@@ -132,6 +132,12 @@ const deferred = <T>() => {
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+const positionedAgentEvent = (event: Record<string, unknown>): PiAgentEvent => ({
+  leafId: null,
+  turnIndex: 0,
+  ...event,
+} as unknown as PiAgentEvent);
+
 class FakeRuntime implements PiSessionStoreRuntime {
   key = 'runtime-a';
   readonly calls: Array<{ method: RuntimeMethod; params: unknown }> = [];
@@ -172,6 +178,7 @@ class FakeRuntime implements PiSessionStoreRuntime {
       seq: 1,
       source: {
         role: sessionId === undefined ? 'catalog' : 'session',
+        runtimeGeneration: 1,
         ...(sessionId === undefined ? {} : { sessionId }),
         workerId: sessionId ?? 'catalog',
       },
@@ -242,7 +249,7 @@ describe('Pi session event state', () => {
       timestamp: '2026-08-02T00:00:00.000Z',
       type: 'message',
     };
-    const persisted = reducePiAgentEvent(updated, { entry, type: 'entry_appended' });
+    const persisted = reducePiAgentEvent(updated, positionedAgentEvent({ entry, type: 'entry_appended' }));
     expect(persisted.branchEntries?.entries.map((candidate) => candidate.id)).toEqual(['entry-a']);
     expect(persisted.liveAssistant).toBeUndefined();
   });
@@ -265,7 +272,7 @@ describe('Pi session event state', () => {
       snapshot: snapshot(sessionId),
       toolExecutions: {},
     };
-    const persisted = reducePiAgentEvent(initial, { entry, type: 'entry_appended' });
+    const persisted = reducePiAgentEvent(initial, positionedAgentEvent({ entry, type: 'entry_appended' }));
     const ended = reducePiAgentEvent(persisted, { message: { ...message }, type: 'message_end' });
 
     expect(ended.branchEntries?.entries).toHaveLength(1);
@@ -312,7 +319,7 @@ describe('Pi session event state', () => {
       timestamp: '2026-08-02T00:00:00.000Z',
       type: 'message',
     };
-    const persisted = reducePiAgentEvent(started, { entry, type: 'entry_appended' });
+    const persisted = reducePiAgentEvent(started, positionedAgentEvent({ entry, type: 'entry_appended' }));
     expect(persisted.liveUser).toBeUndefined();
     expect(persisted.branchEntries?.entries).toEqual([entry]);
     expect(persisted.view?.newTurn?.turnId).toBe('turn:user-entry');
@@ -326,14 +333,14 @@ describe('Pi session event state', () => {
       snapshot: snapshot('session-a'),
       toolExecutions: {},
     };
-    const busy = reducePiAgentEvent(initial, { type: 'agent_start' }, 1_000);
-    const repeatedStart = reducePiAgentEvent(busy, { type: 'agent_start' }, 2_000);
+    const busy = reducePiAgentEvent(initial, positionedAgentEvent({ type: 'agent_start' }), 1_000);
+    const repeatedStart = reducePiAgentEvent(busy, positionedAgentEvent({ type: 'agent_start' }), 2_000);
     const queued = reducePiAgentEvent(busy, {
       followUp: ['later'],
       steering: ['now'],
       type: 'queue_update',
     });
-    const settled = reducePiAgentEvent(queued, { type: 'agent_settled' }, 5_500);
+    const settled = reducePiAgentEvent(queued, positionedAgentEvent({ type: 'agent_settled' }), 5_500);
     expect(repeatedStart.activityStartedAt).toBe(1_000);
     expect(queued.snapshot?.followUp).toEqual(['later']);
     expect(queued.snapshot?.steering).toEqual(['now']);
@@ -366,7 +373,7 @@ describe('Pi session event state', () => {
       toolExecutions: {},
     };
 
-    const repeated = reducePiAgentEvent(initial, { entry: existingEntry, type: 'entry_appended' });
+    const repeated = reducePiAgentEvent(initial, positionedAgentEvent({ entry: existingEntry, type: 'entry_appended' }));
     expect(repeated.submission?.id).toBe('submission-a');
 
     const appended: PiSessionEntry = {
@@ -376,7 +383,7 @@ describe('Pi session event state', () => {
       timestamp: '2026-08-02T00:00:01.000Z',
       type: 'message',
     };
-    const reconciled = reducePiAgentEvent(repeated, { entry: appended, type: 'entry_appended' });
+    const reconciled = reducePiAgentEvent(repeated, positionedAgentEvent({ entry: appended, type: 'entry_appended' }));
     expect(reconciled.submission).toBeUndefined();
   });
 });
@@ -655,7 +662,7 @@ describe('Pi session store', () => {
     await store.getState().openSession({ cwd: 'D:/work', sessionId: 'session-a' });
     await flushAsync();
     runtime.event('agent.event', {
-      event: { type: 'agent_start' } satisfies PiAgentEvent,
+      event: positionedAgentEvent({ type: 'agent_start' }),
       sessionId: 'session-a',
     }, 'session-a');
     runtime.event('extension.state', {
@@ -737,27 +744,27 @@ describe('Pi session store', () => {
     store.getState().setCurrentSession('session-visible');
 
     runtime.event('agent.event', {
-      event: {
+      event: positionedAgentEvent({
         messages: [assistant('done', 'stop')],
         type: 'agent_end',
         willRetry: false,
-      } satisfies PiAgentEvent,
+      }),
       sessionId: 'session-background',
     }, 'session-background');
     runtime.event('agent.event', {
-      event: {
+      event: positionedAgentEvent({
         messages: [{ ...assistant('failed', 'error'), errorMessage: 'failed' }],
         type: 'agent_end',
         willRetry: false,
-      } satisfies PiAgentEvent,
+      }),
       sessionId: 'session-error',
     }, 'session-error');
     runtime.event('agent.event', {
-      event: {
+      event: positionedAgentEvent({
         messages: [assistant('visible', 'stop')],
         type: 'agent_end',
         willRetry: false,
-      } satisfies PiAgentEvent,
+      }),
       sessionId: 'session-visible',
     }, 'session-visible');
 
@@ -779,19 +786,19 @@ describe('Pi session store', () => {
     await store.getState().loadCatalog();
 
     runtime.event('agent.event', {
-      event: {
+      event: positionedAgentEvent({
         messages: [assistant('retrying', 'error')],
         type: 'agent_end',
         willRetry: true,
-      } satisfies PiAgentEvent,
+      }),
       sessionId: 'session-retry',
     }, 'session-retry');
     runtime.event('agent.event', {
-      event: {
+      event: positionedAgentEvent({
         messages: [assistant('aborted', 'aborted')],
         type: 'agent_end',
         willRetry: false,
-      } satisfies PiAgentEvent,
+      }),
       sessionId: 'session-aborted',
     }, 'session-aborted');
 
@@ -1348,7 +1355,7 @@ describe('Pi session store', () => {
       type: 'message',
     };
     runtime.event('agent.event', {
-      event: { entry: appended, type: 'entry_appended' },
+      event: positionedAgentEvent({ entry: appended, type: 'entry_appended' }),
       sessionId: 'session-a',
     }, 'session-a');
     nextRequest.resolve(branch('session-a'));

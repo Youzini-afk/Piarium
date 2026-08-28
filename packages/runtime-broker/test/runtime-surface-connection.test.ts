@@ -147,14 +147,17 @@ test("surface connection projects routed host events only after handshake", asyn
       envelope: createEvent(1, "session.closed", { sessionId: "session-before" }),
       kind: "host",
       role: "session",
+      runtimeGeneration: 1,
       sessionId: "session-before",
       workerId: "worker-before",
     });
     await handshake(harness);
     harness.emit({
       envelope: createEvent(7, "session.closed", { sessionId: "session-1" }),
+      executionId: "execution-1",
       kind: "host",
       role: "session",
+      runtimeGeneration: 2,
       sessionId: "session-1",
       workerId: "worker-1",
     });
@@ -164,7 +167,9 @@ test("surface connection projects routed host events only after handshake", asyn
       kind: "event",
       seq: 7,
       source: {
+        executionId: "execution-1",
         role: "session",
+        runtimeGeneration: 2,
         sessionId: "session-1",
         workerId: "worker-1",
       },
@@ -184,6 +189,7 @@ test("surface connection reports a session worker exit to every connected surfac
       expected: false,
       kind: "worker.exit",
       role: "session",
+      runtimeGeneration: 3,
       sequence: 8,
       sessionId: "session-crashed",
       signal: null,
@@ -201,6 +207,7 @@ test("surface connection reports a session worker exit to every connected surfac
       seq: 8,
       source: {
         role: "session",
+        runtimeGeneration: 3,
         sessionId: "session-crashed",
         workerId: "worker-crashed",
       },
@@ -233,6 +240,7 @@ test("surface connection projects and cancels only configuration watches owned b
       }),
       kind: "host",
       role: "catalog",
+      runtimeGeneration: 4,
       workerId: "catalog-worker",
     });
     harness.emit({
@@ -243,6 +251,7 @@ test("surface connection projects and cancels only configuration watches owned b
       }),
       kind: "host",
       role: "catalog",
+      runtimeGeneration: 4,
       workerId: "catalog-worker",
     });
     const changed = await harness.next();

@@ -25,6 +25,7 @@ export interface PiRuntimeBrokerFactoryOptions {
   hostEntry: string;
   nodePath?: string;
   packageRoot?: string;
+  runtimeGeneration: number;
   runtimeSource?: PiRuntimeInstallation["source"];
 }
 
@@ -341,10 +342,13 @@ export class PiRuntimeLifecycle {
       this.#activationIssue = undefined;
       return current.handshake;
     }
+    const id = this.#nextId;
+    this.#nextId += 1;
     const broker = this.#createBroker({
       hostEntry: this.#hostEntry,
       ...(installation.nodePath === undefined ? {} : { nodePath: installation.nodePath }),
       ...(installation.packageRoot === undefined ? {} : { packageRoot: installation.packageRoot }),
+      runtimeGeneration: id,
       runtimeSource: installation.source,
     });
     let handshake: HostHandshakeResult;
@@ -354,8 +358,6 @@ export class PiRuntimeLifecycle {
       await broker.dispose().catch(() => {});
       throw error;
     }
-    const id = this.#nextId;
-    this.#nextId += 1;
     const unsubscribe = broker.subscribe((event) => {
       this.#workerGenerations.set(event.workerId, id);
       const eventSessionId = "sessionId" in event ? event.sessionId : undefined;

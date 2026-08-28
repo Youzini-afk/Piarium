@@ -320,6 +320,7 @@ test("routes old-session and worker operations to their owning generation", asyn
       envelope: {} as never,
       kind: "host",
       role: "session",
+      runtimeGeneration: 1,
       sessionId: "session-old",
       workerId: "worker-old",
     });

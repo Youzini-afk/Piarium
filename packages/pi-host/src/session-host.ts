@@ -463,6 +463,7 @@ export class SessionHost {
   #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryPluginAdapter | undefined;
+  #turnIndex = 0;
   #unsubscribe: (() => void) | undefined;
   #disposed = false;
 
@@ -2389,6 +2390,7 @@ export class SessionHost {
   async #bindSession(): Promise<void> {
     const runtime = this.runtime;
     const session = runtime.session;
+    this.#turnIndex = 0;
     this.#unsubscribe?.();
     this.ui.cancelAll();
     await session.bindExtensions({
@@ -2420,10 +2422,33 @@ export class SessionHost {
       uiContext: this.ui.createContext(),
     });
     this.#unsubscribe = session.subscribe((event) => {
+      if (event.type === "agent_start") this.#turnIndex = 0;
+      if (event.type === "turn_start") this.#turnIndex += 1;
+      const position = {
+        leafId: session.sessionManager.getLeafId(),
+        turnIndex: this.#turnIndex,
+      };
       this.#emit("agent.event", {
-        event: projectAgentEvent(event),
+        event: projectAgentEvent(event, position),
         sessionId: session.sessionId,
       });
+      if (event.type === "message_end") {
+        const previousLeafId = position.leafId;
+        queueMicrotask(() => {
+          if (this.#runtime !== runtime) return;
+          const leafId = session.sessionManager.getLeafId();
+          if (!leafId || leafId === previousLeafId) return;
+          const entry = session.sessionManager.getEntry(leafId);
+          if (!entry) return;
+          this.#emit("agent.event", {
+            event: projectAgentEvent(
+              { entry, type: "entry_appended" },
+              { leafId, turnIndex: this.#turnIndex },
+            ),
+            sessionId: session.sessionId,
+          });
+        });
+      }
       if (
         event.type === "agent_start" ||
         event.type === "agent_end" ||

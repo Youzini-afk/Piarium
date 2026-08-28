@@ -274,7 +274,9 @@ export const RUNTIME_WORKER_ROLES = ["catalog", "workspace", "package", "session
 export type RuntimeWorkerRole = (typeof RUNTIME_WORKER_ROLES)[number];
 
 export interface RuntimeEventSource {
+  executionId?: string;
   role: RuntimeWorkerRole;
+  runtimeGeneration: number;
   sessionId?: string;
   workerId: string;
 }

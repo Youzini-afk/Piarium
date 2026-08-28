@@ -15,6 +15,7 @@ import {
 } from './catalog.js';
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from './errors.js';
 import { createRecoveryLocationRegistry, writeRecoveryJsonAtomic } from './locations.js';
+import { createRecoveryBindingStore } from './bindings.js';
 
 const POLICY_REVISION = 'phase1-default-v1';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
@@ -274,6 +275,12 @@ export const createWorkspaceRecoveryEngine = ({
       root,
     };
   };
+
+  const bindings = createRecoveryBindingStore({
+    fsPromises,
+    inspectIdentity,
+    storageFor,
+  });
 
   const comparisonKey = (relativePath) => {
     const normalized = relativePath.normalize('NFC');
@@ -550,8 +557,13 @@ export const createWorkspaceRecoveryEngine = ({
       ).iterate(captureId)) {
         await verifyRecoveryObject(storeRoot, row.object_hash, { fsModule });
       }
-      const validation = await validateCapture?.();
-      if (validation && !validation.stable) {
+      const validation = await validateCapture();
+      const witness = {
+        epoch: validation.state.epoch,
+        mutationRevision: validation.state.mutationRevision,
+        writerRevision: validation.state.writerRevision,
+      };
+      if (!validation.stable) {
         database.prepare(`
           UPDATE staged_entries
           SET coverage = 'unstable', reason = ?
@@ -621,6 +633,26 @@ export const createWorkspaceRecoveryEngine = ({
           FROM staged_entries WHERE capture_id = ?
         `).run(snapshotId, captureId);
         database.prepare('DELETE FROM staged_entries WHERE capture_id = ?').run(captureId);
+        if (validation.stable && !incomplete) {
+          database.prepare(`
+            INSERT INTO workspace_heads(
+              workspace_id, snapshot_id, epoch, mutation_revision, writer_revision, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id) DO UPDATE SET
+              snapshot_id = excluded.snapshot_id,
+              epoch = excluded.epoch,
+              mutation_revision = excluded.mutation_revision,
+              writer_revision = excluded.writer_revision,
+              updated_at = excluded.updated_at
+          `).run(
+            identity.workspaceId,
+            snapshotId,
+            witness.epoch,
+            witness.mutationRevision,
+            witness.writerRevision,
+            createdAt,
+          );
+        }
         recordCatalogOperation(database, {
           createdAt: startedAt,
           data: { snapshotId },
@@ -632,7 +664,12 @@ export const createWorkspaceRecoveryEngine = ({
         });
       })();
       const row = database.prepare('SELECT * FROM snapshots WHERE id = ?').get(snapshotId);
-      return { snapshot: snapshotSummaryFromRow(row), status: 'captured' };
+      return {
+        reused: false,
+        snapshot: snapshotSummaryFromRow(row),
+        status: 'captured',
+        witness,
+      };
     } catch (error) {
       const updatedAt = new Date().toISOString();
       database.prepare('DELETE FROM staged_entries WHERE capture_id = ?').run(captureId);
@@ -740,6 +777,46 @@ export const createWorkspaceRecoveryEngine = ({
       };
     } finally {
       database?.close();
+    }
+  };
+
+  const reuseWorkspaceHead = async (identity, storeRoot, mutationState) => {
+    if (mutationState.maintenance
+      || mutationState.reconciliationRequired
+      || mutationState.activeWriters.length > 0) return null;
+    const database = await openRecoveryCatalog(storeRoot, { create: false, fsPromises });
+    if (!database) return null;
+    try {
+      const head = database.prepare(`
+        SELECT snapshot_id FROM workspace_heads
+        WHERE workspace_id = ? AND epoch = ? AND mutation_revision = ? AND writer_revision = ?
+      `).get(
+        identity.workspaceId,
+        mutationState.epoch,
+        mutationState.mutationRevision,
+        mutationState.writerRevision,
+      );
+      if (!head) return null;
+      const inspected = await inspectStoredSnapshot(
+        database,
+        storeRoot,
+        identity.workspaceId,
+        head.snapshot_id,
+        { fsModule, verifyObjects: false },
+      );
+      if (inspected.availability !== 'ready') return null;
+      return {
+        reused: true,
+        snapshot: snapshotSummaryFromRow(inspected.row),
+        status: 'captured',
+        witness: {
+          epoch: mutationState.epoch,
+          mutationRevision: mutationState.mutationRevision,
+          writerRevision: mutationState.writerRevision,
+        },
+      };
+    } finally {
+      database.close();
     }
   };
 
@@ -1187,13 +1264,65 @@ export const createWorkspaceRecoveryEngine = ({
     return result;
   };
 
+  const captureSnapshotPublic = (input) => runWorkspace(input.workspaceId, async () => {
+    let capture;
+    let captureCompleted = false;
+    try {
+      const identity = await inspectIdentity(input.workspaceId);
+      const storage = await storageFor(identity);
+      if (input.reuseIfUnchanged) {
+        const reused = await reuseWorkspaceHead(
+          identity,
+          storage.root,
+          await documents.inspectMutation(input.workspaceId),
+        );
+        if (reused) return reused;
+      }
+      capture = await documents.beginCapture(input.workspaceId);
+      return await captureIntoCatalog(identity, storage.root, input, async () => {
+        captureCompleted = true;
+        return documents.completeCapture(capture);
+      });
+    } catch (error) {
+      return failedRecoveryResult(error);
+    } finally {
+      if (capture && !captureCompleted) {
+        await documents.completeCapture(capture).catch(() => undefined);
+      }
+    }
+  });
+
+  const createCheckpointPublic = async (input) => {
+    const captured = await captureSnapshotPublic({
+      label: input.name,
+      source: 'manual',
+      workspaceId: input.workspaceId,
+    });
+    if (captured.status !== 'captured') return captured;
+    try {
+      await runWorkspace(input.workspaceId, () => (
+        bindings.pinCheckpoint(input.workspaceId, captured.snapshot.id, input.name)
+      ));
+      return captured;
+    } catch (error) {
+      return failedRecoveryResult(error);
+    }
+  };
+
   return {
     locations,
     async status(workspaceId) {
       try {
         const identity = await inspectIdentity(workspaceId);
         return {
-          capabilities: { capture: true, diff: true, read: true, storageManagement: true },
+          capabilities: {
+            bindings: true,
+            capture: true,
+            checkpoints: true,
+            diff: true,
+            read: true,
+            storageManagement: true,
+          },
           identity,
           status: 'ready',
           storage: await storageStatusInternal(identity),
@@ -1203,25 +1332,35 @@ export const createWorkspaceRecoveryEngine = ({
       }
     },
     async captureSnapshot(input) {
+      return captureSnapshotPublic(input);
+    },
+    async createCheckpoint(input) {
+      return createCheckpointPublic(input);
+    },
+    async recordTurnStart(input) {
       return runWorkspace(input.workspaceId, async () => {
-        let capture;
-        let captureCompleted = false;
         try {
-          const identity = await inspectIdentity(input.workspaceId);
-          const storage = await storageFor(identity);
-          capture = typeof documents.beginCapture === 'function'
-            ? await documents.beginCapture(input.workspaceId)
-            : null;
-          return await captureIntoCatalog(identity, storage.root, input, capture ? async () => {
-            captureCompleted = true;
-            return documents.completeCapture(capture);
-          } : undefined);
+          return await bindings.recordTurnStart(input);
         } catch (error) {
           return failedRecoveryResult(error);
-        } finally {
-          if (capture && !captureCompleted) {
-            await documents.completeCapture(capture).catch(() => undefined);
-          }
+        }
+      });
+    },
+    async recordTurnSettled(input) {
+      return runWorkspace(input.workspaceId, async () => {
+        try {
+          return await bindings.recordTurnSettled(input);
+        } catch (error) {
+          return failedRecoveryResult(error);
+        }
+      });
+    },
+    async resolveEntry(input) {
+      return runWorkspace(input.workspaceId, async () => {
+        try {
+          return await bindings.resolveEntry(input);
+        } catch (error) {
+          return failedRecoveryResult(error);
         }
       });
     },

@@ -1,6 +1,6 @@
 # Piarium native workspace recovery
 
-Status: proposed target architecture; supersedes plugin-backed workspace recovery after implementation
+Status: implementation in progress; Phases 1–3 are implemented, while restore execution and product UI remain pending
 
 Last updated: 2026-08-28
 

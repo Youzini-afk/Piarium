@@ -17,6 +17,7 @@ import type {
 import type {
   JsonValue,
   PiAgentEvent,
+  PiAgentEventPosition,
   PiAssistantContent,
   PiAssistantMessage,
   PiAssistantStreamUpdate,
@@ -327,21 +328,27 @@ function projectCompactionResult(result: CompactionResult): PiCompactionResult {
   } as PiCompactionResult;
 }
 
-export function projectAgentEvent(event: AgentSessionEvent): PiAgentEvent {
+export function projectAgentEvent(
+  event: AgentSessionEvent,
+  position: PiAgentEventPosition = { leafId: null, turnIndex: 0 },
+): PiAgentEvent {
   switch (event.type) {
     case "agent_start":
     case "agent_settled":
     case "turn_start":
+      return { ...position, type: event.type };
     case "summarization_retry_finished":
       return { type: event.type };
     case "agent_end":
       return {
+        ...position,
         messages: event.messages.map(projectMessage),
         type: "agent_end",
         willRetry: event.willRetry,
       };
     case "turn_end":
       return {
+        ...position,
         message: projectMessage(event.message),
         toolResults: event.toolResults.map(projectToolResult),
         type: "turn_end",
@@ -381,7 +388,7 @@ export function projectAgentEvent(event: AgentSessionEvent): PiAgentEvent {
     case "queue_update":
       return { followUp: [...event.followUp], steering: [...event.steering], type: "queue_update" };
     case "entry_appended":
-      return { entry: projectSessionEntry(event.entry), type: "entry_appended" };
+      return { ...position, entry: projectSessionEntry(event.entry), type: "entry_appended" };
     case "session_info_changed":
       return {
         ...(event.name === undefined ? {} : { name: event.name }),

@@ -42,7 +42,14 @@ test("the built-in recovery Host activates on service invocation and withdraws o
   runtime.capabilities.register("workspace.recovery-primitives", async (method, params) => {
     calls.push({ method, params });
     return {
-      capabilities: { capture: true, diff: true, read: true, storageManagement: true },
+      capabilities: {
+        bindings: true,
+        capture: true,
+        checkpoints: true,
+        diff: true,
+        read: true,
+        storageManagement: true,
+      },
       identity: {
         authorityId: runtime.services.hostId,
         canonicalRoot: "/workspace",

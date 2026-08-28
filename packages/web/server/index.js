@@ -22,6 +22,7 @@ import { createDocumentsCapabilityHandler } from './lib/documents/capability.js'
 import { createWorkspaceRecoveryEngine } from './lib/recovery/engine.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
+import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
@@ -742,6 +743,7 @@ async function main(options = {}) {
 
   const requirePiRuntime = options.requirePiRuntime ?? process.env.PIARIUM_RUNTIME !== 'desktop';
   let piWriterTracker = null;
+  let recoveryTurnCoordinator = null;
   const admitPiSessionExecution = (request) => {
     if (!piWriterTracker) {
       throw new PiRuntimeBrokerError(
@@ -750,7 +752,7 @@ async function main(options = {}) {
         { retryable: true },
       );
     }
-    return piWriterTracker.admit(request);
+    return recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request);
   };
   const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions) => createWebPiRuntimeBroker({
     agentDir: process.env.PIARIUM_AGENT_DIR,
@@ -938,6 +940,12 @@ async function main(options = {}) {
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const sessionNames = new Map();
   const sessionSnapshots = new Map();
+  recoveryTurnCoordinator = createRecoveryTurnCoordinator({
+    documents: documentsAuthority,
+    getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId),
+    invokeService: (request) => extensionRuntime.invokeService(request),
+    writerTracker: piWriterTracker,
+  });
   const sendPiSessionNotification = async ({ body, kind, sessionId, tag, title }) => {
     const settings = await readSettingsFromDisk().catch(() => ({}));
     if (settings.notifyOnCompletion === false) return;
@@ -978,6 +986,7 @@ async function main(options = {}) {
     piSessionAutomation.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
     void piWriterTracker.processEvent(event);
+    void recoveryTurnCoordinator.processEvent(event);
     if (event?.kind === 'worker.exit') return;
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
@@ -1184,6 +1193,7 @@ async function main(options = {}) {
       await runRuntime.dispose();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
+      await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);

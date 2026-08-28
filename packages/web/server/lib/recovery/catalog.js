@@ -84,6 +84,38 @@ const SCHEMA = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS workspace_heads (
+    workspace_id TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL,
+    mutation_revision INTEGER NOT NULL,
+    writer_revision INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS turn_bindings (
+    execution_id TEXT PRIMARY KEY,
+    runtime_key TEXT NOT NULL,
+    runtime_generation INTEGER NOT NULL,
+    worker_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    user_entry_id TEXT,
+    assistant_entry_id TEXT,
+    before_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
+    after_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
+    active_writer_scopes_json TEXT NOT NULL,
+    provenance TEXT NOT NULL,
+    status TEXT NOT NULL,
+    failure_json TEXT,
+    started_at TEXT NOT NULL,
+    settled_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS turn_bindings_user_entry
+    ON turn_bindings(session_id, user_entry_id) WHERE user_entry_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS turn_bindings_assistant_entry
+    ON turn_bindings(session_id, assistant_entry_id) WHERE assistant_entry_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS turn_bindings_workspace_time
+    ON turn_bindings(workspace_id, started_at DESC);
 `;
 
 const catalogPath = (root) => path.join(root, 'catalog.sqlite');

@@ -2,9 +2,13 @@ import {
   parseRecoveryStorageCleanupInput,
   parseSetRecoveryStorageLocationInput,
   parseWorkspaceRecoveryCaptureInput,
+  parseWorkspaceRecoveryCheckpointInput,
+  parseWorkspaceRecoveryEntryTarget,
   parseWorkspaceRecoverySnapshotDiffInput,
   parseWorkspaceRecoverySnapshotQuery,
   parseWorkspaceRecoverySnapshotReadInput,
+  parseWorkspaceRecoveryTurnSettledInput,
+  parseWorkspaceRecoveryTurnStartInput,
 } from '@piarium/extension-contract';
 
 const asRecord = (value, label) => {
@@ -26,6 +30,10 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
     return engine.status(requiredText(input.workspaceId, 'workspaceId'));
   }
   if (method === 'captureSnapshot') return engine.captureSnapshot(parseWorkspaceRecoveryCaptureInput(params));
+  if (method === 'createCheckpoint') return engine.createCheckpoint(parseWorkspaceRecoveryCheckpointInput(params));
+  if (method === 'recordTurnStart') return engine.recordTurnStart(parseWorkspaceRecoveryTurnStartInput(params));
+  if (method === 'recordTurnSettled') return engine.recordTurnSettled(parseWorkspaceRecoveryTurnSettledInput(params));
+  if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
   if (method === 'listSnapshots') return engine.listSnapshots(parseWorkspaceRecoverySnapshotQuery(params));
   if (method === 'readSnapshot') return engine.readSnapshot(parseWorkspaceRecoverySnapshotReadInput(params));
   if (method === 'diffSnapshots') return engine.diffSnapshots(parseWorkspaceRecoverySnapshotDiffInput(params));

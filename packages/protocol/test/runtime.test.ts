@@ -109,7 +109,7 @@ describe("surface runtime protocol", () => {
 
   it("carries an explicit worker source on events", () => {
     const event = createRuntimeEvent(
-      { role: "session", sessionId: "session-1", workerId: "worker-1" },
+      { executionId: "execution-1", role: "session", runtimeGeneration: 2, sessionId: "session-1", workerId: "worker-1" },
       12,
       "session.closed",
       { sessionId: "session-1" },
@@ -118,7 +118,7 @@ describe("surface runtime protocol", () => {
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(event)), event);
 
     const extensionState = createRuntimeEvent(
-      { role: "session", sessionId: "session-1", workerId: "worker-1" },
+      { role: "session", runtimeGeneration: 2, sessionId: "session-1", workerId: "worker-1" },
       13,
       "extension.state",
       {
@@ -130,7 +130,7 @@ describe("surface runtime protocol", () => {
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(extensionState)), extensionState);
 
     const configChanged = createRuntimeEvent(
-      { role: "workspace", workerId: "worker-2" },
+      { role: "workspace", runtimeGeneration: 2, workerId: "worker-2" },
       14,
       "config.changed",
       {
@@ -142,7 +142,7 @@ describe("surface runtime protocol", () => {
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(configChanged)), configChanged);
 
     const packageProgress = createRuntimeEvent(
-      { role: "package", workerId: "worker-3" },
+      { role: "package", runtimeGeneration: 2, workerId: "worker-3" },
       15,
       "package.progress",
       { message: "Installing", operation: "install", source: "npm:pi-mcp-adapter" },

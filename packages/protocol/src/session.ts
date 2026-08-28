@@ -258,12 +258,17 @@ export interface PiCompactionResult {
   usage?: PiUsage;
 }
 
+export interface PiAgentEventPosition {
+  leafId: string | null;
+  turnIndex: number;
+}
+
 export type PiAgentEvent =
-  | { type: "agent_start" }
-  | { messages: PiMessage[]; type: "agent_end"; willRetry: boolean }
-  | { type: "agent_settled" }
-  | { type: "turn_start" }
-  | { message: PiMessage; toolResults: PiToolResultMessage[]; type: "turn_end" }
+  | ({ type: "agent_start" } & PiAgentEventPosition)
+  | ({ messages: PiMessage[]; type: "agent_end"; willRetry: boolean } & PiAgentEventPosition)
+  | ({ type: "agent_settled" } & PiAgentEventPosition)
+  | ({ type: "turn_start" } & PiAgentEventPosition)
+  | ({ message: PiMessage; toolResults: PiToolResultMessage[]; type: "turn_end" } & PiAgentEventPosition)
   | { message: PiMessage; type: "message_start" }
   | { message: PiMessage; type: "message_update"; update: PiAssistantStreamUpdate }
   | { message: PiMessage; type: "message_end" }
@@ -283,7 +288,7 @@ export type PiAgentEvent =
       type: "tool_execution_end";
     }
   | { followUp: string[]; steering: string[]; type: "queue_update" }
-  | { entry: PiSessionEntry; type: "entry_appended" }
+  | ({ entry: PiSessionEntry; type: "entry_appended" } & PiAgentEventPosition)
   | { name?: string; type: "session_info_changed" }
   | { level: ThinkingLevel; type: "thinking_level_changed" }
   | { reason: "manual" | "threshold" | "overflow"; type: "compaction_start" }

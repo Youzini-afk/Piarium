@@ -19,6 +19,7 @@ export function createWebPiRuntimeBroker({
   hostEntry,
   nodePath,
   packageRoot,
+  runtimeGeneration,
   runtimeSource,
 } = {}) {
   return new PiRuntimeBroker({
@@ -35,6 +36,7 @@ export function createWebPiRuntimeBroker({
     hostEntry: hostEntry || resolveBundledPiHostEntry(),
     ...(nodePath ? { nodePath } : {}),
     ...(packageRoot ? { packageRoot } : {}),
+    ...(Number.isSafeInteger(runtimeGeneration) && runtimeGeneration > 0 ? { runtimeGeneration } : {}),
     ...(runtimeSource ? { runtimeSource } : {}),
   });
 }

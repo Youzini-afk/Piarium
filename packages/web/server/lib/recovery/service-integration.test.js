@@ -44,6 +44,10 @@ describe('Web Application Host workspace recovery service', () => {
     await runtime.start();
 
     const api = createWorkspaceRecoveryAPI((request) => runtime.invokeService(request));
+    expect(await api.status(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      capabilities: { bindings: true, checkpoints: true },
+    });
     const captured = await api.captureSnapshot({ workspaceId: harness.identity.workspaceId });
     expect(captured.status).toBe('captured');
     const listed = await api.listSnapshots({ workspaceId: harness.identity.workspaceId });
@@ -55,5 +59,37 @@ describe('Web Application Host workspace recovery service', () => {
     });
     expect(read.status).toBe('ready');
     expect(read.manifest.entries).toContainEqual(expect.objectContaining({ path: 'note.txt', kind: 'regular-file' }));
+
+    const turn = await api.recordTurnStart({
+      activeWriterScopes: ['pi-worker:worker-1'],
+      beforeSnapshotId: captured.snapshot.id,
+      executionId: 'service-execution-1',
+      provenance: 'observed-during',
+      runtimeGeneration: 1,
+      sessionId: 'service-session-1',
+      userEntryId: 'service-user-1',
+      workerId: 'worker-1',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(turn).toMatchObject({ status: 'ready', binding: { status: 'pending' } });
+    const settled = await api.recordTurnSettled({
+      activeWriterScopes: ['pi-worker:worker-1'],
+      afterSnapshotId: captured.snapshot.id,
+      assistantEntryId: 'service-assistant-1',
+      executionId: 'service-execution-1',
+      provenance: 'observed-during',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(settled).toMatchObject({ status: 'ready', binding: { status: 'ready' } });
+    expect(await api.resolveEntry({
+      entryId: 'service-assistant-1',
+      sessionId: 'service-session-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({ position: 'after', snapshotId: captured.snapshot.id, status: 'ready' });
+    const checkpoint = await api.createCheckpoint({
+      name: 'Service checkpoint',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(checkpoint).toMatchObject({ status: 'captured', snapshot: { label: 'Service checkpoint' } });
   });
 });

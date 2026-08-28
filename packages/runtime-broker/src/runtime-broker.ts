@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { lstat, realpath, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
@@ -56,8 +57,10 @@ interface WorkspaceWorkerContext {
 
 export interface PiSessionExecutionAdmissionRequest {
   cwd: string;
+  executionId: string;
   method?: HostMethod;
   phase: "agent-run" | "worker-start" | "workspace-mutation";
+  runtimeGeneration: number;
   sessionId?: string;
   workerId: string;
 }
@@ -75,6 +78,7 @@ interface SessionExecutionAdmissionState {
   closing: boolean;
   closePromise?: Promise<void>;
   done: Promise<void>;
+  executionId: string;
   holders: number;
   lease?: PiSessionExecutionLease | null;
   phase: PiSessionExecutionAdmissionRequest["phase"];
@@ -83,7 +87,7 @@ interface SessionExecutionAdmissionState {
   running: boolean;
 }
 
-export type PiRuntimeBrokerEvent =
+type PiRuntimeBrokerEventPayload =
   | {
       kind: "diagnostic";
       level: "error" | "info";
@@ -109,6 +113,11 @@ export type PiRuntimeBrokerEvent =
       workerId: string;
     };
 
+export type PiRuntimeBrokerEvent = PiRuntimeBrokerEventPayload & {
+  executionId?: string;
+  runtimeGeneration: number;
+};
+
 export interface PiRuntimeBrokerOptions {
   agentDir?: string;
   client: Omit<HostHandshakeParams, "protocolVersions">;
@@ -121,6 +130,7 @@ export interface PiRuntimeBrokerOptions {
   nodePath?: string;
   packageRoot?: string;
   projectTrustOverride?: boolean;
+  runtimeGeneration?: number;
   runtimeSource?: RuntimeSourceKind;
   admitSessionExecution?: PiSessionExecutionAdmission;
   shutdownTimeoutMs?: number;
@@ -225,6 +235,7 @@ export class PiRuntimeBroker {
   readonly #knownSummaries = new Map<string, SessionSummary>();
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
+  readonly #runtimeGeneration: number;
   readonly #sessionExecutionAdmissions = new Map<PiHostClient, SessionExecutionAdmissionState>();
   readonly #workerCwds = new Map<PiHostClient, string>();
   readonly #foundationalPackages: readonly FoundationalPiPackageManifestEntry[];
@@ -243,6 +254,10 @@ export class PiRuntimeBroker {
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
+    this.#runtimeGeneration = options.runtimeGeneration ?? 1;
+    if (!Number.isSafeInteger(this.#runtimeGeneration) || this.#runtimeGeneration < 1) {
+      throw new TypeError("Pi runtime generation must be a positive safe integer");
+    }
     this.#sessionExecutionAdmission = options.admitSessionExecution;
     this.#foundationalPackages = [...(options.foundationalPackages ?? [])];
     this.#foundationalStatus = {
@@ -1601,10 +1616,17 @@ export class PiRuntimeBroker {
     });
   }
 
-  #emit(event: PiRuntimeBrokerEvent): void {
+  #emit(event: PiRuntimeBrokerEventPayload): void {
+    const admission = [...this.#sessionExecutionAdmissions.values()]
+      .find((candidate) => candidate.client.id === event.workerId);
+    const projected: PiRuntimeBrokerEvent = {
+      ...event,
+      ...(admission ? { executionId: admission.executionId } : {}),
+      runtimeGeneration: this.#runtimeGeneration,
+    };
     for (const listener of this.#listeners) {
       try {
-        listener(event);
+        listener(projected);
       } catch {
         // Surface callbacks are observational and must not break worker ownership.
       }
@@ -1640,6 +1662,7 @@ export class PiRuntimeBroker {
         client,
         closing: false,
         done,
+        executionId: randomUUID(),
         holders: 1,
         phase: context.phase,
         ready: Promise.resolve(),
@@ -1650,8 +1673,10 @@ export class PiRuntimeBroker {
       state.ready = (async () => {
         const lease = await this.#sessionExecutionAdmission?.({
           cwd,
+          executionId: state.executionId,
           ...(context.method === undefined ? {} : { method: context.method }),
           phase: context.phase,
+          runtimeGeneration: this.#runtimeGeneration,
           ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
           workerId: client.id,
         });

@@ -187,6 +187,10 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
   return {
     admit,
     processEvent,
+    async waitForIdle(workerId) {
+      const state = writers.get(workerId);
+      if (state) await state.closedPromise;
+    },
     async dispose() {
       if (disposed) return;
       disposed = true;

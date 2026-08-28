@@ -126,6 +126,7 @@ export class VSCodePiRuntime implements vscode.Disposable {
   #broker: PiRuntimeBroker | null = null;
   #disposed = false;
   #lifecycleTail: Promise<void> = Promise.resolve();
+  #nextRuntimeGeneration = 1;
   #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
   #status: PiRuntimeStatusSnapshot = { status: 'connecting' };
 
@@ -214,6 +215,8 @@ export class VSCodePiRuntime implements vscode.Disposable {
     if (previous) await previous.dispose();
     const nodePath = this.#dependencies.resolveNodeExecutable();
     const hostEntry = this.#dependencies.resolveHostEntry(this.#context.extensionPath);
+    const runtimeGeneration = this.#nextRuntimeGeneration;
+    this.#nextRuntimeGeneration += 1;
     this.#output.appendLine(`[Pi runtime] Node: ${nodePath}`);
     this.#output.appendLine(`[Pi runtime] Host: ${hostEntry}`);
     const broker = this.#dependencies.createBroker({
@@ -228,6 +231,7 @@ export class VSCodePiRuntime implements vscode.Disposable {
       foundationalPackages: FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
       hostEntry,
       nodePath,
+      runtimeGeneration,
       ...(this.#sessionExecutionAdmission
         ? { admitSessionExecution: this.#sessionExecutionAdmission }
         : {}),

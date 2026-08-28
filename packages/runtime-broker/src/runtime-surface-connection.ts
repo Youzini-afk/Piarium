@@ -101,7 +101,9 @@ export class PiRuntimeSurfaceConnection {
         if (event.role !== "session" || event.sessionId === undefined) return;
         this.#send(createRuntimeEvent(
           {
+            ...(event.executionId === undefined ? {} : { executionId: event.executionId }),
             role: event.role,
+            runtimeGeneration: event.runtimeGeneration,
             workerId: event.workerId,
             sessionId: event.sessionId,
           },
@@ -128,7 +130,9 @@ export class PiRuntimeSurfaceConnection {
       }
       this.#send(createRuntimeEvent(
         {
+          ...(event.executionId === undefined ? {} : { executionId: event.executionId }),
           role: event.role,
+          runtimeGeneration: event.runtimeGeneration,
           workerId: event.workerId,
           ...(event.sessionId === undefined ? {} : { sessionId: event.sessionId }),
         },

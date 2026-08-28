@@ -459,4 +459,111 @@ describe('native workspace recovery Phase 1 engine', () => {
     const listed = await engine.listSnapshots({ workspaceId: harness.identity.workspaceId });
     expect(listed).toEqual({ page: { nextCursor: null, snapshots: [] }, status: 'ready' });
   });
+
+  it('reuses a validated workspace head only while its mutation witness is unchanged', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'one');
+    const first = await engine.captureSnapshot({
+      reuseIfUnchanged: true,
+      source: 'turn-before',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(first).toMatchObject({ status: 'captured', reused: false });
+    const reused = await engine.captureSnapshot({
+      reuseIfUnchanged: true,
+      source: 'turn-before',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(reused).toMatchObject({
+      status: 'captured',
+      reused: true,
+      snapshot: { id: first.snapshot.id },
+      witness: first.witness,
+    });
+
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'two',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: 'phase3-mutation',
+    });
+    const changed = await engine.captureSnapshot({
+      reuseIfUnchanged: true,
+      source: 'turn-after',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(changed).toMatchObject({ status: 'captured', reused: false });
+    expect(changed.snapshot.id).not.toBe(first.snapshot.id);
+  });
+
+  it('binds exact user/assistant entries independently from conversation ancestry and pins checkpoints', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'before');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    const started = await engine.recordTurnStart({
+      activeWriterScopes: ['pi-worker:worker-1'],
+      beforeSnapshotId: before.snapshot.id,
+      executionId: 'execution-1',
+      provenance: 'observed-during',
+      runtimeGeneration: 3,
+      sessionId: 'session-1',
+      userEntryId: 'user-entry-1',
+      workerId: 'worker-1',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(started).toMatchObject({ status: 'ready', binding: { status: 'pending' } });
+
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'after',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: 'turn-write',
+    });
+    const after = await engine.captureSnapshot({ source: 'turn-after', workspaceId: harness.identity.workspaceId });
+    const settled = await engine.recordTurnSettled({
+      activeWriterScopes: ['terminal:other-session'],
+      afterSnapshotId: after.snapshot.id,
+      assistantEntryId: 'assistant-entry-1',
+      executionId: 'execution-1',
+      provenance: 'overlapped',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(settled).toMatchObject({
+      status: 'ready',
+      binding: { provenance: 'overlapped', status: 'ready' },
+    });
+    expect(await engine.resolveEntry({
+      entryId: 'user-entry-1',
+      sessionId: 'session-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({ position: 'before', snapshotId: before.snapshot.id, status: 'ready' });
+    expect(await engine.resolveEntry({
+      entryId: 'assistant-entry-1',
+      sessionId: 'session-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({ position: 'after', snapshotId: after.snapshot.id, status: 'ready' });
+    expect(await engine.resolveEntry({
+      entryId: 'unbound-entry',
+      sessionId: 'session-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toEqual({ reason: 'entry-unbound', status: 'unbound' });
+
+    const checkpoint = await engine.createCheckpoint({
+      name: 'Before refactor',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(checkpoint).toMatchObject({ status: 'captured', snapshot: { label: 'Before refactor' } });
+    const database = await openRecoveryCatalog(applicationDataRoot(harness), { create: false });
+    expect(database.prepare("SELECT key FROM pins WHERE snapshot_id = ? AND kind = 'named'")
+      .get(checkpoint.snapshot.id)).toEqual({ key: 'Before refactor' });
+    database.close();
+  });
 });

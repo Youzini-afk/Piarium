@@ -94,6 +94,8 @@ test("session execution admission precedes worker and agent execution and owns c
     assert.equal(broker.workerCount, 0);
     assert.equal(activeLeases, 0);
     assert.equal(admissions[0]?.phase, "worker-start");
+    assert.equal(admissions[0]?.runtimeGeneration, 1);
+    assert.equal(typeof admissions[0]?.executionId, "string");
 
     deny = false;
     const created = await broker.createSession(workspace);

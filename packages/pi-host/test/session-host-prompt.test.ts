@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData, PiAgentEvent } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
 
 describe("SessionHost prompt streaming", () => {
@@ -83,6 +83,23 @@ describe("SessionHost prompt streaming", () => {
       );
       const entries = host.entries(snapshot.sessionId, "branch");
       assert.equal(entries.scope, "branch");
+      const projectedAgentEvents = events
+        .filter((entry) => entry.event === "agent.event")
+        .map((entry) => (entry.data as { event: PiAgentEvent }).event);
+      const appended = projectedAgentEvents.filter((event) => event.type === "entry_appended");
+      assert.ok(appended.some((event) => event.entry.type === "message" && event.entry.message.role === "user"));
+      assert.ok(appended.some((event) => event.entry.type === "message" && event.entry.message.role === "assistant"));
+      for (const event of projectedAgentEvents) {
+        if (event.type === "agent_start"
+          || event.type === "agent_end"
+          || event.type === "agent_settled"
+          || event.type === "turn_start"
+          || event.type === "turn_end"
+          || event.type === "entry_appended") {
+          assert.equal(Number.isSafeInteger(event.turnIndex), true);
+          assert.equal(event.leafId === null || typeof event.leafId === "string", true);
+        }
+      }
       const instructionsEntry = entries.entries.find(
         (entry) => entry.type === "custom_message" && entry.customType === "piarium.instructions",
       );

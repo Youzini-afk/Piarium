@@ -88,8 +88,10 @@ test('VS Code webview bridge dispatches Runtime frames and routed events', async
 
     for (const listener of listeners) listener({
       envelope: createEvent(4, 'session.closed', { sessionId: 'session-1' }),
+      executionId: 'execution-1',
       kind: 'host',
       role: 'session',
+      runtimeGeneration: 2,
       sessionId: 'session-1',
       workerId: 'worker-1',
     });
@@ -99,7 +101,9 @@ test('VS Code webview bridge dispatches Runtime frames and routed events', async
     if (event.kind !== 'event') assert.fail('expected routed event');
     assert.equal(event.event, 'session.closed');
     assert.deepEqual(event.source, {
+      executionId: 'execution-1',
       role: 'session',
+      runtimeGeneration: 2,
       sessionId: 'session-1',
       workerId: 'worker-1',
     });

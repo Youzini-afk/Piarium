@@ -6,6 +6,8 @@ import {
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
   parseRecoveryStorageLocation,
+  parseWorkspaceRecoveryCaptureResult,
+  parseWorkspaceRecoveryEntryBindingResult,
   parseWorkspaceRecoveryManifestEntry,
   parseWorkspaceRecoveryReadResult,
   parseWorkspaceRecoverySnapshotSummary,
@@ -80,6 +82,28 @@ test("keeps missing, malformed, incomplete, and corrupt snapshot results distinc
       status,
     }).status, status);
   }
+});
+
+test("keeps capture witnesses and entry bindings explicit", () => {
+  const captured = parseWorkspaceRecoveryCaptureResult({
+    reused: false,
+    snapshot: summary(),
+    status: "captured",
+    witness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
+  });
+  assert.deepEqual(captured, {
+    reused: false,
+    snapshot: summary(),
+    status: "captured",
+    witness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
+  });
+  assert.deepEqual(parseWorkspaceRecoveryEntryBindingResult({
+    reason: "entry-unbound",
+    status: "unbound",
+  }), {
+    reason: "entry-unbound",
+    status: "unbound",
+  });
 });
 
 test("browser-safe API uses the generic extension service invocation contract", async () => {
