@@ -501,7 +501,9 @@ section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md)
 The following section describes the current plugin-backed implementation. The approved replacement
 direction is the Host-owned design in
 [native-workspace-recovery-design.md](native-workspace-recovery-design.md); current paths remain only
-until its complete phases replace them.
+until its complete phases replace them. The default implementation will be the published, replaceable
+Piarium extension `@piarium/recovery`, not a Pi package; fixed Host code retains only privileged safety
+primitives and the conversation-only fallback.
 
 Piarium owns one recovery interaction model, not one recovery storage engine. Conversation-only
 rollback branches Pi's append-only session tree and restores editable user text/images without

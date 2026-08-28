@@ -6,7 +6,9 @@ Last updated: 2026-08-28
 
 ## 1. Decision
 
-Piarium will own workspace checkpoints and recovery as an Application Host capability.
+Piarium will own workspace checkpoints and recovery through a versioned Piarium service. The official
+implementation is published as the independently versioned Piarium extension package
+`@piarium/recovery` (manifest ID `org.piarium.recovery`) and selected by the default distribution.
 
 Pi remains authoritative for its append-only conversation tree. Piarium becomes authoritative for the
 physical workspace timeline and for coordinating a conversation navigation with a workspace restore.
@@ -32,6 +34,9 @@ The product terms are:
   current directory untouched.
 
 This replaces the current design in which a loaded plugin is assumed to make combined recovery safe.
+It does not turn the implementation into fixed product code: users may disable the official package or
+select another conforming Piarium extension for the recovery service. The fixed kernel retains only the
+privileged safety primitives and a conversation-only fallback.
 
 ## 2. Why the current design is rejected
 
@@ -117,11 +122,17 @@ Pi session worker
           |
           | typed session/turn/navigation protocol
           v
-Application Host
-  Workspace Recovery Coordinator        <- single semantic owner
-  Workspace Tracker + writer epochs
-  Snapshot/CAS Store + operation WAL
+Application Host fixed safety substrate
+  Workspace identity/trust + mutation epochs
+  fenced file transaction executor + durable operation guard
   DocumentAuthority + task/terminal/Git participants
+          |
+          | versioned, capability-gated Host services
+          v
+Selected Piarium recovery extension
+  @piarium/recovery by distribution default
+  Recovery coordinator + policy
+  Workspace tracker + snapshot/CAS store + operation WAL
           |
           | authenticated WorkspaceRecoveryAPI + events
           v
@@ -129,13 +140,20 @@ Web / Electron / mobile / IDE shell / VS Code companion
   replaceable Recovery UI, preview, progress, conflict resolution
 ```
 
-The coordinator runs where the filesystem lives. A mobile client is only a control surface. A remote
-Piarium Host stores and restores its own workspaces. Snapshot identity is scoped by
+The selected Host entrypoint runs where the filesystem lives. A mobile client is only a control
+surface. A remote Piarium Host stores and restores its own workspaces. Snapshot identity is scoped by
 `{authorityId, workspaceId}`; a same-looking path on another Host is unrelated.
 
-The coordinator is part of the fixed recovery kernel. Snapshot storage, native filesystem snapshot
-acceleration, repository inspection, and UI can be extended through versioned Piarium services, but no
-extension bypasses the coordinator's transaction, path, trust, or fencing invariants.
+The feature implementation is replaceable; the safety boundary is not. The fixed substrate owns
+canonical path/trust checks, workspace fencing, controlled mutation epochs, Pi session capability
+access, and the low-level durable materialization guard. A selected recovery extension owns snapshot
+policy, timeline/catalog, storage, planning, orchestration, and product contributions through those
+capabilities. It cannot obtain a raw bypass around the substrate's path, trust, fencing, or durable
+operation invariants.
+
+If no recovery service is selected or its Host entrypoint is disabled/failed, Piarium keeps native Pi
+conversation rollback and the fixed Extension Manager recovery route. Workspace checkpoints and
+combined rollback report unavailable; no fallback engine is silently activated.
 
 ## 6. Core data model
 
@@ -277,15 +295,20 @@ materialization.
 
 ## 9. Content and metadata storage
 
-The default store lives below:
+The default package receives a Host-resolved, extension-owned storage namespace. Its illustrative
+private layout is:
 
 ```text
-<PIARIUM_DATA_DIR>/recovery/v1/<authorityId>/<workspaceId>/
+<PIARIUM_DATA_DIR>/extensions/storage/org.piarium.recovery/recovery/v1/<authorityId>/<workspaceId>/
   catalog.sqlite
   objects/
   operations/
   staging/
 ```
+
+The physical root is not part of the public service contract. The Host injects the extension namespace
+and provides streamed object and durable-operation handles, so a package cannot select another
+extension's directory or escape the Application Host authority.
 
 The catalog owns snapshots, manifests, bindings, pins, writer epochs, refcounts, and operation state.
 Large immutable bytes live in a content-addressed object store. Object identity uses SHA-256 over the
@@ -431,7 +454,10 @@ is based on observed semantics, not platform-name guesses.
 
 ## 14. Public contracts
 
-The Application Host exposes one `WorkspaceRecoveryAPI`, separate from Pi worker recovery methods:
+`@piarium/extension-contract` owns the browser-safe service identity and DTOs for
+`piarium.workspace-recovery@1`. The selected Piarium extension provides its Host implementation; the
+Application Host exposes the selected service as `WorkspaceRecoveryAPI`, separate from Pi worker
+recovery methods:
 
 ```ts
 interface WorkspaceRecoveryAPI {
@@ -459,6 +485,18 @@ not the renderer, combines those with workspace operations.
 
 The existing dead `CheckpointsAPI` DTO and plugin recovery bridge are replaced, not preserved as a
 second implementation or compatibility facade.
+
+The official `@piarium/recovery` package contains:
+
+- a brokered Host entrypoint that provides `piarium.workspace-recovery@1`;
+- Surface entrypoints for the per-message action, Recovery panel, settings, progress, preview, and
+  diagnostics;
+- its snapshot catalog, CAS, retention, and operation schemas in extension-owned Host storage;
+- conformance fixtures that every replacement service provider must pass.
+
+It depends on `@piarium/extension-sdk`, not Pi's PackageManager or extension runner. Official releases
+publish it to npm and also bundle a verified artifact in the Piarium distribution for offline and
+first-run reliability. Bundling is a delivery choice, not privileged lifecycle or service semantics.
 
 ## 15. User experience
 
@@ -489,18 +527,28 @@ does not create a second checkpoint store.
 
 ## 16. Extension points
 
-Piarium extensions may provide versioned Host services for:
+The complete recovery feature is a selected, replaceable Piarium Host service. Another Piarium
+extension may replace `@piarium/recovery` by providing `piarium.workspace-recovery@1` and passing the
+same safety, crash, storage, and cross-platform conformance suite. Selection uses the existing
+distribution/user/workspace service-routing rules; package load order never chooses the owner.
+
+The selected recovery implementation may in turn consume optional versioned Host services for:
 
 - point-in-time filesystem snapshot acceleration (VSS/APFS/Btrfs/ZFS/reflink-capable stores);
 - alternative durable object storage;
 - metadata capture/materialization for a filesystem profile;
 - Git/worktree inspection and safe clone materialization;
 - snapshot export/import;
-- replacement Recovery UI.
+- replacement or augmented Recovery UI contributions.
 
-Providers report consistency, volume, metadata, crash, and materialization capabilities. They never
-commit a workspace or navigate Pi directly. The coordinator validates provider output and remains the
-single semantic authority.
+Providers report consistency, volume, metadata, crash, and materialization capabilities. Accelerators
+never commit a workspace or navigate Pi directly. The selected recovery service coordinates them
+through fixed Host primitives.
+
+Disabling or replacing `@piarium/recovery` drains active captures/restores first, pins unfinished safety
+state, withdraws its UI and service generation atomically, and retains extension data by default. A
+replacement never inherits or silently interprets another provider's private snapshot store; explicit
+export/import is a separate operation.
 
 Pi packages may continue to implement their own `/undo` commands for Pi CLI users, but Piarium does not
 auto-install them or interpret their private state as native checkpoints.
@@ -532,15 +580,20 @@ label alone does not claim that every deduplicated object was physically erased.
 
 Each phase is complete, independently reviewable, and pushed before the next one.
 
-### Phase 1 — Contract, catalog, and content store
+### Phase 1 — Fixed primitives, service contract, and package skeleton
 
-- Introduce the Host-owned recovery package, workspace identity, snapshot/manifest/CAS schema,
-  consistency/coverage model, pins, WAL records, and storage diagnostics.
-- Implement immutable capture/list/read/diff for a direct test workspace.
+- Add fixed Application Host primitives for workspace identity/trust, mutation epochs, streamed object
+  handles, fenced materialization, Pi session capability access, and durable operation recovery.
+- Define `piarium.workspace-recovery@1` in `@piarium/extension-contract` and scaffold the published
+  `@piarium/recovery` Piarium extension with brokered Host and Surface entrypoints.
+- Introduce the extension-owned snapshot/manifest/CAS schema, consistency/coverage model, pins, WAL
+  records, and storage diagnostics.
+- Implement immutable capture/list/read/diff for a direct test workspace through the service.
 - Replace the dead `CheckpointsAPI` contract rather than extending it.
 
 Acceptance: snapshot round-trip preserves all supported path kinds and metadata; missing/malformed/
-incomplete/corrupt state remains distinct; crash injection cannot publish a snapshot with missing blobs.
+incomplete/corrupt state remains distinct; crash injection cannot publish a snapshot with missing blobs;
+disabling the package withdraws the service/UI while conversation-only recovery remains reachable.
 
 ### Phase 2 — Workspace tracker and mutation participants
 
@@ -585,12 +638,15 @@ snapshot; worker crash, Host crash, disconnect, and stale completion preserve th
 
 ### Phase 6 — Product UI and policy
 
-- Rebuild per-message revert, chooser, Recovery panel, progress, preview, conflict resolution, storage,
-  pins, rescue, and settings over `WorkspaceRecoveryAPI`.
+- Complete the `@piarium/recovery` Surface entrypoints for per-message revert, chooser, Recovery panel,
+  progress, preview, conflict resolution, storage, pins, rescue, and settings over
+  `WorkspaceRecoveryAPI`.
 - Share the behavior across Agent/IDE/Web/Electron/mobile and define truthful VS Code behavior.
+- Prove service replacement with a second conformance provider and distribution/user/workspace routing.
 
 Acceptance: no provider-derived fake availability, no generic error-only outcome, no silent downgrade,
-and every long action remains observable and cancellable where its durable state permits cancellation.
+every long action remains observable and cancellable where its durable state permits cancellation, and
+switching providers never mutates Pi packages or selects by load order.
 
 ### Phase 7 — Retire plugin-backed recovery
 
@@ -598,6 +654,8 @@ and every long action remains observable and cancellable where its durable state
 - Remove workspace-history settings adapter, tree-hook fallback, recovery bridge v1, and old command-owned
   checkpoint paths from Piarium.
 - Keep the packages ordinarily installable and independently usable by Pi CLI users.
+- Select the bundled `@piarium/recovery` package in the default Piarium distribution; do not add it to
+  Pi's settings or package catalog.
 - Rewrite architecture, recovery, deployment, diagnostics, and user documentation.
 
 Acceptance: a clean Piarium install has complete native conversation/workspace recovery without those
@@ -635,13 +693,16 @@ The core engine requires model- and fault-based tests, not only happy-path UI te
 Settled:
 
 - Piarium owns workspace recovery; Pi owns conversation history.
-- The Application Host, not the renderer or Pi worker, coordinates combined recovery.
+- The selected Piarium recovery Host service, not the renderer or Pi worker, coordinates combined
+  recovery through fixed Application Host safety primitives.
 - Git is neither the snapshot engine nor a workspace transaction mechanism.
 - Watchers optimize invalidation but never prove completeness alone.
 - Restore is a durable coordinated transition, not falsely advertised universal 2PC.
 - Snapshot consistency and coverage are first-class user-visible facts.
 - New-workspace recovery is the safe path when writers or filesystem semantics cannot be fenced.
-- Piarium extensions may accelerate or store snapshots, but cannot bypass the coordinator.
+- The official implementation is the published, replaceable `@piarium/recovery` Piarium extension;
+  optional providers may replace it or accelerate its storage, but none bypass the fixed safety
+  substrate.
 - No old plugin-state migration or compatibility layer is retained.
 
 Measurements before fixing defaults:
