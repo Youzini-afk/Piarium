@@ -28,6 +28,7 @@ test("the native recovery built-in declares a replaceable Host service without P
   }]);
   assert.equal(manifest.integrates, undefined);
   assert.equal(PIARIUM_BUILTIN_RECOVERY_EXTENSION.manifest.id, "piarium.builtin.pi-recovery");
+  assert.deepEqual(PIARIUM_BUILTIN_RECOVERY_EXTENSION.piPackages ?? [], []);
   assert.notEqual(PIARIUM_BUILTIN_RECOVERY_EXTENSION.manifest.id, manifest.id);
 });
 

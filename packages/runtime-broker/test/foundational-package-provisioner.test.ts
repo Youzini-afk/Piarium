@@ -55,7 +55,7 @@ describe("foundational package reconcile", () => {
   it("adopts disabled packages offline and never repairs configured broken artifacts", async () => {
     const integrations = [
       FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!,
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[3]!,
+      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1]!,
     ] as const;
     const authority = [
       descriptor(integrations[0].source, { enabled: false }),
@@ -82,7 +82,7 @@ describe("foundational package reconcile", () => {
   it("continues after a partial failure and verifies success from Host descriptors", async () => {
     const integrations = [
       FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!,
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[3]!,
+      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1]!,
     ] as const;
     const receipt = fakeStore();
     const installed = descriptor(integrations[0].source);

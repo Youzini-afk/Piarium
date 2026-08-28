@@ -8,8 +8,6 @@ import type {
   PiSessionFeatureState,
   RecoveryMode,
   RecoveryOperationResult,
-  RecoveryRepairAction,
-  RecoveryStatus,
   RuntimeEventEnvelope,
   RuntimeMethod,
   RuntimeMethodParams,
@@ -28,6 +26,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import {
   armPiTimelineTurn,
   cancelPiTimelineAutomation,
@@ -85,7 +84,6 @@ export interface PiSessionViewState {
   open: boolean;
   previewError?: string;
   previewLoading?: boolean;
-  recoveryStatus?: RecoveryStatus;
   sessionId: string;
   settledActivityDurationMs?: number;
   snapshot?: SessionSnapshot;
@@ -140,7 +138,6 @@ export interface PiSessionStoreState {
   cancelTimelineAutomation(sessionId: string): void;
   completeTimelineReturn(sessionId: string, token: number): void;
   clearSessionAttention(sessionId: string): void;
-  createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
   createSession(
     cwd: string,
     name?: string,
@@ -184,19 +181,13 @@ export interface PiSessionStoreState {
   recoverTo(
     sessionId: string,
     targetId: string,
-    mode: RecoveryMode,
+    mode: Extract<RecoveryMode, 'conversation'>,
     summarize?: boolean,
-  ): Promise<RecoveryOperationResult>;
-  redoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
-  repairRecovery(
-    sessionId: string,
-    action: RecoveryRepairAction,
   ): Promise<RecoveryOperationResult>;
   refreshEntries(
     sessionId: string,
     scope?: 'branch' | 'all',
   ): Promise<SessionEntriesResult>;
-  refreshRecoveryStatus(sessionId: string): Promise<RecoveryStatus>;
   refreshStats(sessionId: string): Promise<SessionStats>;
   requestTimelineReturn(sessionId: string): number;
   renameSession(sessionId: string, name: string): Promise<void>;
@@ -217,7 +208,6 @@ export interface PiSessionStoreState {
     instructions?: string,
     expectedRuntimeKey?: string,
   ): Promise<boolean>;
-  undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
   updateSubmission(
     sessionId: string,
@@ -233,6 +223,21 @@ const DEFAULT_RUNTIME: PiSessionStoreRuntime = {
   connect: getPiRuntimeConnection,
   currentKey: getRuntimeKey,
   subscribeChanged: subscribeRuntimeEndpointChanged,
+};
+
+const canonicalWorkspaceBinding = async (
+  cwd: string,
+  workspace: SessionWorkspaceBinding | undefined,
+): Promise<SessionWorkspaceBinding | undefined> => {
+  if (workspace?.kind !== 'workspace') return workspace;
+  const documents = getRegisteredRuntimeAPIs()?.documents;
+  if (!documents) return workspace;
+  try {
+    const identity = await documents.resolveWorkspace({ path: cwd });
+    return { ...workspace, authorityId: identity.workspaceId };
+  } catch {
+    return workspace;
+  }
 };
 
 const errorMessage = (error: unknown): string => (
@@ -667,7 +672,6 @@ export const createPiSessionStore = (
   const previewRequests = new Map<string, Promise<SessionEntriesResult>>();
   const deletingSessionIds = new Set<string>();
   const deletedSessionIds = new Set<string>();
-  const recoveryGeneration = new Map<string, number>();
   const statsGeneration = new Map<string, number>();
 
   const store = create<PiSessionStoreState>((set, get) => {
@@ -854,21 +858,9 @@ export const createPiSessionStore = (
           }
           return;
         }
-        case 'recovery.status': {
-          const { sessionId, ...recoveryStatus } = envelope.data;
-          recoveryGeneration.set(sessionId, (recoveryGeneration.get(sessionId) ?? 0) + 1);
-          set((state) => ({
-            records: upsertRecord(state.records, sessionId, (current) => ({
-              ...current,
-              recoveryStatus,
-            })),
-          }));
-          return;
-        }
         case 'recovery.changed': {
           const { sessionId } = envelope.data;
           void get().refreshEntries(sessionId).catch(() => undefined);
-          void get().refreshRecoveryStatus(sessionId).catch(() => undefined);
           return;
         }
         case 'extension.state': {
@@ -969,10 +961,7 @@ export const createPiSessionStore = (
             : current.view,
         })),
       }));
-      await Promise.all([
-        get().refreshEntries(sessionId),
-        get().refreshRecoveryStatus(sessionId).catch(() => undefined),
-      ]);
+      await get().refreshEntries(sessionId);
       return result;
     };
 
@@ -1098,11 +1087,12 @@ export const createPiSessionStore = (
       createSession: async (cwd, name, parentSession, workspace) => {
         const selectionIntent = beginSelectionIntent();
         try {
+          const resolvedWorkspace = await canonicalWorkspaceBinding(cwd, workspace);
           const { result, runtimeKey } = await request('session.create', {
             cwd,
             ...(name === undefined ? {} : { name }),
             ...(parentSession === undefined ? {} : { parentSession }),
-            ...(workspace === undefined ? {} : { workspace }),
+            ...(resolvedWorkspace === undefined ? {} : { workspace: resolvedWorkspace }),
           });
           deletedSessionIds.delete(result.sessionId);
           set((state) => ({
@@ -1118,10 +1108,7 @@ export const createPiSessionStore = (
               view: preparePiTimelineEnd(current.view),
             })),
           }));
-          await Promise.allSettled([
-            get().refreshEntries(result.sessionId),
-            get().refreshRecoveryStatus(result.sessionId),
-          ]);
+          await get().refreshEntries(result.sessionId);
           await refreshCatalogAfterMutation();
           return result;
         } catch (error) {
@@ -1320,7 +1307,18 @@ export const createPiSessionStore = (
           void get().prefetchSession(openingSessionId, params.cwd).catch(() => undefined);
         }
         try {
-          const { result, runtimeKey } = await request('session.open', params);
+          const knownSummary = params.sessionId
+            ? get().summaries.find((summary) => summary.id === params.sessionId)
+            : undefined;
+          const workspaceCwd = params.cwd ?? knownSummary?.cwd;
+          const requestedWorkspace = params.workspace ?? knownSummary?.workspace;
+          const resolvedWorkspace = workspaceCwd
+            ? await canonicalWorkspaceBinding(workspaceCwd, requestedWorkspace)
+            : requestedWorkspace;
+          const openParams = resolvedWorkspace === undefined
+            ? params
+            : { ...params, workspace: resolvedWorkspace };
+          const { result, runtimeKey } = await request('session.open', openParams);
           deletedSessionIds.delete(result.sessionId);
           set((state) => {
             const selectionCurrent = selectionIntentIsCurrent(selectionIntent, runtimeKey);
@@ -1352,7 +1350,7 @@ export const createPiSessionStore = (
                   : state.openingSessionId,
               }));
             });
-          void get().refreshRecoveryStatus(result.sessionId).catch(() => undefined);
+          void refreshCatalogAfterMutation();
           return result;
         } catch (error) {
           if (selectionIntent === selectionGeneration) {
@@ -1470,11 +1468,6 @@ export const createPiSessionStore = (
         return preview;
       },
 
-      createRecoveryCheckpoint: async (sessionId, name) => {
-        const { result } = await request('recovery.checkpoint.create', { name, sessionId });
-        return applyRecoveryResult(sessionId, result);
-      },
-
       recoverTo: async (sessionId, targetId, mode, summarize) => {
         const { result } = await request('recovery.navigate', {
           mode,
@@ -1482,16 +1475,6 @@ export const createPiSessionStore = (
           targetId,
           ...(summarize === undefined ? {} : { summarize }),
         });
-        return applyRecoveryResult(sessionId, result);
-      },
-
-      redoRecovery: async (sessionId, mode) => {
-        const { result } = await request('recovery.redo', { mode, sessionId });
-        return applyRecoveryResult(sessionId, result);
-      },
-
-      repairRecovery: async (sessionId, action) => {
-        const { result } = await request('recovery.repair', { action, sessionId });
         return applyRecoveryResult(sessionId, result);
       },
 
@@ -1545,31 +1528,6 @@ export const createPiSessionStore = (
           if (entriesAppendedDuringRequest.get(requestKey) === appendedEntryIds) {
             entriesAppendedDuringRequest.delete(requestKey);
           }
-        }
-      },
-
-      refreshRecoveryStatus: async (sessionId) => {
-        const generation = (recoveryGeneration.get(sessionId) ?? 0) + 1;
-        recoveryGeneration.set(sessionId, generation);
-        try {
-          const { result, runtimeKey } = await request('recovery.status', { sessionId });
-          if (
-            recoveryGeneration.get(sessionId) !== generation
-            || !contextIsCurrent(runtimeKey)
-          ) {
-            return result;
-          }
-          set((state) => ({
-            lastError: null,
-            records: upsertRecord(state.records, sessionId, (current) => ({
-              ...current,
-              recoveryStatus: result,
-            })),
-          }));
-          return result;
-        } catch (error) {
-          commitError(runtime.currentKey(), error);
-          throw error;
         }
       },
 
@@ -1632,7 +1590,6 @@ export const createPiSessionStore = (
         previewRequests.clear();
         deletingSessionIds.clear();
         deletedSessionIds.clear();
-        recoveryGeneration.clear();
         statsGeneration.clear();
         unsubscribeEvents?.();
         unsubscribeEvents = null;
@@ -1695,11 +1652,6 @@ export const createPiSessionStore = (
           text,
         }, expectedRuntimeKey);
         return result.accepted;
-      },
-
-      undoRecovery: async (sessionId, mode) => {
-        const { result } = await request('recovery.undo', { mode, sessionId });
-        return applyRecoveryResult(sessionId, result);
       },
 
       unarchiveSession: async (sessionId) => {

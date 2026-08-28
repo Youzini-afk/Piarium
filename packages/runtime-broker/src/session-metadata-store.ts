@@ -36,7 +36,14 @@ function parseWorkspaceBinding(value: unknown): SessionWorkspaceBinding | undefi
   if (!isRecord(value)) return undefined;
   if (value.kind === "unbound") return { kind: "unbound" };
   if (value.kind === "workspace" && typeof value.id === "string" && value.id.trim()) {
-    return { id: value.id.trim(), kind: "workspace" };
+    const authorityId = typeof value.authorityId === "string" && value.authorityId.trim()
+      ? value.authorityId.trim()
+      : undefined;
+    return {
+      id: value.id.trim(),
+      kind: "workspace",
+      ...(authorityId === undefined ? {} : { authorityId }),
+    };
   }
   return undefined;
 }

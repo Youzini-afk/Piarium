@@ -3241,7 +3241,7 @@ export const dict: Record<I18nKey, string> = {
   'pi.interaction.trust.workspace': 'Робочий простір',
   'voice.action.finishAndTranscribe': 'Finish and transcribe voice input',
   'contextPanel.mode.recovery': 'Відновлення',
-  'contextRail.surface.recovery.description': 'Відновлення сеансу, контрольні точки та виправлення запитів',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': 'Відновлення розмови й файлів недоступне в цьому сеансі. Увімкніть постачальника з підтримкою спільного скасування.',
   'contextPanel.recovery.sessionBusy': 'Дочекайтеся завершення активного запуску Pi, перш ніж змінювати історію.',
   'contextPanel.recovery.actions.undo': 'Скасувати',

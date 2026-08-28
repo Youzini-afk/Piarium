@@ -15,19 +15,17 @@ import {
 } from "../src/index.js";
 
 describe("foundational Pi package manifest", () => {
-  it("publishes revision 1 with the four stable identities and current sources", () => {
-    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION, 1);
-    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision, 1);
+  it("publishes revision 2 with only the foundational runtime integrations", () => {
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION, 2);
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision, 2);
     assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_IDS, [
       "mcp",
       "permission-system",
-      "workspace-history",
-      "wtf",
     ]);
 
     const integrations = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations;
-    assert.equal(new Set(integrations.map((entry) => entry.id)).size, 4);
-    assert.equal(new Set(integrations.map((entry) => entry.source)).size, 4);
+    assert.equal(new Set(integrations.map((entry) => entry.id)).size, 2);
+    assert.equal(new Set(integrations.map((entry) => entry.source)).size, 2);
     const aliases = integrations.flatMap((entry) => [...entry.packageAliases]);
     assert.equal(new Set(aliases).size, aliases.length);
     assert.ok(integrations.every((entry) => entry.introducedRevision === 1));
@@ -36,8 +34,6 @@ describe("foundational Pi package manifest", () => {
       {
         mcp: "npm:@piarium/pi-mcp-adapter",
         "permission-system": "npm:@gotgenes/pi-permission-system",
-        "workspace-history": "npm:pi-workspace-history",
-        wtf: "npm:pi-wtf",
       },
     );
     assert.deepEqual(
@@ -45,8 +41,6 @@ describe("foundational Pi package manifest", () => {
       {
         mcp: "@piarium/pi-mcp-adapter",
         "permission-system": "@gotgenes/pi-permission-system",
-        "workspace-history": "pi-workspace-history",
-        wtf: "pi-wtf",
       },
     );
     assert.ok(
@@ -104,7 +98,7 @@ describe("foundational Pi package manifest", () => {
           source: "npm:pi-mcp-adapter",
         },
       ],
-      manifestRevision: 1,
+      manifestRevision: 2,
       revision: 3,
       state: "degraded",
     };

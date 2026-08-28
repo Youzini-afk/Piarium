@@ -38,6 +38,14 @@ afterEach(async () => {
 });
 
 describe('native workspace recovery Phase 1 engine', () => {
+  it('reports an empty registered recovery location as missing before the first snapshot', async () => {
+    const { engine, harness } = await createHarness();
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { byteLength: 0, objectCount: 0, snapshotCount: 0, state: 'missing' },
+    });
+  });
+
   it('round-trips files, empty directories, symlinks, readonly metadata, exclusions, and diffs', async () => {
     const { engine, harness } = await createHarness();
     await fs.promises.mkdir(path.join(harness.workspaceRoot, 'empty'), { recursive: true });

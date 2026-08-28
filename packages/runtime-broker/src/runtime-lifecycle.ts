@@ -208,6 +208,7 @@ export class PiRuntimeLifecycle {
     cwd?: string;
     sessionFile?: string;
     sessionId?: string;
+    workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     const broker = input.sessionId ? this.#findBrokerForSession(input.sessionId) : undefined;
     return (broker ?? this.requireBroker()).openSession(input);

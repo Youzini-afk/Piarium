@@ -148,14 +148,14 @@ const statTree = async (root, fsPromises) => {
   let byteLength = 0;
   let objectCount = 0;
   const walk = async (directory) => {
-    let handle;
+    let entries;
     try {
-      handle = await fsPromises.opendir(directory);
+      entries = await fsPromises.readdir(directory, { withFileTypes: true });
     } catch (error) {
       if (error?.code === 'ENOENT') return;
       throw error;
     }
-    for await (const directoryEntry of handle) {
+    for (const directoryEntry of entries) {
       const target = path.join(directory, directoryEntry.name);
       const stat = await fsPromises.lstat(target);
       if (stat.isDirectory() && !stat.isSymbolicLink()) await walk(target);
@@ -1493,6 +1493,14 @@ export const createWorkspaceRecoveryEngine = ({
     async getCombinedOperation(operationId) {
       try {
         return { operation: await combined.get(operationId), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async listCombinedOperations(workspaceId) {
+      try {
+        await inspectIdentity(workspaceId);
+        return { operations: await combined.list(workspaceId), status: 'ready' };
       } catch (error) {
         return failedRecoveryResult(error);
       }

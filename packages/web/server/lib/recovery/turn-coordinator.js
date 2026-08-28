@@ -17,10 +17,10 @@ const incompleteFailure = (message) => ({
   retryable: true,
 });
 
-const isBoundWorkspace = (snapshot) => (
-  snapshot?.workspace?.kind === 'workspace'
-  && typeof snapshot.workspace.id === 'string'
-  && snapshot.workspace.id
+const isBoundWorkspace = (workspace) => (
+  workspace?.kind === 'workspace'
+  && typeof workspace.id === 'string'
+  && workspace.id
 );
 
 export const createRecoveryTurnCoordinator = ({
@@ -145,9 +145,9 @@ export const createRecoveryTurnCoordinator = ({
       if (request.phase !== 'agent-run' || !request.sessionId) {
         return writerTracker.admit(request);
       }
-      const snapshot = getSessionSnapshot(request.sessionId);
-      if (!isBoundWorkspace(snapshot)) return writerTracker.admit(request);
-      const workspaceId = snapshot.workspace.id;
+      const workspace = request.workspace ?? getSessionSnapshot(request.sessionId)?.workspace;
+      if (!isBoundWorkspace(workspace)) return writerTracker.admit(request);
+      const workspaceId = workspace.authorityId ?? workspace.id;
       const turn = {
         activeWriterScopes: [],
         agentStarted: false,

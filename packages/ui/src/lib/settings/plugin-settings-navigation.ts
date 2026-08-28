@@ -2,8 +2,6 @@ export type PluginSettingsIntegrationId =
   | 'subagents'
   | 'magic-context'
   | 'web-access'
-  | 'workspace-history'
-  | 'wtf'
   | 'openai-codex-compat'
   | 'observational-memory'
   | 'context-mode'
@@ -32,8 +30,6 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   '@cortexkit/aft-pi': 'aft',
   'pi-subagents': 'subagents',
   'pi-web-access': 'web-access',
-  'pi-workspace-history': 'workspace-history',
-  'pi-wtf': 'wtf',
   'pi-lens': 'pi-lens',
   '@gotgenes/pi-permission-system': 'permission-system',
   'pi-hermes-memory': 'hermes-memory',
@@ -56,8 +52,6 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'aft': '@cortexkit/aft-pi',
   'subagents': 'pi-subagents',
   'web-access': 'pi-web-access',
-  'workspace-history': 'pi-workspace-history',
-  'wtf': 'pi-wtf',
   'pi-lens': 'pi-lens',
   'permission-system': '@gotgenes/pi-permission-system',
   'hermes-memory': 'pi-hermes-memory',

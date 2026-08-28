@@ -1,6 +1,6 @@
 # Piarium native workspace recovery
 
-Status: implementation in progress; Phases 1–5 are implemented, while product UI and plugin retirement remain pending
+Status: implementation in progress; Phases 1–7 are implemented, while cross-platform hardening remains pending
 
 Last updated: 2026-08-28
 
@@ -512,6 +512,7 @@ interface WorkspaceRecoveryAPI {
   applyCombinedRecovery(input: CombinedRecoveryApplyInput): Promise<CombinedRecoveryOperation>;
   prepareCombinedUndo(operationId: string): Promise<CombinedRecoveryPlan>;
   getCombinedOperation(operationId: string): Promise<CombinedRecoveryOperation>;
+  listCombinedOperations(workspaceId: string): Promise<CombinedRecoveryOperation[]>;
   cancelCombinedOperation(operationId: string): Promise<CombinedRecoveryOperation>;
   cancelOperation(operationId: string): Promise<RestoreOperation>;
   getOperation(operationId: string): Promise<RestoreOperation>;

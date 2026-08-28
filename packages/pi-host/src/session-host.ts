@@ -121,12 +121,6 @@ import {
   projectSessionEntry,
 } from "./protocol-projector.js";
 import {
-  createRecoveryBridgeExtension,
-  RecoveryPluginAdapter,
-  type RecoveryPluginContext,
-  type RecoveryPluginExecution,
-} from "./recovery-plugin-adapter.js";
-import {
   createSessionFeaturesExtension,
   mutateSessionFeatures,
   readSessionFeatures,
@@ -297,6 +291,13 @@ function editableRecoveryContent(entry: NativeSessionEntry | undefined): {
 interface ResolvedConversationNavigationTarget {
   editable: ReturnType<typeof editableRecoveryContent>;
   targetLeafId: string | null;
+}
+
+interface ConversationRecoveryExecution {
+  editorImages?: ImageAttachment[];
+  editorText?: string;
+  handledBy: "pi-native";
+  outcome: "applied";
 }
 
 function resolveConversationNavigationTarget(
@@ -534,7 +535,6 @@ export class SessionHost {
   #fleet: FleetProviderRegistry | undefined;
   #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
-  #recovery: RecoveryPluginAdapter | undefined;
   #turnIndex = 0;
   #unsubscribe: (() => void) | undefined;
   #disposed = false;
@@ -1148,7 +1148,19 @@ export class SessionHost {
 
   recoveryStatus(sessionId: string): RecoveryStatus {
     this.assertSession(sessionId);
-    return this.recovery.status(this.session, this.#recoveryContext());
+    return {
+      actions: ["navigate", "undo"],
+      available: true,
+      issues: [],
+      modes: ["conversation"],
+      providers: [{
+        actions: ["navigate", "undo"],
+        active: true,
+        id: "pi-native",
+        modes: ["conversation"],
+        name: "Pi session tree",
+      }],
+    };
   }
 
   async navigateRecovery(
@@ -1160,21 +1172,14 @@ export class SessionHost {
     this.#assertRecoveryReady(sessionId);
     const target = this.session.sessionManager.getEntry(targetId);
     if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
-    if (mode === "conversation" && summarize === true) {
+    if (mode !== "conversation" || summarize === true) {
       throw new HostError(
         "recovery_mode_unavailable",
-        "Conversation-only recovery cannot summarize through a workspace-history hook",
+        "Pi runtime recovery is conversation-only; workspace recovery is coordinated by the Piarium Host service",
       );
     }
     const editable = editableRecoveryContent(target);
-    const execution =
-      mode === "conversation"
-        ? await this.#navigateConversationOnly(targetId)
-        : await this.recovery.navigate(this.session, this.#recoveryContext(), {
-            mode,
-            ...(summarize === undefined ? {} : { summarize }),
-            targetId,
-          });
+    const execution = await this.#navigateConversationOnly(targetId);
     return this.#finishRecovery("navigate", execution, {
       ...editable,
       mode,
@@ -1183,17 +1188,22 @@ export class SessionHost {
 
   async undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    const execution =
-      mode === "conversation"
-        ? await this.#undoConversationOnly()
-        : await this.recovery.undo(this.session, this.#recoveryContext(), mode);
+    if (mode !== "conversation") {
+      throw new HostError(
+        "recovery_mode_unavailable",
+        "Workspace recovery undo is coordinated by the Piarium Host service",
+      );
+    }
+    const execution = await this.#undoConversationOnly();
     return this.#finishRecovery("undo", execution, { mode });
   }
 
   async redoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    const execution = await this.recovery.redo(this.session, this.#recoveryContext(), mode);
-    return this.#finishRecovery("redo", execution, { mode });
+    throw new HostError(
+      "recovery_action_unavailable",
+      `Pi session tree does not provide ${mode} redo; use a completed Piarium recovery operation to undo or redo workspace state`,
+    );
   }
 
   async createRecoveryCheckpoint(
@@ -1201,8 +1211,10 @@ export class SessionHost {
     name: string,
   ): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    const execution = await this.recovery.checkpoint(this.session, name);
-    return this.#finishRecovery("checkpoint", execution);
+    throw new HostError(
+      "recovery_action_unavailable",
+      `Named checkpoint "${name}" must be created through the Piarium workspace recovery service`,
+    );
   }
 
   async repairRecovery(
@@ -1210,14 +1222,10 @@ export class SessionHost {
     action: RecoveryRepairAction,
   ): Promise<RecoveryOperationResult> {
     this.assertSession(sessionId);
-    const execution = await this.recovery.repair(this.session, action);
-    const protocolAction: RecoveryAction =
-      action === "recover"
-        ? "repair"
-        : action === "recover-typo"
-          ? "repair-typo"
-          : "repair-destructive";
-    return this.#finishRecovery(protocolAction, execution);
+    throw new HostError(
+      "recovery_action_unavailable",
+      `Prompt repair action ${action} is not part of Piarium native recovery`,
+    );
   }
 
   listAgentProviders(): Promise<PiAgentCatalogSnapshot> {
@@ -2532,8 +2540,6 @@ export class SessionHost {
       const settingsManager = SettingsManager.create(cwd, agentDir, {
         projectTrusted: initialTrust,
       });
-      const recovery = new RecoveryPluginAdapter();
-      this.#recovery = recovery;
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -2577,11 +2583,6 @@ export class SessionHost {
               factory: createAgentProviderBridgeExtension(agentProviders),
               hidden: true,
               name: "piarium-agent-provider-bridge",
-            },
-            {
-              factory: createRecoveryBridgeExtension(recovery),
-              hidden: true,
-              name: "piarium-recovery-bridge",
             },
           ],
         },
@@ -2705,10 +2706,6 @@ export class SessionHost {
       });
     }
     this.#emit("session.snapshot", this.snapshot());
-    this.#emit("recovery.status", {
-      ...this.recoveryStatus(session.sessionId),
-      sessionId: session.sessionId,
-    });
   }
 
   #packageManager(): DefaultPackageManager {
@@ -2787,17 +2784,11 @@ export class SessionHost {
     this.#agentProviders = undefined;
     this.#fleet = undefined;
     this.#mcpConfig = undefined;
-    this.#recovery = undefined;
   }
 
   get fleet(): FleetProviderRegistry {
     if (!this.#fleet) throw new HostError("fleet_unavailable", "Fleet is unavailable");
     return this.#fleet;
-  }
-
-  get recovery(): RecoveryPluginAdapter {
-    if (!this.#recovery) throw new HostError("recovery_unavailable", "Recovery is unavailable");
-    return this.#recovery;
   }
 
   get mcpConfig(): PiMcpConfigBridge {
@@ -2816,22 +2807,7 @@ export class SessionHost {
     }
   }
 
-  #recoveryContext(): RecoveryPluginContext {
-    const extensions = this.runtime.services.resourceLoader.getExtensions().extensions;
-    return {
-      configuredSources: this.#packageManager()
-        .listConfiguredPackages()
-        .map((entry) => entry.source),
-      loadedExtensions: extensions.flatMap((extension) => [
-        extension.path,
-        extension.resolvedPath,
-        extension.sourceInfo.source,
-        extension.sourceInfo.path,
-      ]),
-    };
-  }
-
-  async #navigateConversationOnly(targetId: string): Promise<RecoveryPluginExecution> {
+  async #navigateConversationOnly(targetId: string): Promise<ConversationRecoveryExecution> {
     const manager = this.session.sessionManager;
     const oldLeafId = manager.getLeafId();
     const resolved = resolveConversationNavigationTarget(manager, targetId);
@@ -2844,7 +2820,7 @@ export class SessionHost {
     return { ...resolved.editable, handledBy: "pi-native", outcome: "applied" };
   }
 
-  async #undoConversationOnly(): Promise<RecoveryPluginExecution> {
+  async #undoConversationOnly(): Promise<ConversationRecoveryExecution> {
     const target = this.session.sessionManager
       .getBranch()
       .findLast((entry) => entry.type === "message" && entry.message.role === "user");
@@ -2856,7 +2832,7 @@ export class SessionHost {
 
   #finishRecovery(
     action: RecoveryAction,
-    execution: RecoveryPluginExecution,
+    execution: ConversationRecoveryExecution,
     options: {
       editorImages?: ImageAttachment[];
       editorText?: string;
@@ -2878,7 +2854,6 @@ export class SessionHost {
       snapshot: this.snapshot(),
     };
     this.#emit("recovery.changed", { sessionId });
-    this.#emit("recovery.status", { ...this.recoveryStatus(sessionId), sessionId });
     return result;
   }
 }

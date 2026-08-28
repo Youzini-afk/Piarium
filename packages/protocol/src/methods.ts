@@ -35,6 +35,7 @@ import type {
   SessionSnapshot,
   SessionStats,
   SessionSummary,
+  SessionWorkspaceBinding,
   ThinkingLevel,
 } from "./types.js";
 import type { PackageBootstrapResult } from "./foundational-pi-packages.js";
@@ -387,7 +388,12 @@ export interface HostMethodMap {
     };
   };
   "session.open": {
-    params: { cwd?: string; sessionFile?: string; sessionId?: string };
+    params: {
+      cwd?: string;
+      sessionFile?: string;
+      sessionId?: string;
+      workspace?: SessionWorkspaceBinding;
+    };
     result: SessionSnapshot;
   };
   "session.resolve": {

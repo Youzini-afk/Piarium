@@ -3241,7 +3241,7 @@ export const dict: Record<I18nKey, string> = {
   'pi.interaction.trust.workspace': 'Espacio de trabajo',
   'voice.action.finishAndTranscribe': 'Finish and transcribe voice input',
   'contextPanel.mode.recovery': 'Recuperación',
-  'contextRail.surface.recovery.description': 'Recuperación de la sesión, puntos de control y reparación de instrucciones',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': 'La recuperación de conversación y archivos no está disponible en esta sesión. Activa un proveedor que admita deshacer ambos.',
   'contextPanel.recovery.sessionBusy': 'Espera a que termine la ejecución activa de Pi antes de cambiar el historial.',
   'contextPanel.recovery.actions.undo': 'Deshacer',

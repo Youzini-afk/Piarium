@@ -314,6 +314,25 @@ test("broker owns catalog and per-session Pi workers", async () => {
       id: "workspace-broker",
       kind: "workspace",
     });
+    const rebound = await dispatchRuntimeRequest(broker, "session.open", {
+      sessionId: created.sessionId,
+      workspace: {
+        authorityId: "workspace-canonical",
+        id: "workspace-broker",
+        kind: "workspace",
+      },
+    });
+    assert.deepEqual(rebound.workspace, {
+      authorityId: "workspace-canonical",
+      id: "workspace-broker",
+      kind: "workspace",
+    });
+    assert.deepEqual(
+      (await broker.requestForSession(created.sessionId, "session.snapshot", {
+        sessionId: created.sessionId,
+      })).workspace,
+      { authorityId: "workspace-canonical", id: "workspace-broker", kind: "workspace" },
+    );
     assert.deepEqual(created.features, {
       revision: 0,
       schemaVersion: 1,

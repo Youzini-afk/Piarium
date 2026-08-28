@@ -3237,7 +3237,7 @@ export const dict = {
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
   'contextPanel.mode.recovery': 'Récupération',
-  'contextRail.surface.recovery.description': 'Récupération de session, points de contrôle et réparation des instructions',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': 'La récupération de la conversation et des fichiers est indisponible dans cette session. Activez un fournisseur prenant en charge l’annulation combinée.',
   'contextPanel.recovery.sessionBusy': 'Attendez la fin de l’exécution Pi active avant de modifier l’historique.',
   'contextPanel.recovery.actions.undo': 'Annuler',

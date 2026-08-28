@@ -3101,7 +3101,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.changelog.title': '新機能',
   'quota.window.premiumInteractions': 'プレミアムインタラクション',
   'contextPanel.mode.recovery': '復元',
-  'contextRail.surface.recovery.description': 'セッションの復元、チェックポイント、プロンプト修復',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': 'このセッションでは会話とファイルの同時復元を利用できません。両方の取り消しに対応するプロバイダーを有効にしてください。',
   'contextPanel.recovery.sessionBusy': '履歴を変更する前に、実行中の Pi 処理が完了するまでお待ちください。',
   'contextPanel.recovery.actions.undo': '元に戻す',

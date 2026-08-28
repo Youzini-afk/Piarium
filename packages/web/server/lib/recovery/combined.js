@@ -26,7 +26,7 @@ const revisionOf = (value) => `sha256-${createHash('sha256').update(canonicalJso
 
 const sameLeaf = (left, right) => (left ?? null) === (right ?? null);
 
-const publicOperation = (record) => ({
+const publicOperation = (record, workspaceOperation) => ({
   conversationState: record.conversationState,
   createdAt: record.createdAt,
   ...(record.destinationPath ? { destinationPath: record.destinationPath } : {}),
@@ -45,6 +45,10 @@ const publicOperation = (record) => ({
   updatedAt: record.updatedAt,
   workspaceId: record.plan.workspaceId,
   workspaceState: record.workspaceState,
+  ...(workspaceOperation ? {
+    workspaceAppliedOperations: workspaceOperation.appliedOperations,
+    workspaceTotalOperations: workspaceOperation.totalOperations,
+  } : {}),
   ...(record.editorImages ? { editorImages: record.editorImages } : {}),
   ...(record.editorText !== undefined ? { editorText: record.editorText } : {}),
   ...(record.failure ? { failure: record.failure } : {}),
@@ -531,7 +535,16 @@ export const createCombinedRecoveryManager = ({
       }
     },
     async get(operationId) {
-      return publicOperation(await readOperation(operationId));
+      const record = await readOperation(operationId);
+      return publicOperation(record, await restore.get(record.plan.restore.id));
+    },
+    async list(workspaceId) {
+      const records = (await listOperationRecords())
+        .filter((record) => record.plan.workspaceId === workspaceId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      return Promise.all(records.map(async (record) => (
+        publicOperation(record, await restore.get(record.plan.restore.id))
+      )));
     },
     prepare,
     prepareUndo: (operationId) => runOperation(operationId, async () => {

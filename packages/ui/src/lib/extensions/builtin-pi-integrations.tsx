@@ -33,8 +33,6 @@ import { PermissionSystemComposerControl } from '@/components/pi-session/Permiss
 import { RtkSettings } from '@/components/sections/plugin-settings/RtkSettings';
 import { SubagentsSettings } from '@/components/sections/plugin-settings/SubagentsSettings';
 import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAccessSettings';
-import { WorkspaceHistorySettings } from '@/components/sections/plugin-settings/WorkspaceHistorySettings';
-import { WtfSettings } from '@/components/sections/plugin-settings/WtfSettings';
 import { Button } from '@/components/ui/button';
 import { BuiltinWorkbenchTransitionScene } from '@/components/ui/BuiltinWorkbenchTransitionScene';
 import { useI18n } from '@/lib/i18n';
@@ -131,10 +129,6 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         );
       case 'web-access':
         return <WebAccessSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
-      case 'workspace-history':
-        return <WorkspaceHistorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
-      case 'wtf':
-        return <WtfSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'openai-codex-compat':
         return <OpenAICodexCompatSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'observational-memory':

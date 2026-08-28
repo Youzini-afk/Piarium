@@ -858,7 +858,10 @@ async function main(options = {}) {
   const workspaceRecoveryEngines = new Map();
   const assertRecoverySessionWorkspace = async (sessionId, workspaceId) => {
     const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId });
-    if (snapshot.workspace?.kind !== 'workspace' || snapshot.workspace.id !== workspaceId) {
+    const authorityWorkspaceId = snapshot.workspace?.kind === 'workspace'
+      ? snapshot.workspace.authorityId ?? snapshot.workspace.id
+      : null;
+    if (authorityWorkspaceId !== workspaceId) {
       throw new RecoveryPrimitiveError(
         'navigation-conflict',
         'The Pi session is no longer bound to the workspace selected for recovery',

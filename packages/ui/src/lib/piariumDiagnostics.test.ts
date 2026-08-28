@@ -40,7 +40,19 @@ mock.module('@/lib/pi-runtime/client', () => ({
           case 'fleet.status':
             return (await import('@/lib/pi-runtime/fleet')).getPiFleetStatus(String(params.sessionId));
           case 'recovery.status':
-            return (await import('@/lib/pi-runtime/recovery')).getPiRecoveryStatus(String(params.sessionId));
+            return {
+              actions: ['navigate', 'undo'],
+              available: true,
+              issues: [],
+              modes: ['conversation'],
+              providers: [{
+                actions: ['navigate', 'undo'],
+                active: true,
+                id: 'pi-native',
+                modes: ['conversation'],
+                name: 'Pi session tree',
+              }],
+            };
           default:
             throw new Error(`Unexpected runtime method: ${method}`);
         }
@@ -181,23 +193,6 @@ mock.module('@/lib/pi-runtime/fleet', () => ({
       state: 'active',
     }],
     totalActive: 1,
-  }),
-}));
-
-mock.module('@/lib/pi-runtime/recovery', () => ({
-  getPiRecoveryStatus: async () => ({
-    actions: ['navigate', 'undo'],
-    available: true,
-    issues: [],
-    modes: ['conversation', 'both'],
-    providers: [{
-      actions: ['navigate', 'undo'],
-      active: true,
-      id: 'workspace-history',
-      modes: ['conversation', 'both'],
-      name: 'Workspace History',
-      source: 'https://token:secret-token@example.test/recovery.git',
-    }],
   }),
 }));
 

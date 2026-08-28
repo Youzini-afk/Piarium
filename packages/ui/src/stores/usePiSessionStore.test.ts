@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type { RuntimeAPIs } from '@/lib/api/types';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import {
   PIARIUM_PROTOCOL_VERSION,
@@ -389,6 +391,7 @@ describe('Pi session event state', () => {
 });
 
 describe('Pi session store', () => {
+  afterEach(() => registerRuntimeAPIs(null));
   test('owns recoverable submission state per Pi session', () => {
     const store = createPiSessionStore(new FakeRuntime());
     store.setState({
@@ -586,12 +589,17 @@ describe('Pi session store', () => {
     ]);
   });
 
-  test('forwards the Piarium workspace binding without changing the required cwd', async () => {
+  test('canonicalizes the workspace binding without changing the required cwd', async () => {
+    registerRuntimeAPIs({
+      documents: {
+        resolveWorkspace: async () => ({ epoch: 1, hostId: 'host-a', workspaceId: 'canonical-workspace-a' }),
+      },
+    } as unknown as RuntimeAPIs);
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
       if (method === 'session.create') return {
         ...snapshot('session-a', 'D:/worktree/feature'),
-        workspace: { id: 'workspace-a', kind: 'workspace' },
+        workspace: { authorityId: 'canonical-workspace-a', id: 'workspace-a', kind: 'workspace' },
         workspacePersistence: 'pending',
       } satisfies SessionSnapshot;
       if (method === 'session.entries') return branch('session-a');
@@ -610,14 +618,53 @@ describe('Pi session store', () => {
 
     expect(runtime.calls.find((call) => call.method === 'session.create')?.params).toEqual({
       cwd: 'D:/worktree/feature',
-      workspace: { id: 'workspace-a', kind: 'workspace' },
+      workspace: { authorityId: 'canonical-workspace-a', id: 'workspace-a', kind: 'workspace' },
     });
     runtime.event('session.snapshot', snapshot('session-a', 'D:/worktree/feature'), 'session-a');
     expect(store.getState().records['session-a']?.snapshot?.workspace).toEqual({
+      authorityId: 'canonical-workspace-a',
       id: 'workspace-a',
       kind: 'workspace',
     });
     expect(store.getState().records['session-a']?.snapshot?.workspacePersistence).toBe('pending');
+  });
+
+  test('migrates an existing project workspace binding when the session opens', async () => {
+    registerRuntimeAPIs({
+      documents: {
+        resolveWorkspace: async ({ path }: { path?: string }) => {
+          expect(path).toBe('D:/work');
+          return { epoch: 1, hostId: 'host-a', workspaceId: 'canonical-workspace-a' };
+        },
+      },
+    } as unknown as RuntimeAPIs);
+    const runtime = new FakeRuntime();
+    runtime.handler = (method, params) => {
+      if (method === 'session.list') return [{
+        ...summary('session-a', '2026-08-02T00:00:00.000Z'),
+        workspace: { id: 'legacy-project-id', kind: 'workspace' },
+      }];
+      if (method === 'session.open') return {
+        ...snapshot('session-a'),
+        workspace: (params as { workspace?: SessionSummary['workspace'] }).workspace,
+      };
+      if (method === 'session.entries') return branch('session-a');
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+
+    await store.getState().openSession({ sessionId: 'session-a' });
+
+    expect(runtime.calls.find((call) => call.method === 'session.open')?.params).toEqual({
+      sessionId: 'session-a',
+      workspace: { authorityId: 'canonical-workspace-a', id: 'legacy-project-id', kind: 'workspace' },
+    });
+    expect(store.getState().records['session-a']?.snapshot?.workspace).toEqual({
+      authorityId: 'canonical-workspace-a',
+      id: 'legacy-project-id',
+      kind: 'workspace',
+    });
   });
 
   test('keeps derived catalog selector references stable until summaries change', async () => {
@@ -673,7 +720,6 @@ describe('Pi session store', () => {
 
     expect(store.getState().currentSessionId).toBe('session-a');
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
-    expect(store.getState().records['session-a']?.recoveryStatus?.available).toBe(true);
     expect(store.getState().records['session-a']?.snapshot?.busy).toBe(true);
     expect(store.getState().records['session-a']?.extensionStates['pi-mcp-adapter/status/v1'])
       .toEqual({ connectedCount: 1, version: 1 });
@@ -1364,28 +1410,7 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([appended]);
   });
 
-  test('does not overwrite a newer recovery event with an older status response', async () => {
-    const runtime = new FakeRuntime();
-    const statusRequest = deferred<RecoveryStatus>();
-    runtime.handler = (method) => {
-      if (method === 'recovery.status') return statusRequest.promise;
-      throw new Error(`Unexpected ${method}`);
-    };
-    const store = createPiSessionStore(runtime);
-    const refresh = store.getState().refreshRecoveryStatus('session-a');
-    await Promise.resolve();
-    runtime.event('recovery.status', {
-      ...recoveryStatus,
-      actions: ['navigate'],
-      sessionId: 'session-a',
-    }, 'session-a');
-    statusRequest.resolve(recoveryStatus);
-    await refresh;
-
-    expect(store.getState().records['session-a']?.recoveryStatus?.actions).toEqual(['navigate']);
-  });
-
-  test('applies plugin recovery to its session without stealing a newer selection', async () => {
+  test('applies native conversation recovery without stealing a newer selection', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method, params) => {
       const sessionId = (params as { sessionId?: string }).sessionId ?? '';
@@ -1393,87 +1418,24 @@ describe('Pi session store', () => {
         return {
           action: 'navigate',
           editorText: 'restore this prompt',
-          handledBy: 'pi-workspace-history',
-          mode: 'both',
+          handledBy: 'pi-native',
+          mode: 'conversation',
           outcome: 'applied',
           snapshot: snapshot(sessionId),
         };
       }
       if (method === 'session.entries') return branch(sessionId);
-      if (method === 'recovery.status') return recoveryStatus;
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
     store.getState().setCurrentSession('session-b');
 
-    const result = await store.getState().recoverTo('session-a', 'entry-a', 'both');
+    const result = await store.getState().recoverTo('session-a', 'entry-a', 'conversation');
 
     expect(result.editorText).toBe('restore this prompt');
     expect(store.getState().currentSessionId).toBe('session-b');
     expect(store.getState().records['session-a']?.snapshot?.sessionId).toBe('session-a');
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
-  });
-
-  test('executes sidebar recovery controls through the session store', async () => {
-    const runtime = new FakeRuntime();
-    runtime.handler = (method, params) => {
-      const sessionId = (params as { sessionId?: string }).sessionId ?? '';
-      if (method === 'session.entries') return branch(sessionId);
-      if (method === 'recovery.status') return recoveryStatus;
-      if (method === 'recovery.checkpoint.create') {
-        return {
-          action: 'checkpoint',
-          handledBy: 'pi-workspace-history',
-          outcome: 'unknown',
-          snapshot: snapshot(sessionId),
-        };
-      }
-      if (method === 'recovery.undo' || method === 'recovery.redo') {
-        return {
-          action: method === 'recovery.undo' ? 'undo' : 'redo',
-          handledBy: method === 'recovery.undo' ? 'pi-native' : 'pi-workspace-history',
-          mode: (params as { mode: 'conversation' | 'both' }).mode,
-          outcome: 'applied',
-          snapshot: snapshot(sessionId),
-        };
-      }
-      if (method === 'recovery.repair') {
-        return {
-          action: 'repair-typo',
-          handledBy: 'pi-wtf',
-          outcome: 'unknown',
-          snapshot: snapshot(sessionId),
-        };
-      }
-      throw new Error(`Unexpected ${method}`);
-    };
-    const store = createPiSessionStore(runtime);
-
-    await store.getState().createRecoveryCheckpoint('session-a', 'Known good');
-    await store.getState().undoRecovery('session-a', 'conversation');
-    await store.getState().redoRecovery('session-a', 'both');
-    await store.getState().repairRecovery('session-a', 'recover-typo');
-
-    expect(runtime.calls.filter((call) => call.method.startsWith('recovery.') && call.method !== 'recovery.status'))
-      .toEqual([
-        {
-          method: 'recovery.checkpoint.create',
-          params: { name: 'Known good', sessionId: 'session-a' },
-        },
-        {
-          method: 'recovery.undo',
-          params: { mode: 'conversation', sessionId: 'session-a' },
-        },
-        {
-          method: 'recovery.redo',
-          params: { mode: 'both', sessionId: 'session-a' },
-        },
-        {
-          method: 'recovery.repair',
-          params: { action: 'recover-typo', sessionId: 'session-a' },
-        },
-      ]);
-    expect(store.getState().records['session-a']?.snapshot?.sessionId).toBe('session-a');
   });
 
   test('resets catalog, current session, and event ownership on runtime change', async () => {

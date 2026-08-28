@@ -2,7 +2,6 @@ import React from 'react';
 import { PiariumVisualSettings } from './PiariumVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
-import { CheckpointSettings } from './CheckpointSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
@@ -54,7 +53,6 @@ export const PiariumSettingsPage: React.FC<PiariumSettingsPageProps> = ({ sectio
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
                 <PiSettingsContributionSlot slot="settings.sessions.panels" />
-                {isVSCode && <CheckpointSettings />}
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
             </SettingsPageLayout>
@@ -216,13 +214,11 @@ const ChatSectionContent: React.FC = () => {
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
     return (
         <>
             <DefaultsSettings />
             <SessionRetentionSettings />
             <PiSettingsContributionSlot slot="settings.sessions.panels" />
-            {isVSCode && <CheckpointSettings />}
         </>
     );
 };

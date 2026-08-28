@@ -110,7 +110,7 @@ describe('recovery turn coordinator', () => {
     };
     const coordinator = createRecoveryTurnCoordinator({
       documents: { inspectMutation: async () => structuredClone(state) },
-      getSessionSnapshot: () => ({ workspace: { id: workspaceId, kind: 'workspace' } }),
+      getSessionSnapshot: () => ({ workspace: { id: 'legacy-project-id', kind: 'workspace' } }),
       invokeService,
       writerTracker,
     });
@@ -122,6 +122,7 @@ describe('recovery turn coordinator', () => {
       runtimeGeneration: 2,
       sessionId: 'session-1',
       workerId: 'worker-1',
+      workspace: { authorityId: workspaceId, id: 'project-1', kind: 'workspace' },
     };
 
     const lease = await coordinator.admit(request);

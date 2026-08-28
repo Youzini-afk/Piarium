@@ -7,10 +7,10 @@ import {
 
 describe('plugin settings navigation', () => {
   test('hands a requested integration to the next plugin settings page once', () => {
-    requestPluginSettingsIntegration('workspace-history');
+    requestPluginSettingsIntegration('mcp');
     expect(consumePluginSettingsTarget()).toEqual({
-      integrationId: 'workspace-history',
-      pluginId: 'pi-workspace-history',
+      integrationId: 'mcp',
+      pluginId: 'pi-mcp-adapter',
     });
 
     requestPluginSettingsTarget('npm:pi-openai-codex-compat@0.0.7-alpha.0');
@@ -41,6 +41,12 @@ describe('plugin settings navigation', () => {
       pluginId: 'example-agents',
       packageIdentity: 'project:../example-agents',
       section: 'profiles',
+    });
+
+    requestPluginSettingsTarget('pi-workspace-history');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: null,
+      pluginId: 'pi-workspace-history',
     });
   });
 

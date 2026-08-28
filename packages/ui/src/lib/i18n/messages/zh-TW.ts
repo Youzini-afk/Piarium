@@ -3240,7 +3240,7 @@ export const dict: Record<I18nKey, string> = {
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
   'contextPanel.mode.recovery': '復原',
-  'contextRail.surface.recovery.description': '工作階段復原、檢查點與提示詞修復',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': '目前工作階段無法同時回退對話與檔案。請啟用支援聯合復原的提供者。',
   'contextPanel.recovery.sessionBusy': '請等待目前的 Pi 工作結束後再變更歷史。',
   'contextPanel.recovery.actions.undo': '復原',

@@ -67,6 +67,10 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
     return engine.cancelOperation(requiredText(input.operationId, 'operationId'));
   }
   if (method === 'listSnapshots') return engine.listSnapshots(parseWorkspaceRecoverySnapshotQuery(params));
+  if (method === 'listCombinedOperations') {
+    const input = asRecord(params, 'workspace.recovery-primitives.listCombinedOperations');
+    return engine.listCombinedOperations(requiredText(input.workspaceId, 'workspaceId'));
+  }
   if (method === 'readSnapshot') return engine.readSnapshot(parseWorkspaceRecoverySnapshotReadInput(params));
   if (method === 'diffSnapshots') return engine.diffSnapshots(parseWorkspaceRecoverySnapshotDiffInput(params));
   if (method === 'storageStatus') {

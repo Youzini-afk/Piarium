@@ -123,7 +123,7 @@ export interface RuntimeDescriptor {
 
 export type SessionWorkspaceBinding =
   | { kind: "unbound" }
-  | { id: string; kind: "workspace" };
+  | { authorityId?: string; id: string; kind: "workspace" };
 
 export interface SessionSummary {
   allMessagesText: string;

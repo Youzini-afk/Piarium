@@ -1,12 +1,10 @@
 import type { PackageDescriptor } from "./types.js";
 
-export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 1 as const;
+export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 2 as const;
 
 export const FOUNDATIONAL_PI_PACKAGE_IDS = [
   "mcp",
   "permission-system",
-  "workspace-history",
-  "wtf",
 ] as const;
 
 export type FoundationalPiPackageId = (typeof FOUNDATIONAL_PI_PACKAGE_IDS)[number];
@@ -55,20 +53,6 @@ export const FOUNDATIONAL_PI_PACKAGE_MANIFEST = {
       packageAliases: ["@gotgenes/pi-permission-system", "pi-permission-system"],
       packageName: "@gotgenes/pi-permission-system",
       source: "npm:@gotgenes/pi-permission-system",
-    },
-    {
-      id: "workspace-history",
-      introducedRevision: 1,
-      packageAliases: ["pi-workspace-history"],
-      packageName: "pi-workspace-history",
-      source: "npm:pi-workspace-history",
-    },
-    {
-      id: "wtf",
-      introducedRevision: 1,
-      packageAliases: ["pi-wtf"],
-      packageName: "pi-wtf",
-      source: "npm:pi-wtf",
     },
   ],
   revision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,

@@ -107,10 +107,10 @@ describe("package provisioning receipt store", () => {
   it("persists suppression before any later package removal", async () => {
     const agentDir = await createAgentDir();
     const first = await createPackageProvisioningReceiptStore(agentDir);
-    await first.markSuppressed("workspace-history");
+    await first.markSuppressed("mcp");
 
     const second = await createPackageProvisioningReceiptStore(agentDir);
-    assert.deepEqual((await second.read()).entries["workspace-history"], {
+    assert.deepEqual((await second.read()).entries.mcp, {
       intent: "suppressed",
       lastObservedPresent: false,
       provenance: "none",
@@ -123,11 +123,11 @@ describe("package provisioning receipt store", () => {
 
     const disabled = await store.setAutoInstallNew(false);
     assert.equal(disabled.autoInstallNew, false);
-    assert.equal(disabled.manifestRevisionSeen, 1);
+    assert.equal(disabled.manifestRevisionSeen, 2);
 
     const enabled = await store.setAutoInstallNew(true);
     assert.equal(enabled.autoInstallNew, true);
-    assert.equal(enabled.manifestRevisionSeen, 1);
+    assert.equal(enabled.manifestRevisionSeen, 2);
   });
 
   it("fails closed for malformed and unsupported receipt documents", async () => {
@@ -137,7 +137,7 @@ describe("package provisioning receipt store", () => {
     await writeFile(store.filePath, "{not-json", "utf8");
 
     await assert.rejects(store.read(), SyntaxError);
-    await assert.rejects(store.markSuppressed("wtf"), SyntaxError);
+    await assert.rejects(store.markSuppressed("mcp"), SyntaxError);
     assert.equal(await readFile(store.filePath, "utf8"), "{not-json");
 
     await writeFile(

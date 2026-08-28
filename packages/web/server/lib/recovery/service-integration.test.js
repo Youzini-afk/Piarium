@@ -134,5 +134,9 @@ describe('Web Application Host workspace recovery service', () => {
     });
     expect(await api.cancelCombinedOperation(combined.plan.id))
       .toMatchObject({ status: 'ready', operation: { state: 'aborted' } });
+    expect(await api.listCombinedOperations(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      operations: [expect.objectContaining({ id: combined.plan.id, state: 'aborted' })],
+    });
   });
 });

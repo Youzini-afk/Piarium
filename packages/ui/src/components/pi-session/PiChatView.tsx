@@ -1,22 +1,14 @@
 import React from 'react';
+import type { WorkspaceCombinedRecoveryOperation } from '@piarium/extension-contract';
 import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
 import type {
   ModelDescriptor,
   PiSessionMessageEntry,
   PiUserMessage,
-  RecoveryMode,
   ThinkingLevel,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
@@ -42,7 +34,6 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { joinPiDraftInstructions } from '@/lib/pi-runtime/sessionDrafts';
-import { recoveryModeForStatus, supportsPiRecoveryAction } from '@/lib/pi-runtime/recovery';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { consumeEditorContextAttachments, restoreEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
@@ -68,6 +59,7 @@ import { configurePiComposerSession } from './piComposerSessionConfig';
 import { renderPiComposerAgentInvocation } from '@/lib/pi-runtime/composerAgent';
 import { projectPiMessageHistory } from './piMessageHistory';
 import { projectPiAssistantWaiting } from './piAssistantWaiting';
+import { PiRecoveryDialog } from './PiRecoveryDialog';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -184,15 +176,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
-  const supportsCombinedRecovery = supportsPiRecoveryAction(
-    currentRecord?.recoveryStatus,
-    'navigate',
-    'both',
-  );
-  const preferredRecoveryMode = recoveryModeForStatus(
-    recoveryPreference,
-    currentRecord?.recoveryStatus,
-  );
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
@@ -475,14 +458,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     await submitPendingDraft();
   }, [pendingCwd, runtimeKey, setPendingPiDraft, submitPendingDraft]);
 
-  const runRecovery = React.useCallback(async (
-    entry: PiSessionMessageEntry,
-    mode: RecoveryMode,
-  ) => {
+  const runConversationRecovery = React.useCallback(async (entry: PiSessionMessageEntry) => {
     if (!currentSessionId) return;
     setRecoveryBusyEntryId(entry.id);
     try {
-      const result = await recoverTo(currentSessionId, entry.id, mode);
+      const result = await recoverTo(currentSessionId, entry.id, 'conversation');
       if (result.editorText !== undefined || result.editorImages !== undefined) {
         updateDraft(currentSessionId, {
           ...(result.editorImages === undefined ? {} : { images: result.editorImages }),
@@ -491,25 +471,46 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         });
       }
       if (result.outcome === 'applied') {
-        toast.success(mode === 'conversation'
-          ? t('settings.piarium.recovery.preference.conversation.label')
-          : t('settings.piarium.recovery.preference.both.label'));
+        toast.success(t('settings.piarium.recovery.preference.conversation.label'));
       }
-      setRecoveryEntry(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
+      throw error;
     } finally {
       setRecoveryBusyEntryId(null);
     }
   }, [currentSessionId, recoverTo, t, updateDraft]);
 
+  const handleCombinedRecoveryResult = React.useCallback(async (
+    operation: WorkspaceCombinedRecoveryOperation,
+  ) => {
+    if (!currentSessionId) return;
+    if (operation.state === 'complete') {
+      if (operation.editorText !== undefined || operation.editorImages !== undefined) {
+        updateDraft(currentSessionId, {
+          ...(operation.editorImages === undefined ? {} : { images: operation.editorImages }),
+          ...(operation.editorText === undefined ? {} : { text: operation.editorText }),
+          instructions: undefined,
+        });
+      }
+      await refreshEntries(currentSessionId).catch(() => undefined);
+      toast.success(t('chat.recoveryDialog.completed'));
+    } else if (operation.state === 'alternate-ready') {
+      toast.success(t('chat.recoveryDialog.newWorkspaceReady', {
+        path: operation.destinationPath ?? '',
+      }));
+    }
+    setRecoveryBusyEntryId(null);
+  }, [currentSessionId, refreshEntries, t, updateDraft]);
+
   const handleRecover = React.useCallback((entry: PiSessionMessageEntry) => {
-    if (preferredRecoveryMode === null) {
-      setRecoveryEntry(entry);
+    if (recoveryPreference === 'conversation' || currentRecord?.snapshot?.workspace?.kind !== 'workspace') {
+      void runConversationRecovery(entry);
       return;
     }
-    void runRecovery(entry, preferredRecoveryMode);
-  }, [preferredRecoveryMode, runRecovery]);
+    setRecoveryBusyEntryId(entry.id);
+    setRecoveryEntry(entry);
+  }, [currentRecord?.snapshot?.workspace?.kind, recoveryPreference, runConversationRecovery]);
 
   const handleFork = React.useCallback(async (entry: PiSessionMessageEntry) => {
     if (!currentSessionId || forkBusyEntryId) return;
@@ -798,59 +799,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         </div>
       </div>
 
-      <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>
-        <DialogContent showCloseButton={false} className="max-w-md gap-5">
-          <DialogHeader>
-            <DialogTitle>{t('settings.piarium.recovery.preference.aria')}</DialogTitle>
-            <DialogDescription>
-              {t('settings.piarium.recovery.preference.ask.description')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <button
-              type="button"
-              onClick={() => { if (recoveryEntry) void runRecovery(recoveryEntry, 'conversation'); }}
-              disabled={recoveryBusyEntryId !== null}
-              className="rounded-lg border border-border px-3 py-3 text-left hover:bg-interactive-hover/50 disabled:opacity-50"
-            >
-              <span className="block typography-ui-label font-medium text-foreground">
-                {t('settings.piarium.recovery.preference.conversation.label')}
-              </span>
-              <span className="mt-1 block typography-meta text-muted-foreground">
-                {t('settings.piarium.recovery.preference.conversation.description')}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (recoveryEntry) void runRecovery(recoveryEntry, 'both'); }}
-              disabled={!supportsCombinedRecovery || recoveryBusyEntryId !== null}
-              className="rounded-lg border border-border px-3 py-3 text-left hover:bg-interactive-hover/50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span className="block typography-ui-label font-medium text-foreground">
-                {t('settings.piarium.recovery.preference.both.label')}
-              </span>
-              <span className="mt-1 block typography-meta text-muted-foreground">
-                {t('settings.piarium.recovery.preference.both.description')}
-              </span>
-              {!supportsCombinedRecovery ? (
-                <span className="mt-2 block typography-meta text-[var(--status-warning)]">
-                  {t('contextPanel.recovery.combinedUnavailable')}
-                </span>
-              ) : null}
-            </button>
-          </div>
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => setRecoveryEntry(null)}
-              disabled={recoveryBusyEntryId !== null}
-              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 disabled:opacity-50"
-            >
-              {t('sessions.sidebar.dialogs.cancel')}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {recoveryEntry && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
+        <PiRecoveryDialog
+          entryId={recoveryEntry.id}
+          open
+          sessionId={currentSessionId}
+          workspaceId={snapshot.workspace.authorityId ?? snapshot.workspace.id}
+          onClose={() => {
+            setRecoveryEntry(null);
+            setRecoveryBusyEntryId(null);
+          }}
+          onCombinedResult={handleCombinedRecoveryResult}
+          onConversationOnly={() => runConversationRecovery(recoveryEntry)}
+        />
+      ) : null}
     </TooltipProvider>
   );
 };

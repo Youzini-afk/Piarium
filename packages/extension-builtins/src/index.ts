@@ -191,8 +191,8 @@ export const PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION = definition({
 
 export const PIARIUM_BUILTIN_RECOVERY_EXTENSION = definition({
   id: "piarium.builtin.pi-recovery",
-  displayName: "Pi Recovery Integration",
-  piPackages: ["pi-workspace-history", "pi-wtf"],
+  displayName: "Piarium Recovery",
+  piPackages: [],
   contributions: [{
     contractVersion: 1,
     data: { contract: "pi-settings-panel/v1", panelId: "recovery" },
@@ -358,8 +358,6 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("subagents", "pi-subagents Settings Adapter", "subagents", "robot-2", ["pi-subagents"]),
   pluginAdapter("magic-context", "Magic Context Settings Adapter", "magic-context", "brain", ["@cortexkit/pi-magic-context"]),
   pluginAdapter("web-access", "Web Access Settings Adapter", "web-access", "global", ["pi-web-access"]),
-  pluginAdapter("workspace-history", "Workspace History Settings Adapter", "workspace-history", "history", ["pi-workspace-history"]),
-  pluginAdapter("wtf", "pi-wtf Settings Adapter", "wtf", "arrow-go-back", ["pi-wtf"]),
   pluginAdapter("openai-codex-compat", "OpenAI Codex Compatibility Settings Adapter", "openai-codex-compat", "code-box", ["pi-openai-codex-compat"]),
   pluginAdapter("observational-memory", "Observational Memory Settings Adapter", "observational-memory", "brain", ["pi-observational-memory"]),
   pluginAdapter("context-mode", "Context Mode Integration Adapter", "context-mode", "database-2", ["context-mode"]),

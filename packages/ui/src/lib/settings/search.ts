@@ -729,8 +729,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       'browser cookies',
       'ssrf',
       'domain policy',
-      'workspace history',
-      'pi-wtf',
       'openai codex compat',
       'responses lite',
       'remote compaction',

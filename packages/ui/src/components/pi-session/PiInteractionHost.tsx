@@ -18,7 +18,6 @@ import {
   piTrustResponseKey,
   usePiInteractionStore,
 } from '@/stores/usePiInteractionStore';
-import { shouldPresentPiExtensionNotice } from './extensionNoticePresentation';
 
 const payloadRecord = (value: JsonValue): Record<string, JsonValue> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -74,7 +73,7 @@ export const PiInteractionHost: React.FC = () => {
   React.useEffect(() => {
     if (!notice || lastShownNotice.current === notice.id) return;
     lastShownNotice.current = notice.id;
-    if (shouldPresentPiExtensionNotice(notice)) toast[notice.type](notice.message);
+    toast[notice.type](notice.message);
     dismissNotice(notice.id);
   }, [dismissNotice, notice]);
 

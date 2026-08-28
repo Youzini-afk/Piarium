@@ -31,6 +31,7 @@ export default defineHostExtension({
       getStorageMove: (operationId) => call("getStorageMove", { operationId }),
       getOperation: (operationId) => call("getOperation", { operationId }),
       listSnapshots: (input) => call("listSnapshots", input),
+      listCombinedOperations: (workspaceId) => call("listCombinedOperations", { workspaceId }),
       readSnapshot: (input) => call("readSnapshot", input),
       prepareCombinedRecovery: (input) => call("prepareCombinedRecovery", input),
       prepareCombinedUndo: (operationId) => call("prepareCombinedUndo", { operationId }),

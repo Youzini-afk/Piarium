@@ -62,6 +62,7 @@ export interface PiSessionExecutionAdmissionRequest {
   phase: "agent-run" | "worker-start" | "workspace-mutation";
   runtimeGeneration: number;
   sessionId?: string;
+  workspace?: SessionWorkspaceBinding;
   workerId: string;
 }
 
@@ -477,11 +478,21 @@ export class PiRuntimeBroker {
     cwd?: string;
     sessionFile?: string;
     sessionId?: string;
+    workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     if (input.sessionId) {
       const existing = this.#sessions.get(input.sessionId);
       if (existing) {
         const snapshot = await existing.request("session.snapshot", { sessionId: input.sessionId });
+        if (input.workspace !== undefined) {
+          await this.#persistWorkspaceBinding(
+            await this.#metadataFor(existing),
+            snapshot.sessionId,
+            input.workspace,
+            existing,
+            "Failed to update session workspace binding",
+          );
+        }
         return this.#enrichSnapshot(existing, snapshot);
       }
     }
@@ -533,6 +544,15 @@ export class PiRuntimeBroker {
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
       this.#bindSession(opened.worker, opened.snapshot.sessionId);
+      if (input.workspace !== undefined) {
+        await this.#persistWorkspaceBinding(
+          await this.#metadataFor(opened.worker),
+          opened.snapshot.sessionId,
+          input.workspace,
+          opened.worker,
+          "Failed to update session workspace binding",
+        );
+      }
       return await this.#enrichSnapshot(opened.worker, opened.snapshot);
     } catch (error) {
       await this.#removeWorker(opened.worker);
@@ -573,6 +593,10 @@ export class PiRuntimeBroker {
       ) as Promise<HostMethodResult<M>>;
     }
     const worker = this.#workerForSession(sessionId);
+    if ((method as HostMethod) === "session.snapshot") {
+      return worker.request("session.snapshot", params as HostMethodParams<"session.snapshot">)
+        .then((snapshot) => this.#enrichSnapshot(worker, snapshot)) as Promise<HostMethodResult<M>>;
+    }
     if (!requiresWorkspaceAdmission(method, params)) return worker.request(method, params);
     const cwd = this.#workerCwds.get(worker);
     if (!cwd) {
@@ -1671,6 +1695,9 @@ export class PiRuntimeBroker {
       };
       this.#sessionExecutionAdmissions.set(client, state);
       state.ready = (async () => {
+        const workspace = context.sessionId === undefined
+          ? undefined
+          : this.#knownSummaries.get(context.sessionId)?.workspace;
         const lease = await this.#sessionExecutionAdmission?.({
           cwd,
           executionId: state.executionId,
@@ -1678,6 +1705,7 @@ export class PiRuntimeBroker {
           phase: context.phase,
           runtimeGeneration: this.#runtimeGeneration,
           ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
+          ...(workspace === undefined ? {} : { workspace }),
           workerId: client.id,
         });
         if (lease != null && typeof lease.close !== "function") {

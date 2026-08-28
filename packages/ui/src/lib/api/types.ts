@@ -996,90 +996,6 @@ export interface WorkspaceAPI {
   gitRemotes(path: string): Promise<GitRemote[]>;
 }
 
-export interface CheckpointRecord {
-  id: string;
-  sessionId: string;
-  messageId: string;
-  directory: string;
-  createdAt: number;
-  label?: string;
-  phase: 'before-message' | 'before-restore' | 'manual';
-  backupDir: string;
-  type: 'full' | 'incremental';
-  baseCheckpointId?: string;
-  changes?: Array<{
-    path: string;
-    type: 'added' | 'modified' | 'deleted';
-    hash?: string;
-  }>;
-  fileCount: number;
-  totalBytes: number;
-  contentHash: string;
-  hasFileHashes: boolean;
-}
-
-export interface CheckpointChangedFile {
-  path: string;
-  type: 'added' | 'modified' | 'deleted';
-}
-
-export interface CheckpointRestoreResult {
-  success: boolean;
-  restored: number;
-  deleted: number;
-  skipped: number;
-  safetyCheckpoint?: CheckpointRecord;
-}
-
-export interface CheckpointRestoreReviewResult {
-  restore: boolean;
-  cancelled?: boolean;
-  changedCount: number;
-  openedDiff?: boolean;
-}
-
-export interface CheckpointCleanupResult {
-  deletedCheckpoints: number;
-  deletedSessions: number;
-  deletedBytes: number;
-  remainingCheckpoints: number;
-}
-
-export interface CheckpointStorageStats {
-  sessionCount: number;
-  checkpointCount: number;
-  totalBytes: number;
-  retentionLimit: number;
-}
-
-export interface CheckpointsAPI {
-  create(input: {
-    sessionId: string;
-    messageId: string;
-    directory: string;
-    label?: string;
-    phase?: CheckpointRecord['phase'];
-  }): Promise<CheckpointRecord | null>;
-  getForMessage(input: {
-    sessionId: string;
-    messageId: string;
-    directory?: string;
-  }): Promise<CheckpointRecord | null>;
-  list(sessionId: string): Promise<CheckpointRecord[]>;
-  diff(input: { sessionId: string; checkpointId: string }): Promise<{ files: CheckpointChangedFile[] }>;
-  openFileDiff(input: { sessionId: string; checkpointId: string; filePath: string }): Promise<void>;
-  reviewRestore?(input: { sessionId: string; checkpointId: string }): Promise<CheckpointRestoreReviewResult>;
-  restore(input: {
-    sessionId: string;
-    checkpointId: string;
-    createSafetyCheckpoint?: boolean;
-  }): Promise<CheckpointRestoreResult>;
-  stats?(): Promise<CheckpointStorageStats>;
-  cleanupSession?(sessionId: string): Promise<CheckpointCleanupResult>;
-  cleanupRetention?(limit?: number): Promise<CheckpointCleanupResult>;
-  cleanupAll?(): Promise<CheckpointCleanupResult>;
-}
-
 export interface MobileDevice {
   id: string;
   name: string;
@@ -2420,7 +2336,6 @@ export interface RuntimeAPIs {
   settings: SettingsAPI;
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
-  checkpoints?: CheckpointsAPI;
   github?: GitHubAPI;
   push?: PushAPI;
   mobile?: MobileAPI;

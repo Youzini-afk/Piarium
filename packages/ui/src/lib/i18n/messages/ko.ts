@@ -3240,7 +3240,7 @@ export const dict: Record<I18nKey, string> = {
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
   'contextPanel.mode.recovery': '복구',
-  'contextRail.surface.recovery.description': '세션 복구, 체크포인트 및 프롬프트 복구',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': '이 세션에서는 대화와 파일을 함께 복구할 수 없습니다. 통합 실행 취소를 지원하는 제공자를 활성화하세요.',
   'contextPanel.recovery.sessionBusy': '기록을 변경하기 전에 실행 중인 Pi 작업이 끝날 때까지 기다리세요.',
   'contextPanel.recovery.actions.undo': '실행 취소',

@@ -1,83 +1,31 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
+import { HostError } from "../src/errors.js";
 import { SessionHost } from "../src/session-host.js";
 
 describe("SessionHost recovery", () => {
-  it("uses Pi natively for conversation recovery and delegates workspace actions to plugins", async () => {
+  it("keeps conversation recovery Pi-native and never delegates workspace recovery to Pi packages", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-host-recovery-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     const treeMarker = join(root, "workspace-history-tree.txt");
-    const checkpointMarker = join(root, "workspace-history-checkpoint.txt");
-    const repairMarker = join(root, "pi-wtf-repair.txt");
     const bridgeMarker = join(root, "recovery-bridge.txt");
     await mkdir(extensionDir, { recursive: true });
     await writeFile(
-      join(extensionDir, "pi-workspace-history.ts"),
+      join(extensionDir, "optional-recovery-packages.ts"),
       `import { writeFile } from "node:fs/promises";
-export default function workspaceHistory(pi: any) {
-  pi.on("session_before_tree", async () => {
-    await writeFile(${JSON.stringify(treeMarker)}, "tree", "utf8");
-  });
-  pi.registerCommand("undo", {
-    description: "Description text may change upstream",
-    handler: async () => undefined,
-  });
-  pi.registerCommand("redo", {
-    description: "Localized description",
-    handler: async () => undefined,
-  });
-  pi.registerCommand("checkpoint", {
-    description: "Create a named point",
-    handler: async (name: string) => writeFile(${JSON.stringify(checkpointMarker)}, name, "utf8"),
-  });
-}
-`,
-      "utf8",
-    );
-    await writeFile(
-      join(extensionDir, "pi-wtf.ts"),
-      `import { writeFile } from "node:fs/promises";
-export default function piWtf(pi: any) {
-  pi.registerCommand("oops", {
-    description: "Localized recovery description",
-    handler: async () => writeFile(${JSON.stringify(repairMarker)}, "repair", "utf8"),
-  });
-  pi.registerCommand("oops?", {
-    description: "Localized typo description",
-    handler: async () => undefined,
-  });
-  pi.registerCommand("oops!", {
-    description: "Localized destructive description",
-    handler: async () => undefined,
-  });
-}
-`,
-      "utf8",
-    );
-    await writeFile(
-      join(extensionDir, "recovery-bridge-provider.ts"),
-      `import { writeFile } from "node:fs/promises";
-export default function recoveryBridge(pi: any) {
-  pi.events.on("piarium.recovery.discover/v1", (request: any) => {
-    request.register({
-      actions: ["navigate"],
-      bridgeVersion: 1,
-      execute: async () => {
-        await writeFile(${JSON.stringify(bridgeMarker)}, "files", "utf8");
-        return { outcome: "applied" };
-      },
-      id: "test-files-history",
-      modes: ["files"],
-      name: "Test files history",
-      source: "project:test-files-history",
-    });
-  });
+export default function optionalRecovery(pi: any) {
+  pi.on("session_before_tree", async () => writeFile(${JSON.stringify(treeMarker)}, "tree", "utf8"));
+  pi.events.on("piarium.recovery.discover/v1", (request: any) => request.register({
+    actions: ["navigate"], bridgeVersion: 1,
+    execute: async () => { await writeFile(${JSON.stringify(bridgeMarker)}, "files", "utf8"); return { outcome: "applied" }; },
+    id: "legacy-files-history", modes: ["files", "both"], name: "Legacy files history",
+  }));
 }
 `,
       "utf8",
@@ -102,22 +50,19 @@ export default function recoveryBridge(pi: any) {
       });
       manager.appendCustomEntry("test.tail", {});
 
-      const status = host.recoveryStatus(snapshot.sessionId);
-      assert.ok(status.modes.includes("conversation"));
-      assert.ok(status.modes.includes("both"));
-      assert.ok(status.modes.includes("files"));
-      assert.ok(status.actions.includes("checkpoint"));
-      assert.ok(status.actions.includes("repair"));
-      assert.ok(status.actions.includes("repair-typo"));
-      assert.ok(status.actions.includes("repair-destructive"));
-      assert.deepEqual(
-        status.providers.find((provider) => provider.id === "pi-workspace-history")?.modes,
-        ["both"],
-      );
-      assert.deepEqual(
-        status.providers.find((provider) => provider.id === "pi-wtf")?.modes,
-        ["conversation"],
-      );
+      assert.deepEqual(host.recoveryStatus(snapshot.sessionId), {
+        actions: ["navigate", "undo"],
+        available: true,
+        issues: [],
+        modes: ["conversation"],
+        providers: [{
+          actions: ["navigate", "undo"],
+          active: true,
+          id: "pi-native",
+          modes: ["conversation"],
+          name: "Pi session tree",
+        }],
+      });
 
       const conversation = await host.navigateRecovery(
         snapshot.sessionId,
@@ -130,40 +75,22 @@ export default function recoveryBridge(pi: any) {
         { data: "aW1hZ2U=", mimeType: "image/png" },
       ]);
       await assert.rejects(access(treeMarker), { code: "ENOENT" });
+      await assert.rejects(access(bridgeMarker), { code: "ENOENT" });
 
-      const nextManager = host.session.sessionManager;
-      const nextUserEntryId = nextManager.appendMessage({
-        content: "restore workspace too",
-        role: "user",
-        timestamp: Date.now(),
-      });
-      nextManager.appendCustomEntry("test.tail", {});
-      const filesOnly = await host.navigateRecovery(
-        snapshot.sessionId,
-        nextUserEntryId,
-        "files",
+      for (const mode of ["files", "both"] as const) {
+        await assert.rejects(
+          host.navigateRecovery(snapshot.sessionId, userEntryId, mode),
+          (error: unknown) => error instanceof HostError && error.code === "recovery_mode_unavailable",
+        );
+      }
+      await assert.rejects(
+        host.createRecoveryCheckpoint(snapshot.sessionId, "Known good"),
+        (error: unknown) => error instanceof HostError && error.code === "recovery_action_unavailable",
       );
-      assert.equal(filesOnly.handledBy, "test-files-history");
-      assert.equal(filesOnly.outcome, "applied");
-      assert.equal(await readFile(bridgeMarker, "utf8"), "files");
-      const combined = await host.navigateRecovery(
-        snapshot.sessionId,
-        nextUserEntryId,
-        "both",
+      await assert.rejects(
+        host.repairRecovery(snapshot.sessionId, "recover"),
+        (error: unknown) => error instanceof HostError && error.code === "recovery_action_unavailable",
       );
-      assert.equal(combined.handledBy, "pi-workspace-history");
-      assert.equal(combined.outcome, "applied");
-      assert.equal(await readFile(treeMarker, "utf8"), "tree");
-
-      const checkpoint = await host.createRecoveryCheckpoint(snapshot.sessionId, "Known good");
-      assert.equal(checkpoint.handledBy, "pi-workspace-history");
-      assert.equal(checkpoint.outcome, "unknown");
-      assert.equal(await readFile(checkpointMarker, "utf8"), "Known good");
-
-      const repaired = await host.repairRecovery(snapshot.sessionId, "recover");
-      assert.equal(repaired.handledBy, "pi-wtf");
-      assert.equal(repaired.outcome, "unknown");
-      assert.equal(await readFile(repairMarker, "utf8"), "repair");
       assert.ok(events.includes("recovery.changed"));
     } finally {
       await host.dispose();

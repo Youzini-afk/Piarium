@@ -193,7 +193,12 @@ function optionalSessionWorkspaceBinding(
   const workspace = requireRecord(record.workspace);
   const kind = requireEnum(workspace, "kind", ["unbound", "workspace"] as const);
   if (kind === "unbound") return { kind };
-  return { id: requireString(workspace, "id"), kind };
+  const authorityId = optionalString(workspace, "authorityId");
+  return {
+    id: requireString(workspace, "id"),
+    kind,
+    ...(authorityId === undefined ? {} : { authorityId }),
+  };
 }
 
 type RuntimeContextTarget = { cwd: string } | { sessionId: string };
@@ -365,6 +370,7 @@ async function dispatchRuntimeRequestUnchecked(
       const cwd = optionalString(input, "cwd");
       const sessionFile = optionalString(input, "sessionFile");
       const sessionId = optionalString(input, "sessionId");
+      const workspace = optionalSessionWorkspaceBinding(input);
       if (!sessionFile && !sessionId) {
         throw new RuntimeDispatchError(
           "invalid_params",
@@ -375,6 +381,7 @@ async function dispatchRuntimeRequestUnchecked(
         ...(cwd === undefined ? {} : { cwd }),
         ...(sessionFile === undefined ? {} : { sessionFile }),
         ...(sessionId === undefined ? {} : { sessionId }),
+        ...(workspace === undefined ? {} : { workspace }),
       });
     }
     case "session.close": {

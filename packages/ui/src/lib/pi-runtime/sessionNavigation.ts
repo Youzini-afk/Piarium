@@ -21,6 +21,12 @@ export interface PiSessionCreateTarget {
 }
 
 let piSessionNavigationGeneration = 0;
+const CANONICAL_WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const canRecoverProjectBinding = (workspace: SessionWorkspaceBinding | undefined): boolean => (
+  workspace?.kind === 'workspace'
+  && (workspace.authorityId !== undefined || CANONICAL_WORKSPACE_ID.test(workspace.id))
+);
 
 const beginPiSessionNavigation = (): number => {
   piSessionNavigationGeneration += 1;
@@ -119,7 +125,9 @@ const applyPiSessionLocation = (
   const project = workspace?.kind === 'unbound'
     ? null
     : workspace?.kind === 'workspace'
-      ? boundProject ?? null
+      ? boundProject ?? (canRecoverProjectBinding(workspace)
+        ? findPiProjectForCwd(projectsState.projects, cwd)
+        : null)
       : preferredProject ?? findPiProjectForCwd(projectsState.projects, cwd);
   if ((project?.id ?? null) !== projectsState.activeProjectId) {
     projectsState.setActiveProjectIdOnly(project?.id ?? null);
@@ -152,9 +160,15 @@ export const openPiSessionFromNavigation = async (
       applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
     }
   } else {
+    const project = cwd ? findPiProjectForCwd(useProjectsStore.getState().projects, cwd) : undefined;
+    const workspace = summary?.workspace?.kind === 'workspace' && project
+      && canRecoverProjectBinding(summary.workspace)
+      ? { ...summary.workspace, id: project.id }
+      : summary?.workspace;
     const opening = state.openSession({
       ...(cwd ? { cwd } : {}),
       sessionId,
+      ...(workspace === undefined ? {} : { workspace }),
     });
     if (cwd && isCurrentPiSessionNavigation(navigationGeneration, sessionId)) {
       applyPiSessionLocation(cwd, undefined, summary?.workspace);

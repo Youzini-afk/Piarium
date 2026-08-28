@@ -3257,7 +3257,7 @@ export const dict: Record<I18nKey, string> = {
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
   'contextPanel.mode.recovery': 'Odzyskiwanie',
-  'contextRail.surface.recovery.description': 'Odzyskiwanie sesji, punkty kontrolne i naprawa promptów',
+  'contextRail.surface.recovery.description': 'Workspace checkpoints and coordinated conversation recovery',
   'contextPanel.recovery.combinedUnavailable': 'Odzyskiwanie rozmowy i plików jest niedostępne w tej sesji. Włącz dostawcę obsługującego łączone cofanie.',
   'contextPanel.recovery.sessionBusy': 'Przed zmianą historii poczekaj na zakończenie aktywnego zadania Pi.',
   'contextPanel.recovery.actions.undo': 'Cofnij',
