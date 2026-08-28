@@ -19,6 +19,8 @@ describe('VS Code documents bridge errors', () => {
       readRecoveryJournal: async () => ({}),
       writeRecoveryJournal: async () => ({}),
       deleteRecoveryJournal: async () => ({}),
+      publishDirtyBuffers: async () => ({}),
+      clearDirtyBuffers: async () => ({}),
     };
 
     const response = await handleDocumentsBridgeMessage(

@@ -62,6 +62,7 @@ export const createDocumentAuthority = (options) => {
   const queues = createSerialQueues();
   const watchers = new Map();
   const captureWatches = new Map();
+  const dirtyBuffersByOwner = new Map();
   let disposed = false;
   let disposePromise = null;
   const mutations = createWorkspaceMutationAuthority({
@@ -493,7 +494,7 @@ export const createDocumentAuthority = (options) => {
 
   const watcherController = (workspaceId) => watchers.get(workspaceId)?.controller ?? null;
 
-  const beginCapture = async (workspaceId) => {
+  const beginCapture = async (workspaceId, options = {}) => {
     const subscription = watch(workspaceId, () => undefined);
     const record = watchers.get(workspaceId);
     const controller = await record?.ready;
@@ -507,7 +508,7 @@ export const createDocumentAuthority = (options) => {
     await new Promise((resolve) => setImmediate(resolve));
     await controller.settle();
     await mutations.setWatchBaseline(workspaceId, controller.position);
-    const capture = await mutations.beginCapture(workspaceId);
+    const capture = await mutations.beginCapture(workspaceId, options);
     captureWatches.set(capture.captureId, { subscription, controller });
     return capture;
   };
@@ -542,6 +543,74 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
+  const dirtyBufferKey = (ownerId, workspaceId) => `${ownerId}\0${workspaceId}`;
+
+  const publishDirtyBuffers = async (request) => {
+    if (!request || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0
+      || !Array.isArray(request.resources)) {
+      throw new DocumentAuthorityError('Dirty buffer publication is malformed', { code: 'failed', statusCode: 400 });
+    }
+    await loadWorkspace(request.workspaceId);
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const existing = dirtyBuffersByOwner.get(key);
+    if (existing && existing.generation > request.generation) {
+      throw new DocumentAuthorityError('Dirty buffer publication is stale', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    const resources = request.resources.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || !entry.resource || entry.resource.workspaceId !== request.workspaceId
+        || typeof entry.resource.resourceId !== 'string' || !entry.resource.resourceId
+        || (entry.baseRevision !== null && typeof entry.baseRevision !== 'string')
+        || !Number.isSafeInteger(entry.localEditRevision) || entry.localEditRevision < 0) {
+        throw new DocumentAuthorityError('Dirty buffer resource is malformed', { code: 'failed', statusCode: 400 });
+      }
+      return {
+        baseRevision: entry.baseRevision,
+        localEditRevision: entry.localEditRevision,
+        resource: { ...entry.resource },
+      };
+    });
+    const record = {
+      generation: request.generation,
+      ownerId: request.ownerId,
+      resources,
+      updatedAt: new Date().toISOString(),
+      workspaceId: request.workspaceId,
+    };
+    dirtyBuffersByOwner.set(key, record);
+    return structuredClone(record);
+  };
+
+  const clearDirtyBuffers = async (request) => {
+    if (!request || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0) {
+      throw new DocumentAuthorityError('Dirty buffer clear request is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const existing = dirtyBuffersByOwner.get(key);
+    if (existing && existing.generation > request.generation) {
+      throw new DocumentAuthorityError('Dirty buffer clear request is stale', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    return { cleared: dirtyBuffersByOwner.delete(key) };
+  };
+
+  const inspectDirtyBuffers = async (workspaceId) => {
+    await loadWorkspace(workspaceId);
+    return [...dirtyBuffersByOwner.values()]
+      .filter((record) => record.workspaceId === workspaceId)
+      .map((record) => structuredClone(record))
+      .sort((left, right) => left.ownerId.localeCompare(right.ownerId));
+  };
+
   const dispose = () => {
     if (disposePromise) return disposePromise;
     disposed = true;
@@ -556,6 +625,7 @@ export const createDocumentAuthority = (options) => {
       tracked.controller.close();
     }
     captureWatches.clear();
+    dirtyBuffersByOwner.clear();
     // Mutation disposal flips its admission gate synchronously, before an
     // asynchronously starting watcher can register more mutation work.
     const mutationDisposal = mutations.dispose();
@@ -596,6 +666,9 @@ export const createDocumentAuthority = (options) => {
     watch,
     listRecoveryJournals: (request) => journals.list(request),
     readRecoveryJournal: (journalId) => journals.read(journalId),
+    publishDirtyBuffers,
+    clearDirtyBuffers,
+    inspectDirtyBuffers,
     writeRecoveryJournal: (request) => journalMutation(
       request,
       'document-recovery-journal-write',

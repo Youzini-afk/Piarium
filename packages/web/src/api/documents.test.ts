@@ -61,6 +61,30 @@ describe('createWebDocumentsAPI', () => {
     });
   });
 
+  it('publishes live dirty buffers through the document authority', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    const request = {
+      generation: 2,
+      ownerId: 'surface-1',
+      resources: [{
+        baseRevision: null,
+        localEditRevision: 3,
+        resource: { workspaceId: 'workspace-1', resourceId: 'note.txt' },
+      }],
+      workspaceId: 'workspace-1',
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      ...request,
+      updatedAt: '2026-08-28T00:00:00.000Z',
+    }));
+    await expect(api.publishDirtyBuffers(request)).resolves.toMatchObject({ ownerId: 'surface-1' });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/documents/dirty/publish', expect.objectContaining({
+      body: JSON.stringify(request),
+      method: 'POST',
+    }));
+  });
+
   it('opens document watches without putting credentials in the URL', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
     const api = createWebDocumentsAPI();

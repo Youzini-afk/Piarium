@@ -566,4 +566,249 @@ describe('native workspace recovery Phase 1 engine', () => {
       .get(checkpoint.snapshot.id)).toEqual({ key: 'Before refactor' });
     database.close();
   });
+
+  it('prepares one immutable plan and materializes a new workspace without touching the current one', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, 'empty'), { recursive: true });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'hardlink-leader.txt'), 'linked');
+    await fs.promises.link(
+      path.join(harness.workspaceRoot, 'hardlink-leader.txt'),
+      path.join(harness.workspaceRoot, 'hardlink-member.txt'),
+    );
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const note = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'current',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: note.revision,
+      operationId: 'current-note',
+    });
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('extra.txt'),
+      content: 'keep-current-only',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: 'current-extra',
+    });
+    const destination = path.join(harness.root, 'recovered-workspace');
+    const prepared = await engine.prepareRestore({
+      newWorkspacePath: destination,
+      targetSnapshotId: target.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared).toMatchObject({
+      status: 'ready',
+      plan: {
+        allowedModes: ['in-place', 'new-workspace'],
+        recommendedMode: 'in-place',
+      },
+    });
+    expect(prepared.plan.operations.map((operation) => [operation.type, operation.path]))
+      .toEqual(expect.arrayContaining([['write', 'note.txt'], ['delete', 'extra.txt']]));
+
+    const applied = await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'new-workspace',
+      newWorkspacePath: destination,
+      operationId: prepared.plan.id,
+    });
+    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete', mode: 'new-workspace' } });
+    await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+    expect((await fs.promises.stat(path.join(destination, 'empty'))).isDirectory()).toBe(true);
+    const [leaderStat, memberStat] = await Promise.all([
+      fs.promises.stat(path.join(destination, 'hardlink-leader.txt')),
+      fs.promises.stat(path.join(destination, 'hardlink-member.txt')),
+    ]);
+    expect(memberStat.dev).toBe(leaderStat.dev);
+    expect(memberStat.ino).toBe(leaderStat.ino);
+    await expect(fs.promises.stat(path.join(destination, 'extra.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('current');
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'extra.txt'), 'utf8')).resolves.toBe('keep-current-only');
+    expect(await engine.getOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: { destinationPath: destination, state: 'complete' },
+    });
+  });
+
+  it('resumes an in-place restore after a simulated process crash and publishes a restore revision', async () => {
+    let crashAfterFirst = true;
+    const crash = Object.assign(new Error('simulated crash'), { simulatedCrash: true });
+    const { engine, harness } = await createHarness({
+      faults: {
+        afterApplyOperation: () => {
+          if (!crashAfterFirst) return;
+          crashAfterFirst = false;
+          throw crash;
+        },
+      },
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'a.txt'), 'target-a');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'b.txt'), 'target-b');
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    for (const [name, content] of [['a.txt', 'current-a'], ['b.txt', 'current-b']]) {
+      const current = await harness.authority.read(harness.resource(name));
+      await harness.authority.write({
+        token: harness.token(),
+        resource: harness.resource(name),
+        content,
+        encoding: 'utf-8',
+        bom: false,
+        expectedRevision: current.revision,
+        operationId: `mutate-${name}`,
+      });
+    }
+    const prepared = await engine.prepareRestore({
+      targetSnapshotId: target.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    const firstAttempt = await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'in-place',
+      operationId: prepared.plan.id,
+    });
+    expect(firstAttempt).toMatchObject({ status: 'failed', failure: { code: 'internal' } });
+    expect(await engine.getOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: { state: 'applying-workspace', appliedOperations: 1 },
+    });
+
+    const resumed = await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'in-place',
+      operationId: prepared.plan.id,
+    });
+    expect(resumed).toMatchObject({ status: 'ready', operation: { state: 'complete', mode: 'in-place' } });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'a.txt'), 'utf8')).resolves.toBe('target-a');
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'b.txt'), 'utf8')).resolves.toBe('target-b');
+    const state = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    expect(state.epoch).toBe(2);
+    expect(state.maintenance).toBe(false);
+    const snapshots = await engine.listSnapshots({ workspaceId: harness.identity.workspaceId });
+    expect(snapshots.page.snapshots[0]).toMatchObject({ source: 'restore', restoredFrom: target.snapshot.id });
+  });
+
+  it('resumes a new-workspace root switch after the staged tree was verified', async () => {
+    let crashBeforeSwitch = true;
+    const crash = Object.assign(new Error('simulated root-switch crash'), { simulatedCrash: true });
+    const { engine, harness } = await createHarness({
+      faults: {
+        beforeRootSwitch: () => {
+          if (!crashBeforeSwitch) return;
+          crashBeforeSwitch = false;
+          throw crash;
+        },
+      },
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const destination = path.join(harness.root, 'root-switch-recovered');
+    const prepared = await engine.prepareRestore({
+      newWorkspacePath: destination,
+      targetSnapshotId: target.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'new-workspace',
+      newWorkspacePath: destination,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'failed', failure: { code: 'internal' } });
+    expect(await engine.getOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: { state: 'workspace-verified' },
+    });
+    await expect(fs.promises.stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    expect(await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'new-workspace',
+      newWorkspacePath: destination,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+  });
+
+  it('rejects a stale in-place plan but keeps the same immutable target usable for new-workspace restore', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(target).toMatchObject({ status: 'captured' });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'current');
+    const destination = path.join(harness.root, 'stale-plan-recovered');
+    const prepared = await engine.prepareRestore({
+      newWorkspacePath: destination,
+      targetSnapshotId: target.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'changed-after-plan',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: 'stale-plan-write',
+    });
+    expect(await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'in-place',
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'failed', failure: { code: 'stale-plan' } });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8'))
+      .resolves.toBe('changed-after-plan');
+
+    expect(await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'new-workspace',
+      newWorkspacePath: destination,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+  });
+
+  it('downgrades active-writer plans to new-workspace and cancels only before commit', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    await harness.authority.publishDirtyBuffers({
+      generation: 1,
+      ownerId: 'surface-dirty',
+      resources: [{ baseRevision: null, localEditRevision: 1, resource: harness.resource('draft.txt') }],
+      workspaceId: harness.identity.workspaceId,
+    });
+    const writer = await harness.authority.registerWriter(harness.token(), { purpose: 'other-session' });
+    try {
+      const prepared = await engine.prepareRestore({
+        targetSnapshotId: target.snapshot.id,
+        workspaceId: harness.identity.workspaceId,
+      });
+      expect(prepared).toMatchObject({
+        status: 'ready',
+        plan: {
+          allowedModes: ['new-workspace'],
+          conflicts: expect.arrayContaining([
+            expect.objectContaining({ code: 'active-writer' }),
+            expect.objectContaining({ code: 'dirty-buffers' }),
+          ]),
+          recommendedMode: 'new-workspace',
+        },
+      });
+      const cancelled = await engine.cancelOperation(prepared.plan.id);
+      expect(cancelled).toMatchObject({ status: 'ready', operation: { state: 'aborted' } });
+      expect(await engine.applyRestore({
+        expectedRevision: prepared.plan.revision,
+        mode: 'new-workspace',
+        operationId: prepared.plan.id,
+      })).toMatchObject({ status: 'failed', failure: { code: 'recovery-in-progress' } });
+    } finally {
+      await writer.close();
+    }
+  });
 });

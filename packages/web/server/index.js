@@ -840,6 +840,22 @@ async function main(options = {}) {
   });
   activeDocumentsAuthority = documentsAuthority;
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
+  const inspectRecoveryGit = async (workspaceRoot) => {
+    const git = await import('./lib/git/service.js');
+    if (!await git.isGitRepository(workspaceRoot)) return { available: true, repository: false, staged: false };
+    const status = await git.getStatus(workspaceRoot, { mode: 'light' });
+    return {
+      available: true,
+      repository: true,
+      staged: status.files.some((file) => {
+        const index = String(file.index || '').trim();
+        return index && index !== '?';
+      }),
+      ...(status.mergeInProgress ? { operation: 'merge' }
+        : status.rebaseInProgress ? { operation: 'rebase' }
+          : {}),
+    };
+  };
   const workspaceRecoveryEngines = new Map();
   const recoveryEngineForOwner = (context) => {
     const storageOwnerId = context?.owner?.extensionId;
@@ -853,6 +869,7 @@ async function main(options = {}) {
         dataDir: PIARIUM_DATA_DIR,
         defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
         documents: documentsAuthority,
+        gitInspector: inspectRecoveryGit,
         storageOwnerId,
       });
       workspaceRecoveryEngines.set(storageOwnerId, engine);

@@ -1,6 +1,6 @@
 # Piarium native workspace recovery
 
-Status: implementation in progress; Phases 1–3 are implemented, while restore execution and product UI remain pending
+Status: implementation in progress; Phases 1–4 are implemented, while combined coordination and product UI remain pending
 
 Last updated: 2026-08-28
 

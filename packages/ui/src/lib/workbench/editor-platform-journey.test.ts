@@ -125,6 +125,8 @@ const createMemoryDocuments = () => {
       : { status: 'missing', epoch: 1, resource };
   };
   const api: DocumentsAPI = {
+    clearDirtyBuffers: async () => ({ cleared: true }),
+    publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async () => ({ workspaceId, hostId: 'host-1', epoch: 1 }),
     read,
     write: async (request) => {

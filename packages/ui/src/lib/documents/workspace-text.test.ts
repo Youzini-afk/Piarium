@@ -17,6 +17,8 @@ const createDocuments = () => {
   let revisionSeq = 1;
   const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   const api: DocumentsAPI = {
+    clearDirtyBuffers: async () => ({ cleared: true }),
+    publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1', epoch: 1 }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));

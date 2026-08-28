@@ -81,6 +81,25 @@ it('uses a fresh watch source as the baseline after each watcher rebuild', async
   }
 });
 
+it('allows only an explicit restore capture to validate under maintenance', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  try {
+    await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+    const ordinary = await harness.authority.beginCapture(harness.identity.workspaceId);
+    expect(await harness.authority.completeCapture(ordinary)).toMatchObject({
+      stable: false,
+      reasons: expect.arrayContaining(['maintenance']),
+    });
+    const restore = await harness.authority.beginCapture(harness.identity.workspaceId, {
+      allowMaintenance: true,
+    });
+    expect(await harness.authority.completeCapture(restore)).toMatchObject({ stable: true, reasons: [] });
+    await harness.authority.setMaintenance(harness.identity.workspaceId, false);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 it('closes an asynchronously started obsolete watcher after close and reopen', async () => {
   let gate = false;
   const releases = [];

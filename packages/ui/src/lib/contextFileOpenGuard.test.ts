@@ -9,6 +9,8 @@ const resource = (resourceId: string): PiariumResourceReference => ({
 });
 
 const documentsApi = (content: string | null): DocumentsAPI => ({
+  clearDirtyBuffers: async () => ({ cleared: true }),
+  publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
   resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1', epoch: 1 }),
   read: async (ref) => {
     if (content === null) return { status: 'missing', epoch: 1, resource: ref };

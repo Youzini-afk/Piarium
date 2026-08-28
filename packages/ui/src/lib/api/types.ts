@@ -1787,6 +1787,20 @@ export interface PiariumDocumentRecoveryJournalSummary {
   byteLength: number;
 }
 
+export interface PiariumDirtyBufferResource {
+  baseRevision: string | null;
+  localEditRevision: number;
+  resource: PiariumResourceReference;
+}
+
+export interface PiariumDirtyBufferPublication {
+  generation: number;
+  ownerId: string;
+  resources: PiariumDirtyBufferResource[];
+  updatedAt: string;
+  workspaceId: string;
+}
+
 export type PiariumDocumentRecoveryReadResult =
   | {
       status: 'ready';
@@ -1817,6 +1831,11 @@ export type PiariumDocumentRecoveryWriteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 export interface DocumentsAPI {
+  clearDirtyBuffers(request: {
+    generation: number;
+    ownerId: string;
+    workspaceId: string;
+  }): Promise<{ cleared: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<PiariumWorkspaceIdentity>;
   read(resource: PiariumResourceReference): Promise<PiariumDocumentReadResult>;
   write(request: PiariumDocumentWriteRequest): Promise<PiariumDocumentWriteResult>;
@@ -1831,6 +1850,12 @@ export interface DocumentsAPI {
     workspaceId: string;
     recoverySessionId?: string;
   }): Promise<PiariumDocumentRecoveryJournalSummary[]>;
+  publishDirtyBuffers(request: {
+    generation: number;
+    ownerId: string;
+    resources: PiariumDirtyBufferResource[];
+    workspaceId: string;
+  }): Promise<PiariumDirtyBufferPublication>;
   readRecoveryJournal(journalId: string): Promise<PiariumDocumentRecoveryReadResult>;
   writeRecoveryJournal(request: PiariumDocumentRecoveryWriteRequest): Promise<PiariumDocumentRecoveryWriteResult>;
   deleteRecoveryJournal(request: {

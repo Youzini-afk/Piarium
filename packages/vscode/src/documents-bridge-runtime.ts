@@ -18,6 +18,8 @@ type DocumentAuthority = {
   readRecoveryJournal: (journalId: string) => Promise<unknown>;
   writeRecoveryJournal: (request: unknown) => Promise<unknown>;
   deleteRecoveryJournal: (request: unknown) => Promise<unknown>;
+  publishDirtyBuffers: (request: unknown) => Promise<unknown>;
+  clearDirtyBuffers: (request: unknown) => Promise<unknown>;
 };
 
 const watches = new Map<string, { close: () => void }>();
@@ -66,6 +68,10 @@ export const handleDocumentsBridgeMessage = async (
         return { id, type, success: true, data: await deps.documents.move(body) };
       case 'api:documents:delete':
         return { id, type, success: true, data: await deps.documents.delete(body) };
+      case 'api:documents:dirty:publish':
+        return { id, type, success: true, data: await deps.documents.publishDirtyBuffers(body) };
+      case 'api:documents:dirty:clear':
+        return { id, type, success: true, data: await deps.documents.clearDirtyBuffers(body) };
       case 'api:documents:recovery:list':
         return { id, type, success: true, data: { journals: await deps.documents.listRecoveryJournals(body) } };
       case 'api:documents:recovery:read':

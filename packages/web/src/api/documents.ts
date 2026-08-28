@@ -1,5 +1,6 @@
 import type {
   DocumentsAPI,
+  PiariumDirtyBufferPublication,
   PiariumDocumentDeleteRequest,
   PiariumDocumentDeleteResult,
   PiariumDocumentMoveRequest,
@@ -139,10 +140,12 @@ const readSseEvents = async (
  * Application Host. This module never uses a Capacitor filesystem plugin.
  */
 export const createWebDocumentsAPI = (): DocumentsAPI => ({
+  clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<PiariumWorkspaceIdentity>,
   read: (resource: PiariumResourceReference) => postJson('/api/documents/read', { resource }) as Promise<PiariumDocumentReadResult>,
   write: (request: PiariumDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<PiariumDocumentWriteResult>,
   move: (request: PiariumDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<PiariumDocumentMoveResult>,
+  publishDirtyBuffers: (request) => postJson('/api/documents/dirty/publish', request) as Promise<PiariumDirtyBufferPublication>,
   delete: (request: PiariumDocumentDeleteRequest) => postJson('/api/documents/delete', request) as Promise<PiariumDocumentDeleteResult>,
   watch(workspaceId: string, listener: (event: PiariumWorkspaceFileEvent) => void, options): Subscription {
     const tracker = createDocumentWatchEventTracker(listener);

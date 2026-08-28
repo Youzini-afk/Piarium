@@ -8,6 +8,8 @@ const METHODS = new Set([
   'readRecoveryJournal',
   'writeRecoveryJournal',
   'deleteRecoveryJournal',
+  'publishDirtyBuffers',
+  'clearDirtyBuffers',
 ]);
 
 const asRecord = (params) => (
@@ -67,5 +69,16 @@ export const createDocumentsCapabilityHandler = (authority) => async (method, pa
   if (method === 'listRecoveryJournals') return authority.listRecoveryJournals(record);
   if (method === 'writeRecoveryJournal') return authority.writeRecoveryJournal(bindCapabilityOwner(record, context));
   if (method === 'deleteRecoveryJournal') return authority.deleteRecoveryJournal(bindCapabilityOwner(record, context));
+  if (method === 'publishDirtyBuffers' || method === 'clearDirtyBuffers') {
+    const owner = context?.owner;
+    const request = owner ? {
+      ...record,
+      generation: owner.generation,
+      ownerId: `extension:${owner.extensionId}:${owner.entrypointId}`,
+    } : record;
+    return method === 'publishDirtyBuffers'
+      ? authority.publishDirtyBuffers(request)
+      : authority.clearDirtyBuffers(request);
+  }
   throw new Error(`workspace.documents does not implement ${method}`);
 };

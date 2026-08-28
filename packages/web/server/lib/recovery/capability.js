@@ -9,6 +9,8 @@ import {
   parseWorkspaceRecoverySnapshotReadInput,
   parseWorkspaceRecoveryTurnSettledInput,
   parseWorkspaceRecoveryTurnStartInput,
+  parseWorkspaceRestoreApplyInput,
+  parseWorkspaceRestorePrepareInput,
 } from '@piarium/extension-contract';
 
 const asRecord = (value, label) => {
@@ -34,6 +36,16 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
   if (method === 'recordTurnStart') return engine.recordTurnStart(parseWorkspaceRecoveryTurnStartInput(params));
   if (method === 'recordTurnSettled') return engine.recordTurnSettled(parseWorkspaceRecoveryTurnSettledInput(params));
   if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
+  if (method === 'prepareRestore') return engine.prepareRestore(parseWorkspaceRestorePrepareInput(params));
+  if (method === 'applyRestore') return engine.applyRestore(parseWorkspaceRestoreApplyInput(params));
+  if (method === 'getOperation') {
+    const input = asRecord(params, 'workspace.recovery-primitives.getOperation');
+    return engine.getOperation(requiredText(input.operationId, 'operationId'));
+  }
+  if (method === 'cancelOperation') {
+    const input = asRecord(params, 'workspace.recovery-primitives.cancelOperation');
+    return engine.cancelOperation(requiredText(input.operationId, 'operationId'));
+  }
   if (method === 'listSnapshots') return engine.listSnapshots(parseWorkspaceRecoverySnapshotQuery(params));
   if (method === 'readSnapshot') return engine.readSnapshot(parseWorkspaceRecoverySnapshotReadInput(params));
   if (method === 'diffSnapshots') return engine.diffSnapshots(parseWorkspaceRecoverySnapshotDiffInput(params));

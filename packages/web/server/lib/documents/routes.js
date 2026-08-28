@@ -63,6 +63,22 @@ export const registerDocumentRoutes = (app, {
     }
   });
 
+  app.post('/api/documents/dirty/publish', requireAuth, async (req, res) => {
+    try {
+      return res.json(await documents.publishDirtyBuffers(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/dirty/clear', requireAuth, async (req, res) => {
+    try {
+      return res.json(await documents.clearDirtyBuffers(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
   app.get('/api/documents/watch', requireAuth, async (req, res) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!workspaceId) {

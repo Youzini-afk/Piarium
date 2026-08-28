@@ -48,10 +48,12 @@ const call = async <T>(type: string, payload?: unknown): Promise<T> => {
 };
 
 export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
+  clearDirtyBuffers: (request) => call<{ cleared: boolean }>('api:documents:dirty:clear', request),
   resolveWorkspace: (input) => call<PiariumWorkspaceIdentity>('api:documents:resolveWorkspace', input),
   read: (resource) => call<PiariumDocumentReadResult>('api:documents:read', { resource }),
   write: (request) => call<PiariumDocumentWriteResult>('api:documents:write', request),
   move: (request) => call<PiariumDocumentMoveResult>('api:documents:move', request),
+  publishDirtyBuffers: (request) => call('api:documents:dirty:publish', request),
   delete: (request) => call<PiariumDocumentDeleteResult>('api:documents:delete', request),
   watch(workspaceId, listener, options): Subscription {
     const tracker = createDocumentWatchEventTracker(listener);

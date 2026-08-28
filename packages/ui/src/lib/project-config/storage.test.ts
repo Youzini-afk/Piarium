@@ -36,6 +36,8 @@ const createRuntime = () => {
     return { workspaceId: REPO_WORKSPACE, resourceId: path.slice(REPO.length).replace(/^\//, '') };
   };
   const documents: DocumentsAPI = {
+    clearDirtyBuffers: async () => ({ cleared: true }),
+    publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
     resolveWorkspace: async ({ path }) => ({
       workspaceId: path === HOME ? HOME_WORKSPACE : REPO_WORKSPACE,
       hostId: 'host-1',

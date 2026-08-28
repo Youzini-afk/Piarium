@@ -290,6 +290,8 @@ export class DocumentRegistry {
   private readonly listeners = new Map<string, Set<DocumentListener>>();
   private readonly dirtyIdsByWorkspace = new Map<string, Set<string>>();
   private readonly dirtyListenersByWorkspace = new Map<string, Set<() => void>>();
+  private readonly dirtyOwnerId: string;
+  private readonly dirtyPublicationTails = new Map<string, Promise<void>>();
   private readonly workspaceListeners = new Map<string, Set<() => void>>();
   private readonly workspaceVersions = new Map<string, number>();
   private readonly watches = new Map<string, Subscription>();
@@ -303,6 +305,7 @@ export class DocumentRegistry {
     this.documents = options.documents;
     this.getGeneration = options.getGeneration ?? getRuntimeEndpointGeneration;
     this.recoverySessionId = options.recoverySessionId ?? getDocumentRecoverySessionId();
+    this.dirtyOwnerId = `document-surface:${this.recoverySessionId}:${crypto.randomUUID()}`;
     this.journalDebounceMs = options.journalDebounceMs ?? 750;
     this.createDocumentInstanceId = options.createDocumentInstanceId ?? (() => crypto.randomUUID());
   }
@@ -1049,6 +1052,7 @@ export class DocumentRegistry {
   dispose(): void {
     if (this.disposed) return;
     const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
+    const dirtyWorkspaces = [...this.dirtyIdsByWorkspace.keys()];
     this.disposed = true;
     for (const timer of this.journalTimers.values()) clearTimeout(timer);
     this.journalTimers.clear();
@@ -1067,6 +1071,16 @@ export class DocumentRegistry {
     this.workspaceVersions.clear();
     this.preparedWorkspaceEdits.clear();
     this.workspaceEditUndoGroups.clear();
+    for (const workspaceId of dirtyWorkspaces) {
+      const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
+      const generation = this.getGeneration();
+      void previous.catch(() => undefined).then(() => this.documents.clearDirtyBuffers({
+        generation,
+        ownerId: this.dirtyOwnerId,
+        workspaceId,
+      })).catch(() => undefined);
+    }
+    this.dirtyPublicationTails.clear();
   }
 
   private commit(record: DocumentRecord): void {
@@ -1118,10 +1132,38 @@ export class DocumentRegistry {
     else next.delete(identity.resourceId);
     if (previous.size === next.size && [...previous].every((resourceId) => next.has(resourceId))) return;
     this.dirtyIdsByWorkspace.set(identity.workspaceId, next);
+    this.publishDirtyWorkspace(identity.workspaceId);
     const listeners = this.dirtyListenersByWorkspace.get(identity.workspaceId);
     if (listeners) {
       for (const listener of listeners) listener();
     }
+  }
+
+  private publishDirtyWorkspace(workspaceId: string): void {
+    if (this.disposed) return;
+    const resources = [...this.records.values()]
+      .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
+      .map((record) => ({
+        baseRevision: record.baseRevision,
+        localEditRevision: record.localEditRevision,
+        resource: record.identity,
+      }));
+    const generation = this.getGeneration();
+    const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(async () => {
+      await this.documents.publishDirtyBuffers({
+        generation,
+        ownerId: this.dirtyOwnerId,
+        resources,
+        workspaceId,
+      });
+    });
+    this.dirtyPublicationTails.set(workspaceId, current);
+    void current.catch((error) => this.reportJournalFailure(error)).finally(() => {
+      if (this.dirtyPublicationTails.get(workspaceId) === current) {
+        this.dirtyPublicationTails.delete(workspaceId);
+      }
+    });
   }
 
   private commitAtomic(records: DocumentRecord[], workspaceId: string): void {
@@ -1135,6 +1177,7 @@ export class DocumentRegistry {
       else nextDirty.delete(record.identity.resourceId);
     }
     this.dirtyIdsByWorkspace.set(workspaceId, nextDirty);
+    if (!sameResourceSet(previousDirty, nextDirty)) this.publishDirtyWorkspace(workspaceId);
     this.workspaceVersions.set(workspaceId, (this.workspaceVersions.get(workspaceId) ?? 0) + 1);
     this.ensureWatch(workspaceId);
     for (const record of records) {

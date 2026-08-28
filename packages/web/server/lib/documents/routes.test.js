@@ -29,6 +29,21 @@ describe('document routes', () => {
         })
         .expect(200);
       expect(created.body.status).toBe('written');
+      await request(app)
+        .post('/api/documents/dirty/publish')
+        .send({
+          generation: 1,
+          ownerId: 'web-surface',
+          resources: [{ baseRevision: null, localEditRevision: 1, resource: harness.resource('note.txt') }],
+          workspaceId: harness.identity.workspaceId,
+        })
+        .expect(200);
+      expect(await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))
+        .toEqual([expect.objectContaining({ ownerId: 'web-surface' })]);
+      await request(app)
+        .post('/api/documents/dirty/clear')
+        .send({ generation: 1, ownerId: 'web-surface', workspaceId: harness.identity.workspaceId })
+        .expect(200);
       const escaped = await request(app)
         .post('/api/documents/read')
         .send({ resource: harness.resource('../secret.txt') })

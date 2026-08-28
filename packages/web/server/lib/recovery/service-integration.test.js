@@ -91,5 +91,23 @@ describe('Web Application Host workspace recovery service', () => {
       workspaceId: harness.identity.workspaceId,
     });
     expect(checkpoint).toMatchObject({ status: 'captured', snapshot: { label: 'Service checkpoint' } });
+    const destination = path.join(harness.root, 'service-restored-workspace');
+    const prepared = await api.prepareRestore({
+      newWorkspacePath: destination,
+      targetSnapshotId: captured.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared).toMatchObject({ status: 'ready', plan: { targetSnapshotId: captured.snapshot.id } });
+    const applied = await api.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'new-workspace',
+      newWorkspacePath: destination,
+      operationId: prepared.plan.id,
+    });
+    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(await api.getOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: { destinationPath: destination, state: 'complete' },
+    });
   });
 });

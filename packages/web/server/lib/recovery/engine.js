@@ -16,6 +16,7 @@ import {
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from './errors.js';
 import { createRecoveryLocationRegistry, writeRecoveryJsonAtomic } from './locations.js';
 import { createRecoveryBindingStore } from './bindings.js';
+import { createWorkspaceRestoreManager } from './restore.js';
 
 const POLICY_REVISION = 'phase1-default-v1';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
@@ -187,6 +188,7 @@ export const createWorkspaceRecoveryEngine = ({
   faults = {},
   fsModule = fs,
   fsPromises = fs.promises,
+  gitInspector,
   pathModule = path,
   storageOwnerId = 'piarium.builtin.recovery',
 }) => {
@@ -602,7 +604,7 @@ export const createWorkspaceRecoveryEngine = ({
             @id, @workspaceId, @sequence, @parentSnapshotId, @manifestHash, @policyRevision,
             @consistency, @availability, @present, @knownAbsent,
             @excludedUnknown, @unstable, @createdAt, @source, @label,
-            NULL, @entryCount, @byteLength
+            @restoredFrom, @entryCount, @byteLength
           )
         `).run({
           availability: incomplete ? 'incomplete' : 'ready',
@@ -618,6 +620,7 @@ export const createWorkspaceRecoveryEngine = ({
           parentSnapshotId: parent,
           policyRevision: POLICY_REVISION,
           present: counts.present,
+          restoredFrom: input.restoredFrom ?? null,
           sequence,
           source: input.source ?? 'manual',
           unstable: counts.unstable,
@@ -993,14 +996,14 @@ export const createWorkspaceRecoveryEngine = ({
   const recoverMoveOperations = () => {
     if (moveRecoveryPromise) return moveRecoveryPromise;
     moveRecoveryPromise = (async () => {
-      let directory;
+      let entries;
       try {
-        directory = await fsPromises.opendir(locations.operationsRoot);
+        entries = await fsPromises.readdir(locations.operationsRoot, { withFileTypes: true });
       } catch (error) {
         if (error?.code === 'ENOENT') return;
         throw error;
       }
-      for await (const entry of directory) {
+      for (const entry of entries) {
         if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
         const operationId = entry.name.slice(0, -'.json'.length);
         const operation = await validateMoveRoots(await readMove(operationId));
@@ -1048,6 +1051,22 @@ export const createWorkspaceRecoveryEngine = ({
   const moveStorageInternal = async (identity, targetLocation) => {
     const current = await locations.selection(identity.workspaceId);
     const sourceRoot = await resolveStorageRoot(identity, current.location);
+    const sourceCatalog = await openRecoveryCatalog(sourceRoot, { create: false, fsPromises });
+    try {
+      const activeRestore = sourceCatalog?.prepare(`
+        SELECT id FROM operations
+        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        LIMIT 1
+      `).get();
+      if (activeRestore) {
+        throw new RecoveryPrimitiveError('recovery-in-progress', 'Recovery storage cannot move during a workspace restore', {
+          details: { operationId: activeRestore.id },
+          operationId: activeRestore.id,
+        });
+      }
+    } finally {
+      sourceCatalog?.close();
+    }
     const destinationRoot = await resolveStorageRoot(identity, targetLocation);
     if (!locations.samePath(sourceRoot, destinationRoot)
       && (pathIsInside(sourceRoot, destinationRoot, pathModule)
@@ -1164,8 +1183,22 @@ export const createWorkspaceRecoveryEngine = ({
     try {
       database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
       if (!database) return base;
+      const activeRestore = database.prepare(`
+        SELECT id FROM operations
+        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        LIMIT 1
+      `).get();
+      if (activeRestore) {
+        throw new RecoveryPrimitiveError('recovery-in-progress', 'Storage cleanup cannot run during a workspace restore', {
+          details: { operationId: activeRestore.id },
+          operationId: activeRestore.id,
+        });
+      }
       database.transaction(() => {
-        database.prepare("UPDATE operations SET state = 'failed', updated_at = ? WHERE state NOT IN ('complete', 'failed')").run(new Date().toISOString());
+        database.prepare(`
+          UPDATE operations SET state = 'failed', updated_at = ?
+          WHERE type IN ('capture', 'cleanup') AND state NOT IN ('complete', 'failed')
+        `).run(new Date().toISOString());
         database.prepare('DELETE FROM staged_entries').run();
       })();
       recordCatalogOperation(database, {
@@ -1241,6 +1274,22 @@ export const createWorkspaceRecoveryEngine = ({
   const deleteHistoryInternal = async (identity) => {
     const operationId = randomUUID();
     const storage = await storageFor(identity);
+    const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
+    try {
+      const activeRestore = database?.prepare(`
+        SELECT id FROM operations
+        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        LIMIT 1
+      `).get();
+      if (activeRestore) {
+        throw new RecoveryPrimitiveError('recovery-in-progress', 'Recovery history cannot be deleted during a workspace restore', {
+          details: { operationId: activeRestore.id },
+          operationId: activeRestore.id,
+        });
+      }
+    } finally {
+      database?.close();
+    }
     const stats = await statTree(storage.root, fsPromises).catch(() => ({ byteLength: 0, objectCount: 0 }));
     const objectStats = await statTree(pathModule.join(storage.root, 'objects'), fsPromises)
       .catch(() => ({ byteLength: 0, objectCount: 0 }));
@@ -1278,7 +1327,9 @@ export const createWorkspaceRecoveryEngine = ({
         );
         if (reused) return reused;
       }
-      capture = await documents.beginCapture(input.workspaceId);
+      capture = await documents.beginCapture(input.workspaceId, {
+        allowMaintenance: input.allowMaintenance === true,
+      });
       return await captureIntoCatalog(identity, storage.root, input, async () => {
         captureCompleted = true;
         return documents.completeCapture(capture);
@@ -1309,6 +1360,19 @@ export const createWorkspaceRecoveryEngine = ({
     }
   };
 
+  const restore = createWorkspaceRestoreManager({
+    captureSnapshot: captureSnapshotPublic,
+    documents,
+    faults,
+    fsModule,
+    fsPromises,
+    ...(gitInspector ? { gitInspector } : {}),
+    inspectIdentity,
+    locations,
+    pathModule,
+    storageFor,
+  });
+
   return {
     locations,
     async status(workspaceId) {
@@ -1321,6 +1385,7 @@ export const createWorkspaceRecoveryEngine = ({
             checkpoints: true,
             diff: true,
             read: true,
+            restore: true,
             storageManagement: true,
           },
           identity,
@@ -1363,6 +1428,34 @@ export const createWorkspaceRecoveryEngine = ({
           return failedRecoveryResult(error);
         }
       });
+    },
+    async prepareRestore(input) {
+      try {
+        return { plan: await restore.prepare(input), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async applyRestore(input) {
+      try {
+        return { operation: await restore.apply(input), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async getOperation(operationId) {
+      try {
+        return { operation: await restore.get(operationId), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async cancelOperation(operationId) {
+      try {
+        return { operation: await restore.cancel(operationId), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
     },
     async listSnapshots(input) {
       return runWorkspace(input.workspaceId, async () => {
@@ -1430,7 +1523,9 @@ export const createWorkspaceRecoveryEngine = ({
     async deleteWorkspaceHistory(workspaceId) {
       return runWorkspace(workspaceId, async () => {
         try {
-          return { result: await deleteHistoryInternal(await inspectIdentity(workspaceId)), status: 'ready' };
+          const result = await deleteHistoryInternal(await inspectIdentity(workspaceId));
+          if (result.status === 'complete') await restore.deleteWorkspaceOperations(workspaceId);
+          return { result, status: 'ready' };
         } catch (error) {
           return failedRecoveryResult(error);
         }

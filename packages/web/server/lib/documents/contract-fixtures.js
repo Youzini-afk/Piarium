@@ -413,6 +413,35 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
       await harness.authority.setMaintenance(harness.identity.workspaceId, false);
     });
 
+    it('tracks live dirty buffers by surface owner and rejects stale generations', async () => {
+      const publication = await harness.authority.publishDirtyBuffers({
+        generation: 2,
+        ownerId: 'surface-1',
+        resources: [{
+          baseRevision: null,
+          localEditRevision: 3,
+          resource: harness.resource('dirty.txt'),
+        }],
+        workspaceId: harness.identity.workspaceId,
+      });
+      expect(publication).toMatchObject({ ownerId: 'surface-1', generation: 2 });
+      const dirty = await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId);
+      expect(dirty).toHaveLength(1);
+      expect(dirty[0].ownerId).toBe('surface-1');
+      expect(dirty[0].resources[0].resource).toEqual(harness.resource('dirty.txt'));
+      await expect(harness.authority.clearDirtyBuffers({
+        generation: 1,
+        ownerId: 'surface-1',
+        workspaceId: harness.identity.workspaceId,
+      })).rejects.toMatchObject({ code: 'stale-completion' });
+      expect(await harness.authority.clearDirtyBuffers({
+        generation: 2,
+        ownerId: 'surface-1',
+        workspaceId: harness.identity.workspaceId,
+      })).toEqual({ cleared: true });
+      expect(await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId)).toEqual([]);
+    });
+
     it('watches created, changed, moved, deleted, and reset events without file bodies', async () => {
       const events = [];
       const subscription = harness.authority.watch(harness.identity.workspaceId, (event) => {

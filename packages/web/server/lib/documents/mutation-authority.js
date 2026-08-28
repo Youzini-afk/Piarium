@@ -381,7 +381,7 @@ export const createWorkspaceMutationAuthority = ({
     return publicState(runtime, entry);
   });
 
-  const beginCapture = (workspaceId) => run(workspaceId, async (runtime) => {
+  const beginCapture = (workspaceId, options = {}) => run(workspaceId, async (runtime) => {
     const { entry } = await mutateWorkspace(workspaceId);
     syncRuntime(runtime, entry);
     return {
@@ -391,6 +391,7 @@ export const createWorkspaceMutationAuthority = ({
       mutationRevision: entry.mutationRevision,
       writerRevision: entry.writerRevision,
       activeWriterIds: Object.keys(entry.activeWriters).sort(),
+      allowMaintenance: options.allowMaintenance === true,
       maintenance: entry.maintenance,
       watchRevision: runtime.watchRevision,
       watch: runtime.watch ? { ...runtime.watch } : null,
@@ -408,7 +409,7 @@ export const createWorkspaceMutationAuthority = ({
     if (capture.epoch !== entry.epoch) reasons.push('epoch-changed');
     if (capture.mutationRevision !== entry.mutationRevision) reasons.push('mutation-observed');
     if (capture.writerRevision !== entry.writerRevision) reasons.push('writer-activity');
-    if (capture.maintenance || entry.maintenance) reasons.push('maintenance');
+    if ((capture.maintenance || entry.maintenance) && capture.allowMaintenance !== true) reasons.push('maintenance');
     if (capture.activeWriterIds.length > 0 || Object.keys(entry.activeWriters).length > 0) reasons.push('active-writer');
     const beforeWatch = capture.watch;
     const afterWatch = runtime.watch;

@@ -31,6 +31,7 @@ const createMemoryDocuments = () => {
     baseRevision: string | null;
   }>();
   const listeners = new Set<(event: PiariumWorkspaceFileEvent) => void>();
+  const dirtyPublications: Array<Parameters<DocumentsAPI['publishDirtyBuffers']>[0]> = [];
   let revisionSeq = 1;
   let workspaceEpoch = 1;
   let watchSequence = 0;
@@ -41,6 +42,11 @@ const createMemoryDocuments = () => {
   };
 
   const api: DocumentsAPI = {
+    clearDirtyBuffers: async () => ({ cleared: true }),
+    publishDirtyBuffers: async (request) => {
+      dirtyPublications.push(request);
+      return { ...request, updatedAt: '2026-08-28T00:00:00.000Z' };
+    },
     resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));
@@ -182,7 +188,7 @@ const createMemoryDocuments = () => {
     },
   };
 
-  return { api, files, journals, emit, setEpoch: (epoch: number) => { workspaceEpoch = epoch; } };
+  return { api, dirtyPublications, files, journals, emit, setEpoch: (epoch: number) => { workspaceEpoch = epoch; } };
 };
 
 describe('DocumentRegistry', () => {
@@ -447,7 +453,7 @@ describe('DocumentRegistry', () => {
   });
 
   test('dirty subscriptions only publish dirty-set membership changes', async () => {
-    const { api } = createMemoryDocuments();
+    const { api, dirtyPublications } = createMemoryDocuments();
     const identity = resource();
     await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
@@ -458,8 +464,13 @@ describe('DocumentRegistry', () => {
     registry.applyTransaction(identity, 'second', { origin: 'view' });
     expect(updates).toBe(1);
     expect(registry.dirtyResourceIds(identity.workspaceId)).toEqual(new Set([identity.resourceId]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dirtyPublications.at(-1)?.resources).toHaveLength(1);
+    expect(dirtyPublications.at(-1)?.resources[0]?.resource).toEqual(identity);
     await registry.save(identity);
     expect(updates).toBe(2);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dirtyPublications.at(-1)?.resources).toEqual([]);
     unsubscribe();
     registry.dispose();
   });
