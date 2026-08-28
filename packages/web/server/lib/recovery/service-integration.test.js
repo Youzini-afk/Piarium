@@ -36,6 +36,15 @@ describe('Web Application Host workspace recovery service', () => {
       authorityId: runtime.services.hostId,
       dataDir: runtimeDataDir,
       documents: harness.authority,
+      sessionNavigation: {
+        commit: async () => ({ alreadyApplied: false, markerId: 'service-marker', snapshot: {} }),
+        prepare: async () => ({
+          currentLeafId: 'service-current-leaf',
+          expectedLeafId: 'service-current-leaf',
+          targetId: 'service-assistant-1',
+          targetLeafId: 'service-assistant-1',
+        }),
+      },
     });
     runtime.capabilities.register(
       'workspace.recovery-primitives',
@@ -46,7 +55,7 @@ describe('Web Application Host workspace recovery service', () => {
     const api = createWorkspaceRecoveryAPI((request) => runtime.invokeService(request));
     expect(await api.status(harness.identity.workspaceId)).toMatchObject({
       status: 'ready',
-      capabilities: { bindings: true, checkpoints: true },
+      capabilities: { bindings: true, checkpoints: true, combined: true },
     });
     const captured = await api.captureSnapshot({ workspaceId: harness.identity.workspaceId });
     expect(captured.status).toBe('captured');
@@ -109,5 +118,21 @@ describe('Web Application Host workspace recovery service', () => {
       status: 'ready',
       operation: { destinationPath: destination, state: 'complete' },
     });
+    const combined = await api.prepareCombinedRecovery({
+      entryId: 'service-assistant-1',
+      sessionId: 'service-session-1',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(combined).toMatchObject({
+      status: 'ready',
+      plan: {
+        expectedLeafId: 'service-current-leaf',
+        navigationKind: 'entry',
+        targetLeafId: 'service-assistant-1',
+        targetSnapshotId: captured.snapshot.id,
+      },
+    });
+    expect(await api.cancelCombinedOperation(combined.plan.id))
+      .toMatchObject({ status: 'ready', operation: { state: 'aborted' } });
   });
 });

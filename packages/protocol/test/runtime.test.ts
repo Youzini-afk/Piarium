@@ -105,6 +105,8 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("resource.list"), true);
     assert.equal(isRuntimeMethod("resource.update"), true);
     assert.equal(isRuntimeMethod("recovery.apply"), false);
+    assert.equal(isRuntimeMethod("session.recovery.navigation.prepare"), false);
+    assert.equal(isRuntimeMethod("session.recovery.navigation.commit"), false);
   });
 
   it("carries an explicit worker source on events", () => {

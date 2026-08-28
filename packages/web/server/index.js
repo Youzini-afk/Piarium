@@ -21,6 +21,7 @@ import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbenc
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
 import { createWorkspaceRecoveryEngine } from './lib/recovery/engine.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
+import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
 import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
@@ -809,8 +810,6 @@ async function main(options = {}) {
   piRuntimeLifecycle.subscribe((snapshot) => {
     if (snapshot.status === 'ready') piRuntimeHandshake = piRuntimeLifecycle.handshake ?? piRuntimeHandshake;
   });
-  if (requirePiRuntime) await startPiRuntime();
-  else void startPiRuntime();
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
       brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@piarium/extension-host'))),
@@ -857,6 +856,61 @@ async function main(options = {}) {
     };
   };
   const workspaceRecoveryEngines = new Map();
+  const assertRecoverySessionWorkspace = async (sessionId, workspaceId) => {
+    const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId });
+    if (snapshot.workspace?.kind !== 'workspace' || snapshot.workspace.id !== workspaceId) {
+      throw new RecoveryPrimitiveError(
+        'navigation-conflict',
+        'The Pi session is no longer bound to the workspace selected for recovery',
+        { details: { sessionId, workspaceId } },
+      );
+    }
+  };
+  const recoverySessionNavigation = {
+    async commit(input) {
+      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      return piRuntimeBroker.requestForSession(
+        input.sessionId,
+        'session.recovery.navigation.commit',
+        {
+          expectedLeafId: input.expectedLeafId,
+          operationId: input.operationId,
+          preparedTargetLeafId: input.preparedTargetLeafId,
+          sessionId: input.sessionId,
+          targetId: input.targetId,
+        },
+      );
+    },
+    async commitLeaf(input) {
+      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      return piRuntimeBroker.requestForSession(
+        input.sessionId,
+        'session.recovery.navigation.commitLeaf',
+        {
+          expectedLeafId: input.expectedLeafId,
+          operationId: input.operationId,
+          preparedTargetLeafId: input.preparedTargetLeafId,
+          sessionId: input.sessionId,
+        },
+      );
+    },
+    async prepare(input) {
+      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      return piRuntimeBroker.requestForSession(
+        input.sessionId,
+        'session.recovery.navigation.prepare',
+        { sessionId: input.sessionId, targetId: input.targetId },
+      );
+    },
+    async prepareLeaf(input) {
+      await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
+      return piRuntimeBroker.requestForSession(
+        input.sessionId,
+        'session.recovery.navigation.prepareLeaf',
+        { sessionId: input.sessionId, targetLeafId: input.targetLeafId },
+      );
+    },
+  };
   const recoveryEngineForOwner = (context) => {
     const storageOwnerId = context?.owner?.extensionId;
     if (typeof storageOwnerId !== 'string' || !storageOwnerId) {
@@ -870,12 +924,33 @@ async function main(options = {}) {
         defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
         documents: documentsAuthority,
         gitInspector: inspectRecoveryGit,
+        sessionNavigation: recoverySessionNavigation,
         storageOwnerId,
       });
       workspaceRecoveryEngines.set(storageOwnerId, engine);
     }
     return engine;
   };
+  const foundationalRecoveryEngine = recoveryEngineForOwner({
+    owner: { extensionId: 'piarium.builtin.recovery' },
+  });
+  let fencedRecoveryOperations = [];
+  try {
+    fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
+    await foundationalRecoveryEngine.resumeWorkspaceOperations();
+  } catch (error) {
+    console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', error?.message || error);
+  }
+  const piRuntimeStartup = startPiRuntime();
+  if (requirePiRuntime || fencedRecoveryOperations.length > 0) await piRuntimeStartup;
+  else void piRuntimeStartup;
+  const combinedRecoveryStartup = piRuntimeStartup.then(() => (
+    foundationalRecoveryEngine.resumeCombinedOperations()
+  )).catch((error) => {
+    console.error('[WorkspaceRecovery] Startup combined recovery requires attention:', error?.message || error);
+  });
+  if (fencedRecoveryOperations.length > 0) await combinedRecoveryStartup;
+  else void combinedRecoveryStartup;
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),

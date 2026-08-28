@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { objectPath, openRecoveryCatalog, recordCatalogOperation } from './catalog.js';
 import { createWorkspaceRecoveryEngine } from './engine.js';
@@ -771,6 +771,286 @@ describe('native workspace recovery Phase 1 engine', () => {
       operationId: prepared.plan.id,
     })).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
     await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+  });
+
+  it('coordinates an in-place workspace restore with one durable expected-leaf navigation', async () => {
+    const navigation = {
+      commit: vi.fn(async () => ({
+        alreadyApplied: false,
+        editorText: 'target prompt',
+        navigationMarkerId: 'navigation-marker-1',
+      })),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [],
+      beforeSnapshotId: before.snapshot.id,
+      executionId: 'combined-execution-1',
+      provenance: 'caused-by',
+      runtimeGeneration: 1,
+      sessionId: 'combined-session-1',
+      userEntryId: 'combined-user-1',
+      workerId: 'combined-worker-1',
+      workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'current',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: 'combined-current-write',
+    });
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'combined-user-1',
+      sessionId: 'combined-session-1',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared).toMatchObject({
+      status: 'ready',
+      plan: { allowedModes: ['in-place', 'new-workspace'], expectedLeafId: 'current-leaf', targetLeafId: null },
+    });
+    const applied = await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(applied).toMatchObject({
+      status: 'ready',
+      operation: {
+        conversationState: 'navigated',
+        editorText: 'target prompt',
+        navigationMarkerId: 'navigation-marker-1',
+        state: 'complete',
+        workspaceState: 'restored',
+      },
+    });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('target');
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
+    expect(navigation.commit).toHaveBeenCalledWith(expect.objectContaining({
+      expectedLeafId: 'current-leaf',
+      operationId: prepared.plan.id,
+      preparedTargetLeafId: null,
+      targetId: 'combined-user-1',
+    }));
+  });
+
+  it('restores the safety checkpoint when expected-leaf navigation loses its race', async () => {
+    const navigationError = Object.assign(new Error('leaf changed'), { code: 'session_leaf_conflict' });
+    const simulatedCrash = Object.assign(new Error('compensation process crashed'), { simulatedCrash: true });
+    let crashAfterCompensation = true;
+    const faults = {
+      afterCompensationOperation: () => {
+        if (!crashAfterCompensation) return;
+        crashAfterCompensation = false;
+        throw simulatedCrash;
+      },
+    };
+    const navigation = {
+      commit: vi.fn(async () => { throw navigationError; }),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: 'assistant-target' })),
+    };
+    const { engine, harness } = await createHarness({ faults, sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [], beforeSnapshotId: before.snapshot.id, executionId: 'combined-execution-2',
+      provenance: 'caused-by', runtimeGeneration: 1, sessionId: 'combined-session-2',
+      userEntryId: 'combined-user-2', workerId: 'combined-worker-2', workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(), resource: harness.resource('note.txt'), content: 'current', encoding: 'utf-8',
+      bom: false, expectedRevision: current.revision, operationId: 'combined-current-write-2',
+    });
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'combined-user-2', sessionId: 'combined-session-2', workspaceId: harness.identity.workspaceId,
+    });
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'failed', failure: { code: 'internal' } });
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(true);
+    const resumedEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      faults,
+      sessionNavigation: navigation,
+    });
+    await resumedEngine.fenceUnfinishedOperations();
+    await resumedEngine.resumeWorkspaceOperations();
+    await resumedEngine.resumeCombinedOperations();
+    expect(await resumedEngine.getCombinedOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: {
+        conversationState: 'unchanged',
+        failure: { code: 'navigation-conflict' },
+        state: 'compensated',
+        workspaceState: 'compensated',
+      },
+    });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('current');
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
+  });
+
+  it('prepares a completed combined recovery undo from its pinned safety checkpoint', async () => {
+    let activeLeaf = 'original-leaf';
+    const navigation = {
+      commit: vi.fn(async () => {
+        activeLeaf = 'recovery-marker';
+        return { alreadyApplied: false, markerId: activeLeaf };
+      }),
+      commitLeaf: vi.fn(async ({ preparedTargetLeafId }) => {
+        expect(preparedTargetLeafId).toBe('original-leaf');
+        activeLeaf = 'undo-marker';
+        return { alreadyApplied: false, markerId: activeLeaf };
+      }),
+      prepare: vi.fn(async () => ({ expectedLeafId: activeLeaf, targetLeafId: null })),
+      prepareLeaf: vi.fn(async ({ targetLeafId }) => ({ expectedLeafId: activeLeaf, targetLeafId })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [], beforeSnapshotId: before.snapshot.id, executionId: 'combined-execution-undo',
+      provenance: 'caused-by', runtimeGeneration: 1, sessionId: 'combined-session-undo',
+      userEntryId: 'combined-user-undo', workerId: 'combined-worker-undo', workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(), resource: harness.resource('note.txt'), content: 'current', encoding: 'utf-8',
+      bom: false, expectedRevision: current.revision, operationId: 'combined-current-write-undo',
+    });
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'combined-user-undo', sessionId: 'combined-session-undo', workspaceId: harness.identity.workspaceId,
+    });
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('target');
+
+    const undo = await engine.prepareCombinedUndo(prepared.plan.id);
+    expect(undo).toMatchObject({
+      status: 'ready',
+      plan: {
+        expectedLeafId: 'recovery-marker',
+        navigationKind: 'leaf',
+        targetLeafId: 'original-leaf',
+        undoOf: prepared.plan.id,
+      },
+    });
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: undo.plan.revision,
+      operationId: undo.plan.id,
+    })).toMatchObject({
+      status: 'ready',
+      operation: { state: 'complete', undoOf: prepared.plan.id },
+    });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('current');
+    expect(activeLeaf).toBe('undo-marker');
+  });
+
+  it('materializes a new-workspace fallback without navigating the current conversation', async () => {
+    const navigation = {
+      commit: vi.fn(),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [], beforeSnapshotId: before.snapshot.id, executionId: 'combined-execution-new',
+      provenance: 'caused-by', runtimeGeneration: 1, sessionId: 'combined-session-new',
+      userEntryId: 'combined-user-new', workerId: 'combined-worker-new', workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(), resource: harness.resource('note.txt'), content: 'current', encoding: 'utf-8',
+      bom: false, expectedRevision: current.revision, operationId: 'combined-current-write-new',
+    });
+    const writer = await harness.authority.registerWriter(harness.token(), { purpose: 'fallback-writer' });
+    const destination = path.join(harness.root, 'combined-new-workspace');
+    try {
+      const prepared = await engine.prepareCombinedRecovery({
+        entryId: 'combined-user-new', newWorkspacePath: destination,
+        sessionId: 'combined-session-new', workspaceId: harness.identity.workspaceId,
+      });
+      expect(prepared).toMatchObject({ status: 'ready', plan: { allowedModes: ['new-workspace'] } });
+      expect(await engine.applyCombinedRecovery({
+        expectedRevision: prepared.plan.revision,
+        mode: 'new-workspace',
+        newWorkspacePath: destination,
+        operationId: prepared.plan.id,
+      })).toMatchObject({
+        status: 'ready',
+        operation: {
+          conversationState: 'unchanged',
+          destinationPath: destination,
+          state: 'alternate-ready',
+          workspaceState: 'materialized-new',
+        },
+      });
+    } finally {
+      await writer.close();
+    }
+    await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('current');
+    expect(navigation.commit).not.toHaveBeenCalled();
+  });
+
+  it('resumes conversation navigation without reapplying an already verified workspace', async () => {
+    let failNavigation = true;
+    const navigation = {
+      commit: vi.fn(async () => {
+        if (failNavigation) throw Object.assign(new Error('worker disconnected'), { code: 'worker_unavailable' });
+        return { alreadyApplied: true, navigationMarkerId: 'navigation-marker-resumed' };
+      }),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [], beforeSnapshotId: before.snapshot.id, executionId: 'combined-execution-3',
+      provenance: 'caused-by', runtimeGeneration: 1, sessionId: 'combined-session-3',
+      userEntryId: 'combined-user-3', workerId: 'combined-worker-3', workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(), resource: harness.resource('note.txt'), content: 'current', encoding: 'utf-8',
+      bom: false, expectedRevision: current.revision, operationId: 'combined-current-write-3',
+    });
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'combined-user-3', sessionId: 'combined-session-3', workspaceId: harness.identity.workspaceId,
+    });
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'failed', failure: { code: 'recovery-in-progress', retryable: true } });
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(true);
+    failNavigation = false;
+    const resumedEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      sessionNavigation: navigation,
+    });
+    expect(await resumedEngine.fenceUnfinishedOperations()).toContain(prepared.plan.restore.id);
+    await resumedEngine.resumeWorkspaceOperations();
+    expect(await resumedEngine.resumeCombinedOperations())
+      .toEqual([expect.objectContaining({ state: 'complete' })]);
+    expect(await resumedEngine.getCombinedOperation(prepared.plan.id))
+      .toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(navigation.commit).toHaveBeenCalledTimes(2);
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8')).resolves.toBe('target');
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
   });
 
   it('downgrades active-writer plans to new-workspace and cancels only before commit', async () => {

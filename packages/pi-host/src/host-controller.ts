@@ -214,6 +214,11 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return readString(record, key, { optional: true });
 }
 
+function readNullableString(record: Record<string, unknown>, key: string): string | null {
+  if (record[key] === null) return null;
+  return readString(record, key);
+}
+
 function readStringList(record: Record<string, unknown>, key: string): string[] {
   const value = record[key];
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
@@ -616,6 +621,31 @@ export class HostController {
           readString(params, "sessionId"),
           readString(params, "targetId"),
           readBoolean(params, "summarize", { defaultValue: false }),
+        );
+      case "session.recovery.navigation.prepare":
+        return this.#sessionHost.prepareRecoveryNavigation(
+          readString(params, "sessionId"),
+          readString(params, "targetId"),
+        );
+      case "session.recovery.navigation.commit":
+        return this.#sessionHost.commitRecoveryNavigation(
+          readString(params, "sessionId"),
+          readString(params, "targetId"),
+          readNullableString(params, "preparedTargetLeafId"),
+          readNullableString(params, "expectedLeafId"),
+          readString(params, "operationId"),
+        );
+      case "session.recovery.navigation.commitLeaf":
+        return this.#sessionHost.commitRecoveryNavigationLeaf(
+          readString(params, "sessionId"),
+          readNullableString(params, "preparedTargetLeafId"),
+          readNullableString(params, "expectedLeafId"),
+          readString(params, "operationId"),
+        );
+      case "session.recovery.navigation.prepareLeaf":
+        return this.#sessionHost.prepareRecoveryNavigationLeaf(
+          readString(params, "sessionId"),
+          readNullableString(params, "targetLeafId"),
         );
       case "agent.prompt":
         return this.#sessionHost.prompt(

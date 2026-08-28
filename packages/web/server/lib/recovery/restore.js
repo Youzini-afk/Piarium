@@ -13,6 +13,14 @@ import { writeRecoveryJsonAtomic } from './locations.js';
 
 const OPERATION_SCHEMA_VERSION = 1;
 const PRE_DECISION_STATES = new Set(['planned', 'staged']);
+const POST_DECISION_STATES = new Set([
+  'commit-decided',
+  'applying-workspace',
+  'workspace-verified',
+  'completion-decided',
+  'compensating-workspace',
+  'needs-attention',
+]);
 
 const canonicalJson = (value) => {
   if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
@@ -46,6 +54,16 @@ const samePath = (left, right, pathModule) => {
   return process.platform === 'win32'
     ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
     : resolvedLeft === resolvedRight;
+};
+
+const pathExists = async (target, fsPromises) => {
+  try {
+    await fsPromises.lstat(target);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
 };
 
 const resolveTarget = (root, relativePath, pathModule) => {
@@ -193,8 +211,11 @@ const publicOperation = (record) => ({
   totalOperations: record.totalOperations,
   updatedAt: record.updatedAt,
   workspaceId: record.plan.workspaceId,
+  ...(record.compensation?.snapshotId ? { compensatedSnapshotId: record.compensation.snapshotId } : {}),
+  ...(record.completionHold ? { completionHold: record.completionHold } : {}),
   ...(record.failure ? { failure: record.failure } : {}),
   ...(record.mode ? { mode: record.mode } : {}),
+  ...(record.restoredSnapshotId ? { restoredSnapshotId: record.restoredSnapshotId } : {}),
 });
 
 const assertOperationRecord = (value, operationId) => {
@@ -276,6 +297,23 @@ export const createWorkspaceRestoreManager = ({
     }
   };
 
+  const listOperationRecords = async () => {
+    let entries;
+    try {
+      entries = await fsPromises.readdir(locations.operationsRoot);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    const records = [];
+    for (const name of entries) {
+      if (!name.startsWith('restore-') || !name.endsWith('.json')) continue;
+      const operationId = name.slice('restore-'.length, -'.json'.length);
+      records.push(await readOperation(operationId));
+    }
+    return records;
+  };
+
   const stageOperation = async (record, database, storeRoot) => {
     if (record.state !== 'planned') return;
     const stageRoot = pathModule.join(storeRoot, 'staging', `restore-${record.id}`);
@@ -320,7 +358,7 @@ export const createWorkspaceRestoreManager = ({
   };
 
   const removeOrBackup = async (target, backup) => {
-    await fsPromises.rm(backup, { force: true, recursive: true });
+    if (await pathExists(backup, fsPromises)) return true;
     try {
       await fsPromises.rename(target, backup);
       return true;
@@ -378,9 +416,10 @@ export const createWorkspaceRestoreManager = ({
     const token = `${record.id}-${index}`;
     const temporary = pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.tmp`);
     const backup = pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.previous`);
+    const retainBackup = record.completionHold === 'conversation';
     if (operation.type === 'delete') {
       const moved = await removeOrBackup(target, backup);
-      if (moved) await fsPromises.rm(backup, { force: true, recursive: true });
+      if (moved && !retainBackup) await fsPromises.rm(backup, { force: true, recursive: true });
       return;
     }
     if (operation.type === 'mkdir') {
@@ -388,8 +427,8 @@ export const createWorkspaceRestoreManager = ({
         const stat = await fsPromises.lstat(target);
         if (!stat.isDirectory() || stat.isSymbolicLink()) {
           await removeOrBackup(target, backup);
+          await fsPromises.rm(target, { force: true, recursive: true });
           await fsPromises.mkdir(target, { recursive: true });
-          await fsPromises.rm(backup, { force: true, recursive: true });
         }
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
@@ -397,6 +436,7 @@ export const createWorkspaceRestoreManager = ({
       }
       const row = record.targetEntries[operation.path];
       if (row?.mode !== null && row?.mode !== undefined) await fsPromises.chmod(target, row.mode);
+      if (!retainBackup) await fsPromises.rm(backup, { force: true, recursive: true });
       return;
     }
     if (operation.type === 'metadata') {
@@ -422,12 +462,15 @@ export const createWorkspaceRestoreManager = ({
     }
     const moved = await removeOrBackup(target, backup);
     try {
+      await fsPromises.rm(target, { force: true, recursive: true });
       await fsPromises.rename(temporary, target);
     } catch (error) {
-      if (moved) await fsPromises.rename(backup, target).catch(() => undefined);
+      if (moved && !await pathExists(target, fsPromises)) {
+        await fsPromises.rename(backup, target).catch(() => undefined);
+      }
       throw error;
     }
-    await fsPromises.rm(backup, { force: true, recursive: true });
+    if (!retainBackup) await fsPromises.rm(backup, { force: true, recursive: true });
     const row = record.targetEntries[operation.path];
     if (operation.type === 'write' && row?.mode !== null && row?.mode !== undefined) {
       await fsPromises.chmod(target, row.mode);
@@ -527,7 +570,9 @@ export const createWorkspaceRestoreManager = ({
     try {
       const built = buildPlans(reopened, input.targetSnapshotId, safety.snapshot.id);
       const targetRows = readRows(reopened, input.targetSnapshotId);
+      const safetyRows = readRows(reopened, safety.snapshot.id);
       const targetEntries = Object.fromEntries(targetRows.map((row) => [row.path, row]));
+      const safetyEntries = Object.fromEntries(safetyRows.map((row) => [row.path, row]));
       const hardlinkLeaders = {};
       const hardlinkGroups = new Map();
       for (const operation of built.newWorkspaceOperations) {
@@ -633,6 +678,7 @@ export const createWorkspaceRestoreManager = ({
         mode: null,
         newWorkspaceOperations: built.newWorkspaceOperations,
         plan,
+        safetyEntries,
         schemaVersion: OPERATION_SCHEMA_VERSION,
         stageRoot: null,
         state: 'planned',
@@ -664,13 +710,26 @@ export const createWorkspaceRestoreManager = ({
       throw new RecoveryPrimitiveError('invalid-request', `Restore mode is not allowed: ${input.mode}`);
     }
     if (record.state === 'complete' || record.state === 'needs-attention') return publicOperation(record);
+    if (record.state === 'workspace-verified' && record.completionHold === 'conversation') {
+      return publicOperation(record);
+    }
     if (record.state === 'aborted') throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore operation was cancelled');
+    if (input.holdForConversation === true && input.mode !== 'in-place') {
+      throw new RecoveryPrimitiveError('invalid-request', 'Conversation coordination can only hold an in-place restore');
+    }
     record.failure = null;
     const identity = await inspectIdentity(record.plan.workspaceId);
     const storage = await storageFor(identity);
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
     try {
+      if (input.holdForConversation === true && record.completionHold !== 'conversation') {
+        if (!PRE_DECISION_STATES.has(record.state)) {
+          throw new RecoveryPrimitiveError('stale-plan', 'Restore completion mode changed after its commit decision');
+        }
+        record.completionHold = 'conversation';
+        await writeOperation(record, database);
+      }
       await stageOperation(record, database, storage.root);
       record.mode = input.mode;
       if (input.mode === 'new-workspace') {
@@ -774,6 +833,12 @@ export const createWorkspaceRestoreManager = ({
           throw new RecoveryPrimitiveError('needs-attention', 'Restored workspace could not publish its new timeline revision');
         }
         record.restoredSnapshotId = restored.snapshot.id;
+        record.verifiedWitness = restored.witness;
+        if (record.completionHold === 'conversation') {
+          record.state = 'workspace-verified';
+          await writeOperation(record, database);
+          return publicOperation(record);
+        }
         await documents.setMaintenance(identity.workspaceId, false);
       }
       record.state = 'complete';
@@ -801,13 +866,174 @@ export const createWorkspaceRestoreManager = ({
     }
   };
 
+  const cleanupAuxiliaryPaths = async (record, root) => {
+    await Promise.all(record.inPlaceOperations.flatMap((operation, index) => {
+      if (operation.type === 'metadata') return [];
+      const target = resolveTarget(root, operation.path, pathModule);
+      const token = `${record.id}-${index}`;
+      return [
+        fsPromises.rm(pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.tmp`), {
+          force: true,
+          recursive: true,
+        }),
+        fsPromises.rm(pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.previous`), {
+          force: true,
+          recursive: true,
+        }),
+      ];
+    }));
+    if (record.stageRoot) await fsPromises.rm(record.stageRoot, { force: true, recursive: true });
+  };
+
+  const verifyHeldInternal = async (record, database, identity) => {
+    if (record.completionHold !== 'conversation'
+      || !['workspace-verified', 'completion-decided'].includes(record.state)) {
+      throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore is not waiting for conversation navigation');
+    }
+    const current = await documents.inspectMutation(identity.workspaceId);
+    if (!current.maintenance) {
+      throw new RecoveryPrimitiveError('needs-attention', 'Workspace maintenance ended before coordinated recovery completed');
+    }
+    if (record.state === 'workspace-verified' && record.verifiedWitness && (
+      current.epoch !== record.verifiedWitness.epoch
+      || current.mutationRevision !== record.verifiedWitness.mutationRevision
+      || current.writerRevision !== record.verifiedWitness.writerRevision
+    )) {
+      throw new RecoveryPrimitiveError('stale-plan', 'Workspace changed after restore verification', { retryable: true });
+    }
+    await verifyMaterialized(record, identity.canonicalRoot, record.inPlaceOperations);
+    await writeOperation(record, database);
+    return publicOperation(record);
+  };
+
+  const finalizeInternal = async (record) => {
+    const identity = await inspectIdentity(record.plan.workspaceId);
+    const storage = await storageFor(identity);
+    const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
+    if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
+    try {
+      if (record.state === 'complete') return publicOperation(record);
+      if (record.state === 'workspace-verified') {
+        await verifyHeldInternal(record, database, identity);
+        record.state = 'completion-decided';
+        await writeOperation(record, database);
+      }
+      if (record.state !== 'completion-decided' || record.completionHold !== 'conversation') {
+        throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore is not ready to finalize');
+      }
+      await documents.setMaintenance(identity.workspaceId, false);
+      await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
+      record.completionHold = null;
+      record.state = 'complete';
+      await writeOperation(record, database);
+      return publicOperation(record);
+    } finally {
+      database.close();
+    }
+  };
+
+  const compensateInternal = async (record) => {
+    const identity = await inspectIdentity(record.plan.workspaceId);
+    const storage = await storageFor(identity);
+    const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
+    if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
+    try {
+      if (record.state === 'compensated') return publicOperation(record);
+      if (record.completionHold !== 'conversation'
+        || !['workspace-verified', 'compensating-workspace'].includes(record.state)) {
+        throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore cannot be compensated in its current state');
+      }
+      if (!record.compensation) {
+        record.compensation = { appliedOperations: 0, snapshotId: null };
+        record.state = 'compensating-workspace';
+        await writeOperation(record, database);
+      }
+      for (
+        let offset = record.compensation.appliedOperations;
+        offset < record.inPlaceOperations.length;
+        offset += 1
+      ) {
+        const index = record.inPlaceOperations.length - 1 - offset;
+        const operation = record.inPlaceOperations[index];
+        const target = resolveTarget(identity.canonicalRoot, operation.path, pathModule);
+        const token = `${record.id}-${index}`;
+        const temporary = pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.tmp`);
+        const backup = pathModule.join(pathModule.dirname(target), `.piarium-restore-${token}.previous`);
+        if (operation.type === 'metadata') {
+          const safetyEntry = record.safetyEntries[operation.path];
+          if (safetyEntry?.mode !== null && safetyEntry?.mode !== undefined) {
+            await fsPromises.chmod(target, safetyEntry.mode);
+          }
+        } else {
+          const safetyEntry = record.safetyEntries[operation.path];
+          const backupExists = await pathExists(backup, fsPromises);
+          if (safetyEntry?.coverage === 'present' && !backupExists) {
+            throw new RecoveryPrimitiveError(
+              'needs-attention',
+              `Restore compensation backup is missing: ${operation.path}`,
+            );
+          }
+          await fsPromises.rm(temporary, { force: true, recursive: true });
+          await fsPromises.rm(target, { force: true, recursive: true });
+          if (backupExists) await fsPromises.rename(backup, target);
+        }
+        record.compensation.appliedOperations = offset + 1;
+        await writeOperation(record, database);
+        await faults.afterCompensationOperation?.({ index, operationId: record.id, path: operation.path });
+      }
+      const safetyRoot = record.safetyEntries['.'];
+      if (safetyRoot?.mode !== null && safetyRoot?.mode !== undefined) {
+        await fsPromises.chmod(identity.canonicalRoot, safetyRoot.mode);
+      }
+      const compensated = await captureSnapshot({
+        allowMaintenance: true,
+        restoredFrom: record.plan.safetySnapshotId,
+        source: 'restore',
+        workspaceId: identity.workspaceId,
+      });
+      if (compensated.status !== 'captured' || compensated.snapshot.availability !== 'ready') {
+        throw new RecoveryPrimitiveError('needs-attention', 'Compensated workspace could not publish a verified revision');
+      }
+      const comparison = buildPlans(database, record.plan.safetySnapshotId, compensated.snapshot.id);
+      if (comparison.targetConflicts.length > 0
+        || comparison.inPlaceConflicts.length > 0
+        || comparison.inPlaceOperations.length > 0) {
+        throw new RecoveryPrimitiveError('needs-attention', 'Workspace compensation did not reproduce its safety checkpoint');
+      }
+      record.compensation.snapshotId = compensated.snapshot.id;
+      record.completionHold = null;
+      record.state = 'compensated';
+      await writeOperation(record, database);
+      await documents.setMaintenance(identity.workspaceId, false);
+      await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
+      return publicOperation(record);
+    } catch (error) {
+      if (error?.simulatedCrash === true) throw error;
+      record.failure = recoveryFailure(error, 'needs-attention');
+      record.state = 'needs-attention';
+      await writeOperation(record, database);
+      throw new RecoveryPrimitiveError('needs-attention', 'Restore compensation requires attention', {
+        cause: error,
+        details: { operationId: record.id },
+        operationId: record.id,
+      });
+    } finally {
+      database.close();
+    }
+  };
+
   return {
     apply: (input) => runOperation(input.operationId, async () => {
       const record = await readOperation(input.operationId);
       return runWorkspace(record.plan.workspaceId, () => applyInternal(input));
     }),
+    compensate: (operationId) => runOperation(operationId, async () => {
+      const record = await readOperation(operationId);
+      return runWorkspace(record.plan.workspaceId, () => compensateInternal(record));
+    }),
     cancel: (operationId) => runOperation(operationId, async () => {
       const record = await readOperation(operationId);
+      if (record.state === 'aborted') return publicOperation(record);
       if (!PRE_DECISION_STATES.has(record.state)) {
         throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore cannot be cancelled after its commit decision');
       }
@@ -828,9 +1054,67 @@ export const createWorkspaceRestoreManager = ({
       }
       return publicOperation(record);
     }),
+    async fenceUnfinished() {
+      const records = await listOperationRecords();
+      const fenced = [];
+      for (const record of records) {
+        if (!POST_DECISION_STATES.has(record.state)) continue;
+        if (record.mode !== 'in-place' && record.completionHold !== 'conversation') continue;
+        await documents.setMaintenance(record.plan.workspaceId, true);
+        fenced.push(record.id);
+      }
+      return fenced;
+    },
+    async resumeUnfinished() {
+      const records = await listOperationRecords();
+      const results = [];
+      for (const record of records) {
+        if (record.state === 'completion-decided') {
+          results.push(await runOperation(record.id, () => (
+            runWorkspace(record.plan.workspaceId, () => finalizeInternal(record))
+          )));
+          continue;
+        }
+        if (record.state === 'compensating-workspace') {
+          results.push(await runOperation(record.id, () => (
+            runWorkspace(record.plan.workspaceId, () => compensateInternal(record))
+          )));
+          continue;
+        }
+        if (!['commit-decided', 'applying-workspace', 'workspace-verified'].includes(record.state)) continue;
+        if (record.state === 'workspace-verified' && record.completionHold === 'conversation') continue;
+        if (!record.mode) continue;
+        results.push(await runOperation(record.id, () => runWorkspace(record.plan.workspaceId, () => applyInternal({
+          expectedRevision: record.plan.revision,
+          ...(record.completionHold === 'conversation' ? { holdForConversation: true } : {}),
+          mode: record.mode,
+          newWorkspacePath: record.destinationPath || record.plan.newWorkspacePath,
+          operationId: record.id,
+        }))));
+      }
+      return results;
+    },
     async get(operationId) {
       return publicOperation(await readOperation(operationId));
     },
+    finalize: (operationId) => runOperation(operationId, async () => {
+      const record = await readOperation(operationId);
+      return runWorkspace(record.plan.workspaceId, () => finalizeInternal(record));
+    }),
+    verifyHeld: (operationId) => runOperation(operationId, async () => {
+      const record = await readOperation(operationId);
+      return runWorkspace(record.plan.workspaceId, async () => {
+        const identity = await inspectIdentity(record.plan.workspaceId);
+        const storage = await storageFor(identity);
+        const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
+        if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
+        try {
+          return await verifyHeldInternal(record, database, identity);
+        } finally {
+          database.close();
+        }
+      });
+    }),
     async deleteWorkspaceOperations(workspaceId) {
       let entries = [];
       try {

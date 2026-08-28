@@ -16,6 +16,7 @@ import {
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from './errors.js';
 import { createRecoveryLocationRegistry, writeRecoveryJsonAtomic } from './locations.js';
 import { createRecoveryBindingStore } from './bindings.js';
+import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
 
 const POLICY_REVISION = 'phase1-default-v1';
@@ -190,6 +191,7 @@ export const createWorkspaceRecoveryEngine = ({
   fsPromises = fs.promises,
   gitInspector,
   pathModule = path,
+  sessionNavigation,
   storageOwnerId = 'piarium.builtin.recovery',
 }) => {
   const locations = createRecoveryLocationRegistry({
@@ -1004,7 +1006,10 @@ export const createWorkspaceRecoveryEngine = ({
         throw error;
       }
       for (const entry of entries) {
-        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        if (!entry.isFile()
+          || !entry.name.endsWith('.json')
+          || entry.name.startsWith('restore-')
+          || entry.name.startsWith('combined-')) continue;
         const operationId = entry.name.slice(0, -'.json'.length);
         const operation = await validateMoveRoots(await readMove(operationId));
         if (operation.state === 'complete' || operation.state === 'failed') continue;
@@ -1055,7 +1060,8 @@ export const createWorkspaceRecoveryEngine = ({
     try {
       const activeRestore = sourceCatalog?.prepare(`
         SELECT id FROM operations
-        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        WHERE type IN ('workspace-restore', 'combined-recovery')
+          AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention')
         LIMIT 1
       `).get();
       if (activeRestore) {
@@ -1185,7 +1191,8 @@ export const createWorkspaceRecoveryEngine = ({
       if (!database) return base;
       const activeRestore = database.prepare(`
         SELECT id FROM operations
-        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        WHERE type IN ('workspace-restore', 'combined-recovery')
+          AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention')
         LIMIT 1
       `).get();
       if (activeRestore) {
@@ -1278,7 +1285,8 @@ export const createWorkspaceRecoveryEngine = ({
     try {
       const activeRestore = database?.prepare(`
         SELECT id FROM operations
-        WHERE type = 'workspace-restore' AND state NOT IN ('complete', 'aborted', 'needs-attention')
+        WHERE type IN ('workspace-restore', 'combined-recovery')
+          AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention')
         LIMIT 1
       `).get();
       if (activeRestore) {
@@ -1372,9 +1380,33 @@ export const createWorkspaceRecoveryEngine = ({
     pathModule,
     storageFor,
   });
+  const combined = createCombinedRecoveryManager({
+    bindings,
+    fsPromises,
+    inspectIdentity,
+    locations,
+    pathModule,
+    restore,
+    sessionNavigation,
+    storageFor,
+  });
 
   return {
     locations,
+    async fenceUnfinishedOperations() {
+      return restore.fenceUnfinished();
+    },
+    async resumeCombinedOperations() {
+      return combined.resumeUnfinished();
+    },
+    async resumeWorkspaceOperations() {
+      return restore.resumeUnfinished();
+    },
+    async resumeUnfinishedOperations() {
+      const workspace = await restore.resumeUnfinished();
+      const composite = await combined.resumeUnfinished();
+      return { composite, workspace };
+    },
     async status(workspaceId) {
       try {
         const identity = await inspectIdentity(workspaceId);
@@ -1383,6 +1415,7 @@ export const createWorkspaceRecoveryEngine = ({
             bindings: true,
             capture: true,
             checkpoints: true,
+            combined: Boolean(sessionNavigation),
             diff: true,
             read: true,
             restore: true,
@@ -1432,6 +1465,41 @@ export const createWorkspaceRecoveryEngine = ({
     async prepareRestore(input) {
       try {
         return { plan: await restore.prepare(input), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async prepareCombinedRecovery(input) {
+      try {
+        return { plan: await combined.prepare(input), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async prepareCombinedUndo(operationId) {
+      try {
+        return { plan: await combined.prepareUndo(operationId), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async applyCombinedRecovery(input) {
+      try {
+        return { operation: await combined.apply(input), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async getCombinedOperation(operationId) {
+      try {
+        return { operation: await combined.get(operationId), status: 'ready' };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
+    async cancelCombinedOperation(operationId) {
+      try {
+        return { operation: await combined.cancel(operationId), status: 'ready' };
       } catch (error) {
         return failedRecoveryResult(error);
       }
@@ -1524,7 +1592,10 @@ export const createWorkspaceRecoveryEngine = ({
       return runWorkspace(workspaceId, async () => {
         try {
           const result = await deleteHistoryInternal(await inspectIdentity(workspaceId));
-          if (result.status === 'complete') await restore.deleteWorkspaceOperations(workspaceId);
+          if (result.status === 'complete') {
+            await combined.deleteWorkspaceOperations(workspaceId);
+            await restore.deleteWorkspaceOperations(workspaceId);
+          }
           return { result, status: 'ready' };
         } catch (error) {
           return failedRecoveryResult(error);

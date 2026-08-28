@@ -1,6 +1,8 @@
 import {
   parseRecoveryStorageCleanupInput,
   parseSetRecoveryStorageLocationInput,
+  parseWorkspaceCombinedRecoveryApplyInput,
+  parseWorkspaceCombinedRecoveryPrepareInput,
   parseWorkspaceRecoveryCaptureInput,
   parseWorkspaceRecoveryCheckpointInput,
   parseWorkspaceRecoveryEntryTarget,
@@ -38,6 +40,24 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
   if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
   if (method === 'prepareRestore') return engine.prepareRestore(parseWorkspaceRestorePrepareInput(params));
   if (method === 'applyRestore') return engine.applyRestore(parseWorkspaceRestoreApplyInput(params));
+  if (method === 'prepareCombinedRecovery') {
+    return engine.prepareCombinedRecovery(parseWorkspaceCombinedRecoveryPrepareInput(params));
+  }
+  if (method === 'prepareCombinedUndo') {
+    const input = asRecord(params, 'workspace.recovery-primitives.prepareCombinedUndo');
+    return engine.prepareCombinedUndo(requiredText(input.operationId, 'operationId'));
+  }
+  if (method === 'applyCombinedRecovery') {
+    return engine.applyCombinedRecovery(parseWorkspaceCombinedRecoveryApplyInput(params));
+  }
+  if (method === 'getCombinedOperation') {
+    const input = asRecord(params, 'workspace.recovery-primitives.getCombinedOperation');
+    return engine.getCombinedOperation(requiredText(input.operationId, 'operationId'));
+  }
+  if (method === 'cancelCombinedOperation') {
+    const input = asRecord(params, 'workspace.recovery-primitives.cancelCombinedOperation');
+    return engine.cancelCombinedOperation(requiredText(input.operationId, 'operationId'));
+  }
   if (method === 'getOperation') {
     const input = asRecord(params, 'workspace.recovery-primitives.getOperation');
     return engine.getOperation(requiredText(input.operationId, 'operationId'));

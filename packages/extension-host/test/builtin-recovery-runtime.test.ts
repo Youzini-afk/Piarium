@@ -46,6 +46,7 @@ test("the built-in recovery Host activates on service invocation and withdraws o
         bindings: true,
         capture: true,
         checkpoints: true,
+        combined: true,
         diff: true,
         read: true,
         restore: true,

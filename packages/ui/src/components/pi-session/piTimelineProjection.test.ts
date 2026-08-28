@@ -5,6 +5,7 @@ import type {
   PiSessionMessageEntry,
   PiUserMessage,
 } from '@piarium/protocol';
+import { PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE } from '@piarium/protocol';
 import { projectPiTimeline } from './piTimelineProjection';
 
 const assistant = (text: string, timestamp = 1): PiAssistantMessage => ({
@@ -159,6 +160,29 @@ describe('Pi timeline projection', () => {
     const projection = projectPiTimeline([user, orphan]);
     if (projection.items[0]?.kind !== 'turn') throw new Error('expected a turn');
     expect(projection.items[0].turn.entries).toEqual([orphan]);
+  });
+
+  test('hides persisted Piarium recovery navigation markers', () => {
+    const user = userEntry('user', 'hello', 1);
+    const marker: PiSessionEntry = {
+      customType: PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+      data: {
+        expectedLeafId: user.id,
+        operationId: 'restore-1',
+        schemaVersion: 1,
+        targetId: user.id,
+        targetLeafId: null,
+      },
+      id: 'marker',
+      parentId: user.id,
+      timestamp: '2',
+      type: 'custom',
+    };
+    const projection = projectPiTimeline([user, marker]);
+
+    expect(projection.visibleEntries).toEqual([user]);
+    if (projection.items[0]?.kind !== 'turn') throw new Error('expected a turn');
+    expect(projection.items[0].turn.entries).toEqual([]);
   });
 
   test('keeps completed turn identities stable while only the tail changes', () => {

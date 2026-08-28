@@ -21,9 +21,14 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import {
+  PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
+  PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+} from "@piarium/protocol";
 import type {
   HostEvent,
   HostEventData,
+  HostMethodResult,
   ImageAttachment,
   JsonValue,
   ModelDescriptor,
@@ -51,6 +56,7 @@ import type {
   PiResourceDocumentSnapshot,
   PiResourceKind,
   PiResourceScope,
+  PiRecoveryNavigationMarkerData,
   PiSettingsSnapshot,
   ProviderConfigDeleteScope,
   ProviderConfigDetails,
@@ -286,6 +292,72 @@ function editableRecoveryContent(entry: NativeSessionEntry | undefined): {
     ...(editorImages.length === 0 ? {} : { editorImages }),
     ...(text.length === 0 ? {} : { editorText: text }),
   };
+}
+
+interface ResolvedConversationNavigationTarget {
+  editable: ReturnType<typeof editableRecoveryContent>;
+  targetLeafId: string | null;
+}
+
+function resolveConversationNavigationTarget(
+  manager: SessionManager,
+  targetId: string,
+): ResolvedConversationNavigationTarget {
+  const target = manager.getEntry(targetId);
+  if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
+  const parent = target.parentId === null ? undefined : manager.getEntry(target.parentId);
+  const parentBeforeAssociatedInstructions =
+    target.type === "message" && target.message.role === "user"
+    && parent?.type === "custom_message"
+    && parent.customType === PIARIUM_INSTRUCTIONS_MESSAGE_TYPE
+    && parent.display === false
+      ? parent.parentId
+      : target.parentId;
+  const targetLeafId =
+    target.type === "message" && target.message.role === "user"
+      ? parentBeforeAssociatedInstructions
+      : target.type === "custom_message"
+        ? target.parentId
+        : target.id;
+  return {
+    editable: editableRecoveryContent(target),
+    targetLeafId,
+  };
+}
+
+interface PersistedRecoveryNavigationMarker {
+  data: Record<string, unknown>;
+  id: string;
+}
+
+function persistedRecoveryNavigationMarkers(
+  manager: SessionManager,
+  operationId: string,
+): PersistedRecoveryNavigationMarker[] {
+  return manager.getEntries().flatMap((entry) => {
+    if (
+      entry.type !== "custom"
+      || entry.customType !== PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE
+      || typeof entry.data !== "object"
+      || entry.data === null
+      || Array.isArray(entry.data)
+    ) return [];
+    const data = entry.data as Record<string, unknown>;
+    return data.operationId === operationId ? [{ data, id: entry.id }] : [];
+  });
+}
+
+function recoveryNavigationMarkerMatches(
+  marker: PersistedRecoveryNavigationMarker,
+  expected: PiRecoveryNavigationMarkerData,
+): boolean {
+  return (
+    marker.data.schemaVersion === expected.schemaVersion
+    && marker.data.operationId === expected.operationId
+    && marker.data.expectedLeafId === expected.expectedLeafId
+    && marker.data.targetId === expected.targetId
+    && marker.data.targetLeafId === expected.targetLeafId
+  );
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -780,6 +852,171 @@ export class SessionHost {
       ...(result.editorText === undefined ? {} : { editorText: result.editorText }),
       snapshot: this.snapshot(),
     };
+  }
+
+  prepareRecoveryNavigation(
+    sessionId: string,
+    targetId: string,
+  ): HostMethodResult<"session.recovery.navigation.prepare"> {
+    this.#assertSessionIdle(sessionId);
+    const manager = this.session.sessionManager;
+    const resolved = resolveConversationNavigationTarget(manager, targetId);
+    const currentLeafId = manager.getLeafId();
+    return {
+      currentLeafId,
+      ...resolved.editable,
+      expectedLeafId: currentLeafId,
+      targetId,
+      targetLeafId: resolved.targetLeafId,
+    };
+  }
+
+  prepareRecoveryNavigationLeaf(
+    sessionId: string,
+    targetLeafId: string | null,
+  ): HostMethodResult<"session.recovery.navigation.prepareLeaf"> {
+    this.#assertSessionIdle(sessionId);
+    const manager = this.session.sessionManager;
+    if (targetLeafId !== null && !manager.getEntry(targetLeafId)) {
+      throw new HostError("recovery_target_not_found", `Unknown session leaf: ${targetLeafId}`);
+    }
+    const currentLeafId = manager.getLeafId();
+    return { currentLeafId, expectedLeafId: currentLeafId, targetLeafId };
+  }
+
+  async commitRecoveryNavigation(
+    sessionId: string,
+    targetId: string | null,
+    preparedTargetLeafId: string | null,
+    expectedLeafId: string | null,
+    operationId: string,
+  ): Promise<HostMethodResult<"session.recovery.navigation.commit">> {
+    this.#assertSessionIdle(sessionId);
+    const manager = this.session.sessionManager;
+    const persistedMarkers = persistedRecoveryNavigationMarkers(manager, operationId);
+    const requestedMarker: PiRecoveryNavigationMarkerData = {
+      expectedLeafId,
+      operationId,
+      schemaVersion: PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
+      targetId,
+      targetLeafId: preparedTargetLeafId,
+    };
+
+    if (persistedMarkers.length > 0) {
+      const mismatched = persistedMarkers.find((marker) => (
+        !recoveryNavigationMarkerMatches(marker, requestedMarker)
+      ));
+      if (mismatched) {
+        throw new HostError(
+          "session_navigation_operation_conflict",
+          `Recovery navigation operation ${operationId} was already used with different parameters`,
+          {
+            details: toJsonValue({
+              operationId,
+              persisted: mismatched.data,
+              requested: requestedMarker,
+            }),
+          },
+        );
+      }
+    }
+
+    const resolved = targetId === null
+      ? (() => {
+          if (preparedTargetLeafId !== null && !manager.getEntry(preparedTargetLeafId)) {
+            throw new HostError(
+              "session_navigation_target_conflict",
+              `Recovery navigation leaf ${preparedTargetLeafId} no longer exists`,
+              {
+                details: { operationId, preparedTargetLeafId },
+                retryable: true,
+              },
+            );
+          }
+          return { editable: {}, targetLeafId: preparedTargetLeafId };
+        })()
+      : resolveConversationNavigationTarget(manager, targetId);
+
+    if (resolved.targetLeafId !== preparedTargetLeafId) {
+      throw new HostError(
+        "session_navigation_target_conflict",
+        `Recovery navigation target ${targetId ?? "<direct-leaf>"} no longer resolves to its prepared leaf`,
+        {
+          details: {
+            currentTargetLeafId: resolved.targetLeafId,
+            operationId,
+            preparedTargetLeafId,
+            targetId,
+          },
+          retryable: true,
+        },
+      );
+    }
+
+    if (persistedMarkers.length > 0) {
+      const branchIds = new Set(manager.getBranch().map((entry) => entry.id));
+      const activeMarker = persistedMarkers.find((marker) => branchIds.has(marker.id));
+      if (!activeMarker) {
+        throw new HostError(
+          "session_navigation_divergence",
+          `Recovery navigation operation ${operationId} exists outside the active branch`,
+          {
+            details: {
+              currentLeafId: manager.getLeafId(),
+              markerIds: persistedMarkers.map((marker) => marker.id),
+              operationId,
+            },
+          },
+        );
+      }
+      return {
+        alreadyApplied: true,
+        ...resolved.editable,
+        markerId: activeMarker.id,
+        snapshot: this.snapshot(),
+      };
+    }
+
+    const currentLeafId = manager.getLeafId();
+    if (currentLeafId !== expectedLeafId) {
+      throw new HostError(
+        "session_leaf_conflict",
+        `Recovery navigation expected leaf ${expectedLeafId ?? "<root>"}, but found ${currentLeafId ?? "<root>"}`,
+        {
+          details: { current: currentLeafId, expected: expectedLeafId, operationId },
+          retryable: true,
+        },
+      );
+    }
+
+    if (resolved.targetLeafId === null) manager.resetLeaf();
+    else manager.branch(resolved.targetLeafId);
+    const markerId = manager.appendCustomEntry(
+      PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+      requestedMarker,
+    );
+    await this.#replaceWith(manager);
+    return {
+      alreadyApplied: false,
+      ...resolved.editable,
+      markerId,
+      snapshot: this.snapshot(),
+    };
+  }
+
+  async commitRecoveryNavigationLeaf(
+    sessionId: string,
+    preparedTargetLeafId: string | null,
+    expectedLeafId: string | null,
+    operationId: string,
+  ): Promise<HostMethodResult<"session.recovery.navigation.commitLeaf">> {
+    return this.commitRecoveryNavigation(
+      sessionId,
+      null,
+      preparedTargetLeafId,
+      expectedLeafId,
+      operationId,
+    );
   }
 
   async prompt(
@@ -2569,6 +2806,10 @@ export class SessionHost {
   }
 
   #assertRecoveryReady(sessionId: string): void {
+    this.#assertSessionIdle(sessionId);
+  }
+
+  #assertSessionIdle(sessionId: string): void {
     this.assertSession(sessionId);
     if (!this.session.isIdle) {
       throw new HostError("session_busy", "Wait for the active Pi run before using recovery");
@@ -2593,30 +2834,14 @@ export class SessionHost {
   async #navigateConversationOnly(targetId: string): Promise<RecoveryPluginExecution> {
     const manager = this.session.sessionManager;
     const oldLeafId = manager.getLeafId();
+    const resolved = resolveConversationNavigationTarget(manager, targetId);
     if (targetId === oldLeafId) {
       return { handledBy: "pi-native", outcome: "applied" };
     }
-    const target = manager.getEntry(targetId);
-    if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
-    const editable = editableRecoveryContent(target);
-    const parent = target.parentId === null ? undefined : manager.getEntry(target.parentId);
-    const parentBeforeAssociatedInstructions =
-      target.type === "message" && target.message.role === "user"
-      && parent?.type === "custom_message"
-      && parent.customType === PIARIUM_INSTRUCTIONS_MESSAGE_TYPE
-      && parent.display === false
-        ? parent.parentId
-        : target.parentId;
-    const newLeafId =
-      target.type === "message" && target.message.role === "user"
-        ? parentBeforeAssociatedInstructions
-        : target.type === "custom_message"
-          ? target.parentId
-        : target.id;
-    if (newLeafId === null) manager.resetLeaf();
-    else manager.branch(newLeafId);
+    if (resolved.targetLeafId === null) manager.resetLeaf();
+    else manager.branch(resolved.targetLeafId);
     await this.#replaceWith(manager);
-    return { ...editable, handledBy: "pi-native", outcome: "applied" };
+    return { ...resolved.editable, handledBy: "pi-native", outcome: "applied" };
   }
 
   async #undoConversationOnly(): Promise<RecoveryPluginExecution> {

@@ -230,6 +230,9 @@ export type WorkspaceRestoreOperationState =
   | "commit-decided"
   | "applying-workspace"
   | "workspace-verified"
+  | "completion-decided"
+  | "compensating-workspace"
+  | "compensated"
   | "complete"
   | "aborted"
   | "needs-attention";
@@ -290,6 +293,8 @@ export interface WorkspaceRestoreApplyInput {
 
 export interface WorkspaceRestoreOperation {
   appliedOperations: number;
+  compensatedSnapshotId?: string;
+  completionHold?: "conversation";
   createdAt: string;
   destinationPath: string;
   failure?: WorkspaceRecoveryFailure;
@@ -298,10 +303,82 @@ export interface WorkspaceRestoreOperation {
   planRevision: string;
   safetySnapshotId: string;
   state: WorkspaceRestoreOperationState;
+  restoredSnapshotId?: string;
   targetSnapshotId: string;
   totalOperations: number;
   updatedAt: string;
   workspaceId: string;
+}
+
+export interface WorkspaceRecoveryEditorImage {
+  data: string;
+  mimeType: string;
+}
+
+export interface WorkspaceCombinedRecoveryPrepareInput {
+  entryId: string;
+  newWorkspacePath?: string;
+  sessionId: string;
+  workspaceId: string;
+}
+
+export interface WorkspaceCombinedRecoveryPlan {
+  allowedModes: WorkspaceRestoreMode[];
+  createdAt: string;
+  entryId: string;
+  expectedLeafId: string | null;
+  id: string;
+  navigationKind: "entry" | "leaf";
+  restore: WorkspaceRestorePlan;
+  revision: string;
+  sessionId: string;
+  targetLeafId: string | null;
+  targetSnapshotId: string;
+  undoOf?: string;
+  workspaceId: string;
+}
+
+export interface WorkspaceCombinedRecoveryApplyInput {
+  expectedRevision: string;
+  mode: WorkspaceRestoreMode;
+  newWorkspacePath?: string;
+  operationId: string;
+}
+
+export type WorkspaceCombinedRecoveryOperationState =
+  | "planned"
+  | "applying-workspace"
+  | "workspace-verified"
+  | "navigating-conversation"
+  | "compensating-workspace"
+  | "compensated"
+  | "alternate-ready"
+  | "complete"
+  | "aborted"
+  | "needs-attention";
+
+export interface WorkspaceCombinedRecoveryOperation {
+  conversationState: "unchanged" | "navigated" | "diverged";
+  createdAt: string;
+  destinationPath?: string;
+  editorImages?: WorkspaceRecoveryEditorImage[];
+  editorText?: string;
+  entryId: string;
+  expectedLeafId: string | null;
+  failure?: WorkspaceRecoveryFailure;
+  id: string;
+  mode?: WorkspaceRestoreMode;
+  navigationMarkerId?: string;
+  restoreOperationId: string;
+  revision: string;
+  sessionId: string;
+  state: WorkspaceCombinedRecoveryOperationState;
+  targetLeafId: string | null;
+  targetSnapshotId: string;
+  undoOf?: string;
+  updatedAt: string;
+  workspaceId: string;
+  workspaceState: "unchanged" | "restored" | "compensated" | "materialized-new" | "needs-attention";
 }
 
 export interface WorkspaceRecoverySnapshotQuery {
@@ -412,6 +489,7 @@ export interface WorkspaceRecoveryStatus {
     bindings: boolean;
     capture: boolean;
     checkpoints: boolean;
+    combined: boolean;
     diff: boolean;
     read: boolean;
     restore: boolean;
@@ -446,6 +524,14 @@ export type WorkspaceRestorePrepareResult =
 
 export type WorkspaceRestoreOperationResult =
   | { operation: WorkspaceRestoreOperation; status: "ready" }
+  | WorkspaceRecoveryFailedResult;
+
+export type WorkspaceCombinedRecoveryPrepareResult =
+  | { plan: WorkspaceCombinedRecoveryPlan; status: "ready" }
+  | WorkspaceRecoveryFailedResult;
+
+export type WorkspaceCombinedRecoveryOperationResult =
+  | { operation: WorkspaceCombinedRecoveryOperation; status: "ready" }
   | WorkspaceRecoveryFailedResult;
 
 export type WorkspaceRecoveryListResult =
@@ -493,8 +579,17 @@ const text = (value: unknown, label: string): string => {
   return value;
 };
 
+const plainText = (value: unknown, label: string): string => {
+  if (typeof value !== "string") throw new WorkspaceRecoveryContractError(`${label} must be a string`);
+  return value;
+};
+
 const optionalText = (value: unknown, label: string): string | undefined => (
   value === undefined ? undefined : text(value, label)
+);
+
+const nullableText = (value: unknown, label: string): string | null => (
+  value === null ? null : text(value, label)
 );
 
 const contentHash = (value: unknown, label: string): string => {
@@ -757,7 +852,12 @@ export const parseWorkspaceRecoveryCheckpointInput = (value: unknown): Workspace
 const RESTORE_MODES = ["in-place", "new-workspace"] as const;
 const RESTORE_STATES = [
   "planned", "staged", "commit-decided", "applying-workspace",
-  "workspace-verified", "complete", "aborted", "needs-attention",
+  "workspace-verified", "completion-decided", "compensating-workspace",
+  "compensated", "complete", "aborted", "needs-attention",
+] as const;
+const COMBINED_STATES = [
+  "planned", "applying-workspace", "workspace-verified", "navigating-conversation",
+  "compensating-workspace", "compensated", "alternate-ready", "complete", "aborted", "needs-attention",
 ] as const;
 
 export const parseWorkspaceRestorePrepareInput = (value: unknown): WorkspaceRestorePrepareInput => {
@@ -852,8 +952,123 @@ export const parseWorkspaceRestoreOperation = (value: unknown): WorkspaceRestore
     totalOperations: count(raw.totalOperations, "restore operation.totalOperations"),
     updatedAt: isoTimestamp(raw.updatedAt, "restore operation.updatedAt"),
     workspaceId: text(raw.workspaceId, "restore operation.workspaceId"),
+    ...(raw.compensatedSnapshotId === undefined
+      ? {}
+      : { compensatedSnapshotId: text(raw.compensatedSnapshotId, "restore operation.compensatedSnapshotId") }),
+    ...(raw.completionHold === undefined
+      ? {}
+      : { completionHold: oneOf(raw.completionHold, ["conversation"] as const, "restore operation.completionHold") }),
     ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
     ...(raw.mode === undefined ? {} : { mode: oneOf(raw.mode, RESTORE_MODES, "restore operation.mode") }),
+    ...(raw.restoredSnapshotId === undefined
+      ? {}
+      : { restoredSnapshotId: text(raw.restoredSnapshotId, "restore operation.restoredSnapshotId") }),
+  };
+};
+
+export const parseWorkspaceCombinedRecoveryPrepareInput = (
+  value: unknown,
+): WorkspaceCombinedRecoveryPrepareInput => {
+  const raw = record(value, "Combined recovery prepare input");
+  return {
+    entryId: text(raw.entryId, "combined.entryId"),
+    sessionId: text(raw.sessionId, "combined.sessionId"),
+    workspaceId: text(raw.workspaceId, "combined.workspaceId"),
+    ...(optionalText(raw.newWorkspacePath, "combined.newWorkspacePath")
+      ? { newWorkspacePath: raw.newWorkspacePath as string }
+      : {}),
+  };
+};
+
+export const parseWorkspaceCombinedRecoveryApplyInput = (
+  value: unknown,
+): WorkspaceCombinedRecoveryApplyInput => {
+  const raw = record(value, "Combined recovery apply input");
+  return {
+    expectedRevision: contentHash(raw.expectedRevision, "combined.expectedRevision"),
+    mode: oneOf(raw.mode, RESTORE_MODES, "combined.mode"),
+    operationId: text(raw.operationId, "combined.operationId"),
+    ...(optionalText(raw.newWorkspacePath, "combined.newWorkspacePath")
+      ? { newWorkspacePath: raw.newWorkspacePath as string }
+      : {}),
+  };
+};
+
+export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCombinedRecoveryPlan => {
+  const raw = record(value, "Combined recovery plan");
+  if (!Array.isArray(raw.allowedModes)) {
+    throw new WorkspaceRecoveryContractError("combined.allowedModes must be an array");
+  }
+  return {
+    allowedModes: raw.allowedModes.map((item, index) => oneOf(
+      item,
+      RESTORE_MODES,
+      `combined.allowedModes[${index}]`,
+    )),
+    createdAt: isoTimestamp(raw.createdAt, "combined.createdAt"),
+    entryId: text(raw.entryId, "combined.entryId"),
+    expectedLeafId: nullableText(raw.expectedLeafId, "combined.expectedLeafId"),
+    id: text(raw.id, "combined.id"),
+    navigationKind: oneOf(raw.navigationKind, ["entry", "leaf"] as const, "combined.navigationKind"),
+    restore: parseWorkspaceRestorePlan(raw.restore),
+    revision: contentHash(raw.revision, "combined.revision"),
+    sessionId: text(raw.sessionId, "combined.sessionId"),
+    targetLeafId: nullableText(raw.targetLeafId, "combined.targetLeafId"),
+    targetSnapshotId: text(raw.targetSnapshotId, "combined.targetSnapshotId"),
+    ...(raw.undoOf === undefined ? {} : { undoOf: text(raw.undoOf, "combined.undoOf") }),
+    workspaceId: text(raw.workspaceId, "combined.workspaceId"),
+  };
+};
+
+const parseEditorImages = (value: unknown): WorkspaceRecoveryEditorImage[] => {
+  if (!Array.isArray(value)) throw new WorkspaceRecoveryContractError("combined.editorImages must be an array");
+  return value.map((item, index) => {
+    const image = record(item, `combined.editorImages[${index}]`);
+    return {
+      data: text(image.data, `combined.editorImages[${index}].data`),
+      mimeType: text(image.mimeType, `combined.editorImages[${index}].mimeType`),
+    };
+  });
+};
+
+export const parseWorkspaceCombinedRecoveryOperation = (
+  value: unknown,
+): WorkspaceCombinedRecoveryOperation => {
+  const raw = record(value, "Combined recovery operation");
+  return {
+    conversationState: oneOf(
+      raw.conversationState,
+      ["unchanged", "navigated", "diverged"] as const,
+      "combined.conversationState",
+    ),
+    createdAt: isoTimestamp(raw.createdAt, "combined.createdAt"),
+    ...(raw.destinationPath === undefined
+      ? {}
+      : { destinationPath: text(raw.destinationPath, "combined.destinationPath") }),
+    entryId: text(raw.entryId, "combined.entryId"),
+    expectedLeafId: nullableText(raw.expectedLeafId, "combined.expectedLeafId"),
+    id: text(raw.id, "combined.id"),
+    ...(raw.mode === undefined ? {} : { mode: oneOf(raw.mode, RESTORE_MODES, "combined.mode") }),
+    restoreOperationId: text(raw.restoreOperationId, "combined.restoreOperationId"),
+    revision: contentHash(raw.revision, "combined.revision"),
+    sessionId: text(raw.sessionId, "combined.sessionId"),
+    state: oneOf(raw.state, COMBINED_STATES, "combined.state"),
+    targetLeafId: nullableText(raw.targetLeafId, "combined.targetLeafId"),
+    targetSnapshotId: text(raw.targetSnapshotId, "combined.targetSnapshotId"),
+    ...(raw.undoOf === undefined ? {} : { undoOf: text(raw.undoOf, "combined.undoOf") }),
+    updatedAt: isoTimestamp(raw.updatedAt, "combined.updatedAt"),
+    workspaceId: text(raw.workspaceId, "combined.workspaceId"),
+    workspaceState: oneOf(
+      raw.workspaceState,
+      ["unchanged", "restored", "compensated", "materialized-new", "needs-attention"] as const,
+      "combined.workspaceState",
+    ),
+    ...(raw.editorImages === undefined ? {} : { editorImages: parseEditorImages(raw.editorImages) }),
+    ...(raw.editorText === undefined ? {} : { editorText: plainText(raw.editorText, "combined.editorText") }),
+    ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
+    ...(raw.navigationMarkerId === undefined
+      ? {}
+      : { navigationMarkerId: text(raw.navigationMarkerId, "combined.navigationMarkerId") }),
   };
 };
 
@@ -1029,6 +1244,26 @@ export const parseWorkspaceRestoreOperationResult = (value: unknown): WorkspaceR
   };
 };
 
+export const parseWorkspaceCombinedRecoveryPrepareResult = (
+  value: unknown,
+): WorkspaceCombinedRecoveryPrepareResult => {
+  const raw = record(value, "Combined recovery prepare result");
+  return raw.status === "failed" ? failed(raw) : {
+    plan: parseWorkspaceCombinedRecoveryPlan(raw.plan),
+    status: oneOf(raw.status, ["ready"] as const, "combined prepare.status"),
+  };
+};
+
+export const parseWorkspaceCombinedRecoveryOperationResult = (
+  value: unknown,
+): WorkspaceCombinedRecoveryOperationResult => {
+  const raw = record(value, "Combined recovery operation result");
+  return raw.status === "failed" ? failed(raw) : {
+    operation: parseWorkspaceCombinedRecoveryOperation(raw.operation),
+    status: oneOf(raw.status, ["ready"] as const, "combined operation result.status"),
+  };
+};
+
 export const parseWorkspaceRecoveryEntryBindingResult = (value: unknown): WorkspaceRecoveryEntryBindingResult => {
   const raw = record(value, "Workspace recovery entry binding result");
   if (raw.status === "failed") return failed(raw);
@@ -1109,7 +1344,7 @@ export const parseWorkspaceRecoveryStatusResult = (value: unknown): WorkspaceRec
   const raw = record(value, "Workspace recovery status result");
   if (raw.status === "failed") return failed(raw);
   const capabilities = record(raw.capabilities, "status.capabilities");
-  for (const key of ["bindings", "capture", "checkpoints", "diff", "read", "restore", "storageManagement"] as const) {
+  for (const key of ["bindings", "capture", "checkpoints", "combined", "diff", "read", "restore", "storageManagement"] as const) {
     if (typeof capabilities[key] !== "boolean") throw new WorkspaceRecoveryContractError(`status.capabilities.${key} must be boolean`);
   }
   return {
@@ -1117,6 +1352,7 @@ export const parseWorkspaceRecoveryStatusResult = (value: unknown): WorkspaceRec
       bindings: capabilities.bindings as boolean,
       capture: capabilities.capture as boolean,
       checkpoints: capabilities.checkpoints as boolean,
+      combined: capabilities.combined as boolean,
       diff: capabilities.diff as boolean,
       read: capabilities.read as boolean,
       restore: capabilities.restore as boolean,
@@ -1153,17 +1389,22 @@ export const parseRecoveryStorageCleanupOperationResult = (value: unknown): Reco
 };
 
 export interface WorkspaceRecoveryAPI {
+  applyCombinedRecovery(input: WorkspaceCombinedRecoveryApplyInput): Promise<WorkspaceCombinedRecoveryOperationResult>;
   applyRestore(input: WorkspaceRestoreApplyInput): Promise<WorkspaceRestoreOperationResult>;
+  cancelCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   cancelOperation(operationId: string): Promise<WorkspaceRestoreOperationResult>;
   captureSnapshot(input: WorkspaceRecoveryCaptureInput): Promise<WorkspaceRecoveryCaptureResult>;
   cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupOperationResult>;
   createCheckpoint(input: WorkspaceRecoveryCheckpointInput): Promise<WorkspaceRecoveryCaptureResult>;
   deleteWorkspaceHistory(workspaceId: string): Promise<RecoveryStorageCleanupOperationResult>;
   diffSnapshots(input: WorkspaceRecoverySnapshotDiffInput): Promise<WorkspaceRecoveryDiffResult>;
+  getCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   getStorageMove(operationId: string): Promise<RecoveryStorageMoveResult>;
   getOperation(operationId: string): Promise<WorkspaceRestoreOperationResult>;
   listSnapshots(input: WorkspaceRecoverySnapshotQuery): Promise<WorkspaceRecoveryListResult>;
   readSnapshot(input: WorkspaceRecoverySnapshotReadInput): Promise<WorkspaceRecoveryReadResult>;
+  prepareCombinedRecovery(input: WorkspaceCombinedRecoveryPrepareInput): Promise<WorkspaceCombinedRecoveryPrepareResult>;
+  prepareCombinedUndo(operationId: string): Promise<WorkspaceCombinedRecoveryPrepareResult>;
   prepareRestore(input: WorkspaceRestorePrepareInput): Promise<WorkspaceRestorePrepareResult>;
   recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBindingResult>;
   recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBindingResult>;
@@ -1187,17 +1428,22 @@ export const createWorkspaceRecoveryAPI = (
     version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
   });
   return {
+    applyCombinedRecovery: async (input) => parseWorkspaceCombinedRecoveryOperationResult(await call("applyCombinedRecovery", [parseWorkspaceCombinedRecoveryApplyInput(input) as unknown as JsonValue])),
     applyRestore: async (input) => parseWorkspaceRestoreOperationResult(await call("applyRestore", [parseWorkspaceRestoreApplyInput(input) as unknown as JsonValue])),
+    cancelCombinedOperation: async (operationId) => parseWorkspaceCombinedRecoveryOperationResult(await call("cancelCombinedOperation", [text(operationId, "operationId")])),
     cancelOperation: async (operationId) => parseWorkspaceRestoreOperationResult(await call("cancelOperation", [text(operationId, "operationId")])),
     captureSnapshot: async (input) => parseWorkspaceRecoveryCaptureResult(await call("captureSnapshot", [parseWorkspaceRecoveryCaptureInput(input) as unknown as JsonValue])),
     cleanupStorage: async (input) => parseRecoveryStorageCleanupOperationResult(await call("cleanupStorage", [parseRecoveryStorageCleanupInput(input) as unknown as JsonValue])),
     createCheckpoint: async (input) => parseWorkspaceRecoveryCaptureResult(await call("createCheckpoint", [parseWorkspaceRecoveryCheckpointInput(input) as unknown as JsonValue])),
     deleteWorkspaceHistory: async (workspaceId) => parseRecoveryStorageCleanupOperationResult(await call("deleteWorkspaceHistory", [text(workspaceId, "workspaceId")])),
     diffSnapshots: async (input) => parseWorkspaceRecoveryDiffResult(await call("diffSnapshots", [parseWorkspaceRecoverySnapshotDiffInput(input) as unknown as JsonValue])),
+    getCombinedOperation: async (operationId) => parseWorkspaceCombinedRecoveryOperationResult(await call("getCombinedOperation", [text(operationId, "operationId")])),
     getStorageMove: async (operationId) => parseRecoveryStorageMoveResult(await call("getStorageMove", [text(operationId, "operationId")])),
     getOperation: async (operationId) => parseWorkspaceRestoreOperationResult(await call("getOperation", [text(operationId, "operationId")])),
     listSnapshots: async (input) => parseWorkspaceRecoveryListResult(await call("listSnapshots", [parseWorkspaceRecoverySnapshotQuery(input) as unknown as JsonValue])),
     readSnapshot: async (input) => parseWorkspaceRecoveryReadResult(await call("readSnapshot", [parseWorkspaceRecoverySnapshotReadInput(input) as unknown as JsonValue])),
+    prepareCombinedRecovery: async (input) => parseWorkspaceCombinedRecoveryPrepareResult(await call("prepareCombinedRecovery", [parseWorkspaceCombinedRecoveryPrepareInput(input) as unknown as JsonValue])),
+    prepareCombinedUndo: async (operationId) => parseWorkspaceCombinedRecoveryPrepareResult(await call("prepareCombinedUndo", [text(operationId, "operationId")])),
     prepareRestore: async (input) => parseWorkspaceRestorePrepareResult(await call("prepareRestore", [parseWorkspaceRestorePrepareInput(input) as unknown as JsonValue])),
     recordTurnSettled: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnSettled", [parseWorkspaceRecoveryTurnSettledInput(input) as unknown as JsonValue])),
     recordTurnStart: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnStart", [parseWorkspaceRecoveryTurnStartInput(input) as unknown as JsonValue])),

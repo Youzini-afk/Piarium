@@ -338,6 +338,54 @@ export interface HostMethodMap {
     params: { sessionId: string; summarize?: boolean; targetId: string };
     result: { cancelled: boolean; editorText?: string; snapshot: SessionSnapshot };
   };
+  "session.recovery.navigation.commit": {
+    params: {
+      expectedLeafId: string | null;
+      operationId: string;
+      preparedTargetLeafId: string | null;
+      sessionId: string;
+      targetId: string;
+    };
+    result: {
+      alreadyApplied: boolean;
+      editorImages?: ImageAttachment[];
+      editorText?: string;
+      markerId: string;
+      snapshot: SessionSnapshot;
+    };
+  };
+  "session.recovery.navigation.commitLeaf": {
+    params: {
+      expectedLeafId: string | null;
+      operationId: string;
+      preparedTargetLeafId: string | null;
+      sessionId: string;
+    };
+    result: {
+      alreadyApplied: boolean;
+      markerId: string;
+      snapshot: SessionSnapshot;
+    };
+  };
+  "session.recovery.navigation.prepare": {
+    params: { sessionId: string; targetId: string };
+    result: {
+      currentLeafId: string | null;
+      editorImages?: ImageAttachment[];
+      editorText?: string;
+      expectedLeafId: string | null;
+      targetId: string;
+      targetLeafId: string | null;
+    };
+  };
+  "session.recovery.navigation.prepareLeaf": {
+    params: { sessionId: string; targetLeafId: string | null };
+    result: {
+      currentLeafId: string | null;
+      expectedLeafId: string | null;
+      targetLeafId: string | null;
+    };
+  };
   "session.open": {
     params: { cwd?: string; sessionFile?: string; sessionId?: string };
     result: SessionSnapshot;

@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe('workspace.recovery-primitives Web Host capability', () => {
-  it('validates JSON input and exposes Phase 1 only through the fixed capability', async () => {
+  it('validates JSON input across capture, restore, and combined recovery primitives', async () => {
     harness = await createDocumentAuthorityHarness();
     await fs.promises.writeFile(`${harness.workspaceRoot}/note.txt`, 'content');
     const engine = createWorkspaceRecoveryEngine({
@@ -26,6 +26,7 @@ describe('workspace.recovery-primitives Web Host capability', () => {
     const listed = await capability('listSnapshots', { workspaceId: harness.identity.workspaceId });
     expect(listed.page.snapshots).toHaveLength(1);
     await expect(capability('captureSnapshot', { workspaceId: '' })).rejects.toThrow(/workspaceId/);
-    await expect(capability('prepareRestore', {})).rejects.toThrow(/does not implement/);
+    await expect(capability('prepareRestore', {})).rejects.toThrow(/targetSnapshotId/);
+    await expect(capability('prepareCombinedRecovery', {})).rejects.toThrow(/entryId/);
   });
 });
