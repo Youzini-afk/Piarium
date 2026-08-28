@@ -97,8 +97,13 @@ describe("PiRuntimeClient", () => {
     client.subscribe((event) => events.push(event.seq));
     await client.connect();
 
-    const sourceA = { role: "session" as const, sessionId: "a", workerId: "worker-a" };
-    const sourceB = { role: "catalog" as const, workerId: "worker-b" };
+    const sourceA = {
+      role: "session" as const,
+      runtimeGeneration: 1,
+      sessionId: "a",
+      workerId: "worker-a",
+    };
+    const sourceB = { role: "catalog" as const, runtimeGeneration: 1, workerId: "worker-b" };
     transport.receive(
       encodeRuntimeEnvelope(createRuntimeEvent(sourceA, 5, "session.closed", { sessionId: "a" })),
     );
