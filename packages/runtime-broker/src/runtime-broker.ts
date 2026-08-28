@@ -54,6 +54,35 @@ interface WorkspaceWorkerContext {
   ready: Promise<{ client: PiHostClient; sessionId: string }>;
 }
 
+export interface PiSessionExecutionAdmissionRequest {
+  cwd: string;
+  method?: HostMethod;
+  phase: "agent-run" | "worker-start" | "workspace-mutation";
+  sessionId?: string;
+  workerId: string;
+}
+
+export interface PiSessionExecutionLease {
+  close(): Promise<void> | void;
+}
+
+export type PiSessionExecutionAdmission = (
+  request: PiSessionExecutionAdmissionRequest,
+) => Promise<PiSessionExecutionLease | null | undefined>;
+
+interface SessionExecutionAdmissionState {
+  client: PiHostClient;
+  closing: boolean;
+  closePromise?: Promise<void>;
+  done: Promise<void>;
+  holders: number;
+  lease?: PiSessionExecutionLease | null;
+  phase: PiSessionExecutionAdmissionRequest["phase"];
+  ready: Promise<void>;
+  resolveDone(): void;
+  running: boolean;
+}
+
 export type PiRuntimeBrokerEvent =
   | {
       kind: "diagnostic";
@@ -93,6 +122,7 @@ export interface PiRuntimeBrokerOptions {
   packageRoot?: string;
   projectTrustOverride?: boolean;
   runtimeSource?: RuntimeSourceKind;
+  admitSessionExecution?: PiSessionExecutionAdmission;
   shutdownTimeoutMs?: number;
   promptForProjectTrust?(request: ProjectTrustRequest): Promise<ProjectTrustDecision>;
 }
@@ -147,6 +177,45 @@ const PACKAGE_MUTATION_METHODS = new Set<HostMethod>([
   "settings.update",
 ]);
 
+const AGENT_RUN_METHODS = new Set<HostMethod>([
+  "agent.followUp",
+  "agent.prompt",
+  "agent.steer",
+  "command.execute",
+  "fleet.action",
+]);
+
+const ALWAYS_WORKSPACE_MUTATION_METHODS = new Set<HostMethod>([
+  "recovery.checkpoint.create",
+  "recovery.navigate",
+  "recovery.repair",
+  "recovery.redo",
+  "recovery.undo",
+  "resource.delete",
+  "resource.update",
+]);
+
+const requiresWorkspaceAdmission = (method: HostMethod, params: unknown): boolean => {
+  if (AGENT_RUN_METHODS.has(method) || ALWAYS_WORKSPACE_MUTATION_METHODS.has(method)) return true;
+  const record = params && typeof params === "object" && !Array.isArray(params)
+    ? params as Record<string, unknown>
+    : {};
+  if (method === "config.document.update" || method === "settings.update") {
+    return record.scope === "project";
+  }
+  if (method === "config.text.update") return record.root === "project";
+  if (method === "config.text.authority.update") return record.authority === "pi-lens-project";
+  if (method === "provider.config.delete" || method === "provider.config.upsert") {
+    return record.scope === "project";
+  }
+  if (method === "package.update") return true;
+  if (method === "package.install" || method === "package.remove" || method === "package.setEnabled") {
+    return record.scope === "project";
+  }
+  if (method === "resource.copy" || method === "resource.create") return record.scope === "project";
+  return false;
+};
+
 export class PiRuntimeBroker {
   readonly #clients = new Set<PiHostClient>();
   readonly #configWatches = new Map<string, PiHostClient>();
@@ -156,6 +225,8 @@ export class PiRuntimeBroker {
   readonly #knownSummaries = new Map<string, SessionSummary>();
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
+  readonly #sessionExecutionAdmissions = new Map<PiHostClient, SessionExecutionAdmissionState>();
+  readonly #workerCwds = new Map<PiHostClient, string>();
   readonly #foundationalPackages: readonly FoundationalPiPackageManifestEntry[];
   readonly #workspaceContexts = new Map<string, WorkspaceWorkerContext>();
   readonly #workspaceSessions = new Map<string, PiHostClient>();
@@ -168,9 +239,11 @@ export class PiRuntimeBroker {
   #metadata: SessionMetadataStore | undefined;
   #packageMutationTail: Promise<void> = Promise.resolve();
   #receiptPromise: Promise<PackageProvisioningReceiptStore> | undefined;
+  #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
+    this.#sessionExecutionAdmission = options.admitSessionExecution;
     this.#foundationalPackages = [...(options.foundationalPackages ?? [])];
     this.#foundationalStatus = {
       autoInstallNew: true,
@@ -211,6 +284,13 @@ export class PiRuntimeBroker {
     return () => {
       this.#listeners.delete(listener);
     };
+  }
+
+  setSessionExecutionAdmission(admit: PiSessionExecutionAdmission): void {
+    if (typeof admit !== "function") {
+      throw new TypeError("Pi session execution admission must be a function");
+    }
+    this.#sessionExecutionAdmission = admit;
   }
 
   async warmup(): Promise<HostHandshakeResult> {
@@ -255,7 +335,7 @@ export class PiRuntimeBroker {
     return worker.request(method, params);
   }
 
-  requestForWorkspace<M extends Exclude<PiCatalogMethod, "session.list">>(
+  async requestForWorkspace<M extends Exclude<PiCatalogMethod, "session.list">>(
     cwd: string,
     method: M,
     params: HostMethodParams<M>,
@@ -273,7 +353,17 @@ export class PiRuntimeBroker {
         params as HostMethodParams<PiPackageMutationMethod>,
       ) as Promise<HostMethodResult<M>>;
     }
-    return this.#getWorkspaceContext(cwd).then(({ client }) => client.request(method, params));
+    const normalizedCwd = resolve(cwd);
+    const context = await this.#getWorkspaceContext(normalizedCwd);
+    if (!requiresWorkspaceAdmission(method, params)) return context.client.request(method, params);
+    return this.#requestWithExecutionAdmission(
+      context.client,
+      normalizedCwd,
+      context.sessionId,
+      method,
+      params,
+      "workspace-mutation",
+    );
   }
 
   async listCommandsForWorkspace(cwd: string): Promise<HostMethodResult<"command.list">> {
@@ -360,6 +450,11 @@ export class PiRuntimeBroker {
     } catch (error) {
       await this.#removeWorker(worker);
       throw error;
+    } finally {
+      const admission = this.#sessionExecutionAdmissions.get(worker);
+      if (admission?.phase === "worker-start") {
+        await this.#finishSessionExecutionAdmission(admission);
+      }
     }
   }
 
@@ -427,6 +522,11 @@ export class PiRuntimeBroker {
     } catch (error) {
       await this.#removeWorker(opened.worker);
       throw error;
+    } finally {
+      const admission = this.#sessionExecutionAdmissions.get(opened.worker);
+      if (admission?.phase === "worker-start") {
+        await this.#finishSessionExecutionAdmission(admission);
+      }
     }
   }
 
@@ -457,7 +557,43 @@ export class PiRuntimeBroker {
         params as HostMethodParams<PiPackageMutationMethod>,
       ) as Promise<HostMethodResult<M>>;
     }
-    return this.#workerForSession(sessionId).request(method, params);
+    const worker = this.#workerForSession(sessionId);
+    if (!requiresWorkspaceAdmission(method, params)) return worker.request(method, params);
+    const cwd = this.#workerCwds.get(worker);
+    if (!cwd) {
+      throw new PiRuntimeBrokerError(
+        "session_context_unavailable",
+        `Workspace context is unavailable for Pi session: ${sessionId}`,
+      );
+    }
+    return this.#requestWithExecutionAdmission(
+      worker,
+      cwd,
+      sessionId,
+      method,
+      params,
+      AGENT_RUN_METHODS.has(method) ? "agent-run" : "workspace-mutation",
+    );
+  }
+
+  async #requestWithExecutionAdmission<M extends HostMethod>(
+    worker: PiHostClient,
+    cwd: string,
+    sessionId: string | undefined,
+    method: M,
+    params: HostMethodParams<M>,
+    phase: PiSessionExecutionAdmissionRequest["phase"],
+  ): Promise<HostMethodResult<M>> {
+    const admission = await this.#ensureSessionExecutionAdmission(worker, cwd, {
+      method,
+      phase,
+      ...(sessionId === undefined ? {} : { sessionId }),
+    });
+    try {
+      return await worker.request(method, params);
+    } finally {
+      await this.#finishSessionExecutionAdmission(admission);
+    }
   }
 
   mutatePackage<M extends PiPackageMutationMethod>(
@@ -495,6 +631,13 @@ export class PiRuntimeBroker {
         }
         if ("sessionId" in target) {
           const worker = this.#workerForSession(target.sessionId);
+          const cwd = this.#workerCwds.get(worker);
+          if (!cwd) {
+            throw new PiRuntimeBrokerError(
+              "session_context_unavailable",
+              `Workspace context is unavailable for Pi session: ${target.sessionId}`,
+            );
+          }
           const foundational = source === undefined || scope !== "global"
             ? undefined
             : await this.#foundationalPackageForMutation(worker, source);
@@ -504,10 +647,20 @@ export class PiRuntimeBroker {
             scope,
             foundational,
             source,
-            () => worker.request(method, params),
+            () => requiresWorkspaceAdmission(method, params)
+              ? this.#requestWithExecutionAdmission(
+                  worker,
+                  cwd,
+                  target.sessionId,
+                  method,
+                  params,
+                  "workspace-mutation",
+                )
+              : worker.request(method, params),
           );
         }
-        return await this.#withWorkspaceContext(resolve(target.cwd), async (worker) => {
+        const workspaceCwd = resolve(target.cwd);
+        return await this.#withWorkspaceContext(workspaceCwd, async (worker) => {
           const foundational = source === undefined || scope !== "global"
             ? undefined
             : await this.#foundationalPackageForMutation(worker, source);
@@ -517,7 +670,16 @@ export class PiRuntimeBroker {
             scope,
             foundational,
             source,
-            () => worker.request(method, params),
+            () => requiresWorkspaceAdmission(method, params)
+              ? this.#requestWithExecutionAdmission(
+                  worker,
+                  workspaceCwd,
+                  undefined,
+                  method,
+                  params,
+                  "workspace-mutation",
+                )
+              : worker.request(method, params),
           );
         });
       } finally {
@@ -723,12 +885,18 @@ export class PiRuntimeBroker {
       this.#packageMutationTail,
       stoppingClients,
     ]);
+    await Promise.allSettled(
+      [...this.#sessionExecutionAdmissions.values()].map((state) => (
+        this.#releaseSessionExecutionAdmission(state, true)
+      )),
+    );
     this.#clients.clear();
     this.#configWatches.clear();
     this.#sessions.clear();
     this.#knownSummaries.clear();
     this.#pendingWorkspaceBindings.clear();
     this.#pendingProjectTrust.clear();
+    this.#workerCwds.clear();
     this.#catalog = undefined;
     this.#workspaceContexts.clear();
     this.#workspaceSessions.clear();
@@ -772,15 +940,23 @@ export class PiRuntimeBroker {
     if (existing) return existing.ready;
 
     const client = this.#createClient("workspace", normalizedCwd);
+    this.#workerCwds.set(client, normalizedCwd);
     this.#clients.add(client);
     const ready = (async () => {
-      await client.start();
-      const snapshot = await client.request("catalog.context.open", { cwd: normalizedCwd });
-      if (this.#disposed || this.#workspaceContexts.get(key)?.client !== client) {
-        throw new Error("Pi workspace worker was superseded during startup");
+      const admission = await this.#ensureSessionExecutionAdmission(client, normalizedCwd, {
+        phase: "worker-start",
+      });
+      try {
+        await client.start();
+        const snapshot = await client.request("catalog.context.open", { cwd: normalizedCwd });
+        if (this.#disposed || this.#workspaceContexts.get(key)?.client !== client) {
+          throw new Error("Pi workspace worker was superseded during startup");
+        }
+        this.#bindWorkspaceContext(client, snapshot.sessionId);
+        return { client, sessionId: snapshot.sessionId };
+      } finally {
+        await this.#finishSessionExecutionAdmission(admission);
       }
-      this.#bindWorkspaceContext(client, snapshot.sessionId);
-      return { client, sessionId: snapshot.sessionId };
     })();
     const context: WorkspaceWorkerContext = { client, cwd: normalizedCwd, ready };
     this.#workspaceContexts.set(key, context);
@@ -1217,8 +1393,10 @@ export class PiRuntimeBroker {
   async #spawnWorker(cwd: string): Promise<PiHostClient> {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
     const worker = this.#createClient("session", cwd);
+    this.#workerCwds.set(worker, cwd);
     this.#clients.add(worker);
     try {
+      await this.#ensureSessionExecutionAdmission(worker, cwd, { phase: "worker-start" });
       await worker.start();
       return worker;
     } catch (error) {
@@ -1259,6 +1437,18 @@ export class PiRuntimeBroker {
         }
         if (role === "session" && envelope.event === "session.snapshot") {
           this.#bindSession(client, envelope.data.sessionId);
+        }
+        if (role === "session" && envelope.event === "agent.event") {
+          if (envelope.data.event.type === "agent_start") {
+            const admission = this.#sessionExecutionAdmissions.get(client);
+            if (admission && !admission.closing) admission.running = true;
+          } else if (envelope.data.event.type === "agent_settled") {
+            const admission = this.#sessionExecutionAdmissions.get(client);
+            if (admission) {
+              admission.running = false;
+              void this.#releaseSessionExecutionAdmission(admission);
+            }
+          }
         }
         if (role === "workspace" && envelope.event === "session.snapshot") {
           this.#bindWorkspaceContext(client, envelope.data.sessionId);
@@ -1365,7 +1555,13 @@ export class PiRuntimeBroker {
     }
     this.#clearProjectTrustForClient(worker);
     this.#clearConfigWatchesForClient(worker);
-    await worker.dispose();
+    try {
+      await worker.dispose();
+    } finally {
+      this.#workerCwds.delete(worker);
+      const admission = this.#sessionExecutionAdmissions.get(worker);
+      if (admission) await this.#releaseSessionExecutionAdmission(admission, true);
+    }
   }
 
   #handleExit(
@@ -1390,6 +1586,9 @@ export class PiRuntimeBroker {
     }
     this.#clearProjectTrustForClient(client);
     this.#clearConfigWatchesForClient(client);
+    this.#workerCwds.delete(client);
+    const admission = this.#sessionExecutionAdmissions.get(client);
+    if (admission) void this.#releaseSessionExecutionAdmission(admission, true);
     this.#emit({
       code: exit.code,
       expected,
@@ -1410,6 +1609,107 @@ export class PiRuntimeBroker {
         // Surface callbacks are observational and must not break worker ownership.
       }
     }
+  }
+
+  async #ensureSessionExecutionAdmission(
+    client: PiHostClient,
+    cwd: string,
+    context: Pick<PiSessionExecutionAdmissionRequest, "method" | "phase" | "sessionId">,
+  ): Promise<SessionExecutionAdmissionState> {
+    for (;;) {
+      if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+      const existing = this.#sessionExecutionAdmissions.get(client);
+      if (existing) {
+        await existing.ready;
+        if (existing.closing || this.#sessionExecutionAdmissions.get(client) !== existing) {
+          await existing.done;
+          continue;
+        }
+        if (existing.phase === context.phase || (context.phase === "agent-run" && existing.running)) {
+          existing.holders += 1;
+          return existing;
+        }
+        await existing.done;
+        continue;
+      }
+      let resolveDone = () => {};
+      const done = new Promise<void>((resolve) => {
+        resolveDone = resolve;
+      });
+      const state: SessionExecutionAdmissionState = {
+        client,
+        closing: false,
+        done,
+        holders: 1,
+        phase: context.phase,
+        ready: Promise.resolve(),
+        resolveDone,
+        running: false,
+      };
+      this.#sessionExecutionAdmissions.set(client, state);
+      state.ready = (async () => {
+        const lease = await this.#sessionExecutionAdmission?.({
+          cwd,
+          ...(context.method === undefined ? {} : { method: context.method }),
+          phase: context.phase,
+          ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
+          workerId: client.id,
+        });
+        if (lease != null && typeof lease.close !== "function") {
+          throw new TypeError("Pi session execution admission must return a closeable lease");
+        }
+        state.lease = lease ?? null;
+      })().catch((error) => {
+        state.closing = true;
+        if (this.#sessionExecutionAdmissions.get(client) === state) {
+          this.#sessionExecutionAdmissions.delete(client);
+        }
+        state.resolveDone();
+        throw error;
+      });
+      await state.ready;
+      if (state.closing) {
+        await state.done;
+        continue;
+      }
+      return state;
+    }
+  }
+
+  #finishSessionExecutionAdmission(state: SessionExecutionAdmissionState): Promise<void> {
+    if (state.holders > 0) state.holders -= 1;
+    return this.#releaseSessionExecutionAdmission(state);
+  }
+
+  #releaseSessionExecutionAdmission(
+    state: SessionExecutionAdmissionState,
+    force: boolean = false,
+  ): Promise<void> {
+    if (state.closePromise) return state.closePromise;
+    if (!force && (state.holders > 0 || state.running)) return Promise.resolve();
+    state.closing = true;
+    state.closePromise = (async () => {
+      await state.ready.catch(() => undefined);
+      try {
+        await state.lease?.close();
+      } catch (error) {
+        this.#emit({
+          kind: "diagnostic",
+          level: "error",
+          message: `Failed to release Pi session execution admission: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          role: "session",
+          workerId: state.client.id,
+        });
+      }
+    })().finally(() => {
+      if (this.#sessionExecutionAdmissions.get(state.client) === state) {
+        this.#sessionExecutionAdmissions.delete(state.client);
+      }
+      state.resolveDone();
+    });
+    return state.closePromise;
   }
 
   #clearProjectTrustForClient(client: PiHostClient): void {

@@ -46,6 +46,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       attachSignals,
       apiOnly,
       dictationModelsDir,
+      documents,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -63,6 +64,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: terminalHeartbeatIntervalMs,
       TERMINAL_INPUT_WS_REBIND_WINDOW_MS: terminalRebindWindowMs,
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
+      documents,
     });
 
     const dictationRuntime = createDictationRuntime({

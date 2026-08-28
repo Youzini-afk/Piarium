@@ -20,6 +20,7 @@ const record = (resource: DocumentIdentity, buffer = 'const value = 1;'): Docume
   identity: resource,
   documentInstanceId: 'document-one',
   connectionGeneration: 1,
+  workspaceEpoch: 1,
   status: 'ready',
   dirty: false,
   saving: false,

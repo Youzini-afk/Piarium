@@ -372,7 +372,7 @@ export const createWorkspaceRecoveryEngine = ({
     database.prepare(INSERT_STAGED_ENTRY).run(entryRow(captureId, entry));
   };
 
-  const captureIntoCatalog = async (identity, storeRoot, input) => {
+  const captureIntoCatalog = async (identity, storeRoot, input, validateCapture) => {
     const captureId = randomUUID();
     const database = await openRecoveryCatalog(storeRoot, { create: true, fsPromises });
     const startedAt = new Date().toISOString();
@@ -549,6 +549,14 @@ export const createWorkspaceRecoveryEngine = ({
         'SELECT object_hash FROM staged_entries WHERE capture_id = ? AND object_hash IS NOT NULL ORDER BY path COLLATE BINARY',
       ).iterate(captureId)) {
         await verifyRecoveryObject(storeRoot, row.object_hash, { fsModule });
+      }
+      const validation = await validateCapture?.();
+      if (validation && !validation.stable) {
+        database.prepare(`
+          UPDATE staged_entries
+          SET coverage = 'unstable', reason = ?
+          WHERE capture_id = ? AND path = '.' AND coverage <> 'unstable'
+        `).run(`workspace-tracker:${validation.reasons.join(',')}`, captureId);
       }
       const manifestHash = calculateManifestHash(database, 'staged_entries', 'capture_id', captureId);
       const counts = database.prepare(`
@@ -1196,12 +1204,24 @@ export const createWorkspaceRecoveryEngine = ({
     },
     async captureSnapshot(input) {
       return runWorkspace(input.workspaceId, async () => {
+        let capture;
+        let captureCompleted = false;
         try {
           const identity = await inspectIdentity(input.workspaceId);
           const storage = await storageFor(identity);
-          return captureIntoCatalog(identity, storage.root, input);
+          capture = typeof documents.beginCapture === 'function'
+            ? await documents.beginCapture(input.workspaceId)
+            : null;
+          return await captureIntoCatalog(identity, storage.root, input, capture ? async () => {
+            captureCompleted = true;
+            return documents.completeCapture(capture);
+          } : undefined);
         } catch (error) {
           return failedRecoveryResult(error);
+        } finally {
+          if (capture && !captureCompleted) {
+            await documents.completeCapture(capture).catch(() => undefined);
+          }
         }
       });
     },

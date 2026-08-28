@@ -1,8 +1,10 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -120,11 +122,11 @@ const registerExec = ({ spawn }) => {
   return getRoute('POST', '/api/fs/exec');
 };
 
-const registerWrite = (fsPromises) => {
+const registerWrite = (fsPromises, options = {}) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
     os: { homedir: () => '/home/user' },
-    path: path.posix,
+    path: options.path || path.posix,
     fsPromises: {
       realpath: async (targetPath) => targetPath,
       ...fsPromises,
@@ -132,10 +134,11 @@ const registerWrite = (fsPromises) => {
     spawn: vi.fn(),
     crypto: { randomUUID: () => 'job-0' },
     normalizeDirectoryPath: (p) => p,
-    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    resolveProjectDirectory: async () => ({ directory: options.workspaceRoot || '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
     piariumUserConfigRoot: '/home/user/.config',
+    documents: options.documents,
   });
   return getRoute('POST', '/api/fs/write');
 };
@@ -452,6 +455,30 @@ describe('fs write', () => {
     expect(res.body).toEqual({ error: 'Access denied' });
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
     expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('records workspace mutations and refuses writes during maintenance', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const handler = registerWrite(fs.promises, {
+        documents: harness.authority,
+        workspaceRoot: harness.workspaceRoot,
+        path,
+      });
+      const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+
+      const written = await callWrite(handler, { path: path.join(harness.workspaceRoot, 'tracked.txt'), content: 'tracked' });
+      expect(written.statusCode).toBe(200);
+      const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
+
+      await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+      const rejected = await callWrite(handler, { path: path.join(harness.workspaceRoot, 'late.txt'), content: 'late' });
+      expect(rejected.statusCode).toBe(409);
+      expect(fs.existsSync(path.join(harness.workspaceRoot, 'late.txt'))).toBe(false);
+    } finally {
+      await harness.cleanup();
+    }
   });
 });
 

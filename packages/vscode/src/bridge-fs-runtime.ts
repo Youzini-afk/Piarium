@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
+import { runVSCodeMutation, runVSCodeProcessMutation, type VSCodeMutationAuthority } from './documents-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -120,7 +121,44 @@ type FsDeps = {
   >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
+  documents?: VSCodeMutationAuthority;
 };
+
+const isReadOnlyGitShellCommand = (command: string): boolean => {
+  const normalized = normalizeCommand(command);
+  if (/[;&|<>`$]/.test(normalized)) return false;
+  return /^git\s+(?:(?:--(?:no-pager|no-color|literal-pathspecs)|--(?:work-tree|git-dir)(?:=\S+|\s+\S+)|-C\s+\S+)\s+)*(?:status|diff|log)(?:\s|$)/.test(normalized);
+};
+
+const runFsMutation = <T>(
+  deps: FsDeps,
+  targetPaths: readonly string[],
+  owner: { kind: string; id: string },
+  operation: () => PromiseLike<T> | T,
+  mutation?: { mode?: 'controlled' | 'process' | 'external'; purpose?: string },
+): Promise<T> => runVSCodeMutation({
+  workspace: vscode.workspace,
+  documents: deps.documents,
+  targetPaths,
+  owner,
+  operation,
+  mutation,
+});
+
+const runFsProcessMutation = <T>(
+  deps: FsDeps,
+  targetPaths: readonly string[],
+  owner: { kind: string; id: string },
+  operation: () => PromiseLike<T> | T,
+  purpose: string,
+): Promise<T> => runVSCodeProcessMutation({
+  workspace: vscode.workspace,
+  documents: deps.documents,
+  targetPaths,
+  owner,
+  operation,
+  purpose,
+});
 
 const runGitCheckIgnore = async (
   execGit: FsDeps['execGit'],
@@ -245,7 +283,13 @@ export async function handleFsBridgeMessage(
       }
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
       const resolvedPath = deps.resolveUserPath(target, workspaceRoot);
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedPath));
+      await runFsMutation(
+        deps,
+        [resolvedPath],
+        { kind: 'vscode-fs', id: `${id}:mkdir` },
+        () => vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedPath)),
+        { purpose: 'vscode-fs-mkdir' },
+      );
       return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
     }
 
@@ -300,7 +344,13 @@ export async function handleFsBridgeMessage(
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
         const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
         const uri = vscode.Uri.file(resolvedPath);
-        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
+        await runFsMutation(
+          deps,
+          [resolvedPath],
+          { kind: 'vscode-fs', id: `${id}:delete` },
+          () => vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false }),
+          { purpose: 'vscode-fs-delete' },
+        );
         return { id, type, success: true, data: { success: true } };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete file';
@@ -322,7 +372,13 @@ export async function handleFsBridgeMessage(
         const resolvedNew = deps.resolveUserPath(newPath, workspaceRoot);
         const oldUri = vscode.Uri.file(resolvedOld);
         const newUri = vscode.Uri.file(resolvedNew);
-        await vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false });
+        await runFsMutation(
+          deps,
+          [resolvedOld, resolvedNew],
+          { kind: 'vscode-fs', id: `${id}:rename` },
+          () => vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false }),
+          { purpose: 'vscode-fs-rename' },
+        );
         return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedNew) } };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to rename file';
@@ -422,12 +478,22 @@ export async function handleFsBridgeMessage(
 
         const results: FsExecCommandResult[] = [];
 
-        for (const cmd of commands) {
+        for (const [index, cmd] of commands.entries()) {
           if (typeof cmd !== 'string' || !cmd.trim()) {
             results.push({ command: cmd, success: false, error: 'Invalid command' });
             continue;
           }
-          results.push(await runCommandWithGitReadCache(cmd));
+          const run = () => runCommandWithGitReadCache(cmd);
+          const result = isReadOnlyGitShellCommand(cmd)
+            ? await run()
+            : await runFsProcessMutation(
+              deps,
+              [resolvedCwd],
+              { kind: 'vscode-shell', id: `${id}:${index}` },
+              run,
+              'vscode-shell-exec',
+            );
+          results.push(result);
         }
 
         const allSucceeded = results.every((r) => r.success);
@@ -536,7 +602,13 @@ export async function handleFsBridgeMessage(
 
       const base64 = dataUrl.slice(commaIndex + 1);
       const bytes = Buffer.from(base64, 'base64');
-      await vscode.workspace.fs.writeFile(saveUri, bytes);
+      await runFsMutation(
+        deps,
+        [saveUri.fsPath],
+        { kind: 'vscode-fs', id: `${id}:save-image` },
+        () => vscode.workspace.fs.writeFile(saveUri, bytes),
+        { purpose: 'vscode-fs-save-image' },
+      );
 
       return { id, type, success: true, data: { saved: true, path: saveUri.fsPath || saveUri.toString() } };
     }
@@ -565,7 +637,13 @@ export async function handleFsBridgeMessage(
         return { id, type, success: true, data: { saved: false, canceled: true } };
       }
 
-      await vscode.workspace.fs.writeFile(saveUri, Buffer.from(content, 'utf8'));
+      await runFsMutation(
+        deps,
+        [saveUri.fsPath],
+        { kind: 'vscode-fs', id: `${id}:save-markdown` },
+        () => vscode.workspace.fs.writeFile(saveUri, Buffer.from(content, 'utf8')),
+        { purpose: 'vscode-fs-save-markdown' },
+      );
 
       return { id, type, success: true, data: { saved: true, path: saveUri.fsPath || saveUri.toString() } };
     }

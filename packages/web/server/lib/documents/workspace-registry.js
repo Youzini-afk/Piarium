@@ -90,6 +90,16 @@ export const createWorkspaceRegistry = ({
     return current.workspaces.find((entry) => normalizeComparePath(entry.canonicalPath, pathModule) === needle);
   };
 
+  const findContainingPath = (current, canonicalPath) => {
+    const needle = normalizeComparePath(canonicalPath, pathModule);
+    return current.workspaces
+      .filter((entry) => {
+        const root = normalizeComparePath(entry.canonicalPath, pathModule);
+        return needle === root || needle.startsWith(`${root}${pathModule.sep}`);
+      })
+      .sort((left, right) => right.canonicalPath.length - left.canonicalPath.length)[0] ?? null;
+  };
+
   return {
     async resolve({ canonicalPath, workspaceId, create }) {
       if (workspaceId) {
@@ -99,12 +109,17 @@ export const createWorkspaceRegistry = ({
         return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
       }
       if (!canonicalPath) throw new DocumentPathError('Workspace path is required', 400);
+      const current = await read();
+      const existing = findByPath(current, canonicalPath);
+      if (existing) {
+        return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+      }
+      if (!create) return null;
       return mutate((current) => {
-        const existing = findByPath(current, canonicalPath);
-        if (existing) {
-          return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+        const currentExisting = findByPath(current, canonicalPath);
+        if (currentExisting) {
+          return { workspaceId: currentExisting.workspaceId, canonicalPath: currentExisting.canonicalPath, hostId };
         }
-        if (!create) return null;
         const created = {
           workspaceId: randomUUID(),
           canonicalPath,
@@ -118,6 +133,13 @@ export const createWorkspaceRegistry = ({
     async get(workspaceId) {
       const current = await read();
       const existing = current.workspaces.find((entry) => entry.workspaceId === workspaceId);
+      if (!existing) return null;
+      return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+    },
+
+    async findContaining(canonicalPath) {
+      const current = await read();
+      const existing = findContainingPath(current, canonicalPath);
       if (!existing) return null;
       return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
     },

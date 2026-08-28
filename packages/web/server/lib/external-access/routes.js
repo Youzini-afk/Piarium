@@ -469,6 +469,7 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     resolveProjectDirectory,
     __dirname,
     deploymentRoot,
+    documents,
   } = dependencies;
 
   const rootRuntime = createExternalAccessRootRuntime({
@@ -481,6 +482,18 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     resolveProjectDirectory,
     deploymentRoot,
   });
+
+  const runWorkspaceMutation = (resolved, ownerId, operation, options = {}) => {
+    if (resolved?.root?.source !== 'workspace' || typeof documents?.runMutationForScope !== 'function') {
+      return operation();
+    }
+    return documents.runMutationForScope(
+      resolved.root.realPath,
+      { kind: 'web-route', id: ownerId },
+      operation,
+      options,
+    );
+  };
 
   app.get('/api/external/me', (req, res) => {
     const context = req.piariumAuth || null;
@@ -622,26 +635,33 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
         return res.status(400).json({ error: 'content must be a string' });
       }
       const candidate = await rootRuntime.resolvePath(req, { rootId, relativePath, mustExist: false });
-      if (body.createParents !== false) {
-        await fsPromises.mkdir(path.dirname(candidate.absolutePath), { recursive: true });
-      }
       const resolved = await rootRuntime.resolvePath(req, { rootId, relativePath, mustExist: false, forWrite: true });
-      const expectedMtimeMs = typeof body.expectedMtimeMs === 'number' ? body.expectedMtimeMs : null;
-      if (expectedMtimeMs !== null) {
-        try {
-          const current = await fsPromises.stat(resolved.absolutePath);
-          if (Math.abs(current.mtimeMs - expectedMtimeMs) > 1) {
-            return res.status(409).json({ error: 'File was modified after it was read' });
-          }
-        } catch (error) {
-          if (error?.code !== 'ENOENT') throw error;
+      const result = await runWorkspaceMutation(resolved, 'external.fs.write', async () => {
+        if (body.createParents !== false) {
+          await fsPromises.mkdir(path.dirname(candidate.absolutePath), { recursive: true });
         }
+        const expectedMtimeMs = typeof body.expectedMtimeMs === 'number' ? body.expectedMtimeMs : null;
+        if (expectedMtimeMs !== null) {
+          try {
+            const current = await fsPromises.stat(resolved.absolutePath);
+            if (Math.abs(current.mtimeMs - expectedMtimeMs) > 1) {
+              return { conflict: true };
+            }
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error;
+          }
+        }
+        const buffer = body.encoding === 'base64'
+          ? Buffer.from(body.content, 'base64')
+          : Buffer.from(body.content, 'utf8');
+        await fsPromises.writeFile(resolved.absolutePath, buffer);
+        const stats = await fsPromises.stat(resolved.absolutePath);
+        return { stats };
+      }, { mode: 'external', purpose: 'external-fs-write' });
+      if (result?.conflict) {
+        return res.status(409).json({ error: 'File was modified after it was read' });
       }
-      const buffer = body.encoding === 'base64'
-        ? Buffer.from(body.content, 'base64')
-        : Buffer.from(body.content, 'utf8');
-      await fsPromises.writeFile(resolved.absolutePath, buffer);
-      const stats = await fsPromises.stat(resolved.absolutePath);
+      const stats = result.stats;
       return res.json({
         success: true,
         root: resolved.root.id,
@@ -664,12 +684,14 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
         mustExist: false,
         forWrite: true,
       });
-      await fsPromises.mkdir(resolved.absolutePath, { recursive: true });
-      const canonical = await rootRuntime.resolvePath(req, {
-        rootId: req.body?.root || 'deployment',
-        relativePath: req.body?.path || '.',
-        mustExist: true,
-      });
+      const canonical = await runWorkspaceMutation(resolved, 'external.fs.folder', async () => {
+        await fsPromises.mkdir(resolved.absolutePath, { recursive: true });
+        return rootRuntime.resolvePath(req, {
+          rootId: req.body?.root || 'deployment',
+          relativePath: req.body?.path || '.',
+          mustExist: true,
+        });
+      }, { mode: 'external', purpose: 'external-fs-folder' });
       return res.json({
         success: true,
         root: canonical.root.id,
@@ -696,7 +718,12 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
       if (stats.isDirectory() && !recursive) {
         return res.status(400).json({ error: 'recursive=true is required to delete directories' });
       }
-      await fsPromises.rm(resolved.absolutePath, { recursive, force: false });
+      await runWorkspaceMutation(
+        resolved,
+        'external.fs.delete',
+        () => fsPromises.rm(resolved.absolutePath, { recursive, force: false }),
+        { mode: 'external', purpose: 'external-fs-delete' },
+      );
       return res.json({
         success: true,
         root: resolved.root.id,
@@ -733,13 +760,18 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
       const envPath = typeof buildAugmentedPath === 'function'
         ? buildAugmentedPath(process.env.PATH || '')
         : process.env.PATH;
-      const result = await runCommand({
-        spawn,
-        command,
-        cwd: resolved.absolutePath,
-        timeoutMs,
-        env: { ...process.env, PATH: envPath },
-      });
+      const result = await runWorkspaceMutation(
+        resolved,
+        'external.command',
+        () => runCommand({
+          spawn,
+          command,
+          cwd: resolved.absolutePath,
+          timeoutMs,
+          env: { ...process.env, PATH: envPath },
+        }),
+        { mode: 'process', purpose: 'external-command' },
+      );
       return res.json({
         ...result,
         root: resolved.root.id,

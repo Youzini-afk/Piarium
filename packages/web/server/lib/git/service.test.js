@@ -2,7 +2,7 @@ import * as childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 
 import {
@@ -25,6 +25,7 @@ import {
   unstageFiles,
   applyHunk,
   getDiff,
+  integrateWorktreeCommits,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -417,6 +418,70 @@ describe('worktree root resolution', () => {
   });
 });
 
+describe('integrateWorktreeCommits writer lifecycle', () => {
+  it('acquires the repository writer before creating the temporary worktree', async () => {
+    if (!canRunGit()) return;
+
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    process.env.PIARIUM_DATA_DIR = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      runGit(repo, ['checkout', '-b', 'feature']);
+      fs.writeFileSync(path.join(repo, 'feature.txt'), 'feature\n');
+      runGit(repo, ['add', 'feature.txt']);
+      runGit(repo, ['commit', '-m', 'Feature commit']);
+      const featureCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+      runGit(repo, ['checkout', '-b', 'parking', 'main']);
+
+      const writer = {
+        markMutated: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+      const registrations = [];
+      const documents = {
+        resolveScopeId: vi.fn().mockResolvedValue('repository-workspace'),
+        registerWriterForScope: vi.fn(async (scope, owner, options) => {
+          registrations.push({
+            scope,
+            owner,
+            options,
+            worktrees: runGit(repo, ['worktree', 'list', '--porcelain']),
+          });
+          return writer;
+        }),
+      };
+
+      await expect(integrateWorktreeCommits({
+        repoRoot: repo,
+        sourceBranch: 'feature',
+        targetBranch: 'main',
+        commits: [featureCommit],
+      }, { documents })).resolves.toEqual({ kind: 'success', moved: 1 });
+
+      expect(registrations).toHaveLength(1);
+      expect(registrations[0]).toMatchObject({
+        scope: path.resolve(repo),
+        options: { mode: 'process', purpose: 'git-integrate-run' },
+      });
+      expect(registrations[0].worktrees).not.toContain('piarium-integrate-');
+      expect(writer.markMutated).toHaveBeenCalledTimes(1);
+      expect(writer.close).toHaveBeenCalledTimes(1);
+      expect(runGit(repo, ['show', 'main:feature.txt'])).toBe('feature\n');
+    } finally {
+      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
+      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // createWorktree
 // ---------------------------------------------------------------------------
@@ -652,6 +717,193 @@ describe('createWorktree', () => {
     }
   });
 
+  it('hands the create writer to background bootstrap before returning and releases it exactly once', async () => {
+    if (!canRunGit()) return;
+
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    const setupStarted = path.join(dataHome, 'writer-setup-started');
+    const setupFinished = path.join(dataHome, 'writer-setup-finished');
+    const setupScript = path.join(dataHome, 'writer-setup.cjs');
+    process.env.PIARIUM_DATA_DIR = dataHome;
+    fs.writeFileSync(
+      setupScript,
+      `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
+    );
+
+    const writers = [];
+    let requestReturned = false;
+    const documents = {
+      registerWriterForScope: vi.fn(async (_scope, _owner, options) => {
+        if (requestReturned) {
+          throw Object.assign(new Error('Workspace is in maintenance mode'), { code: 'maintenance' });
+        }
+        const record = {
+          purpose: options?.purpose,
+          closed: false,
+          markCalls: 0,
+          closeCalls: 0,
+        };
+        writers.push(record);
+        return {
+          async markMutated() { record.markCalls += 1; },
+          async close() { record.closeCalls += 1; record.closed = true; },
+        };
+      }),
+    };
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/writer-lifecycle',
+        worktreeName: 'writer-lifecycle',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(setupScript)}`,
+      }, { documents });
+      requestReturned = true;
+
+      expect(writers).toHaveLength(1);
+      expect(writers[0]).toMatchObject({ purpose: 'git-worktree-create', closed: false });
+      await expect.poll(() => fs.existsSync(setupStarted), { timeout: 5_000 }).toBe(true);
+      expect(writers[0].closed).toBe(false);
+      await expect.poll(() => fs.existsSync(setupFinished), { timeout: 5_000 }).toBe(true);
+      await expect.poll(() => writers[0].closed, { timeout: 5_000 }).toBe(true);
+      expect(writers[0]).toMatchObject({ markCalls: 1, closeCalls: 1 });
+      expect(documents.registerWriterForScope).toHaveBeenCalledTimes(1);
+
+      await removeWorktree(repo, { directory: created.path });
+    } finally {
+      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
+      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+    }
+  });
+
+  it('keeps the create writer through bootstrap on the normal create path', async () => {
+    if (!canRunGit()) return;
+
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    const setupStarted = path.join(dataHome, 'sync-writer-setup-started');
+    const setupFinished = path.join(dataHome, 'sync-writer-setup-finished');
+    const setupScript = path.join(dataHome, 'sync-writer-setup.cjs');
+    process.env.PIARIUM_DATA_DIR = dataHome;
+    fs.writeFileSync(
+      setupScript,
+      `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
+    );
+
+    const record = { closed: false, markCalls: 0, closeCalls: 0 };
+    const documents = {
+      registerWriterForScope: vi.fn(async () => ({
+        async markMutated() { record.markCalls += 1; },
+        async close() { record.closeCalls += 1; record.closed = true; },
+      })),
+    };
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/sync-writer-lifecycle',
+        worktreeName: 'sync-writer-lifecycle',
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(setupScript)}`,
+      }, { documents });
+
+      expect(record.closed).toBe(false);
+      await expect.poll(() => fs.existsSync(setupStarted), { timeout: 5_000 }).toBe(true);
+      expect(record.closed).toBe(false);
+      await expect.poll(() => fs.existsSync(setupFinished), { timeout: 5_000 }).toBe(true);
+      await expect.poll(() => record.closed, { timeout: 5_000 }).toBe(true);
+      expect(record).toMatchObject({ markCalls: 1, closeCalls: 1 });
+      expect(documents.registerWriterForScope).toHaveBeenCalledTimes(1);
+
+      await removeWorktree(repo, { directory: created.path });
+    } finally {
+      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
+      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+    }
+  });
+
+  it('keeps the create writer active until failed background attach cleanup finishes', async () => {
+    if (!canRunGit()) return;
+
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    process.env.PIARIUM_DATA_DIR = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const candidateDirectory = path.join(
+        dataHome,
+        'worktrees',
+        createProjectIdFromPath(canonicalGitPath(repo)),
+        'writer-attach-failure',
+      );
+      const record = {
+        closed: false,
+        pathExistedAtClose: null,
+        markCalls: 0,
+        closeCalls: 0,
+      };
+      const documents = {
+        registerWriterForScope: vi.fn(async () => ({
+          async markMutated() { record.markCalls += 1; },
+          async close() {
+            record.closeCalls += 1;
+            record.pathExistedAtClose = fs.existsSync(candidateDirectory);
+            record.closed = true;
+          },
+        })),
+      };
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'invalid..branch',
+        worktreeName: 'writer-attach-failure',
+        returnAfterDirectoryCreated: true,
+      }, { documents });
+
+      expect(created.path).toBe(candidateDirectory);
+      expect(record.closed).toBe(false);
+      await expect.poll(() => record.closed, { timeout: 5_000 }).toBe(true);
+      expect(record).toMatchObject({
+        pathExistedAtClose: false,
+        markCalls: 1,
+        closeCalls: 1,
+      });
+      expect(fs.existsSync(candidateDirectory)).toBe(false);
+      await expect(getWorktreeBootstrapStatus(candidateDirectory)).resolves.toMatchObject({
+        status: 'failed',
+        phase: 'directory-created',
+      });
+    } finally {
+      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
+      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+    }
+  });
+
   it('recovers from an unchanged stale index lock while populating a worktree', async () => {
     if (!canRunGit()) return;
 
@@ -692,6 +944,13 @@ describe('createWorktree', () => {
       runGit(repo, ['add', 'README.md']);
       runGit(repo, ['commit', '-m', 'Initial commit']);
       const projectId = createProjectIdFromPath(canonicalGitPath(repo));
+      const writer = {
+        markMutated: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+      const documents = {
+        registerWriterForScope: vi.fn().mockResolvedValue(writer),
+      };
 
       fs.rmSync(worktree, { recursive: true, force: true });
       runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
@@ -703,10 +962,13 @@ describe('createWorktree', () => {
         branchName: 'feature/in-use',
         worktreeName: 'feature-in-use',
         returnAfterDirectoryCreated: true,
-      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
+      }, { documents })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
 
       const candidateDirectory = path.join(dataHome, 'worktrees', projectId, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);
+      expect(documents.registerWriterForScope).toHaveBeenCalledTimes(1);
+      expect(writer.markMutated).toHaveBeenCalledTimes(1);
+      expect(writer.close).toHaveBeenCalledTimes(1);
       expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
       expect(fs.existsSync(path.join(dataHome, 'opencode'))).toBe(false);
     } finally {

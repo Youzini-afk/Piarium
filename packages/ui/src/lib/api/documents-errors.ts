@@ -3,6 +3,7 @@ export type DocumentsFailureReason =
   | 'untrusted'
   | 'path-escape'
   | 'stale-completion'
+  | 'maintenance'
   | 'unsupported';
 
 export class DocumentsError extends Error {
@@ -27,6 +28,7 @@ export const parseDocumentsFailureReason = (value: unknown): DocumentsFailureRea
     case 'untrusted':
     case 'path-escape':
     case 'stale-completion':
+    case 'maintenance':
     case 'unsupported':
       return value;
     default:

@@ -73,7 +73,17 @@ const createRouteContext = (dependencies) => {
     osModule,
   });
 
-  return { config, fsPromises, pathModule, osModule };
+  return { config, fsPromises, pathModule, osModule, documents: dependencies.documents };
+};
+
+const runWorkspaceMutation = (context, ownerId, operation, options = {}) => {
+  if (typeof context.documents?.runMutationForScope !== 'function') return operation();
+  return context.documents.runMutationForScope(
+    context.config.root,
+    { kind: 'web-route', id: ownerId },
+    operation,
+    options,
+  );
 };
 
 const readTree = async (relativePath, depth, context) => {
@@ -210,7 +220,11 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/folder', async (req, res) => {
     try {
-      res.json(await createWorkspaceFolder(getRequestPath(req), context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.folder',
+        () => createWorkspaceFolder(getRequestPath(req), context.config, context),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -218,10 +232,14 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/file', async (req, res) => {
     try {
-      res.json(await createWorkspaceFile(getRequestPath(req), context.config, {
-        ...context,
-        content: req.body?.content ?? '',
-      }));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.file',
+        () => createWorkspaceFile(getRequestPath(req), context.config, {
+          ...context,
+          content: req.body?.content ?? '',
+        }),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -231,7 +249,11 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
     try {
       const from = req.body?.from ?? req.body?.oldPath;
       const to = req.body?.to ?? req.body?.newPath;
-      res.json(await moveWorkspaceEntry(from, to, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.move',
+        () => moveWorkspaceEntry(from, to, context.config, context),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -239,10 +261,14 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.delete('/api/workspace/entry', async (req, res) => {
     try {
-      res.json(await deleteWorkspaceEntry(getRequestPath(req), context.config, {
-        ...context,
-        permanent: req.body?.permanent === true,
-      }));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.delete',
+        () => deleteWorkspaceEntry(getRequestPath(req), context.config, {
+          ...context,
+          permanent: req.body?.permanent === true,
+        }),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -252,10 +278,18 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
     try {
       if (req.is('multipart/form-data')) {
         const files = await parseMultipartUpload(req, res);
-        res.json(await uploadWorkspaceMultipartFiles(getRequestPath(req), files, context.config, context));
+        res.json(await runWorkspaceMutation(
+          context,
+          'workspace.upload',
+          () => uploadWorkspaceMultipartFiles(getRequestPath(req), files, context.config, context),
+        ));
         return;
       }
-      res.json(await uploadWorkspaceFiles(getRequestPath(req), req.body?.files, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.upload',
+        () => uploadWorkspaceFiles(getRequestPath(req), req.body?.files, context.config, context),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -271,7 +305,11 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/archive/extract', async (req, res) => {
     try {
-      res.json(await extractWorkspaceArchive(req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.archive.extract',
+        () => extractWorkspaceArchive(req.body, context.config, context),
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -326,7 +364,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/git/fetch', async (req, res) => {
     try {
-      res.json(await workspaceGitFetch(getRequestPath(req), req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.fetch',
+        () => workspaceGitFetch(getRequestPath(req), req.body, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-fetch' },
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -334,7 +377,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/git/clone', async (req, res) => {
     try {
-      res.json(await workspaceGitClone(getRequestPath(req), req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.clone',
+        () => workspaceGitClone(getRequestPath(req), req.body, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-clone' },
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -342,7 +390,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/git/pull', async (req, res) => {
     try {
-      res.json(await workspaceGitPull(getRequestPath(req), req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.pull',
+        () => workspaceGitPull(getRequestPath(req), req.body, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-pull' },
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -350,7 +403,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/git/push', async (req, res) => {
     try {
-      res.json(await workspaceGitPush(getRequestPath(req), req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.push',
+        () => workspaceGitPush(getRequestPath(req), req.body, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-push' },
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -360,7 +418,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
     try {
       const branch = String(req.body?.branch || '').trim();
       if (!branch) return res.status(400).json({ error: 'branch is required' });
-      res.json(await workspaceGitCheckout(getRequestPath(req), branch, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.checkout',
+        () => workspaceGitCheckout(getRequestPath(req), branch, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-checkout' },
+      ));
     } catch (error) {
       sendError(res, error);
     }
@@ -368,7 +431,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.post('/api/workspace/git/commit', async (req, res) => {
     try {
-      res.json(await workspaceGitCommit(getRequestPath(req), req.body, context.config, context));
+      res.json(await runWorkspaceMutation(
+        context,
+        'workspace.git.commit',
+        () => workspaceGitCommit(getRequestPath(req), req.body, context.config, context),
+        { mode: 'process', purpose: 'workspace-git-commit' },
+      ));
     } catch (error) {
       sendError(res, error);
     }

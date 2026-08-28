@@ -13,6 +13,16 @@ const isOsPermissionError = (error) => (
   && (error.code === 'EACCES' || error.code === 'EPERM')
 );
 
+const sendMutationAuthorityError = (res, error) => {
+  if (error?.code !== 'maintenance' && error?.code !== 'stale-epoch') return null;
+  const status = Number.isInteger(error.statusCode) ? error.statusCode : 409;
+  return res.status(status).json({
+    error: error.message || 'Workspace mutation is unavailable',
+    reason: error.code,
+    ...(error.currentEpoch ? { currentEpoch: error.currentEpoch } : {}),
+  });
+};
+
 const pruneOutsideFileGrants = () => {
   const now = Date.now();
   for (const [token, grant] of outsideFileGrants.entries()) {
@@ -175,11 +185,11 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
   const resolvedBase = path.resolve(baseDirectory || os.homedir());
 
   if (isPathWithinRoot(resolved, resolvedBase, path, os)) {
-    return { ok: true, base: resolvedBase, resolved };
+    return { ok: true, base: resolvedBase, resolved, workspaceRoot: true };
   }
 
   if (isPathWithinRoot(resolved, piariumUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(piariumUserConfigRoot), resolved };
+    return { ok: true, base: path.resolve(piariumUserConfigRoot), resolved, workspaceRoot: false };
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
@@ -208,7 +218,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
       }
       const candidateResolved = path.resolve(candidate);
       if (isPathWithinRoot(resolved, candidateResolved, path, os)) {
-        return { ok: true, base: candidateResolved, resolved };
+        return { ok: true, base: candidateResolved, resolved, workspaceRoot: true };
       }
     }
   } catch (error) {
@@ -353,10 +363,23 @@ export const registerFsRoutes = (app, dependencies) => {
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
     piariumUserConfigRoot,
+    documents,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
   });
+
+  const runWorkspaceMutation = (resolved, ownerId, operation, options = {}) => {
+    if (!resolved?.workspaceRoot || typeof documents?.runMutationForScope !== 'function') {
+      return operation();
+    }
+    return documents.runMutationForScope(
+      resolved.base,
+      { kind: 'web-route', id: ownerId },
+      operation,
+      options,
+    );
+  };
 
   const spawnDetached = (command, args) => new Promise((resolve, reject) => {
     let child;
@@ -547,8 +570,17 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       let resolvedPath = '';
+      let resolvedContext = null;
       if (allowOutsideWorkspace) {
         resolvedPath = path.resolve(normalizeDirectoryPath(dirPath.trim()));
+        resolvedContext = { workspaceRoot: false };
+        if (typeof documents?.runMutationForScope === 'function') {
+          const project = await resolveProjectDirectory(req).catch(() => null);
+          const projectRoot = project?.directory ? path.resolve(project.directory) : '';
+          if (projectRoot && isPathWithinRoot(resolvedPath, projectRoot, path, os)) {
+            resolvedContext = { base: projectRoot, resolved: resolvedPath, workspaceRoot: true };
+          }
+        }
       } else {
         const resolved = await resolveWorkspacePathFromContext({
           req,
@@ -563,11 +595,18 @@ export const registerFsRoutes = (app, dependencies) => {
           return res.status(400).json({ error: resolved.error });
         }
         resolvedPath = resolved.resolved;
+        resolvedContext = resolved;
       }
 
-      await fsPromises.mkdir(resolvedPath, { recursive: true });
+      await runWorkspaceMutation(
+        resolvedContext,
+        'fs.mkdir',
+        () => fsPromises.mkdir(resolvedPath, { recursive: true }),
+      );
       return res.json({ success: true, path: resolvedPath });
     } catch (error) {
+      const authorityResponse = sendMutationAuthorityError(res, error);
+      if (authorityResponse) return authorityResponse;
       console.error('Failed to create directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to create directory' });
     }
@@ -882,26 +921,28 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
-      if (existing === content) {
-        return res.json({ success: true, path: resolved.resolved });
-      }
+      await runWorkspaceMutation(resolved, 'fs.write', async () => {
+        const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+        if (existing === content) return;
 
-      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+        await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
 
-      // Atomic write: write to temp then rename to avoid concurrent readers
-      // seeing an empty file during the O_TRUNC window of direct writeFile.
-      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      try {
-        await fsPromises.writeFile(tmp, content, 'utf8');
-        await fsPromises.rename(tmp, writePath);
-      } catch (error) {
-        await fsPromises.unlink(tmp).catch(() => {});
-        throw error;
-      }
+        // Atomic write: write to temp then rename to avoid concurrent readers
+        // seeing an empty file during the O_TRUNC window of direct writeFile.
+        const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        try {
+          await fsPromises.writeFile(tmp, content, 'utf8');
+          await fsPromises.rename(tmp, writePath);
+        } catch (error) {
+          await fsPromises.unlink(tmp).catch(() => {});
+          throw error;
+        }
+      });
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
+      const authorityResponse = sendMutationAuthorityError(res, err);
+      if (authorityResponse) return authorityResponse;
       if (err && typeof err === 'object' && err.code === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -930,10 +971,16 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
+      await runWorkspaceMutation(
+        resolved,
+        'fs.delete',
+        () => fsPromises.rm(resolved.resolved, { recursive: true, force: true }),
+      );
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
+      const authorityResponse = sendMutationAuthorityError(res, err);
+      if (authorityResponse) return authorityResponse;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File or directory not found' });
       }
@@ -985,10 +1032,19 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Source and destination must share the same workspace root' });
       }
 
-      await fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved);
+      const workspaceMutation = resolvedOld.workspaceRoot && resolvedNew.workspaceRoot
+        ? resolvedOld
+        : null;
+      await runWorkspaceMutation(
+        workspaceMutation,
+        'fs.rename',
+        () => fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved),
+      );
       return res.json({ success: true, path: resolvedNew.resolved });
     } catch (error) {
       const err = error;
+      const authorityResponse = sendMutationAuthorityError(res, err);
+      if (authorityResponse) return authorityResponse;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }
@@ -1131,7 +1187,12 @@ export const registerFsRoutes = (app, dependencies) => {
         });
       }
 
-      await runExecJob(job);
+      await runWorkspaceMutation(
+        resolvedForWorkspace,
+        `fs.exec:${jobId}`,
+        () => runExecJob(job),
+        { mode: 'process', purpose: 'fs-exec' },
+      );
       return res.json({
         jobId,
         status: job.status,
@@ -1139,6 +1200,8 @@ export const registerFsRoutes = (app, dependencies) => {
         results: job.results,
       });
     } catch (error) {
+      const authorityResponse = sendMutationAuthorityError(res, error);
+      if (authorityResponse) return authorityResponse;
       console.error('Failed to execute commands:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to execute commands' });
     }

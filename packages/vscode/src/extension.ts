@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './ChatViewProvider';
+import { disposeVSCodeExtensionRuntime, getVSCodeDocuments } from './bridge-extensions-runtime';
 import { parseCompanionUri } from './companion-uri';
 import {
   resolvePiNodeExecutable,
@@ -11,6 +12,7 @@ import { resolveWorkspaceFolders } from './workspaceResolver';
 let chatViewProvider: ChatViewProvider | undefined;
 let piRuntime: VSCodePiRuntime | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
 let activeSessionId: string | null = null;
 
 const t = vscode.l10n.t;
@@ -30,6 +32,7 @@ const readSettingsPage = (settingsPage: unknown): string | undefined => {
 };
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  extensionContext = context;
   outputChannel = vscode.window.createOutputChannel('Piarium');
   piRuntime = new VSCodePiRuntime(context, outputChannel);
   context.subscriptions.push(piRuntime);
@@ -332,14 +335,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  void piRuntime.start().catch(() => {
-    // VSCodePiRuntime publishes the actionable diagnostic and status.
-  });
+  void getVSCodeDocuments(context, piRuntime)
+    .then(() => piRuntime?.start())
+    .catch(() => {
+      // The extension/document runtime and VSCodePiRuntime publish actionable diagnostics.
+    });
 }
 
 export async function deactivate(): Promise<void> {
-  await piRuntime?.stop();
+  const disposals = [piRuntime?.stop()];
+  if (extensionContext) disposals.push(disposeVSCodeExtensionRuntime(extensionContext));
+  await Promise.allSettled(disposals);
   piRuntime = undefined;
+  extensionContext = undefined;
   chatViewProvider = undefined;
   outputChannel?.dispose();
   outputChannel = undefined;

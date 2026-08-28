@@ -1,5 +1,7 @@
+import * as vscode from 'vscode';
 import * as gitService from './gitService';
 import type { BridgeResponse } from './bridge';
+import { runVSCodeProcessMutation, type VSCodeMutationAuthority } from './documents-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -18,7 +20,28 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
-export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
+type GitBridgeDeps = {
+  documents?: VSCodeMutationAuthority;
+};
+
+const runGitMutation = <T>(
+  message: BridgeMessageInput,
+  deps: GitBridgeDeps,
+  targetPaths: readonly string[],
+  operation: () => PromiseLike<T> | T,
+): Promise<T> => runVSCodeProcessMutation({
+  workspace: vscode.workspace,
+  documents: deps.documents,
+  targetPaths,
+  owner: { kind: 'vscode-git', id: message.id },
+  operation,
+  purpose: `vscode-git:${message.type}`,
+});
+
+export async function handleStandardGitBridgeMessage(
+  message: BridgeMessageInput,
+  deps: GitBridgeDeps = {},
+): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   switch (type) {
@@ -40,11 +63,16 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (typeof destinationPath !== 'string' || destinationPath.trim().length === 0) {
         return { id, type, success: false, error: 'Destination path is required' };
       }
-      const result = await gitService.cloneRepository({
-        remoteUrl: remoteUrl.trim(),
-        destinationPath: destinationPath.trim(),
-        gitIdentity: gitIdentity && typeof gitIdentity === 'object' ? gitIdentity : null,
-      });
+      const result = await runGitMutation(
+        message,
+        deps,
+        [destinationPath.trim()],
+        () => gitService.cloneRepository({
+          remoteUrl: remoteUrl.trim(),
+          destinationPath: destinationPath.trim(),
+          gitIdentity: gitIdentity && typeof gitIdentity === 'object' ? gitIdentity : null,
+        }),
+      );
       return { id, type, success: true, data: result };
     }
 
@@ -94,7 +122,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!name) {
           return { id, type, success: false, error: 'Branch name is required' };
         }
-        const result = await gitService.createBranch(directory!, name, startPoint);
+        const result = await runGitMutation(message, deps, [directory!], () => gitService.createBranch(directory!, name, startPoint));
         return { id, type, success: true, data: result };
       }
 
@@ -102,7 +130,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!name) {
           return { id, type, success: false, error: 'Branch name is required' };
         }
-        const result = await gitService.deleteGitBranch(directory!, name, force);
+        const result = await runGitMutation(message, deps, [directory!], () => gitService.deleteGitBranch(directory!, name, force));
         return { id, type, success: true, data: result };
       }
 
@@ -118,7 +146,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || !branch) {
         return { id, type, success: false, error: 'Directory and branch are required' };
       }
-      const result = await gitService.deleteRemoteBranch(directory, branch, remote);
+      const result = await runGitMutation(message, deps, [directory], () => gitService.deleteRemoteBranch(directory, branch, remote));
       return { id, type, success: true, data: result };
     }
 
@@ -127,7 +155,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || !branch) {
         return { id, type, success: false, error: 'Directory and branch are required' };
       }
-      const result = await gitService.checkoutBranch(directory, branch);
+      const result = await runGitMutation(message, deps, [directory], () => gitService.checkoutBranch(directory, branch));
       return { id, type, success: true, data: result };
     }
 
@@ -150,7 +178,17 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       }
 
       if (normalizedMethod === 'POST') {
-        const created = await gitService.createWorktree(directory!, (payload || {}) as gitService.CreateGitWorktreePayload);
+        // Worktree creation owns a lease that can outlive this bridge response.
+        // Let the service acquire and hand off that single writer instead of
+        // nesting it under a request-scoped writer that closes too early.
+        const created = await gitService.createWorktree(
+          directory!,
+          (payload || {}) as gitService.CreateGitWorktreePayload,
+          {
+            documents: deps.documents,
+            owner: { kind: 'vscode-git', id: `${message.id}:worktree-bootstrap` },
+          },
+        );
         return { id, type, success: true, data: created };
       }
 
@@ -169,10 +207,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!worktreeDirectory) {
           return { id, type, success: false, error: 'Worktree directory is required' };
         }
-        const removed = await gitService.removeWorktree(directory!, {
-          directory: worktreeDirectory,
-          deleteLocalBranch: removePayload?.body?.deleteLocalBranch === true || removePayload?.deleteLocalBranch === true,
-        });
+        const removed = await runGitMutation(
+          message,
+          deps,
+          [directory!, worktreeDirectory],
+          () => gitService.removeWorktree(directory!, {
+            directory: worktreeDirectory,
+            deleteLocalBranch: removePayload?.body?.deleteLocalBranch === true || removePayload?.deleteLocalBranch === true,
+          }),
+        );
         return { id, type, success: true, data: { success: Boolean(removed) } };
       }
 
@@ -251,7 +294,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || !filePath) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.revertGitFile(directory, filePath, { scope });
+      await runGitMutation(message, deps, [directory], () => gitService.revertGitFile(directory, filePath, { scope }));
       return { id, type, success: true, data: { success: true } };
     }
 
@@ -262,7 +305,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || filePaths.length === 0) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.stageGitFiles(directory, filePaths);
+      await runGitMutation(message, deps, [directory], () => gitService.stageGitFiles(directory, filePaths));
       return { id, type, success: true, data: { success: true } };
     }
 
@@ -273,7 +316,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || filePaths.length === 0) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.unstageGitFiles(directory, filePaths);
+      await runGitMutation(message, deps, [directory], () => gitService.unstageGitFiles(directory, filePaths));
       return { id, type, success: true, data: { success: true } };
     }
 
@@ -290,22 +333,27 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
         return { id, type, success: false, error: 'action must be stage, unstage, or discard' };
       }
-      await gitService.applyGitHunk(directory, filePath, patch, action);
+      await runGitMutation(message, deps, [directory], () => gitService.applyGitHunk(directory, filePath, patch, action));
       return { id, type, success: true, data: { success: true } };
     }
 
     case 'api:git/commit': {
-      const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
+      const { directory, message: commitMessage, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;
         message?: string;
         addAll?: boolean;
         files?: string[];
         stageFiles?: string[];
       };
-      if (!directory || !message) {
+      if (!directory || !commitMessage) {
         return { id, type, success: false, error: 'Directory and message are required' };
       }
-      const result = await gitService.createGitCommit(directory, message, { addAll, files, stageFiles });
+      const result = await runGitMutation(
+        message,
+        deps,
+        [directory],
+        () => gitService.createGitCommit(directory, commitMessage, { addAll, files, stageFiles }),
+      );
       return { id, type, success: true, data: result };
     }
 
@@ -318,7 +366,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.gitPush(directory!, { remote, branch, options });
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.gitPush(directory!, { remote, branch, options }));
       return { id, type, success: true, data: result };
     }
 
@@ -331,7 +379,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.gitPull(directory!, { remote, branch, rebase });
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.gitPull(directory!, { remote, branch, rebase }));
       return { id, type, success: true, data: result };
     }
 
@@ -343,7 +391,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.gitFetch(directory!, { remote, branch });
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.gitFetch(directory!, { remote, branch }));
       return { id, type, success: true, data: result };
     }
 
@@ -362,10 +410,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/stash': {
-      const { directory, message } = (payload || {}) as { directory?: string; message?: string };
+      const { directory, message: stashMessage } = (payload || {}) as { directory?: string; message?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      return { id, type, success: true, data: await gitService.stashGitChanges(directory!, { message }) };
+      return {
+        id,
+        type,
+        success: true,
+        data: await runGitMutation(message, deps, [directory!], () => gitService.stashGitChanges(directory!, { message: stashMessage })),
+      };
     }
 
     case 'api:git/stash/apply':
@@ -375,11 +428,11 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
       const stashRef = ref || 'stash@{0}';
-      const data = type === 'api:git/stash/apply'
-        ? await gitService.applyGitStash(directory!, { ref: stashRef })
+      const data = await runGitMutation(message, deps, [directory!], () => type === 'api:git/stash/apply'
+        ? gitService.applyGitStash(directory!, { ref: stashRef })
         : type === 'api:git/stash/pop'
-          ? await gitService.popGitStash(directory!, { ref: stashRef })
-          : await gitService.dropGitStash(directory!, { ref: stashRef });
+          ? gitService.popGitStash(directory!, { ref: stashRef })
+          : gitService.dropGitStash(directory!, { ref: stashRef }));
       return { id, type, success: true, data };
     }
 
@@ -402,7 +455,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!remote) {
           return { id, type, success: false, error: 'Remote name is required' };
         }
-        const result = await gitService.removeRemote(directory!, remote);
+        const result = await runGitMutation(message, deps, [directory!], () => gitService.removeRemote(directory!, remote));
         return { id, type, success: true, data: result };
       }
 
@@ -416,7 +469,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!onto) {
         return { id, type, success: false, error: 'onto is required' };
       }
-      const result = await gitService.rebase(directory!, { onto });
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.rebase(directory!, { onto }));
       return { id, type, success: true, data: result };
     }
 
@@ -424,7 +477,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.abortRebase(directory!);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.abortRebase(directory!));
       return { id, type, success: true, data: result };
     }
 
@@ -435,7 +488,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!branch) {
         return { id, type, success: false, error: 'branch is required' };
       }
-      const result = await gitService.merge(directory!, { branch });
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.merge(directory!, { branch }));
       return { id, type, success: true, data: result };
     }
 
@@ -443,7 +496,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.abortMerge(directory!);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.abortMerge(directory!));
       return { id, type, success: true, data: result };
     }
 
@@ -451,7 +504,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.continueRebase(directory!);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.continueRebase(directory!));
       return { id, type, success: true, data: result };
     }
 
@@ -459,7 +512,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.continueMerge(directory!);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.continueMerge(directory!));
       return { id, type, success: true, data: result };
     }
 
@@ -470,7 +523,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.checkoutCommit(directory!, hash);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.checkoutCommit(directory!, hash));
       return { id, type, success: true, data: result };
     }
 
@@ -481,7 +534,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.cherryPick(directory!, hash);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.cherryPick(directory!, hash));
       return { id, type, success: true, data: result };
     }
 
@@ -492,7 +545,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.revertCommit(directory!, hash);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.revertCommit(directory!, hash));
       return { id, type, success: true, data: result };
     }
 
@@ -511,7 +564,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
         return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
       }
-      const result = await gitService.resetToCommit(directory!, hash, mode, force);
+      const result = await runGitMutation(message, deps, [directory!], () => gitService.resetToCommit(directory!, hash, mode, force));
       return { id, type, success: true, data: result };
     }
 
@@ -580,13 +633,18 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!userName || !userEmail) {
           return { id, type, success: false, error: 'userName and userEmail are required' };
         }
-        const result = await gitService.setGitIdentity(
-          directory!,
-          userName,
-          userEmail,
-          sshKey,
-          signCommits === true,
-          signingKey ?? null
+        const result = await runGitMutation(
+          message,
+          deps,
+          [directory!],
+          () => gitService.setGitIdentity(
+            directory!,
+            userName,
+            userEmail,
+            sshKey,
+            signCommits === true,
+            signingKey ?? null,
+          ),
         );
         return { id, type, success: true, data: result };
       }

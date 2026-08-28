@@ -17,12 +17,13 @@ const createDocuments = () => {
   let revisionSeq = 1;
   const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   const api: DocumentsAPI = {
-    resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1' }),
+    resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1', epoch: 1 }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));
-      if (!file) return { status: 'missing', resource: ref };
+      if (!file) return { status: 'missing', epoch: 1, resource: ref };
       return {
         status: 'ready',
+        epoch: 1,
         resource: ref,
         revision: file.revision,
         content: file.content,
@@ -40,6 +41,7 @@ const createDocuments = () => {
             status: 'conflict',
             current: {
               status: 'ready',
+              epoch: 1,
               resource: request.resource,
               revision: current.revision,
               encoding: 'utf-8',
@@ -54,13 +56,14 @@ const createDocuments = () => {
           current: current
             ? {
                 status: 'ready',
+                epoch: 1,
                 resource: request.resource,
                 revision: current.revision,
                 encoding: 'utf-8',
                 bom: false,
                 byteLength: current.content.length,
               }
-            : { status: 'missing', resource: request.resource },
+            : { status: 'missing', epoch: 1, resource: request.resource },
         };
       }
       const revision = `d1_${revisionSeq++}`;

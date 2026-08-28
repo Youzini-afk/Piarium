@@ -28,6 +28,19 @@ const waitForChildExit = (child) => new Promise((resolve) => {
   child.once('close', finish);
 });
 
+const registerProcessWriter = async (documents, scopeId, owner, purpose) => {
+  if (typeof documents?.registerWriterForScope !== 'function') return null;
+  return documents.registerWriterForScope(scopeId, owner, { mode: 'process', purpose });
+};
+
+const releaseProcessWriter = async (writer, mutated = true) => {
+  if (!writer) return;
+  if (mutated) {
+    try { await writer.markMutated(); } catch { /* authority may already be gone */ }
+  }
+  try { await writer.close(); } catch { /* authority may already be gone */ }
+};
+
 const asRecord = (value) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : null
 );
@@ -76,6 +89,18 @@ export const createWorkspaceTaskRunner = ({
   const workspaceListeners = new Map();
   const pendingExits = new Set();
 
+  const acquireWriter = (scopeId, owner) => {
+    return registerProcessWriter(documents, scopeId, owner, 'task-process');
+  };
+
+  const releaseRecordWriter = async (record, mutated = true) => {
+    if (!record?.writer || record.writerReleased) return;
+    record.writerReleased = true;
+    const writer = record.writer;
+    record.writer = null;
+    await releaseProcessWriter(writer, mutated);
+  };
+
   const emit = (workspaceId, event) => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
@@ -104,9 +129,15 @@ export const createWorkspaceTaskRunner = ({
       // Process may already have exited.
     }
     if (child) {
-      const exited = waitForChildExit(child).finally(() => pendingExits.delete(exited));
+      const exited = waitForChildExit(child)
+        .then(() => releaseRecordWriter(record))
+        .finally(() => {
+          if (record.pendingTermination === exited) record.pendingTermination = null;
+          pendingExits.delete(exited);
+        });
       pendingExits.add(exited);
-    }
+      record.pendingTermination = exited;
+    } else if (!record.pendingTermination) void releaseRecordWriter(record);
     record.child = null;
     if (record.status === 'running') {
       record.status = 'stopped';
@@ -239,11 +270,19 @@ export const createWorkspaceTaskRunner = ({
       generation: 1,
       message: '',
       child: null,
+      writer: null,
+      writerReleased: false,
+      pendingTermination: null,
     };
     runs.set(runId, record);
-    emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
     let child;
     try {
+      record.writer = await acquireWriter(workspaceId, {
+        kind: 'task',
+        id: runId,
+        generation: record.generation,
+      });
+      emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       child = spawn(command, args, {
         cwd: workspace.root,
         env: { ...env },
@@ -251,6 +290,7 @@ export const createWorkspaceTaskRunner = ({
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
+      await releaseRecordWriter(record, Boolean(child));
       record.status = 'failed';
       record.message = error instanceof Error ? error.message : 'Failed to start task';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -280,6 +320,7 @@ export const createWorkspaceTaskRunner = ({
       record.status = code === 0 ? 'stopped' : 'failed';
       if (code !== 0) record.message = `Task exited with code ${code}`;
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+      void releaseRecordWriter(record);
     });
     return snapshotFor(record);
   };

@@ -8,6 +8,7 @@ const record = (revision: number, status: DocumentRecord['status'] = 'ready'): D
   identity,
   documentInstanceId: 'document-1',
   connectionGeneration: 1,
+  workspaceEpoch: 1,
   status,
   dirty: false,
   saving: false,

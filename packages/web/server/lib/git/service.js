@@ -1404,16 +1404,34 @@ const normalizeIntegrateState = (state = {}) => ({
   currentCommit: normalizeIntegrateSha(state.currentCommit),
 });
 
-export async function integrateWorktreeCommits(inputPlan = {}) {
+export async function integrateWorktreeCommits(inputPlan = {}, runtimeOptions = {}) {
   const plan = await normalizeIntegratePlan(inputPlan);
   if (plan.commits.length === 0) {
     return { kind: 'noop', reason: 'No commits to move' };
   }
 
-  const tmpDir = await createIntegrateTempWorktree(plan.repoRoot, plan.targetBranch);
+  const writerOwner = runtimeOptions.writerOwner || { kind: 'git-integrate-run', id: plan.repoRoot };
+  const writerScopes = new Set();
+  let tmpDir = null;
   let cleanTargetWorktrees = [];
   let remaining = [];
+  let writers = [];
   try {
+    writers = await acquireWorktreeWriters(
+      runtimeOptions.documents,
+      [plan.repoRoot],
+      writerOwner,
+      'git-integrate-run',
+      writerScopes,
+    );
+    tmpDir = await createIntegrateTempWorktree(plan.repoRoot, plan.targetBranch);
+    writers.push(...await acquireWorktreeWriters(
+      runtimeOptions.documents,
+      [tmpDir],
+      writerOwner,
+      'git-integrate-run',
+      writerScopes,
+    ));
     await maybeFastForwardIntegrateUpstream(tmpDir);
 
     const clean = await runGitCommand(tmpDir, ['status', '--porcelain']);
@@ -1426,6 +1444,13 @@ export async function integrateWorktreeCommits(inputPlan = {}) {
       targetBranch: plan.targetBranch,
       excludePaths: [tmpDir],
     }).catch(() => []);
+    writers.push(...await acquireWorktreeWriters(
+      runtimeOptions.documents,
+      cleanTargetWorktrees,
+      writerOwner,
+      'git-integrate-run',
+      writerScopes,
+    ));
 
     remaining = [...plan.commits];
     while (remaining.length > 0) {
@@ -1462,62 +1487,86 @@ export async function integrateWorktreeCommits(inputPlan = {}) {
     await syncCleanIntegrateTargetWorktrees(cleanTargetWorktrees).catch(() => undefined);
     return { kind: 'success', moved: plan.commits.length };
   } catch (error) {
-    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir).catch(() => undefined);
+    if (tmpDir) {
+      await removeIntegrateTempWorktree(plan.repoRoot, tmpDir).catch(() => undefined);
+    }
     throw error;
+  } finally {
+    await releaseWorktreeWriters(writers);
   }
 }
 
-export async function abortIntegrate(stateInput = {}) {
+export async function abortIntegrate(stateInput = {}, runtimeOptions = {}) {
   const state = normalizeIntegrateState(stateInput);
-  await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--abort']).catch(() => undefined);
-  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
-  return { success: true };
+  const writers = await acquireWorktreeWriters(
+    runtimeOptions.documents,
+    [state.repoRoot, state.tempWorktreePath],
+    runtimeOptions.writerOwner || { kind: 'git-integrate-abort', id: state.repoRoot },
+    'git-integrate-abort',
+  );
+  try {
+    await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--abort']).catch(() => undefined);
+    await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
+    return { success: true };
+  } finally {
+    await releaseWorktreeWriters(writers);
+  }
 }
 
-export async function continueIntegrate(stateInput = {}) {
+export async function continueIntegrate(stateInput = {}, runtimeOptions = {}) {
   const state = normalizeIntegrateState(stateInput);
-  const cont = await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--continue']);
-  if (!runGitOk(cont)) {
-    const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
-    if (trimGitLines(unmerged.stdout).length > 0) {
-      const details = await getIntegrateConflictDetails(state.tempWorktreePath);
-      return { kind: 'conflict', state, details };
+  const writers = await acquireWorktreeWriters(
+    runtimeOptions.documents,
+    [state.repoRoot, state.tempWorktreePath, ...state.cleanTargetWorktrees],
+    runtimeOptions.writerOwner || { kind: 'git-integrate-continue', id: state.repoRoot },
+    'git-integrate-continue',
+  );
+  try {
+    const cont = await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--continue']);
+    if (!runGitOk(cont)) {
+      const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
+      if (trimGitLines(unmerged.stdout).length > 0) {
+        const details = await getIntegrateConflictDetails(state.tempWorktreePath);
+        return { kind: 'conflict', state, details };
+      }
+      throw new Error(gitStderrText(cont) || 'Cherry-pick continue failed');
     }
-    throw new Error(gitStderrText(cont) || 'Cherry-pick continue failed');
-  }
 
-  const remaining = [...state.remainingCommits];
-  if (remaining.length > 0 && remaining[0] === state.currentCommit) {
-    remaining.shift();
-  }
-
-  const still = [...remaining];
-  while (still.length > 0) {
-    const sha = still[0];
-    const pick = await runGitCommand(state.tempWorktreePath, ['cherry-pick', sha]);
-    if (runGitOk(pick)) {
-      still.shift();
-      continue;
+    const remaining = [...state.remainingCommits];
+    if (remaining.length > 0 && remaining[0] === state.currentCommit) {
+      remaining.shift();
     }
-    const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
-    if (trimGitLines(unmerged.stdout).length > 0) {
-      const details = await getIntegrateConflictDetails(state.tempWorktreePath);
-      return {
-        kind: 'conflict',
-        state: {
-          ...state,
-          remainingCommits: still,
-          currentCommit: sha,
-        },
-        details,
-      };
-    }
-    throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
-  }
 
-  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
-  await syncCleanIntegrateTargetWorktrees(state.cleanTargetWorktrees).catch(() => undefined);
-  return { kind: 'success', moved: state.remainingCommits.length };
+    const still = [...remaining];
+    while (still.length > 0) {
+      const sha = still[0];
+      const pick = await runGitCommand(state.tempWorktreePath, ['cherry-pick', sha]);
+      if (runGitOk(pick)) {
+        still.shift();
+        continue;
+      }
+      const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
+      if (trimGitLines(unmerged.stdout).length > 0) {
+        const details = await getIntegrateConflictDetails(state.tempWorktreePath);
+        return {
+          kind: 'conflict',
+          state: {
+            ...state,
+            remainingCommits: still,
+            currentCommit: sha,
+          },
+          details,
+        };
+      }
+      throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
+    }
+
+    await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
+    await syncCleanIntegrateTargetWorktrees(state.cleanTargetWorktrees).catch(() => undefined);
+    return { kind: 'success', moved: state.remainingCommits.length };
+  } finally {
+    await releaseWorktreeWriters(writers);
+  }
 }
 
 const resolveWorktreeProjectContext = async (directory) => {
@@ -1743,6 +1792,65 @@ const runWorktreeStartScript = async (directory, startCommand) => {
   }
 };
 
+const worktreeWriterScopeKey = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const normalized = path.resolve(value.trim());
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+};
+
+const acquireWorktreeWriters = async (documents, scopes, owner, purpose, seen = new Set()) => {
+  if (typeof documents?.registerWriterForScope !== 'function') return [];
+  const writers = [];
+  try {
+    for (const scope of scopes) {
+      const workspaceId = typeof documents.resolveScopeId === 'function'
+        ? await documents.resolveScopeId(scope)
+        : null;
+      const pathKey = worktreeWriterScopeKey(scope);
+      const key = workspaceId ? `workspace:${workspaceId}` : (pathKey ? `path:${pathKey}` : '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const writer = await documents.registerWriterForScope(
+        scope,
+        owner,
+        { mode: 'process', purpose },
+      );
+      if (writer) writers.push(writer);
+    }
+  } catch (error) {
+    await Promise.all(writers.map((writer) => writer.close().catch(() => undefined)));
+    throw error;
+  }
+  return writers;
+};
+
+const releaseWorktreeWriters = async (writers) => {
+  for (const writer of writers) {
+    try {
+      await writer.markMutated();
+    } catch {
+      // The authority may have been disposed while the Git process ended.
+    }
+    try {
+      await writer.close();
+    } catch {
+      // The authority may have been disposed while the Git process ended.
+    }
+  }
+};
+
+const acquireWorktreeWriterLease = async (documents, scopes, owner, purpose) => {
+  const writers = await acquireWorktreeWriters(documents, scopes, owner, purpose);
+  let released = false;
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      await releaseWorktreeWriters(writers);
+    },
+  };
+};
+
 const queueWorktreeBootstrap = (args) => {
   const {
     directory,
@@ -1754,6 +1862,7 @@ const queueWorktreeBootstrap = (args) => {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    writerLease,
   } = args;
   const task = new Promise((resolve) => setTimeout(resolve, 0))
     .then(async () => {
@@ -1795,7 +1904,8 @@ const queueWorktreeBootstrap = (args) => {
         error instanceof Error ? error.message : String(error)
       );
       console.warn('Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
-    });
+    })
+    .finally(() => writerLease.release());
 
   trackWorktreeBootstrapTask(directory, task);
 };
@@ -3858,7 +3968,7 @@ export async function previewWorktreeCreate(directory, input = {}) {
   };
 }
 
-async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
+async function attachGitWorktreeToCandidate(context, candidate, input = {}, writerLease) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
   const startRef = normalizeStartRef(input?.startRef);
@@ -3959,6 +4069,7 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    writerLease,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -3974,61 +4085,80 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
   };
 }
 
-export async function createWorktree(directory, input = {}) {
+export async function createWorktree(directory, input = {}, runtimeOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-
-  if (input?.returnAfterDirectoryCreated === true) {
-    await assertWorktreeCreatePreflight(directory, input);
-  }
-
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
-
-  const preferredName = String(input?.worktreeName || '').trim();
-  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
-
-  const candidate = await resolveCandidateDirectory(
-    context.worktreeRoot,
-    preferredName,
-    mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+  const writerLease = await acquireWorktreeWriterLease(
+    runtimeOptions.documents,
+    [directory, context.primaryWorktree],
+    runtimeOptions.writerOwner || { kind: 'git-worktree-route', id: context.primaryWorktree },
+    'git-worktree-create',
   );
+  let writerHandedOff = false;
 
-  if (input?.returnAfterDirectoryCreated === true) {
-    await fsp.mkdir(candidate.directory, { recursive: false });
+  try {
+    if (input?.returnAfterDirectoryCreated === true) {
+      await assertWorktreeCreatePreflight(directory, input);
+    }
 
-    const bootstrapStatus = setWorktreeBootstrapState(
-      candidate.directory,
-      WORKTREE_BOOTSTRAP_PENDING,
-      WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED
+    await fsp.mkdir(context.worktreeRoot, { recursive: true });
+
+    const preferredName = String(input?.worktreeName || '').trim();
+    const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+
+    const candidate = await resolveCandidateDirectory(
+      context.worktreeRoot,
+      preferredName,
+      mode === 'new' && preferredBranchName ? preferredBranchName : '',
+      context.primaryWorktree
     );
-    const localBranch = mode === 'existing'
-      ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
-      : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
-      setWorktreeBootstrapState(
+    if (input?.returnAfterDirectoryCreated === true) {
+      await fsp.mkdir(candidate.directory, { recursive: false });
+
+      const bootstrapStatus = setWorktreeBootstrapState(
         candidate.directory,
-        WORKTREE_BOOTSTRAP_FAILED,
-        WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
-        error instanceof Error ? error.message : String(error)
+        WORKTREE_BOOTSTRAP_PENDING,
+        WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED
       );
-      await cleanupFailedFastWorktreeCreate(context, candidate);
-      console.warn('Background worktree creation failed:', error instanceof Error ? error.message : String(error));
-    });
-    trackWorktreeBootstrapTask(candidate.directory, task);
+      const localBranch = mode === 'existing'
+        ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
+        : candidate.branch;
 
-    return {
-      head: '',
-      name: candidate.name,
-      branch: localBranch,
-      path: candidate.directory,
-      directoryCreated: true,
-      bootstrapStatus,
-    };
+      const task = attachGitWorktreeToCandidate(context, candidate, input, writerLease)
+        .catch(async (error) => {
+          try {
+            setWorktreeBootstrapState(
+              candidate.directory,
+              WORKTREE_BOOTSTRAP_FAILED,
+              WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
+              error instanceof Error ? error.message : String(error)
+            );
+            await cleanupFailedFastWorktreeCreate(context, candidate);
+            console.warn('Background worktree creation failed:', error instanceof Error ? error.message : String(error));
+          } finally {
+            await writerLease.release();
+          }
+        });
+      trackWorktreeBootstrapTask(candidate.directory, task);
+      writerHandedOff = true;
+
+      return {
+        head: '',
+        name: candidate.name,
+        branch: localBranch,
+        path: candidate.directory,
+        directoryCreated: true,
+        bootstrapStatus,
+      };
+    }
+
+    const created = await attachGitWorktreeToCandidate(context, candidate, input, writerLease);
+    writerHandedOff = true;
+    return created;
+  } finally {
+    if (!writerHandedOff) await writerLease.release();
   }
-
-  return attachGitWorktreeToCandidate(context, candidate, input);
 }
 
 export async function getWorktreeBootstrapStatus(directory) {
@@ -4048,7 +4178,7 @@ export async function getWorktreeBootstrapStatus(directory) {
   );
 }
 
-export async function removeWorktree(directory, input = {}) {
+export async function removeWorktree(directory, input = {}, runtimeOptions = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
     throw new Error('Worktree directory is required');
@@ -4057,7 +4187,15 @@ export async function removeWorktree(directory, input = {}) {
   await waitForActiveWorktreeBootstrap(targetDirectory);
 
   const context = await resolveWorktreeProjectContext(directory);
-  const deleteLocalBranch = input?.deleteLocalBranch === true;
+  const writers = await acquireWorktreeWriters(
+    runtimeOptions.documents,
+    [context.primaryWorktree, targetDirectory],
+    runtimeOptions.writerOwner || { kind: 'git-worktree-route', id: context.primaryWorktree },
+    'git-worktree-remove',
+  );
+
+  try {
+    const deleteLocalBranch = input?.deleteLocalBranch === true;
 
   const targetCanonical = await canonicalPath(targetDirectory);
   const primaryCanonical = await canonicalPath(context.primaryWorktree);
@@ -4113,7 +4251,10 @@ export async function removeWorktree(directory, input = {}) {
 
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
-  return true;
+    return true;
+  } finally {
+    await releaseWorktreeWriters(writers);
+  }
 }
 
 export async function deleteBranch(directory, branch, options = {}) {

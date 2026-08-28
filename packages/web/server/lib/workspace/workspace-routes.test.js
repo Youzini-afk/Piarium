@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process';
 import request from 'supertest';
 import AdmZip from 'adm-zip';
 import { create as tarCreate } from 'tar';
+import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 
 let tempDir;
 let workspaceRoot;
@@ -45,7 +46,7 @@ async function loadRoutesModule() {
   return import(/* @vite-ignore */ `./workspace-routes.js?test=${Date.now()}-${Math.random()}`);
 }
 
-async function createApp(env = {}) {
+async function createApp(env = {}, options = {}) {
   const { registerWorkspaceRoutes } = await loadRoutesModule();
   const app = express();
   app.use(express.json({ limit: '5mb' }));
@@ -62,6 +63,7 @@ async function createApp(env = {}) {
     readSettingsFromDisk: vi.fn(async () => ({ projects: [] })),
     persistSettings: vi.fn(async (changes) => ({ ...changes })),
     sanitizeProjects: (value) => Array.isArray(value) ? value : [],
+    documents: options.documents,
   });
   return app;
 }
@@ -137,6 +139,31 @@ describe('workspace routes', () => {
     expect(fs.existsSync(path.join(workspaceRoot, 'demo'))).toBe(false);
     expect(fs.existsSync(deleted.body.trashPath)).toBe(true);
     expect(deleted.body.trashPath.startsWith(path.join(workspaceRoot, '.trash'))).toBe(true);
+  });
+
+  it('records workspace API mutations and refuses new files during maintenance', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    workspaceRoot = harness.workspaceRoot;
+    try {
+      const app = await createApp({}, { documents: harness.authority });
+      const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+
+      await request(app)
+        .post('/api/workspace/file')
+        .send({ path: 'tracked.txt', content: 'tracked' })
+        .expect(200);
+      const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
+
+      await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+      await request(app)
+        .post('/api/workspace/file')
+        .send({ path: 'late.txt', content: 'late' })
+        .expect(409);
+      expect(fs.existsSync(path.join(workspaceRoot, 'late.txt'))).toBe(false);
+    } finally {
+      await harness.cleanup();
+    }
   });
 
   it('lists an empty trash directory explicitly while keeping it hidden from root', async () => {

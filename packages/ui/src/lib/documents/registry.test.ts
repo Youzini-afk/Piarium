@@ -14,17 +14,25 @@ const resource = (resourceId = 'note.txt'): PiariumResourceReference => ({
   resourceId,
 });
 
+const mutationToken = () => ({
+  workspaceId: resource().workspaceId,
+  epoch: 1,
+  owner: { kind: 'test', id: 'document-registry' },
+});
+
 const createMemoryDocuments = () => {
   const files = new Map<string, { content: string; revision: string }>();
   const journals = new Map<string, {
     journalId: string;
     resource: PiariumResourceReference;
     content: string;
+    epoch: number;
     revision: number;
     baseRevision: string | null;
   }>();
   const listeners = new Set<(event: PiariumWorkspaceFileEvent) => void>();
   let revisionSeq = 1;
+  let workspaceEpoch = 1;
   let watchSequence = 0;
   const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   const nextRevision = () => `d1_${revisionSeq++}`;
@@ -33,12 +41,13 @@ const createMemoryDocuments = () => {
   };
 
   const api: DocumentsAPI = {
-    resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1' }),
+    resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));
-      if (!file) return { status: 'missing', resource: ref };
+      if (!file) return { status: 'missing', epoch: workspaceEpoch, resource: ref };
       return {
         status: 'ready',
+        epoch: workspaceEpoch,
         resource: ref,
         revision: file.revision,
         content: file.content,
@@ -52,19 +61,19 @@ const createMemoryDocuments = () => {
       const current = files.get(key);
       if (request.expectedRevision === null) {
         if (current) {
-          return { status: 'conflict', current: { status: 'ready', resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length } };
+          return { status: 'conflict', current: { status: 'ready', epoch: workspaceEpoch, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length } };
         }
       } else if (!current || current.revision !== request.expectedRevision) {
         return {
           status: 'conflict',
           current: current
-            ? { status: 'ready', resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length }
-            : { status: 'missing', resource: request.resource },
+            ? { status: 'ready', epoch: workspaceEpoch, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length }
+            : { status: 'missing', epoch: workspaceEpoch, resource: request.resource },
         };
       }
       const revision = nextRevision();
       files.set(key, { content: request.content, revision });
-      emit({ kind: current ? 'changed' : 'created', sequence: ++watchSequence, resource: request.resource, revision });
+      emit({ sourceId: 'memory-documents', generation: 1, kind: current ? 'changed' : 'created', sequence: ++watchSequence, resource: request.resource, revision });
       return { status: 'written', revision, byteLength: request.content.length };
     },
     move: async () => ({ status: 'missing', resource: resource() }),
@@ -81,6 +90,7 @@ const createMemoryDocuments = () => {
       resource: entry.resource,
       revision: entry.revision,
       baseRevision: entry.baseRevision,
+      epoch: entry.epoch,
       updatedAt: '2026-08-20T00:00:00.000Z',
       byteLength: entry.content.length,
     })) satisfies PiariumDocumentRecoveryJournalSummary[],
@@ -94,6 +104,7 @@ const createMemoryDocuments = () => {
           resource: entry.resource,
           revision: entry.revision,
           baseRevision: entry.baseRevision,
+          epoch: entry.epoch,
           updatedAt: '2026-08-20T00:00:00.000Z',
           byteLength: entry.content.length,
         },
@@ -113,6 +124,7 @@ const createMemoryDocuments = () => {
             resource: existing.resource,
             revision: existing.revision,
             baseRevision: existing.baseRevision,
+            epoch: existing.epoch,
             updatedAt: '2026-08-20T00:00:00.000Z',
             byteLength: existing.content.length,
           } };
@@ -125,6 +137,7 @@ const createMemoryDocuments = () => {
           resource: existing.resource,
           revision: existing.revision,
           baseRevision: existing.baseRevision,
+          epoch: existing.epoch,
           updatedAt: '2026-08-20T00:00:00.000Z',
           byteLength: existing.content.length,
         } };
@@ -135,6 +148,7 @@ const createMemoryDocuments = () => {
         journalId,
         resource: request.resource,
         content: request.content,
+        epoch: request.token.epoch,
         revision: 1,
         baseRevision: request.baseRevision,
       };
@@ -144,6 +158,7 @@ const createMemoryDocuments = () => {
         resource: request.resource,
         revision: 1,
         baseRevision: request.baseRevision,
+        epoch: request.token.epoch,
         updatedAt: '2026-08-20T00:00:00.000Z',
         byteLength: request.content.length,
       } };
@@ -157,6 +172,7 @@ const createMemoryDocuments = () => {
           resource: current.resource,
           revision: current.revision,
           baseRevision: current.baseRevision,
+          epoch: current.epoch,
           updatedAt: '2026-08-20T00:00:00.000Z',
           byteLength: current.content.length,
         } };
@@ -166,14 +182,14 @@ const createMemoryDocuments = () => {
     },
   };
 
-  return { api, files, journals, emit };
+  return { api, files, journals, emit, setEpoch: (epoch: number) => { workspaceEpoch = epoch; } };
 };
 
 describe('DocumentRegistry', () => {
   test('keeps independent dirty buffers when switching documents', async () => {
     const { api } = createMemoryDocuments();
-    await api.write({ resource: resource('a.txt'), content: 'A', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
-    await api.write({ resource: resource('b.txt'), content: 'B', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    await api.write({ token: mutationToken(), resource: resource('a.txt'), content: 'A', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: resource('b.txt'), content: 'B', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     const a = await registry.open(resource('a.txt'));
     const b = await registry.open(resource('b.txt'));
@@ -188,7 +204,7 @@ describe('DocumentRegistry', () => {
   test('coalesces concurrent first-open reads for the same document', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let reads = 0;
     const counted: DocumentsAPI = {
       ...api,
@@ -213,7 +229,7 @@ describe('DocumentRegistry', () => {
   test('two views share one buffer and keep independent origins', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
     registry.applyTransaction(identity, 'from-a', { origin: 'view-a' });
@@ -229,7 +245,7 @@ describe('DocumentRegistry', () => {
   test('applies incremental edits against one captured revision and advances it once', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'alpha beta gamma', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'alpha beta gamma', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     const opened = await registry.open(identity);
 
@@ -257,7 +273,7 @@ describe('DocumentRegistry', () => {
   test('rejects stale and invalid incremental edits without mutating the buffer', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'abcdef', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'abcdef', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     const opened = await registry.open(identity);
     registry.applyTransaction(identity, 'abcdef!', { origin: 'other-view' });
@@ -299,7 +315,7 @@ describe('DocumentRegistry', () => {
     const { api } = createMemoryDocuments();
     const identity = resource('before.txt');
     const moved = resource('after.txt');
-    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let sequence = 0;
     const registry = new DocumentRegistry({
       documents: api,
@@ -311,7 +327,7 @@ describe('DocumentRegistry', () => {
     const reloaded = await registry.reload(identity);
     expect(reloaded.documentInstanceId).toBe(opened.documentInstanceId);
 
-    registry.handleWatchEvent({ kind: 'moved', sequence: 1, from: identity, resource: moved });
+    registry.handleWatchEvent({ sourceId: 'test', generation: 1, kind: 'moved', sequence: 1, from: identity, resource: moved });
     expect(registry.get(moved)?.documentInstanceId).toBe(opened.documentInstanceId);
     registry.dispose();
   });
@@ -319,7 +335,7 @@ describe('DocumentRegistry', () => {
   test('reloads clean documents and conflicts when dirty content differs', async () => {
     const { api, files } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
     const initialVersion = registry.get(identity)?.localEditRevision;
@@ -342,7 +358,7 @@ describe('DocumentRegistry', () => {
   test('save in flight keeps later edits dirty', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let releaseWrite: () => void = () => undefined;
     const hold = new Promise<void>((resolve) => {
       releaseWrite = () => resolve();
@@ -369,7 +385,7 @@ describe('DocumentRegistry', () => {
   test('read failure preserves dirty buffers', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'ok', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'ok', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let failRead = false;
     const gated: DocumentsAPI = {
       ...api,
@@ -391,12 +407,12 @@ describe('DocumentRegistry', () => {
   test('deleted watch events keep dirty buffers and require explicit recreation', async () => {
     const { api, files } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'keep', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'keep', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
     registry.applyTransaction(identity, 'kept', { origin: 'view' });
     files.delete(documentKey(identity));
-    registry.handleWatchEvent({ kind: 'deleted', sequence: 1, resource: identity });
+    registry.handleWatchEvent({ sourceId: 'test', generation: 1, kind: 'deleted', sequence: 1, resource: identity });
     expect(registry.get(identity)?.status).toBe('deleted');
     expect(registry.get(identity)?.buffer).toBe('kept');
     const blocked = await registry.save(identity);
@@ -414,15 +430,15 @@ describe('DocumentRegistry', () => {
     const { api, files } = createMemoryDocuments();
     const clean = resource('clean.txt');
     const dirty = resource('dirty.txt');
-    await api.write({ resource: clean, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
-    await api.write({ resource: dirty, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    await api.write({ token: mutationToken(), resource: clean, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: dirty, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(clean);
     await registry.open(dirty);
     registry.applyTransaction(dirty, 'local', { origin: 'view' });
     files.set(documentKey(clean), { content: 'two', revision: 'external-clean' });
     files.set(documentKey(dirty), { content: 'disk', revision: 'external-dirty' });
-    registry.handleWatchEvent({ kind: 'reset', sequence: 1, reason: 'reconnected' }, clean.workspaceId);
+    registry.handleWatchEvent({ sourceId: 'test', generation: 2, kind: 'reset', sequence: 1, reason: 'reconnected' }, clean.workspaceId);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(registry.get(clean)?.buffer).toBe('two');
     expect(registry.get(dirty)?.buffer).toBe('local');
@@ -433,7 +449,7 @@ describe('DocumentRegistry', () => {
   test('dirty subscriptions only publish dirty-set membership changes', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
     let updates = 0;
@@ -451,7 +467,7 @@ describe('DocumentRegistry', () => {
   test('stale generation completions do not replace newer buffers', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'v1', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'v1', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let generation = 1;
     let finishRead: ((value: PiariumDocumentReadResult) => void) | undefined;
     const gated: DocumentsAPI = {
@@ -465,6 +481,7 @@ describe('DocumentRegistry', () => {
     generation = 2;
     finishRead?.({
       status: 'ready',
+      epoch: 1,
       resource: identity,
       revision: 'stale',
       content: 'old-host',
@@ -480,7 +497,7 @@ describe('DocumentRegistry', () => {
   test('restores a recovery journal into a dirty buffer without writing the file', async () => {
     const { api, files } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({
       documents: api,
       getGeneration: () => 1,
@@ -499,10 +516,169 @@ describe('DocumentRegistry', () => {
     restored.dispose();
   });
 
+  test('keeps a journal from an older workspace epoch as history instead of replaying it', async () => {
+    const { api, files, setEpoch } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const first = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session', journalDebounceMs: 0 });
+    await first.open(identity);
+    first.applyTransaction(identity, 'old-epoch-draft', { origin: 'view' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    first.dispose();
+
+    setEpoch(2);
+    const restored = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await restored.open(identity);
+    expect(restored.get(identity)?.buffer).toBe('disk');
+    expect(restored.get(identity)?.dirty).toBe(false);
+    expect(files.get(documentKey(identity))?.content).toBe('disk');
+    restored.dispose();
+  });
+
+  test('does not replay a journal when the workspace epoch changes while it is being read', async () => {
+    const { api, journals, setEpoch } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.writeRecoveryJournal({
+      token: mutationToken(),
+      workspaceId: identity.workspaceId,
+      recoverySessionId: 'session',
+      resource: identity,
+      content: 'old-epoch-draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: 'd1_1',
+      expectedRevision: null,
+    });
+
+    let releaseJournal: () => void = () => undefined;
+    const journalReadStarted = new Promise<void>((resolve) => {
+      releaseJournal = () => resolve();
+    });
+    let signalReadStarted: () => void = () => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      signalReadStarted = resolve;
+    });
+    const delayed: DocumentsAPI = {
+      ...api,
+      readRecoveryJournal: async (journalId) => {
+        signalReadStarted();
+        await journalReadStarted;
+        return api.readRecoveryJournal(journalId);
+      },
+    };
+    const registry = new DocumentRegistry({ documents: delayed, getGeneration: () => 1, recoverySessionId: 'session' });
+    const pending = registry.open(identity);
+    await readStarted;
+
+    setEpoch(2);
+    await registry.reload(identity);
+    releaseJournal();
+    await pending;
+
+    expect(registry.get(identity)?.buffer).toBe('disk');
+    expect(registry.get(identity)?.dirty).toBe(false);
+    expect(journals.size).toBe(1);
+    registry.dispose();
+  });
+
+  test('does not replay a journal after the runtime generation changes while it is being read', async () => {
+    const { api, journals } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.writeRecoveryJournal({
+      token: mutationToken(),
+      workspaceId: identity.workspaceId,
+      recoverySessionId: 'session',
+      resource: identity,
+      content: 'stale-generation-draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: 'd1_1',
+      expectedRevision: null,
+    });
+
+    let generation = 1;
+    let releaseJournal: () => void = () => undefined;
+    const journalReadStarted = new Promise<void>((resolve) => {
+      releaseJournal = () => resolve();
+    });
+    let signalReadStarted: () => void = () => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      signalReadStarted = resolve;
+    });
+    const delayed: DocumentsAPI = {
+      ...api,
+      readRecoveryJournal: async (journalId) => {
+        signalReadStarted();
+        await journalReadStarted;
+        return api.readRecoveryJournal(journalId);
+      },
+    };
+    const registry = new DocumentRegistry({ documents: delayed, getGeneration: () => generation, recoverySessionId: 'session' });
+    const pending = registry.open(identity);
+    await readStarted;
+    generation = 2;
+    releaseJournal();
+    await pending;
+
+    expect(registry.get(identity)?.buffer).toBe('disk');
+    expect(registry.get(identity)?.dirty).toBe(false);
+    expect(journals.size).toBe(1);
+    registry.dispose();
+  });
+
+  test('does not replay a journal into a moved document identity after an asynchronous read', async () => {
+    const { api, journals } = createMemoryDocuments();
+    const identity = resource();
+    const moved = resource('renamed.txt');
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.writeRecoveryJournal({
+      token: mutationToken(),
+      workspaceId: identity.workspaceId,
+      recoverySessionId: 'session',
+      resource: identity,
+      content: 'moved-document-draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: 'd1_1',
+      expectedRevision: null,
+    });
+
+    let releaseJournal: () => void = () => undefined;
+    const journalReadStarted = new Promise<void>((resolve) => {
+      releaseJournal = () => resolve();
+    });
+    let signalReadStarted: () => void = () => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      signalReadStarted = resolve;
+    });
+    const delayed: DocumentsAPI = {
+      ...api,
+      readRecoveryJournal: async (journalId) => {
+        signalReadStarted();
+        await journalReadStarted;
+        return api.readRecoveryJournal(journalId);
+      },
+    };
+    const registry = new DocumentRegistry({ documents: delayed, getGeneration: () => 1, recoverySessionId: 'session' });
+    const pending = registry.open(identity);
+    await readStarted;
+    registry.handleWatchEvent({ sourceId: 'test', generation: 1, kind: 'moved', sequence: 1, from: identity, resource: moved });
+    releaseJournal();
+    await pending;
+
+    expect(registry.get(identity)).toBeUndefined();
+    expect(registry.get(moved)?.buffer).toBe('disk');
+    expect(registry.get(moved)?.dirty).toBe(false);
+    expect(journals.size).toBe(1);
+    registry.dispose();
+  });
+
   test('clears the current recovery revision after repeated journal writes', async () => {
     const { api, journals } = createMemoryDocuments();
     const identity = resource();
-    await api.write({ resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({
       documents: api,
       getGeneration: () => 1,
@@ -524,8 +700,8 @@ describe('DocumentRegistry', () => {
     const { api, files } = createMemoryDocuments();
     const first = resource('first.ts');
     const second = resource('second.ts');
-    await api.write({ resource: first, content: 'const first = 1;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
-    await api.write({ resource: second, content: 'const second = first;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    await api.write({ token: mutationToken(), resource: first, content: 'const first = 1;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: second, content: 'const second = first;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     const opened = await registry.open(first);
     let listenerSawAtomicState = false;
@@ -574,8 +750,8 @@ describe('DocumentRegistry', () => {
     const { api } = createMemoryDocuments();
     const first = resource('first.ts');
     const second = resource('second.ts');
-    await api.write({ resource: first, content: 'first\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
-    await api.write({ resource: second, content: 'second\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    await api.write({ token: mutationToken(), resource: first, content: 'first\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ token: mutationToken(), resource: second, content: 'second\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     const firstRecord = await registry.open(first);
     await registry.open(second);

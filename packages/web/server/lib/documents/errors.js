@@ -4,6 +4,9 @@ export class DocumentAuthorityError extends Error {
     this.name = 'DocumentAuthorityError';
     this.code = options.code || 'failed';
     this.statusCode = options.statusCode || 500;
+    if (Number.isSafeInteger(options.currentEpoch) && options.currentEpoch > 0) {
+      this.currentEpoch = options.currentEpoch;
+    }
   }
 }
 

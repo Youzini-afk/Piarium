@@ -19,6 +19,7 @@ describe('document routes', () => {
       const created = await request(app)
         .post('/api/documents/write')
         .send({
+          token: harness.token(),
           resource: harness.resource('note.txt'),
           content: 'hello',
           encoding: 'utf-8',

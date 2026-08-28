@@ -47,6 +47,41 @@ const handshake = {
 };
 
 describe('VSCodePiRuntime lifecycle', () => {
+  test('installs execution admission before startup and updates a connected broker', async () => {
+    const installed = [];
+    let startupAdmission;
+    const broker = {
+      dispose: async () => undefined,
+      setSessionExecutionAdmission: (admit) => installed.push(admit),
+      warmup: async () => handshake,
+    };
+    const runtime = new VSCodePiRuntime(
+      {
+        extension: { packageJSON: { version: '0.1.0' } },
+        extensionPath: 'C:/extension',
+      },
+      { appendLine: () => undefined },
+      {
+        createBroker: (options) => {
+          startupAdmission = options.admitSessionExecution;
+          return broker;
+        },
+        resolveHostEntry: () => 'C:/extension/pi-host.js',
+        resolveNodeExecutable: () => 'C:/node.exe',
+      },
+    );
+    const first = async () => null;
+    const second = async () => null;
+
+    runtime.setSessionExecutionAdmission(first);
+    await runtime.start();
+    expect(startupAdmission).toBe(first);
+    runtime.setSessionExecutionAdmission(second);
+    expect(installed).toEqual([second]);
+    await runtime.stop();
+    runtime.dispose();
+  });
+
   test('does not start a replacement broker until the previous broker is disposed', async () => {
     const events = [];
     let releaseDispose = () => undefined;

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 // @ts-expect-error Shared Web/VS Code contract fixtures are a JS module.
-import { defineDocumentAuthorityContract } from '../../web/server/lib/documents/contract-fixtures.js';
+import { createDocumentAuthorityHarness, defineDocumentAuthorityContract } from '../../web/server/lib/documents/contract-fixtures.js';
+import { runVSCodeMutation, runVSCodeProcessMutation } from './documents-runtime';
 
 type ExpectClass = new (...args: never[]) => unknown;
 
@@ -25,6 +28,9 @@ const expect = (value: unknown) => {
     },
     toBeGreaterThanOrEqual(expected: number) {
       assert.ok(typeof value === 'number' && value >= expected);
+    },
+    toBeGreaterThan(expected: number) {
+      assert.ok(typeof value === 'number' && value > expected);
     },
     toContain(expected: unknown) {
       if (Array.isArray(value)) {
@@ -75,3 +81,97 @@ const expect = (value: unknown) => {
 };
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
+
+describe('VS Code native mutation wiring', () => {
+  it('tracks workspace FS writes, leaves outside writes unscoped, and rejects maintenance', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const workspace = {
+      isTrusted: true,
+      workspaceFolders: [{ uri: { fsPath: harness.workspaceRoot } }],
+    };
+    const workspacePath = path.join(harness.workspaceRoot, 'native.txt');
+    const outsidePath = path.join(harness.root, 'outside.txt');
+    try {
+      const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      await runVSCodeMutation({
+        workspace,
+        documents: harness.authority,
+        targetPaths: [workspacePath],
+        owner: { kind: 'vscode-fs', id: 'native-write' },
+        operation: () => writeFile(workspacePath, 'tracked'),
+      });
+      const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      assert.ok(after.mutationRevision > before.mutationRevision);
+
+      const beforeOutside = after.mutationRevision;
+      await runVSCodeMutation({
+        workspace,
+        documents: harness.authority,
+        targetPaths: [outsidePath],
+        owner: { kind: 'vscode-fs', id: 'outside-write' },
+        operation: () => writeFile(outsidePath, 'unscoped'),
+      });
+      const afterOutside = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      assert.equal(afterOutside.mutationRevision, beforeOutside);
+
+      await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+      await assert.rejects(
+        runVSCodeMutation({
+          workspace,
+          documents: harness.authority,
+          targetPaths: [path.join(harness.workspaceRoot, 'maintenance.txt')],
+          owner: { kind: 'vscode-fs', id: 'maintenance-write' },
+          operation: () => writeFile(path.join(harness.workspaceRoot, 'maintenance.txt'), 'blocked'),
+        }),
+        (error: unknown) => (error as { code?: string })?.code === 'maintenance',
+      );
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it('keeps process writers alive through completion and releases them on failure', async () => {
+    const events: string[] = [];
+    const workspace = {
+      isTrusted: true,
+      workspaceFolders: [{ uri: { fsPath: process.cwd() } }],
+    };
+    const documents = {
+      runMutationForScope: async <T>(_scope: string, _owner: unknown, operation: () => T | PromiseLike<T>) => await operation(),
+      registerWriterForScope: async () => {
+        events.push('register');
+        return {
+          markMutated: async () => { events.push('mark'); },
+          close: async () => { events.push('close'); },
+        };
+      },
+    };
+
+    await runVSCodeProcessMutation({
+      workspace,
+      documents,
+      targetPaths: [process.cwd()],
+      owner: { kind: 'vscode-shell', id: 'process' },
+      purpose: 'vscode-shell-exec',
+      operation: async () => {
+        events.push('operation');
+        await Promise.resolve();
+      },
+    });
+    assert.deepEqual(events, ['register', 'operation', 'mark', 'close']);
+
+    events.length = 0;
+    await assert.rejects(runVSCodeProcessMutation({
+      workspace,
+      documents,
+      targetPaths: [process.cwd()],
+      owner: { kind: 'vscode-shell', id: 'failed-process' },
+      purpose: 'vscode-shell-exec',
+      operation: async () => {
+        events.push('operation');
+        throw new Error('process failed');
+      },
+    }), /process failed/);
+    assert.deepEqual(events, ['register', 'operation', 'mark', 'close']);
+  });
+});

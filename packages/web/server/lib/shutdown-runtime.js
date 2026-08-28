@@ -9,6 +9,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     scheduledTasksRuntime,
     getTerminalRuntime,
     setTerminalRuntime,
+    getDocumentsAuthority,
+    setDocumentsAuthority,
     getServer,
     getUiAuthController,
     setUiAuthController,
@@ -50,6 +52,18 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         ]);
       } finally {
         if (closeTimeout) clearTimeout(closeTimeout);
+      }
+    }
+
+    const documentsAuthority = getDocumentsAuthority?.();
+    if (documentsAuthority) {
+      try {
+        await documentsAuthority.dispose();
+      } catch (error) {
+        // Continue closing process-owned resources after a failed authority cleanup.
+        console.error('Document authority shutdown failed:', error?.message || error);
+      } finally {
+        setDocumentsAuthority?.(null);
       }
     }
 

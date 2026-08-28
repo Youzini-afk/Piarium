@@ -13,6 +13,12 @@ const gitService = {
 };
 
 mock.module('./gitService', () => gitService);
+mock.module('vscode', () => ({
+  workspace: {
+    isTrusted: true,
+    workspaceFolders: [{ uri: { fsPath: '/repo' } }],
+  },
+}));
 
 const { handleStandardGitBridgeMessage } = await import('./bridge-git-runtime');
 
@@ -213,6 +219,13 @@ describe('bridge git runtime index mutations', () => {
       },
     };
     gitService.createWorktree.mockResolvedValue(created);
+    const routeWriter = {
+      markMutated: mock(async () => undefined),
+      close: mock(async () => undefined),
+    };
+    const documents = {
+      registerWriterForScope: mock(async () => routeWriter),
+    };
 
     const response = await handleStandardGitBridgeMessage({
       id: 'create-worktree',
@@ -223,7 +236,7 @@ describe('bridge git runtime index mutations', () => {
         worktreeName: 'feature',
         returnAfterDirectoryCreated: true,
       },
-    });
+    }, { documents });
 
     expect(response).toEqual({
       id: 'create-worktree',
@@ -231,8 +244,16 @@ describe('bridge git runtime index mutations', () => {
       success: true,
       data: created,
     });
-    expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
-      returnAfterDirectoryCreated: true,
-    }));
+    expect(gitService.createWorktree).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({ returnAfterDirectoryCreated: true }),
+      {
+        documents,
+        owner: { kind: 'vscode-git', id: 'create-worktree:worktree-bootstrap' },
+      },
+    );
+    expect(documents.registerWriterForScope).not.toHaveBeenCalled();
+    expect(routeWriter.markMutated).not.toHaveBeenCalled();
+    expect(routeWriter.close).not.toHaveBeenCalled();
   });
 });

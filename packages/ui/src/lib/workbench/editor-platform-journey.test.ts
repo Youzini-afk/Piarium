@@ -114,6 +114,7 @@ const createMemoryDocuments = () => {
     return current
       ? {
           status: 'ready',
+          epoch: 1,
           resource,
           revision: current.revision,
           content: current.content,
@@ -121,10 +122,10 @@ const createMemoryDocuments = () => {
           bom: false,
           byteLength: current.content.length,
         }
-      : { status: 'missing', resource };
+      : { status: 'missing', epoch: 1, resource };
   };
   const api: DocumentsAPI = {
-    resolveWorkspace: async () => ({ workspaceId, hostId: 'host-1' }),
+    resolveWorkspace: async () => ({ workspaceId, hostId: 'host-1', epoch: 1 }),
     read,
     write: async (request) => {
       const key = documentKey(request.resource);
@@ -134,6 +135,7 @@ const createMemoryDocuments = () => {
         return { status: 'conflict', current: currentResult.status === 'ready'
           ? {
               status: 'ready',
+              epoch: currentResult.epoch,
               resource: request.resource,
               revision: currentResult.revision,
               encoding: currentResult.encoding,

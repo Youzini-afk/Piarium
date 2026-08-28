@@ -9,11 +9,12 @@ const resource = (resourceId: string): PiariumResourceReference => ({
 });
 
 const documentsApi = (content: string | null): DocumentsAPI => ({
-  resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1' }),
+  resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1', epoch: 1 }),
   read: async (ref) => {
-    if (content === null) return { status: 'missing', resource: ref };
+    if (content === null) return { status: 'missing', epoch: 1, resource: ref };
     return {
       status: 'ready',
+      epoch: 1,
       resource: ref,
       revision: 'd1_1',
       content,

@@ -161,6 +161,37 @@ describe('native workspace recovery Phase 1 engine', () => {
     expect(read.manifest.entries.some((entry) => entry.path === 'arrived-during-capture.txt')).toBe(false);
   });
 
+  it('publishes active-writer and watcher-reset captures as incomplete, then reconciles with a stable full scan', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    harnesses.add(harness);
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    let resetDuringCapture = false;
+    const engine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      faults: {
+        beforePublish: async () => {
+          if (resetDuringCapture) harness.authority.emitWatchOverflow(harness.identity.workspaceId);
+        },
+      },
+    });
+
+    const writer = await harness.authority.registerWriter(harness.token(), { purpose: 'capture-overlap-test' });
+    const active = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(active).toMatchObject({ status: 'captured', snapshot: { availability: 'incomplete' } });
+    await writer.close();
+
+    resetDuringCapture = true;
+    const reset = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(reset).toMatchObject({ status: 'captured', snapshot: { availability: 'incomplete' } });
+
+    resetDuringCapture = false;
+    const stable = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(stable).toMatchObject({ status: 'captured', snapshot: { availability: 'ready', consistency: 'validated' } });
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).reconciliationRequired).toBe(false);
+  });
+
   it('does not publish when a referenced object disappears before publication', async () => {
     const { engine, harness } = await createHarness({
       faults: {

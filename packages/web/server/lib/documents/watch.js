@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 const toResource = (workspaceId, relativePath) => ({
   workspaceId,
   resourceId: relativePath.replace(/\\/g, '/'),
@@ -21,6 +23,7 @@ export const createWorkspaceWatcher = ({
   pathModule,
   overflowLimit,
   onEvent,
+  sourceId = randomUUID(),
 }) => {
   let sequence = 0;
   let generation = 1;
@@ -46,7 +49,7 @@ export const createWorkspaceWatcher = ({
 
   const emit = (event) => {
     if (closed) return;
-    onEvent(event);
+    onEvent({ sourceId, generation, ...event });
   };
 
   const reset = (reason) => {
@@ -74,9 +77,9 @@ export const createWorkspaceWatcher = ({
       }
       if (closed || capturedGeneration !== generation) return;
 
-      if (!stat || !stat.isFile()) {
+      if (!stat) {
         emit({ kind: 'deleted', sequence: nextSequence(), resource });
-      } else {
+      } else if (stat.isFile()) {
         emit({
           kind: eventType === 'rename' ? 'created' : 'changed',
           sequence: nextSequence(),
@@ -97,6 +100,14 @@ export const createWorkspaceWatcher = ({
       batchTimer = null;
       flushChain = flushChain.then(flushBatch, flushBatch).catch(reportBatchFailure);
     }, 20);
+  };
+
+  const settle = async () => {
+    if (closed) return;
+    if (batchTimer) clearTimeout(batchTimer);
+    batchTimer = null;
+    flushChain = flushChain.then(flushBatch, flushBatch).catch(reportBatchFailure);
+    await flushChain;
   };
 
   const queuePath = (eventType, filename) => {
@@ -140,8 +151,14 @@ export const createWorkspaceWatcher = ({
   start();
 
   return {
+    get sourceId() {
+      return sourceId;
+    },
     get generation() {
       return generation;
+    },
+    get position() {
+      return { sourceId, generation, sequence };
     },
     overflow() {
       reset('overflow');
@@ -155,6 +172,7 @@ export const createWorkspaceWatcher = ({
     authorityChanged() {
       reset('authority-changed');
     },
+    settle,
     close() {
       closed = true;
       if (batchTimer) clearTimeout(batchTimer);

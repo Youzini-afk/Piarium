@@ -5,6 +5,7 @@ const sendError = (res, error) => {
     return res.status(error.statusCode).json({
       error: error.message,
       reason: error.code,
+      ...(error.currentEpoch ? { currentEpoch: error.currentEpoch } : {}),
     });
   }
   const message = error instanceof Error ? error.message : 'Document request failed';

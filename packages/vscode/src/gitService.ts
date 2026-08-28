@@ -12,6 +12,7 @@ import { createHash } from 'crypto';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import type { VSCodeMutationAuthority } from './documents-runtime';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -1157,6 +1158,15 @@ export interface CreateGitWorktreePayload {
   returnAfterDirectoryCreated?: boolean;
 }
 
+export type GitMutationProcessContext = {
+  documents?: VSCodeMutationAuthority;
+  owner?: {
+    kind: string;
+    id: string;
+    generation?: number;
+  };
+};
+
 export interface RemoveGitWorktreePayload {
   directory: string;
   deleteLocalBranch?: boolean;
@@ -1735,6 +1745,69 @@ const runWorktreeStartScript = async (directory: string, startCommand: string | 
   }
 };
 
+type GitMutationWriter = {
+  markMutated: () => Promise<void>;
+  close: () => Promise<void>;
+};
+
+type GitMutationWriterLease = {
+  release: () => Promise<void>;
+};
+
+const acquireWorktreeWriterLease = async (
+  mutation: GitMutationProcessContext | undefined,
+  scopes: readonly string[],
+  purpose: string,
+): Promise<GitMutationWriterLease> => {
+  const documents = mutation?.documents as (VSCodeMutationAuthority & {
+    resolveScopeId?: (scopeId: string) => Promise<string | null>;
+  }) | undefined;
+  if (typeof documents?.registerWriterForScope !== 'function') {
+    return { release: async () => undefined };
+  }
+
+  const writers: GitMutationWriter[] = [];
+  const seen = new Set<string>();
+  const owner = mutation?.owner ?? {
+    kind: 'vscode-git',
+    id: `worktree-create:${path.resolve(scopes[0] || '')}`,
+  };
+  try {
+    for (const scope of scopes) {
+      if (typeof scope !== 'string' || !scope.trim()) continue;
+      const normalized = path.resolve(scope.trim());
+      const pathKey = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      const workspaceId = typeof documents.resolveScopeId === 'function'
+        ? await documents.resolveScopeId(scope)
+        : null;
+      const key = workspaceId ? `workspace:${workspaceId}` : `path:${pathKey}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const writer = await documents.registerWriterForScope(
+        scope,
+        owner,
+        { mode: 'process', purpose },
+      );
+      if (writer) writers.push(writer);
+    }
+  } catch (error) {
+    await Promise.all(writers.map((writer) => writer.close().catch(() => undefined)));
+    throw error;
+  }
+
+  let released = false;
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      for (const writer of writers.reverse()) {
+        try { await writer.markMutated(); } catch { /* authority may already be gone */ }
+        try { await writer.close(); } catch { /* authority may already be gone */ }
+      }
+    },
+  };
+};
+
 const queueWorktreeBootstrap = (args: {
   directory: string;
   primaryWorktree: string;
@@ -1745,6 +1818,7 @@ const queueWorktreeBootstrap = (args: {
   ensureRemoteName: string;
   ensureRemoteUrl: string;
   startCommand: string | undefined;
+  writerLease: GitMutationWriterLease;
 }) => {
   const {
     directory,
@@ -1756,35 +1830,38 @@ const queueWorktreeBootstrap = (args: {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    writerLease,
   } = args;
-  const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
-    .then(async () => {
-      await populateWorktreeWithLockRecovery(directory);
-      await runPostCheckoutHook(directory);
-      if (setUpstream) {
-        await applyUpstreamConfiguration({
-          primaryWorktree,
-          worktreeDirectory: directory,
-          localBranch,
-          setUpstream,
-          upstreamRemote,
-          upstreamBranch,
-          ensureRemoteName,
-          ensureRemoteUrl,
-        }).catch((error) => {
-          console.warn('[GitService] Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
-        });
-      }
-      setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
-      await runWorktreeStartScript(directory, startCommand).catch((error) => {
-        console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+  const bootstrap = async () => {
+    await populateWorktreeWithLockRecovery(directory);
+    await runPostCheckoutHook(directory);
+    if (setUpstream) {
+      await applyUpstreamConfiguration({
+        primaryWorktree,
+        worktreeDirectory: directory,
+        localBranch,
+        setUpstream,
+        upstreamRemote,
+        upstreamBranch,
+        ensureRemoteName,
+        ensureRemoteUrl,
+      }).catch((error) => {
+        console.warn('[GitService] Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
       });
-      setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
-    })
+    }
+    setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
+    await runWorktreeStartScript(directory, startCommand).catch((error) => {
+      console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+    });
+    setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
+  };
+  const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
+    .then(bootstrap)
     .catch((error) => {
       setWorktreeBootstrapFailure(directory, error);
       console.warn('[GitService] Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
-    });
+    })
+    .finally(() => writerLease.release());
 
   trackWorktreeBootstrapTask(directory, task);
 };
@@ -2094,6 +2171,7 @@ async function attachGitWorktreeToCandidate(
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   candidate: { name: string; directory: string; branch: string },
   input: CreateGitWorktreePayload = {},
+  writerLease: GitMutationWriterLease,
 ): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -2200,6 +2278,7 @@ async function attachGitWorktreeToCandidate(
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    writerLease,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -2215,61 +2294,83 @@ async function attachGitWorktreeToCandidate(
   };
 }
 
-export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+export async function createWorktree(
+  directory: string,
+  input: CreateGitWorktreePayload = {},
+  mutation?: GitMutationProcessContext,
+): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-
-  if (input?.returnAfterDirectoryCreated === true) {
-    await assertWorktreeCreatePreflight(directory, input);
-  }
-
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
-
-  const preferredName = String(input?.worktreeName || input?.name || '').trim();
-  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
-
-  const candidate = await resolveCandidateDirectory(
-    context.worktreeRoot,
-    preferredName,
-    mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
+  const writerLease = await acquireWorktreeWriterLease(
+    mutation,
+    [directory, context.primaryWorktree],
+    'vscode-git:worktree-create',
   );
+  let writerHandedOff = false;
 
-  if (input?.returnAfterDirectoryCreated === true) {
-    await fs.promises.mkdir(candidate.directory, { recursive: false });
+  try {
+    if (input?.returnAfterDirectoryCreated === true) {
+      await assertWorktreeCreatePreflight(directory, input);
+    }
 
-    const bootstrapStatus = setWorktreeBootstrapState(
-      candidate.directory,
-      WORKTREE_BOOTSTRAP_PENDING,
-      WORKTREE_PHASE_DIRECTORY_CREATED,
-    ) ?? {
-      status: WORKTREE_BOOTSTRAP_PENDING,
-      phase: WORKTREE_PHASE_DIRECTORY_CREATED,
-      error: null,
-      updatedAt: Date.now(),
-    };
-    const localBranch = mode === 'existing'
-      ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
-      : candidate.branch;
+    await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
-      setWorktreeBootstrapFailure(candidate.directory, error);
-      await cleanupFailedFastWorktreeCreate(context, candidate);
-      console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
-    });
-    trackWorktreeBootstrapTask(candidate.directory, task);
+    const preferredName = String(input?.worktreeName || input?.name || '').trim();
+    const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
 
-    return {
-      head: '',
-      name: candidate.name,
-      branch: localBranch,
-      path: candidate.directory,
-      directoryCreated: true,
-      bootstrapStatus,
-    };
+    const candidate = await resolveCandidateDirectory(
+      context.worktreeRoot,
+      preferredName,
+      mode === 'new' && preferredBranchName ? preferredBranchName : '',
+      context.primaryWorktree
+    );
+
+    if (input?.returnAfterDirectoryCreated === true) {
+      await fs.promises.mkdir(candidate.directory, { recursive: false });
+
+      const bootstrapStatus = setWorktreeBootstrapState(
+        candidate.directory,
+        WORKTREE_BOOTSTRAP_PENDING,
+        WORKTREE_PHASE_DIRECTORY_CREATED,
+      ) ?? {
+        status: WORKTREE_BOOTSTRAP_PENDING,
+        phase: WORKTREE_PHASE_DIRECTORY_CREATED,
+        error: null,
+        updatedAt: Date.now(),
+      };
+      const localBranch = mode === 'existing'
+        ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
+        : candidate.branch;
+
+      const task = attachGitWorktreeToCandidate(context, candidate, input, writerLease)
+        .catch(async (error) => {
+          try {
+            setWorktreeBootstrapFailure(candidate.directory, error);
+            await cleanupFailedFastWorktreeCreate(context, candidate);
+            console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
+          } finally {
+            await writerLease.release();
+          }
+        });
+      trackWorktreeBootstrapTask(candidate.directory, task);
+      writerHandedOff = true;
+
+      return {
+        head: '',
+        name: candidate.name,
+        branch: localBranch,
+        path: candidate.directory,
+        directoryCreated: true,
+        bootstrapStatus,
+      };
+    }
+
+    const created = await attachGitWorktreeToCandidate(context, candidate, input, writerLease);
+    writerHandedOff = true;
+    return created;
+  } finally {
+    if (!writerHandedOff) await writerLease.release();
   }
-
-  return attachGitWorktreeToCandidate(context, candidate, input);
 }
 
 export async function getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapStatus> {

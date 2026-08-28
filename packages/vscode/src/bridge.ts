@@ -66,6 +66,8 @@ export interface BridgeResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  reason?: string;
+  status?: number;
 }
 
 export interface BridgeContext {
@@ -412,7 +414,16 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
   const { id, type, payload } = message;
 
   try {
-    const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
+    const needsMutationAuthority = type.startsWith('api:git/')
+      || type.startsWith('api:fs:')
+      || type.startsWith('api:files/');
+    const nativeDocuments = needsMutationAuthority && ctx?.context
+      ? await getVSCodeDocuments(ctx.context, ctx.piRuntime)
+      : undefined;
+    const standardGitResponse = await handleStandardGitBridgeMessage(
+      { id, type, payload },
+      nativeDocuments ? { documents: nativeDocuments } : undefined,
+    );
     if (standardGitResponse) return standardGitResponse;
     const conflictResponse = await handleGitConflictBridgeMessage({ id, type, payload });
     if (conflictResponse) return conflictResponse;
@@ -427,12 +438,13 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         resolveFileReadPath,
         parseDroppedFileReference,
         readUriAsAttachment,
+        ...(nativeDocuments ? { documents: nativeDocuments } : {}),
       }
     );
     if (fsResponse) return fsResponse;
 
     if (type.startsWith('api:documents:') && ctx?.context) {
-      const documents = await getVSCodeDocuments(ctx.context, ctx.piRuntime);
+      const documents = nativeDocuments ?? await getVSCodeDocuments(ctx.context, ctx.piRuntime);
       const documentsResponse = await handleDocumentsBridgeMessage(
         { id, type, payload },
         {

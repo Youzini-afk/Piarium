@@ -6,6 +6,7 @@ import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
+  type PiSessionExecutionAdmission,
 } from '@piarium/runtime-broker/core';
 
 export type PiRuntimeConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -125,6 +126,7 @@ export class VSCodePiRuntime implements vscode.Disposable {
   #broker: PiRuntimeBroker | null = null;
   #disposed = false;
   #lifecycleTail: Promise<void> = Promise.resolve();
+  #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
   #status: PiRuntimeStatusSnapshot = { status: 'connecting' };
 
   constructor(
@@ -148,6 +150,12 @@ export class VSCodePiRuntime implements vscode.Disposable {
   onStatusChange(listener: (snapshot: PiRuntimeStatusSnapshot) => void): vscode.Disposable {
     this.#listeners.add(listener);
     return new vscode.Disposable(() => this.#listeners.delete(listener));
+  }
+
+  setSessionExecutionAdmission(admit: PiSessionExecutionAdmission): void {
+    if (typeof admit !== 'function') throw new TypeError('Pi session execution admission must be a function');
+    this.#sessionExecutionAdmission = admit;
+    this.#broker?.setSessionExecutionAdmission(admit);
   }
 
   start(): Promise<PiRuntimeBroker> {
@@ -220,6 +228,9 @@ export class VSCodePiRuntime implements vscode.Disposable {
       foundationalPackages: FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
       hostEntry,
       nodePath,
+      ...(this.#sessionExecutionAdmission
+        ? { admitSessionExecution: this.#sessionExecutionAdmission }
+        : {}),
     });
     this.#broker = broker;
     const handshake = await broker.warmup();

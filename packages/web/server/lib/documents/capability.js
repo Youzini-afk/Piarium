@@ -24,7 +24,23 @@ const asResource = (params) => {
   return null;
 };
 
-export const createDocumentsCapabilityHandler = (authority) => async (method, params) => {
+const bindCapabilityOwner = (record, context) => {
+  const owner = context?.owner;
+  if (!owner || !record.token || typeof record.token !== 'object' || Array.isArray(record.token)) return record;
+  return {
+    ...record,
+    token: {
+      ...record.token,
+      owner: {
+        kind: 'extension',
+        id: `${owner.extensionId}:${owner.entrypointId}`,
+        generation: owner.generation,
+      },
+    },
+  };
+};
+
+export const createDocumentsCapabilityHandler = (authority) => async (method, params, context) => {
   if (!METHODS.has(method)) {
     throw new Error(`workspace.documents does not implement ${method}`);
   }
@@ -45,11 +61,11 @@ export const createDocumentsCapabilityHandler = (authority) => async (method, pa
   }
   const record = asRecord(params);
   if (!record) throw new Error('workspace.documents expects an object');
-  if (method === 'write') return authority.write(record);
-  if (method === 'move') return authority.move(record);
-  if (method === 'delete') return authority.delete(record);
+  if (method === 'write') return authority.write(bindCapabilityOwner(record, context));
+  if (method === 'move') return authority.move(bindCapabilityOwner(record, context));
+  if (method === 'delete') return authority.delete(bindCapabilityOwner(record, context));
   if (method === 'listRecoveryJournals') return authority.listRecoveryJournals(record);
-  if (method === 'writeRecoveryJournal') return authority.writeRecoveryJournal(record);
-  if (method === 'deleteRecoveryJournal') return authority.deleteRecoveryJournal(record);
+  if (method === 'writeRecoveryJournal') return authority.writeRecoveryJournal(bindCapabilityOwner(record, context));
+  if (method === 'deleteRecoveryJournal') return authority.deleteRecoveryJournal(bindCapabilityOwner(record, context));
   throw new Error(`workspace.documents does not implement ${method}`);
 };

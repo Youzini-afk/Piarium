@@ -1,20 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { createSerialQueues } from './serialize.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const journalFileName = (journalId) => `${journalId}.json`;
+
+const assertPathSegment = (value, label) => {
+  if (typeof value !== 'string' || !value || value === '.' || value === '..' || /[\\/\0]/.test(value)) {
+    throw new TypeError(`${label} is malformed`);
+  }
+  return value;
+};
 
 const summarize = (record) => ({
   journalId: record.journalId,
   resource: record.resource,
   revision: record.revision,
   baseRevision: record.baseRevision,
+  epoch: record.epoch,
   updatedAt: record.updatedAt,
   byteLength: Buffer.byteLength(record.content, 'utf8'),
 });
 
-const parseRecord = (raw, journalId) => {
+const parseRecord = (raw, journalId, expected) => {
   if (!raw || raw.schemaVersion !== SCHEMA_VERSION) return { status: 'malformed', journalId };
   if (typeof raw.journalId !== 'string' || raw.journalId !== journalId) return { status: 'malformed', journalId };
   if (!raw.resource || typeof raw.resource.workspaceId !== 'string' || typeof raw.resource.resourceId !== 'string') {
@@ -24,8 +33,15 @@ const parseRecord = (raw, journalId) => {
     return { status: 'malformed', journalId };
   }
   if (!Number.isSafeInteger(raw.revision) || raw.revision < 1) return { status: 'malformed', journalId };
+  if (!Number.isSafeInteger(raw.epoch) || raw.epoch < 1) return { status: 'malformed', journalId };
   if (raw.baseRevision !== null && typeof raw.baseRevision !== 'string') return { status: 'malformed', journalId };
   if (typeof raw.updatedAt !== 'string' || typeof raw.recoverySessionId !== 'string') {
+    return { status: 'malformed', journalId };
+  }
+  if (raw.hostId !== expected.hostId
+    || (expected.workspaceId && raw.workspaceId !== expected.workspaceId)
+    || (expected.recoverySessionId && raw.recoverySessionId !== expected.recoverySessionId)
+    || raw.resource.workspaceId !== raw.workspaceId) {
     return { status: 'malformed', journalId };
   }
   return { status: 'ready', record: raw };
@@ -37,22 +53,51 @@ export const createRecoveryJournalStore = ({
   fsPromises,
   pathModule = path,
 }) => {
+  const queues = createSerialQueues();
   const directoryFor = (workspaceId, recoverySessionId) => pathModule.join(
     rootDir,
-    hostId,
-    workspaceId,
-    recoverySessionId,
+    assertPathSegment(hostId, 'hostId'),
+    assertPathSegment(workspaceId, 'workspaceId'),
+    assertPathSegment(recoverySessionId, 'recoverySessionId'),
   );
 
-  const readFile = async (filePath, journalId) => {
+  const readFile = async (filePath, journalId, expected = {}) => {
     try {
       const raw = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
-      return parseRecord(raw, journalId);
+      return parseRecord(raw, journalId, { hostId, ...expected });
     } catch (error) {
       if (error?.code === 'ENOENT') return { status: 'missing', journalId };
       if (error instanceof SyntaxError) return { status: 'malformed', journalId };
       throw error;
     }
+  };
+
+  const findJournal = async (journalId, requestedWorkspaceId) => {
+    assertPathSegment(journalId, 'journalId');
+    const hostDir = pathModule.join(rootDir, assertPathSegment(hostId, 'hostId'));
+    let workspaces = [];
+    try {
+      workspaces = await fsPromises.readdir(hostDir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+    for (const workspaceEntry of workspaces) {
+      if (!workspaceEntry.isDirectory()) continue;
+      if (requestedWorkspaceId && workspaceEntry.name !== requestedWorkspaceId) continue;
+      const workspaceId = assertPathSegment(workspaceEntry.name, 'workspaceId');
+      const workspaceDir = pathModule.join(hostDir, workspaceId);
+      const sessions = await fsPromises.readdir(workspaceDir, { withFileTypes: true });
+      for (const sessionEntry of sessions) {
+        if (!sessionEntry.isDirectory()) continue;
+        const recoverySessionId = assertPathSegment(sessionEntry.name, 'recoverySessionId');
+        const filePath = pathModule.join(workspaceDir, recoverySessionId, journalFileName(journalId));
+        const parsed = await readFile(filePath, journalId, { workspaceId, recoverySessionId });
+        if (parsed.status === 'missing') continue;
+        return { filePath, parsed, workspaceId, recoverySessionId };
+      }
+    }
+    return null;
   };
 
   const atomicWrite = async (filePath, record) => {
@@ -69,6 +114,8 @@ export const createRecoveryJournalStore = ({
 
   return {
     async list({ workspaceId, recoverySessionId }) {
+      assertPathSegment(workspaceId, 'workspaceId');
+      if (recoverySessionId !== undefined) assertPathSegment(recoverySessionId, 'recoverySessionId');
       const summaries = [];
       const base = recoverySessionId
         ? [directoryFor(workspaceId, recoverySessionId)]
@@ -98,7 +145,11 @@ export const createRecoveryJournalStore = ({
         for (const name of files) {
           if (!name.endsWith('.json') || name.includes('.tmp.')) continue;
           const journalId = name.slice(0, -'.json'.length);
-          const parsed = await readFile(pathModule.join(directory, name), journalId);
+          const sessionId = pathModule.basename(directory);
+          const parsed = await readFile(pathModule.join(directory, name), journalId, {
+            workspaceId,
+            recoverySessionId: sessionId,
+          });
           if (parsed.status === 'ready') summaries.push(summarize(parsed.record));
         }
       }
@@ -106,26 +157,9 @@ export const createRecoveryJournalStore = ({
     },
 
     async read(journalId) {
-      const matches = [];
-      const hostDir = pathModule.join(rootDir, hostId);
-      const walk = async (directory, depth) => {
-        if (depth > 4) return;
-        let entries = [];
-        try {
-          entries = await fsPromises.readdir(directory, { withFileTypes: true });
-        } catch (error) {
-          if (error?.code === 'ENOENT') return;
-          throw error;
-        }
-        for (const entry of entries) {
-          const full = pathModule.join(directory, entry.name);
-          if (entry.isDirectory()) await walk(full, depth + 1);
-          else if (entry.name === journalFileName(journalId)) matches.push(full);
-        }
-      };
-      await walk(hostDir, 0);
-      if (matches.length === 0) return { status: 'missing', journalId };
-      const parsed = await readFile(matches[0], journalId);
+      const found = await findJournal(journalId);
+      if (!found) return { status: 'missing', journalId };
+      const { parsed } = found;
       if (parsed.status !== 'ready') return parsed;
       return {
         status: 'ready',
@@ -137,95 +171,96 @@ export const createRecoveryJournalStore = ({
     },
 
     async write(request) {
-      const directory = directoryFor(request.workspaceId, request.recoverySessionId);
-      await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
-      const existingNames = await fsPromises.readdir(directory).catch((error) => {
-        if (error?.code === 'ENOENT') return [];
-        throw error;
-      });
-      let existing = null;
-      for (const name of existingNames) {
-        if (!name.endsWith('.json')) continue;
-        const parsed = await readFile(pathModule.join(directory, name), name.slice(0, -'.json'.length));
-        if (parsed.status !== 'ready') continue;
-        if (
-          parsed.record.resource.workspaceId === request.resource.workspaceId
-          && parsed.record.resource.resourceId === request.resource.resourceId
-        ) {
-          existing = parsed.record;
-          break;
-        }
+      assertPathSegment(request.workspaceId, 'workspaceId');
+      assertPathSegment(request.recoverySessionId, 'recoverySessionId');
+      if (!request.resource || request.resource.workspaceId !== request.workspaceId
+        || typeof request.resource.resourceId !== 'string') {
+        throw new TypeError('Recovery journal resource does not match its workspace');
       }
-
-      if (existing) {
-        if (request.expectedRevision !== existing.revision) {
-          return { status: 'conflict', journal: summarize(existing) };
+      const targetKey = `${request.workspaceId}\0${request.recoverySessionId}\0${request.resource.resourceId}`;
+      return queues.run(targetKey, async () => {
+        const directory = directoryFor(request.workspaceId, request.recoverySessionId);
+        await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
+        const existingNames = await fsPromises.readdir(directory).catch((error) => {
+          if (error?.code === 'ENOENT') return [];
+          throw error;
+        });
+        let existing = null;
+        for (const name of existingNames) {
+          if (!name.endsWith('.json')) continue;
+          const parsed = await readFile(pathModule.join(directory, name), name.slice(0, -'.json'.length), {
+            workspaceId: request.workspaceId,
+            recoverySessionId: request.recoverySessionId,
+          });
+          if (parsed.status !== 'ready') continue;
+          if (
+            parsed.record.resource.workspaceId === request.resource.workspaceId
+            && parsed.record.resource.resourceId === request.resource.resourceId
+            && parsed.record.epoch === request.token.epoch
+          ) {
+            existing = parsed.record;
+            break;
+          }
         }
+
+        if (existing) {
+          if (request.expectedRevision !== existing.revision) {
+            return { status: 'conflict', journal: summarize(existing) };
+          }
+          const record = {
+            ...existing,
+            content: request.content,
+            encoding: request.encoding,
+            bom: request.bom,
+            baseRevision: request.baseRevision,
+            revision: existing.revision + 1,
+            updatedAt: new Date().toISOString(),
+          };
+          await atomicWrite(pathModule.join(directory, journalFileName(existing.journalId)), record);
+          return { status: 'written', journal: summarize(record) };
+        }
+
+        if (request.expectedRevision !== null) {
+          return { status: 'missing', journalId: '' };
+        }
+
         const record = {
-          ...existing,
+          schemaVersion: SCHEMA_VERSION,
+          journalId: randomUUID(),
+          hostId,
+          workspaceId: request.workspaceId,
+          recoverySessionId: request.recoverySessionId,
+          resource: request.resource,
           content: request.content,
           encoding: request.encoding,
           bom: request.bom,
           baseRevision: request.baseRevision,
-          revision: existing.revision + 1,
+          epoch: request.token.epoch,
+          revision: 1,
           updatedAt: new Date().toISOString(),
         };
-        await atomicWrite(pathModule.join(directory, journalFileName(existing.journalId)), record);
+        await atomicWrite(pathModule.join(directory, journalFileName(record.journalId)), record);
         return { status: 'written', journal: summarize(record) };
-      }
-
-      if (request.expectedRevision !== null) {
-        return { status: 'missing', journalId: '' };
-      }
-
-      const record = {
-        schemaVersion: SCHEMA_VERSION,
-        journalId: randomUUID(),
-        hostId,
-        workspaceId: request.workspaceId,
-        recoverySessionId: request.recoverySessionId,
-        resource: request.resource,
-        content: request.content,
-        encoding: request.encoding,
-        bom: request.bom,
-        baseRevision: request.baseRevision,
-        revision: 1,
-        updatedAt: new Date().toISOString(),
-      };
-      await atomicWrite(pathModule.join(directory, journalFileName(record.journalId)), record);
-      return { status: 'written', journal: summarize(record) };
+      });
     },
 
-    async delete({ journalId, expectedRevision }) {
-      const current = await this.read(journalId);
-      if (current.status === 'missing') return { status: 'missing' };
-      if (current.status === 'malformed') return { status: 'missing' };
-      if (current.journal.revision !== expectedRevision) {
-        return { status: 'conflict', journal: current.journal };
-      }
-      const hostDir = pathModule.join(rootDir, hostId);
-      const remove = async (directory, depth) => {
-        if (depth > 4) return false;
-        let entries = [];
-        try {
-          entries = await fsPromises.readdir(directory, { withFileTypes: true });
-        } catch (error) {
-          if (error?.code === 'ENOENT') return false;
-          throw error;
+    async delete({ journalId, expectedRevision, token }) {
+      const workspaceId = assertPathSegment(token?.workspaceId, 'workspaceId');
+      const found = await findJournal(journalId, workspaceId);
+      if (!found || found.parsed.status !== 'ready') return { status: 'missing' };
+      const targetKey = `${workspaceId}\0${found.recoverySessionId}\0${found.parsed.record.resource.resourceId}`;
+      return queues.run(targetKey, async () => {
+        const current = await readFile(found.filePath, journalId, {
+          workspaceId,
+          recoverySessionId: found.recoverySessionId,
+        });
+        if (current.status !== 'ready') return { status: 'missing' };
+        if (current.record.revision !== expectedRevision) {
+          return { status: 'conflict', journal: summarize(current.record) };
         }
-        for (const entry of entries) {
-          const full = pathModule.join(directory, entry.name);
-          if (entry.isDirectory()) {
-            if (await remove(full, depth + 1)) return true;
-          } else if (entry.name === journalFileName(journalId)) {
-            await fsPromises.unlink(full);
-            return true;
-          }
-        }
-        return false;
-      };
-      await remove(hostDir, 0);
-      return { status: 'deleted' };
+        await fsPromises.unlink(found.filePath);
+        return { status: 'deleted' };
+      });
     },
   };
 };

@@ -9,6 +9,7 @@ import { DocumentsError } from '@/lib/api/documents-errors';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
 import { getRuntimeEndpointGeneration } from '@/lib/runtime-switch';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
+import { requireWorkspaceEpoch } from './mutation-token';
 import { getDocumentRecoverySessionId } from './recovery-session';
 import {
   documentKey,
@@ -137,6 +138,7 @@ const emptyRecord = (
   identity,
   documentInstanceId,
   connectionGeneration: generation,
+  workspaceEpoch: 0,
   status: 'unloaded',
   dirty: false,
   saving: false,
@@ -167,6 +169,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
       return {
         ...record,
         status: 'deleted',
+        workspaceEpoch: result.epoch,
         byteLength: 0,
         errorMessage: null,
         conflict: record.dirty
@@ -182,6 +185,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     return {
       ...record,
       status: 'missing',
+      workspaceEpoch: result.epoch,
       baseContent: '',
       buffer: record.dirty ? record.buffer : '',
       baseRevision: null,
@@ -194,6 +198,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     return {
       ...record,
       status: 'binary',
+      workspaceEpoch: result.epoch,
       baseRevision: result.revision,
       byteLength: result.byteLength,
       errorMessage: null,
@@ -204,6 +209,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     return {
       ...record,
       status: 'unsupported-encoding',
+      workspaceEpoch: result.epoch,
       baseRevision: result.revision,
       byteLength: result.byteLength,
       errorMessage: null,
@@ -216,6 +222,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     return {
       ...record,
       status: 'ready',
+      workspaceEpoch: result.epoch,
       dirty: false,
       baseContent: normalized,
       baseRevision: result.revision,
@@ -233,6 +240,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     return {
       ...record,
       status: 'conflict',
+      workspaceEpoch: result.epoch,
       baseContent: normalized,
       baseRevision: result.revision,
       encoding: result.encoding,
@@ -254,6 +262,7 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
   return {
     ...record,
     status: 'ready',
+    workspaceEpoch: result.epoch,
     dirty: false,
     baseContent: normalized,
     buffer: normalized,
@@ -817,6 +826,15 @@ export class DocumentRegistry {
     });
     try {
       const result = await this.documents.write({
+        token: {
+          workspaceId: identity.workspaceId,
+          epoch: requireWorkspaceEpoch(current.workspaceEpoch),
+          owner: {
+            kind: 'document-surface',
+            id: this.recoverySessionId,
+            generation: current.connectionGeneration,
+          },
+        },
         resource: identity,
         content,
         encoding: current.encoding,
@@ -826,6 +844,16 @@ export class DocumentRegistry {
       });
       if (this.disposed || generation !== this.getGeneration()) return current;
       const latest = this.records.get(documentKey(identity)) ?? current;
+      if (result.status === 'stale-epoch') {
+        this.commit({
+          ...latest,
+          saving: false,
+          saveOperationId: null,
+          saveCapturedEditRevision: null,
+          errorMessage: `Workspace epoch changed to ${result.currentEpoch}; reload before saving`,
+        });
+        return this.records.get(documentKey(identity)) ?? latest;
+      }
       if (result.status === 'conflict') {
         const disk = await this.documents.read(identity);
         if (this.disposed || generation !== this.getGeneration()) return latest;
@@ -888,7 +916,18 @@ export class DocumentRegistry {
   async create(identity: DocumentIdentity, content = ''): Promise<DocumentRecord> {
     this.assertActive();
     const generation = this.getGeneration();
+    const current = this.records.get(documentKey(identity));
+    const snapshot = current ?? applyRead(
+      emptyRecord(identity, generation, this.createDocumentInstanceId()),
+      await this.documents.read(identity),
+    );
+    if (snapshot.status !== 'missing') return this.open(identity);
     const result = await this.documents.write({
+      token: {
+        workspaceId: identity.workspaceId,
+        epoch: requireWorkspaceEpoch(snapshot.workspaceEpoch),
+        owner: { kind: 'document-surface', id: this.recoverySessionId, generation },
+      },
       resource: identity,
       content,
       encoding: 'utf-8',
@@ -896,7 +935,7 @@ export class DocumentRegistry {
       expectedRevision: null,
       operationId: crypto.randomUUID(),
     });
-    if (result.status === 'conflict') {
+    if (result.status === 'conflict' || result.status === 'stale-epoch') {
       return this.open(identity);
     }
     if (this.disposed || generation !== this.getGeneration()) {
@@ -946,7 +985,11 @@ export class DocumentRegistry {
     const current = this.records.get(documentKey(identity));
     if (!current) return;
     if (event.kind === 'deleted') {
-      const deleted = applyRead(current, { status: 'missing', resource: current.identity });
+      const deleted = applyRead(current, {
+        status: 'missing',
+        epoch: requireWorkspaceEpoch(current.workspaceEpoch),
+        resource: current.identity,
+      });
       const externalSource = peekAgentFileChangeHint(current.identity) ? 'agent' : 'disk';
       this.commit({ ...deleted, externalSource });
       return;
@@ -1157,6 +1200,15 @@ export class DocumentRegistry {
 
   private async writeJournalRecord(record: DocumentRecord, updateRegistry: boolean): Promise<void> {
     const request = {
+      token: {
+        workspaceId: record.identity.workspaceId,
+        epoch: requireWorkspaceEpoch(record.workspaceEpoch),
+        owner: {
+          kind: 'document-recovery',
+          id: this.recoverySessionId,
+          generation: record.connectionGeneration,
+        },
+      },
       workspaceId: record.identity.workspaceId,
       recoverySessionId: this.recoverySessionId,
       resource: record.identity,
@@ -1167,6 +1219,9 @@ export class DocumentRegistry {
       expectedRevision: record.recoveryJournalRevision,
     };
     let written = await this.documents.writeRecoveryJournal(request);
+    if (written.status === 'stale-epoch') {
+      throw new Error(`Workspace epoch changed to ${written.currentEpoch}; recovery journal was not written`);
+    }
     if (written.status === 'conflict') {
       written = await this.documents.writeRecoveryJournal({
         ...request,
@@ -1193,11 +1248,23 @@ export class DocumentRegistry {
       const latest = this.records.get(documentKey(record.identity));
       if (!latest?.recoveryJournalId || latest.recoveryJournalRevision === null) return;
       const result = await this.documents.deleteRecoveryJournal({
+        token: {
+          workspaceId: latest.identity.workspaceId,
+          epoch: requireWorkspaceEpoch(latest.workspaceEpoch),
+          owner: {
+            kind: 'document-recovery',
+            id: this.recoverySessionId,
+            generation: latest.connectionGeneration,
+          },
+        },
         journalId: latest.recoveryJournalId,
         expectedRevision: latest.recoveryJournalRevision,
       });
       const current = this.records.get(documentKey(record.identity));
       if (!current) return;
+      if (result.status === 'stale-epoch') {
+        throw new Error(`Workspace epoch changed to ${result.currentEpoch}; recovery journal was not deleted`);
+      }
       if (result.status === 'conflict') {
         this.commit({
           ...current,
@@ -1233,6 +1300,15 @@ export class DocumentRegistry {
 
   private async restoreJournalIfNeeded(record: DocumentRecord): Promise<void> {
     if (record.dirty) return;
+    const runtimeGeneration = this.getGeneration();
+    if (runtimeGeneration !== record.connectionGeneration) return;
+    const captured = {
+      identity: { ...record.identity },
+      workspaceEpoch: record.workspaceEpoch,
+      documentInstanceId: record.documentInstanceId,
+      connectionGeneration: record.connectionGeneration,
+      runtimeGeneration,
+    };
     const journals = await this.documents.listRecoveryJournals({
       workspaceId: record.identity.workspaceId,
       recoverySessionId: this.recoverySessionId,
@@ -1240,12 +1316,29 @@ export class DocumentRegistry {
     const match = journals.find((journal) => (
       journal.resource.workspaceId === record.identity.workspaceId
       && journal.resource.resourceId === record.identity.resourceId
+      && journal.epoch === record.workspaceEpoch
     ));
     if (!match) return;
     const loaded = await this.documents.readRecoveryJournal(match.journalId);
     if (loaded.status !== 'ready') return;
     const latest = this.records.get(documentKey(record.identity));
     if (!latest || latest.dirty) return;
+    // Journal reads can outlive the document load that started them. A newer
+    // epoch, host generation, or document instance must never receive the old
+    // buffer; leave that journal available for explicit recovery/history.
+    if (
+      this.disposed
+      || this.getGeneration() !== captured.runtimeGeneration
+      || loaded.journal.epoch !== captured.workspaceEpoch
+      || latest.workspaceEpoch !== captured.workspaceEpoch
+      || latest.documentInstanceId !== captured.documentInstanceId
+      || latest.connectionGeneration !== captured.connectionGeneration
+      || latest.identity.workspaceId !== captured.identity.workspaceId
+      || latest.identity.resourceId !== captured.identity.resourceId
+      || loaded.journal.journalId !== match.journalId
+      || loaded.journal.resource.workspaceId !== captured.identity.workspaceId
+      || loaded.journal.resource.resourceId !== captured.identity.resourceId
+    ) return;
     const buffer = normalizeEditorLineEndings(loaded.content);
     const withJournal: DocumentRecord = {
       ...latest,

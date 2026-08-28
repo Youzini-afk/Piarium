@@ -3,8 +3,18 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+// @ts-expect-error The Bun test runner provides module mocking at test time.
+import { mock } from 'bun:test';
 import type * as vscode from 'vscode';
-import { handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
+
+mock.module('vscode', () => ({
+  workspace: {
+    isTrusted: true,
+    workspaceFolders: [],
+  },
+}));
+
+const { getVSCodeDocuments, handleExtensionsBridgeMessage } = await import('./bridge-extensions-runtime');
 
 test('VS Code owns an application-host extension catalog in global storage', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'piarium-vscode-extension-host-'));
@@ -110,7 +120,13 @@ test('VS Code owns an application-host extension catalog in global storage', asy
     const remaining = (removed?.data as { extensions?: Array<{ manifest?: { id?: string } }> }).extensions ?? [];
     assert.equal(remaining.some((candidate) => candidate.manifest?.id === 'dev.example.vscode'), false);
     assert.equal(remaining.some((candidate) => candidate.manifest?.id?.startsWith('piarium.builtin.') === true), true);
+    const documents = await getVSCodeDocuments(context);
+    await documents.inspectMutation('vscode-disposal-fixture');
     for (const disposable of subscriptions) await disposable.dispose();
+    await assert.rejects(
+      documents.inspectMutation('vscode-disposal-fixture'),
+      /Workspace mutation authority is disposed/,
+    );
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }

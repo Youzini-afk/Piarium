@@ -28,9 +28,10 @@ const waitUntil = async (predicate: () => boolean): Promise<void> => {
 };
 
 const createDocuments = (): DocumentsAPI => ({
-  resolveWorkspace: async () => ({ workspaceId: identity.workspaceId, hostId: 'host' }),
+  resolveWorkspace: async () => ({ workspaceId: identity.workspaceId, hostId: 'host', epoch: 1 }),
   read: async (resource) => ({
     status: 'ready',
+    epoch: 1,
     resource,
     revision: 'r1',
     content: 'abcdef',

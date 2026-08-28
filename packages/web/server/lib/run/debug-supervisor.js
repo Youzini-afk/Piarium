@@ -29,6 +29,19 @@ const waitForChildExit = (child) => new Promise((resolve) => {
   child.once('close', finish);
 });
 
+const registerProcessWriter = async (documents, scopeId, owner, purpose) => {
+  if (typeof documents?.registerWriterForScope !== 'function') return null;
+  return documents.registerWriterForScope(scopeId, owner, { mode: 'process', purpose });
+};
+
+const releaseProcessWriter = async (writer, mutated = true) => {
+  if (!writer) return;
+  if (mutated) {
+    try { await writer.markMutated(); } catch { /* authority may already be gone */ }
+  }
+  try { await writer.close(); } catch { /* authority may already be gone */ }
+};
+
 const relativeFromRoot = (root, absolutePath, pathModule) => {
   const relative = pathModule.relative(root, absolutePath);
   if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return null;
@@ -67,6 +80,18 @@ export const createDebugSupervisor = ({
   const workspaceListeners = new Map();
   const generations = new Map();
   const pendingExits = new Set();
+
+  const acquireWriter = (scopeId, owner) => {
+    return registerProcessWriter(documents, scopeId, owner, 'debug-process');
+  };
+
+  const releaseRecordWriter = async (record, mutated = true) => {
+    if (!record?.writer || record.writerReleased) return;
+    record.writerReleased = true;
+    const writer = record.writer;
+    record.writer = null;
+    await releaseProcessWriter(writer, mutated);
+  };
 
   const nextGeneration = (workspaceId) => {
     const next = (generations.get(workspaceId) ?? 0) + 1;
@@ -119,9 +144,15 @@ export const createDebugSupervisor = ({
       // Process may already have exited.
     }
     if (child) {
-      const exited = waitForChildExit(child).finally(() => pendingExits.delete(exited));
+      const exited = waitForChildExit(child)
+        .then(() => releaseRecordWriter(record))
+        .finally(() => {
+          if (record.pendingTermination === exited) record.pendingTermination = null;
+          pendingExits.delete(exited);
+        });
       pendingExits.add(exited);
-    }
+      record.pendingTermination = exited;
+    } else if (!record.pendingTermination) void releaseRecordWriter(record);
     record.child = null;
     if (record.status === 'starting' || record.status === 'running' || record.status === 'paused') {
       record.status = 'stopped';
@@ -260,13 +291,21 @@ export const createDebugSupervisor = ({
       message: '',
       child: null,
       rpc: null,
+      writer: null,
+      writerReleased: false,
+      pendingTermination: null,
       root: workspace.root,
       program: programPath,
     };
     sessions.set(workspaceId, record);
-    emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
     let child;
     try {
+      record.writer = await acquireWriter(workspaceId, {
+        kind: 'debug',
+        id: sessionId,
+        generation: record.generation,
+      });
+      emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       child = spawn(adapter.command, adapter.args ?? [], {
         cwd: workspace.root,
         env: { ...env, ...adapter.env },
@@ -274,6 +313,7 @@ export const createDebugSupervisor = ({
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) {
+      await releaseRecordWriter(record, Boolean(child));
       setFailed(record, error instanceof Error ? error.message : 'Failed to start debug adapter');
       return snapshotFor(record);
     }
@@ -319,6 +359,7 @@ export const createDebugSupervisor = ({
       }
       record.child = null;
       record.rpc = null;
+      void releaseRecordWriter(record);
     });
     try {
       const initialized = rpc.waitForEvent('initialized');

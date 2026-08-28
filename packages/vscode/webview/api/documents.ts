@@ -11,7 +11,8 @@ import type {
   PiariumWorkspaceIdentity,
   Subscription,
 } from '@piarium/ui/lib/api/types';
-import { DocumentsError } from '@piarium/ui/lib/api/documents-errors';
+import { DocumentsError, parseDocumentsFailureReason } from '@piarium/ui/lib/api/documents-errors';
+import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
@@ -26,9 +27,24 @@ const assertGeneration = (generation: number): void => {
 
 const call = async <T>(type: string, payload?: unknown): Promise<T> => {
   const generation = getRuntimeEndpointGeneration();
-  const data = await sendBridgeMessage<T>(type, payload);
-  assertGeneration(generation);
-  return data;
+  try {
+    const data = await sendBridgeMessage<T>(type, payload);
+    assertGeneration(generation);
+    return data;
+  } catch (error) {
+    if (error instanceof DocumentsError) throw error;
+    const details = error as { reason?: unknown; status?: unknown };
+    if (typeof details?.reason !== 'string'
+      && (typeof details?.status !== 'number' || !Number.isFinite(details.status))) {
+      throw error;
+    }
+    throw new DocumentsError(error instanceof Error ? error.message : String(error), {
+      reason: parseDocumentsFailureReason(details?.reason),
+      ...(typeof details?.status === 'number' && Number.isFinite(details.status)
+        ? { status: details.status }
+        : {}),
+    });
+  }
 };
 
 export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
@@ -38,6 +54,7 @@ export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
   move: (request) => call<PiariumDocumentMoveResult>('api:documents:move', request),
   delete: (request) => call<PiariumDocumentDeleteResult>('api:documents:delete', request),
   watch(workspaceId, listener, options): Subscription {
+    const tracker = createDocumentWatchEventTracker(listener);
     const generation = getRuntimeEndpointGeneration();
     let watchId: string | null = null;
     let closed = false;
@@ -45,13 +62,13 @@ export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
       if (event.data?.type !== 'api:documents:watch:event') return;
       if (event.data.watchId !== watchId || !event.data.event) return;
       if (JSON.stringify(event.data.event).includes('"content":')) return;
-      listener(event.data.event);
+      tracker.accept(event.data.event);
     };
     window.addEventListener('message', onEvent);
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
       closed = true;
       if (watchId) void sendBridgeMessage('api:documents:watch:stop', { watchId });
-      listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+      tracker.transportReset('authority-changed');
     });
     if (options?.signal?.aborted) {
       unsubscribe();

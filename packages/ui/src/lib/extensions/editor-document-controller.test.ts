@@ -13,6 +13,7 @@ const record = (overrides: Partial<DocumentRecord> = {}): DocumentRecord => ({
   byteLength: 14,
   conflict: null,
   connectionGeneration: 1,
+  workspaceEpoch: 1,
   dirty: false,
   documentInstanceId: 'document-1',
   encoding: 'utf-8',

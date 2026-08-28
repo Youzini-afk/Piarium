@@ -146,6 +146,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       remoteClientAuthRuntime,
       resolveProjectDirectory,
       __dirname,
+      documents,
     });
     registerProjectIconRoutes(app, {
       fsPromises,
@@ -172,7 +173,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
     registerSmallModelRoutes(app, { getSmallModelService });
     registerWalkthroughRoutes(app, { getWalkthroughService });
     registerGitHubRoutes(app);
-    registerGitRoutes(app);
+    registerGitRoutes(app, { documents });
     registerWorkspaceRoutes(app, {
       fsPromises,
       pathModule: path,
@@ -181,6 +182,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       readSettingsFromDisk,
       persistSettings,
       sanitizeProjects,
+      documents,
     });
     registerMagicPromptRoutes(app, { fsPromises, path, piariumDataDir });
     registerSessionFoldersRoutes(app, { fsPromises, path, piariumDataDir });
@@ -195,6 +197,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
       piariumUserConfigRoot,
+      documents,
     });
     if (documents) {
       registerDocumentRoutes(app, { documents, uiAuthController });

@@ -15,12 +15,13 @@ const createMemoryDocuments = () => {
   const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   let revisionSeq = 1;
   const api: DocumentsAPI = {
-    resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1' }),
+    resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: 1 }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));
-      if (!file) return { status: 'missing', resource: ref };
+      if (!file) return { status: 'missing', epoch: 1, resource: ref };
       return {
         status: 'ready',
+        epoch: 1,
         resource: ref,
         revision: file.revision,
         content: file.content,
@@ -34,14 +35,14 @@ const createMemoryDocuments = () => {
       const current = files.get(key);
       if (request.expectedRevision === null) {
         if (current) {
-          return { status: 'conflict', current: { status: 'ready', resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length } };
+          return { status: 'conflict', current: { status: 'ready', epoch: 1, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length } };
         }
       } else if (!current || current.revision !== request.expectedRevision) {
         return {
           status: 'conflict',
           current: current
-            ? { status: 'ready', resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length }
-            : { status: 'missing', resource: request.resource },
+            ? { status: 'ready', epoch: 1, resource: request.resource, revision: current.revision, encoding: 'utf-8', bom: false, byteLength: current.content.length }
+            : { status: 'missing', epoch: 1, resource: request.resource },
         };
       }
       const revision = `d1_${revisionSeq++}`;
@@ -61,6 +62,7 @@ const createMemoryDocuments = () => {
       resource: resource(),
       revision: 1,
       baseRevision: null,
+      epoch: 1,
       updatedAt: '2026-08-20T00:00:00.000Z',
       byteLength: 0,
     } }),
@@ -126,6 +128,8 @@ describe('hinted agent reloads', () => {
     });
     files.set(keyOf(identity), { content: 'two', revision: 'd1_2' });
     registry.handleWatchEvent({
+      sourceId: 'test',
+      generation: 1,
       kind: 'changed',
       sequence: 1,
       resource: identity,

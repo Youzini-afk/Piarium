@@ -17,6 +17,7 @@ import type {
   Subscription,
 } from '@piarium/ui/lib/api/types';
 import { DocumentsError, parseDocumentsFailureReason } from '@piarium/ui/lib/api/documents-errors';
+import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import {
   getRuntimeEndpointGeneration,
@@ -63,14 +64,18 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
   const event = value as Record<string, unknown>;
   if (
     !Number.isSafeInteger(event.sequence)
-    || Number(event.sequence) < 0
+    || Number(event.sequence) < 1
+    || !Number.isSafeInteger(event.generation)
+    || Number(event.generation) < 1
+    || typeof event.sourceId !== 'string'
+    || !event.sourceId
     || typeof event.kind !== 'string'
     || Object.hasOwn(event, 'content')
   ) {
     throw new DocumentsError('Document watch returned an invalid event', { reason: 'failed' });
   }
   if (event.kind === 'reset') {
-    if (!['overflow', 'reconnected', 'authority-changed'].includes(String(event.reason))) {
+    if (!['overflow', 'reconnected', 'authority-changed', 'gap'].includes(String(event.reason))) {
       throw new DocumentsError('Document watch returned an invalid reset event', { reason: 'failed' });
     }
     return event as PiariumWorkspaceFileEvent;
@@ -140,6 +145,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   move: (request: PiariumDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<PiariumDocumentMoveResult>,
   delete: (request: PiariumDocumentDeleteRequest) => postJson('/api/documents/delete', request) as Promise<PiariumDocumentDeleteResult>,
   watch(workspaceId: string, listener: (event: PiariumWorkspaceFileEvent) => void, options): Subscription {
+    const tracker = createDocumentWatchEventTracker(listener);
     const generation = getRuntimeEndpointGeneration();
     const controller = new AbortController();
     if (options?.signal) {
@@ -147,7 +153,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
       else options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
-      listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+      tracker.transportReset('authority-changed');
       controller.abort();
     });
     void (async () => {
@@ -169,21 +175,21 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
             });
           }
           if (reconnecting) {
-            listener({ kind: 'reset', sequence: 0, reason: 'reconnected' });
+            tracker.transportReset('reconnected');
             reconnecting = false;
           }
           reconnectDelayMs = 250;
-          await readSseEvents(response, listener, controller.signal);
+          await readSseEvents(response, (event) => tracker.accept(event), controller.signal);
           if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });
         } catch (error) {
           if (controller.signal.aborted) break;
           if (getRuntimeEndpointGeneration() !== generation) {
-            listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+            tracker.transportReset('authority-changed');
             break;
           }
           const status = error instanceof DocumentsError ? error.status : undefined;
           if (typeof status === 'number' && status < 500) {
-            listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+            tracker.transportReset('authority-changed');
             break;
           }
           reconnecting = true;

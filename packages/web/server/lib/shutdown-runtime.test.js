@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGracefulShutdownRuntime } from './shutdown-runtime.js';
 
-const createRuntime = (server) => createGracefulShutdownRuntime({
+const createRuntime = (server, documentsAuthority = null) => createGracefulShutdownRuntime({
   process: { exit: vi.fn() },
   shutdownTimeoutMs: 1000,
   getExitOnShutdown: () => false,
@@ -13,6 +13,8 @@ const createRuntime = (server) => createGracefulShutdownRuntime({
   scheduledTasksRuntime: { stop: vi.fn() },
   getTerminalRuntime: () => null,
   setTerminalRuntime: vi.fn(),
+  getDocumentsAuthority: () => documentsAuthority,
+  setDocumentsAuthority: vi.fn(),
   getMessageStreamRuntime: () => null,
   setMessageStreamRuntime: vi.fn(),
   getServer: () => server,
@@ -43,5 +45,24 @@ describe('graceful shutdown runtime', () => {
 
     expect(warnSpy).not.toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
     expect(clearTimeoutSpy).toHaveBeenCalled();
+  });
+
+  it('disposes document authority only after the HTTP server stops accepting work', async () => {
+    const order = [];
+    const server = {
+      close: vi.fn((callback) => {
+        order.push('server-closed');
+        callback();
+      }),
+    };
+    const documentsAuthority = {
+      dispose: vi.fn(async () => { order.push('documents-disposed'); }),
+    };
+
+    const runtime = createRuntime(server, documentsAuthority);
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(order).toEqual(['server-closed', 'documents-disposed']);
+    expect(documentsAuthority.dispose).toHaveBeenCalledOnce();
   });
 });

@@ -9,6 +9,7 @@ import {
 import {
   ApplicationExtensionRuntime,
 } from '@piarium/extension-host';
+import { PiRuntimeBrokerError, type PiSessionExecutionAdmission } from '@piarium/runtime-broker/core';
 import type { VSCodePiRuntime } from './piRuntime';
 import {
   createDocumentsCapabilityHandler,
@@ -34,7 +35,54 @@ interface ExtensionRuntime {
 }
 
 const runtimes = new WeakMap<vscode.ExtensionContext, Promise<ExtensionRuntime>>();
+const runtimeDisposals = new WeakMap<vscode.ExtensionContext, Promise<void>>();
 const waitControllers = new Map<string, AbortController>();
+
+const createWorkspaceExecutionAdmission = (
+  documents: ReturnType<typeof createVSCodeDocumentAuthority>,
+): PiSessionExecutionAdmission => async (request) => {
+  let writer;
+  try {
+    writer = await documents.registerWriterForScope(request.cwd, {
+      kind: 'pi-worker',
+      id: request.workerId,
+    }, {
+      mode: 'process',
+      purpose: request.method
+        ? `pi-${request.phase}:${request.method}`
+        : `pi-${request.phase}`,
+    });
+  } catch (error) {
+    const details = error as { code?: unknown; currentEpoch?: unknown; message?: unknown };
+    if (typeof details?.code !== 'string') throw error;
+    const currentEpoch = Number.isSafeInteger(details.currentEpoch)
+      ? Number(details.currentEpoch)
+      : undefined;
+    throw new PiRuntimeBrokerError(
+      details.code,
+      typeof details.message === 'string' ? details.message : 'Pi workspace writer admission failed',
+      {
+        ...(currentEpoch === undefined
+          ? {}
+          : { details: { currentEpoch } }),
+        retryable: details.code === 'maintenance' || details.code === 'stale-epoch',
+      },
+    );
+  }
+  if (!writer) return null;
+  let closed = false;
+  return {
+    async close() {
+      if (closed) return;
+      closed = true;
+      try {
+        await writer.markMutated();
+      } finally {
+        await writer.close();
+      }
+    },
+  };
+};
 
 const getRuntime = (
   context: vscode.ExtensionContext,
@@ -54,6 +102,7 @@ const getRuntime = (
       dataDir,
       workspace: vscode.workspace,
     });
+    piRuntime?.setSessionExecutionAdmission(createWorkspaceExecutionAdmission(documents));
     runtime.workbench.setWorkspaceScopeResolver((scopeId) => documents.resolveScopeId(scopeId));
     runtime.capabilities.register('workspace.documents', createDocumentsCapabilityHandler(documents));
     runtime.capabilities.register('pi-runtime', async (method, value) => {
@@ -76,11 +125,36 @@ const getRuntime = (
       return (result ?? null) as never;
     });
     await runtime.start().catch(() => undefined);
-    context.subscriptions.push({ dispose: () => { void runtime.stop(); } });
+    context.subscriptions.push({
+      dispose: () => {
+        const disposal = disposeVSCodeExtensionRuntime(context);
+        void disposal.catch(() => undefined);
+        return disposal;
+      },
+    });
     return { documents, runtime };
   })();
   runtimes.set(context, creating);
   return creating;
+};
+
+export const disposeVSCodeExtensionRuntime = (context: vscode.ExtensionContext): Promise<void> => {
+  const active = runtimeDisposals.get(context);
+  if (active) return active;
+  const creating = runtimes.get(context);
+  if (!creating) return Promise.resolve();
+  const disposal = creating.then(async ({ documents, runtime }) => {
+    try {
+      await runtime.stop();
+    } finally {
+      await documents.dispose();
+    }
+  }).finally(() => {
+    runtimes.delete(context);
+    runtimeDisposals.delete(context);
+  });
+  runtimeDisposals.set(context, disposal);
+  return disposal;
 };
 
 export const getVSCodeDocuments = async (

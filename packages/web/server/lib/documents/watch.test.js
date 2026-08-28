@@ -34,6 +34,7 @@ const createHarness = () => {
     fsModule,
     fsPromises,
     pathModule: path,
+    sourceId: 'watch-source',
     onEvent: (event) => events.push(event),
   });
   return { controller, events, files, fsPromises, rootPath, change: (eventType, filename) => onChange(eventType, filename) };
@@ -46,6 +47,8 @@ describe('workspace document watcher', () => {
     await waitForFlush();
     expect(harness.events).toContainEqual({
       kind: 'deleted',
+      sourceId: 'watch-source',
+      generation: 1,
       sequence: 1,
       resource: { workspaceId: 'workspace-id', resourceId: 'existing.txt' },
     });

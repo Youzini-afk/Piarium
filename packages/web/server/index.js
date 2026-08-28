@@ -21,6 +21,7 @@ import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbenc
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
 import { createWorkspaceRecoveryEngine } from './lib/recovery/engine.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
+import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
@@ -83,8 +84,11 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
-import { PiRuntimeLifecycle } from '@piarium/runtime-broker';
-import { createWebPiRuntimeBroker } from './lib/pi-runtime/broker.js';
+import { PiRuntimeBrokerError, PiRuntimeLifecycle } from '@piarium/runtime-broker';
+import {
+  attachPiSessionExecutionAdmission,
+  createWebPiRuntimeBroker,
+} from './lib/pi-runtime/broker.js';
 import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
@@ -422,6 +426,7 @@ let server = null;
 let uiAuthController = null;
 let activeTunnelController = null;
 let terminalRuntime = null;
+let activeDocumentsAuthority = null;
 let exitOnShutdown = true;
 let isShuttingDown = false;
 let signalsAttached = false;
@@ -467,6 +472,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   scheduledTasksRuntime,
   getTerminalRuntime: () => terminalRuntime,
   setTerminalRuntime: (value) => { terminalRuntime = value; },
+  getDocumentsAuthority: () => activeDocumentsAuthority,
+  setDocumentsAuthority: (value) => { activeDocumentsAuthority = value; },
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
   setUiAuthController: (value) => { uiAuthController = value; },
@@ -734,12 +741,30 @@ async function main(options = {}) {
   });
 
   const requirePiRuntime = options.requirePiRuntime ?? process.env.PIARIUM_RUNTIME !== 'desktop';
-  const createPiRuntimeBroker = options.createPiRuntimeBroker || ((brokerOptions) => createWebPiRuntimeBroker({
+  let piWriterTracker = null;
+  const admitPiSessionExecution = (request) => {
+    if (!piWriterTracker) {
+      throw new PiRuntimeBrokerError(
+        'runtime_not_ready',
+        'Pi workspace writer admission is not ready',
+        { retryable: true },
+      );
+    }
+    return piWriterTracker.admit(request);
+  };
+  const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions) => createWebPiRuntimeBroker({
     agentDir: process.env.PIARIUM_AGENT_DIR,
     clientVersion: PIARIUM_VERSION,
     cwd: process.cwd(),
     ...brokerOptions,
   }));
+  const createPiRuntimeBroker = (brokerOptions) => attachPiSessionExecutionAdmission(
+    piRuntimeBrokerFactory({
+      ...brokerOptions,
+      admitSessionExecution: admitPiSessionExecution,
+    }),
+    admitPiSessionExecution,
+  );
   piRuntimeLifecycle = options.piRuntimeLifecycle || new PiRuntimeLifecycle({
     dataDir: PIARIUM_DATA_DIR,
     createBroker: (brokerOptions) => createPiRuntimeBroker(brokerOptions),
@@ -754,6 +779,9 @@ async function main(options = {}) {
   });
   const ownsPiRuntimeBroker = !options.piRuntimeBroker && !options.piRuntimeLifecycle;
   const piRuntimeBroker = options.piRuntimeBroker || piRuntimeLifecycle.asBroker();
+  if (options.piRuntimeBroker) {
+    attachPiSessionExecutionAdmission(piRuntimeBroker, admitPiSessionExecution);
+  }
   const getReadyPiRuntimeBroker = () => (
     options.piRuntimeBroker
     || (piRuntimeLifecycle?.currentBroker ? piRuntimeBroker : null)
@@ -808,6 +836,8 @@ async function main(options = {}) {
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
   });
+  activeDocumentsAuthority = documentsAuthority;
+  piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
   const workspaceRecoveryEngines = new Map();
   const recoveryEngineForOwner = (context) => {
     const storageOwnerId = context?.owner?.extensionId;
@@ -947,6 +977,8 @@ async function main(options = {}) {
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
     piSessionAutomation.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
+    void piWriterTracker.processEvent(event);
+    if (event?.kind === 'worker.exit') return;
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
     const sessionId = event.sessionId || envelope.data?.sessionId;
@@ -958,6 +990,7 @@ async function main(options = {}) {
     }
     if (envelope.event !== 'agent.event' || !sessionId) return;
     const agentEvent = envelope.data?.event;
+    if (agentEvent?.type === 'agent_settled') return;
     if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
     void (async () => {
       if (sessionSnapshots.get(sessionId)?.features?.goal?.status === 'active') return;
@@ -1113,6 +1146,7 @@ async function main(options = {}) {
     attachSignals,
     apiOnly,
     dictationModelsDir: path.join(PIARIUM_USER_CONFIG_ROOT, 'speech-models'),
+    documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
   dictationRuntime = startupResult.dictationRuntime;
@@ -1150,6 +1184,7 @@ async function main(options = {}) {
       await runRuntime.dispose();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
+      await piWriterTracker.dispose();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();

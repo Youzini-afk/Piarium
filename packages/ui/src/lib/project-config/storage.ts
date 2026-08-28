@@ -4,6 +4,7 @@ import type {
   PiariumDocumentReadResult,
   PiariumResourceReference,
 } from '@/lib/api/types';
+import { requireWorkspaceEpoch } from '@/lib/documents/mutation-token';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { documentIdentityForPath, pickWorkspaceRoot } from '@/lib/documents/path';
@@ -41,6 +42,12 @@ interface TextSnapshot {
   result: PiariumDocumentReadResult;
   documents: DocumentsAPI;
 }
+
+const mutationToken = (snapshot: TextSnapshot, project: PiariumProjectRef) => ({
+  workspaceId: snapshot.resource.workspaceId,
+  epoch: requireWorkspaceEpoch(snapshot.result.epoch),
+  owner: { kind: 'project-config', id: project.id },
+});
 
 interface LoadedConfig {
   config: PiariumProjectConfig;
@@ -190,6 +197,7 @@ export const createPiariumProjectConfigStore = (
     const encoding = snapshot.result.status === 'ready' ? snapshot.result.encoding : 'utf-8';
     const bom = snapshot.result.status === 'ready' ? snapshot.result.bom : false;
     const result = await snapshot.documents.write({
+      token: mutationToken(snapshot, project),
       resource: snapshot.resource,
       content: `${JSON.stringify(config, null, 2)}\n`,
       encoding,
@@ -259,6 +267,7 @@ export const createPiariumProjectConfigStore = (
     const snapshot = await resolveTextSnapshot(path, project);
     if (snapshot.result.status !== 'missing' && snapshot.result.status !== 'ready') return false;
     const result = await snapshot.documents.write({
+      token: mutationToken(snapshot, project),
       resource: snapshot.resource,
       content,
       encoding: snapshot.result.status === 'ready' ? snapshot.result.encoding : 'utf-8',
@@ -273,6 +282,7 @@ export const createPiariumProjectConfigStore = (
     const snapshot = await resolveTextSnapshot(path, project);
     if (snapshot.result.status === 'missing') return true;
     const result = await snapshot.documents.delete({
+      token: mutationToken(snapshot, project),
       resource: snapshot.resource,
       expectedRevision: snapshot.result.revision,
       operationId: crypto.randomUUID(),

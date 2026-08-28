@@ -1,7 +1,10 @@
 import type { DocumentsAPI, PiariumDocumentReadResult } from '@/lib/api/types';
 import { DocumentsError } from '@/lib/api/documents-errors';
 import { documentIdentityForPath } from './path';
+import { requireWorkspaceEpoch } from './mutation-token';
 import type { DocumentIdentity } from './types';
+
+const WORKSPACE_TEXT_OWNER = { kind: 'workspace-text', id: 'piarium-ui' } as const;
 
 export const resolveTextDocumentIdentity = async (
   documents: DocumentsAPI,
@@ -47,6 +50,11 @@ export const writeWorkspaceTextFile = async (
   const bom = current.status === 'ready' ? current.bom : false;
   const expectedRevision = current.status === 'missing' ? null : current.revision;
   const written = await documents.write({
+    token: {
+      workspaceId: resource.workspaceId,
+      epoch: requireWorkspaceEpoch(current.epoch),
+      owner: WORKSPACE_TEXT_OWNER,
+    },
     resource,
     content,
     encoding,

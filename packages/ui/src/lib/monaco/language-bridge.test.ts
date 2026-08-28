@@ -17,6 +17,7 @@ const record = (): DocumentRecord => ({
   identity,
   documentInstanceId: 'document-one',
   connectionGeneration: 1,
+  workspaceEpoch: 1,
   status: 'ready',
   dirty: true,
   saving: false,

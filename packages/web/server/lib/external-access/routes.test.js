@@ -6,12 +6,13 @@ import path from 'path';
 import { spawn } from 'child_process';
 import request from 'supertest';
 import { registerExternalAccessRoutes } from './routes.js';
+import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 
 let tempDir;
 let deploymentRoot;
 let dataDir;
 
-const createApp = ({ auth } = {}) => {
+const createApp = ({ auth, documents, activeWorkspace } = {}) => {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
   app.use((req, _res, next) => {
@@ -47,9 +48,10 @@ const createApp = ({ auth } = {}) => {
     remoteClientAuthRuntime: {
       listAuditEvents: vi.fn(async () => []),
     },
-    resolveProjectDirectory: vi.fn(async () => ({ directory: path.join(deploymentRoot, 'workspace'), error: null })),
+    resolveProjectDirectory: vi.fn(async () => ({ directory: activeWorkspace || path.join(deploymentRoot, 'workspace'), error: null })),
     __dirname: path.join(deploymentRoot, 'packages', 'web', 'server'),
     deploymentRoot,
+    documents,
   });
   return app;
 };
@@ -140,5 +142,32 @@ describe('external access routes', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.stdout).toContain('external-ok');
     expect(response.body.absoluteCwd).toBe(await fs.promises.realpath(deploymentRoot));
+  });
+
+  it('records active-workspace external writes and refuses them during maintenance', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const app = createApp({
+        documents: harness.authority,
+        activeWorkspace: harness.workspaceRoot,
+      });
+      const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+
+      await request(app)
+        .put('/api/external/fs/write')
+        .send({ root: 'workspace', path: 'tracked.txt', content: 'tracked' })
+        .expect(200);
+      const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+      expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
+
+      await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+      await request(app)
+        .put('/api/external/fs/write')
+        .send({ root: 'workspace', path: 'late.txt', content: 'late' })
+        .expect(409);
+      expect(fs.existsSync(path.join(harness.workspaceRoot, 'late.txt'))).toBe(false);
+    } finally {
+      await harness.cleanup();
+    }
   });
 });

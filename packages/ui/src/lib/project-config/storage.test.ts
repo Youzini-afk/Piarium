@@ -39,12 +39,14 @@ const createRuntime = () => {
     resolveWorkspace: async ({ path }) => ({
       workspaceId: path === HOME ? HOME_WORKSPACE : REPO_WORKSPACE,
       hostId: 'host-1',
+      epoch: 1,
     }),
     read: async (resource) => {
       const current = files.get(keyOf(resource));
-      if (!current) return { status: 'missing', resource };
+      if (!current) return { status: 'missing', epoch: 1, resource };
       return {
         status: 'ready',
+        epoch: 1,
         resource,
         revision: current.revision,
         content: current.content,
@@ -63,13 +65,14 @@ const createRuntime = () => {
           current: current
             ? {
                 status: 'ready',
+                epoch: 1,
                 resource: request.resource,
                 revision: current.revision,
                 encoding: 'utf-8',
                 bom: false,
                 byteLength: current.content.length,
               }
-            : { status: 'missing', resource: request.resource },
+            : { status: 'missing', epoch: 1, resource: request.resource },
         };
       }
       const nextRevision = `d1_${revision++}`;
@@ -86,6 +89,7 @@ const createRuntime = () => {
           status: 'conflict',
           current: {
             status: 'ready',
+            epoch: 1,
             resource: request.resource,
             revision: current.revision,
             encoding: 'utf-8',

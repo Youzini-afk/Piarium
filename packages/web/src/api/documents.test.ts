@@ -44,6 +44,23 @@ describe('createWebDocumentsAPI', () => {
     await expect(pending).rejects.toMatchObject({ reason: 'stale-completion' });
   });
 
+  it('preserves maintenance failure reason and HTTP status from the host', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      error: 'Workspace is in maintenance mode',
+      reason: 'maintenance',
+    }, { status: 409 }));
+
+    await expect(api.read({
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      resourceId: 'note.txt',
+    })).rejects.toMatchObject({
+      reason: 'maintenance',
+      status: 409,
+    });
+  });
+
   it('opens document watches without putting credentials in the URL', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
     const api = createWebDocumentsAPI();
@@ -73,9 +90,43 @@ describe('createWebDocumentsAPI', () => {
       }));
     const events: unknown[] = [];
     const subscription = api.watch('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (event) => events.push(event));
-    await vi.waitFor(() => expect(events).toContainEqual({ kind: 'reset', sequence: 0, reason: 'reconnected' }), {
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+      kind: 'reset',
+      sequence: 0,
+      reason: 'reconnected',
+    })), {
       timeout: 2_000,
     });
+    subscription.close();
+  });
+
+  it('turns a same-generation sequence gap into a workspace reset', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    const encoder = new TextEncoder();
+    const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) {
+        for (const sequence of [1, 3]) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            sourceId: 'source-1',
+            generation: 1,
+            sequence,
+            kind: 'changed',
+            resource: { workspaceId, resourceId: 'note.txt' },
+          })}\n\n`));
+        }
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+    const events: unknown[] = [];
+    const subscription = api.watch(workspaceId, (event) => events.push(event));
+    await vi.waitFor(() => expect(events).toContainEqual({
+      sourceId: 'source-1',
+      generation: 1,
+      sequence: 3,
+      kind: 'reset',
+      reason: 'gap',
+    }));
     subscription.close();
   });
 

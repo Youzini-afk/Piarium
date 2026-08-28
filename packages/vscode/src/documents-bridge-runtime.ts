@@ -29,6 +29,22 @@ const payloadRecord = (value: unknown): Record<string, unknown> => (
     : {}
 );
 
+const bridgeErrorDetails = (error: unknown): Pick<BridgeResponse, 'reason' | 'status'> => {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return {};
+  const details = error as { code?: unknown; reason?: unknown; statusCode?: unknown; status?: unknown };
+  const reason = typeof details.code === 'string'
+    ? details.code
+    : typeof details.reason === 'string' ? details.reason : undefined;
+  const statusValue = details.statusCode ?? details.status;
+  const status = typeof statusValue === 'number' && Number.isFinite(statusValue)
+    ? statusValue
+    : undefined;
+  return {
+    ...(reason ? { reason } : {}),
+    ...(status === undefined ? {} : { status }),
+  };
+};
+
 export const handleDocumentsBridgeMessage = async (
   message: BridgeMessageInput,
   deps: {
@@ -60,7 +76,9 @@ export const handleDocumentsBridgeMessage = async (
         return { id, type, success: true, data: await deps.documents.deleteRecoveryJournal(body) };
       case 'api:documents:watch:start': {
         const workspaceId = String(body.workspaceId ?? '');
-        if (!workspaceId) return { id, type, success: false, error: 'workspaceId is required' };
+        if (!workspaceId) {
+          return { id, type, success: false, error: 'workspaceId is required', reason: 'failed', status: 400 };
+        }
         const watchId = `watch_${++watchSeq}`;
         const subscription = deps.documents.watch(workspaceId, (event) => {
           const serialized = JSON.stringify(event);
@@ -85,6 +103,7 @@ export const handleDocumentsBridgeMessage = async (
       type,
       success: false,
       error: error instanceof Error ? error.message : String(error),
+      ...bridgeErrorDetails(error),
     };
   }
 };

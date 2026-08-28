@@ -40,6 +40,7 @@ export type DocumentRecord = {
   /** Internal identity for editor-engine projections. It survives move/rename within this registry. */
   documentInstanceId: string;
   connectionGeneration: number;
+  workspaceEpoch: number;
   status: DocumentLoadStatus;
   dirty: boolean;
   saving: boolean;
@@ -165,6 +166,7 @@ export type DocumentWorkspaceEditUndoResult =
 
 export type DocumentMeta = {
   identity: DocumentIdentity;
+  workspaceEpoch: number;
   status: DocumentLoadStatus;
   dirty: boolean;
   saving: boolean;
@@ -181,6 +183,7 @@ export type DocumentMeta = {
 
 export const toDocumentMeta = (record: DocumentRecord): DocumentMeta => ({
   identity: record.identity,
+  workspaceEpoch: record.workspaceEpoch,
   status: record.status,
   dirty: record.dirty,
   saving: record.saving,
