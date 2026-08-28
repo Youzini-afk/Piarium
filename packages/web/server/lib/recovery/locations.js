@@ -5,6 +5,7 @@ import { RecoveryPrimitiveError } from './errors.js';
 
 const SCHEMA_VERSION = 1;
 const MODES = new Set(['application-data', 'workspace-local', 'workspace-adjacent', 'custom']);
+const DEFAULT_LOCATION = Object.freeze({ mode: 'application-data' });
 
 const samePath = (left, right, pathModule = path) => {
   const a = pathModule.resolve(left);
@@ -64,6 +65,8 @@ const normalizeLocation = (value) => {
 
 const emptyDocument = (authorityId) => ({
   authorityId,
+  defaultLocation: DEFAULT_LOCATION,
+  inheritedLocations: {},
   locations: {},
   revision: 0,
   schemaVersion: SCHEMA_VERSION,
@@ -83,8 +86,16 @@ const parseDocument = (value, authorityId) => {
   if (typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry timestamp is malformed');
   }
+  if (value.inheritedLocations !== undefined
+    && (!value.inheritedLocations || typeof value.inheritedLocations !== 'object' || Array.isArray(value.inheritedLocations))) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry inherited locations are malformed');
+  }
+  const inheritedLocations = value.inheritedLocations ?? {};
   return {
     authorityId,
+    defaultLocation: normalizeLocation(value.defaultLocation ?? DEFAULT_LOCATION),
+    inheritedLocations: Object.fromEntries(Object.entries(inheritedLocations)
+      .map(([workspaceId, location]) => [workspaceId, normalizeLocation(location)])),
     locations: Object.fromEntries(Object.entries(value.locations).map(([workspaceId, location]) => [
       workspaceId,
       normalizeLocation(location),
@@ -211,17 +222,46 @@ export const createRecoveryLocationRegistry = ({
     return next;
   });
 
+  const selectedFromDocument = (document, workspaceId) => {
+    const override = document.locations[workspaceId];
+    if (override) {
+      return {
+        defaultLocation: document.defaultLocation,
+        document,
+        location: override,
+        migrationRequired: false,
+        source: 'workspace',
+      };
+    }
+    const inherited = document.inheritedLocations[workspaceId] ?? DEFAULT_LOCATION;
+    return {
+      defaultLocation: document.defaultLocation,
+      document,
+      location: inherited,
+      migrationRequired: JSON.stringify(inherited) !== JSON.stringify(document.defaultLocation),
+      source: 'global',
+    };
+  };
+
   return {
     authorityId,
     operationsRoot,
     registryPath,
     read,
-    async selection(workspaceId) {
+    async globalSelection() {
       const document = await read();
-      return {
-        document,
-        location: document.locations[workspaceId] ?? { mode: 'application-data' },
-      };
+      return { document, location: document.defaultLocation };
+    },
+    async selection(workspaceId) {
+      return selectedFromDocument(await read(), workspaceId);
+    },
+    async materialize(workspaceId) {
+      await update((next, current) => {
+        if (current.locations[workspaceId] || current.inheritedLocations[workspaceId]) return false;
+        next.inheritedLocations[workspaceId] = DEFAULT_LOCATION;
+        return true;
+      });
+      return selectedFromDocument(await read(), workspaceId);
     },
     async resolve(identity, location) {
       return resolveRecoveryStorageRoot({
@@ -235,21 +275,54 @@ export const createRecoveryLocationRegistry = ({
         storageOwnerId,
       });
     },
-    async commit(workspaceId, expectedLocation, location) {
+    async commit(workspaceId, expectedLocation, location, options = {}) {
       const normalized = normalizeLocation(location);
       return update((next, current) => {
-        const authoritative = current.locations[workspaceId] ?? { mode: 'application-data' };
+        const authoritative = current.locations[workspaceId]
+          ?? current.inheritedLocations[workspaceId]
+          ?? DEFAULT_LOCATION;
         if (JSON.stringify(authoritative) !== JSON.stringify(normalizeLocation(expectedLocation))) {
           throw new RecoveryPrimitiveError('recovery-in-progress', 'Recovery storage authority changed while the move was running', { retryable: true });
         }
+        if (options.source === 'global') {
+          const expectedDefault = normalizeLocation(options.expectedDefaultLocation ?? location);
+          if (JSON.stringify(current.defaultLocation) !== JSON.stringify(expectedDefault)) {
+            throw new RecoveryPrimitiveError('recovery-in-progress', 'Global recovery storage changed while the move was running', { retryable: true });
+          }
+          delete next.locations[workspaceId];
+          next.inheritedLocations[workspaceId] = normalized;
+          return Boolean(current.locations[workspaceId])
+            || JSON.stringify(current.inheritedLocations[workspaceId]) !== JSON.stringify(normalized);
+        }
         next.locations[workspaceId] = normalized;
-        return JSON.stringify(authoritative) !== JSON.stringify(normalized);
+        delete next.inheritedLocations[workspaceId];
+        return JSON.stringify(current.locations[workspaceId]) !== JSON.stringify(normalized)
+          || Boolean(current.inheritedLocations[workspaceId]);
       });
+    },
+    async setDefault(location) {
+      const normalized = normalizeLocation(location);
+      return update((next, current) => {
+        if (JSON.stringify(current.defaultLocation) === JSON.stringify(normalized)) return false;
+        next.defaultLocation = normalized;
+        return true;
+      });
+    },
+    async validateLocation(location) {
+      const normalized = normalizeLocation(location);
+      if (normalized.mode === 'custom') {
+        return {
+          customRoot: await canonicalizeCreatableDirectory(normalized.customRoot, fsPromises, pathModule),
+          mode: 'custom',
+        };
+      }
+      return normalized;
     },
     async remove(workspaceId) {
       return update((next, current) => {
-        if (!current.locations[workspaceId]) return false;
+        if (!current.locations[workspaceId] && !current.inheritedLocations[workspaceId]) return false;
         delete next.locations[workspaceId];
+        delete next.inheritedLocations[workspaceId];
         return true;
       });
     },

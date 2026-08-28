@@ -270,9 +270,54 @@ export const createWorkspaceRecoveryEngine = ({
     pathModule,
   );
 
+  const inheritedMovePromises = new Map();
+  const storageMoveQueues = new Map();
+
+  const runStorageMove = (workspaceId, operation) => {
+    const previous = storageMoveQueues.get(workspaceId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const settled = result.then(() => undefined, () => undefined);
+    storageMoveQueues.set(workspaceId, settled);
+    settled.finally(() => {
+      if (storageMoveQueues.get(workspaceId) === settled) storageMoveQueues.delete(workspaceId);
+    });
+    return result;
+  };
+
+  const currentStorageSelection = async (identity) => {
+    const initial = await locations.materialize(identity.workspaceId);
+    if (!initial.migrationRequired) return initial;
+    const existing = inheritedMovePromises.get(identity.workspaceId);
+    if (existing) return existing;
+    const migration = (async () => {
+      const operation = await runStorageMove(identity.workspaceId, () => (
+        moveStorageInternal(identity, initial.defaultLocation, {
+          expectedDefaultLocation: initial.defaultLocation,
+          source: 'global',
+        })
+      ));
+      if (operation.state !== 'complete') {
+        throw new RecoveryPrimitiveError(
+          'storage-move-failed',
+          operation.failure?.message ?? 'Inherited recovery storage could not move to the global default',
+          { operationId: operation.id, retryable: operation.failure?.retryable ?? true },
+        );
+      }
+      return locations.selection(identity.workspaceId);
+    })();
+    inheritedMovePromises.set(identity.workspaceId, migration);
+    try {
+      return await migration;
+    } finally {
+      if (inheritedMovePromises.get(identity.workspaceId) === migration) {
+        inheritedMovePromises.delete(identity.workspaceId);
+      }
+    }
+  };
+
   const storageFor = async (identity) => {
     await recoverMoveOperations();
-    const selection = await locations.selection(identity.workspaceId);
+    const selection = await currentStorageSelection(identity);
     const root = await resolveStorageRoot(identity, selection.location);
     await recoverStoreOperations(root, identity.workspaceId);
     return {
@@ -894,14 +939,15 @@ export const createWorkspaceRecoveryEngine = ({
   const storageStatusInternal = async (identity) => {
     await recoverMoveOperations();
     const selection = identity
-      ? await locations.selection(identity.workspaceId)
-      : { document: await locations.read(), location: { mode: 'application-data' } };
+      ? await currentStorageSelection(identity)
+      : await locations.globalSelection();
     if (!identity) {
       return {
         authorityId,
         byteLength: 0,
         encryption: { available: false, enabled: false },
         location: selection.location,
+        locationSource: 'global',
         objectCount: 0,
         readySnapshotCount: 0,
         registryRevision: selection.document.revision,
@@ -920,6 +966,7 @@ export const createWorkspaceRecoveryEngine = ({
           byteLength: objectStats.byteLength,
           encryption: { available: false, enabled: false },
           location: selection.location,
+          locationSource: selection.source,
           objectCount: objectStats.objectCount,
           readySnapshotCount: 0,
           registryRevision: selection.document.revision,
@@ -942,6 +989,7 @@ export const createWorkspaceRecoveryEngine = ({
         byteLength: objectStats.byteLength,
         encryption: { available: false, enabled: false },
         location: selection.location,
+        locationSource: selection.source,
         objectCount: objectStats.objectCount,
         readySnapshotCount,
         registryRevision: selection.document.revision,
@@ -1054,7 +1102,8 @@ export const createWorkspaceRecoveryEngine = ({
     return moveRecoveryPromise;
   };
 
-  const moveStorageInternal = async (identity, targetLocation) => {
+  const moveStorageInternal = async (identity, targetLocation, commitOptions = {}) => {
+    const normalizedTargetLocation = await locations.validateLocation(targetLocation);
     const current = await locations.selection(identity.workspaceId);
     const sourceRoot = await resolveStorageRoot(identity, current.location);
     const sourceCatalog = await openRecoveryCatalog(sourceRoot, { create: false, fsPromises });
@@ -1074,7 +1123,7 @@ export const createWorkspaceRecoveryEngine = ({
     } finally {
       sourceCatalog?.close();
     }
-    const destinationRoot = await resolveStorageRoot(identity, targetLocation);
+    const destinationRoot = await resolveStorageRoot(identity, normalizedTargetLocation);
     if (!locations.samePath(sourceRoot, destinationRoot)
       && (pathIsInside(sourceRoot, destinationRoot, pathModule)
         || pathIsInside(destinationRoot, sourceRoot, pathModule))) {
@@ -1088,7 +1137,7 @@ export const createWorkspaceRecoveryEngine = ({
       from: current.location,
       sourceRoot,
       destinationRoot,
-      to: targetLocation,
+      to: normalizedTargetLocation,
       workspaceId: identity.workspaceId,
     });
     const stageRoot = `${destinationRoot}.move-${operation.id}.staging`;
@@ -1099,7 +1148,7 @@ export const createWorkspaceRecoveryEngine = ({
     operation.switched = false;
     await writeMove(operation);
     if (locations.samePath(sourceRoot, destinationRoot)) {
-      await locations.commit(identity.workspaceId, current.location, targetLocation);
+      await locations.commit(identity.workspaceId, current.location, normalizedTargetLocation, commitOptions);
       operation.state = 'complete';
       await writeMove(operation);
       return publicMoveOperation(operation);
@@ -1149,7 +1198,7 @@ export const createWorkspaceRecoveryEngine = ({
       await writeMove(operation);
       await fsPromises.rename(stageRoot, destinationRoot);
       destinationReplaced = true;
-      await locations.commit(identity.workspaceId, current.location, targetLocation);
+      await locations.commit(identity.workspaceId, current.location, normalizedTargetLocation, commitOptions);
       operation.switched = true;
       operation.state = 'complete';
       await writeMove(operation);
@@ -1569,11 +1618,40 @@ export const createWorkspaceRecoveryEngine = ({
         return failedRecoveryResult(error);
       }
     },
+    async setDefaultStorageLocation(location) {
+      try {
+        const normalized = await locations.validateLocation(location);
+        await locations.setDefault(normalized);
+        return { status: 'ready', storage: await storageStatusInternal(null) };
+      } catch (error) {
+        return failedRecoveryResult(error, 'storage-move-failed');
+      }
+    },
     async setStorageLocation(input) {
       return runWorkspace(input.workspaceId, async () => {
         try {
           await recoverMoveOperations();
-          const operation = await moveStorageInternal(await inspectIdentity(input.workspaceId), input.location);
+          const operation = await runStorageMove(input.workspaceId, async () => (
+            moveStorageInternal(await inspectIdentity(input.workspaceId), input.location)
+          ));
+          return { operation, status: 'ready' };
+        } catch (error) {
+          return failedRecoveryResult(error, 'storage-move-failed');
+        }
+      });
+    },
+    async clearStorageLocationOverride(workspaceId) {
+      return runWorkspace(workspaceId, async () => {
+        try {
+          await recoverMoveOperations();
+          const identity = await inspectIdentity(workspaceId);
+          const global = await locations.globalSelection();
+          const operation = await runStorageMove(workspaceId, () => (
+            moveStorageInternal(identity, global.location, {
+              expectedDefaultLocation: global.location,
+              source: 'global',
+            })
+          ));
           return { operation, status: 'ready' };
         } catch (error) {
           return failedRecoveryResult(error, 'storage-move-failed');

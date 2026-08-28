@@ -1,4 +1,5 @@
 import {
+  parseRecoveryStorageLocation,
   parseRecoveryStorageCleanupInput,
   parseSetRecoveryStorageLocationInput,
   parseWorkspaceCombinedRecoveryApplyInput,
@@ -81,6 +82,13 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
   }
   if (method === 'setStorageLocation') {
     return engine.setStorageLocation(parseSetRecoveryStorageLocationInput(params));
+  }
+  if (method === 'setDefaultStorageLocation') {
+    return engine.setDefaultStorageLocation(parseRecoveryStorageLocation(params));
+  }
+  if (method === 'clearStorageLocationOverride') {
+    const input = asRecord(params, 'workspace.recovery-primitives.clearStorageLocationOverride');
+    return engine.clearStorageLocationOverride(requiredText(input.workspaceId, 'workspaceId'));
   }
   if (method === 'getStorageMove') {
     const input = asRecord(params, 'workspace.recovery-primitives.getStorageMove');

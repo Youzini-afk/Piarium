@@ -332,6 +332,75 @@ describe('native workspace recovery Phase 1 engine', () => {
     }
   });
 
+  it('applies the global default lazily while project storage overrides keep priority', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured.status).toBe('captured');
+
+    const globalChanged = await engine.setDefaultStorageLocation({ mode: 'workspace-adjacent' });
+    expect(globalChanged).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global' },
+    });
+    const inherited = await engine.storageStatus(harness.identity.workspaceId);
+    expect(inherited).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global', snapshotCount: 1 },
+    });
+    await expect(fs.promises.stat(applicationDataRoot(harness))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const overridden = await engine.setStorageLocation({
+      location: { mode: 'workspace-local' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(overridden).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    await engine.setDefaultStorageLocation({ mode: 'application-data' });
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'workspace-local' }, locationSource: 'workspace', snapshotCount: 1 },
+    });
+
+    const inheritedAgain = await engine.clearStorageLocationOverride(harness.identity.workspaceId);
+    expect(inheritedAgain).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'application-data' }, locationSource: 'global', snapshotCount: 1 },
+    });
+    expect(await engine.readSnapshot({
+      snapshotId: captured.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({ status: 'ready' });
+  });
+
+  it('bootstraps an unmaterialized workspace from application data before following a changed global default', async () => {
+    const { engine, harness } = await createHarness();
+    await engine.setDefaultStorageLocation({ mode: 'workspace-adjacent' });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured.status).toBe('captured');
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global', snapshotCount: 1 },
+    });
+  });
+
+  it('lets an unmaterialized project override a changed global default', async () => {
+    const { engine, harness } = await createHarness();
+    await engine.setDefaultStorageLocation({ mode: 'workspace-adjacent' });
+
+    const moved = await engine.setStorageLocation({
+      location: { mode: 'workspace-local' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(moved).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { location: { mode: 'workspace-local' }, locationSource: 'workspace' },
+    });
+  });
+
   it('keeps recovery storage private to the providing extension', async () => {
     const { engine, harness } = await createHarness();
     const other = createWorkspaceRecoveryEngine({

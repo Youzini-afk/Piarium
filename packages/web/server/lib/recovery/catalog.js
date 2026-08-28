@@ -185,7 +185,10 @@ export const openRecoveryCatalog = async (root, options = {}) => {
         if (error?.code !== 'ENOENT') throw error;
       }
     }
-    database = new Database(catalogPath(root), create ? undefined : { fileMustExist: true });
+    const databasePath = process.platform === 'win32'
+      ? path.toNamespacedPath(catalogPath(root))
+      : catalogPath(root);
+    database = new Database(databasePath, create ? undefined : { fileMustExist: true });
     initialize(database);
     if (create) {
       await fsPromises.chmod(catalogPath(root), 0o600);
@@ -195,7 +198,11 @@ export const openRecoveryCatalog = async (root, options = {}) => {
   } catch (error) {
     database?.close();
     if (error instanceof RecoveryPrimitiveError) throw error;
-    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog cannot be opened', { cause: error });
+    throw new RecoveryPrimitiveError(
+      'storage-malformed',
+      `Recovery catalog cannot be opened: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
 };
 

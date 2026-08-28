@@ -6,6 +6,7 @@ import {
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
   parseRecoveryStorageLocation,
+  parseRecoveryStorageStatus,
   parseWorkspaceRecoveryCaptureResult,
   parseWorkspaceRecoveryEntryBindingResult,
   parseWorkspaceRecoveryManifestEntry,
@@ -48,7 +49,7 @@ test("rejects unsafe manifest paths and unauthenticated content identifiers", ()
 
 test("owns the versioned workspace recovery service identity", () => {
   assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID, "piarium.workspace-recovery");
-  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 1);
+  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 2);
   assert.equal(parseWorkspaceRecoverySnapshotSummary(summary()).availability, "ready");
 });
 
@@ -64,6 +65,21 @@ test("parses every storage mode without accepting custom roots on another mode",
     () => parseRecoveryStorageLocation({ mode: "application-data", customRoot: "/escape" }),
     WorkspaceRecoveryContractError,
   );
+});
+
+test("keeps global and project recovery storage authority explicit", () => {
+  assert.equal(parseRecoveryStorageStatus({
+    authorityId: "authority-1",
+    byteLength: 0,
+    encryption: { available: false, enabled: false },
+    location: { mode: "workspace-local" },
+    locationSource: "global",
+    objectCount: 0,
+    readySnapshotCount: 0,
+    registryRevision: 1,
+    snapshotCount: 0,
+    state: "missing",
+  }).locationSource, "global");
 });
 
 test("keeps missing, malformed, incomplete, and corrupt snapshot results distinct", () => {
@@ -121,6 +137,6 @@ test("browser-safe API uses the generic extension service invocation contract", 
     args: [{ workspaceId: "workspace-1" }],
     method: "listSnapshots",
     serviceId: "piarium.workspace-recovery",
-    version: 1,
+    version: 2,
   }]);
 });

@@ -577,7 +577,8 @@ export const getDesktopHomeDirectory = async (): Promise<string | null> => {
 };
 
 export const requestDirectoryAccess = async (
-  directoryPath: string
+  directoryPath: string,
+  options?: { title?: string },
 ): Promise<{ success: boolean; path?: string; projectId?: string; error?: string }> => {
   // Desktop shell on local instance: use native folder picker.
   if (canRequestNativeDirectoryAccess()) {
@@ -585,7 +586,7 @@ export const requestDirectoryAccess = async (
       const selected = await getDesktopBridge()?.openDialog?.({
         directory: true,
         multiple: false,
-        title: 'Select Working Directory',
+        title: options?.title || 'Select Working Directory',
         ...(directoryPath ? { defaultPath: directoryPath } : {}),
       });
       if (!selected || typeof selected !== 'string') {

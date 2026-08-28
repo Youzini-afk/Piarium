@@ -296,7 +296,8 @@ materialization.
 ## 9. Content and metadata storage
 
 The Host keeps a small authoritative storage-location registry in the built-in extension namespace.
-Each workspace independently selects one of four payload locations:
+The registry owns one global default plus optional project overrides. Project configuration always wins;
+workspaces without an override inherit the global selection. Both levels use the same four payload modes:
 
 ```ts
 type RecoveryStorageMode =
@@ -315,8 +316,17 @@ Resolution and illustrative layouts are:
 | `workspace-adjacent` | `<workspace-parent>/.piarium-recovery/<workspaceId>/v1` | Same-volume storage without placing history inside the workspace tree |
 | `custom` | `<selected-root>/<authorityId>/<workspaceId>/v1` | User/deployment-selected disk, mount, NAS, or persistent volume |
 
-`PIARIUM_RECOVERY_DIR` may set the Application Host's default payload root; a per-workspace selection
-wins over that default. Without either, `application-data` resolves through `PIARIUM_DATA_DIR`.
+The built-in default is `application-data`, resolved through `PIARIUM_DATA_DIR`.
+`PIARIUM_RECOVERY_DIR` may replace that mode's Application Host payload root. A user-selected global
+location supersedes the built-in default, and an explicit project location supersedes the global one.
+
+For inherited workspaces, the registry also records the last authoritative global location. Changing the
+global default never makes existing history disappear: the next access copies and verifies that workspace's
+payload, atomically switches its inherited location to the current global default, and only then removes the
+old payload. Offline workspaces keep their previous authority until they are accessible. Selecting **Use
+global default** for a project performs the same verified transfer before removing its override.
+An unmaterialized workspace always starts from the built-in `application-data` authority before following a
+changed global default, so histories created before global defaults existed are discovered and transferred.
 
 Every payload root uses the same private layout:
 
@@ -495,7 +505,7 @@ is based on observed semantics, not platform-name guesses.
 ## 14. Public contracts
 
 `@piarium/extension-contract` owns the browser-safe service identity and DTOs for
-`piarium.workspace-recovery@1`. The selected Piarium extension provides its Host implementation; the
+`piarium.workspace-recovery@2`. The selected Piarium extension provides its Host implementation; the
 Application Host exposes the selected service as `WorkspaceRecoveryAPI`, separate from Pi worker
 recovery methods:
 
@@ -519,7 +529,9 @@ interface WorkspaceRecoveryAPI {
   pinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   unpinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatus>;
+  setDefaultStorageLocation(location: RecoveryStorageLocation): Promise<RecoveryStorageStatus>;
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveOperation>;
+  clearStorageLocationOverride(workspaceId: string): Promise<RecoveryStorageMoveOperation>;
   getStorageMove(operationId: string): Promise<RecoveryStorageMoveOperation>;
   cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupResult>;
   deleteWorkspaceHistory(workspaceId: string): Promise<RecoveryStorageCleanupResult>;
@@ -647,7 +659,7 @@ Each phase is complete, independently reviewable, and pushed before the next one
 
 - Add fixed Application Host primitives for workspace identity/trust, mutation epochs, streamed object
   handles, fenced materialization, Pi session capability access, and durable operation recovery.
-- Define `piarium.workspace-recovery@1` in `@piarium/extension-contract` and scaffold the statically
+- Define `piarium.workspace-recovery@2` in `@piarium/extension-contract` and scaffold the statically
   distributed `piarium.builtin.recovery` extension with brokered Host and Surface entrypoints.
 - Introduce the extension-owned snapshot/manifest/CAS schema, consistency/coverage model, pins, WAL
   records, and storage diagnostics.

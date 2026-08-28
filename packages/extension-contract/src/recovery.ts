@@ -8,7 +8,7 @@ import type {
   PiariumExtensionServiceInvocationRequest,
 } from "./types.js";
 
-export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 1 as const;
+export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 2 as const;
 
 export type WorkspaceRecoverySnapshotConsistency =
   | "point-in-time"
@@ -439,6 +439,7 @@ export interface RecoveryStorageStatus {
   byteLength: number;
   encryption: { available: boolean; enabled: boolean };
   location: RecoveryStorageLocation;
+  locationSource: "global" | "workspace";
   objectCount: number;
   readySnapshotCount: number;
   registryRevision: number;
@@ -1146,6 +1147,7 @@ export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatu
     byteLength: count(raw.byteLength, "storage.byteLength"),
     encryption: { available: encryption.available, enabled: encryption.enabled },
     location: parseRecoveryStorageLocation(raw.location),
+    locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "storage.locationSource"),
     objectCount: count(raw.objectCount, "storage.objectCount"),
     readySnapshotCount: count(raw.readySnapshotCount, "storage.readySnapshotCount"),
     registryRevision: count(raw.registryRevision, "storage.registryRevision"),
@@ -1419,6 +1421,7 @@ export interface WorkspaceRecoveryAPI {
   applyRestore(input: WorkspaceRestoreApplyInput): Promise<WorkspaceRestoreOperationResult>;
   cancelCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   cancelOperation(operationId: string): Promise<WorkspaceRestoreOperationResult>;
+  clearStorageLocationOverride(workspaceId: string): Promise<RecoveryStorageMoveResult>;
   captureSnapshot(input: WorkspaceRecoveryCaptureInput): Promise<WorkspaceRecoveryCaptureResult>;
   cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupOperationResult>;
   createCheckpoint(input: WorkspaceRecoveryCheckpointInput): Promise<WorkspaceRecoveryCaptureResult>;
@@ -1436,6 +1439,7 @@ export interface WorkspaceRecoveryAPI {
   recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBindingResult>;
   recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBindingResult>;
   resolveEntry(input: WorkspaceRecoveryEntryTarget): Promise<WorkspaceRecoveryEntryBindingResult>;
+  setDefaultStorageLocation(location: RecoveryStorageLocation): Promise<RecoveryStorageStatusResult>;
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveResult>;
   status(workspaceId: string): Promise<WorkspaceRecoveryStatusResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
@@ -1459,6 +1463,7 @@ export const createWorkspaceRecoveryAPI = (
     applyRestore: async (input) => parseWorkspaceRestoreOperationResult(await call("applyRestore", [parseWorkspaceRestoreApplyInput(input) as unknown as JsonValue])),
     cancelCombinedOperation: async (operationId) => parseWorkspaceCombinedRecoveryOperationResult(await call("cancelCombinedOperation", [text(operationId, "operationId")])),
     cancelOperation: async (operationId) => parseWorkspaceRestoreOperationResult(await call("cancelOperation", [text(operationId, "operationId")])),
+    clearStorageLocationOverride: async (workspaceId) => parseRecoveryStorageMoveResult(await call("clearStorageLocationOverride", [text(workspaceId, "workspaceId")])),
     captureSnapshot: async (input) => parseWorkspaceRecoveryCaptureResult(await call("captureSnapshot", [parseWorkspaceRecoveryCaptureInput(input) as unknown as JsonValue])),
     cleanupStorage: async (input) => parseRecoveryStorageCleanupOperationResult(await call("cleanupStorage", [parseRecoveryStorageCleanupInput(input) as unknown as JsonValue])),
     createCheckpoint: async (input) => parseWorkspaceRecoveryCaptureResult(await call("createCheckpoint", [parseWorkspaceRecoveryCheckpointInput(input) as unknown as JsonValue])),
@@ -1476,6 +1481,7 @@ export const createWorkspaceRecoveryAPI = (
     recordTurnSettled: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnSettled", [parseWorkspaceRecoveryTurnSettledInput(input) as unknown as JsonValue])),
     recordTurnStart: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnStart", [parseWorkspaceRecoveryTurnStartInput(input) as unknown as JsonValue])),
     resolveEntry: async (input) => parseWorkspaceRecoveryEntryBindingResult(await call("resolveEntry", [parseWorkspaceRecoveryEntryTarget(input) as unknown as JsonValue])),
+    setDefaultStorageLocation: async (location) => parseRecoveryStorageStatusResult(await call("setDefaultStorageLocation", [parseRecoveryStorageLocation(location) as unknown as JsonValue])),
     setStorageLocation: async (input) => parseRecoveryStorageMoveResult(await call("setStorageLocation", [parseSetRecoveryStorageLocationInput(input) as unknown as JsonValue])),
     status: async (workspaceId) => parseWorkspaceRecoveryStatusResult(await call("status", [text(workspaceId, "workspaceId")])),
     storageStatus: async (workspaceId) => parseRecoveryStorageStatusResult(await call("storageStatus", [workspaceId === undefined ? null : text(workspaceId, "workspaceId")])),

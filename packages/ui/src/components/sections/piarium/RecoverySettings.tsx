@@ -1,11 +1,13 @@
 import React from 'react';
 import type {
+  RecoveryStorageLocation,
   RecoveryStorageMode,
   RecoveryStorageStatus,
   WorkspaceRecoveryStatus,
 } from '@piarium/extension-contract';
 import type { RecoveryPreference } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
+import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import {
   SettingsRadioGroup,
   SettingsRadioOption,
@@ -15,6 +17,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
   getWorkspaceRecoveryAPI,
@@ -54,6 +57,13 @@ const STORAGE_MODES: Array<{ labelKey: I18nKey; mode: RecoveryStorageMode }> = [
   { mode: 'custom', labelKey: 'settings.piarium.recovery.storage.custom' },
 ];
 
+type StorageEditorMode = RecoveryStorageMode | 'inherit';
+type StoragePickerTarget = 'global' | 'workspace';
+
+const storageLocation = (mode: RecoveryStorageMode, customRoot: string): RecoveryStorageLocation => (
+  mode === 'custom' ? { customRoot: customRoot.trim(), mode } : { mode }
+);
+
 const statusTone = (state: RecoveryStorageStatus['state']): string => {
   if (state === 'ready') return 'text-[var(--status-success)]';
   if (state === 'missing') return 'text-muted-foreground';
@@ -70,12 +80,17 @@ export const RecoverySettings: React.FC = () => {
     const workspace = sessionId ? state.records[sessionId]?.snapshot?.workspace : undefined;
     return workspace?.kind === 'workspace' ? workspace.authorityId ?? workspace.id : null;
   });
+  const [globalStatus, setGlobalStatus] = React.useState<RecoveryStorageStatus | null>(null);
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [busy, setBusy] = React.useState<'cleanup' | 'delete' | 'move' | null>(null);
+  const [busy, setBusy] = React.useState<'cleanup' | 'delete' | 'global' | 'move' | null>(null);
+  const [globalError, setGlobalError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [storageMode, setStorageMode] = React.useState<RecoveryStorageMode>('application-data');
+  const [globalStorageMode, setGlobalStorageMode] = React.useState<RecoveryStorageMode>('application-data');
+  const [globalCustomRoot, setGlobalCustomRoot] = React.useState('');
+  const [storageMode, setStorageMode] = React.useState<StorageEditorMode>('inherit');
   const [customRoot, setCustomRoot] = React.useState('');
+  const [pickerTarget, setPickerTarget] = React.useState<StoragePickerTarget | null>(null);
 
   const changePreference = React.useCallback((next: RecoveryPreference) => {
     setPreference(next);
@@ -83,21 +98,48 @@ export const RecoverySettings: React.FC = () => {
   }, [setPreference]);
 
   const refresh = React.useCallback(async () => {
-    if (!workspaceId) {
-      setStatus(null);
-      setError(null);
-      return;
-    }
     setLoading(true);
+    setGlobalError(null);
     setError(null);
     try {
-      const result = requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().status(workspaceId));
-      setStatus(result);
-      setStorageMode(result.storage.location.mode);
-      setCustomRoot(result.storage.location.mode === 'custom' ? result.storage.location.customRoot : '');
+      const api = getWorkspaceRecoveryAPI();
+      const [globalResult, workspaceResult] = await Promise.allSettled([
+        api.storageStatus().then(requireWorkspaceRecoveryResult),
+        workspaceId
+          ? api.status(workspaceId).then(requireWorkspaceRecoveryResult)
+          : Promise.resolve(null),
+      ]);
+      if (globalResult.status === 'fulfilled') {
+        const next = globalResult.value.storage;
+        setGlobalStatus(next);
+        setGlobalStorageMode(next.location.mode);
+        setGlobalCustomRoot(next.location.mode === 'custom' ? next.location.customRoot : '');
+      } else {
+        setGlobalStatus(null);
+        setGlobalError(globalResult.reason instanceof Error ? globalResult.reason.message : String(globalResult.reason));
+      }
+      if (workspaceResult.status === 'fulfilled') {
+        const next = workspaceResult.value;
+        setStatus(next);
+        if (next) {
+          setStorageMode(next.storage.locationSource === 'workspace' ? next.storage.location.mode : 'inherit');
+          setCustomRoot(
+            next.storage.locationSource === 'workspace' && next.storage.location.mode === 'custom'
+              ? next.storage.location.customRoot
+              : '',
+          );
+        } else {
+          setStorageMode('inherit');
+          setCustomRoot('');
+        }
+      } else {
+        setStatus(null);
+        setError(workspaceResult.reason instanceof Error ? workspaceResult.reason.message : String(workspaceResult.reason));
+      }
     } catch (cause) {
+      setGlobalStatus(null);
       setStatus(null);
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setGlobalError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
@@ -107,16 +149,37 @@ export const RecoverySettings: React.FC = () => {
     void refresh();
   }, [refresh]);
 
+  const saveGlobalStorage = React.useCallback(async () => {
+    if (globalStorageMode === 'custom' && !globalCustomRoot.trim()) return;
+    setBusy('global');
+    try {
+      requireWorkspaceRecoveryResult(
+        await getWorkspaceRecoveryAPI().setDefaultStorageLocation(
+          storageLocation(globalStorageMode, globalCustomRoot),
+        ),
+      );
+      toast.success(t('settings.piarium.recovery.storage.globalSaved'));
+      await refresh();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }, [globalCustomRoot, globalStorageMode, refresh, t]);
+
   const moveStorage = React.useCallback(async () => {
     if (!workspaceId || (storageMode === 'custom' && !customRoot.trim())) return;
     setBusy('move');
     try {
-      requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().setStorageLocation({
-        location: storageMode === 'custom'
-          ? { customRoot: customRoot.trim(), mode: 'custom' }
-          : { mode: storageMode },
-        workspaceId,
-      }));
+      const api = getWorkspaceRecoveryAPI();
+      if (storageMode === 'inherit') {
+        requireWorkspaceRecoveryResult(await api.clearStorageLocationOverride(workspaceId));
+      } else {
+        requireWorkspaceRecoveryResult(await api.setStorageLocation({
+          location: storageLocation(storageMode, customRoot),
+          workspaceId,
+        }));
+      }
       toast.success(t('settings.piarium.recovery.storage.moveComplete'));
       await refresh();
     } catch (cause) {
@@ -125,6 +188,21 @@ export const RecoverySettings: React.FC = () => {
       setBusy(null);
     }
   }, [customRoot, refresh, storageMode, t, workspaceId]);
+
+  const chooseStorageFolder = React.useCallback(async (target: StoragePickerTarget) => {
+    const currentPath = target === 'global' ? globalCustomRoot : customRoot;
+    if (canRequestNativeDirectoryAccess()) {
+      const selected = await requestDirectoryAccess(currentPath, {
+        title: t('settings.piarium.recovery.storage.folderPickerTitle'),
+      });
+      if (selected.success && selected.path) {
+        if (target === 'global') setGlobalCustomRoot(selected.path);
+        else setCustomRoot(selected.path);
+      }
+      return;
+    }
+    setPickerTarget(target);
+  }, [customRoot, globalCustomRoot, t]);
 
   const cleanup = React.useCallback(async () => {
     if (!workspaceId) return;
@@ -160,18 +238,27 @@ export const RecoverySettings: React.FC = () => {
   }, [refresh, t, workspaceId]);
 
   const selectedLocation = status?.storage.location;
+  const globalLocationChanged = globalStatus
+    ? globalStatus.location.mode !== globalStorageMode
+      || (globalStorageMode === 'custom' && globalStatus.location.mode === 'custom'
+        && globalStatus.location.customRoot !== globalCustomRoot.trim())
+    : false;
   const locationChanged = selectedLocation
-    ? selectedLocation.mode !== storageMode
-      || (storageMode === 'custom' && selectedLocation.mode === 'custom'
-        && selectedLocation.customRoot !== customRoot.trim())
+    ? storageMode === 'inherit'
+      ? status?.storage.locationSource !== 'global'
+      : status?.storage.locationSource !== 'workspace'
+        || selectedLocation.mode !== storageMode
+        || (storageMode === 'custom' && selectedLocation.mode === 'custom'
+          && selectedLocation.customRoot !== customRoot.trim())
     : false;
 
   return (
-    <SettingsSection
-      settingsItem="sessions.recovery"
-      title={t('settings.piarium.recovery.title')}
-      description={t('settings.piarium.recovery.description')}
-    >
+    <>
+      <SettingsSection
+        settingsItem="sessions.recovery"
+        title={t('settings.piarium.recovery.title')}
+        description={t('settings.piarium.recovery.description')}
+      >
       <SettingsRadioGroup aria-label={t('settings.piarium.recovery.preference.aria')}>
         {RECOVERY_PREFERENCES.map((option) => (
           <SettingsRadioOption
@@ -200,6 +287,62 @@ export const RecoverySettings: React.FC = () => {
             {t('settings.piarium.recovery.actions.refresh')}
           </Button>
         </div>
+
+        <div className="space-y-3 rounded-xl border border-border/60 p-3">
+          <div>
+            <h4 className="typography-ui-label font-medium text-foreground">
+              {t('settings.piarium.recovery.storage.globalTitle')}
+            </h4>
+            <p className="mt-1 typography-meta text-muted-foreground">
+              {t('settings.piarium.recovery.storage.globalDescription')}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {STORAGE_MODES.map((option) => (
+              <Button
+                key={option.mode}
+                type="button"
+                variant="chip"
+                size="sm"
+                aria-pressed={globalStorageMode === option.mode}
+                onClick={() => setGlobalStorageMode(option.mode)}
+              >
+                {t(option.labelKey)}
+              </Button>
+            ))}
+          </div>
+          {globalStorageMode === 'custom' ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                value={globalCustomRoot}
+                onChange={(event) => setGlobalCustomRoot(event.target.value)}
+                placeholder={t('settings.piarium.recovery.storage.customPlaceholder')}
+                className="min-w-0 flex-1 font-mono typography-meta"
+              />
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => void chooseStorageFolder('global')}>
+                <Icon name="folder" className="size-3.5" />
+                {t('settings.piarium.recovery.storage.chooseFolder')}
+              </Button>
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!globalLocationChanged || busy !== null || (globalStorageMode === 'custom' && !globalCustomRoot.trim())}
+            onClick={() => void saveGlobalStorage()}
+          >
+            {busy === 'global'
+              ? t('settings.piarium.recovery.storage.savingGlobal')
+              : t('settings.piarium.recovery.storage.saveGlobal')}
+          </Button>
+        </div>
+
+        {globalError ? (
+          <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">
+            {globalError}
+          </div>
+        ) : null}
 
         {!workspaceId ? (
           <div className="rounded-xl border border-border/60 bg-muted/20 p-3 typography-meta text-muted-foreground">
@@ -242,13 +385,22 @@ export const RecoverySettings: React.FC = () => {
           <div className="space-y-3 rounded-xl border border-border/60 p-3">
             <div>
               <h4 className="typography-ui-label font-medium text-foreground">
-                {t('settings.piarium.recovery.storage.location')}
+                {t('settings.piarium.recovery.storage.projectTitle')}
               </h4>
               <p className="mt-1 typography-meta text-muted-foreground">
-                {t('settings.piarium.recovery.storage.locationDescription')}
+                {t('settings.piarium.recovery.storage.projectDescription')}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="chip"
+                size="sm"
+                aria-pressed={storageMode === 'inherit'}
+                onClick={() => setStorageMode('inherit')}
+              >
+                {t('settings.piarium.recovery.storage.inheritGlobal')}
+              </Button>
               {STORAGE_MODES.map((option) => (
                 <Button
                   key={option.mode}
@@ -263,12 +415,18 @@ export const RecoverySettings: React.FC = () => {
               ))}
             </div>
             {storageMode === 'custom' ? (
-              <Input
-                value={customRoot}
-                onChange={(event) => setCustomRoot(event.target.value)}
-                placeholder={t('settings.piarium.recovery.storage.customPlaceholder')}
-                className="font-mono typography-meta"
-              />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={customRoot}
+                  onChange={(event) => setCustomRoot(event.target.value)}
+                  placeholder={t('settings.piarium.recovery.storage.customPlaceholder')}
+                  className="min-w-0 flex-1 font-mono typography-meta"
+                />
+                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => void chooseStorageFolder('workspace')}>
+                  <Icon name="folder" className="size-3.5" />
+                  {t('settings.piarium.recovery.storage.chooseFolder')}
+                </Button>
+              </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
               <Button
@@ -305,6 +463,20 @@ export const RecoverySettings: React.FC = () => {
           </div>
         ) : null}
       </div>
-    </SettingsSection>
+      </SettingsSection>
+      <DirectoryExplorerDialog
+        open={pickerTarget !== null}
+        onOpenChange={(open) => { if (!open) setPickerTarget(null); }}
+        mode="select-directory"
+        initialPath={pickerTarget === 'global' ? globalCustomRoot : customRoot}
+        title={t('settings.piarium.recovery.storage.folderPickerTitle')}
+        description={t('settings.piarium.recovery.storage.folderPickerDescription')}
+        confirmLabel={t('settings.piarium.recovery.storage.chooseFolder')}
+        onSelectDirectory={(selected) => {
+          if (pickerTarget === 'global') setGlobalCustomRoot(selected);
+          else if (pickerTarget === 'workspace') setCustomRoot(selected);
+        }}
+      />
+    </>
   );
 };

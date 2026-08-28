@@ -64,6 +64,7 @@ test("the built-in recovery Host activates on service invocation and withdraws o
         byteLength: 0,
         encryption: { available: false, enabled: false },
         location: { mode: "application-data" },
+        locationSource: "global",
         objectCount: 0,
         readySnapshotCount: 0,
         registryRevision: 0,
