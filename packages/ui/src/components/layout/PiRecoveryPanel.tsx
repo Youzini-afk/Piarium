@@ -146,7 +146,15 @@ export const PiRecoveryPanel: React.FC = () => {
             {t('contextPanel.recovery.native.description')}
           </p>
         </div>
-        <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()} disabled={busy !== null}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => void refresh()}
+          disabled={busy !== null}
+          aria-label={t('settings.piarium.recovery.actions.refresh')}
+          title={t('settings.piarium.recovery.actions.refresh')}
+        >
           <Icon name="refresh" className={cn('size-4', busy === 'refresh' && 'animate-spin')} />
         </Button>
       </div>
