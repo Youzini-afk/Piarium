@@ -33,6 +33,12 @@ button,
   -webkit-user-select: none !important;
 }
 
+/* Monaco renders controls with private-use Codicon glyphs. Keep app font
+   preferences and utility classes from replacing the icon font. */
+.monaco-editor .codicon[class*="codicon-"] {
+  font-family: codicon !important;
+}
+
 :root.oc-theme-switching *,
 :root.oc-theme-switching *::before,
 :root.oc-theme-switching *::after {

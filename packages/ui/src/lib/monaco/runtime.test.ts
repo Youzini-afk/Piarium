@@ -14,6 +14,7 @@ describe('Monaco runtime controller', () => {
     const environmentHost = { Worker: class {} };
     const loadEditor = vi.fn(async () => fakeRuntime);
     const loadEditorFeatures = vi.fn(async () => undefined);
+    const loadIconFont = vi.fn(async () => undefined);
     const loadLanguageDefinitions = vi.fn(async () => undefined);
     const loadEditorWorkerUrl = vi.fn(async () => '/assets/editor.worker.js');
     const createWorker = vi.fn(() => fakeWorker());
@@ -22,6 +23,7 @@ describe('Monaco runtime controller', () => {
       environmentHost,
       loadEditor,
       loadEditorFeatures,
+      loadIconFont,
       loadLanguageDefinitions,
       loadEditorWorkerUrl,
     });
@@ -31,6 +33,7 @@ describe('Monaco runtime controller', () => {
     expect(second).toBe(fakeRuntime);
     expect(loadEditor).toHaveBeenCalledTimes(1);
     expect(loadEditorFeatures).toHaveBeenCalledTimes(1);
+    expect(loadIconFont).toHaveBeenCalledTimes(1);
     expect(loadLanguageDefinitions).toHaveBeenCalledTimes(1);
     expect(loadEditorWorkerUrl).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('ready');
@@ -82,6 +85,26 @@ describe('Monaco runtime controller', () => {
     expect(controller.getSnapshot()).toMatchObject({
       status: 'failed',
       errorMessage: 'MonacoEnvironment is already owned by another runtime.',
+    });
+  });
+
+  test('does not publish a ready editor while the Codicon font is unavailable', async () => {
+    const controller = createMonacoRuntimeController({
+      createWorker: () => fakeWorker(),
+      environmentHost: { Worker: class {} },
+      loadEditor: async () => fakeRuntime,
+      loadEditorFeatures: async () => undefined,
+      loadIconFont: async () => {
+        throw new MonacoRuntimeError('load-failed', 'Monaco Codicon font is unavailable.');
+      },
+      loadLanguageDefinitions: async () => undefined,
+      loadEditorWorkerUrl: async () => '/assets/editor.worker.js',
+    });
+
+    await expect(controller.load()).rejects.toMatchObject({ reason: 'load-failed' });
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'failed',
+      errorMessage: 'Monaco Codicon font is unavailable.',
     });
   });
 

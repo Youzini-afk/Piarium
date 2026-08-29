@@ -41,6 +41,7 @@ type MonacoRuntimeDependencies = {
   environmentHost: MonacoEnvironmentHost;
   loadEditor(): Promise<MonacoRuntime>;
   loadEditorFeatures(): Promise<void>;
+  loadIconFont?(): Promise<void>;
   loadLanguageDefinitions(): Promise<void>;
   loadEditorWorkerUrl(): Promise<string>;
 };
@@ -133,6 +134,7 @@ export const createMonacoRuntimeController = (
         dependencies.loadEditorFeatures(),
         dependencies.loadLanguageDefinitions(),
       ]);
+      await dependencies.loadIconFont?.();
       runtime = loaded;
       publish({
         status: 'ready',
@@ -177,6 +179,13 @@ const defaultController = createMonacoRuntimeController({
   environmentHost: globalThis as unknown as MonacoEnvironmentHost,
   loadEditor: () => import('monaco-editor/editor'),
   loadEditorFeatures: () => import('monaco-editor/features/register.all').then(() => undefined),
+  loadIconFont: async () => {
+    if (typeof document === 'undefined' || !document.fonts) return;
+    const loaded = await document.fonts.load('16px codicon', '\uea60');
+    if (loaded.length === 0) {
+      throw new MonacoRuntimeError('load-failed', 'Monaco Codicon font is unavailable.');
+    }
+  },
   loadLanguageDefinitions: async () => {
     const [monaco] = await Promise.all([
       import('monaco-editor/editor'),
