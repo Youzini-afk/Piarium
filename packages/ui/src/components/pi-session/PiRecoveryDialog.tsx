@@ -63,6 +63,13 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
   const activePlanRef = React.useRef<string | null>(null);
   const startedPlansRef = React.useRef(new Set<string>());
   const generationRef = React.useRef(0);
+  const applyInFlightRef = React.useRef(false);
+  const friendlyFailure = React.useCallback((value: unknown): string => {
+    const message = value instanceof Error ? value.message : String(value);
+    return message.includes('Combined recovery mode changed after application started')
+      ? t('chat.recoveryDialog.modeConflict')
+      : message;
+  }, [t]);
 
   const cancelPreparedPlan = React.useCallback(async (operationId: string | null) => {
     if (!operationId || startedPlansRef.current.has(operationId)) return;
@@ -93,6 +100,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
       }
       activePlanRef.current = result.plan.id;
       setPlan(result.plan);
+      setSelectedMode(result.plan.restore.recommendedMode);
       setNewWorkspacePath(result.plan.restore.newWorkspacePath);
       setPhase('ready');
     } catch (error) {
@@ -104,14 +112,14 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
             ? t('chat.recoveryDialog.incompleteCheckpoint')
             : ['snapshot-unavailable', 'snapshot-missing'].includes(error.failure.code)
               ? t('chat.recoveryDialog.noCheckpoint')
-              : error.message,
+              : friendlyFailure(error),
         );
       } else {
-        setFailure(error instanceof Error ? error.message : String(error));
+        setFailure(friendlyFailure(error));
       }
       setPhase('failed');
     }
-  }, [cancelPreparedPlan, entryId, sessionId, t, workspaceId]);
+  }, [cancelPreparedPlan, entryId, friendlyFailure, sessionId, t, workspaceId]);
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -130,7 +138,9 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
   }, [onClose, phase]);
 
   const runConversationOnly = React.useCallback(async () => {
-    if (phase === 'applying') return;
+    if (phase === 'applying' || applyInFlightRef.current) return;
+    applyInFlightRef.current = true;
+    generationRef.current += 1;
     setPhase('applying');
     const operationId = activePlanRef.current;
     activePlanRef.current = null;
@@ -139,13 +149,15 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
       await onConversationOnly();
       onClose();
     } catch (error) {
-      setFailure(error instanceof Error ? error.message : String(error));
+      applyInFlightRef.current = false;
+      setFailure(friendlyFailure(error));
       setPhase('failed');
     }
-  }, [cancelPreparedPlan, onClose, onConversationOnly, phase]);
+  }, [cancelPreparedPlan, friendlyFailure, onClose, onConversationOnly, phase]);
 
   const apply = React.useCallback(async (mode: WorkspaceRestoreMode) => {
-    if (!plan || phase === 'applying') return;
+    if (!plan || phase === 'applying' || applyInFlightRef.current) return;
+    applyInFlightRef.current = true;
     startedPlansRef.current.add(plan.id);
     activePlanRef.current = null;
     setSelectedMode(mode);
@@ -183,7 +195,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
       }
       const message = result.operation.failure?.message
         ?? t('chat.recoveryDialog.compensatedDescription');
-      setFailure(message);
+      setFailure(friendlyFailure(message));
       setPhase('failed');
     } catch (error) {
       if (error instanceof WorkspaceRecoveryServiceError) {
@@ -191,12 +203,13 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
         const current = await getWorkspaceRecoveryAPI().getCombinedOperation(plan.id).catch(() => null);
         if (current?.status === 'ready') setOperation(current.operation);
       }
-      setFailure(error instanceof Error ? error.message : String(error));
+      setFailure(friendlyFailure(error));
       setPhase('failed');
     } finally {
       polling = false;
+      applyInFlightRef.current = false;
     }
-  }, [newWorkspacePath, onClose, onCombinedResult, phase, plan, t]);
+  }, [friendlyFailure, newWorkspacePath, onClose, onCombinedResult, phase, plan, t]);
 
   const progress = operationProgress(operation);
   const conflicts = plan?.restore.conflicts ?? [];
@@ -218,9 +231,30 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
         </DialogHeader>
 
         {phase === 'preparing' ? (
-          <div className="flex min-h-28 items-center justify-center gap-2 text-muted-foreground" aria-busy="true">
+          <div className="space-y-3">
+            <div className="flex min-h-20 items-center justify-center gap-2 text-muted-foreground" aria-busy="true">
+              <Icon name="loader-4" className="size-4 animate-spin" />
+              <span className="typography-ui-label">{t('chat.recoveryDialog.preparing')}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void runConversationOnly()}
+              className="w-full rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-interactive-hover/50"
+            >
+              <span className="block typography-ui-label font-medium text-foreground">
+                {t('settings.piarium.recovery.preference.conversation.label')}
+              </span>
+              <span className="mt-1 block typography-meta text-muted-foreground">
+                {t('settings.piarium.recovery.preference.conversation.description')}
+              </span>
+            </button>
+          </div>
+        ) : null}
+
+        {phase === 'applying' && !plan ? (
+          <div className="flex min-h-24 items-center justify-center gap-2 text-muted-foreground" aria-busy="true">
             <Icon name="loader-4" className="size-4 animate-spin" />
-            <span className="typography-ui-label">{t('chat.recoveryDialog.preparing')}</span>
+            <span className="typography-ui-label">{applyingLabel}</span>
           </div>
         ) : null}
 
@@ -238,6 +272,12 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
                 </p>
               </div>
             </div>
+
+            {plan.restore.operationCount === 0 ? (
+              <div className="rounded-xl border border-[var(--status-success-border)] bg-[var(--status-success-background)] px-3 py-2 typography-meta text-[var(--status-success)]">
+                {t('chat.recoveryDialog.noFileChanges')}
+              </div>
+            ) : null}
 
             {conflicts.length > 0 ? (
               <div className="rounded-xl border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
@@ -284,13 +324,19 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
           </div>
         ) : null}
 
-        {phase !== 'preparing' && phase !== 'applying' ? (
+        {phase !== 'preparing' && phase !== 'applying' && !operation ? (
           <div className="grid gap-2">
-            {(!operation || canRetry) && plan?.allowedModes.includes('in-place') ? (
+            {plan?.allowedModes.includes('in-place') ? (
               <button
                 type="button"
-                onClick={() => void apply('in-place')}
-                className="rounded-xl border border-primary/40 bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10"
+                aria-pressed={selectedMode === 'in-place'}
+                onClick={() => setSelectedMode('in-place')}
+                className={cn(
+                  'rounded-xl border px-3 py-3 text-left transition-colors',
+                  selectedMode === 'in-place'
+                    ? 'border-primary/50 bg-primary/10 ring-1 ring-primary/20'
+                    : 'border-border hover:bg-interactive-hover/50',
+                )}
               >
                 <span className="block typography-ui-label font-medium text-foreground">
                   {t('chat.recoveryDialog.inPlace')}
@@ -300,13 +346,18 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
                 </span>
               </button>
             ) : null}
-            {(!operation || canRetry) && plan?.allowedModes.includes('new-workspace') ? (
-              <div className="rounded-xl border border-border px-3 py-3">
+            {plan?.allowedModes.includes('new-workspace') ? (
+              <div className={cn(
+                'rounded-xl border px-3 py-3 transition-colors',
+                selectedMode === 'new-workspace'
+                  ? 'border-primary/50 bg-primary/10 ring-1 ring-primary/20'
+                  : 'border-border',
+              )}>
                 <button
                   type="button"
-                  onClick={() => void apply('new-workspace')}
-                  disabled={!newWorkspacePath.trim()}
-                  className="w-full text-left disabled:opacity-50"
+                  aria-pressed={selectedMode === 'new-workspace'}
+                  onClick={() => setSelectedMode('new-workspace')}
+                  className="w-full text-left"
                 >
                   <span className="block typography-ui-label font-medium text-foreground">
                     {t('chat.recoveryDialog.newWorkspace')}
@@ -325,10 +376,16 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
             ) : null}
             <button
               type="button"
-              onClick={() => void runConversationOnly()}
+              aria-pressed={selectedMode === null}
+              onClick={() => {
+                if (plan) setSelectedMode(null);
+                else void runConversationOnly();
+              }}
               className={cn(
-                'rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-interactive-hover/50',
-                !plan && 'border-primary/40',
+                'rounded-xl border px-3 py-3 text-left transition-colors',
+                selectedMode === null
+                  ? 'border-primary/50 bg-primary/10 ring-1 ring-primary/20'
+                  : 'border-border hover:bg-interactive-hover/50',
               )}
             >
               <span className="block typography-ui-label font-medium text-foreground">
@@ -355,6 +412,18 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
               }}
             >
               {t('chat.recoveryDialog.retry')}
+            </Button>
+          ) : null}
+          {phase === 'ready' && plan && !operation ? (
+            <Button
+              type="button"
+              onClick={() => {
+                if (selectedMode) void apply(selectedMode);
+                else void runConversationOnly();
+              }}
+              disabled={selectedMode === 'new-workspace' && !newWorkspacePath.trim()}
+            >
+              {t('chat.recoveryDialog.confirmSelection')}
             </Button>
           ) : null}
           <Button type="button" variant="outline" onClick={close} disabled={phase === 'applying'}>

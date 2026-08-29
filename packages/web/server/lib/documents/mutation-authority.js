@@ -128,11 +128,9 @@ const durableWitness = (entry) => ({
   writerRevision: entry.writerRevision,
 });
 
-const sameDurableWitness = (left, right) => left
+const sameWorkspaceContentWitness = (left, right) => left
   && left.epoch === right.epoch
-  && left.maintenance === right.maintenance
-  && left.mutationRevision === right.mutationRevision
-  && left.writerRevision === right.writerRevision;
+  && left.mutationRevision === right.mutationRevision;
 
 const publicState = (runtime, entry) => ({
   workspaceId: runtime.workspaceId,
@@ -207,7 +205,9 @@ export const createWorkspaceMutationAuthority = ({
 
   const syncRuntime = (runtime, entry) => {
     const next = durableWitness(entry);
-    if (runtime.lastDurableWitness && !sameDurableWitness(runtime.lastDurableWitness, next)) {
+    // Writer admission/release is lifecycle metadata, not evidence that file
+    // content changed. Only content/epoch movement invalidates a reusable head.
+    if (runtime.lastDurableWitness && !sameWorkspaceContentWitness(runtime.lastDurableWitness, next)) {
       runtime.reconciliationRequired = true;
     }
     runtime.lastDurableWitness = next;

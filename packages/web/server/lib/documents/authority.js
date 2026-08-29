@@ -481,6 +481,8 @@ export const createDocumentAuthority = (options) => {
     }
     record.listeners.add(listener);
     return {
+      ready: Promise.resolve(record.ready).then((controller) => Boolean(controller)),
+      settle: () => Promise.resolve(record.ready).then((controller) => controller?.settle()),
       close() {
         record.listeners.delete(listener);
         if (record.listeners.size === 0) {

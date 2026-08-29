@@ -73,6 +73,67 @@ describe('Pi workspace writer tracker', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('does not advance workspace content history when a Pi turn changes no files', async () => {
+    const markMutated = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const closeWatch = vi.fn();
+    const settle = vi.fn(async () => undefined);
+    const tracker = createPiWorkspaceWriterTracker({
+      documents: {
+        registerWriterForScope: vi.fn(async () => ({ markMutated, close })),
+        resolveScopeId: vi.fn(async () => 'workspace-1'),
+        watch: vi.fn(() => ({
+          close: closeWatch,
+          ready: Promise.resolve(true),
+          settle,
+        })),
+      },
+    });
+
+    const lease = await tracker.admit({
+      cwd: 'D:/workspace',
+      sessionId: 'session-1',
+      workerId: 'worker-1',
+    });
+    await lease.close();
+
+    expect(settle).toHaveBeenCalledOnce();
+    expect(markMutated).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(closeWatch).toHaveBeenCalledOnce();
+  });
+
+  it('advances workspace content history after the watcher observes a Pi change', async () => {
+    const markMutated = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    let onWorkspaceEvent = () => {};
+    const tracker = createPiWorkspaceWriterTracker({
+      documents: {
+        registerWriterForScope: vi.fn(async () => ({ markMutated, close })),
+        resolveScopeId: vi.fn(async () => 'workspace-1'),
+        watch: vi.fn((_workspaceId, listener) => {
+          onWorkspaceEvent = listener;
+          return {
+            close: vi.fn(),
+            ready: Promise.resolve(true),
+            settle: vi.fn(async () => undefined),
+          };
+        }),
+      },
+    });
+
+    const lease = await tracker.admit({
+      cwd: 'D:/workspace',
+      sessionId: 'session-1',
+      workerId: 'worker-1',
+    });
+    onWorkspaceEvent({ kind: 'changed' });
+    await lease.close();
+
+    expect(markMutated).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('waits for a closing writer before admitting a replacement lease', async () => {
     let finishClose;
     const firstClose = vi.fn(() => new Promise((resolve) => { finishClose = resolve; }));

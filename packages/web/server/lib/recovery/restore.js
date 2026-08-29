@@ -550,7 +550,16 @@ export const createWorkspaceRestoreManager = ({
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('snapshot-missing', `Unknown workspace snapshot: ${input.targetSnapshotId}`);
     try {
-      const target = await inspectStoredSnapshot(database, storage.root, identity.workspaceId, input.targetSnapshotId, { fsModule });
+      // Planning reads manifests and computes a preview. Hashing every stored
+      // object here can turn opening the dialog into a multi-minute operation;
+      // apply/staging verifies each object before it can affect a workspace.
+      const target = await inspectStoredSnapshot(
+        database,
+        storage.root,
+        identity.workspaceId,
+        input.targetSnapshotId,
+        { fsModule, verifyObjects: false },
+      );
       if (target.availability !== 'ready') {
         throw target.error ?? new RecoveryPrimitiveError('snapshot-incomplete', 'Target workspace snapshot is not ready');
       }
@@ -562,7 +571,11 @@ export const createWorkspaceRestoreManager = ({
     if (initialState.maintenance) {
       throw new RecoveryPrimitiveError('recovery-in-progress', 'Workspace is already in recovery maintenance');
     }
-    const safety = await captureSnapshot({ source: 'safety', workspaceId: identity.workspaceId });
+    const safety = await captureSnapshot({
+      reuseIfUnchanged: true,
+      source: 'safety',
+      workspaceId: identity.workspaceId,
+    });
     if (safety.status !== 'captured') throw new RecoveryPrimitiveError('snapshot-incomplete', 'Current workspace safety checkpoint failed');
     const currentState = await documents.inspectMutation(identity.workspaceId);
     const witnessChanged = currentState.epoch !== safety.witness.epoch
@@ -659,7 +672,10 @@ export const createWorkspaceRestoreManager = ({
         recommendedMode,
         safetySnapshotId: safety.snapshot.id,
         targetSnapshotId: input.targetSnapshotId,
-        totalBytes: built.newWorkspaceOperations.reduce((total, operation) => total + (operation.byteLength ?? 0), 0),
+        // The dialog describes the recommended action, not the logical size of
+        // the entire target revision. A no-op in-place rollback must read 0 B,
+        // even when the workspace itself contains hundreds of megabytes.
+        totalBytes: displayedOperations.reduce((total, operation) => total + (operation.byteLength ?? 0), 0),
         witness: safety.witness,
         workspaceId: identity.workspaceId,
       };

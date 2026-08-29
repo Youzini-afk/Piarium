@@ -29,7 +29,16 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     state.closePromise = (async () => {
       await Promise.resolve(state.ready).catch(() => undefined);
       try {
-        await state.writer?.markMutated();
+        if (state.watch) {
+          try {
+            await state.watch.settle();
+          } catch {
+            state.watchAvailable = false;
+          }
+        }
+        if (state.mutationObserved || !state.watchAvailable) {
+          await state.writer?.markMutated();
+        }
       } catch {
         // The writer still has to close when mutation accounting is stopping.
       }
@@ -37,6 +46,8 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         await state.writer?.close();
       } catch {
         // Authority shutdown owns any remaining in-memory cleanup.
+      } finally {
+        state.watch?.close();
       }
     })().finally(() => {
       state.closed = true;
@@ -72,28 +83,49 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
       closing: false,
       fallbackLease: null,
       holders: 0,
+      mutationObserved: false,
       ready: null,
       resolveClosed,
       retired: false,
+      watch: null,
+      watchAvailable: false,
       writer: null,
     };
     writers.set(workerId, state);
-    state.ready = documents.registerWriterForScope(cwd, {
-      kind: 'pi-worker',
-      id: workerId,
-    }, {
-      mode: 'process',
-      purpose: method
-        ? `pi-${phase || 'execution'}:${method}`
-        : sessionId ? `pi-session:${sessionId}` : `pi-${phase || 'execution'}`,
-    }).then((writer) => {
+    state.ready = (async () => {
+      if (typeof documents.resolveScopeId === 'function' && typeof documents.watch === 'function') {
+        try {
+          const workspaceId = await documents.resolveScopeId(cwd);
+          if (workspaceId) {
+            state.watch = documents.watch(workspaceId, () => {
+              state.mutationObserved = true;
+            });
+            state.watchAvailable = await state.watch.ready;
+          }
+        } catch {
+          state.watch?.close();
+          state.watch = null;
+          state.watchAvailable = false;
+        }
+      }
+      const writer = await documents.registerWriterForScope(cwd, {
+        kind: 'pi-worker',
+        id: workerId,
+      }, {
+        mode: 'process',
+        purpose: method
+          ? `pi-${phase || 'execution'}:${method}`
+          : sessionId ? `pi-session:${sessionId}` : `pi-${phase || 'execution'}`,
+      });
       state.writer = writer;
       if (!writer) {
+        state.watch?.close();
         state.closed = true;
         state.resolveClosed();
         if (writers.get(workerId) === state) writers.delete(workerId);
       }
-    }).catch((error) => {
+    })().catch((error) => {
+      state.watch?.close();
       state.closed = true;
       state.resolveClosed();
       if (writers.get(workerId) === state) writers.delete(workerId);

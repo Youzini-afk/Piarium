@@ -313,14 +313,33 @@ describe('native workspace recovery Phase 1 engine', () => {
     const hash = read.manifest.entries.find((entry) => entry.path === 'note.txt').objectHash;
     const target = objectPath(applicationDataRoot(harness), hash);
 
+    const note = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'current',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: note.revision,
+      operationId: 'current-before-corruption-check',
+    });
+    const currentRevision = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+
     await fs.promises.writeFile(target, 'different');
     expect(await engine.listSnapshots({ workspaceId: harness.identity.workspaceId })).toMatchObject({
-      page: { snapshots: [expect.objectContaining({ availability: 'ready' })] },
+      page: { snapshots: expect.arrayContaining([expect.objectContaining({ availability: 'ready' })]) },
       status: 'ready',
     });
     expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
       status: 'ready',
       storage: { state: 'ready' },
+    });
+    expect(await engine.prepareRestore({
+      targetSnapshotId: captured.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({
+      status: 'ready',
+      plan: { safetySnapshotId: currentRevision.snapshot.id },
     });
     const corrupt = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
     expect(corrupt).toMatchObject({ status: 'corrupt', failure: { code: 'object-corrupt' } });
@@ -662,6 +681,23 @@ describe('native workspace recovery Phase 1 engine', () => {
       witness: first.witness,
     });
 
+    const idleWriter = await harness.authority.registerWriter(harness.token(), {
+      purpose: 'read-only-agent-turn',
+    });
+    await idleWriter.close();
+    const reusedAfterWriterLifecycle = await engine.captureSnapshot({
+      reuseIfUnchanged: true,
+      source: 'turn-after',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(reusedAfterWriterLifecycle).toMatchObject({
+      reused: true,
+      snapshot: { id: first.snapshot.id },
+      status: 'captured',
+    });
+    expect(reusedAfterWriterLifecycle.witness.writerRevision)
+      .toBeGreaterThan(first.witness.writerRevision);
+
     const current = await harness.authority.read(harness.resource('note.txt'));
     await harness.authority.write({
       token: harness.token(),
@@ -777,6 +813,10 @@ describe('native workspace recovery Phase 1 engine', () => {
       expectedRevision: null,
       operationId: 'current-extra',
     });
+    const currentRevision = await engine.captureSnapshot({
+      source: 'turn-after',
+      workspaceId: harness.identity.workspaceId,
+    });
     const destination = path.join(harness.root, 'recovered-workspace');
     const prepared = await engine.prepareRestore({
       newWorkspacePath: destination,
@@ -788,8 +828,11 @@ describe('native workspace recovery Phase 1 engine', () => {
       plan: {
         allowedModes: ['in-place', 'new-workspace'],
         recommendedMode: 'in-place',
+        safetySnapshotId: currentRevision.snapshot.id,
       },
     });
+    expect((await engine.listSnapshots({ workspaceId: harness.identity.workspaceId })).page.snapshots)
+      .toHaveLength(2);
     expect(prepared.plan.operations.map((operation) => [operation.type, operation.path]))
       .toEqual(expect.arrayContaining([['write', 'note.txt'], ['delete', 'extra.txt']]));
 
@@ -815,6 +858,27 @@ describe('native workspace recovery Phase 1 engine', () => {
       status: 'ready',
       operation: { destinationPath: destination, state: 'complete' },
     });
+  });
+
+  it('reports affected bytes instead of the full workspace revision size', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'large-logical-file.bin'), 'unchanged');
+    const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+
+    const prepared = await engine.prepareRestore({
+      targetSnapshotId: target.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+
+    expect(prepared).toMatchObject({
+      status: 'ready',
+      plan: {
+        operationCount: 0,
+        recommendedMode: 'in-place',
+        totalBytes: 0,
+      },
+    });
+    await engine.cancelOperation(prepared.plan.id);
   });
 
   it('resumes an in-place restore after a simulated process crash and publishes a restore revision', async () => {

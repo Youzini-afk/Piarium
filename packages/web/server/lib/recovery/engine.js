@@ -883,13 +883,11 @@ export const createWorkspaceRecoveryEngine = ({
         WHERE heads.workspace_id = ?
           AND heads.epoch = ?
           AND heads.mutation_revision = ?
-          AND heads.writer_revision = ?
           AND snapshots.policy_revision = ?
       `).get(
         identity.workspaceId,
         mutationState.epoch,
         mutationState.mutationRevision,
-        mutationState.writerRevision,
         POLICY_REVISION,
       );
       if (!head) return null;
