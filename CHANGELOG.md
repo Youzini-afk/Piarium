@@ -5,6 +5,23 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.6
+
+Piarium 0.9.6 adds native Pi session-tree navigation and makes workspace recovery practical for
+large, long-lived projects.
+
+- Add a searchable `/tree` timeline with active-branch context, labels, keyboard navigation, and
+  recovery or forking from any user or assistant message
+- Move turn checkpoint capture out of prompt admission, serialize background capture per workspace,
+  and reuse unchanged workspace heads instead of rescanning before every message
+- Honor workspace Git ignore rules, stage only affected restore paths, and make no-file-change recovery
+  complete without copying or advancing the workspace timeline
+- Split the short filesystem restore transaction from retryable conversation navigation; make
+  maintenance process-owned, release it on shutdown, reclaim it after process death, and migrate old
+  ownerless locks without blocking new sessions
+- Run the development Web Host on Node with crash-exit behavior so a Bun native panic cannot leave the
+  renderer indefinitely sending against a dead backend
+
 ## 0.9.5
 
 - Refresh distribution-owned Host artifacts by build fingerprint so upgrades cannot keep running stale
