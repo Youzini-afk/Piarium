@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -251,6 +251,7 @@ test("a broken global extension remains removable through the package authority"
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const packageRoot = join(root, "blocking-package");
+  const extensionStarted = join(root, "blocking-extension-started");
   await Promise.all([
     mkdir(workspace, { recursive: true }),
     mkdir(agentDir, { recursive: true }),
@@ -267,7 +268,11 @@ test("a broken global extension remains removable through the package authority"
   );
   await writeFile(
     join(packageRoot, "index.ts"),
-    "await new Promise<void>(() => {});\nexport default function () {}\n",
+    `import { writeFile } from "node:fs/promises";
+await writeFile(${JSON.stringify(extensionStarted)}, "started\\n", "utf8");
+await new Promise<void>(() => {});
+export default function () {}
+`,
     "utf8",
   );
   const broker = new PiRuntimeBroker({
@@ -297,7 +302,19 @@ test("a broken global extension remains removable through the package authority"
       () => ({ status: "fulfilled" as const }),
       (error: unknown) => ({ error, status: "rejected" as const }),
     );
-    await delay(50);
+    await Promise.race([
+      (async () => {
+        while (true) {
+          try {
+            await access(extensionStarted);
+            return;
+          } catch {
+            await delay(10);
+          }
+        }
+      })(),
+      delay(15_000).then(() => { throw new Error("broken extension did not reach its blocking point"); }),
+    ]);
     const removed = await Promise.race([
       dispatchRuntimeRequest(broker, "package.remove", {
         cwd: workspace,
