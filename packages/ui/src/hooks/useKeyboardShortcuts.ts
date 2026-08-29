@@ -225,8 +225,9 @@ export const useKeyboardShortcuts = () => {
       }
 
       if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
+        if (!currentSessionId) return;
         e.preventDefault();
-        focusPiTimeline();
+        useUIStore.getState().setTimelineDialogOpen(true);
         return;
       }
 

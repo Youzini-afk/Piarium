@@ -16,6 +16,7 @@ import type {
   SessionSnapshot,
   SessionStats,
   SessionSummary,
+  SessionTreeResult,
   SessionWorkspaceBinding,
   ThinkingLevel,
   JsonValue,
@@ -158,6 +159,7 @@ export interface PiSessionStoreState {
     entryId: string,
     position?: 'before' | 'at',
   ): Promise<RuntimeMethodResult<'session.fork'>>;
+  getSessionTree(sessionId: string): Promise<SessionTreeResult>;
   loadCatalog(cwd?: string): Promise<SessionSummary[]>;
   mutateFeatures(
     sessionId: string,
@@ -1156,6 +1158,13 @@ export const createPiSessionStore = (
         if (command.trim() === '/reload') {
           notifyPiRuntimeCatalogChanged('reload');
         }
+        return result;
+      },
+
+      getSessionTree: async (sessionId) => {
+        // The dialog owns its retry/error UI; a tree read failure must not
+        // replace the entire active conversation with the store-level error.
+        const { result } = await request('session.tree', { sessionId }, undefined, false);
         return result;
       },
 

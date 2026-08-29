@@ -867,6 +867,36 @@ describe('Pi session store', () => {
     }]);
   });
 
+  test('loads the authoritative Pi session tree', async () => {
+    const runtime = new FakeRuntime();
+    const tree = {
+      leafId: 'entry-a',
+      sessionId: 'session-a',
+      tree: [{
+        children: [],
+        entry: {
+          id: 'entry-a',
+          message: { content: 'hello', role: 'user', timestamp: 1 },
+          parentId: null,
+          timestamp: '2026-08-29T00:00:00.000Z',
+          type: 'message',
+        },
+      }],
+    } as const;
+    runtime.handler = (method) => {
+      if (method === 'session.tree') return tree;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const result = await store.getState().getSessionTree('session-a');
+    expect(result).toEqual(tree);
+    expect(runtime.calls).toEqual([{
+      method: 'session.tree',
+      params: { sessionId: 'session-a' },
+    }]);
+  });
+
   test('invalidates command metadata after a successful Pi reload', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

@@ -4,6 +4,7 @@ import {
   RiArrowGoForwardLine,
   RiCommandLine,
   RiFileLine,
+  RiGitBranchLine,
   RiRefreshLine,
   RiScissorsLine,
   RiSearchEyeLine,
@@ -166,6 +167,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       case 'undo': return <RiArrowGoBackLine className="h-3.5 w-3.5 text-orange-500" />;
       case 'redo': return <RiArrowGoForwardLine className="h-3.5 w-3.5 text-orange-500" />;
       case 'timeline': return <RiTimeLine className="h-3.5 w-3.5" />;
+      case 'tree': return <RiGitBranchLine className="h-3.5 w-3.5" />;
       case 'compact': return <RiScissorsLine className="h-3.5 w-3.5 text-purple-500" />;
       case 'review': return <RiSearchEyeLine className="h-3.5 w-3.5 text-blue-500" />;
       case 'test':

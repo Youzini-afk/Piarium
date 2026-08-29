@@ -60,10 +60,16 @@ import { renderPiComposerAgentInvocation } from '@/lib/pi-runtime/composerAgent'
 import { projectPiMessageHistory } from './piMessageHistory';
 import { projectPiAssistantWaiting } from './piAssistantWaiting';
 import { PiRecoveryDialog } from './PiRecoveryDialog';
+import { parsePiLocalCommand } from './piLocalCommands';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
   return { default: module.PiTimeline };
+});
+
+const LazyPiTreeDialog = React.lazy(async () => {
+  const module = await import('./PiTreeDialog');
+  return { default: module.PiTreeDialog };
 });
 
 interface PiChatViewProps {
@@ -176,6 +182,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
+  const treeDialogOpen = useUIStore((state) => state.isTimelineDialogOpen);
+  const setTreeDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
@@ -211,6 +219,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
+  const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const submission = currentRecord?.submission;
   const sending = submission?.status === 'preparing' || submission?.status === 'dispatching';
@@ -391,8 +400,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
-    await sendDraft(currentSessionId, readPiDraft(currentSessionId, runtimeKey), runtimeKey);
-  }, [currentSessionId, runtimeKey, sendDraft]);
+    const currentDraft = readPiDraft(currentSessionId, runtimeKey);
+    const command = parsePiLocalCommand(currentDraft.text);
+    if (command?.kind === 'tree') {
+      if (currentDraft.images.length > 0) {
+        toast.error(t('chat.timeline.attachmentsUnsupported'));
+        return;
+      }
+      clearPiDraft(currentSessionId, runtimeKey);
+      setTreeInitialQuery(command.query);
+      setTreeDialogOpen(true);
+      return;
+    }
+    await sendDraft(currentSessionId, currentDraft, runtimeKey);
+  }, [clearPiDraft, currentSessionId, runtimeKey, sendDraft, setTreeDialogOpen, t]);
 
   const handleDictationSend = React.useCallback(async (transcript: string) => {
     if (!currentSessionId) return;
@@ -798,6 +819,23 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         </section>
         </div>
       </div>
+
+      {treeDialogOpen && currentSessionId && snapshot ? (
+        <React.Suspense fallback={null}>
+          <LazyPiTreeDialog
+            busy={projectPiSessionActivity(snapshot).isWorking}
+            initialQuery={treeInitialQuery}
+            onFork={handleFork}
+            onOpenChange={(open) => {
+              setTreeDialogOpen(open);
+              if (!open) setTreeInitialQuery('');
+            }}
+            onRecover={handleRecover}
+            open
+            sessionId={currentSessionId}
+          />
+        </React.Suspense>
+      ) : null}
 
       {recoveryEntry && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
         <PiRecoveryDialog

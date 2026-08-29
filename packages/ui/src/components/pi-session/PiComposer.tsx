@@ -108,7 +108,7 @@ const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((
   reader.readAsDataURL(file);
 });
 
-const PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
+const MAGIC_PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
   description: getMagicPromptDefinition(command.visiblePrompt).description,
   id: `piarium:${command.name}`,
   name: command.name,
@@ -160,6 +160,15 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
   const [clearingQueue, setClearingQueue] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
+  const piariumCommands = React.useMemo<readonly CommandInfo[]>(() => [
+    ...MAGIC_PIARIUM_COMMANDS,
+    {
+      description: t('chat.timeline.description'),
+      id: 'piarium:tree',
+      name: 'tree',
+      source: 'piarium',
+    },
+  ], [t]);
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -178,9 +187,9 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     confirmedMentions,
     inputMode: 'normal',
     knownAgentNames,
-    knownSlashNames: new Set(PIARIUM_COMMANDS.map((command) => command.name.toLowerCase())),
+    knownSlashNames: new Set(piariumCommands.map((command) => command.name.toLowerCase())),
     knownSnippetTriggers: new Set(snippets.flatMap((snippet) => [snippet.name, ...snippet.aliases]).map((value) => value.toLowerCase())),
-  }), [confirmedMentions, knownAgentNames, snippets]);
+  }), [confirmedMentions, knownAgentNames, piariumCommands, snippets]);
   const modelControls = (
     <div className="flex min-w-0 items-center justify-end gap-2.5">
       <PiComposerModelControls
@@ -554,7 +563,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           {autocomplete?.kind === 'command' ? (
             <CommandAutocomplete
               ref={commandRef}
-              additionalCommands={PIARIUM_COMMANDS}
+              additionalCommands={piariumCommands}
               cwd={cwd}
               sessionId={sessionId}
               searchQuery={autocomplete.query}
