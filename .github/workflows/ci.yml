@@ -32,6 +32,7 @@ jobs:
       - run: bun audit
       - run: bun run test:docs
       - run: bun run docs:validate
+      - run: bun run test:i18n
       - run: bun run type-check
       - run: bun run lint
       - run: bun run test:pi
