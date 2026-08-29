@@ -78,6 +78,8 @@ import {
   useWorkbenchMatchRenderers,
 } from '@/lib/extensions/workbench-registry';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
+import { useUpdateStore } from '@/stores/useUpdateStore';
 
 interface PiSessionSidebarProps {
   isVisible?: boolean;
@@ -409,7 +411,11 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const setArchivePageOpen = useUIStore((state) => state.setArchivePageOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
+  const updateAvailable = useUpdateStore((state) => state.available);
+  const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
+  const autoUpdateChecksEnabled = usePreferencesStore((state) => state.settingsAutoUpdateChecksEnabled);
   const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
   const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
@@ -588,6 +594,19 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     setSettingsDialogOpen(true);
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
+  const handleOpenShortcuts = React.useCallback(() => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+    setHelpDialogOpen(true);
+  }, [mobileVariant, onRequestClose, setHelpDialogOpen, setSessionSwitcherOpen]);
+
+  const handleOpenAbout = React.useCallback(() => {
+    setSettingsPage('about');
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+    setSettingsDialogOpen(true);
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen, setSettingsPage]);
+
   const handleOpenProjectSettings = React.useCallback((projectId: string) => {
     setSettingsProjectsSelectedId(projectId);
     setSettingsPage('projects');
@@ -605,6 +624,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
 
   const canRevealProject = Boolean(files.revealPath)
     && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
+
+  const showUpdateButton = autoUpdateChecksEnabled
+    && updateAvailable
+    && (updateRuntimeType === 'desktop' || updateRuntimeType === 'web');
 
   const handleRevealProject = React.useCallback(async (path: string) => {
     if (!files.revealPath) return;
@@ -1323,17 +1346,73 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </Button>
             </div>
           ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleOpenSettings}
-            className="w-full justify-start font-normal normal-case text-muted-foreground"
-            aria-label={t('sessions.sidebar.footer.actions.settings')}
-          >
-            <Icon name="settings-3" className="size-4" />
-            <span className="truncate">{t('sessions.sidebar.footer.actions.settings')}</span>
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleOpenSettings}
+                  className="size-9 text-muted-foreground hover:text-foreground"
+                  aria-label={t('sessions.sidebar.footer.actions.settings')}
+                >
+                  <Icon name="settings-3" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('sessions.sidebar.footer.actions.settings')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleOpenShortcuts}
+                  className="size-9 text-muted-foreground hover:text-foreground"
+                  aria-label={t('sessions.sidebar.footer.actions.shortcuts')}
+                >
+                  <Icon name="command" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('sessions.sidebar.footer.actions.shortcuts')}</TooltipContent>
+            </Tooltip>
+            {!runtime.isVSCode ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleOpenAbout}
+                    className="size-9 text-muted-foreground hover:text-foreground"
+                    aria-label={t('sessions.sidebar.footer.actions.aboutPiarium')}
+                  >
+                    <Icon name="information" className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('sessions.sidebar.footer.actions.aboutPiarium')}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {showUpdateButton ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleOpenAbout}
+                    className="ml-auto h-8 gap-1.5 border border-[var(--status-info-border)] bg-[var(--status-info-background)] px-2 text-[var(--status-info)] hover:bg-[var(--status-info-background)]/80 hover:text-[var(--status-info)]"
+                    aria-label={t('sessions.sidebar.footer.actions.update')}
+                  >
+                    <Icon name="download" className="size-3.5" />
+                    <span>{t('sessions.sidebar.footer.actions.update')}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('sessions.sidebar.footer.actions.update')}</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
         </div>
       </div>
 

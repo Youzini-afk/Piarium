@@ -151,7 +151,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     persist(
       (set) => ({
         settingsAutoCreateWorktree: false,
-        settingsAutoUpdateChecksEnabled: false,
+        settingsAutoUpdateChecksEnabled: true,
         settingsDefaultFileViewerPreview: false,
         settingsGitmojiEnabled: booleanValue('gitmojiEnabled', false),
         settingsZenModel: undefined,
@@ -271,6 +271,19 @@ export const usePreferencesStore = create<PreferencesState>()(
         // silently dropping the former OpenCode provider/session cache fields.
         name: 'config-store',
         storage: createDeferredSafeJSONStorage(),
+        version: 1,
+        migrate: (persistedState, version) => {
+          const state = persistedState && typeof persistedState === 'object'
+            ? persistedState as Partial<PreferencesState>
+            : {};
+          // The old false value was an internal default with no setting exposed
+          // to users. Enable the newly surfaced updater for existing installs;
+          // an explicit settings.json value is still applied afterwards.
+          if (version < 1) {
+            return { ...state, settingsAutoUpdateChecksEnabled: true };
+          }
+          return state;
+        },
         partialize: (state) => ({
           settingsAutoCreateWorktree: state.settingsAutoCreateWorktree,
           settingsAutoUpdateChecksEnabled: state.settingsAutoUpdateChecksEnabled,

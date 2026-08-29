@@ -53,7 +53,7 @@ export const BUILTIN_SETTINGS_PAGES: readonly BuiltinPageDefinition[] = [
   page({ slug: 'voice', title: 'Voice', titleKey: 'settings.page.voice.title', group: 'general', kind: 'single', icon: 'mic', order: 6, keywords: ['tts', 'speech', 'voice'] }, { ...piariumPage('voice'), isAvailable: notVSCode }),
   page({ slug: 'usage', title: 'Usage', titleKey: 'settings.page.usage.title', group: 'general', kind: 'split', icon: 'bar-chart-2', order: 7, keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'] }, { renderContent: () => <UsagePage />, renderSidebar: (options) => <UsageSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'about', title: 'About', titleKey: 'settings.page.about.title', group: 'general', kind: 'single', icon: 'information', order: 8, keywords: ['about', 'version', 'updates', 'release', 'changelog'] }, {
-    isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode,
+    isAvailable: notVSCode,
     renderContent: () => <BuiltinAboutSettingsPage />,
   }),
   page({ slug: 'projects', title: 'Projects', titleKey: 'settings.page.projects.title', group: 'projects', kind: 'split', icon: 'folders', order: 20, keywords: ['project', 'projects', 'worktree', 'worktrees', 'repo', 'repository', 'directory'] }, { isAvailable: notVSCode, renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }),

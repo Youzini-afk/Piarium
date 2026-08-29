@@ -409,6 +409,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const renderSettingsNav = () => {
     const hasSearchQuery = settingsSearchQuery.trim().length > 0;
+    const aboutPage = visiblePages.find((page) => page.slug === 'about') ?? null;
 
     return (
       <div className="flex h-full flex-col overflow-hidden">
@@ -487,6 +488,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             ) : (() => {
               const pagesByGroup = new Map<string, typeof visiblePages>();
               for (const page of visiblePages) {
+                if (page.slug === 'about') continue;
                 const group = page.group;
                 const existing = pagesByGroup.get(group);
                 if (existing) {
@@ -550,6 +552,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             })()}
           </div>
         </div>
+
+        {!hasSearchQuery && aboutPage ? (
+          <div className="shrink-0 border-t border-border/60 px-4 py-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => openPage(aboutPage.slug)}
+                  aria-current={settingsSlug === aboutPage.slug ? 'page' : undefined}
+                  className={cn(
+                    'flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-md px-3 sm:h-8 sm:gap-2 sm:px-2',
+                    settingsSlug === aboutPage.slug
+                      ? 'bg-interactive-selection text-foreground'
+                      : 'text-foreground hover:bg-interactive-hover',
+                  )}
+                >
+                  <Icon name={getSettingsNavIcon(aboutPage.slug)!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
+                  <span className="truncate typography-ui-label font-normal">{getPageTitle(aboutPage.slug)}</span>
+                </button>
+              </TooltipTrigger>
+            </Tooltip>
+          </div>
+        ) : null}
 
       </div>
     );

@@ -8,9 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
 import {
+  SettingsCheckboxRow,
   SettingsSection,
   SETTINGS_BRAND_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
@@ -39,13 +43,18 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     downloaded: s.downloaded,
     progress: s.progress,
     runtimeType: s.runtimeType,
+    lastChecked: s.lastChecked,
     checkForUpdates: s.checkForUpdates,
     downloadUpdate: s.downloadUpdate,
     restartToUpdate: s.restartToUpdate,
   })));
+  const autoUpdateChecksEnabled = usePreferencesStore((state) => state.settingsAutoUpdateChecksEnabled);
+  const setAutoUpdateChecksEnabled = usePreferencesStore((state) => state.setSettingsAutoUpdateChecksEnabled);
   const { isMobile } = useDeviceInfo();
 
-  const currentVersion = piariumVersion || updateStore.info?.currentVersion || 'unknown';
+  const currentVersion = piariumVersion
+    || updateStore.info?.currentVersion
+    || t('settings.piarium.about.state.unknown');
 
   React.useEffect(() => {
     let cancelled = false;
@@ -56,14 +65,16 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error(`System info request failed with ${response.status}`);
         const data = await response.json().catch(() => null) as { piariumVersion?: unknown } | null;
         const version = typeof data?.piariumVersion === 'string' && data.piariumVersion.trim().length > 0
           ? data.piariumVersion.trim()
           : null;
+        if (!version) throw new Error('System info did not include a version');
         if (!cancelled) setPiariumVersion(version);
       } catch {
-        if (!cancelled) setPiariumVersion(null);
+        const nativeVersion = await getDesktopAppVersion();
+        if (!cancelled) setPiariumVersion(nativeVersion);
       }
     };
 
@@ -74,22 +85,35 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     };
   }, []);
 
-  // Track if we initiated a check to show toast on completion
-  const didInitiateCheck = React.useRef(false);
+  // Only a user-initiated check should produce the "latest version" toast.
+  // Background polling uses the same store and must remain quiet.
+  const didInitiateManualCheck = React.useRef(false);
+
+  const handleCheckForUpdates = React.useCallback(() => {
+    didInitiateManualCheck.current = true;
+    void updateStore.checkForUpdates();
+  }, [updateStore]);
+
+  const handleAutoUpdateChecksChange = React.useCallback((enabled: boolean) => {
+    setAutoUpdateChecksEnabled(enabled);
+    void updateDesktopSettings({ autoUpdateChecksEnabled: enabled });
+    if (enabled) {
+      void updateStore.checkForUpdates({ automatic: true });
+    }
+  }, [setAutoUpdateChecksEnabled, updateStore]);
 
   // Ensure minimum visible duration for checking animation
   React.useEffect(() => {
     if (updateStore.checking) {
       setShowChecking(true);
-      didInitiateCheck.current = true;
     } else if (showChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
         // Show toast if check completed with no update available
-        if (didInitiateCheck.current && !updateStore.available && !updateStore.error) {
+        if (didInitiateManualCheck.current && !updateStore.available && !updateStore.error) {
           toast.success(t('settings.piarium.about.toast.latestVersion'));
-          didInitiateCheck.current = false;
         }
+        didInitiateManualCheck.current = false;
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
@@ -110,12 +134,12 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
 
         <div className="flex justify-center">
-          {!updateStore.available && !updateStore.error && (
+          {!updateStore.available && (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => updateStore.checkForUpdates()}
+              onClick={handleCheckForUpdates}
               disabled={isChecking}
               className="h-10 w-auto justify-center gap-2 rounded-xl px-4"
             >
@@ -143,6 +167,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             {updateStore.error}
           </p>
         )}
+
+        <SettingsCheckboxRow
+          checked={autoUpdateChecksEnabled}
+          onChange={handleAutoUpdateChecksChange}
+          label={t('settings.piarium.about.field.autoUpdateChecks')}
+          description={t('settings.piarium.about.field.autoUpdateChecksHint')}
+          ariaLabel={t('settings.piarium.about.field.autoUpdateChecksAria')}
+          className="rounded-xl border border-border/60 px-3 py-3 text-left"
+        />
 
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex items-center justify-center gap-5">
@@ -191,10 +224,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   return (
     <SettingsSection divider={false}>
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
-          <div className="flex min-w-0 flex-col">
-            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.piarium.about.field.version')}</span>
-            <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
+        <div className="flex flex-col gap-4 border-b border-border/40 px-4 py-4 @xl:flex-row @xl:items-center @xl:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <PiariumLogo width={44} height={44} />
+            <div className="flex min-w-0 flex-col">
+              <span className={SETTINGS_FIELD_LABEL_CLASS}>Piarium</span>
+              <span className="typography-meta font-mono text-muted-foreground">
+                {t('settings.piarium.about.field.version')} {currentVersion}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {updateStore.checking && (
@@ -215,12 +253,20 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             )}
 
             {!updateStore.checking && !updateStore.available && !updateStore.error && (
-              <span className="typography-meta text-muted-foreground">{t('settings.piarium.about.state.upToDate')}</span>
+              <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className={`size-1.5 rounded-full ${updateStore.lastChecked ? 'bg-[var(--status-success)]' : 'bg-muted-foreground/60'}`}
+                />
+                {updateStore.lastChecked
+                  ? t('settings.piarium.about.state.upToDate')
+                  : t('settings.piarium.about.state.unknown')}
+              </span>
             )}
 
             <Button size="sm"
               variant="outline"
-              onClick={() => updateStore.checkForUpdates()}
+              onClick={handleCheckForUpdates}
               disabled={updateStore.checking}
             >
               {t('settings.piarium.about.actions.checkForUpdates')}
@@ -229,10 +275,20 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
 
         {updateStore.error && (
-          <div className="px-3 py-2 border-b border-border/40">
+          <div className="border-b border-border/40 px-4 py-2">
             <p className="typography-meta text-[var(--status-error)]">{updateStore.error}</p>
           </div>
         )}
+
+        <div className="border-b border-border/40 px-4 py-3">
+          <SettingsCheckboxRow
+            checked={autoUpdateChecksEnabled}
+            onChange={handleAutoUpdateChecksChange}
+            label={t('settings.piarium.about.field.autoUpdateChecks')}
+            description={t('settings.piarium.about.field.autoUpdateChecksHint')}
+            ariaLabel={t('settings.piarium.about.field.autoUpdateChecksAria')}
+          />
+        </div>
 
         <div className="flex flex-col gap-2 border-b border-border/40 px-4 py-3 @xl:flex-row @xl:items-center @xl:justify-between">
           <InstanceServiceUrls />

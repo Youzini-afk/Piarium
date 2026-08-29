@@ -196,7 +196,7 @@ export type DesktopSettings = {
 
   // User-added skills catalogs (persisted to Piarium's settings.json)
   skillCatalogs?: SkillCatalogConfig[];
-  // Opt-in to automatic update checks and update notification UI (default: false)
+  // Automatic update checks and update notification UI (default: true; user-configurable)
   autoUpdateChecksEnabled?: boolean;
 
   // Piarium-owned global behavior prompt.

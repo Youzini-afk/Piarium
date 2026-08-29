@@ -131,7 +131,7 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
     };
   } catch (error) {
     console.warn('Failed to check for updates:', error);
-    return null;
+    throw error;
   }
 }
 
@@ -183,6 +183,9 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           checkForDesktopUpdates(),
           checkForWebUpdates('desktop', appVersion),
         ]);
+        if (desktopResult.status === 'rejected') {
+          throw desktopResult.reason;
+        }
         const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
         suggestedSec = apiResult.status === 'fulfilled'
           ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
@@ -219,7 +222,11 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         checking: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
+        // Background polling should retry quietly; a manual check must surface
+        // the real failure instead of pretending the app is up to date.
+        error: options?.automatic
+          ? null
+          : (error instanceof Error ? error.message : 'Failed to check for updates'),
       });
       return null;
     }

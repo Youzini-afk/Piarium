@@ -38,14 +38,18 @@ describe('MainLayout mobile PiSessionSidebar mount (issue #1695 regression guard
         expect(/mobileLeftDrawerVisible\s*&&/.test(precedingWindow)).toBe(false);
     });
 
-    test('the Pi sidebar exposes the shared settings surface from its fixed footer', () => {
+    test('the Pi sidebar exposes settings, shortcut help, and About from its fixed footer', () => {
         const scrollRegionIndex = sessionSidebarSource.indexOf('min-h-0 flex-1 overflow-y-auto');
         const footerIndex = sessionSidebarSource.indexOf('shrink-0 border-t border-border/60');
 
         expect(scrollRegionIndex).toBeGreaterThan(-1);
         expect(footerIndex).toBeGreaterThan(scrollRegionIndex);
         expect(sessionSidebarSource).toContain("t('sessions.sidebar.footer.actions.settings')");
+        expect(sessionSidebarSource).toContain("t('sessions.sidebar.footer.actions.shortcuts')");
+        expect(sessionSidebarSource).toContain("t('sessions.sidebar.footer.actions.aboutPiarium')");
         expect(sessionSidebarSource).toContain('if (mobileVariant) setSessionSwitcherOpen(false);');
         expect(sessionSidebarSource).toContain('setSettingsDialogOpen(true);');
+        expect(sessionSidebarSource).toContain('setHelpDialogOpen(true);');
+        expect(sessionSidebarSource).toContain("setSettingsPage('about');");
     });
 });

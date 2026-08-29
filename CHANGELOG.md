@@ -5,6 +5,12 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.4
+
+- Add a desktop About settings page with the current version, honest update status, automatic and manual
+  update checks, release installation, and persistent update preferences
+- Add compact Settings, shortcut help, About, and available-update actions to the conversation sidebar footer
+
 ## 0.9.3
 
 Piarium 0.9.3 replaces plugin-backed workspace rollback with a Piarium-native recovery system and
