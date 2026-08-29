@@ -38,6 +38,8 @@ export const createRecoveryTurnCoordinator = ({
   writerTracker,
 }) => {
   const pending = new Map();
+  const latestReadyByWorkspace = new Map();
+  const captureInFlightByWorkspace = new Map();
   let disposed = false;
 
   const apiFor = (turn) => createWorkspaceRecoveryAPI((request) => invokeService({
@@ -58,18 +60,61 @@ export const createRecoveryTurnCoordinator = ({
     };
   };
 
-  const capture = async (turn, source) => {
+  const rememberReadySnapshot = (snapshot) => {
+    if (snapshot?.availability !== 'ready') return;
+    const previous = latestReadyByWorkspace.get(snapshot.workspaceId);
+    if (!previous || snapshot.sequence >= previous.sequence) {
+      latestReadyByWorkspace.set(snapshot.workspaceId, snapshot);
+    }
+  };
+
+  const latestReadySnapshot = async (turn) => {
+    const cached = latestReadyByWorkspace.get(turn.workspaceId);
+    // A filesystem scan may take minutes for data-heavy workspaces. Never put
+    // the next user prompt behind an in-flight history revision.
+    if (captureInFlightByWorkspace.has(turn.workspaceId)) return cached;
     try {
-      const result = await apiFor(turn).captureSnapshot({
-        reuseIfUnchanged: true,
-        source,
+      const result = await apiFor(turn).listSnapshots({
+        limit: 1,
         workspaceId: turn.workspaceId,
       });
-      if (result.status === 'failed') reportRecoveryFailure(turn, `${source} capture`, result.failure);
-      return result;
+      if (result.status === 'failed') {
+        reportRecoveryFailure(turn, 'workspace history head lookup', result.failure);
+        return cached;
+      }
+      const snapshot = result.page.snapshots[0];
+      rememberReadySnapshot(snapshot);
+      return snapshot?.availability === 'ready' ? snapshot : cached;
     } catch (error) {
-      reportRecoveryFailure(turn, `${source} capture`, error);
-      return { failure: unavailableFailure(error), status: 'failed' };
+      reportRecoveryFailure(turn, 'workspace history head lookup', error);
+      return cached;
+    }
+  };
+
+  const capture = async (turn, source) => {
+    const previous = captureInFlightByWorkspace.get(turn.workspaceId) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(async () => {
+      try {
+        const result = await apiFor(turn).captureSnapshot({
+          reuseIfUnchanged: true,
+          source,
+          workspaceId: turn.workspaceId,
+        });
+        if (result.status === 'failed') reportRecoveryFailure(turn, `${source} capture`, result.failure);
+        else rememberReadySnapshot(result.snapshot);
+        return result;
+      } catch (error) {
+        reportRecoveryFailure(turn, `${source} capture`, error);
+        return { failure: unavailableFailure(error), status: 'failed' };
+      }
+    });
+    captureInFlightByWorkspace.set(turn.workspaceId, task);
+    try {
+      return await task;
+    } finally {
+      if (captureInFlightByWorkspace.get(turn.workspaceId) === task) {
+        captureInFlightByWorkspace.delete(turn.workspaceId);
+      }
     }
   };
 
@@ -181,7 +226,7 @@ export const createRecoveryTurnCoordinator = ({
       };
       const beforeMutation = await inspectScopes(workspaceId).catch(() => null);
       if (beforeMutation) turn.activeWriterScopes = beforeMutation.scopes;
-      const before = await capture(turn, 'turn-before');
+      const before = await latestReadySnapshot(turn);
       const writerLease = await writerTracker.admit(request);
       const admittedMutation = await inspectScopes(workspaceId).catch(() => null);
       if (admittedMutation) {
@@ -197,23 +242,22 @@ export const createRecoveryTurnCoordinator = ({
       const foreignWriters = admittedMutation?.state.activeWriters.filter((writer) => (
         writer.owner?.kind !== 'pi-worker' || writer.owner?.id !== request.workerId
       )) ?? [];
-      const witnessMatches = before.status === 'captured'
+      const admissionOverlapped = Boolean(
+        beforeMutation
         && admittedMutation
-        && before.witness.epoch === admittedMutation.state.epoch
-        && before.witness.mutationRevision === admittedMutation.state.mutationRevision
-        && before.witness.writerRevision + currentWriter.length === admittedMutation.state.writerRevision
-        && currentWriter.length === (writerLease ? 1 : 0)
-        && foreignWriters.length === 0;
-      if (before.status === 'captured' && before.snapshot.availability === 'ready') {
-        turn.beforeSnapshotId = before.snapshot.id;
-        // The revision is still a real, restorable point in workspace history
-        // when another writer overlaps the small capture/admission gap. Keep it
-        // and describe provenance instead of erasing the user's checkpoint.
-        if (!witnessMatches) turn.provenance = 'overlapped';
+        && (
+          admittedMutation.state.writerRevision
+            > beforeMutation.state.writerRevision + currentWriter.length
+          || foreignWriters.length > 0
+        )
+      );
+      if (before) {
+        turn.beforeSnapshotId = before.id;
+        if (admissionOverlapped) turn.provenance = 'overlapped';
       } else {
-        turn.beforeFailure = before.status === 'failed'
-          ? before.failure
-          : incompleteFailure('Turn-before workspace snapshot is incomplete');
+        turn.beforeFailure = incompleteFailure(
+          'Workspace history has no completed revision before this turn',
+        );
         if (foreignWriters.length > 0) turn.provenance = 'overlapped';
       }
       pending.set(request.executionId, turn);
@@ -267,6 +311,8 @@ export const createRecoveryTurnCoordinator = ({
         finalize(turn, incompleteFailure('Application Host stopped before the turn settled'))
       )));
       pending.clear();
+      captureInFlightByWorkspace.clear();
+      latestReadyByWorkspace.clear();
     },
   };
 };

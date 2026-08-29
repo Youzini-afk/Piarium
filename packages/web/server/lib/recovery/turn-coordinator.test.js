@@ -63,11 +63,20 @@ describe('recovery turn coordinator', () => {
     let captureCount = 0;
     const invokeService = vi.fn(async (request) => {
       const input = request.args[0];
+      if (request.method === 'listSnapshots') {
+        return {
+          page: {
+            nextCursor: null,
+            snapshots: [snapshot('before', 'turn-after')],
+          },
+          status: 'ready',
+        };
+      }
       if (request.method === 'captureSnapshot') {
         captureCount += 1;
         return {
           reused: false,
-          snapshot: snapshot(captureCount === 1 ? 'before' : 'after', input.source),
+          snapshot: snapshot('after', input.source),
           status: 'captured',
           witness: {
             epoch: state.epoch,
@@ -129,6 +138,7 @@ describe('recovery turn coordinator', () => {
     };
 
     const lease = await coordinator.admit(request);
+    expect(captureCount).toBe(0);
     await coordinator.processEvent(agentEvent('execution-1', {
       entry: { id: 'user-1', message: { role: 'user' }, type: 'message' },
       leafId: 'user-1',
@@ -157,7 +167,7 @@ describe('recovery turn coordinator', () => {
       executionId: 'execution-1',
       provenance: 'overlapped',
     })]);
-    expect(captureCount).toBe(2);
+    expect(captureCount).toBe(1);
     await coordinator.dispose();
   });
 

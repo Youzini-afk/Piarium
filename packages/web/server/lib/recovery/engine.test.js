@@ -54,6 +54,10 @@ describe('native workspace recovery Phase 1 engine', () => {
     await fs.promises.chmod(path.join(harness.workspaceRoot, 'nested', 'note.txt'), 0o444);
     await fs.promises.mkdir(path.join(harness.workspaceRoot, '.git'), { recursive: true });
     await fs.promises.writeFile(path.join(harness.workspaceRoot, '.git', 'HEAD'), 'must-not-be-read');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, '.gitignore'), 'ignored.bin\nignored-dir/\n');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'ignored.bin'), 'must-not-be-read');
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, 'ignored-dir'), { recursive: true });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'ignored-dir', 'private'), 'must-not-be-read');
     await fs.promises.mkdir(path.join(harness.workspaceRoot, '.piarium', 'recovery'), { recursive: true });
     await fs.promises.writeFile(path.join(harness.workspaceRoot, '.piarium', 'recovery', 'private'), 'must-not-be-read');
     let symlinkCreated = true;
@@ -75,6 +79,9 @@ describe('native workspace recovery Phase 1 engine', () => {
     const byPath = new Map(read.manifest.entries.map((entry) => [entry.path, entry]));
     expect(byPath.get('empty')).toMatchObject({ kind: 'directory', coverage: 'present' });
     expect(byPath.get('.git')).toMatchObject({ kind: 'excluded', reason: 'vcs-administrative-store' });
+    expect(byPath.get('ignored.bin')).toMatchObject({ kind: 'excluded', reason: 'workspace-ignore' });
+    expect(byPath.get('ignored-dir')).toMatchObject({ kind: 'excluded', reason: 'workspace-ignore' });
+    expect([...byPath.keys()].some((entry) => entry.startsWith('ignored-dir/'))).toBe(false);
     expect(byPath.get('.piarium/recovery')).toMatchObject({ kind: 'excluded', reason: 'piarium-recovery-storage' });
     expect([...byPath.keys()].some((entry) => entry.startsWith('.git/'))).toBe(false);
     expect([...byPath.keys()].some((entry) => entry.startsWith('.piarium/recovery/'))).toBe(false);
@@ -307,6 +314,14 @@ describe('native workspace recovery Phase 1 engine', () => {
     const target = objectPath(applicationDataRoot(harness), hash);
 
     await fs.promises.writeFile(target, 'different');
+    expect(await engine.listSnapshots({ workspaceId: harness.identity.workspaceId })).toMatchObject({
+      page: { snapshots: [expect.objectContaining({ availability: 'ready' })] },
+      status: 'ready',
+    });
+    expect(await engine.storageStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      storage: { state: 'ready' },
+    });
     const corrupt = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
     expect(corrupt).toMatchObject({ status: 'corrupt', failure: { code: 'object-corrupt' } });
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs, { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
+import ignore from 'ignore';
 import {
   calculateManifestHash,
   ensureRecoveryStoreLayout,
@@ -20,7 +21,7 @@ import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
 import { portableSymlinkTarget } from './symlink-target.js';
 
-const POLICY_REVISION = 'native-local-history-v2';
+const POLICY_REVISION = 'native-local-history-v3';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
 const INSERT_STAGED_ENTRY = `
   INSERT INTO staged_entries(
@@ -463,13 +464,30 @@ export const createWorkspaceRecoveryEngine = ({
       workspaceId: identity.workspaceId,
     });
 
-    const shouldExclude = (relativePath, absolutePath) => {
+    const workspaceIgnore = ignore();
+    for (const ignoreFile of [
+      pathModule.join(identity.canonicalRoot, '.gitignore'),
+      pathModule.join(identity.canonicalRoot, '.git', 'info', 'exclude'),
+    ]) {
+      try {
+        workspaceIgnore.add(await fsPromises.readFile(ignoreFile, 'utf8'));
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          console.warn(`[WorkspaceRecovery] Could not read ignore rules from ${ignoreFile}: ${error?.message || error}`);
+        }
+      }
+    }
+
+    const shouldExclude = (relativePath, absolutePath, directory = false) => {
       const segments = relativePath.split('/');
       if (EXCLUDED_VCS_NAMES.has(segments.at(-1))) return 'vcs-administrative-store';
       if (segments.length === 2 && segments[0] === '.piarium' && segments[1] === 'recovery') {
         return 'piarium-recovery-storage';
       }
       if (locations.samePath(absolutePath, storeRoot)) return 'piarium-recovery-storage';
+      if (workspaceIgnore.ignores(directory ? `${relativePath}/` : relativePath)) {
+        return 'workspace-ignore';
+      }
       return null;
     };
 
@@ -515,7 +533,7 @@ export const createWorkspaceRecoveryEngine = ({
           : directoryEntry.name;
         const portablePath = forwardPath(relativePath);
         const absolutePath = pathModule.join(absoluteDirectory, directoryEntry.name);
-        const exclusion = shouldExclude(portablePath, absolutePath);
+        const exclusion = shouldExclude(portablePath, absolutePath, directoryEntry.isDirectory());
         if (exclusion) {
           insertEntry(database, captureId, {
             comparisonKey: comparisonKey(portablePath),
@@ -831,7 +849,13 @@ export const createWorkspaceRecoveryEngine = ({
       if (hasMore) rows.pop();
       const snapshots = [];
       for (const row of rows) {
-        const inspected = await inspectStoredSnapshot(database, storage.root, identity.workspaceId, row.id, { fsModule });
+        // Listing is a metadata operation used on the prompt path. Object
+        // hashing belongs to explicit read/restore/audit operations and can be
+        // tens of gigabytes for data-heavy workspaces.
+        const inspected = await inspectStoredSnapshot(database, storage.root, identity.workspaceId, row.id, {
+          fsModule,
+          verifyObjects: false,
+        });
         snapshots.push(snapshotSummaryFromRow(row, inspected.availability));
       }
       return {
@@ -1000,7 +1024,10 @@ export const createWorkspaceRecoveryEngine = ({
       let state = rows.some((row) => row.availability === 'incomplete') ? 'incomplete' : 'ready';
       let readySnapshotCount = 0;
       for (const row of rows) {
-        const inspected = await inspectStoredSnapshot(database, root, identity.workspaceId, row.id, { fsModule });
+        const inspected = await inspectStoredSnapshot(database, root, identity.workspaceId, row.id, {
+          fsModule,
+          verifyObjects: false,
+        });
         if (inspected.availability === 'corrupt') state = 'corrupt';
         else if (inspected.availability === 'malformed' && state !== 'corrupt') state = 'malformed';
         else if (inspected.availability === 'ready') readySnapshotCount += 1;
