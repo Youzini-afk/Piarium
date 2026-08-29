@@ -28,6 +28,30 @@ OpenCode 相容層。
 > Piarium 目前仍處於 1.0 之前的活躍開發階段。各產品端和私有執行期協定會同步演進，較舊的組建
 > 不保證能與較新的組建互通。請備份重要的工作區；長期部署時，請固定到已經驗證過的映像摘要。
 
+## 產品介面
+
+以下截圖使用隔離的 `demo-workspace` 和匿名範例檔案產生，不包含個人帳號、真實專案、會話或憑證。
+
+### Agent Workspace
+
+專案和會話保持可見，主區域把目前的代理程式、上下文工具與輸入框集中在同一個工作空間中。
+
+![Piarium Agent Workspace](assets/agent-workspace.png)
+
+### IDE Workbench
+
+IDE Profile 將工作區導覽和編輯器基礎設施與完整的 Pi 代理程式並排組合，而不是把聊天拆成另一個應用程式。
+
+![Piarium IDE Workbench](assets/ide-workbench.png)
+
+### 行動端工作空間
+
+響應式介面在手機螢幕上保留同一套專案、代理程式控制、上下文介面和輸入框。
+
+<p align="center">
+  <img src="assets/mobile-workspace.png" alt="Piarium 行動端工作空間" width="390" />
+</p>
+
 ## Piarium 提供什麼
 
 - **Pi 原生會話：** 支援串流回應、分支、會話樹導覽、壓縮、引導和後續訊息佇列、模型與思考

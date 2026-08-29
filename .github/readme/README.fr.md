@@ -33,6 +33,34 @@ donc vous pouvez remplacer l'une ou l'autre, ou n'importe laquelle de leurs part
 > une plus récente. Sauvegardez les espaces de travail importants et épinglez un digest d'image
 > testé pour les déploiements durables.
 
+## Interfaces du produit
+
+Les captures ci-dessous utilisent un `demo-workspace` isolé et des fichiers d'exemple anonymes, sans
+compte, projet, conversation ni identifiant personnel.
+
+### Agent Workspace
+
+Les sessions et projets restent visibles tandis que la zone principale réunit l'agent actif, les
+outils de contexte et le compositeur dans un même espace de travail.
+
+![Piarium Agent Workspace](assets/agent-workspace.png)
+
+### IDE Workbench
+
+Le profil IDE associe la navigation et l'infrastructure d'édition à un agent Pi complet et ancré,
+plutôt que de traiter le chat comme une application séparée.
+
+![Piarium IDE Workbench](assets/ide-workbench.png)
+
+### Espace de travail mobile
+
+L'interface adaptative conserve le même projet, les contrôles de l'agent, les surfaces de contexte et
+le compositeur sur un écran de téléphone.
+
+<p align="center">
+  <img src="assets/mobile-workspace.png" alt="Espace de travail mobile Piarium" width="390" />
+</p>
+
 ## Ce que fournit Piarium
 
 - **Conversations Pi-natives :** streaming, branches, navigation dans l'arbre, compaction, files de

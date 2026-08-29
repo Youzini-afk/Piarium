@@ -31,6 +31,34 @@ part of it.
 > currently advance together, so older builds are not guaranteed to interoperate with newer ones.
 > Back up important workspaces and pin a tested image digest for persistent deployments.
 
+## Product surfaces
+
+The screenshots below use an isolated `demo-workspace` with anonymous sample files and no personal
+accounts, projects, conversations, or credentials.
+
+### Agent Workspace
+
+Sessions and projects stay visible while the main canvas keeps the active agent, context tools, and
+composer in one focused workspace.
+
+![Piarium Agent Workspace](.github/readme/assets/agent-workspace.png)
+
+### IDE Workbench
+
+The IDE profile combines workspace navigation and editor infrastructure with a docked, fully capable
+Pi agent instead of treating chat as a separate application.
+
+![Piarium IDE Workbench](.github/readme/assets/ide-workbench.png)
+
+### Mobile workspace
+
+The responsive workspace keeps the same project, agent controls, context surfaces, and composer on a
+phone-sized screen.
+
+<p align="center">
+  <img src=".github/readme/assets/mobile-workspace.png" alt="Piarium mobile workspace" width="390" />
+</p>
+
 ## What Piarium provides
 
 - **Pi-native conversations:** streaming, branching, tree navigation, compaction, steering and

@@ -28,6 +28,30 @@ OpenCode 兼容层。
 > Piarium 目前仍处于 1.0 之前的活跃开发阶段。各产品端和私有运行时协议会同步演进，较旧构建
 > 不保证与较新构建互通。请备份重要工作区；长期部署时，请固定到已经验证的镜像摘要。
 
+## 产品界面
+
+以下截图使用隔离的 `demo-workspace` 和匿名示例文件生成，不包含个人账号、真实项目、会话或凭据。
+
+### Agent Workspace
+
+项目和会话始终可见，主区域将当前智能体、上下文工具与输入框集中在同一个工作空间中。
+
+![Piarium Agent Workspace](assets/agent-workspace.png)
+
+### IDE Workbench
+
+IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体并排组合，而不是把聊天拆成另一个应用。
+
+![Piarium IDE Workbench](assets/ide-workbench.png)
+
+### 移动端工作空间
+
+响应式界面在手机屏幕上保留同一套项目、智能体控制、上下文界面和输入框。
+
+<p align="center">
+  <img src="assets/mobile-workspace.png" alt="Piarium 移动端工作空间" width="390" />
+</p>
+
 ## Piarium 提供什么
 
 - **Pi 原生会话：** 支持流式响应、分支、会话树导航、压缩、引导和后续消息队列、模型与思考
