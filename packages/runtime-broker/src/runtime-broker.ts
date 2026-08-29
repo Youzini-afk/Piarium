@@ -1695,9 +1695,28 @@ export class PiRuntimeBroker {
       };
       this.#sessionExecutionAdmissions.set(client, state);
       state.ready = (async () => {
-        const workspace = context.sessionId === undefined
+        const cachedWorkspace = context.sessionId === undefined
           ? undefined
           : this.#knownSummaries.get(context.sessionId)?.workspace;
+        let workspace = cachedWorkspace;
+        if (context.sessionId !== undefined) {
+          try {
+            // Recovery and mutation ownership must use the durable session
+            // binding, not whichever summary happened to be cached by the UI.
+            // Refreshing here also covers a freshly created or rebound session
+            // before its next catalog refresh.
+            workspace = (await this.#rememberSummary(client, context.sessionId)).workspace
+              ?? cachedWorkspace;
+          } catch (error) {
+            this.#emit({
+              kind: "diagnostic",
+              level: "error",
+              message: `Failed to refresh Piarium session workspace binding: ${error instanceof Error ? error.message : String(error)}`,
+              role: "session",
+              workerId: client.id,
+            });
+          }
+        }
         const lease = await this.#sessionExecutionAdmission?.({
           cwd,
           executionId: state.executionId,

@@ -1032,6 +1032,13 @@ export class SessionHost {
     const preflight = new Promise<boolean>((resolvePreflight) => {
       accept = resolvePreflight;
     });
+    let markAgentStarted: () => void = () => {};
+    const agentStarted = new Promise<void>((resolveStarted) => {
+      markAgentStarted = resolveStarted;
+    });
+    const unsubscribeStarted = session.subscribe((event) => {
+      if (event.type === "agent_start") markAgentStarted();
+    });
     const run = session.prompt(text, {
       ...(images === undefined ? {} : { images: toImages(images) }),
       preflightResult: accept,
@@ -1040,13 +1047,24 @@ export class SessionHost {
     let accepted: boolean;
     try {
       accepted = await Promise.race([preflight, run.then(() => false)]);
-      if (!accepted) await run;
+      if (accepted) {
+        // `accepted` is a preflight result. Do not acknowledge the Host request
+        // before an actual agent run has emitted agent_start, otherwise the
+        // broker can release its execution/recovery lease and orphan every
+        // subsequent message event. Extension commands complete through `run`
+        // without agent_start and remain synchronous.
+        await Promise.race([agentStarted, run]);
+      } else {
+        await run;
+      }
     } catch (error) {
       throw new HostError(
         "agent_run_failed",
         error instanceof Error ? error.message : String(error),
         { cause: error },
       );
+    } finally {
+      unsubscribeStarted();
     }
     void run.catch((error) => {
       this.#emit("host.error", {

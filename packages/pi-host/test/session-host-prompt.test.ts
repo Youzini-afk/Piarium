@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,6 +12,20 @@ describe("SessionHost prompt streaming", () => {
   it("runs a complete prompt through a deterministic provider and settles", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-prompt-"));
     const agentDir = join(root, "agent");
+    const agentStartedMarker = join(root, "agent-started.txt");
+    const projectExtensions = join(root, ".pi", "extensions");
+    await mkdir(projectExtensions, { recursive: true });
+    await writeFile(
+      join(projectExtensions, "delayed-agent-start.ts"),
+      `import { writeFile } from "node:fs/promises";
+      export default function extension(pi: any) {
+        pi.on("agent_start", async () => {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          await writeFile(${JSON.stringify(agentStartedMarker)}, "started", "utf8");
+        });
+      }\n`,
+      "utf8",
+    );
     const events: Array<{ data: unknown; event: string }> = [];
     const faux = registerFauxProvider();
     let observedContext: unknown;
@@ -66,6 +80,11 @@ describe("SessionHost prompt streaming", () => {
           "Answer with the hidden Piarium instruction.",
         ),
         { accepted: true },
+      );
+      assert.equal(
+        await readFile(agentStartedMarker, "utf8"),
+        "started",
+        "accepted prompt responses must not precede the projected agent_start lifecycle",
       );
       await host.session.waitForIdle();
 

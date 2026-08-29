@@ -17,6 +17,14 @@ const incompleteFailure = (message) => ({
   retryable: true,
 });
 
+const reportRecoveryFailure = (turn, stage, failure) => {
+  const message = failure?.message || String(failure || 'unknown failure');
+  console.warn(
+    `[WorkspaceRecovery] ${stage} failed for session ${turn.sessionId} `
+    + `(execution ${turn.executionId}, workspace ${turn.workspaceId}): ${message}`,
+  );
+};
+
 const isBoundWorkspace = (workspace) => (
   workspace?.kind === 'workspace'
   && typeof workspace.id === 'string'
@@ -52,12 +60,15 @@ export const createRecoveryTurnCoordinator = ({
 
   const capture = async (turn, source) => {
     try {
-      return await apiFor(turn).captureSnapshot({
+      const result = await apiFor(turn).captureSnapshot({
         reuseIfUnchanged: true,
         source,
         workspaceId: turn.workspaceId,
       });
+      if (result.status === 'failed') reportRecoveryFailure(turn, `${source} capture`, result.failure);
+      return result;
     } catch (error) {
+      reportRecoveryFailure(turn, `${source} capture`, error);
       return { failure: unavailableFailure(error), status: 'failed' };
     }
   };
@@ -77,22 +88,24 @@ export const createRecoveryTurnCoordinator = ({
         workspaceId: turn.workspaceId,
       });
       if (result.status === 'ready') turn.bindingIds.push(executionId);
-    } catch {
-      // A missing/replaced recovery provider leaves the conversation authoritative.
+      else reportRecoveryFailure(turn, 'turn binding start', result.failure);
+    } catch (error) {
+      reportRecoveryFailure(turn, 'turn binding start', error);
     }
   };
 
   const settleBinding = async (turn, executionId, input) => {
     try {
-      await apiFor(turn).recordTurnSettled({
+      const result = await apiFor(turn).recordTurnSettled({
         activeWriterScopes: [...turn.activeWriterScopes],
         executionId,
         provenance: turn.provenance,
         workspaceId: turn.workspaceId,
         ...input,
       });
-    } catch {
-      // The binding remains pending/incomplete and can be diagnosed by the provider.
+      if (result.status === 'failed') reportRecoveryFailure(turn, 'turn binding settlement', result.failure);
+    } catch (error) {
+      reportRecoveryFailure(turn, 'turn binding settlement', error);
     }
   };
 
@@ -191,12 +204,16 @@ export const createRecoveryTurnCoordinator = ({
         && before.witness.writerRevision + currentWriter.length === admittedMutation.state.writerRevision
         && currentWriter.length === (writerLease ? 1 : 0)
         && foreignWriters.length === 0;
-      if (witnessMatches && before.snapshot.availability === 'ready') {
+      if (before.status === 'captured' && before.snapshot.availability === 'ready') {
         turn.beforeSnapshotId = before.snapshot.id;
+        // The revision is still a real, restorable point in workspace history
+        // when another writer overlaps the small capture/admission gap. Keep it
+        // and describe provenance instead of erasing the user's checkpoint.
+        if (!witnessMatches) turn.provenance = 'overlapped';
       } else {
         turn.beforeFailure = before.status === 'failed'
           ? before.failure
-          : incompleteFailure('Workspace changed between turn-before capture and writer admission');
+          : incompleteFailure('Turn-before workspace snapshot is incomplete');
         if (foreignWriters.length > 0) turn.provenance = 'overlapped';
       }
       pending.set(request.executionId, turn);

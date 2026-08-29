@@ -20,7 +20,7 @@ import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
 import { portableSymlinkTarget } from './symlink-target.js';
 
-const POLICY_REVISION = 'phase1-default-v1';
+const POLICY_REVISION = 'native-local-history-v2';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
 const INSERT_STAGED_ENTRY = `
   INSERT INTO staged_entries(
@@ -633,13 +633,6 @@ export const createWorkspaceRecoveryEngine = ({
         mutationRevision: validation.state.mutationRevision,
         writerRevision: validation.state.writerRevision,
       };
-      if (!validation.stable) {
-        database.prepare(`
-          UPDATE staged_entries
-          SET coverage = 'unstable', reason = ?
-          WHERE capture_id = ? AND path = '.' AND coverage <> 'unstable'
-        `).run(`workspace-tracker:${validation.reasons.join(',')}`, captureId);
-      }
       const manifestHash = calculateManifestHash(database, 'staged_entries', 'capture_id', captureId);
       const counts = database.prepare(`
         SELECT
@@ -677,7 +670,9 @@ export const createWorkspaceRecoveryEngine = ({
         `).run({
           availability: incomplete ? 'incomplete' : 'ready',
           byteLength: counts.byte_length,
-          consistency: incomplete ? 'incomplete' : 'validated',
+          consistency: incomplete
+            ? 'incomplete'
+            : validation.stable ? 'validated' : 'point-in-time',
           createdAt,
           entryCount: counts.entry_count,
           excludedUnknown: counts.excluded_unknown,
@@ -859,13 +854,19 @@ export const createWorkspaceRecoveryEngine = ({
     if (!database) return null;
     try {
       const head = database.prepare(`
-        SELECT snapshot_id FROM workspace_heads
-        WHERE workspace_id = ? AND epoch = ? AND mutation_revision = ? AND writer_revision = ?
+        SELECT heads.snapshot_id FROM workspace_heads AS heads
+        JOIN snapshots ON snapshots.id = heads.snapshot_id
+        WHERE heads.workspace_id = ?
+          AND heads.epoch = ?
+          AND heads.mutation_revision = ?
+          AND heads.writer_revision = ?
+          AND snapshots.policy_revision = ?
       `).get(
         identity.workspaceId,
         mutationState.epoch,
         mutationState.mutationRevision,
         mutationState.writerRevision,
+        POLICY_REVISION,
       );
       if (!head) return null;
       const inspected = await inspectStoredSnapshot(
@@ -1477,12 +1478,32 @@ export const createWorkspaceRecoveryEngine = ({
         );
         if (reused) return reused;
       }
-      capture = await documents.beginCapture(input.workspaceId, {
-        allowMaintenance: input.allowMaintenance === true,
-      });
+      let captureUnavailable = null;
+      try {
+        capture = await documents.beginCapture(input.workspaceId, {
+          allowMaintenance: input.allowMaintenance === true,
+        });
+      } catch (error) {
+        // A workspace watcher strengthens a revision from point-in-time to
+        // validated, but it is not the authority for whether history exists.
+        // IDE local-history semantics still preserve a complete filesystem
+        // scan when the watcher is unavailable; restore-time conflict checks
+        // decide whether that revision should be applied in place.
+        captureUnavailable = error;
+      }
       return await captureIntoCatalog(identity, storage.root, input, async () => {
-        captureCompleted = true;
-        return documents.completeCapture(capture);
+        if (capture) {
+          captureCompleted = true;
+          return documents.completeCapture(capture);
+        }
+        const state = await documents.inspectMutation(input.workspaceId);
+        return {
+          reasons: [
+            `watcher-unavailable:${captureUnavailable?.code ?? 'unknown'}`,
+          ],
+          stable: false,
+          state,
+        };
       });
     } catch (error) {
       return failedRecoveryResult(error);

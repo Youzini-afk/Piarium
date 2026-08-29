@@ -49,7 +49,7 @@ const agentEvent = (executionId, event) => ({
 });
 
 describe('recovery turn coordinator', () => {
-  it('captures before writer admission, binds stable entries, and captures after writer release', async () => {
+  it('keeps a ready turn-before revision when admission provenance overlaps', async () => {
     const starts = [];
     const settlements = [];
     const state = {
@@ -90,7 +90,10 @@ describe('recovery turn coordinator', () => {
     let idle = Promise.resolve();
     const writerTracker = {
       async admit(request) {
-        state.writerRevision += 1;
+        // Simulate another writer lifecycle in the narrow gap between the
+        // completed scan and Pi writer admission. The snapshot remains a real
+        // point in local history even though causality is no longer exclusive.
+        state.writerRevision += 2;
         state.activeWriters = [{
           owner: { id: request.workerId, kind: 'pi-worker' },
           purpose: 'pi-agent-run',
@@ -143,11 +146,16 @@ describe('recovery turn coordinator', () => {
       leafId: 'assistant-1', turnIndex: 1, type: 'agent_settled',
     }));
 
-    expect(starts).toEqual([expect.objectContaining({ beforeSnapshotId: 'before', userEntryId: 'user-1' })]);
+    expect(starts).toEqual([expect.objectContaining({
+      beforeSnapshotId: 'before',
+      provenance: 'overlapped',
+      userEntryId: 'user-1',
+    })]);
     expect(settlements).toEqual([expect.objectContaining({
       afterSnapshotId: 'after',
       assistantEntryId: 'assistant-1',
       executionId: 'execution-1',
+      provenance: 'overlapped',
     })]);
     expect(captureCount).toBe(2);
     await coordinator.dispose();

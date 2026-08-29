@@ -98,7 +98,12 @@ test("session execution admission precedes worker and agent execution and owns c
     assert.equal(typeof admissions[0]?.executionId, "string");
 
     deny = false;
-    const created = await broker.createSession(workspace);
+    const workspaceBinding = {
+      authorityId: "workspace-authority",
+      id: "workspace-project",
+      kind: "workspace" as const,
+    };
+    const created = await broker.createSession(workspace, undefined, undefined, workspaceBinding);
     assert.ok(crossingCommand, "session snapshot should expose the startup/run crossing request");
     await crossingCommand;
     assert.equal(broker.workerCount, 1);
@@ -134,6 +139,7 @@ test("session execution admission precedes worker and agent execution and owns c
     assert.equal(admissions.at(-1)?.phase, "agent-run");
     assert.equal(admissions.at(-1)?.method, "command.execute");
     assert.equal(admissions.at(-1)?.sessionId, created.sessionId);
+    assert.deepEqual(admissions.at(-1)?.workspace, workspaceBinding);
 
     deny = true;
     await assert.rejects(
