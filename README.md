@@ -324,6 +324,8 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the rep
 - [Cloud deployment](docs/cloud-deployment.md)
 - [Security model](docs/security.md)
 
+- Thanks to the [LinuxDO](https://linux.do) community for their support
+
 ## Lineage and license
 
 Piarium is a Pi-native refactor of the maintainer's OpenChamber fork.
