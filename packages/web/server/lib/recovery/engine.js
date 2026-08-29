@@ -232,6 +232,24 @@ export const createWorkspaceRecoveryEngine = ({
     };
   };
 
+  const inspectMaintenanceIdentity = async (workspaceId) => {
+    try {
+      return await inspectIdentity(workspaceId);
+    } catch (error) {
+      if (error?.code !== 'workspace-unavailable'
+        || typeof documents.listWorkspaceRegistrations !== 'function') throw error;
+      const registration = (await documents.listWorkspaceRegistrations())
+        .find((entry) => entry.workspaceId === workspaceId);
+      if (!registration) throw error;
+      return {
+        authorityId,
+        canonicalRoot: registration.canonicalPath,
+        filesystemProfile: process.platform === 'win32' ? 'local-windows' : 'local-posix',
+        workspaceId,
+      };
+    }
+  };
+
   const recoverStoreOperations = (root, workspaceId) => {
     const existing = recoveredStores.get(root);
     if (existing) return existing;
@@ -315,9 +333,11 @@ export const createWorkspaceRecoveryEngine = ({
     }
   };
 
-  const storageFor = async (identity) => {
+  const storageFor = async (identity, options = {}) => {
     await recoverMoveOperations();
-    const selection = await currentStorageSelection(identity);
+    const selection = options.migrate === false
+      ? await locations.selection(identity.workspaceId)
+      : await currentStorageSelection(identity);
     const root = await resolveStorageRoot(identity, selection.location);
     await recoverStoreOperations(root, identity.workspaceId);
     return {
@@ -1002,6 +1022,78 @@ export const createWorkspaceRecoveryEngine = ({
     }
   };
 
+  const storageWorkspaceSummary = async (registration) => {
+    const identity = {
+      authorityId,
+      canonicalRoot: registration.canonicalPath,
+      filesystemProfile: process.platform === 'win32' ? 'local-windows' : 'local-posix',
+      workspaceId: registration.workspaceId,
+    };
+    const selection = await locations.selection(identity.workspaceId);
+    let workspaceAvailable = false;
+    try {
+      const stat = await fsPromises.stat(await fsPromises.realpath(identity.canonicalRoot));
+      workspaceAvailable = stat.isDirectory();
+    } catch {
+      workspaceAvailable = false;
+    }
+    try {
+      const root = await resolveStorageRoot(identity, selection.location);
+      const objectStats = await statTree(pathModule.join(root, 'objects'), fsPromises);
+      const database = await openRecoveryCatalog(root, { create: false, fsPromises });
+      try {
+        const snapshots = database?.prepare(`
+          SELECT
+            COUNT(*) AS count,
+            MAX(created_at) AS last_activity_at,
+            COALESCE(SUM(CASE WHEN availability = 'incomplete' THEN 1 ELSE 0 END), 0) AS incomplete
+          FROM snapshots WHERE workspace_id = ?
+        `).get(identity.workspaceId) ?? { count: 0, incomplete: 0, last_activity_at: null };
+        const operationActivity = database?.prepare(
+          'SELECT MAX(updated_at) AS last_activity_at FROM operations WHERE workspace_id = ?',
+        ).get(identity.workspaceId)?.last_activity_at ?? null;
+        const lastActivityAt = [snapshots.last_activity_at, operationActivity]
+          .filter((value) => typeof value === 'string')
+          .sort()
+          .at(-1) ?? null;
+        return {
+          byteLength: objectStats.byteLength,
+          canonicalRoot: identity.canonicalRoot,
+          lastActivityAt,
+          location: selection.location,
+          locationSource: selection.source,
+          migrationRequired: selection.migrationRequired,
+          objectCount: objectStats.objectCount,
+          snapshotCount: snapshots.count,
+          state: snapshots.count === 0 && objectStats.objectCount === 0
+            ? 'missing'
+            : snapshots.incomplete > 0 ? 'incomplete' : 'ready',
+          storageAvailable: true,
+          workspaceAvailable,
+          workspaceId: identity.workspaceId,
+        };
+      } finally {
+        database?.close();
+      }
+    } catch (error) {
+      return {
+        byteLength: 0,
+        canonicalRoot: identity.canonicalRoot,
+        failure: recoveryFailure(error, 'unavailable'),
+        lastActivityAt: null,
+        location: selection.location,
+        locationSource: selection.source,
+        migrationRequired: selection.migrationRequired,
+        objectCount: 0,
+        snapshotCount: 0,
+        state: 'unavailable',
+        storageAvailable: false,
+        workspaceAvailable,
+        workspaceId: identity.workspaceId,
+      };
+    }
+  };
+
   const moveRecordPath = (operationId) => pathModule.join(locations.operationsRoot, `${operationId}.json`);
   const writeMove = async (operation) => {
     operation.updatedAt = new Date().toISOString();
@@ -1233,7 +1325,7 @@ export const createWorkspaceRecoveryEngine = ({
       status: 'complete',
       workspaceId: identity.workspaceId,
     };
-    const storage = await storageFor(identity);
+    const storage = await storageFor(identity, { migrate: false });
     let database;
     const startedAt = new Date().toISOString();
     try {
@@ -1330,7 +1422,7 @@ export const createWorkspaceRecoveryEngine = ({
 
   const deleteHistoryInternal = async (identity) => {
     const operationId = randomUUID();
-    const storage = await storageFor(identity);
+    const storage = await storageFor(identity, { migrate: false });
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     try {
       const activeRestore = database?.prepare(`
@@ -1618,6 +1710,22 @@ export const createWorkspaceRecoveryEngine = ({
         return failedRecoveryResult(error);
       }
     },
+    async listStorageWorkspaces() {
+      try {
+        if (typeof documents.listWorkspaceRegistrations !== 'function') {
+          throw new RecoveryPrimitiveError('unavailable', 'Workspace registration inventory is unavailable');
+        }
+        const registrations = await documents.listWorkspaceRegistrations();
+        const workspaces = await Promise.all(registrations.map(storageWorkspaceSummary));
+        workspaces.sort((left, right) => (
+          (right.lastActivityAt ?? '').localeCompare(left.lastActivityAt ?? '')
+          || left.canonicalRoot.localeCompare(right.canonicalRoot)
+        ));
+        return { status: 'ready', workspaces };
+      } catch (error) {
+        return failedRecoveryResult(error);
+      }
+    },
     async setDefaultStorageLocation(location) {
       try {
         const normalized = await locations.validateLocation(location);
@@ -1669,7 +1777,7 @@ export const createWorkspaceRecoveryEngine = ({
     async cleanupStorage(input) {
       return runWorkspace(input.workspaceId, async () => {
         try {
-          return { result: await cleanupInternal(await inspectIdentity(input.workspaceId)), status: 'ready' };
+          return { result: await cleanupInternal(await inspectMaintenanceIdentity(input.workspaceId)), status: 'ready' };
         } catch (error) {
           return failedRecoveryResult(error);
         }
@@ -1678,7 +1786,7 @@ export const createWorkspaceRecoveryEngine = ({
     async deleteWorkspaceHistory(workspaceId) {
       return runWorkspace(workspaceId, async () => {
         try {
-          const result = await deleteHistoryInternal(await inspectIdentity(workspaceId));
+          const result = await deleteHistoryInternal(await inspectMaintenanceIdentity(workspaceId));
           if (result.status === 'complete') {
             await combined.deleteWorkspaceOperations(workspaceId);
             await restore.deleteWorkspaceOperations(workspaceId);

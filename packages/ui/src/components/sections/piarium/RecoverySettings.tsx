@@ -3,6 +3,7 @@ import type {
   RecoveryStorageLocation,
   RecoveryStorageMode,
   RecoveryStorageStatus,
+  RecoveryStorageWorkspaceSummary,
   WorkspaceRecoveryStatus,
 } from '@piarium/extension-contract';
 import type { RecoveryPreference } from '@piarium/protocol';
@@ -81,6 +82,7 @@ export const RecoverySettings: React.FC = () => {
     return workspace?.kind === 'workspace' ? workspace.authorityId ?? workspace.id : null;
   });
   const [globalStatus, setGlobalStatus] = React.useState<RecoveryStorageStatus | null>(null);
+  const [storageWorkspaces, setStorageWorkspaces] = React.useState<RecoveryStorageWorkspaceSummary[]>([]);
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState<'cleanup' | 'delete' | 'global' | 'move' | null>(null);
@@ -91,6 +93,8 @@ export const RecoverySettings: React.FC = () => {
   const [storageMode, setStorageMode] = React.useState<StorageEditorMode>('inherit');
   const [customRoot, setCustomRoot] = React.useState('');
   const [pickerTarget, setPickerTarget] = React.useState<StoragePickerTarget | null>(null);
+  const [maintenanceBusy, setMaintenanceBusy] = React.useState<string | null>(null);
+  const [maintenanceError, setMaintenanceError] = React.useState<string | null>(null);
 
   const changePreference = React.useCallback((next: RecoveryPreference) => {
     setPreference(next);
@@ -100,14 +104,16 @@ export const RecoverySettings: React.FC = () => {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     setGlobalError(null);
+    setMaintenanceError(null);
     setError(null);
     try {
       const api = getWorkspaceRecoveryAPI();
-      const [globalResult, workspaceResult] = await Promise.allSettled([
+      const [globalResult, workspaceResult, inventoryResult] = await Promise.allSettled([
         api.storageStatus().then(requireWorkspaceRecoveryResult),
         workspaceId
           ? api.status(workspaceId).then(requireWorkspaceRecoveryResult)
           : Promise.resolve(null),
+        api.listStorageWorkspaces().then(requireWorkspaceRecoveryResult),
       ]);
       if (globalResult.status === 'fulfilled') {
         const next = globalResult.value.storage;
@@ -136,8 +142,17 @@ export const RecoverySettings: React.FC = () => {
         setStatus(null);
         setError(workspaceResult.reason instanceof Error ? workspaceResult.reason.message : String(workspaceResult.reason));
       }
+      if (inventoryResult.status === 'fulfilled') {
+        setStorageWorkspaces(inventoryResult.value.workspaces);
+      } else {
+        setStorageWorkspaces([]);
+        setMaintenanceError(inventoryResult.reason instanceof Error
+          ? inventoryResult.reason.message
+          : String(inventoryResult.reason));
+      }
     } catch (cause) {
       setGlobalStatus(null);
+      setStorageWorkspaces([]);
       setStatus(null);
       setGlobalError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -204,6 +219,87 @@ export const RecoverySettings: React.FC = () => {
     setPickerTarget(target);
   }, [customRoot, globalCustomRoot, t]);
 
+  const maintainStorageWorkspaces = React.useCallback(async (
+    action: 'cleanup' | 'migrate',
+    targets: RecoveryStorageWorkspaceSummary[],
+  ) => {
+    if (targets.length === 0) return;
+    setMaintenanceBusy(`${action}:${targets.length === 1 ? targets[0].workspaceId : 'all'}`);
+    setMaintenanceError(null);
+    try {
+      const api = getWorkspaceRecoveryAPI();
+      const results = await Promise.allSettled(targets.map(async (workspace) => {
+        if (action === 'migrate') {
+          const moved = requireWorkspaceRecoveryResult(
+            await api.clearStorageLocationOverride(workspace.workspaceId),
+          );
+          if (moved.operation.state !== 'complete') {
+            throw new Error(moved.operation.failure?.message || t('settings.piarium.recovery.storage.maintenanceFailed'));
+          }
+          return 0;
+        }
+        const cleaned = requireWorkspaceRecoveryResult(
+          await api.cleanupStorage({ workspaceId: workspace.workspaceId }),
+        );
+        if (cleaned.result.status !== 'complete') {
+          throw new Error(cleaned.result.failures[0]?.message || t('settings.piarium.recovery.storage.maintenanceFailed'));
+        }
+        return cleaned.result.byteLengthReclaimed;
+      }));
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length > 0) {
+        const first = failed[0].status === 'rejected' ? failed[0].reason : null;
+        const summary = t('settings.piarium.recovery.storage.maintenancePartial', {
+          failed: failed.length,
+          total: targets.length,
+        });
+        const detail = first instanceof Error ? first.message : first ? String(first) : '';
+        throw new Error(detail ? `${summary}: ${detail}` : summary, { cause: first });
+      }
+      const reclaimedBytes = results.reduce((total, result) => (
+        result.status === 'fulfilled' ? total + result.value : total
+      ), 0);
+      toast.success(t(
+        action === 'migrate'
+          ? 'settings.piarium.recovery.storage.migrateComplete'
+          : 'settings.piarium.recovery.storage.cleanupAllComplete',
+        { bytes: formatWorkspaceArchiveBytes(reclaimedBytes), count: targets.length },
+      ));
+      await refresh();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setMaintenanceError(message);
+      toast.error(message);
+    } finally {
+      setMaintenanceBusy(null);
+    }
+  }, [refresh, t]);
+
+  const deleteStoredWorkspaceHistory = React.useCallback(async (workspace: RecoveryStorageWorkspaceSummary) => {
+    if (typeof window === 'undefined'
+      || !window.confirm(t('settings.piarium.recovery.storage.deleteStoredConfirm', {
+        path: workspace.canonicalRoot,
+      }))) return;
+    setMaintenanceBusy(`delete:${workspace.workspaceId}`);
+    setMaintenanceError(null);
+    try {
+      const result = requireWorkspaceRecoveryResult(
+        await getWorkspaceRecoveryAPI().deleteWorkspaceHistory(workspace.workspaceId),
+      );
+      if (result.result.status !== 'complete') {
+        throw new Error(result.result.failures[0]?.message || t('settings.piarium.recovery.storage.maintenanceFailed'));
+      }
+      toast.success(t('settings.piarium.recovery.storage.deleteComplete'));
+      await refresh();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setMaintenanceError(message);
+      toast.error(message);
+    } finally {
+      setMaintenanceBusy(null);
+    }
+  }, [refresh, t]);
+
   const cleanup = React.useCallback(async () => {
     if (!workspaceId) return;
     setBusy('cleanup');
@@ -236,6 +332,22 @@ export const RecoverySettings: React.FC = () => {
       setBusy(null);
     }
   }, [refresh, t, workspaceId]);
+
+  const visibleStorageWorkspaces = React.useMemo(() => storageWorkspaces.filter((workspace) => (
+    workspace.snapshotCount > 0
+    || workspace.objectCount > 0
+    || workspace.locationSource === 'workspace'
+  )), [storageWorkspaces]);
+  const migratableStorageWorkspaces = React.useMemo(() => visibleStorageWorkspaces.filter((workspace) => (
+    workspace.locationSource === 'global'
+    && workspace.migrationRequired
+    && workspace.workspaceAvailable
+    && workspace.storageAvailable
+  )), [visibleStorageWorkspaces]);
+  const cleanableStorageWorkspaces = React.useMemo(() => visibleStorageWorkspaces.filter((workspace) => (
+    workspace.storageAvailable
+    && (workspace.snapshotCount > 0 || workspace.objectCount > 0)
+  )), [visibleStorageWorkspaces]);
 
   const selectedLocation = status?.storage.location;
   const globalLocationChanged = globalStatus
@@ -341,6 +453,141 @@ export const RecoverySettings: React.FC = () => {
         {globalError ? (
           <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">
             {globalError}
+          </div>
+        ) : null}
+
+        <div className="space-y-3 rounded-xl border border-border/60 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="typography-ui-label font-medium text-foreground">
+                {t('settings.piarium.recovery.storage.managerTitle')}
+              </h4>
+              <p className="mt-1 typography-meta text-muted-foreground">
+                {t('settings.piarium.recovery.storage.managerDescription')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={maintenanceBusy !== null || migratableStorageWorkspaces.length === 0}
+                onClick={() => void maintainStorageWorkspaces('migrate', migratableStorageWorkspaces)}
+              >
+                {t('settings.piarium.recovery.storage.migrateAll')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={maintenanceBusy !== null || cleanableStorageWorkspaces.length === 0}
+                onClick={() => void maintainStorageWorkspaces('cleanup', cleanableStorageWorkspaces)}
+              >
+                {t('settings.piarium.recovery.storage.cleanupAll')}
+              </Button>
+            </div>
+          </div>
+
+          {visibleStorageWorkspaces.length === 0 ? (
+            <p className="rounded-lg bg-muted/20 px-3 py-2 typography-meta text-muted-foreground">
+              {t('settings.piarium.recovery.storage.managerEmpty')}
+            </p>
+          ) : (
+            <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60">
+              {visibleStorageWorkspaces.map((workspace) => {
+                const rowBusy = maintenanceBusy?.endsWith(workspace.workspaceId) === true;
+                return (
+                  <div key={workspace.workspaceId} className="space-y-2 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-mono typography-meta text-foreground" title={workspace.canonicalRoot}>
+                          {workspace.canonicalRoot}
+                        </p>
+                        <p className="mt-1 typography-micro text-muted-foreground">
+                          {workspace.lastActivityAt
+                            ? t('settings.piarium.recovery.storage.lastActivity', {
+                              time: new Date(workspace.lastActivityAt).toLocaleString(),
+                            })
+                            : t('settings.piarium.recovery.storage.neverUsed')}
+                          {' · '}
+                          {t('settings.piarium.recovery.storage.snapshotCount', { count: workspace.snapshotCount })}
+                          {' · '}
+                          {formatWorkspaceArchiveBytes(workspace.byteLength)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {workspace.locationSource === 'workspace' ? (
+                          <span className="rounded-full bg-muted px-2 py-0.5 typography-micro text-muted-foreground">
+                            {t('settings.piarium.recovery.storage.projectOverride')}
+                          </span>
+                        ) : null}
+                        {workspace.migrationRequired ? (
+                          <span className="rounded-full bg-[var(--status-warning-background)] px-2 py-0.5 typography-micro text-[var(--status-warning)]">
+                            {t('settings.piarium.recovery.storage.migrationPending')}
+                          </span>
+                        ) : null}
+                        {!workspace.workspaceAvailable ? (
+                          <span className="rounded-full bg-[var(--status-error-background)] px-2 py-0.5 typography-micro text-[var(--status-error)]">
+                            {t('settings.piarium.recovery.storage.workspaceOffline')}
+                          </span>
+                        ) : null}
+                        {!workspace.storageAvailable ? (
+                          <span className="rounded-full bg-[var(--status-error-background)] px-2 py-0.5 typography-micro text-[var(--status-error)]">
+                            {t('settings.piarium.recovery.storage.storageUnavailable')}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {workspace.locationSource === 'global' && workspace.migrationRequired ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          disabled={maintenanceBusy !== null
+                            || !workspace.workspaceAvailable
+                            || !workspace.storageAvailable}
+                          onClick={() => void maintainStorageWorkspaces('migrate', [workspace])}
+                        >
+                          {t('settings.piarium.recovery.storage.migrateOne')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        disabled={maintenanceBusy !== null
+                          || !workspace.storageAvailable
+                          || (workspace.snapshotCount === 0 && workspace.objectCount === 0)}
+                        onClick={() => void maintainStorageWorkspaces('cleanup', [workspace])}
+                      >
+                        {t('settings.piarium.recovery.storage.cleanupOne')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        disabled={maintenanceBusy !== null
+                          || !workspace.storageAvailable
+                          || (workspace.snapshotCount === 0 && workspace.objectCount === 0)}
+                        className="text-[var(--status-error)] hover:text-[var(--status-error)]"
+                        onClick={() => void deleteStoredWorkspaceHistory(workspace)}
+                      >
+                        {rowBusy
+                          ? t('settings.piarium.recovery.storage.working')
+                          : t('settings.piarium.recovery.storage.deleteStored')}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {maintenanceError ? (
+          <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">
+            {maintenanceError}
           </div>
         ) : null}
 

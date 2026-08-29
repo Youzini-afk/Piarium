@@ -328,6 +328,13 @@ global default** for a project performs the same verified transfer before removi
 An unmaterialized workspace always starts from the built-in `application-data` authority before following a
 changed global default, so histories created before global defaults existed are discovered and transferred.
 
+The global settings surface exposes a Host inventory ordered by the latest snapshot or recovery operation.
+It can migrate every inherited history that is behind the current global default, garbage-collect unreachable
+objects across all available stores, or maintain and explicitly delete one recent workspace at a time. Project
+overrides are never changed by a bulk migration. Host-owned application-data, adjacent, and custom histories
+remain cleanable while their workspace is offline; migration into a workspace-relative target waits for the
+workspace to become available.
+
 Every payload root uses the same private layout:
 
 ```text
@@ -529,6 +536,7 @@ interface WorkspaceRecoveryAPI {
   pinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   unpinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatus>;
+  listStorageWorkspaces(): Promise<RecoveryStorageWorkspaceSummary[]>;
   setDefaultStorageLocation(location: RecoveryStorageLocation): Promise<RecoveryStorageStatus>;
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveOperation>;
   clearStorageLocationOverride(workspaceId: string): Promise<RecoveryStorageMoveOperation>;

@@ -7,6 +7,7 @@ import {
   createWorkspaceRecoveryAPI,
   parseRecoveryStorageLocation,
   parseRecoveryStorageStatus,
+  parseRecoveryStorageWorkspaceSummary,
   parseWorkspaceRecoveryCaptureResult,
   parseWorkspaceRecoveryEntryBindingResult,
   parseWorkspaceRecoveryManifestEntry,
@@ -80,6 +81,20 @@ test("keeps global and project recovery storage authority explicit", () => {
     snapshotCount: 0,
     state: "missing",
   }).locationSource, "global");
+  assert.equal(parseRecoveryStorageWorkspaceSummary({
+    byteLength: 0,
+    canonicalRoot: "/workspace",
+    lastActivityAt: null,
+    location: { mode: "application-data" },
+    locationSource: "workspace",
+    migrationRequired: false,
+    objectCount: 0,
+    snapshotCount: 0,
+    state: "missing",
+    storageAvailable: true,
+    workspaceAvailable: true,
+    workspaceId: "workspace-1",
+  }).workspaceAvailable, true);
 });
 
 test("keeps missing, malformed, incomplete, and corrupt snapshot results distinct", () => {

@@ -343,10 +343,24 @@ describe('native workspace recovery Phase 1 engine', () => {
       status: 'ready',
       storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global' },
     });
+    expect(await engine.listStorageWorkspaces()).toMatchObject({
+      status: 'ready',
+      workspaces: [expect.objectContaining({
+        location: { mode: 'application-data' },
+        locationSource: 'global',
+        migrationRequired: true,
+        snapshotCount: 1,
+        workspaceId: harness.identity.workspaceId,
+      })],
+    });
     const inherited = await engine.storageStatus(harness.identity.workspaceId);
     expect(inherited).toMatchObject({
       status: 'ready',
       storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global', snapshotCount: 1 },
+    });
+    expect(await engine.listStorageWorkspaces()).toMatchObject({
+      status: 'ready',
+      workspaces: [expect.objectContaining({ migrationRequired: false })],
     });
     await expect(fs.promises.stat(applicationDataRoot(harness))).rejects.toMatchObject({ code: 'ENOENT' });
 
@@ -399,6 +413,39 @@ describe('native workspace recovery Phase 1 engine', () => {
       status: 'ready',
       storage: { location: { mode: 'workspace-local' }, locationSource: 'workspace' },
     });
+  });
+
+  it('inventories and cleans Host-owned history while a previous workspace is offline', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const offlineRoot = `${harness.workspaceRoot}.offline`;
+    await fs.promises.rename(harness.workspaceRoot, offlineRoot);
+    try {
+      expect(await engine.listStorageWorkspaces()).toMatchObject({
+        status: 'ready',
+        workspaces: [expect.objectContaining({
+          snapshotCount: 1,
+          storageAvailable: true,
+          workspaceAvailable: false,
+          workspaceId: harness.identity.workspaceId,
+        })],
+      });
+      expect(await engine.cleanupStorage({ workspaceId: harness.identity.workspaceId })).toMatchObject({
+        status: 'ready',
+        result: { status: 'complete' },
+      });
+      expect(await engine.deleteWorkspaceHistory(harness.identity.workspaceId)).toMatchObject({
+        status: 'ready',
+        result: { status: 'complete' },
+      });
+      expect(await engine.listStorageWorkspaces()).toMatchObject({
+        status: 'ready',
+        workspaces: [expect.objectContaining({ snapshotCount: 0, state: 'missing' })],
+      });
+    } finally {
+      await fs.promises.rename(offlineRoot, harness.workspaceRoot);
+    }
   });
 
   it('keeps recovery storage private to the providing extension', async () => {

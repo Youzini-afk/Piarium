@@ -72,6 +72,7 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
     const input = asRecord(params, 'workspace.recovery-primitives.listCombinedOperations');
     return engine.listCombinedOperations(requiredText(input.workspaceId, 'workspaceId'));
   }
+  if (method === 'listStorageWorkspaces') return engine.listStorageWorkspaces();
   if (method === 'readSnapshot') return engine.readSnapshot(parseWorkspaceRecoverySnapshotReadInput(params));
   if (method === 'diffSnapshots') return engine.diffSnapshots(parseWorkspaceRecoverySnapshotDiffInput(params));
   if (method === 'storageStatus') {

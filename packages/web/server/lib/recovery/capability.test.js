@@ -30,6 +30,10 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       status: 'ready',
       storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global' },
     });
+    expect(await capability('listStorageWorkspaces', {})).toMatchObject({
+      status: 'ready',
+      workspaces: [expect.objectContaining({ workspaceId: harness.identity.workspaceId })],
+    });
     const inherited = await capability('clearStorageLocationOverride', {
       workspaceId: harness.identity.workspaceId,
     });

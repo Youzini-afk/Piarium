@@ -137,6 +137,15 @@ export const createWorkspaceRegistry = ({
       return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
     },
 
+    async list() {
+      const current = await read();
+      return current.workspaces.map((entry) => ({
+        workspaceId: entry.workspaceId,
+        canonicalPath: entry.canonicalPath,
+        hostId,
+      }));
+    },
+
     async findContaining(canonicalPath) {
       const current = await read();
       const existing = findContainingPath(current, canonicalPath);

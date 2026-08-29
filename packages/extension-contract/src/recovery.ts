@@ -453,6 +453,22 @@ export interface SetRecoveryStorageLocationInput {
   workspaceId: string;
 }
 
+export interface RecoveryStorageWorkspaceSummary {
+  byteLength: number;
+  canonicalRoot: string;
+  failure?: WorkspaceRecoveryFailure;
+  lastActivityAt: string | null;
+  location: RecoveryStorageLocation;
+  locationSource: "global" | "workspace";
+  migrationRequired: boolean;
+  objectCount: number;
+  snapshotCount: number;
+  state: RecoveryStorageStatus["state"] | "unavailable";
+  storageAvailable: boolean;
+  workspaceAvailable: boolean;
+  workspaceId: string;
+}
+
 export type RecoveryStorageMoveState =
   | "copying"
   | "verifying"
@@ -563,6 +579,9 @@ export type RecoveryStorageMoveResult =
   | WorkspaceRecoveryFailedResult;
 export type RecoveryStorageCleanupOperationResult =
   | { result: RecoveryStorageCleanupResult; status: "ready" }
+  | WorkspaceRecoveryFailedResult;
+export type RecoveryStorageWorkspaceListResult =
+  | { status: "ready"; workspaces: RecoveryStorageWorkspaceSummary[] }
   | WorkspaceRecoveryFailedResult;
 
 export class WorkspaceRecoveryContractError extends Error {
@@ -1157,6 +1176,34 @@ export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatu
   };
 };
 
+export const parseRecoveryStorageWorkspaceSummary = (value: unknown): RecoveryStorageWorkspaceSummary => {
+  const raw = record(value, "Recovery storage workspace summary");
+  if (typeof raw.migrationRequired !== "boolean"
+    || typeof raw.storageAvailable !== "boolean"
+    || typeof raw.workspaceAvailable !== "boolean") {
+    throw new WorkspaceRecoveryContractError("Recovery storage workspace flags must be boolean");
+  }
+  return {
+    byteLength: count(raw.byteLength, "workspace.byteLength"),
+    canonicalRoot: text(raw.canonicalRoot, "workspace.canonicalRoot"),
+    ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
+    lastActivityAt: raw.lastActivityAt === null ? null : isoTimestamp(raw.lastActivityAt, "workspace.lastActivityAt"),
+    location: parseRecoveryStorageLocation(raw.location),
+    locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "workspace.locationSource"),
+    migrationRequired: raw.migrationRequired,
+    objectCount: count(raw.objectCount, "workspace.objectCount"),
+    snapshotCount: count(raw.snapshotCount, "workspace.snapshotCount"),
+    state: oneOf(
+      raw.state,
+      ["missing", "ready", "incomplete", "malformed", "corrupt", "unavailable"] as const,
+      "workspace.state",
+    ),
+    storageAvailable: raw.storageAvailable,
+    workspaceAvailable: raw.workspaceAvailable,
+    workspaceId: text(raw.workspaceId, "workspace.workspaceId"),
+  };
+};
+
 export const parseRecoveryStorageMoveOperation = (value: unknown): RecoveryStorageMoveOperation => {
   const raw = record(value, "Recovery storage move operation");
   return {
@@ -1416,6 +1463,18 @@ export const parseRecoveryStorageCleanupOperationResult = (value: unknown): Reco
   };
 };
 
+export const parseRecoveryStorageWorkspaceListResult = (value: unknown): RecoveryStorageWorkspaceListResult => {
+  const raw = record(value, "Recovery storage workspace list result");
+  if (raw.status === "failed") return failed(raw);
+  if (!Array.isArray(raw.workspaces)) {
+    throw new WorkspaceRecoveryContractError("Recovery storage workspace list must be an array");
+  }
+  return {
+    status: oneOf(raw.status, ["ready"] as const, "workspace list.status"),
+    workspaces: raw.workspaces.map(parseRecoveryStorageWorkspaceSummary),
+  };
+};
+
 export interface WorkspaceRecoveryAPI {
   applyCombinedRecovery(input: WorkspaceCombinedRecoveryApplyInput): Promise<WorkspaceCombinedRecoveryOperationResult>;
   applyRestore(input: WorkspaceRestoreApplyInput): Promise<WorkspaceRestoreOperationResult>;
@@ -1430,6 +1489,7 @@ export interface WorkspaceRecoveryAPI {
   getCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   getStorageMove(operationId: string): Promise<RecoveryStorageMoveResult>;
   getOperation(operationId: string): Promise<WorkspaceRestoreOperationResult>;
+  listStorageWorkspaces(): Promise<RecoveryStorageWorkspaceListResult>;
   listSnapshots(input: WorkspaceRecoverySnapshotQuery): Promise<WorkspaceRecoveryListResult>;
   listCombinedOperations(workspaceId: string): Promise<WorkspaceCombinedRecoveryListResult>;
   readSnapshot(input: WorkspaceRecoverySnapshotReadInput): Promise<WorkspaceRecoveryReadResult>;
@@ -1472,6 +1532,7 @@ export const createWorkspaceRecoveryAPI = (
     getCombinedOperation: async (operationId) => parseWorkspaceCombinedRecoveryOperationResult(await call("getCombinedOperation", [text(operationId, "operationId")])),
     getStorageMove: async (operationId) => parseRecoveryStorageMoveResult(await call("getStorageMove", [text(operationId, "operationId")])),
     getOperation: async (operationId) => parseWorkspaceRestoreOperationResult(await call("getOperation", [text(operationId, "operationId")])),
+    listStorageWorkspaces: async () => parseRecoveryStorageWorkspaceListResult(await call("listStorageWorkspaces", [])),
     listSnapshots: async (input) => parseWorkspaceRecoveryListResult(await call("listSnapshots", [parseWorkspaceRecoverySnapshotQuery(input) as unknown as JsonValue])),
     listCombinedOperations: async (workspaceId) => parseWorkspaceCombinedRecoveryListResult(await call("listCombinedOperations", [text(workspaceId, "workspaceId")])),
     readSnapshot: async (input) => parseWorkspaceRecoveryReadResult(await call("readSnapshot", [parseWorkspaceRecoverySnapshotReadInput(input) as unknown as JsonValue])),

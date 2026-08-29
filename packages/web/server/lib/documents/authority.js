@@ -638,6 +638,7 @@ export const createDocumentAuthority = (options) => {
   return {
     hostId,
     resolveWorkspace,
+    listWorkspaceRegistrations: () => registry.list(),
     inspectWorkspace: async (workspaceId) => {
       try {
         const workspace = await loadWorkspace(workspaceId);
