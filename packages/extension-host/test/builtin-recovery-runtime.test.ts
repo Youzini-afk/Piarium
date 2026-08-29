@@ -8,6 +8,7 @@ import {
   PIARIUM_BUILTIN_RECOVERY_EXTENSION,
   PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION,
 } from "@piarium/extension-builtins";
 import {
   PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
@@ -18,6 +19,8 @@ import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
 test("the native recovery built-in declares a replaceable Host service without Pi package integration", () => {
   const manifest = PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest;
   assert.equal(manifest.id, "piarium.builtin.recovery");
+  assert.equal(manifest.version, PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION);
+  assert.equal(manifest.version, "0.2.0");
   assert.equal(manifest.entrypoints?.host?.mode, "brokered");
   assert.deepEqual(manifest.entrypoints?.host?.activation, ["service-request"]);
   assert.deepEqual(manifest.capabilities?.host, ["workspace.recovery-primitives"]);
@@ -41,6 +44,7 @@ test("the built-in recovery Host activates on service invocation and withdraws o
   const calls: Array<{ method: string; params: unknown }> = [];
   runtime.capabilities.register("workspace.recovery-primitives", async (method, params) => {
     calls.push({ method, params });
+    if (method === "listStorageWorkspaces") return { status: "ready", workspaces: [] };
     return {
       capabilities: {
         bindings: true,
@@ -91,6 +95,14 @@ test("the built-in recovery Host activates on service invocation and withdraws o
     }) as { status?: string };
     assert.equal(result.status, "ready");
     assert.deepEqual(calls, [{ method: "status", params: { workspaceId: "workspace-1" } }]);
+    const inventory = await runtime.invokeService({
+      args: [],
+      method: "listStorageWorkspaces",
+      serviceId: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+      version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+    }) as { status?: string; workspaces?: unknown[] };
+    assert.deepEqual(inventory, { status: "ready", workspaces: [] });
+    assert.deepEqual(calls.at(-1), { method: "listStorageWorkspaces", params: {} });
     const active = await runtime.state();
     assert.equal(active.services.providers.some((provider) => (
       provider.extensionId === PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID

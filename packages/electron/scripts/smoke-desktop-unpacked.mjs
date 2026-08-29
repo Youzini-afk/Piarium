@@ -255,6 +255,23 @@ try {
     throw new Error(`Packaged health check returned HTTP ${healthResponse.status}: ${JSON.stringify(health)}`);
   }
 
+  const recoveryResponse = await fetch(`${baseUrl}/api/piarium/extensions/v1/services/invoke`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      args: [],
+      method: 'listStorageWorkspaces',
+      serviceId: 'piarium.workspace-recovery',
+      version: 2,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const recoveryPayload = await recoveryResponse.json();
+  const recovery = recoveryPayload?.result;
+  if (!recoveryResponse.ok || recovery?.status !== 'ready' || !Array.isArray(recovery.workspaces)) {
+    throw new Error(`Packaged recovery service returned HTTP ${recoveryResponse.status}: ${JSON.stringify(recoveryPayload)}`);
+  }
+
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -283,6 +300,7 @@ try {
     health: 'ok',
     platform: process.platform,
     renderer: renderer.mode,
+    recovery: 'inventory-ok',
     runtimeDiscovery: renderer.state?.diagnostics?.runtimeSnapshot ?? null,
     terminal: 'create-close-ok',
   }, null, 2));

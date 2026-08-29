@@ -175,6 +175,20 @@ const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
   return result;
 };
 
+const runPackagedRecoverySmoke = async (baseUrl) => {
+  const payload = await postJson(baseUrl, '/api/piarium/extensions/v1/services/invoke', {
+    args: [],
+    method: 'listStorageWorkspaces',
+    serviceId: 'piarium.workspace-recovery',
+    version: 2,
+  }, 'Packaged built-in recovery inventory');
+  const result = payload?.result;
+  if (result?.status !== 'ready' || !Array.isArray(result.workspaces)) {
+    throw new Error(`Packaged built-in recovery returned ${JSON.stringify(payload)}`);
+  }
+  return { status: result.status, workspaceCount: result.workspaces.length };
+};
+
 const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) => {
   const socket = new WebSocket(webSocketDebuggerUrl);
   const pending = new Map();
@@ -570,6 +584,7 @@ try {
   if (health?.status !== 'ok') throw new Error(`Packaged health check returned ${JSON.stringify(health)}`);
 
   const builtinLanguage = await runPackagedBuiltinLanguageSmoke(baseUrl, smokeWorkspaceRoot);
+  const builtinRecovery = await runPackagedRecoverySmoke(baseUrl);
 
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
@@ -606,6 +621,7 @@ try {
     console.log(JSON.stringify({
       appPath,
       builtinLanguage,
+      builtinRecovery,
       health: 'ok',
       layout,
       piVersion: null,
@@ -652,6 +668,7 @@ try {
   console.log(JSON.stringify({
     appPath,
     builtinLanguage,
+    builtinRecovery,
     health: 'ok',
     layout,
     piVersion,

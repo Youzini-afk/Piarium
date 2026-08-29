@@ -19,6 +19,7 @@ import {
 } from "@piarium/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import {
+  PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
   PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
 } from "@piarium/extension-builtins/host";
 import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
@@ -37,6 +38,7 @@ export class ExtensionPackageManager {
   readonly artifacts: ExtensionArtifactStore;
   readonly catalog: ApplicationExtensionCatalog;
   readonly piariumVersion: string;
+  readonly #verifiedBuiltinArtifacts = new Set<string>();
 
   constructor(options: ExtensionPackageManagerOptions) {
     this.catalog = options.catalog;
@@ -94,18 +96,44 @@ export class ExtensionPackageManager {
     let current = snapshot;
     for (const definition of definitions) {
       if (!definition.manifest.entrypoints?.host) continue;
-      const existing = current.extensions.find((entry) => entry.manifest.id === definition.manifest.id);
+      const catalogState = await this.catalog.store.read();
+      const existing = catalogState.document.extensions[definition.manifest.id];
+      const distributionFingerprint = await this.artifacts.builtinDistributionFingerprint(
+        definition.manifest.id,
+        PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
+      );
+      const verificationKey = existing?.integrity && distributionFingerprint
+        ? `${definition.manifest.id}\0${existing.integrity}\0${distributionFingerprint}`
+        : null;
       if (
         existing?.source.kind === "builtin"
         && existing.integrity
+        && existing.resolvedPath
         && existing.selectedVersion === definition.manifest.version
-      ) continue;
+        && distributionFingerprint
+        && (this.#verifiedBuiltinArtifacts.has(verificationKey!)
+          || await this.artifacts.builtinArtifactMatchesDistribution({
+            artifactIntegrity: existing.integrity,
+            artifactRoot: existing.resolvedPath,
+            distributionFingerprint,
+            fingerprintFile: PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
+            manifest: existing.manifest,
+          }))
+      ) {
+        this.#verifiedBuiltinArtifacts.add(verificationKey!);
+        continue;
+      }
       const prepared = await this.artifacts.prepare({
         display: "Piarium",
         kind: "builtin",
         specifier: definition.manifest.id,
       });
       current = await this.catalog.selectBuiltinArtifact(prepared);
+      if (distributionFingerprint) {
+        this.#verifiedBuiltinArtifacts.add(
+          `${definition.manifest.id}\0${prepared.integrity}\0${distributionFingerprint}`,
+        );
+      }
     }
     return current;
   }

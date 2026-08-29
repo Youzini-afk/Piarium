@@ -5,6 +5,11 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.5
+
+- Refresh distribution-owned Host artifacts by build fingerprint so upgrades cannot keep running stale
+  recovery code; restore new-session workspace checkpoints and recovery-history inventory on existing installs
+
 ## 0.9.4
 
 - Add a desktop About settings page with the current version, honest update status, automatic and manual

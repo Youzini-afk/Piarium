@@ -2,7 +2,7 @@
   "name": "piarium",
   "displayName": "Piarium",
   "description": "%extension.description%",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "publisher": "youzini-afk",
   "private": true,
   "repository": {

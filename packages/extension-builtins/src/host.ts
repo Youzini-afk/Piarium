@@ -7,6 +7,8 @@ import {
 
 const ASAR_DIRECTORY_SEGMENT = /(^|[\\/])([^\\/]+\.asar)([\\/])/i;
 
+export const PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE = "piarium-builtin-fingerprint.txt";
+
 /**
  * Electron keeps the logical module URL inside app.asar even when electron-builder
  * physically unpacks runtime files beside it. Built-in packages are copied into an

@@ -295,6 +295,7 @@ export class ExtensionArtifactStore {
   readonly directory: string;
   readonly piariumVersion: string;
   readonly #build: ExtensionModuleBuilder;
+  readonly #builtinRoots: ReadonlyMap<string, string>;
   readonly #packageSources: PiariumExtensionPackageSourceRegistry;
   readonly #run: ExtensionSourceCommandRunner;
 
@@ -305,10 +306,47 @@ export class ExtensionArtifactStore {
     assertPiariumApplicationVersion(this.piariumVersion);
     this.#build = options.buildModule ?? buildModuleWithEsbuild;
     this.#run = options.run ?? runExtensionSourceCommand;
+    const builtinRootEntries = options.builtinRoots instanceof Map
+      ? [...options.builtinRoots.entries()]
+      : Object.entries(options.builtinRoots ?? {});
+    this.#builtinRoots = new Map(builtinRootEntries.map(([extensionId, root]) => [extensionId, resolve(root)]));
     this.#packageSources = options.packageSources ?? createDefaultExtensionPackageSourceRegistry({
       ...(options.builtinRoots ? { builtinRoots: options.builtinRoots } : {}),
       run: this.#run,
     });
+  }
+
+  async builtinDistributionFingerprint(extensionId: string, fingerprintFile: string): Promise<string | null> {
+    const sourceRoot = this.#builtinRoots.get(extensionId);
+    if (!sourceRoot || !/^[A-Za-z0-9._-]+$/.test(fingerprintFile)) return null;
+    try {
+      const fingerprint = (await readFile(join(sourceRoot, fingerprintFile), "utf8")).trim();
+      return /^sha256-[0-9a-f]{64}$/.test(fingerprint) ? fingerprint : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async builtinArtifactMatchesDistribution(input: {
+    artifactIntegrity: string;
+    artifactRoot: string;
+    distributionFingerprint: string;
+    fingerprintFile: string;
+    manifest: PiariumExtensionManifest;
+  }): Promise<boolean> {
+    if (!/^[A-Za-z0-9._-]+$/.test(input.fingerprintFile)
+      || !/^sha256-[0-9a-f]{64}$/.test(input.distributionFingerprint)) return false;
+    try {
+      const selected = await this.readAsset(
+        input.artifactRoot,
+        input.artifactIntegrity,
+        `package/${input.fingerprintFile}`,
+        input.manifest,
+      );
+      return Buffer.from(selected.bytesBase64, "base64").toString("utf8").trim() === input.distributionFingerprint;
+    } catch {
+      return false;
+    }
   }
 
   async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionPreparedArtifact> {

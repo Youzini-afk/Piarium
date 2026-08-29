@@ -8,6 +8,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import {
   ApplicationExtensionCatalog,
+  ExtensionArtifactStore,
   ExtensionPackageManager,
   LocalExtensionPackageSourceResolver,
   resolveNpmLaunchTarget,
@@ -15,7 +16,9 @@ import {
 import {
   PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
   PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  type PiariumBuiltinExtensionDefinition,
 } from "@piarium/extension-builtins";
+import { PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE } from "@piarium/extension-builtins/host";
 
 const exec = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -366,6 +369,55 @@ test("authenticates the complete artifact index and rejects corrupt cache reuse"
   const after = await catalog.snapshot();
   assert.equal(after.extensions[0]?.selectedVersion, "1.0.0");
   assert.equal(after.extensions[0]?.candidate, undefined);
+});
+
+test("refreshes a built-in Host artifact when its distribution fingerprint changes at the same version", async () => {
+  const dataDir = await temporaryDirectory("piarium-builtin-fingerprint-data-");
+  const source = await temporaryDirectory("piarium-builtin-fingerprint-source-");
+  const id = "piarium.builtin.fingerprint-fixture";
+  const manifest: PiariumBuiltinExtensionDefinition["manifest"] = {
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    engines: { piarium: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [{ id: "piarium.fixture", version: 1 }] },
+  };
+  const definition: PiariumBuiltinExtensionDefinition = {
+    enabledByDefault: true,
+    manifest,
+  };
+  await writeFile(join(source, "piarium.extension.json"), JSON.stringify(manifest), "utf8");
+  await writeFile(join(source, "package.json"), JSON.stringify({ name: id, private: true, version: manifest.version }), "utf8");
+  await writeFile(join(source, "host.cjs"), "module.exports={activate(){return 'v1';}};", "utf8");
+  await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"1".repeat(64)}\n`, "utf8");
+
+  const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const reconciled = await catalog.reconcileBuiltins([definition], PIARIUM_BUILTIN_EXTENSION_PREFIX);
+  const artifacts = new ExtensionArtifactStore({
+    builtinRoots: new Map([[id, source]]),
+    dataDir,
+    piariumVersion: PIARIUM_VERSION,
+  });
+  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const first = await packages.reconcileBuiltinArtifacts([definition], reconciled);
+  const firstEntry = first.extensions.find((entry) => entry.manifest.id === id);
+  assert.ok(firstEntry?.integrity);
+
+  await writeFile(join(source, "host.cjs"), "module.exports={activate(){return 'v2';}};", "utf8");
+  await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"2".repeat(64)}\n`, "utf8");
+  const second = await packages.reconcileBuiltinArtifacts([definition], first);
+  const secondEntry = second.extensions.find((entry) => entry.manifest.id === id);
+  assert.equal(secondEntry?.selectedVersion, manifest.version);
+  assert.notEqual(secondEntry?.integrity, firstEntry.integrity);
+  assert.match(
+    await readFile((await packages.resolveBrokeredHostEntrypoint(id, "selected", secondEntry?.integrity ?? "")).modulePath, "utf8"),
+    /return 'v2'/,
+  );
+
+  const unchanged = await packages.reconcileBuiltinArtifacts([definition], second);
+  assert.equal(unchanged.revision, second.revision);
+  assert.equal(unchanged.extensions.find((entry) => entry.manifest.id === id)?.integrity, secondEntry?.integrity);
 });
 
 test("a first install that requests capabilities remains disabled for explicit review", async () => {
