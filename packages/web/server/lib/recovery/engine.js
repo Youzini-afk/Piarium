@@ -23,6 +23,7 @@ import { portableSymlinkTarget } from './symlink-target.js';
 
 const POLICY_REVISION = 'native-local-history-v3';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
+const RESTORE_AUXILIARY_NAME = /^\.piarium-restore-[0-9a-f-]+-\d+\.(?:previous|tmp)$/i;
 const INSERT_STAGED_ENTRY = `
   INSERT INTO staged_entries(
     capture_id, path, comparison_key, kind, coverage, object_hash, byte_length, mode,
@@ -481,6 +482,7 @@ export const createWorkspaceRecoveryEngine = ({
     const shouldExclude = (relativePath, absolutePath, directory = false) => {
       const segments = relativePath.split('/');
       if (EXCLUDED_VCS_NAMES.has(segments.at(-1))) return 'vcs-administrative-store';
+      if (RESTORE_AUXILIARY_NAME.test(segments.at(-1))) return 'piarium-restore-transaction';
       if (segments.length === 2 && segments[0] === '.piarium' && segments[1] === 'recovery') {
         return 'piarium-recovery-storage';
       }

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { createSettingsFileStore } from '@piarium/settings-store';
 import { DocumentAuthorityError } from './errors.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+const LEGACY_SCHEMA_VERSION = 2;
 const WRITER_MODES = new Set(['controlled', 'process', 'external']);
 
 // A PID is not enough to distinguish a restarted process or an abandoned authority
@@ -47,14 +48,25 @@ const assertStoredOwner = (owner) => {
 const defaultEntry = () => ({
   epoch: 1,
   maintenance: false,
+  maintenanceOwner: null,
   mutationRevision: 1,
   writerRevision: 1,
   activeWriters: {},
 });
 
+const assertMaintenanceOwner = (owner) => {
+  if (!owner || typeof owner !== 'object' || Array.isArray(owner)
+    || !positiveInteger(owner.pid)
+    || typeof owner.authorityInstanceId !== 'string' || !owner.authorityInstanceId
+    || typeof owner.acquiredAt !== 'string' || !owner.acquiredAt) {
+    throw malformedState();
+  }
+  return owner;
+};
+
 const assertDocument = (value, hostId) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || value.schemaVersion !== SCHEMA_VERSION
+    || ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(value.schemaVersion)
     || value.hostId !== hostId
     || !value.workspaces
     || typeof value.workspaces !== 'object'
@@ -86,8 +98,23 @@ const assertDocument = (value, hostId) => {
       }
       assertStoredOwner(writer.owner);
     }
+    if (value.schemaVersion === SCHEMA_VERSION) {
+      if (entry.maintenance) assertMaintenanceOwner(entry.maintenanceOwner);
+      else if (entry.maintenanceOwner !== null) throw malformedState();
+    }
   }
-  return value;
+  const migrated = value.schemaVersion === LEGACY_SCHEMA_VERSION;
+  if (migrated) {
+    value.schemaVersion = SCHEMA_VERSION;
+    for (const entry of Object.values(value.workspaces)) {
+      if (entry.maintenance) entry.writerRevision += 1;
+      // A v2 lock has no live owner and therefore cannot authorize blocking a
+      // workspace in a new Host process.
+      entry.maintenance = false;
+      entry.maintenanceOwner = null;
+    }
+  }
+  return { document: value, migrated };
 };
 
 const processMayBeAlive = (processLike, pid) => {
@@ -119,6 +146,19 @@ const cleanDeadWriters = (entry, processLike) => {
   }
   if (removed) entry.writerRevision += 1;
   return removed;
+};
+
+const cleanDeadMaintenance = (entry, processLike) => {
+  if (!entry.maintenance) {
+    if (entry.maintenanceOwner === null) return false;
+    entry.maintenanceOwner = null;
+    return true;
+  }
+  if (entry.maintenanceOwner && writerMayBeAlive(processLike, entry.maintenanceOwner)) return false;
+  entry.maintenance = false;
+  entry.maintenanceOwner = null;
+  entry.writerRevision += 1;
+  return true;
 };
 
 const durableWitness = (entry) => ({
@@ -179,6 +219,18 @@ export const createWorkspaceMutationAuthority = ({
   let disposePromise = null;
   liveAuthorityInstances.add(authorityInstanceId);
 
+  const ownsMaintenance = (entry) => entry.maintenanceOwner?.authorityInstanceId === authorityInstanceId
+    && entry.maintenanceOwner.pid === processLike.pid;
+  const maintenanceOwner = () => ({
+    acquiredAt: new Date().toISOString(),
+    authorityInstanceId,
+    pid: processLike.pid,
+  });
+  const maintenanceConflict = (entry) => new DocumentAuthorityError(
+    'Workspace maintenance is owned by another live Host process',
+    { code: 'maintenance', statusCode: 409, currentEpoch: entry.epoch },
+  );
+
   const assertAvailable = () => {
     if (disposed) {
       throw new DocumentAuthorityError('Workspace mutation authority is disposed', {
@@ -214,8 +266,9 @@ export const createWorkspaceMutationAuthority = ({
   };
 
   const mutateWorkspace = (workspaceId, operation = () => ({ changed: false })) => store.transact((raw) => {
-    const document = assertDocument(raw, hostId);
-    let changed = false;
+    const normalized = assertDocument(raw, hostId);
+    const { document } = normalized;
+    let changed = normalized.migrated;
     let entry = document.workspaces[workspaceId];
     if (!entry) {
       entry = defaultEntry();
@@ -223,6 +276,7 @@ export const createWorkspaceMutationAuthority = ({
       changed = true;
     }
     if (cleanDeadWriters(entry, processLike)) changed = true;
+    if (cleanDeadMaintenance(entry, processLike)) changed = true;
     const outcome = operation(entry) ?? {};
     changed ||= outcome.changed === true;
     return {
@@ -445,10 +499,14 @@ export const createWorkspaceMutationAuthority = ({
           currentEpoch: entry.epoch,
         });
       }
+      if (entry.maintenance && !ownsMaintenance(entry)) throw maintenanceConflict(entry);
       entry.epoch += 1;
       entry.mutationRevision += 1;
       entry.writerRevision += 1;
       entry.maintenance = options.maintenance !== false;
+      entry.maintenanceOwner = entry.maintenance
+        ? (ownsMaintenance(entry) ? entry.maintenanceOwner : maintenanceOwner())
+        : null;
       return { changed: true };
     });
     syncRuntime(runtime, transaction.entry);
@@ -459,8 +517,13 @@ export const createWorkspaceMutationAuthority = ({
   const setMaintenance = (workspaceId, enabled) => run(workspaceId, async (runtime) => {
     const next = Boolean(enabled);
     const transaction = await mutateWorkspace(workspaceId, (entry) => {
-      if (entry.maintenance === next) return { changed: false };
+      if (entry.maintenance === next) {
+        if (!next || ownsMaintenance(entry)) return { changed: false };
+        throw maintenanceConflict(entry);
+      }
+      if (!next && !ownsMaintenance(entry)) throw maintenanceConflict(entry);
       entry.maintenance = next;
+      entry.maintenanceOwner = next ? maintenanceOwner() : null;
       entry.writerRevision += 1;
       return { changed: true };
     });
@@ -474,13 +537,19 @@ export const createWorkspaceMutationAuthority = ({
     disposePromise = (async () => {
       await Promise.allSettled([...queues.values()]);
       await store.transact((raw) => {
-        const document = assertDocument(raw, hostId);
-        let changed = false;
+        const normalized = assertDocument(raw, hostId);
+        const { document } = normalized;
+        let changed = normalized.migrated;
         for (const entry of Object.values(document.workspaces)) {
           let removed = false;
           for (const [writerId, writer] of Object.entries(entry.activeWriters)) {
             if (writer.pid !== processLike.pid || writer.authorityInstanceId !== authorityInstanceId) continue;
             delete entry.activeWriters[writerId];
+            removed = true;
+          }
+          if (entry.maintenanceOwner?.authorityInstanceId === authorityInstanceId) {
+            entry.maintenance = false;
+            entry.maintenanceOwner = null;
             removed = true;
           }
           if (removed) {

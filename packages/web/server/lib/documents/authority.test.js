@@ -6,11 +6,12 @@ import { createDocumentAuthorityHarness, defineDocumentAuthorityContract } from 
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
 
-const createPeerAuthority = (harness) => createDocumentAuthority({
+const createPeerAuthority = (harness, options = {}) => createDocumentAuthority({
   hostId: harness.authority.hostId,
   dataDir: harness.dataDir,
   isTrusted: async () => true,
   isAllowedRoot: async () => true,
+  ...options,
 });
 
 it('keeps a persisted workspace identity available while its root is temporarily offline', async () => {
@@ -78,6 +79,71 @@ it('coordinates writer, maintenance, and epoch fencing across authority instance
     await expect(fs.promises.stat(stalePath)).rejects.toMatchObject({ code: 'ENOENT' });
   } finally {
     await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
+it('keeps maintenance process-owned and releases it during authority shutdown', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const peer = createPeerAuthority(harness);
+  try {
+    await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+    await expect(peer.setMaintenance(harness.identity.workspaceId, false))
+      .rejects.toMatchObject({ code: 'maintenance' });
+
+    await harness.authority.dispose();
+    await expect(peer.inspectMutation(harness.identity.workspaceId))
+      .resolves.toMatchObject({ maintenance: false });
+  } finally {
+    await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
+it('reclaims maintenance owned by a terminated Host process', async () => {
+  const firstProcess = { pid: 41001, kill: () => true };
+  const harness = await createDocumentAuthorityHarness({ authority: { processLike: firstProcess } });
+  const terminatedProcessView = {
+    pid: 41002,
+    kill: () => {
+      const error = new Error('process does not exist');
+      error.code = 'ESRCH';
+      throw error;
+    },
+  };
+  const peer = createPeerAuthority(harness, { processLike: terminatedProcessView });
+  try {
+    await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+    await expect(peer.inspectMutation(harness.identity.workspaceId))
+      .resolves.toMatchObject({ maintenance: false });
+  } finally {
+    await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
+it('migrates ownerless v2 maintenance to an unlocked process-owned state', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  let restarted;
+  try {
+    await harness.authority.dispose();
+    const statePath = path.join(harness.dataDir, 'documents', 'mutation-authority.json');
+    const stored = JSON.parse(await fs.promises.readFile(statePath, 'utf8'));
+    const workspace = stored.workspaces[harness.identity.workspaceId];
+    stored.schemaVersion = 2;
+    workspace.maintenance = true;
+    delete workspace.maintenanceOwner;
+    await fs.promises.writeFile(statePath, JSON.stringify(stored));
+
+    restarted = createPeerAuthority(harness);
+    await expect(restarted.inspectMutation(harness.identity.workspaceId))
+      .resolves.toMatchObject({ maintenance: false });
+    const migrated = JSON.parse(await fs.promises.readFile(statePath, 'utf8'));
+    expect(migrated).toMatchObject({
+      schemaVersion: 3,
+      workspaces: {
+        [harness.identity.workspaceId]: { maintenance: false, maintenanceOwner: null },
+      },
+    });
+  } finally {
+    await Promise.allSettled([restarted?.dispose(), harness.cleanup()]);
   }
 });
 

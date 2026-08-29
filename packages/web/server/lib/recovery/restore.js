@@ -14,14 +14,6 @@ import { portableSymlinkTarget } from './symlink-target.js';
 
 const OPERATION_SCHEMA_VERSION = 1;
 const PRE_DECISION_STATES = new Set(['planned', 'staged']);
-const POST_DECISION_STATES = new Set([
-  'commit-decided',
-  'applying-workspace',
-  'workspace-verified',
-  'completion-decided',
-  'compensating-workspace',
-  'needs-attention',
-]);
 
 const canonicalJson = (value) => {
   if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
@@ -315,12 +307,13 @@ export const createWorkspaceRestoreManager = ({
     return records;
   };
 
-  const stageOperation = async (record, database, storeRoot) => {
+  const stageOperation = async (record, database, storeRoot, operations) => {
     if (record.state !== 'planned') return;
     const stageRoot = pathModule.join(storeRoot, 'staging', `restore-${record.id}`);
-    await ensureFreeSpace(storeRoot, record.plan.totalBytes);
+    const stagedBytes = operations.reduce((total, operation) => total + (operation.byteLength ?? 0), 0);
+    await ensureFreeSpace(storeRoot, stagedBytes);
     await fsPromises.rm(stageRoot, { force: true, recursive: true });
-    for (const operation of record.newWorkspaceOperations) {
+    for (const operation of operations) {
       const target = resolveTarget(stageRoot, operation.path, pathModule);
       if (operation.type === 'mkdir') {
         await fsPromises.mkdir(target, { recursive: true, mode: 0o700 });
@@ -728,15 +721,18 @@ export const createWorkspaceRestoreManager = ({
       throw new RecoveryPrimitiveError('invalid-request', `Restore mode is not allowed: ${input.mode}`);
     }
     if (record.state === 'complete' || record.state === 'needs-attention') return publicOperation(record);
-    if (record.state === 'workspace-verified' && record.completionHold === 'conversation') {
-      return publicOperation(record);
-    }
     if (record.state === 'aborted') throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore operation was cancelled');
     if (input.holdForConversation === true && input.mode !== 'in-place') {
       throw new RecoveryPrimitiveError('invalid-request', 'Conversation coordination can only hold an in-place restore');
     }
     record.failure = null;
     const identity = await inspectIdentity(record.plan.workspaceId);
+    let maintenanceAcquired = false;
+    const releaseMaintenance = async ({ force = false } = {}) => {
+      if (!force && !maintenanceAcquired) return;
+      await documents.setMaintenance(identity.workspaceId, false);
+      maintenanceAcquired = false;
+    };
     const storage = await storageFor(identity);
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
@@ -748,8 +744,22 @@ export const createWorkspaceRestoreManager = ({
         record.completionHold = 'conversation';
         await writeOperation(record, database);
       }
-      await stageOperation(record, database, storage.root);
+      if (record.mode && record.mode !== input.mode) {
+        if (!PRE_DECISION_STATES.has(record.state)) {
+          throw new RecoveryPrimitiveError('stale-plan', 'Restore mode changed after its commit decision');
+        }
+        if (record.stageRoot) await fsPromises.rm(record.stageRoot, { force: true, recursive: true });
+        record.appliedOperations = 0;
+        record.stageRoot = null;
+        record.state = 'planned';
+        if (input.mode !== 'in-place') record.completionHold = null;
+      }
       record.mode = input.mode;
+      await writeOperation(record, database);
+      const stagingOperations = input.mode === 'new-workspace'
+        ? record.newWorkspaceOperations
+        : record.inPlaceOperations;
+      await stageOperation(record, database, storage.root, stagingOperations);
       if (input.mode === 'new-workspace') {
         const destination = pathModule.resolve(input.newWorkspacePath || record.plan.newWorkspacePath);
         if (!samePath(destination, record.plan.newWorkspacePath, pathModule)) {
@@ -802,6 +812,37 @@ export const createWorkspaceRestoreManager = ({
       } else {
         record.destinationPath = identity.canonicalRoot;
         record.totalOperations = record.inPlaceOperations.length;
+        if (record.state === 'staged' && record.inPlaceOperations.length === 0) {
+          const current = await documents.inspectMutation(identity.workspaceId);
+          if (current.epoch !== record.plan.witness.epoch
+            || current.mutationRevision !== record.plan.witness.mutationRevision
+            || current.writerRevision !== record.plan.witness.writerRevision) {
+            throw new RecoveryPrimitiveError('stale-plan', 'Workspace changed after restore planning', { retryable: true });
+          }
+          record.restoredSnapshotId = record.plan.targetSnapshotId;
+          record.verifiedWitness = {
+            epoch: current.epoch,
+            mutationRevision: current.mutationRevision,
+            writerRevision: current.writerRevision,
+          };
+          record.state = record.completionHold === 'conversation' ? 'workspace-verified' : 'complete';
+          await writeOperation(record, database);
+          // Repairs legacy operations which persisted a workspace lock even
+          // though this restore has no filesystem work to perform.
+          await releaseMaintenance({ force: true });
+          if (record.state === 'complete') await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
+          return publicOperation(record);
+        }
+        if (record.state === 'workspace-verified' && record.verifiedWitness) {
+          // A verified workspace is a committed saga step, not a reason to keep
+          // blocking the workspace while conversation navigation is pending.
+          await releaseMaintenance({ force: true });
+          if (record.completionHold === 'conversation') return publicOperation(record);
+          record.state = 'complete';
+          await writeOperation(record, database);
+          await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
+          return publicOperation(record);
+        }
         if (record.state === 'staged') {
           const current = await documents.inspectMutation(identity.workspaceId);
           if (current.epoch !== record.plan.witness.epoch
@@ -810,9 +851,18 @@ export const createWorkspaceRestoreManager = ({
             throw new RecoveryPrimitiveError('stale-plan', 'Workspace changed after restore planning', { retryable: true });
           }
           const maintenance = await documents.setMaintenance(identity.workspaceId, true);
+          maintenanceAcquired = true;
           if (maintenance.activeWriters.length > 0) {
-            await documents.setMaintenance(identity.workspaceId, false);
+            await releaseMaintenance();
             throw new RecoveryPrimitiveError('active-writer', 'Workspace has active writers', { retryable: true });
+          }
+          const fenced = await documents.inspectMutation(identity.workspaceId);
+          if (fenced.epoch !== record.plan.witness.epoch
+            || fenced.mutationRevision !== record.plan.witness.mutationRevision) {
+            await releaseMaintenance();
+            throw new RecoveryPrimitiveError('stale-plan', 'Workspace changed while restore maintenance was acquired', {
+              retryable: true,
+            });
           }
           await assertAuxiliaryPathsAvailable(record, identity.canonicalRoot, record.inPlaceOperations);
           await preflightHardlinks(record, identity.canonicalRoot);
@@ -824,6 +874,13 @@ export const createWorkspaceRestoreManager = ({
           record.fenceEpoch = advanced.epoch;
           record.appliedOperations = 0;
           await writeOperation(record, database);
+        } else if (['commit-decided', 'applying-workspace', 'workspace-verified'].includes(record.state)) {
+          const maintenance = await documents.setMaintenance(identity.workspaceId, true);
+          maintenanceAcquired = true;
+          if (maintenance.activeWriters.length > 0) {
+            await releaseMaintenance();
+            throw new RecoveryPrimitiveError('active-writer', 'Workspace has active writers', { retryable: true });
+          }
         }
         if (record.state === 'commit-decided' && !record.fenceEpoch) {
           const current = await documents.inspectMutation(identity.workspaceId);
@@ -852,12 +909,12 @@ export const createWorkspaceRestoreManager = ({
         }
         record.restoredSnapshotId = restored.snapshot.id;
         record.verifiedWitness = restored.witness;
+        record.state = 'workspace-verified';
+        await writeOperation(record, database);
+        await releaseMaintenance();
         if (record.completionHold === 'conversation') {
-          record.state = 'workspace-verified';
-          await writeOperation(record, database);
           return publicOperation(record);
         }
-        await documents.setMaintenance(identity.workspaceId, false);
       }
       record.state = 'complete';
       await writeOperation(record, database);
@@ -865,10 +922,12 @@ export const createWorkspaceRestoreManager = ({
       return publicOperation(record);
     } catch (error) {
       if (error?.simulatedCrash === true) throw error;
+      if (record.mode === 'in-place') {
+        await releaseMaintenance({ force: true }).catch(() => undefined);
+      }
       if (record.state === 'planned' || record.state === 'staged') {
         record.failure = recoveryFailure(error);
         await writeOperation(record, database);
-        if (record.mode === 'in-place') await documents.setMaintenance(record.plan.workspaceId, false).catch(() => undefined);
         throw error;
       }
       record.failure = recoveryFailure(error, 'needs-attention');
@@ -903,23 +962,30 @@ export const createWorkspaceRestoreManager = ({
     if (record.stageRoot) await fsPromises.rm(record.stageRoot, { force: true, recursive: true });
   };
 
-  const verifyHeldInternal = async (record, database, identity) => {
+  const verifyPendingInternal = async (record, database, identity) => {
     if (record.completionHold !== 'conversation'
       || !['workspace-verified', 'completion-decided'].includes(record.state)) {
       throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore is not waiting for conversation navigation');
     }
     const current = await documents.inspectMutation(identity.workspaceId);
-    if (!current.maintenance) {
-      throw new RecoveryPrimitiveError('needs-attention', 'Workspace maintenance ended before coordinated recovery completed');
+    if (current.maintenance) {
+      throw new RecoveryPrimitiveError('recovery-in-progress', 'Workspace filesystem recovery is still in progress', {
+        retryable: true,
+      });
     }
-    if (record.state === 'workspace-verified' && record.verifiedWitness && (
-      current.epoch !== record.verifiedWitness.epoch
-      || current.mutationRevision !== record.verifiedWitness.mutationRevision
-      || current.writerRevision !== record.verifiedWitness.writerRevision
-    )) {
+    if (!record.verifiedWitness) {
+      throw new RecoveryPrimitiveError('needs-attention', 'Workspace recovery has no committed verification witness');
+    }
+    if (current.epoch !== record.verifiedWitness.epoch
+      || current.mutationRevision !== record.verifiedWitness.mutationRevision) {
       throw new RecoveryPrimitiveError('stale-plan', 'Workspace changed after restore verification', { retryable: true });
     }
-    await verifyMaterialized(record, identity.canonicalRoot, record.inPlaceOperations);
+    // The in-process mutation witness is enough for the normal fast path. After
+    // a Host restart the watcher baseline is intentionally unknown, so verify
+    // only the affected paths rather than rescanning the whole workspace.
+    if (current.reconciliationRequired) {
+      await verifyMaterialized(record, identity.canonicalRoot, record.inPlaceOperations);
+    }
     await writeOperation(record, database);
     return publicOperation(record);
   };
@@ -932,14 +998,13 @@ export const createWorkspaceRestoreManager = ({
     try {
       if (record.state === 'complete') return publicOperation(record);
       if (record.state === 'workspace-verified') {
-        await verifyHeldInternal(record, database, identity);
+        await verifyPendingInternal(record, database, identity);
         record.state = 'completion-decided';
         await writeOperation(record, database);
       }
       if (record.state !== 'completion-decided' || record.completionHold !== 'conversation') {
         throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore is not ready to finalize');
       }
-      await documents.setMaintenance(identity.workspaceId, false);
       await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
       record.completionHold = null;
       record.state = 'complete';
@@ -955,6 +1020,12 @@ export const createWorkspaceRestoreManager = ({
     const storage = await storageFor(identity);
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
+    let maintenanceAcquired = false;
+    const releaseMaintenance = async ({ force = false } = {}) => {
+      if (!force && !maintenanceAcquired) return;
+      await documents.setMaintenance(identity.workspaceId, false);
+      maintenanceAcquired = false;
+    };
     try {
       if (record.state === 'compensated') return publicOperation(record);
       if (record.completionHold !== 'conversation'
@@ -962,8 +1033,39 @@ export const createWorkspaceRestoreManager = ({
         throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore cannot be compensated in its current state');
       }
       if (!record.compensation) {
-        record.compensation = { appliedOperations: 0, snapshotId: null };
+        const current = await documents.inspectMutation(identity.workspaceId);
+        if (!record.verifiedWitness
+          || current.epoch !== record.verifiedWitness.epoch
+          || current.mutationRevision !== record.verifiedWitness.mutationRevision) {
+          throw new RecoveryPrimitiveError(
+            'stale-plan',
+            'Workspace changed after restore verification and cannot be compensated automatically',
+            { retryable: false },
+          );
+        }
+        record.compensation = { appliedOperations: 0, fenceEpoch: null, snapshotId: null };
         record.state = 'compensating-workspace';
+        await writeOperation(record, database);
+      }
+      const maintenance = await documents.setMaintenance(identity.workspaceId, true);
+      maintenanceAcquired = true;
+      if (maintenance.activeWriters.length > 0) {
+        await releaseMaintenance();
+        throw new RecoveryPrimitiveError('active-writer', 'Workspace has active writers', { retryable: true });
+      }
+      if (!record.compensation.fenceEpoch) {
+        const current = await documents.inspectMutation(identity.workspaceId);
+        if (current.epoch === record.verifiedWitness.epoch
+          && current.mutationRevision === record.verifiedWitness.mutationRevision) {
+          const advanced = await documents.advanceEpoch(identity.workspaceId, {
+            expectedEpoch: record.verifiedWitness.epoch,
+          });
+          record.compensation.fenceEpoch = advanced.epoch;
+        } else if (current.epoch === record.verifiedWitness.epoch + 1 && current.maintenance) {
+          record.compensation.fenceEpoch = current.epoch;
+        } else {
+          throw new RecoveryPrimitiveError('needs-attention', 'Workspace compensation epoch cannot be reconciled');
+        }
         await writeOperation(record, database);
       }
       for (
@@ -1022,11 +1124,12 @@ export const createWorkspaceRestoreManager = ({
       record.completionHold = null;
       record.state = 'compensated';
       await writeOperation(record, database);
-      await documents.setMaintenance(identity.workspaceId, false);
+      await releaseMaintenance();
       await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
       return publicOperation(record);
     } catch (error) {
       if (error?.simulatedCrash === true) throw error;
+      await releaseMaintenance({ force: true }).catch(() => undefined);
       record.failure = recoveryFailure(error, 'needs-attention');
       record.state = 'needs-attention';
       await writeOperation(record, database);
@@ -1075,11 +1178,22 @@ export const createWorkspaceRestoreManager = ({
     async fenceUnfinished() {
       const records = await listOperationRecords();
       const fenced = [];
+      const workspaceMaintenance = new Map();
       for (const record of records) {
-        if (!POST_DECISION_STATES.has(record.state)) continue;
-        if (record.mode !== 'in-place' && record.completionHold !== 'conversation') continue;
-        await documents.setMaintenance(record.plan.workspaceId, true);
-        fenced.push(record.id);
+        const requiresMaintenance = record.mode === 'in-place' && (
+          ['commit-decided', 'applying-workspace', 'compensating-workspace'].includes(record.state)
+          || (record.state === 'workspace-verified' && !record.verifiedWitness)
+        );
+        const workspaceId = record.plan.workspaceId;
+        const pending = workspaceMaintenance.get(workspaceId) ?? false;
+        workspaceMaintenance.set(workspaceId, pending || requiresMaintenance);
+        if (requiresMaintenance) fenced.push(record.id);
+      }
+      // Reconcile the durable lock from operation truth. This also repairs the
+      // old crash window where maintenance could be persisted while the restore
+      // record was still only staged, and releases legacy conversation holds.
+      for (const [workspaceId, requiresMaintenance] of workspaceMaintenance) {
+        await documents.setMaintenance(workspaceId, requiresMaintenance);
       }
       return fenced;
     },
@@ -1100,7 +1214,9 @@ export const createWorkspaceRestoreManager = ({
           continue;
         }
         if (!['commit-decided', 'applying-workspace', 'workspace-verified'].includes(record.state)) continue;
-        if (record.state === 'workspace-verified' && record.completionHold === 'conversation') continue;
+        if (record.state === 'workspace-verified'
+          && record.completionHold === 'conversation'
+          && record.verifiedWitness) continue;
         if (!record.mode) continue;
         results.push(await runOperation(record.id, () => runWorkspace(record.plan.workspaceId, () => applyInternal({
           expectedRevision: record.plan.revision,
@@ -1119,7 +1235,7 @@ export const createWorkspaceRestoreManager = ({
       const record = await readOperation(operationId);
       return runWorkspace(record.plan.workspaceId, () => finalizeInternal(record));
     }),
-    verifyHeld: (operationId) => runOperation(operationId, async () => {
+    verifyPending: (operationId) => runOperation(operationId, async () => {
       const record = await readOperation(operationId);
       return runWorkspace(record.plan.workspaceId, async () => {
         const identity = await inspectIdentity(record.plan.workspaceId);
@@ -1127,7 +1243,7 @@ export const createWorkspaceRestoreManager = ({
         const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
         if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
         try {
-          return await verifyHeldInternal(record, database, identity);
+          return await verifyPendingInternal(record, database, identity);
         } finally {
           database.close();
         }

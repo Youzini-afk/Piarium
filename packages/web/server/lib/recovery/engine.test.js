@@ -60,6 +60,8 @@ describe('native workspace recovery Phase 1 engine', () => {
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'ignored-dir', 'private'), 'must-not-be-read');
     await fs.promises.mkdir(path.join(harness.workspaceRoot, '.piarium', 'recovery'), { recursive: true });
     await fs.promises.writeFile(path.join(harness.workspaceRoot, '.piarium', 'recovery', 'private'), 'must-not-be-read');
+    const restoreAuxiliary = '.piarium-restore-00000000-0000-4000-8000-000000000000-0.previous';
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, restoreAuxiliary), 'must-not-be-read');
     let symlinkCreated = true;
     try {
       await fs.promises.symlink('nested/note.txt', path.join(harness.workspaceRoot, 'note-link'));
@@ -83,6 +85,7 @@ describe('native workspace recovery Phase 1 engine', () => {
     expect(byPath.get('ignored-dir')).toMatchObject({ kind: 'excluded', reason: 'workspace-ignore' });
     expect([...byPath.keys()].some((entry) => entry.startsWith('ignored-dir/'))).toBe(false);
     expect(byPath.get('.piarium/recovery')).toMatchObject({ kind: 'excluded', reason: 'piarium-recovery-storage' });
+    expect(byPath.get(restoreAuxiliary)).toMatchObject({ kind: 'excluded', reason: 'piarium-restore-transaction' });
     expect([...byPath.keys()].some((entry) => entry.startsWith('.git/'))).toBe(false);
     expect([...byPath.keys()].some((entry) => entry.startsWith('.piarium/recovery/'))).toBe(false);
     expect(byPath.get('nested/note.txt')).toMatchObject({
@@ -861,7 +864,9 @@ describe('native workspace recovery Phase 1 engine', () => {
   });
 
   it('reports affected bytes instead of the full workspace revision size', async () => {
-    const { engine, harness } = await createHarness();
+    const fsPromises = Object.create(fs.promises);
+    fsPromises.copyFile = vi.fn((...args) => fs.promises.copyFile(...args));
+    const { engine, harness } = await createHarness({ fsPromises });
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'large-logical-file.bin'), 'unchanged');
     const target = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
 
@@ -878,7 +883,16 @@ describe('native workspace recovery Phase 1 engine', () => {
         totalBytes: 0,
       },
     });
-    await engine.cancelOperation(prepared.plan.id);
+    fsPromises.copyFile.mockClear();
+    const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    expect(await engine.applyRestore({
+      expectedRevision: prepared.plan.revision,
+      mode: 'in-place',
+      operationId: prepared.plan.id,
+    })).toMatchObject({ status: 'ready', operation: { state: 'complete', totalOperations: 0 } });
+    const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    expect(fsPromises.copyFile).not.toHaveBeenCalled();
+    expect(after).toMatchObject({ epoch: before.epoch, maintenance: false });
   });
 
   it('resumes an in-place restore after a simulated process crash and publishes a restore revision', async () => {
@@ -1144,6 +1158,84 @@ describe('native workspace recovery Phase 1 engine', () => {
     expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
   });
 
+  it('keeps conversation navigation retryable without locking the workspace when the session is inactive', async () => {
+    let sessionActive = false;
+    const navigation = {
+      commit: vi.fn(async () => {
+        if (!sessionActive) throw new Error('Session is not active: combined-session-inactive');
+        return { alreadyApplied: false, markerId: 'inactive-session-resumed' };
+      }),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'target');
+    const before = await engine.captureSnapshot({ source: 'turn-before', workspaceId: harness.identity.workspaceId });
+    await engine.recordTurnStart({
+      activeWriterScopes: [],
+      beforeSnapshotId: before.snapshot.id,
+      executionId: 'combined-execution-inactive',
+      provenance: 'caused-by',
+      runtimeGeneration: 1,
+      sessionId: 'combined-session-inactive',
+      userEntryId: 'combined-user-inactive',
+      workerId: 'combined-worker-inactive',
+      workspaceId: harness.identity.workspaceId,
+    });
+    const current = await harness.authority.read(harness.resource('note.txt'));
+    await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'current',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: 'combined-current-write-inactive',
+    });
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'combined-user-inactive',
+      sessionId: 'combined-session-inactive',
+      workspaceId: harness.identity.workspaceId,
+    });
+
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({
+      status: 'failed',
+      failure: { code: 'recovery-in-progress', retryable: true },
+    });
+    await expect(fs.promises.readFile(path.join(harness.workspaceRoot, 'note.txt'), 'utf8'))
+      .resolves.toBe('target');
+    expect(await engine.getCombinedOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: {
+        conversationState: 'unchanged',
+        state: 'navigating-conversation',
+        workspaceState: 'restored',
+      },
+    });
+    const unlocked = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    expect(unlocked.maintenance).toBe(false);
+    const writer = await harness.authority.registerWriter(harness.token(unlocked.epoch), {
+      purpose: 'session-reopen-after-recovery',
+    });
+    await writer.close();
+
+    sessionActive = true;
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({
+      status: 'ready',
+      operation: {
+        conversationState: 'navigated',
+        state: 'complete',
+        workspaceState: 'restored',
+      },
+    });
+    expect(navigation.commit).toHaveBeenCalledTimes(2);
+  });
+
   it('prepares a completed combined recovery undo from its pinned safety checkpoint', async () => {
     let activeLeaf = 'original-leaf';
     const navigation = {
@@ -1279,7 +1371,10 @@ describe('native workspace recovery Phase 1 engine', () => {
       expectedRevision: prepared.plan.revision,
       operationId: prepared.plan.id,
     })).toMatchObject({ status: 'failed', failure: { code: 'recovery-in-progress', retryable: true } });
-    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(true);
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
+    // Simulate the legacy persisted boolean left by a process which exited
+    // after filesystem verification but before conversation navigation.
+    await harness.authority.setMaintenance(harness.identity.workspaceId, true);
     failNavigation = false;
     const resumedEngine = createWorkspaceRecoveryEngine({
       authorityId: harness.authority.hostId,
@@ -1287,7 +1382,8 @@ describe('native workspace recovery Phase 1 engine', () => {
       documents: harness.authority,
       sessionNavigation: navigation,
     });
-    expect(await resumedEngine.fenceUnfinishedOperations()).toContain(prepared.plan.restore.id);
+    expect(await resumedEngine.fenceUnfinishedOperations()).not.toContain(prepared.plan.restore.id);
+    expect((await harness.authority.inspectMutation(harness.identity.workspaceId)).maintenance).toBe(false);
     await resumedEngine.resumeWorkspaceOperations();
     expect(await resumedEngine.resumeCombinedOperations())
       .toEqual([expect.objectContaining({ state: 'complete' })]);

@@ -47,6 +47,7 @@ export const createDocumentAuthority = (options) => {
     fsPromises = fs.promises,
     fsModule = fs,
     pathModule = path,
+    processLike = process,
     isTrusted = async () => true,
     isAllowedRoot = async () => true,
     maxReadBytes = Number.POSITIVE_INFINITY,
@@ -77,6 +78,7 @@ export const createDocumentAuthority = (options) => {
     fsModule,
     fsPromises,
     pathModule,
+    processLike,
   });
 
   const loadWorkspace = async (workspaceId) => {

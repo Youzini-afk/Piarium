@@ -91,6 +91,7 @@ const isDivergedNavigation = (error) => [
   'session_navigation_operation_conflict',
   'session_navigation_target_conflict',
 ].includes(navigationCode(error));
+const isWorkspaceDivergence = (error) => ['stale-plan', 'needs-attention'].includes(navigationCode(error));
 
 export const createCombinedRecoveryManager = ({
   bindings,
@@ -423,7 +424,7 @@ export const createCombinedRecoveryManager = ({
         operationId: record.plan.restore.id,
       });
       if (workspace.state !== 'workspace-verified') {
-        throw new RecoveryPrimitiveError('needs-attention', 'Workspace restore did not reach its coordinated hold point', {
+        throw new RecoveryPrimitiveError('needs-attention', 'Workspace restore did not reach its committed checkpoint', {
           operationId: record.id,
         });
       }
@@ -432,13 +433,17 @@ export const createCombinedRecoveryManager = ({
       await writeOperation(record);
     }
     if (record.state === 'workspace-verified') {
-      await restore.verifyHeld(record.plan.restore.id);
       record.state = 'navigating-conversation';
       await writeOperation(record);
     }
     if (record.state === 'navigating-conversation' && record.conversationState !== 'navigated') {
       let navigation;
       try {
+        // Conversation navigation is a retryable saga step after the filesystem
+        // transaction has released maintenance. Revalidate its content witness
+        // on every attempt so reopening a session cannot silently navigate after
+        // intervening workspace edits.
+        await restore.verifyPending(record.plan.restore.id);
         const navigationInput = {
           expectedLeafId: record.plan.expectedLeafId,
           operationId: record.id,
@@ -451,17 +456,18 @@ export const createCombinedRecoveryManager = ({
           : await sessionNavigation.commit({ ...navigationInput, targetId: record.plan.entryId });
       } catch (error) {
         if (isLeafConflict(error)) return compensateForLeafConflict(record, error);
+        const diverged = isDivergedNavigation(error) || isWorkspaceDivergence(error);
         record.failure = recoveryFailure(new RecoveryPrimitiveError(
-          isDivergedNavigation(error) ? 'navigation-conflict' : 'recovery-in-progress',
+          diverged ? 'navigation-conflict' : 'recovery-in-progress',
           error instanceof Error ? error.message : 'Conversation navigation did not complete',
           {
             cause: error,
             details: { operationId: record.id },
             operationId: record.id,
-            retryable: !isDivergedNavigation(error),
+            retryable: !diverged,
           },
         ));
-        if (isDivergedNavigation(error)) record.state = 'needs-attention';
+        if (diverged) record.state = 'needs-attention';
         await writeOperation(record);
         throw new RecoveryPrimitiveError(record.failure.code, record.failure.message, {
           details: record.failure.details,
