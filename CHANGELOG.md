@@ -5,6 +5,26 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.3
+
+Piarium 0.9.3 replaces plugin-backed workspace rollback with a Piarium-native recovery system and
+makes its storage practical to manage across projects and platforms.
+
+- Bind immutable workspace checkpoints to Pi conversation turns and offer verified conversation-only,
+  coordinated in-place, or new-workspace recovery without resetting or cleaning the project Git repository
+- Make native recovery a replaceable, versioned Piarium Host service with crash-safe operations, safety
+  checkpoints, explicit review states, and recovery undo
+- Add global recovery storage defaults plus higher-priority project overrides for application data,
+  workspace-local, workspace-adjacent, and custom folders
+- Migrate inherited histories through copy-and-verify switching, list histories by recent activity, clean
+  unreachable objects in one action, and manage or delete individual workspace histories
+- Keep workspace identities usable while roots are offline and unify Windows long, short, namespaced, and
+  missing-child path identities without weakening write and restore boundaries
+- Preserve portable symlink targets, support long Windows SQLite paths, and keep offline Host-owned recovery
+  histories available for maintenance
+- Fix Monaco find and replace controls rendering missing-glyph boxes by awaiting and protecting the Codicon font
+- Remove the unimplemented anonymous usage-reporting setting and keep the selected recovery preference durable
+
 ## 0.9.2
 
 Piarium 0.9.2 makes project navigation, Pi runtime isolation, custom providers, and the IDE editing
