@@ -166,19 +166,28 @@ test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
 });
 
 test('desktop packaging and Windows smoke execute the external Host boundary', async () => {
-  const [afterPack, packageScript, smoke, verifier] = await Promise.all([
+  const [afterPack, desktopSmoke, packageScript, services, verifier, windowsSmoke] = await Promise.all([
     source('./scripts/after-pack.cjs'),
+    source('./scripts/smoke-desktop-unpacked.mjs'),
     source('./scripts/package.mjs'),
-    source('./scripts/smoke-windows-unpacked.mjs'),
+    source('../extension-contract/src/services.ts'),
     source('./scripts/verify-packaged-pi-host.mjs'),
+    source('./scripts/smoke-windows-unpacked.mjs'),
   ]);
+  const recoveryVersion = services.match(/PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION = (\d+) as const/)?.[1];
+  assert.ok(recoveryVersion, 'workspace recovery service version must be declared');
+  const recoveryProbe = new RegExp(
+    `serviceId: 'piarium\\.workspace-recovery',[\\s\\S]*?version: ${recoveryVersion}`,
+  );
 
   assert.match(afterPack, /verify-packaged-pi-host\.mjs/);
   assert.match(packageScript, /PIARIUM_PACKAGING_NODE = process\.execPath/);
   assert.match(afterPack, /PIARIUM_PACKAGING_NODE \|\| process\.execPath/);
   assert.match(verifier, /await lifecycle\.start\(\)/);
-  assert.match(smoke, /runtime-selection\.json/);
-  assert.match(smoke, /selectedId: 'custom:selected'/);
-  assert.match(smoke, /runtimeStillWorking/);
-  assert.match(smoke, /did not activate the seeded Pi runtime through its external Host/);
+  assert.match(desktopSmoke, recoveryProbe);
+  assert.match(windowsSmoke, recoveryProbe);
+  assert.match(windowsSmoke, /runtime-selection\.json/);
+  assert.match(windowsSmoke, /selectedId: 'custom:selected'/);
+  assert.match(windowsSmoke, /runtimeStillWorking/);
+  assert.match(windowsSmoke, /did not activate the seeded Pi runtime through its external Host/);
 });

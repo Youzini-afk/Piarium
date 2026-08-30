@@ -191,7 +191,7 @@ const runPackagedRecoverySmoke = async (baseUrl) => {
     args: [],
     method: 'listStorageWorkspaces',
     serviceId: 'piarium.workspace-recovery',
-    version: 2,
+    version: 3,
   }, 'Packaged built-in recovery inventory');
   const result = payload?.result;
   if (result?.status !== 'ready' || !Array.isArray(result.workspaces)) {
