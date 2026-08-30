@@ -41,6 +41,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     error: s.error,
     downloading: s.downloading,
     downloaded: s.downloaded,
+    restarting: s.restarting,
     progress: s.progress,
     runtimeType: s.runtimeType,
     lastChecked: s.lastChecked,
@@ -210,6 +211,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           info={updateStore.info}
           downloading={updateStore.downloading}
           downloaded={updateStore.downloaded}
+          restarting={updateStore.restarting}
           progress={updateStore.progress}
           error={updateStore.error}
           onDownload={updateStore.downloadUpdate}
@@ -323,6 +325,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         info={updateStore.info}
         downloading={updateStore.downloading}
         downloaded={updateStore.downloaded}
+        restarting={updateStore.restarting}
         progress={updateStore.progress}
         error={updateStore.error}
         onDownload={updateStore.downloadUpdate}

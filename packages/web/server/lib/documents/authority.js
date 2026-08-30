@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { canonicalizePathIdentity, resolveWorkspacePath, WorkspacePathError } from '../workspace/path-safety.js';
+import {
+  canonicalizePathIdentity,
+  normalizePathIdentity,
+  resolveWorkspacePath,
+  WorkspacePathError,
+} from '../workspace/path-safety.js';
 import {
   DocumentAuthorityError,
   DocumentPathError,
@@ -72,6 +77,7 @@ export const createDocumentAuthority = (options) => {
   const dirtyBuffersByOwner = new Map();
   let disposed = false;
   let disposePromise = null;
+  const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
   const mutations = createWorkspaceMutationAuthority({
     dataDir,
     hostId,
@@ -95,8 +101,11 @@ export const createDocumentAuthority = (options) => {
     } catch (error) {
       throw new DocumentWorkspaceUnavailableError(undefined, { cause: error });
     }
-    if (!await isAllowedRoot(root)) {
-      throw new DocumentPathError('Workspace root is not allowed');
+    if (
+      normalizePathIdentity(root, { pathModule, platform })
+      !== normalizePathIdentity(mapping.canonicalPath, { pathModule, platform })
+    ) {
+      throw new DocumentUntrustedError('Workspace root identity changed');
     }
     if (!await isTrusted(root)) {
       throw new DocumentUntrustedError();

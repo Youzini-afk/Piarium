@@ -23,6 +23,7 @@ interface UpdateDialogProps {
   info: UpdateInfo | null;
   downloading: boolean;
   downloaded: boolean;
+  restarting?: boolean;
   progress: UpdateProgress | null;
   error: string | null;
   onDownload: () => void;
@@ -196,6 +197,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   info,
   downloading,
   downloaded,
+  restarting = false,
   progress,
   error,
   onDownload,
@@ -218,6 +220,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
   const isWebRuntime = runtimeType === 'web';
   const isMobileRuntime = runtimeType === 'mobile';
+  const isDesktopRestarting = !isWebRuntime && !isMobileRuntime && restarting;
   const updateCommand = info?.updateCommand || 'piarium update';
 
   // Reset state when dialog closes
@@ -273,6 +276,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   }, [handleOpenExternal, mobileUpdateUrl]);
 
   const isWebUpdating = webUpdateState !== 'idle' && webUpdateState !== 'error';
+  const interactionLocked = isWebUpdating || isDesktopRestarting;
 
   const changelog = useMemo<ParsedChangelog | null>(() => {
     if (!info?.body) {
@@ -307,15 +311,21 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   }, [info?.body, t]);
 
   return (
-    <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
-      <DialogContent className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]" showCloseButton={true}>
+    <Dialog open={open} onOpenChange={interactionLocked ? undefined : onOpenChange}>
+      <DialogContent
+        className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]"
+        data-update-restarting={isDesktopRestarting ? 'true' : undefined}
+        showCloseButton={!interactionLocked}
+      >
 
         {/* Header Section */}
         <div className="flex items-center mb-1">
           <DialogTitle className="flex items-center gap-2.5">
             <RiDownloadCloudLine className="h-5 w-5 text-[var(--primary-base)]" />
             <span className="text-lg font-semibold text-foreground">
-              {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
+              {isDesktopRestarting
+                ? t('updateDialog.header.restarting')
+                : webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
                 ? t('updateDialog.header.updating')
                 : t('updateDialog.header.updateAvailable')}
             </span>
@@ -357,8 +367,25 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
+          {isDesktopRestarting && (
+            <div
+              className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/30 p-5"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-3">
+                <RiLoaderLine className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
+                <div className="typography-ui-label text-foreground">
+                  {t('updateDialog.status.desktopRestarting')}
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t('updateDialog.status.desktopRestartingHint')}
+              </p>
+            </div>
+          )}
+
           {/* Changelog Rendering */}
-          {changelog && !isWebUpdating && (
+          {changelog && !isWebUpdating && !isDesktopRestarting && (
             <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/20 overflow-hidden">
               <ScrollableOverlay
                 className="max-h-[400px] p-0"
@@ -470,15 +497,17 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
         {/* Action Footer */}
         <div className="mt-4 flex items-center justify-between gap-4">
-          <a
-            href={releaseUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            <RiExternalLinkLine className="h-4 w-4" />
-            GitHub
-          </a>
+          {!isDesktopRestarting ? (
+            <a
+              href={releaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <RiExternalLinkLine className="h-4 w-4" />
+              GitHub
+            </a>
+          ) : <span />}
 
           <div className="flex-1 flex justify-end">
             {/* Desktop Buttons */}
@@ -505,10 +534,20 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {!isWebRuntime && !isMobileRuntime && downloaded && (
               <button
                 onClick={onRestart}
-                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
+                disabled={isDesktopRestarting}
+                className={cn(
+                  'flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium text-white transition-opacity',
+                  isDesktopRestarting
+                    ? 'cursor-wait bg-[var(--status-success)]/60'
+                    : 'bg-[var(--status-success)] hover:opacity-90',
+                )}
               >
-                <RiRestartLine className="h-4 w-4" />
-                {t('updateDialog.actions.restartToUpdate')}
+                {isDesktopRestarting
+                  ? <RiLoaderLine className="h-4 w-4 animate-spin" />
+                  : <RiRestartLine className="h-4 w-4" />}
+                {isDesktopRestarting
+                  ? t('updateDialog.actions.restarting')
+                  : t('updateDialog.actions.restartToUpdate')}
               </button>
             )}
 

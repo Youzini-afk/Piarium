@@ -27,6 +27,6 @@ Watch events carry resource metadata only. File bodies are not written to logs, 
 
 ## Persistence
 
-Workspace IDs live under `{PIARIUM_DATA_DIR}/documents/workspaces.json` and are scoped to this application host. Loading this registry never touches workspace storage: a deleted, disconnected, or permission-blocked root keeps its workspace ID and cannot prevent other registrations from loading. Operations that need files canonicalize the root at use time and fail with `workspace-unavailable` until it is accessible again. Recovery journals live under `{PIARIUM_DATA_DIR}/document-recovery/{hostId}/...`. Another host must not inherit the same-path selections.
+Workspace IDs live under `{PIARIUM_DATA_DIR}/documents/workspaces.json` and are scoped to this application host. Converting a filesystem path into an ID performs the current root-admission check once; later operations use that persisted host registration instead of re-reading mutable project selection settings. They still canonicalize the root at use time, reject a changed filesystem identity, enforce resource containment, and fail with `workspace-unavailable` while the root is inaccessible. Loading this registry never touches workspace storage: a deleted or disconnected root keeps its workspace ID and cannot prevent other registrations from loading. Recovery journals live under `{PIARIUM_DATA_DIR}/document-recovery/{hostId}/...`. Another host must not inherit the same-path selections.
 
 Electron reuses this Web host in-process. It does not add a generic filesystem preload IPC.

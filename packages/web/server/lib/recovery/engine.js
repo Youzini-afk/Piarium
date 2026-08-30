@@ -20,6 +20,7 @@ import { createRecoveryBindingStore } from './bindings.js';
 import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
 import { portableSymlinkTarget } from './symlink-target.js';
+import { isPathWithinRoot } from '../workspace/path-safety.js';
 
 const POLICY_REVISION = 'native-local-history-v3';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
@@ -46,13 +47,7 @@ const INSERT_STAGED_ENTRY = `
     platform_json = excluded.platform_json
 `;
 
-const pathIsInside = (candidate, root, pathModule) => {
-  const left = pathModule.resolve(candidate);
-  const right = pathModule.resolve(root);
-  const normalizedLeft = process.platform === 'win32' ? left.toLowerCase() : left;
-  const normalizedRight = process.platform === 'win32' ? right.toLowerCase() : right;
-  return normalizedLeft === normalizedRight || normalizedLeft.startsWith(`${normalizedRight}${pathModule.sep}`);
-};
+const pathIsInside = (candidate, root, pathModule) => isPathWithinRoot(candidate, root, pathModule);
 
 const forwardPath = (value) => value.split(path.sep).join('/');
 const compareStat = (left, right) => (

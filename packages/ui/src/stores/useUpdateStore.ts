@@ -19,6 +19,7 @@ type UpdateState = {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  restarting: boolean;
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
@@ -152,6 +153,7 @@ const initialState: UpdateState = {
   available: false,
   downloading: false,
   downloaded: false,
+  restarting: false,
   info: null,
   progress: null,
   error: null,
@@ -240,7 +242,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       return;
     }
 
-    set({ downloading: true, error: null, progress: null });
+    set({ downloading: true, error: null, progress: null, restarting: false });
 
     try {
       const desktopInfo = await checkForDesktopUpdates();
@@ -278,11 +280,13 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   },
 
   restartToUpdate: async () => {
-    const { downloaded, runtimeType } = get();
+    const { downloaded, restarting, runtimeType } = get();
 
-    if (runtimeType !== 'desktop' || !downloaded) {
+    if (runtimeType !== 'desktop' || !downloaded || restarting) {
       return;
     }
+
+    set({ restarting: true, error: null });
 
     try {
       const ok = await restartToApplyUpdate();
@@ -292,12 +296,13 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to restart',
+        restarting: false,
       });
     }
   },
 
   dismiss: () => {
-    set({ available: false, downloaded: false, info: null });
+    set({ available: false, downloaded: false, info: null, restarting: false });
   },
 
   reset: () => {

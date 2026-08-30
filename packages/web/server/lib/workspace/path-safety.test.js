@@ -115,11 +115,21 @@ describe('workspace path safety', () => {
   });
 
   it('normalizes Windows namespace prefixes and case for identity keys', async () => {
-    const { normalizePathIdentity } = await loadPathSafetyModule();
+    const { isPathWithinRoot, normalizePathIdentity } = await loadPathSafetyModule();
 
     expect(normalizePathIdentity('\\\\?\\C:\\Users\\Runner\\Repo', {
       pathModule: path.win32,
       platform: 'win32',
     })).toBe('c:\\users\\runner\\repo');
+    expect(isPathWithinRoot('\\\\?\\C:\\Users\\RUNNER\\Repo\\src', 'C:\\Users\\Runner\\Repo', path.win32, {
+      platform: 'win32',
+    })).toBe(true);
+  });
+
+  it('treats dot-prefixed child names as children rather than parent traversal', async () => {
+    const { isPathWithinRoot } = await loadPathSafetyModule();
+
+    expect(isPathWithinRoot('/workspace/..cache/file', '/workspace', path.posix)).toBe(true);
+    expect(isPathWithinRoot('/workspace-copy/file', '/workspace', path.posix)).toBe(false);
   });
 });

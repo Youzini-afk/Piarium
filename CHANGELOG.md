@@ -5,6 +5,11 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Show a locked “Restarting Piarium” transition while the desktop updater stops background services
+  and hands off to the installer, with interaction restored if the restart request fails
+- Keep Host-registered workspace identities valid across project-selection changes so background checkpoints
+  and rollback cannot be rejected by stale settings; normalize Windows path identities consistently
+
 ## 0.9.7
 
 Piarium 0.9.7 fixes packaged desktop Pi startup and makes the chat rendering modes behave as their

@@ -51,15 +51,21 @@ export const canonicalizePathIdentity = async (
   }
 };
 
-const normalizeForCompare = (value, pathModule) => {
-  return normalizePathIdentity(value, { pathModule });
+const normalizeForCompare = (value, pathModule, platform) => {
+  return normalizePathIdentity(value, { pathModule, platform });
 };
 
-export const isPathWithinRoot = (candidatePath, rootPath, pathModule = path) => {
-  const candidate = normalizeForCompare(candidatePath, pathModule);
-  const root = normalizeForCompare(rootPath, pathModule);
+export const isPathWithinRoot = (
+  candidatePath,
+  rootPath,
+  pathModule = path,
+  { platform = process.platform } = {},
+) => {
+  const candidate = normalizeForCompare(candidatePath, pathModule, platform);
+  const root = normalizeForCompare(rootPath, pathModule, platform);
   const relative = pathModule.relative(root, candidate);
-  return relative === '' || (!relative.startsWith('..') && !pathModule.isAbsolute(relative));
+  const traversesParent = relative === '..' || relative.startsWith(`..${pathModule.sep}`);
+  return relative === '' || (!traversesParent && !pathModule.isAbsolute(relative));
 };
 
 export const normalizeWorkspaceRelativePath = (value) => {

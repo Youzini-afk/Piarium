@@ -52,6 +52,51 @@ it('keeps a persisted workspace identity available while its root is temporarily
   }
 });
 
+it('keeps an admitted workspace usable after the mutable root selection changes', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const peer = createPeerAuthority(harness, { isAllowedRoot: async () => false });
+  const unregisteredRoot = path.join(harness.root, 'unregistered-workspace');
+  try {
+    await fs.promises.mkdir(unregisteredRoot);
+
+    await expect(peer.inspectWorkspace(harness.identity.workspaceId)).resolves.toMatchObject({
+      workspaceId: harness.identity.workspaceId,
+      root: await fs.promises.realpath(harness.workspaceRoot),
+    });
+    await expect(peer.resolveWorkspace({ path: unregisteredRoot })).rejects.toMatchObject({
+      code: 'path-escape',
+      statusCode: 403,
+    });
+  } finally {
+    await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
+it('rejects a registered path whose canonical filesystem identity changes', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const replacementRoot = path.join(harness.root, 'replacement-workspace');
+  const registeredRoot = await fs.promises.realpath(harness.workspaceRoot);
+  await fs.promises.mkdir(replacementRoot);
+  const replacementCanonicalRoot = await fs.promises.realpath(replacementRoot);
+  const fsPromises = {
+    ...fs.promises,
+    realpath: async (value) => (
+      path.resolve(value) === path.resolve(registeredRoot)
+        ? replacementCanonicalRoot
+        : fs.promises.realpath(value)
+    ),
+  };
+  const peer = createPeerAuthority(harness, { fsPromises });
+  try {
+    await expect(peer.inspectWorkspace(harness.identity.workspaceId)).rejects.toMatchObject({
+      code: 'untrusted',
+      statusCode: 403,
+    });
+  } finally {
+    await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
 it('coordinates writer, maintenance, and epoch fencing across authority instances', async () => {
   const harness = await createDocumentAuthorityHarness();
   const peer = createPeerAuthority(harness);

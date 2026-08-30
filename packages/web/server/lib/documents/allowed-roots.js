@@ -1,14 +1,11 @@
-const pathIsInside = (candidate, root, pathModule) => {
-  const left = process.platform === 'win32' ? String(candidate).toLowerCase() : String(candidate);
-  const right = process.platform === 'win32' ? String(root).toLowerCase() : String(root);
-  return left === right || left.startsWith(`${right}${pathModule.sep}`);
-};
+import { isPathWithinRoot } from '../workspace/path-safety.js';
 
 export const createDocumentRootGuard = ({
   fsPromises,
   pathModule,
   readSettings,
   getWorkspaceRoot,
+  platform = process.platform,
 }) => async (canonicalPath) => {
   const settings = await readSettings().catch(() => ({}));
   const roots = [];
@@ -28,7 +25,7 @@ export const createDocumentRootGuard = ({
   for (const root of roots) {
     try {
       const real = await fsPromises.realpath(root);
-      if (pathIsInside(canonicalPath, real, pathModule)) return true;
+      if (isPathWithinRoot(canonicalPath, real, pathModule, { platform })) return true;
     } catch {
       // A missing configured root is not itself a grant.
     }

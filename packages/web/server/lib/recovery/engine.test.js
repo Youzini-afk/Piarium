@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDocumentAuthority } from '../documents/authority.js';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { objectPath, openRecoveryCatalog, recordCatalogOperation } from './catalog.js';
 import { createWorkspaceRecoveryEngine } from './engine.js';
@@ -44,6 +45,35 @@ describe('native workspace recovery Phase 1 engine', () => {
       status: 'ready',
       storage: { byteLength: 0, objectCount: 0, snapshotCount: 0, state: 'missing' },
     });
+  });
+
+  it('captures through a persisted workspace identity after project selection changes', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    harnesses.add(harness);
+    const documents = createDocumentAuthority({
+      hostId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      isAllowedRoot: async () => false,
+      isTrusted: async () => true,
+    });
+    const engine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents,
+    });
+    try {
+      await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'recoverable');
+
+      await expect(engine.captureSnapshot({
+        source: 'turn-before',
+        workspaceId: harness.identity.workspaceId,
+      })).resolves.toMatchObject({
+        status: 'captured',
+        snapshot: { availability: 'ready' },
+      });
+    } finally {
+      await documents.dispose();
+    }
   });
 
   it('round-trips files, empty directories, symlinks, readonly metadata, exclusions, and diffs', async () => {
