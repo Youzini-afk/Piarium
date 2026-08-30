@@ -55,6 +55,7 @@ export const createDocumentAuthority = (options) => {
     processLike = process,
     isTrusted = async () => true,
     isAllowedRoot = async () => true,
+    onWorkspaceResolved = () => undefined,
     maxReadBytes = Number.POSITIVE_INFINITY,
     overflowLimit,
   } = options;
@@ -265,7 +266,11 @@ export const createDocumentAuthority = (options) => {
       }
       const mapping = await registry.resolve({ canonicalPath, create: true });
       const mutation = await mutations.inspect(mapping.workspaceId);
-      return { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
+      const resolved = { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
+      void Promise.resolve().then(() => onWorkspaceResolved(resolved)).catch((error) => {
+        console.warn(`[Documents] Workspace resolution observer failed: ${error?.message || error}`);
+      });
+      return resolved;
     } catch (error) {
       fail(error);
     }

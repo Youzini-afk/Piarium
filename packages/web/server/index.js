@@ -831,11 +831,13 @@ async function main(options = {}) {
     readSettings: readSettingsFromDisk,
     getWorkspaceRoot: () => workspaceConfig.root,
   });
+  let scheduleWorkspaceRecoveryBaseline = () => undefined;
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
+    onWorkspaceResolved: (workspace) => scheduleWorkspaceRecoveryBaseline(workspace),
   });
   activeDocumentsAuthority = documentsAuthority;
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
@@ -937,6 +939,32 @@ async function main(options = {}) {
   const foundationalRecoveryEngine = recoveryEngineForOwner({
     owner: { extensionId: 'piarium.builtin.recovery' },
   });
+  const workspaceBaselineTasks = new Map();
+  const workspaceBaselineAbortControllers = new Map();
+  scheduleWorkspaceRecoveryBaseline = ({ workspaceId }) => {
+    if (workspaceBaselineTasks.has(workspaceId)) return;
+    const controller = new AbortController();
+    workspaceBaselineAbortControllers.set(workspaceId, controller);
+    const task = foundationalRecoveryEngine.captureSnapshot({
+      reuseIfUnchanged: true,
+      signal: controller.signal,
+      source: 'baseline',
+      workspaceId,
+    }).then((result) => {
+      if (result.status === 'failed') {
+        console.warn(`[WorkspaceRecovery] Background baseline failed for ${workspaceId}: ${result.failure.message}`);
+      }
+      if (result.status !== 'captured' || result.snapshot.consistency !== 'validated') {
+        workspaceBaselineTasks.delete(workspaceId);
+      }
+    }).catch((error) => {
+      workspaceBaselineTasks.delete(workspaceId);
+      console.warn(`[WorkspaceRecovery] Background baseline failed for ${workspaceId}: ${error?.message || error}`);
+    }).finally(() => {
+      workspaceBaselineAbortControllers.delete(workspaceId);
+    });
+    workspaceBaselineTasks.set(workspaceId, task);
+  };
   let fencedRecoveryOperations = [];
   try {
     fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
@@ -1272,6 +1300,10 @@ async function main(options = {}) {
     }),
     isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions = {}) => {
+      scheduleWorkspaceRecoveryBaseline = () => undefined;
+      for (const controller of workspaceBaselineAbortControllers.values()) controller.abort();
+      await Promise.allSettled(workspaceBaselineTasks.values());
+      workspaceBaselineAbortControllers.clear();
       piSessionAutomation.stop();
       brokerUnsubscribe();
       await unregisterWorkbenchLayoutService();

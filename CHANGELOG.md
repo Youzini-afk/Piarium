@@ -10,7 +10,9 @@ private runtime protocol and product surfaces still move together.
 - Keep Host-registered workspace identities valid across project-selection changes so background checkpoints
   and rollback cannot be rejected by stale settings; normalize Windows path identities consistently
 - Aggregate token usage across every model call in a user turn and render it once after the final response,
-  including explicit cache-read and cache-write totals
+  using compact icons and showing cache-read or cache-write totals only when present
+- Replace per-turn full workspace scans with background baselines, witness-only no-op rollback, and watcher-path
+  incremental checkpoints; batch fallback manifests and parallelize object capture for large workspaces
 
 ## 0.9.7
 

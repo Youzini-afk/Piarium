@@ -1,4 +1,5 @@
 import { createWorkspaceRecoveryAPI } from '@piarium/extension-contract';
+import { sameWorkspaceContentWitness } from './witness.js';
 
 const writerScope = (writer) => {
   const generation = writer.owner?.generation === undefined ? '' : `@${writer.owner.generation}`;
@@ -30,6 +31,12 @@ const isBoundWorkspace = (workspace) => (
   && typeof workspace.id === 'string'
   && workspace.id
 );
+
+const witnessFromState = (state) => state ? ({
+  epoch: state.epoch,
+  mutationRevision: state.mutationRevision,
+  writerRevision: state.writerRevision,
+}) : undefined;
 
 export const createRecoveryTurnCoordinator = ({
   documents,
@@ -91,7 +98,7 @@ export const createRecoveryTurnCoordinator = ({
     }
   };
 
-  const capture = async (turn, source) => {
+  const capture = async (turn, source, options = {}) => {
     const previous = captureInFlightByWorkspace.get(turn.workspaceId) ?? Promise.resolve();
     const task = previous.catch(() => undefined).then(async () => {
       try {
@@ -99,6 +106,7 @@ export const createRecoveryTurnCoordinator = ({
           reuseIfUnchanged: true,
           source,
           workspaceId: turn.workspaceId,
+          ...options,
         });
         if (result.status === 'failed') reportRecoveryFailure(turn, `${source} capture`, result.failure);
         else rememberReadySnapshot(result.snapshot);
@@ -123,6 +131,7 @@ export const createRecoveryTurnCoordinator = ({
       const result = await apiFor(turn).recordTurnStart({
         activeWriterScopes: [...turn.activeWriterScopes],
         ...(beforeSnapshotId ? { beforeSnapshotId } : {}),
+        ...(turn.beforeWitness ? { beforeWitness: turn.beforeWitness } : {}),
         executionId,
         ...(failure ? { failure } : {}),
         provenance: turn.provenance,
@@ -157,7 +166,7 @@ export const createRecoveryTurnCoordinator = ({
   const finalize = async (turn, failureOverride) => {
     if (turn.finalizing) return turn.finalizing;
     turn.finalizing = (async () => {
-      await writerTracker.waitForIdle(turn.workerId);
+      const mutationSummary = await writerTracker.waitForIdle(turn.workerId);
       const afterMutation = await inspectScopes(turn.workspaceId).catch(() => null);
       if (afterMutation) {
         turn.activeWriterScopes = [...new Set([
@@ -170,19 +179,37 @@ export const createRecoveryTurnCoordinator = ({
           turn.provenance = 'overlapped';
         }
       }
-      const after = failureOverride ? null : await capture(turn, 'turn-after');
+      const afterWitness = witnessFromState(afterMutation?.state);
+      const workspaceUnchanged = Boolean(
+        turn.beforeWitness
+        && afterWitness
+        && sameWorkspaceContentWitness(turn.beforeWitness, afterWitness)
+      );
+      const incrementalCapture = turn.beforeSnapshotId
+        && mutationSummary?.coverageComplete === true
+        && mutationSummary.changedResourceIds.length > 0
+        ? {
+            baseSnapshotId: turn.beforeSnapshotId,
+            changedResourceIds: mutationSummary.changedResourceIds,
+          }
+        : {};
+      const after = failureOverride || workspaceUnchanged
+        ? null
+        : await capture(turn, 'turn-after', incrementalCapture);
       const afterSnapshotId = after?.status === 'captured' && after.snapshot.availability === 'ready'
         ? after.snapshot.id
         : undefined;
       const afterFailure = failureOverride
-        ?? (after?.status === 'failed'
-          ? after.failure
-          : afterSnapshotId ? undefined : incompleteFailure('Turn-after workspace snapshot is incomplete'));
+        ?? (workspaceUnchanged ? undefined
+          : (after?.status === 'failed'
+            ? after.failure
+            : afterSnapshotId ? undefined : incompleteFailure('Turn-after workspace snapshot is incomplete')));
       const lastBindingId = turn.bindingIds.at(-1);
       for (const executionId of turn.bindingIds) {
         if (executionId === lastBindingId) {
           await settleBinding(turn, executionId, {
             ...(afterSnapshotId ? { afterSnapshotId } : {}),
+            ...(afterWitness ? { afterWitness } : {}),
             ...(turn.lastAssistantEntryId ? { assistantEntryId: turn.lastAssistantEntryId } : {}),
             ...(afterFailure ? { failure: afterFailure } : {}),
           });
@@ -211,6 +238,7 @@ export const createRecoveryTurnCoordinator = ({
         agentStarted: false,
         beforeFailure: undefined,
         beforeSnapshotId: undefined,
+        beforeWitness: undefined,
         bindingIds: [],
         eventTail: Promise.resolve(),
         executionId: request.executionId,
@@ -225,7 +253,10 @@ export const createRecoveryTurnCoordinator = ({
         writerRevisionAfterAdmission: 0,
       };
       const beforeMutation = await inspectScopes(workspaceId).catch(() => null);
-      if (beforeMutation) turn.activeWriterScopes = beforeMutation.scopes;
+      if (beforeMutation) {
+        turn.activeWriterScopes = beforeMutation.scopes;
+        turn.beforeWitness = witnessFromState(beforeMutation.state);
+      }
       const before = await latestReadySnapshot(turn);
       const writerLease = await writerTracker.admit(request);
       const admittedMutation = await inspectScopes(workspaceId).catch(() => null);
@@ -255,9 +286,11 @@ export const createRecoveryTurnCoordinator = ({
         turn.beforeSnapshotId = before.id;
         if (admissionOverlapped) turn.provenance = 'overlapped';
       } else {
-        turn.beforeFailure = incompleteFailure(
-          'Workspace history has no completed revision before this turn',
-        );
+        if (!turn.beforeWitness) {
+          turn.beforeFailure = incompleteFailure(
+            'Workspace history has no completed revision before this turn',
+          );
+        }
         if (foreignWriters.length > 0) turn.provenance = 'overlapped';
       }
       pending.set(request.executionId, turn);

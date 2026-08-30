@@ -19,6 +19,7 @@ const admissionError = (error) => {
 
 export const createPiWorkspaceWriterTracker = ({ documents }) => {
   const snapshots = new Map();
+  const settledSummaries = new Map();
   const writers = new Map();
   let disposed = false;
 
@@ -50,6 +51,11 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         state.watch?.close();
       }
     })().finally(() => {
+      settledSummaries.set(workerId, {
+        changedResourceIds: [...state.changedResourceIds].sort(),
+        coverageComplete: state.watchAvailable && state.watchCoverageComplete,
+        mutationObserved: state.mutationObserved,
+      });
       state.closed = true;
       state.resolveClosed();
       if (writers.get(workerId) === state) writers.delete(workerId);
@@ -72,12 +78,14 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
   };
 
   const createState = ({ cwd, method, phase, sessionId, workerId }) => {
+    settledSummaries.delete(workerId);
     let resolveClosed = () => {};
     const closedPromise = new Promise((resolve) => {
       resolveClosed = () => resolve();
     });
     const state = {
       closed: false,
+      changedResourceIds: new Set(),
       closedPromise,
       closePromise: null,
       closing: false,
@@ -89,6 +97,7 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
       retired: false,
       watch: null,
       watchAvailable: false,
+      watchCoverageComplete: false,
       writer: null,
     };
     writers.set(workerId, state);
@@ -97,15 +106,25 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         try {
           const workspaceId = await documents.resolveScopeId(cwd);
           if (workspaceId) {
-            state.watch = documents.watch(workspaceId, () => {
+            state.watchCoverageComplete = true;
+            state.watch = documents.watch(workspaceId, (event) => {
               state.mutationObserved = true;
+              if (event?.kind === 'reset') {
+                state.watchCoverageComplete = false;
+              } else if (event?.resource?.workspaceId === workspaceId
+                && typeof event.resource.resourceId === 'string'
+                && event.resource.resourceId) {
+                state.changedResourceIds.add(event.resource.resourceId);
+              }
             });
             state.watchAvailable = await state.watch.ready;
+            if (!state.watchAvailable) state.watchCoverageComplete = false;
           }
         } catch {
           state.watch?.close();
           state.watch = null;
-          state.watchAvailable = false;
+            state.watchAvailable = false;
+            state.watchCoverageComplete = false;
         }
       }
       const writer = await documents.registerWriterForScope(cwd, {
@@ -222,12 +241,16 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     async waitForIdle(workerId) {
       const state = writers.get(workerId);
       if (state) await state.closedPromise;
+      const summary = settledSummaries.get(workerId) ?? null;
+      settledSummaries.delete(workerId);
+      return summary;
     },
     async dispose() {
       if (disposed) return;
       disposed = true;
       await Promise.allSettled([...writers].map(([workerId]) => forceRelease(workerId)));
       snapshots.clear();
+      settledSummaries.clear();
     },
   };
 };

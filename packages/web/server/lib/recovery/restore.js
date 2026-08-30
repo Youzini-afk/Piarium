@@ -11,6 +11,10 @@ import {
 import { RecoveryPrimitiveError, recoveryFailure } from './errors.js';
 import { writeRecoveryJsonAtomic } from './locations.js';
 import { portableSymlinkTarget } from './symlink-target.js';
+import {
+  decodeWorkspaceWitness,
+  sameWorkspaceContentWitness,
+} from './witness.js';
 
 const OPERATION_SCHEMA_VERSION = 1;
 const PRE_DECISION_STATES = new Set(['planned', 'staged']);
@@ -537,9 +541,83 @@ export const createWorkspaceRestoreManager = ({
     await writeOperation(record, database);
   };
 
+  const prepareWitnessOnly = async (input, identity, storage, targetWitness) => {
+    const current = await documents.inspectMutation(identity.workspaceId);
+    if (current.maintenance) {
+      throw new RecoveryPrimitiveError('recovery-in-progress', 'Workspace is already in recovery maintenance');
+    }
+    if (!sameWorkspaceContentWitness(targetWitness, current)) {
+      throw new RecoveryPrimitiveError(
+        'snapshot-incomplete',
+        'The workspace changed after this message and no affected-file checkpoint is available yet',
+      );
+    }
+    if (current.activeWriters.length > 0) {
+      throw new RecoveryPrimitiveError('active-writer', 'Workspace writers are active', { retryable: true });
+    }
+    const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
+    if (!database) throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is unavailable');
+    try {
+      const id = randomUUID();
+      const createdAt = new Date().toISOString();
+      const witness = {
+        epoch: current.epoch,
+        mutationRevision: current.mutationRevision,
+        writerRevision: current.writerRevision,
+      };
+      const draft = {
+        activeWriterScopes: [],
+        allowedModes: ['in-place'],
+        conflicts: [],
+        createdAt,
+        dirtyBufferCount: 0,
+        git: { available: true, repository: false, staged: false },
+        id,
+        newWorkspacePath: identity.canonicalRoot,
+        operationCount: 0,
+        operations: [],
+        recommendedMode: 'in-place',
+        safetySnapshotId: input.targetSnapshotId,
+        targetSnapshotId: input.targetSnapshotId,
+        totalBytes: 0,
+        witness,
+        workspaceId: identity.workspaceId,
+      };
+      const plan = { ...draft, revision: planRevision(draft) };
+      const record = {
+        appliedOperations: 0,
+        createdAt,
+        destinationPath: '',
+        failure: null,
+        hardlinkLeaders: {},
+        id,
+        inPlaceOperations: [],
+        inPlaceRequiredBytes: 0,
+        kind: 'workspace-restore',
+        mode: null,
+        newWorkspaceOperations: [],
+        noOp: true,
+        plan,
+        safetyEntries: {},
+        schemaVersion: OPERATION_SCHEMA_VERSION,
+        stageRoot: null,
+        state: 'planned',
+        targetEntries: {},
+        totalOperations: 0,
+        updatedAt: createdAt,
+      };
+      await writeOperation(record, database);
+      return plan;
+    } finally {
+      database.close();
+    }
+  };
+
   const prepare = async (input) => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
+    const targetWitness = decodeWorkspaceWitness(input.targetSnapshotId);
+    if (targetWitness) return prepareWitnessOnly(input, identity, storage, targetWitness);
     const database = await openRecoveryCatalog(storage.root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('snapshot-missing', `Unknown workspace snapshot: ${input.targetSnapshotId}`);
     try {
@@ -1031,6 +1109,21 @@ export const createWorkspaceRestoreManager = ({
       if (record.completionHold !== 'conversation'
         || !['workspace-verified', 'compensating-workspace'].includes(record.state)) {
         throw new RecoveryPrimitiveError('recovery-in-progress', 'Restore cannot be compensated in its current state');
+      }
+      if (record.noOp === true) {
+        const current = await documents.inspectMutation(identity.workspaceId);
+        if (!record.verifiedWitness || !sameWorkspaceContentWitness(record.verifiedWitness, current)) {
+          throw new RecoveryPrimitiveError(
+            'stale-plan',
+            'Workspace changed after no-op recovery verification',
+            { retryable: false },
+          );
+        }
+        record.completionHold = null;
+        record.state = 'compensated';
+        await writeOperation(record, database);
+        await cleanupAuxiliaryPaths(record, identity.canonicalRoot);
+        return publicOperation(record);
       }
       if (!record.compensation) {
         const current = await documents.inspectMutation(identity.workspaceId);

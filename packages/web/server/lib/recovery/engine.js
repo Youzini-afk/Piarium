@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs, { constants as fsConstants } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import ignore from 'ignore';
 import {
@@ -20,7 +21,10 @@ import { createRecoveryBindingStore } from './bindings.js';
 import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
 import { portableSymlinkTarget } from './symlink-target.js';
-import { isPathWithinRoot } from '../workspace/path-safety.js';
+import {
+  isPathWithinRoot,
+  normalizeWorkspaceRelativePath,
+} from '../workspace/path-safety.js';
 
 const POLICY_REVISION = 'native-local-history-v3';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
@@ -48,6 +52,41 @@ const INSERT_STAGED_ENTRY = `
 `;
 
 const pathIsInside = (candidate, root, pathModule) => isPathWithinRoot(candidate, root, pathModule);
+
+const throwIfAborted = (signal) => {
+  if (!signal?.aborted) return;
+  throw Object.assign(new Error('Workspace capture was cancelled'), {
+    code: 'ABORT_ERR',
+    name: 'AbortError',
+  });
+};
+
+const createTaskPool = (concurrency) => {
+  let active = 0;
+  const waiters = [];
+  const acquire = () => {
+    if (active < concurrency) {
+      active += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => waiters.push(resolve));
+  };
+  const release = () => {
+    const next = waiters.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  return {
+    async run(task) {
+      await acquire();
+      try {
+        return await task();
+      } finally {
+        release();
+      }
+    },
+  };
+};
 
 const forwardPath = (value) => value.split(path.sep).join('/');
 const compareStat = (left, right) => (
@@ -201,6 +240,7 @@ export const createWorkspaceRecoveryEngine = ({
     storageOwnerId,
   });
   const queues = new Map();
+  const objectWriteQueues = new Map();
   const recoveredStores = new Map();
   let moveRecoveryPromise = null;
 
@@ -211,6 +251,17 @@ export const createWorkspaceRecoveryEngine = ({
     queues.set(workspaceId, settled);
     settled.finally(() => {
       if (queues.get(workspaceId) === settled) queues.delete(workspaceId);
+    });
+    return result;
+  };
+
+  const runObjectWrite = (key, operation) => {
+    const previous = objectWriteQueues.get(key) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(operation);
+    const settled = result.then(() => undefined, () => undefined);
+    objectWriteQueues.set(key, settled);
+    settled.finally(() => {
+      if (objectWriteQueues.get(key) === settled) objectWriteQueues.delete(key);
     });
     return result;
   };
@@ -362,19 +413,13 @@ export const createWorkspaceRecoveryEngine = ({
     return canonical;
   };
 
-  const syncDirectory = async (directory) => {
-    let handle;
-    try {
-      handle = await fsPromises.open(directory, 'r');
-      await handle.sync();
-    } catch (error) {
-      if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
-    } finally {
-      await handle?.close().catch(() => undefined);
-    }
-  };
-
-  const storeRegularFile = async (absolutePath, workspaceRoot, storeRoot, captureId) => {
+  const storeRegularFile = async (
+    absolutePath,
+    workspaceRoot,
+    storeRoot,
+    captureId,
+    trustedObjectHashes,
+  ) => {
     await assertExistingInsideRoot(absolutePath, workspaceRoot);
     const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
     let sourceHandle;
@@ -398,7 +443,6 @@ export const createWorkspaceRecoveryEngine = ({
           writePosition += written.bytesWritten;
         }
       }
-      await targetHandle.sync();
       const after = await sourceHandle.stat({ bigint: true });
       if (!compareStat(before, after)) {
         throw new RecoveryPrimitiveError('unstable-coverage', 'Workspace file changed while it was being captured', { retryable: true });
@@ -406,20 +450,31 @@ export const createWorkspaceRecoveryEngine = ({
       const objectHash = `sha256-${hash.digest('hex')}`;
       const target = objectPath(storeRoot, objectHash);
       await fsPromises.mkdir(pathModule.dirname(target), { recursive: true, mode: 0o700 });
-      let existing = false;
-      try {
-        await verifyRecoveryObject(storeRoot, objectHash, { fsModule });
-        existing = true;
-      } catch (error) {
-        if (!(error instanceof RecoveryPrimitiveError) || !['object-missing', 'object-corrupt'].includes(error.code)) throw error;
-        if (error.code === 'object-corrupt') await fsPromises.unlink(target).catch(() => undefined);
-      }
-      if (existing) await fsPromises.unlink(temporaryPath);
-      else {
-        await fsPromises.rename(temporaryPath, target);
-        await syncDirectory(pathModule.dirname(target));
-      }
-      await fsPromises.chmod(target, 0o600);
+      await targetHandle.close();
+      targetHandle = undefined;
+      await runObjectWrite(target, async () => {
+        let existing = false;
+        try {
+          const targetStat = await fsPromises.stat(target);
+          if (!targetStat.isFile() || targetStat.size !== Number(before.size)) {
+            throw new RecoveryPrimitiveError('object-corrupt', `Recovery object has an unexpected size: ${objectHash}`);
+          }
+          if (!trustedObjectHashes.has(objectHash)) {
+            await verifyRecoveryObject(storeRoot, objectHash, { fsModule });
+          }
+          existing = true;
+        } catch (error) {
+          if (error?.code !== 'ENOENT'
+            && (!(error instanceof RecoveryPrimitiveError) || error.code !== 'object-corrupt')) throw error;
+          await fsPromises.unlink(target).catch(() => undefined);
+        }
+        if (existing) await fsPromises.unlink(temporaryPath);
+        else {
+          await fsPromises.rename(temporaryPath, target);
+          await fsPromises.chmod(target, 0o600);
+        }
+        trustedObjectHashes.add(objectHash);
+      });
       return {
         byteLength: Number(before.size),
         metadata: metadataFromStat(before),
@@ -433,21 +488,9 @@ export const createWorkspaceRecoveryEngine = ({
     }
   };
 
-  const insertEntry = (database, captureId, entry) => {
-    const collision = database.prepare(
-      'SELECT path FROM staged_entries WHERE capture_id = ? AND comparison_key = ? AND path <> ? LIMIT 1',
-    ).get(captureId, entry.comparisonKey, entry.path);
-    if (collision) {
-      database.prepare(
-        "UPDATE staged_entries SET coverage = 'unstable', reason = 'filesystem-comparison-collision' WHERE capture_id = ? AND path = ?",
-      ).run(captureId, collision.path);
-      entry = { ...entry, coverage: 'unstable', reason: 'filesystem-comparison-collision' };
-    }
-    database.prepare(INSERT_STAGED_ENTRY).run(entryRow(captureId, entry));
-  };
-
   const captureIntoCatalog = async (identity, storeRoot, input, validateCapture) => {
     const captureId = randomUUID();
+    throwIfAborted(input.signal);
     const database = await openRecoveryCatalog(storeRoot, { create: true, fsPromises });
     const startedAt = new Date().toISOString();
     recordCatalogOperation(database, {
@@ -476,7 +519,7 @@ export const createWorkspaceRecoveryEngine = ({
 
     const shouldExclude = (relativePath, absolutePath, directory = false) => {
       const segments = relativePath.split('/');
-      if (EXCLUDED_VCS_NAMES.has(segments.at(-1))) return 'vcs-administrative-store';
+      if (segments.some((segment) => EXCLUDED_VCS_NAMES.has(segment))) return 'vcs-administrative-store';
       if (RESTORE_AUXILIARY_NAME.test(segments.at(-1))) return 'piarium-restore-transaction';
       if (segments.length === 2 && segments[0] === '.piarium' && segments[1] === 'recovery') {
         return 'piarium-recovery-storage';
@@ -488,11 +531,61 @@ export const createWorkspaceRecoveryEngine = ({
       return null;
     };
 
+    const stagedEntries = new Map();
+    const fileTasks = createTaskPool(Math.max(2, availableParallelism()));
+    const pathByComparisonKey = new Map();
+    const trustedObjectHashes = new Set(database.prepare(
+      'SELECT DISTINCT object_hash FROM snapshot_entries WHERE object_hash IS NOT NULL',
+    ).all().map((row) => row.object_hash));
+    const insertEntry = (entry) => {
+      const collisionPath = pathByComparisonKey.get(entry.comparisonKey);
+      if (collisionPath && collisionPath !== entry.path) {
+        const collision = stagedEntries.get(collisionPath);
+        if (collision) {
+          stagedEntries.set(collisionPath, {
+            ...collision,
+            coverage: 'unstable',
+            reason: 'filesystem-comparison-collision',
+          });
+        }
+        entry = { ...entry, coverage: 'unstable', reason: 'filesystem-comparison-collision' };
+      } else {
+        pathByComparisonKey.set(entry.comparisonKey, entry.path);
+      }
+      stagedEntries.set(entry.path, entry);
+    };
+
+    const seedIncrementalCapture = async () => {
+      if (!input.baseSnapshotId) return;
+      if (!Array.isArray(input.changedResourceIds) || input.changedResourceIds.length === 0) {
+        throw new RecoveryPrimitiveError('invalid-request', 'Incremental capture requires changed workspace paths');
+      }
+      const base = await inspectStoredSnapshot(
+        database,
+        storeRoot,
+        identity.workspaceId,
+        input.baseSnapshotId,
+        { fsModule, verifyObjects: false },
+      );
+      if (base.availability !== 'ready') {
+        throw base.error ?? new RecoveryPrimitiveError('snapshot-incomplete', 'Incremental capture base is not ready');
+      }
+      for (const row of database.prepare(
+        'SELECT * FROM snapshot_entries WHERE snapshot_id = ? ORDER BY path COLLATE BINARY',
+      ).iterate(input.baseSnapshotId)) {
+        insertEntry(entryDtoFromRow(row));
+      }
+    };
+
+    const flushStagedEntries = () => database.transaction(() => {
+      const statement = database.prepare(INSERT_STAGED_ENTRY);
+      for (const entry of stagedEntries.values()) statement.run(entryRow(captureId, entry));
+    })();
+
     const markDirectoryUnstable = (relativePath, reason) => {
       const targetPath = relativePath || '.';
-      database.prepare(
-        "UPDATE staged_entries SET coverage = 'unstable', reason = ? WHERE capture_id = ? AND path = ?",
-      ).run(reason, captureId, targetPath);
+      const entry = stagedEntries.get(targetPath);
+      if (entry) stagedEntries.set(targetPath, { ...entry, coverage: 'unstable', reason });
     };
 
     const walkDirectory = async (absoluteDirectory, relativeDirectory, isRoot = false) => {
@@ -507,7 +600,7 @@ export const createWorkspaceRecoveryEngine = ({
         return;
       }
       if (isRoot) {
-        insertEntry(database, captureId, {
+        insertEntry({
           ...metadataFromStat(before),
           comparisonKey: comparisonKey('.'),
           coverage: 'present',
@@ -523,8 +616,9 @@ export const createWorkspaceRecoveryEngine = ({
         markDirectoryUnstable(relativeDirectory, `directory-read-failed:${error?.code ?? 'unknown'}`);
         return;
       }
-      for await (const directoryEntry of directory) {
-        await assertExistingInsideRoot(absoluteDirectory, identity.canonicalRoot);
+      const pendingFileTasks = [];
+      try {
+        for await (const directoryEntry of directory) {
         const relativePath = relativeDirectory
           ? `${relativeDirectory}/${directoryEntry.name}`
           : directoryEntry.name;
@@ -532,7 +626,7 @@ export const createWorkspaceRecoveryEngine = ({
         const absolutePath = pathModule.join(absoluteDirectory, directoryEntry.name);
         const exclusion = shouldExclude(portablePath, absolutePath, directoryEntry.isDirectory());
         if (exclusion) {
-          insertEntry(database, captureId, {
+          insertEntry({
             comparisonKey: comparisonKey(portablePath),
             coverage: 'excluded-unknown',
             kind: 'excluded',
@@ -545,7 +639,7 @@ export const createWorkspaceRecoveryEngine = ({
         try {
           stat = await fsPromises.lstat(absolutePath, { bigint: true });
         } catch (error) {
-          insertEntry(database, captureId, {
+          insertEntry({
             comparisonKey: comparisonKey(portablePath),
             coverage: 'unstable',
             kind: 'unsupported',
@@ -558,7 +652,7 @@ export const createWorkspaceRecoveryEngine = ({
         if (stat.isSymbolicLink()) {
           try {
             const symlinkTarget = portableSymlinkTarget(await fsPromises.readlink(absolutePath));
-            insertEntry(database, captureId, {
+            insertEntry({
               ...metadata,
               comparisonKey: comparisonKey(portablePath),
               coverage: 'present',
@@ -567,7 +661,7 @@ export const createWorkspaceRecoveryEngine = ({
               symlinkTarget,
             });
           } catch (error) {
-            insertEntry(database, captureId, {
+            insertEntry({
               ...metadata,
               comparisonKey: comparisonKey(portablePath),
               coverage: 'unstable',
@@ -579,7 +673,7 @@ export const createWorkspaceRecoveryEngine = ({
           continue;
         }
         if (stat.isDirectory()) {
-          insertEntry(database, captureId, {
+          insertEntry({
             ...metadata,
             comparisonKey: comparisonKey(portablePath),
             coverage: 'present',
@@ -590,34 +684,42 @@ export const createWorkspaceRecoveryEngine = ({
           continue;
         }
         if (stat.isFile()) {
-          try {
-            const stored = await storeRegularFile(absolutePath, identity.canonicalRoot, storeRoot, captureId);
-            insertEntry(database, captureId, {
-              ...stored.metadata,
-              byteLength: stored.byteLength,
-              comparisonKey: comparisonKey(portablePath),
-              coverage: 'present',
-              kind: 'regular-file',
-              objectHash: stored.objectHash,
-              path: portablePath,
-              ...(stored.platformMetadata ? { platformMetadata: stored.platformMetadata } : {}),
-            });
-          } catch (error) {
-            insertEntry(database, captureId, {
-              ...metadata,
-              byteLength: Number(stat.size),
-              comparisonKey: comparisonKey(portablePath),
-              coverage: 'unstable',
-              kind: 'regular-file',
-              path: portablePath,
-              reason: error instanceof RecoveryPrimitiveError
-                ? error.code
-                : `file-read-failed:${error?.code ?? 'unknown'}`,
-            });
-          }
+          pendingFileTasks.push(fileTasks.run(async () => {
+            try {
+              const stored = await storeRegularFile(
+                absolutePath,
+                identity.canonicalRoot,
+                storeRoot,
+                captureId,
+                trustedObjectHashes,
+              );
+              insertEntry({
+                ...stored.metadata,
+                byteLength: stored.byteLength,
+                comparisonKey: comparisonKey(portablePath),
+                coverage: 'present',
+                kind: 'regular-file',
+                objectHash: stored.objectHash,
+                path: portablePath,
+                ...(stored.platformMetadata ? { platformMetadata: stored.platformMetadata } : {}),
+              });
+            } catch (error) {
+              insertEntry({
+                ...metadata,
+                byteLength: Number(stat.size),
+                comparisonKey: comparisonKey(portablePath),
+                coverage: 'unstable',
+                kind: 'regular-file',
+                path: portablePath,
+                reason: error instanceof RecoveryPrimitiveError
+                  ? error.code
+                  : `file-read-failed:${error?.code ?? 'unknown'}`,
+              });
+            }
+          }));
           continue;
         }
-        insertEntry(database, captureId, {
+        insertEntry({
           ...metadata,
           comparisonKey: comparisonKey(portablePath),
           coverage: 'excluded-unknown',
@@ -625,7 +727,12 @@ export const createWorkspaceRecoveryEngine = ({
           path: portablePath,
           reason: 'unsupported-filesystem-entry',
         });
+        }
+      } catch (error) {
+        await Promise.allSettled(pendingFileTasks);
+        throw error;
       }
+      await Promise.all(pendingFileTasks);
       try {
         const after = await fsPromises.lstat(absoluteDirectory, { bigint: true });
         if (!compareStat(before, after)) markDirectoryUnstable(relativeDirectory, 'directory-changed-during-capture');
@@ -634,13 +741,175 @@ export const createWorkspaceRecoveryEngine = ({
       }
     };
 
+    const removeStagedSubtree = (relativePath) => {
+      for (const [candidate, entry] of stagedEntries) {
+        if (candidate !== relativePath && !candidate.startsWith(`${relativePath}/`)) continue;
+        stagedEntries.delete(candidate);
+        if (pathByComparisonKey.get(entry.comparisonKey) === candidate) {
+          pathByComparisonKey.delete(entry.comparisonKey);
+        }
+      }
+    };
+
+    const excludedStagedAncestor = (relativePath) => {
+      const segments = relativePath.split('/');
+      for (let length = segments.length - 1; length > 0; length -= 1) {
+        const ancestor = stagedEntries.get(segments.slice(0, length).join('/'));
+        if (ancestor?.kind === 'excluded' || ancestor?.coverage === 'excluded-unknown') return true;
+      }
+      return false;
+    };
+
+    const captureChangedPath = async (relativePath) => {
+      if (excludedStagedAncestor(relativePath)) return;
+      removeStagedSubtree(relativePath);
+      const absolutePath = pathModule.resolve(identity.canonicalRoot, ...relativePath.split('/'));
+      if (!pathIsInside(absolutePath, identity.canonicalRoot, pathModule)) {
+        throw new RecoveryPrimitiveError('workspace-untrusted', `Incremental capture path escapes workspace: ${relativePath}`);
+      }
+      let stat;
+      try {
+        stat = await fsPromises.lstat(absolutePath, { bigint: true });
+      } catch (error) {
+        if (error?.code === 'ENOENT') return;
+        insertEntry({
+          comparisonKey: comparisonKey(relativePath),
+          coverage: 'unstable',
+          kind: 'unsupported',
+          path: relativePath,
+          reason: `entry-unavailable:${error?.code ?? 'unknown'}`,
+        });
+        return;
+      }
+      const exclusion = shouldExclude(relativePath, absolutePath, stat.isDirectory());
+      if (exclusion) {
+        insertEntry({
+          comparisonKey: comparisonKey(relativePath),
+          coverage: 'excluded-unknown',
+          kind: 'excluded',
+          path: relativePath,
+          reason: exclusion,
+        });
+        return;
+      }
+      const metadata = metadataFromStat(stat);
+      if (stat.isSymbolicLink()) {
+        try {
+          insertEntry({
+            ...metadata,
+            comparisonKey: comparisonKey(relativePath),
+            coverage: 'present',
+            kind: 'symlink',
+            path: relativePath,
+            symlinkTarget: portableSymlinkTarget(await fsPromises.readlink(absolutePath)),
+          });
+        } catch (error) {
+          insertEntry({
+            ...metadata,
+            comparisonKey: comparisonKey(relativePath),
+            coverage: 'unstable',
+            kind: 'symlink',
+            path: relativePath,
+            reason: `symlink-read-failed:${error?.code ?? 'unknown'}`,
+          });
+        }
+        return;
+      }
+      if (stat.isDirectory()) {
+        insertEntry({
+          ...metadata,
+          comparisonKey: comparisonKey(relativePath),
+          coverage: 'present',
+          kind: 'directory',
+          path: relativePath,
+        });
+        await walkDirectory(absolutePath, relativePath);
+        return;
+      }
+      if (stat.isFile()) {
+        try {
+          const stored = await storeRegularFile(
+            absolutePath,
+            identity.canonicalRoot,
+            storeRoot,
+            captureId,
+            trustedObjectHashes,
+          );
+          insertEntry({
+            ...stored.metadata,
+            byteLength: stored.byteLength,
+            comparisonKey: comparisonKey(relativePath),
+            coverage: 'present',
+            kind: 'regular-file',
+            objectHash: stored.objectHash,
+            path: relativePath,
+            ...(stored.platformMetadata ? { platformMetadata: stored.platformMetadata } : {}),
+          });
+        } catch (error) {
+          insertEntry({
+            ...metadata,
+            byteLength: Number(stat.size),
+            comparisonKey: comparisonKey(relativePath),
+            coverage: 'unstable',
+            kind: 'regular-file',
+            path: relativePath,
+            reason: error instanceof RecoveryPrimitiveError
+              ? error.code
+              : `file-read-failed:${error?.code ?? 'unknown'}`,
+          });
+        }
+        return;
+      }
+      insertEntry({
+        ...metadata,
+        comparisonKey: comparisonKey(relativePath),
+        coverage: 'excluded-unknown',
+        kind: 'unsupported',
+        path: relativePath,
+        reason: 'unsupported-filesystem-entry',
+      });
+    };
+
+    const changedRoots = () => {
+      const normalized = [...new Set(input.changedResourceIds.map((value) => (
+        normalizeWorkspaceRelativePath(value)
+      )).filter(Boolean))].sort((left, right) => (
+        left.split('/').length - right.split('/').length || left.localeCompare(right)
+      ));
+      return normalized.filter((candidate, index) => !normalized.slice(0, index).some((ancestor) => (
+        candidate === ancestor || candidate.startsWith(`${ancestor}/`)
+      )));
+    };
+
     try {
-      await walkDirectory(identity.canonicalRoot, '', true);
+      if (input.baseSnapshotId) {
+        await seedIncrementalCapture();
+        for (const relativePath of changedRoots()) await captureChangedPath(relativePath);
+      } else {
+        await walkDirectory(identity.canonicalRoot, '', true);
+      }
+      throwIfAborted(input.signal);
+      flushStagedEntries();
       await faults.beforePublish?.({ captureId, database, root: storeRoot });
       for (const row of database.prepare(
-        'SELECT object_hash FROM staged_entries WHERE capture_id = ? AND object_hash IS NOT NULL ORDER BY path COLLATE BINARY',
+        `SELECT object_hash, MAX(byte_length) AS byte_length
+         FROM staged_entries
+         WHERE capture_id = ? AND object_hash IS NOT NULL
+         GROUP BY object_hash`,
       ).iterate(captureId)) {
-        await verifyRecoveryObject(storeRoot, row.object_hash, { fsModule });
+        throwIfAborted(input.signal);
+        let stat;
+        try {
+          stat = await fsPromises.stat(objectPath(storeRoot, row.object_hash));
+        } catch (error) {
+          if (error?.code === 'ENOENT') {
+            throw new RecoveryPrimitiveError('object-missing', `Recovery object is missing: ${row.object_hash}`);
+          }
+          throw error;
+        }
+        if (!stat.isFile() || stat.size !== row.byte_length) {
+          throw new RecoveryPrimitiveError('object-corrupt', `Recovery object has an unexpected size: ${row.object_hash}`);
+        }
       }
       const validation = await validateCapture();
       const witness = {
@@ -663,7 +932,7 @@ export const createWorkspaceRecoveryEngine = ({
       const incomplete = counts.unstable > 0 || counts.unsupported > 0;
       const snapshotId = randomUUID();
       const createdAt = new Date().toISOString();
-      const parent = database.prepare(
+      const parent = input.baseSnapshotId ?? database.prepare(
         'SELECT id FROM snapshots WHERE workspace_id = ? ORDER BY sequence DESC LIMIT 1',
       ).get(identity.workspaceId)?.id ?? null;
       const sequence = (database.prepare(
@@ -1490,6 +1759,7 @@ export const createWorkspaceRecoveryEngine = ({
     let capture;
     let captureCompleted = false;
     try {
+      throwIfAborted(input.signal);
       const identity = await inspectIdentity(input.workspaceId);
       const storage = await storageFor(identity);
       if (input.reuseIfUnchanged) {

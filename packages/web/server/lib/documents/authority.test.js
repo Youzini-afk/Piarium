@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthority } from './authority.js';
 import { createDocumentAuthorityHarness, defineDocumentAuthorityContract } from './contract-fixtures.js';
 
@@ -67,6 +67,18 @@ it('keeps an admitted workspace usable after the mutable root selection changes'
       code: 'path-escape',
       statusCode: 403,
     });
+  } finally {
+    await Promise.allSettled([peer.dispose(), harness.cleanup()]);
+  }
+});
+
+it('notifies a workspace observer after a path receives its Host identity', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const onWorkspaceResolved = vi.fn();
+  const peer = createPeerAuthority(harness, { onWorkspaceResolved });
+  try {
+    const resolved = await peer.resolveWorkspace({ path: harness.workspaceRoot });
+    await vi.waitFor(() => expect(onWorkspaceResolved).toHaveBeenCalledWith(resolved));
   } finally {
     await Promise.allSettled([peer.dispose(), harness.cleanup()]);
   }

@@ -1,5 +1,9 @@
 import { openRecoveryCatalog } from './catalog.js';
 import { RecoveryPrimitiveError } from './errors.js';
+import {
+  encodeWorkspaceWitness,
+  normalizeWorkspaceWitness,
+} from './witness.js';
 
 const parseStoredJson = (value, fallback) => {
   if (typeof value !== 'string' || !value) return fallback;
@@ -8,6 +12,11 @@ const parseStoredJson = (value, fallback) => {
   } catch {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery binding metadata is malformed');
   }
+};
+
+const parseStoredWitness = (value) => {
+  if (typeof value !== 'string' || !value) return null;
+  return normalizeWorkspaceWitness(parseStoredJson(value, null));
 };
 
 const bindingFromRow = (row) => ({
@@ -23,8 +32,10 @@ const bindingFromRow = (row) => ({
   workerId: row.worker_id,
   workspaceId: row.workspace_id,
   ...(row.after_snapshot_id ? { afterSnapshotId: row.after_snapshot_id } : {}),
+  ...(row.after_witness_json ? { afterWitness: parseStoredWitness(row.after_witness_json) } : {}),
   ...(row.assistant_entry_id ? { assistantEntryId: row.assistant_entry_id } : {}),
   ...(row.before_snapshot_id ? { beforeSnapshotId: row.before_snapshot_id } : {}),
+  ...(row.before_witness_json ? { beforeWitness: parseStoredWitness(row.before_witness_json) } : {}),
   ...(row.failure_json ? { failure: parseStoredJson(row.failure_json, null) } : {}),
   ...(row.settled_at ? { settledAt: row.settled_at } : {}),
 });
@@ -76,15 +87,16 @@ export const createRecoveryBindingStore = ({ fsPromises, inspectIdentity, storag
           throw new RecoveryPrimitiveError('invalid-request', 'Session entry is already bound to another turn');
         }
         const before = snapshotRow(database, identity.workspaceId, input.beforeSnapshotId);
-        const ready = before?.availability === 'ready' && !input.failure;
+        const ready = (before?.availability === 'ready' || input.beforeWitness) && !input.failure;
         const startedAt = new Date().toISOString();
         database.transaction(() => {
           database.prepare(`
             INSERT INTO turn_bindings(
               execution_id, runtime_key, runtime_generation, worker_id, session_id, workspace_id,
               user_entry_id, assistant_entry_id, before_snapshot_id, after_snapshot_id,
+              before_witness_json, after_witness_json,
               active_writer_scopes_json, provenance, status, failure_json, started_at, settled_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, NULL)
           `).run(
             input.executionId,
             `${input.runtimeGeneration}:${input.workerId}`,
@@ -94,6 +106,7 @@ export const createRecoveryBindingStore = ({ fsPromises, inspectIdentity, storag
             input.workspaceId,
             input.userEntryId,
             input.beforeSnapshotId ?? null,
+            input.beforeWitness ? JSON.stringify(normalizeWorkspaceWitness(input.beforeWitness)) : null,
             JSON.stringify(mergeWriterScopes(input.activeWriterScopes)),
             input.provenance,
             ready ? 'pending' : 'incomplete',
@@ -133,10 +146,12 @@ export const createRecoveryBindingStore = ({ fsPromises, inspectIdentity, storag
         }
         const after = snapshotRow(database, existing.workspace_id, input.afterSnapshotId);
         const before = snapshotRow(database, existing.workspace_id, existing.before_snapshot_id);
+        const beforeWitness = parseStoredWitness(existing.before_witness_json);
+        const afterWitness = input.afterWitness ? normalizeWorkspaceWitness(input.afterWitness) : null;
         const ready = Boolean(
           input.assistantEntryId
-          && before?.availability === 'ready'
-          && after?.availability === 'ready'
+          && ((before?.availability === 'ready' && after?.availability === 'ready')
+            || (beforeWitness && afterWitness))
           && !input.failure
           && !existing.failure_json,
         );
@@ -144,12 +159,13 @@ export const createRecoveryBindingStore = ({ fsPromises, inspectIdentity, storag
         database.transaction(() => {
           database.prepare(`
             UPDATE turn_bindings SET
-              assistant_entry_id = ?, after_snapshot_id = ?, active_writer_scopes_json = ?,
+              assistant_entry_id = ?, after_snapshot_id = ?, after_witness_json = ?, active_writer_scopes_json = ?,
               provenance = ?, status = ?, failure_json = ?, settled_at = ?
             WHERE execution_id = ?
           `).run(
             input.assistantEntryId ?? null,
             input.afterSnapshotId ?? null,
+            afterWitness ? JSON.stringify(afterWitness) : null,
             JSON.stringify(mergeWriterScopes(
               parseStoredJson(existing.active_writer_scopes_json, []),
               input.activeWriterScopes,
@@ -194,12 +210,24 @@ export const createRecoveryBindingStore = ({ fsPromises, inspectIdentity, storag
         const binding = bindingFromRow(row);
         const position = row.user_entry_id === input.entryId ? 'before' : 'after';
         const snapshotId = position === 'before' ? row.before_snapshot_id : row.after_snapshot_id;
-        if (!snapshotId) return { binding, reason: 'snapshot-incomplete', status: 'incomplete' };
-        const snapshot = snapshotRow(database, row.workspace_id, snapshotId);
-        if (snapshot.availability !== 'ready') {
-          return { binding, reason: 'snapshot-incomplete', status: 'incomplete' };
+        if (snapshotId) {
+          const snapshot = snapshotRow(database, row.workspace_id, snapshotId);
+          if (snapshot.availability === 'ready') {
+            return { binding, position, snapshotId, status: 'ready' };
+          }
         }
-        return { binding, position, snapshotId, status: 'ready' };
+        const witness = position === 'before'
+          ? parseStoredWitness(row.before_witness_json)
+          : parseStoredWitness(row.after_witness_json);
+        if (binding.status === 'ready' && witness) {
+          return {
+            binding,
+            position,
+            snapshotId: encodeWorkspaceWitness(witness),
+            status: 'ready',
+          };
+        }
+        return { binding, reason: 'snapshot-incomplete', status: 'incomplete' };
       } finally {
         database.close();
       }

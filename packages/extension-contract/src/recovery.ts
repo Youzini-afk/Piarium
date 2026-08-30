@@ -141,6 +141,8 @@ export interface WorkspaceRecoverySnapshotManifest {
 }
 
 export interface WorkspaceRecoveryCaptureInput {
+  baseSnapshotId?: string;
+  changedResourceIds?: string[];
   label?: string;
   reuseIfUnchanged?: boolean;
   source?: WorkspaceRecoverySnapshotSource;
@@ -158,6 +160,7 @@ export type WorkspaceRecoveryTurnProvenance = "caused-by" | "observed-during" | 
 export interface WorkspaceRecoveryTurnStartInput {
   activeWriterScopes: string[];
   beforeSnapshotId?: string;
+  beforeWitness?: WorkspaceRecoveryCaptureWitness;
   executionId: string;
   failure?: WorkspaceRecoveryFailure;
   provenance: WorkspaceRecoveryTurnProvenance;
@@ -171,6 +174,7 @@ export interface WorkspaceRecoveryTurnStartInput {
 export interface WorkspaceRecoveryTurnSettledInput {
   activeWriterScopes: string[];
   afterSnapshotId?: string;
+  afterWitness?: WorkspaceRecoveryCaptureWitness;
   assistantEntryId?: string;
   executionId: string;
   failure?: WorkspaceRecoveryFailure;
@@ -181,8 +185,10 @@ export interface WorkspaceRecoveryTurnSettledInput {
 export interface WorkspaceRecoveryTurnBinding {
   activeWriterScopes: string[];
   afterSnapshotId?: string;
+  afterWitness?: WorkspaceRecoveryCaptureWitness;
   assistantEntryId?: string;
   beforeSnapshotId?: string;
+  beforeWitness?: WorkspaceRecoveryCaptureWitness;
   executionId: string;
   failure?: WorkspaceRecoveryFailure;
   provenance: WorkspaceRecoveryTurnProvenance;
@@ -796,6 +802,11 @@ export const parseWorkspaceRecoverySnapshotManifest = (value: unknown): Workspac
   };
 };
 
+const writerScopes = (value: unknown, label: string): string[] => {
+  if (!Array.isArray(value)) throw new WorkspaceRecoveryContractError(`${label} must be an array`);
+  return [...new Set(value.map((item, index) => text(item, `${label}[${index}]`)))].sort();
+};
+
 export const parseWorkspaceRecoveryCaptureInput = (value: unknown): WorkspaceRecoveryCaptureInput => {
   const raw = record(value, "Workspace recovery capture input");
   if (raw.reuseIfUnchanged !== undefined && typeof raw.reuseIfUnchanged !== "boolean") {
@@ -803,6 +814,12 @@ export const parseWorkspaceRecoveryCaptureInput = (value: unknown): WorkspaceRec
   }
   return {
     workspaceId: text(raw.workspaceId, "capture.workspaceId"),
+    ...(optionalText(raw.baseSnapshotId, "capture.baseSnapshotId")
+      ? { baseSnapshotId: raw.baseSnapshotId as string }
+      : {}),
+    ...(raw.changedResourceIds === undefined
+      ? {}
+      : { changedResourceIds: writerScopes(raw.changedResourceIds, "capture.changedResourceIds") }),
     ...(optionalText(raw.label, "capture.label") ? { label: raw.label as string } : {}),
     ...(raw.reuseIfUnchanged === undefined ? {} : { reuseIfUnchanged: raw.reuseIfUnchanged }),
     ...(raw.source === undefined ? {} : { source: oneOf(raw.source, SOURCES, "capture.source") }),
@@ -816,11 +833,6 @@ export const parseWorkspaceRecoveryCaptureWitness = (value: unknown): WorkspaceR
     mutationRevision: positive(raw.mutationRevision, "witness.mutationRevision"),
     writerRevision: positive(raw.writerRevision, "witness.writerRevision"),
   };
-};
-
-const writerScopes = (value: unknown, label: string): string[] => {
-  if (!Array.isArray(value)) throw new WorkspaceRecoveryContractError(`${label} must be an array`);
-  return [...new Set(value.map((item, index) => text(item, `${label}[${index}]`)))].sort();
 };
 
 export const parseWorkspaceRecoveryTurnStartInput = (value: unknown): WorkspaceRecoveryTurnStartInput => {
@@ -837,6 +849,9 @@ export const parseWorkspaceRecoveryTurnStartInput = (value: unknown): WorkspaceR
     ...(optionalText(raw.beforeSnapshotId, "turn.beforeSnapshotId")
       ? { beforeSnapshotId: raw.beforeSnapshotId as string }
       : {}),
+    ...(raw.beforeWitness === undefined
+      ? {}
+      : { beforeWitness: parseWorkspaceRecoveryCaptureWitness(raw.beforeWitness) }),
     ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
   };
 };
@@ -851,6 +866,9 @@ export const parseWorkspaceRecoveryTurnSettledInput = (value: unknown): Workspac
     ...(optionalText(raw.afterSnapshotId, "turn.afterSnapshotId")
       ? { afterSnapshotId: raw.afterSnapshotId as string }
       : {}),
+    ...(raw.afterWitness === undefined
+      ? {}
+      : { afterWitness: parseWorkspaceRecoveryCaptureWitness(raw.afterWitness) }),
     ...(optionalText(raw.assistantEntryId, "turn.assistantEntryId")
       ? { assistantEntryId: raw.assistantEntryId as string }
       : {}),
@@ -1257,12 +1275,18 @@ export const parseWorkspaceRecoveryTurnBinding = (value: unknown): WorkspaceReco
     ...(optionalText(raw.afterSnapshotId, "binding.afterSnapshotId")
       ? { afterSnapshotId: raw.afterSnapshotId as string }
       : {}),
+    ...(raw.afterWitness === undefined
+      ? {}
+      : { afterWitness: parseWorkspaceRecoveryCaptureWitness(raw.afterWitness) }),
     ...(optionalText(raw.assistantEntryId, "binding.assistantEntryId")
       ? { assistantEntryId: raw.assistantEntryId as string }
       : {}),
     ...(optionalText(raw.beforeSnapshotId, "binding.beforeSnapshotId")
       ? { beforeSnapshotId: raw.beforeSnapshotId as string }
       : {}),
+    ...(raw.beforeWitness === undefined
+      ? {}
+      : { beforeWitness: parseWorkspaceRecoveryCaptureWitness(raw.beforeWitness) }),
     ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
     ...(optionalText(raw.settledAt, "binding.settledAt") ? { settledAt: raw.settledAt as string } : {}),
   };

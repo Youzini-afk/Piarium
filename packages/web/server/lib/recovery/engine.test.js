@@ -147,6 +147,52 @@ describe('native workspace recovery Phase 1 engine', () => {
     ]));
   });
 
+  it('builds a validated turn checkpoint from watcher paths without rescanning unchanged files', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'changed.txt'), 'before');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'deleted.txt'), 'deleted');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'untouched.txt'), 'untouched');
+    const baseline = await engine.captureSnapshot({
+      source: 'baseline',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(baseline).toMatchObject({ status: 'captured', snapshot: { availability: 'ready' } });
+    const baselineManifest = await engine.readSnapshot({
+      snapshotId: baseline.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    const baselineUntouched = baselineManifest.manifest.entries
+      .find((entry) => entry.path === 'untouched.txt');
+
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'changed.txt'), 'after');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'created.txt'), 'created');
+    await fs.promises.unlink(path.join(harness.workspaceRoot, 'deleted.txt'));
+    const incremental = await engine.captureSnapshot({
+      baseSnapshotId: baseline.snapshot.id,
+      changedResourceIds: ['changed.txt', 'created.txt', 'deleted.txt'],
+      source: 'turn-after',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(incremental).toMatchObject({
+      status: 'captured',
+      snapshot: {
+        availability: 'ready',
+        parentSnapshotId: baseline.snapshot.id,
+      },
+    });
+    const read = await engine.readSnapshot({
+      snapshotId: incremental.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    const byPath = new Map(read.manifest.entries.map((entry) => [entry.path, entry]));
+    expect(byPath.get('changed.txt')?.objectHash).not.toBe(
+      baselineManifest.manifest.entries.find((entry) => entry.path === 'changed.txt')?.objectHash,
+    );
+    expect(byPath.get('created.txt')).toMatchObject({ kind: 'regular-file', coverage: 'present' });
+    expect(byPath.has('deleted.txt')).toBe(false);
+    expect(byPath.get('untouched.txt')?.objectHash).toBe(baselineUntouched?.objectHash);
+  });
+
   it('publishes incomplete coverage for unsupported entries instead of silently omitting them', async () => {
     const real = fs.promises;
     let workspaceRoot = '';
@@ -1060,6 +1106,107 @@ describe('native workspace recovery Phase 1 engine', () => {
       operationId: prepared.plan.id,
     })).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
     await expect(fs.promises.readFile(path.join(destination, 'note.txt'), 'utf8')).resolves.toBe('target');
+  });
+
+  it('coordinates a zero-file-change turn without requiring a full workspace snapshot', async () => {
+    const navigation = {
+      commit: vi.fn(async () => ({
+        alreadyApplied: false,
+        editorText: 'original prompt',
+        navigationMarkerId: 'no-op-navigation-marker',
+      })),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    const state = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    const witness = {
+      epoch: state.epoch,
+      mutationRevision: state.mutationRevision,
+      writerRevision: state.writerRevision,
+    };
+    await engine.recordTurnStart({
+      activeWriterScopes: [],
+      beforeWitness: witness,
+      executionId: 'no-op-execution',
+      provenance: 'observed-during',
+      runtimeGeneration: 1,
+      sessionId: 'no-op-session',
+      userEntryId: 'no-op-user',
+      workerId: 'no-op-worker',
+      workspaceId: harness.identity.workspaceId,
+    });
+    await engine.recordTurnSettled({
+      activeWriterScopes: [],
+      afterWitness: witness,
+      assistantEntryId: 'no-op-assistant',
+      executionId: 'no-op-execution',
+      provenance: 'observed-during',
+      workspaceId: harness.identity.workspaceId,
+    });
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'no-op-user',
+      sessionId: 'no-op-session',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared).toMatchObject({
+      status: 'ready',
+      plan: {
+        allowedModes: ['in-place'],
+        restore: { operationCount: 0, totalBytes: 0 },
+      },
+    });
+    expect((await engine.listSnapshots({ workspaceId: harness.identity.workspaceId })).page.snapshots).toEqual([]);
+
+    expect(await engine.applyCombinedRecovery({
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    })).toMatchObject({
+      status: 'ready',
+      operation: {
+        conversationState: 'navigated',
+        state: 'complete',
+        workspaceState: 'restored',
+      },
+    });
+    expect(navigation.commit).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a witness-only rollback after workspace content changes', async () => {
+    const navigation = {
+      commit: vi.fn(),
+      prepare: vi.fn(async () => ({ expectedLeafId: 'current-leaf', targetLeafId: null })),
+    };
+    const { engine, harness } = await createHarness({ sessionNavigation: navigation });
+    const state = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    const witness = {
+      epoch: state.epoch,
+      mutationRevision: state.mutationRevision,
+      writerRevision: state.writerRevision,
+    };
+    await engine.recordTurnStart({
+      activeWriterScopes: [], beforeWitness: witness, executionId: 'stale-witness-execution',
+      provenance: 'observed-during', runtimeGeneration: 1, sessionId: 'stale-witness-session',
+      userEntryId: 'stale-witness-user', workerId: 'stale-witness-worker',
+      workspaceId: harness.identity.workspaceId,
+    });
+    await engine.recordTurnSettled({
+      activeWriterScopes: [], afterWitness: witness, assistantEntryId: 'stale-witness-assistant',
+      executionId: 'stale-witness-execution', provenance: 'observed-during',
+      workspaceId: harness.identity.workspaceId,
+    });
+    await harness.authority.write({
+      token: harness.token(), resource: harness.resource('changed.txt'), content: 'changed',
+      encoding: 'utf-8', bom: false, expectedRevision: null,
+      operationId: 'stale-witness-write',
+    });
+
+    expect(await engine.prepareCombinedRecovery({
+      entryId: 'stale-witness-user',
+      sessionId: 'stale-witness-session',
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({ status: 'failed', failure: { code: 'snapshot-incomplete' } });
+    expect(navigation.commit).not.toHaveBeenCalled();
   });
 
   it('coordinates an in-place workspace restore with one durable expected-leaf navigation', async () => {

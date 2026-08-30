@@ -103,6 +103,8 @@ const SCHEMA = `
     assistant_entry_id TEXT,
     before_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
     after_snapshot_id TEXT REFERENCES snapshots(id) ON DELETE SET NULL,
+    before_witness_json TEXT,
+    after_witness_json TEXT,
     active_writer_scopes_json TEXT NOT NULL,
     provenance TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -143,6 +145,15 @@ const initialize = (database) => {
   } else if (schema.value !== String(RECOVERY_CATALOG_SCHEMA_VERSION)) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog schema version is unsupported');
   }
+  database.transaction(() => {
+    const columns = new Set(database.pragma('table_info(turn_bindings)').map((column) => column.name));
+    if (!columns.has('before_witness_json')) {
+      database.exec('ALTER TABLE turn_bindings ADD COLUMN before_witness_json TEXT');
+    }
+    if (!columns.has('after_witness_json')) {
+      database.exec('ALTER TABLE turn_bindings ADD COLUMN after_witness_json TEXT');
+    }
+  })();
 };
 
 export const ensureRecoveryStoreLayout = async (root, fsPromises = fs.promises) => {

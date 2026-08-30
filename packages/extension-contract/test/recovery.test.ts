@@ -8,11 +8,13 @@ import {
   parseRecoveryStorageLocation,
   parseRecoveryStorageStatus,
   parseRecoveryStorageWorkspaceSummary,
+  parseWorkspaceRecoveryCaptureInput,
   parseWorkspaceRecoveryCaptureResult,
   parseWorkspaceRecoveryEntryBindingResult,
   parseWorkspaceRecoveryManifestEntry,
   parseWorkspaceRecoveryReadResult,
   parseWorkspaceRecoverySnapshotSummary,
+  parseWorkspaceRecoveryTurnBinding,
 } from "../src/index.js";
 
 const summary = (availability = "ready") => ({
@@ -116,6 +118,17 @@ test("keeps missing, malformed, incomplete, and corrupt snapshot results distinc
 });
 
 test("keeps capture witnesses and entry bindings explicit", () => {
+  assert.deepEqual(parseWorkspaceRecoveryCaptureInput({
+    baseSnapshotId: "snapshot-1",
+    changedResourceIds: ["src/b.ts", "src/a.ts", "src/a.ts"],
+    source: "turn-after",
+    workspaceId: "workspace-1",
+  }), {
+    baseSnapshotId: "snapshot-1",
+    changedResourceIds: ["src/a.ts", "src/b.ts"],
+    source: "turn-after",
+    workspaceId: "workspace-1",
+  });
   const captured = parseWorkspaceRecoveryCaptureResult({
     reused: false,
     snapshot: summary(),
@@ -134,6 +147,28 @@ test("keeps capture witnesses and entry bindings explicit", () => {
   }), {
     reason: "entry-unbound",
     status: "unbound",
+  });
+  const binding = parseWorkspaceRecoveryTurnBinding({
+    activeWriterScopes: [],
+    afterWitness: { epoch: 1, mutationRevision: 2, writerRevision: 5 },
+    beforeWitness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
+    executionId: "execution-1",
+    provenance: "observed-during",
+    runtimeGeneration: 1,
+    runtimeKey: "1:worker-1",
+    sessionId: "session-1",
+    startedAt: "2026-08-30T00:00:00.000Z",
+    status: "ready",
+    userEntryId: "user-1",
+    workerId: "worker-1",
+    workspaceId: "workspace-1",
+  });
+  assert.deepEqual({
+    afterWitness: binding.afterWitness,
+    beforeWitness: binding.beforeWitness,
+  }, {
+    afterWitness: { epoch: 1, mutationRevision: 2, writerRevision: 5 },
+    beforeWitness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
   });
 });
 

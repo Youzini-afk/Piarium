@@ -96,6 +96,11 @@ describe('Pi workspace writer tracker', () => {
       workerId: 'worker-1',
     });
     await lease.close();
+    await expect(tracker.waitForIdle('worker-1')).resolves.toEqual({
+      changedResourceIds: [],
+      coverageComplete: true,
+      mutationObserved: false,
+    });
 
     expect(settle).toHaveBeenCalledOnce();
     expect(markMutated).not.toHaveBeenCalled();
@@ -127,11 +132,52 @@ describe('Pi workspace writer tracker', () => {
       sessionId: 'session-1',
       workerId: 'worker-1',
     });
-    onWorkspaceEvent({ kind: 'changed' });
+    onWorkspaceEvent({
+      kind: 'changed',
+      resource: { resourceId: 'src/changed.ts', workspaceId: 'workspace-1' },
+    });
     await lease.close();
 
     expect(markMutated).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
+    await expect(tracker.waitForIdle('worker-1')).resolves.toEqual({
+      changedResourceIds: ['src/changed.ts'],
+      coverageComplete: true,
+      mutationObserved: true,
+    });
+  });
+
+  it('falls back from incremental coverage when the workspace watcher resets', async () => {
+    let onWorkspaceEvent = () => {};
+    const tracker = createPiWorkspaceWriterTracker({
+      documents: {
+        registerWriterForScope: vi.fn(async () => ({
+          close: vi.fn(async () => undefined),
+          markMutated: vi.fn(async () => undefined),
+        })),
+        resolveScopeId: vi.fn(async () => 'workspace-1'),
+        watch: vi.fn((_workspaceId, listener) => {
+          onWorkspaceEvent = listener;
+          return {
+            close: vi.fn(),
+            ready: Promise.resolve(true),
+            settle: vi.fn(async () => undefined),
+          };
+        }),
+      },
+    });
+    const lease = await tracker.admit({
+      cwd: 'D:/workspace',
+      sessionId: 'session-1',
+      workerId: 'worker-1',
+    });
+    onWorkspaceEvent({ kind: 'reset', reason: 'overflow' });
+    await lease.close();
+
+    await expect(tracker.waitForIdle('worker-1')).resolves.toMatchObject({
+      coverageComplete: false,
+      mutationObserved: true,
+    });
   });
 
   it('waits for a closing writer before admitting a replacement lease', async () => {
