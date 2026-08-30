@@ -206,6 +206,25 @@ describe('affected-file workspace recovery journal', () => {
     expect(prepared.plan).toMatchObject({ affectedPaths: [], coverage: 'ready' });
   });
 
+  it('rejects an absolute mutation path that does not resolve inside the workspace', async () => {
+    const { engine, harness } = await createHarness();
+    await startTurn(engine, harness);
+
+    const result = await engine.recordMutationBefore({
+      executionId: 'execution-1',
+      mutationId: 'mutation-outside',
+      path: path.join(harness.root, 'outside.txt'),
+      toolCallId: 'tool-outside',
+      toolName: 'write',
+      workspaceId: harness.identity.workspaceId,
+    });
+
+    expect(result).toMatchObject({
+      failure: { code: 'workspace-untrusted', retryable: false },
+      status: 'failed',
+    });
+  });
+
   it('detects later user edits per path and overwrites only after an explicit choice', async () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');

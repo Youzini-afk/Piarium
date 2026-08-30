@@ -6,6 +6,7 @@ import { RecoveryPrimitiveError } from './errors.js';
 import {
   assertAbsolutePathInWorkspace,
   resolveWorkspacePath,
+  WorkspacePathError,
 } from '../workspace/path-safety.js';
 
 export const normalizeResourceId = (value) => String(value || '')
@@ -31,36 +32,37 @@ const statStable = (before, after) => (
   && before.mtimeMs === after.mtimeMs
 );
 
-const pathInside = (candidate, root, pathModule) => {
-  const relative = pathModule.relative(root, candidate);
-  return relative && relative !== '.' && !relative.startsWith('..') && !pathModule.isAbsolute(relative);
-};
-
 export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promises, pathModule = path } = {}) => {
   const relativePathFor = async (identity, inputPath) => {
-    const absolute = pathModule.isAbsolute(inputPath)
-      ? pathModule.resolve(inputPath)
-      : pathModule.resolve(identity.canonicalRoot, inputPath);
-    if (!pathInside(absolute, identity.canonicalRoot, pathModule)) {
-      throw new RecoveryPrimitiveError('workspace-untrusted', `Recovery path is outside the workspace: ${inputPath}`);
+    let contained;
+    try {
+      contained = pathModule.isAbsolute(inputPath)
+        ? await assertAbsolutePathInWorkspace(inputPath, {
+            allowMissing: true,
+            fsPromises,
+            pathModule,
+            root: identity.canonicalRoot,
+          })
+        : await resolveWorkspacePath(normalizeResourceId(inputPath), {
+            allowMissing: true,
+            fsPromises,
+            pathModule,
+            root: identity.canonicalRoot,
+          });
+    } catch (error) {
+      if (error instanceof WorkspacePathError) {
+        throw new RecoveryPrimitiveError(
+          'workspace-untrusted',
+          `Recovery path is outside the workspace: ${inputPath}`,
+          { cause: error },
+        );
+      }
+      throw error;
     }
-    const relative = normalizeResourceId(pathModule.relative(identity.canonicalRoot, absolute));
+    const relative = normalizeResourceId(contained.relativePath);
     if (!relative || relative === '.' || relative.split('/').includes('..')) {
       throw new RecoveryPrimitiveError('workspace-untrusted', `Recovery path is invalid: ${inputPath}`);
     }
-    const contained = pathModule.isAbsolute(inputPath)
-      ? await assertAbsolutePathInWorkspace(absolute, {
-          allowMissing: true,
-          fsPromises,
-          pathModule,
-          root: identity.canonicalRoot,
-        })
-      : await resolveWorkspacePath(relative, {
-          allowMissing: true,
-          fsPromises,
-          pathModule,
-          root: identity.canonicalRoot,
-        });
     return { absolute: contained.absolutePath, relative };
   };
 

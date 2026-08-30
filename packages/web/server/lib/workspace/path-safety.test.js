@@ -98,6 +98,28 @@ describe('workspace path safety', () => {
     expect(result.realPath).toBe('/canonical/workspace/note.txt');
   });
 
+  it('accepts an absolute child whose workspace prefix uses a different filesystem alias', async () => {
+    const { assertAbsolutePathInWorkspace } = await loadPathSafetyModule();
+    const aliases = new Map([
+      ['/short/workspace', '/canonical/workspace'],
+      ['/short/workspace/note.txt', '/canonical/workspace/note.txt'],
+      ['/canonical/workspace', '/canonical/workspace'],
+      ['/canonical/workspace/note.txt', '/canonical/workspace/note.txt'],
+    ]);
+    const fsPromises = {
+      realpath: async (targetPath) => aliases.get(targetPath) ?? targetPath,
+    };
+
+    const result = await assertAbsolutePathInWorkspace('/short/workspace/note.txt', {
+      root: '/canonical/workspace',
+      fsPromises,
+      pathModule: path.posix,
+    });
+
+    expect(result.relativePath).toBe('note.txt');
+    expect(result.absolutePath).toBe('/canonical/workspace/note.txt');
+  });
+
   it('canonicalizes a missing child through the nearest existing parent identity', async () => {
     const { canonicalizePathIdentity } = await loadPathSafetyModule();
     const fsPromises = {

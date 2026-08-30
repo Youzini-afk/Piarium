@@ -199,10 +199,35 @@ export const assertAbsolutePathInWorkspace = async (absolutePathValue, options) 
 
   const rootPath = pathModule.resolve(root);
   const absolutePath = pathModule.resolve(absolutePathValue);
-  if (!isPathWithinRoot(absolutePath, rootPath, pathModule)) {
-    throw new WorkspacePathError('Path is outside workspace', 403);
+  let relative;
+  if (isPathWithinRoot(absolutePath, rootPath, pathModule)) {
+    relative = pathModule.relative(rootPath, absolutePath);
+  } else {
+    const rootRealPath = await realpathOrResolved(rootPath, fsPromises, pathModule);
+    const rootIdentity = normalizePathIdentity(rootRealPath, { pathModule });
+    const suffix = [];
+    let current = absolutePath;
+    for (;;) {
+      try {
+        const currentRealPath = await fsPromises.realpath(current);
+        if (normalizePathIdentity(currentRealPath, { pathModule }) === rootIdentity) {
+          relative = suffix.reverse().join(pathModule.sep);
+          break;
+        }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+      const parent = pathModule.dirname(current);
+      if (parent === current) break;
+      suffix.push(pathModule.basename(current));
+      current = parent;
+    }
   }
-
-  const relative = pathModule.relative(rootPath, absolutePath).replace(/\\/g, '/');
-  return resolveWorkspacePath(relative, { root, fsPromises, pathModule, allowMissing });
+  if (relative === undefined) throw new WorkspacePathError('Path is outside workspace', 403);
+  return resolveWorkspacePath(relative.replace(/\\/g, '/'), {
+    root,
+    fsPromises,
+    pathModule,
+    allowMissing,
+  });
 };
