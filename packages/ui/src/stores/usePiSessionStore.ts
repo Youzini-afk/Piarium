@@ -462,6 +462,12 @@ export const reducePiAgentEvent = (
       next.activityStartedAt = current.activityStartedAt ?? now;
       delete next.settledActivityDurationMs;
       next.snapshot = updateSnapshot(current.snapshot, { busy: true });
+      if (
+        current.submission?.mode === 'prompt'
+        && (current.submission.status === 'preparing' || current.submission.status === 'dispatching')
+      ) {
+        next.submission = { ...current.submission, status: 'accepted' };
+      }
       return next;
     case 'agent_settled':
       if (current.activityStartedAt !== undefined) {

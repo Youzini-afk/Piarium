@@ -68,6 +68,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "extension.ui.respond",
   "provider.auth.respond",
   "project.trust.respond",
+  "workspace.mutation.respond",
 ]);
 
 const COMMON_ROLE_METHODS = new Set<HostMethod>(["host.handshake", "host.shutdown"]);
@@ -465,6 +466,9 @@ export class HostController {
     switch (request.method) {
       case "host.handshake": {
         const versions = params.protocolVersions;
+        const clientCapabilities = params.capabilities === undefined
+          ? undefined
+          : expectRecord(params.capabilities, "capabilities");
         if (
           !Array.isArray(versions) ||
           versions.some((version) => !Number.isSafeInteger(version))
@@ -480,6 +484,10 @@ export class HostController {
             `Client does not support Piarium protocol v${PIARIUM_PROTOCOL_VERSION}`,
           );
         }
+        this.#sessionHost.setWorkspaceMutationJournalEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "workspaceMutationJournal", { optional: true }) === true,
+        );
         return {
           capabilities: HOST_CAPABILITIES,
           hostVersion: PIARIUM_HOST_VERSION,
@@ -989,6 +997,14 @@ export class HostController {
             requestId: readString(params, "requestId"),
             trusted: readBoolean(params, "trusted"),
           }),
+        };
+      case "workspace.mutation.respond":
+        return {
+          accepted: this.#sessionHost.respondWorkspaceMutation(
+            readString(params, "sessionId"),
+            readString(params, "requestId"),
+            readBoolean(params, "accepted"),
+          ),
         };
       default:
         throw new HostError("method_not_found", `Unknown host method: ${methodName}`);

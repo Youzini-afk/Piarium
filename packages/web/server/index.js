@@ -831,32 +831,14 @@ async function main(options = {}) {
     readSettings: readSettingsFromDisk,
     getWorkspaceRoot: () => workspaceConfig.root,
   });
-  let scheduleWorkspaceRecoveryBaseline = () => undefined;
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
-    onWorkspaceResolved: (workspace) => scheduleWorkspaceRecoveryBaseline(workspace),
   });
   activeDocumentsAuthority = documentsAuthority;
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
-  const inspectRecoveryGit = async (workspaceRoot) => {
-    const git = await import('./lib/git/service.js');
-    if (!await git.isGitRepository(workspaceRoot)) return { available: true, repository: false, staged: false };
-    const status = await git.getStatus(workspaceRoot, { mode: 'light' });
-    return {
-      available: true,
-      repository: true,
-      staged: status.files.some((file) => {
-        const index = String(file.index || '').trim();
-        return index && index !== '?';
-      }),
-      ...(status.mergeInProgress ? { operation: 'merge' }
-        : status.rebaseInProgress ? { operation: 'rebase' }
-          : {}),
-    };
-  };
   const workspaceRecoveryEngines = new Map();
   const assertRecoverySessionWorkspace = async (sessionId, workspaceId) => {
     const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId });
@@ -882,7 +864,7 @@ async function main(options = {}) {
           operationId: input.operationId,
           preparedTargetLeafId: input.preparedTargetLeafId,
           sessionId: input.sessionId,
-          targetId: input.targetId,
+          targetId: input.entryId,
         },
       );
     },
@@ -904,7 +886,7 @@ async function main(options = {}) {
       return piRuntimeBroker.requestForSession(
         input.sessionId,
         'session.recovery.navigation.prepare',
-        { sessionId: input.sessionId, targetId: input.targetId },
+        { sessionId: input.sessionId, targetId: input.entryId },
       );
     },
     async prepareLeaf(input) {
@@ -928,7 +910,6 @@ async function main(options = {}) {
         dataDir: PIARIUM_DATA_DIR,
         defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
         documents: documentsAuthority,
-        gitInspector: inspectRecoveryGit,
         sessionNavigation: recoverySessionNavigation,
         storageOwnerId,
       });
@@ -939,32 +920,6 @@ async function main(options = {}) {
   const foundationalRecoveryEngine = recoveryEngineForOwner({
     owner: { extensionId: 'piarium.builtin.recovery' },
   });
-  const workspaceBaselineTasks = new Map();
-  const workspaceBaselineAbortControllers = new Map();
-  scheduleWorkspaceRecoveryBaseline = ({ workspaceId }) => {
-    if (workspaceBaselineTasks.has(workspaceId)) return;
-    const controller = new AbortController();
-    workspaceBaselineAbortControllers.set(workspaceId, controller);
-    const task = foundationalRecoveryEngine.captureSnapshot({
-      reuseIfUnchanged: true,
-      signal: controller.signal,
-      source: 'baseline',
-      workspaceId,
-    }).then((result) => {
-      if (result.status === 'failed') {
-        console.warn(`[WorkspaceRecovery] Background baseline failed for ${workspaceId}: ${result.failure.message}`);
-      }
-      if (result.status !== 'captured' || result.snapshot.consistency !== 'validated') {
-        workspaceBaselineTasks.delete(workspaceId);
-      }
-    }).catch((error) => {
-      workspaceBaselineTasks.delete(workspaceId);
-      console.warn(`[WorkspaceRecovery] Background baseline failed for ${workspaceId}: ${error?.message || error}`);
-    }).finally(() => {
-      workspaceBaselineAbortControllers.delete(workspaceId);
-    });
-    workspaceBaselineTasks.set(workspaceId, task);
-  };
   let fencedRecoveryOperations = [];
   try {
     fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
@@ -1067,6 +1022,11 @@ async function main(options = {}) {
     documents: documentsAuthority,
     getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId),
     invokeService: (request) => extensionRuntime.invokeService(request),
+    respondMutation: (request, accepted) => piRuntimeBroker.requestForSession(
+      request.sessionId,
+      'workspace.mutation.respond',
+      { accepted, requestId: request.requestId, sessionId: request.sessionId },
+    ),
     writerTracker: piWriterTracker,
   });
   const sendPiSessionNotification = async ({ body, kind, sessionId, tag, title }) => {
@@ -1300,10 +1260,6 @@ async function main(options = {}) {
     }),
     isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions = {}) => {
-      scheduleWorkspaceRecoveryBaseline = () => undefined;
-      for (const controller of workspaceBaselineAbortControllers.values()) controller.abort();
-      await Promise.allSettled(workspaceBaselineTasks.values());
-      workspaceBaselineAbortControllers.clear();
       piSessionAutomation.stop();
       brokerUnsubscribe();
       await unregisterWorkbenchLayoutService();

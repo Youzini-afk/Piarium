@@ -75,6 +75,7 @@ export type PiSessionExecutionAdmission = (
 ) => Promise<PiSessionExecutionLease | null | undefined>;
 
 interface SessionExecutionAdmissionState {
+  awaitsAgentSettlement: boolean;
   client: PiHostClient;
   closing: boolean;
   closePromise?: Promise<void>;
@@ -194,6 +195,14 @@ const AGENT_RUN_METHODS = new Set<HostMethod>([
   "agent.steer",
   "command.execute",
   "fleet.action",
+]);
+
+// These Host methods acknowledge queue admission before Pi emits agent_start.
+// Their execution identity must remain attached until agent_settled.
+const DEFERRED_AGENT_SETTLEMENT_METHODS = new Set<HostMethod>([
+  "agent.followUp",
+  "agent.prompt",
+  "agent.steer",
 ]);
 
 const ALWAYS_WORKSPACE_MUTATION_METHODS = new Set<HostMethod>([
@@ -629,7 +638,20 @@ export class PiRuntimeBroker {
       ...(sessionId === undefined ? {} : { sessionId }),
     });
     try {
-      return await worker.request(method, params);
+      const result = await worker.request(method, params);
+      if (
+        admission.awaitsAgentSettlement
+        && typeof result === "object"
+        && result !== null
+        && "accepted" in result
+        && result.accepted === false
+      ) {
+        admission.running = false;
+      }
+      return result;
+    } catch (error) {
+      admission.running = false;
+      throw error;
     } finally {
       await this.#finishSessionExecutionAdmission(admission);
     }
@@ -1683,6 +1705,9 @@ export class PiRuntimeBroker {
         resolveDone = resolve;
       });
       const state: SessionExecutionAdmissionState = {
+        awaitsAgentSettlement: context.phase === "agent-run"
+          && context.method !== undefined
+          && DEFERRED_AGENT_SETTLEMENT_METHODS.has(context.method),
         client,
         closing: false,
         done,
@@ -1691,7 +1716,9 @@ export class PiRuntimeBroker {
         phase: context.phase,
         ready: Promise.resolve(),
         resolveDone,
-        running: false,
+        running: context.phase === "agent-run"
+          && context.method !== undefined
+          && DEFERRED_AGENT_SETTLEMENT_METHODS.has(context.method),
       };
       this.#sessionExecutionAdmissions.set(client, state);
       state.ready = (async () => {

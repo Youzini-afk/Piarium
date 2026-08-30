@@ -1,7 +1,7 @@
 import React from 'react';
 import type {
   WorkspaceCombinedRecoveryOperation,
-  WorkspaceRecoverySnapshotSummary,
+  WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryStatus,
 } from '@piarium/extension-contract';
 import { Icon } from '@/components/icon/Icon';
@@ -19,7 +19,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 const operationTone = (operation: WorkspaceCombinedRecoveryOperation): string => {
-  if (operation.state === 'complete' || operation.state === 'alternate-ready') {
+  if (operation.state === 'complete') {
     return 'text-[var(--status-success)]';
   }
   if (operation.state === 'compensated') return 'text-[var(--status-warning)]';
@@ -27,8 +27,8 @@ const operationTone = (operation: WorkspaceCombinedRecoveryOperation): string =>
   return 'text-[var(--status-info)]';
 };
 
-const snapshotTitle = (snapshot: WorkspaceRecoverySnapshotSummary): string => (
-  snapshot.label?.trim() || snapshot.source
+const checkpointTitle = (checkpoint: WorkspaceRecoveryCheckpointSummary): string => (
+  checkpoint.label?.trim() || checkpoint.source
 );
 
 export const PiRecoveryPanel: React.FC = () => {
@@ -44,7 +44,7 @@ export const PiRecoveryPanel: React.FC = () => {
     ? snapshot.workspace.authorityId ?? snapshot.workspace.id
     : null;
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
-  const [snapshots, setSnapshots] = React.useState<WorkspaceRecoverySnapshotSummary[]>([]);
+  const [checkpoints, setCheckpoints] = React.useState<WorkspaceRecoveryCheckpointSummary[]>([]);
   const [operations, setOperations] = React.useState<WorkspaceCombinedRecoveryOperation[]>([]);
   const [checkpointName, setCheckpointName] = React.useState('');
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -53,7 +53,7 @@ export const PiRecoveryPanel: React.FC = () => {
   const refresh = React.useCallback(async () => {
     if (!workspaceId) {
       setStatus(null);
-      setSnapshots([]);
+      setCheckpoints([]);
       setOperations([]);
       return;
     }
@@ -61,13 +61,13 @@ export const PiRecoveryPanel: React.FC = () => {
     setError(null);
     try {
       const api = getWorkspaceRecoveryAPI();
-      const [nextStatus, nextSnapshots, nextOperations] = await Promise.all([
+      const [nextStatus, nextCheckpoints, nextOperations] = await Promise.all([
         api.status(workspaceId),
-        api.listSnapshots({ workspaceId }),
+        api.listCheckpoints({ workspaceId }),
         api.listCombinedOperations(workspaceId),
       ]);
       setStatus(requireWorkspaceRecoveryResult(nextStatus));
-      setSnapshots(requireWorkspaceRecoveryResult(nextSnapshots).page.snapshots);
+      setCheckpoints(requireWorkspaceRecoveryResult(nextCheckpoints).page.checkpoints);
       setOperations(requireWorkspaceRecoveryResult(nextOperations).operations);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -105,12 +105,9 @@ export const PiRecoveryPanel: React.FC = () => {
     try {
       const api = getWorkspaceRecoveryAPI();
       const prepared = requireWorkspaceRecoveryResult(await api.prepareCombinedUndo(operation.id));
-      if (!prepared.plan.allowedModes.includes('in-place')) {
-        throw new Error(t('contextPanel.recovery.native.undoNeedsWorkspace'));
-      }
       const result = requireWorkspaceRecoveryResult(await api.applyCombinedRecovery({
+        conflictPolicy: 'abort',
         expectedRevision: prepared.plan.revision,
-        mode: 'in-place',
         operationId: prepared.plan.id,
       }));
       if (result.operation.state !== 'complete') {
@@ -183,8 +180,8 @@ export const PiRecoveryPanel: React.FC = () => {
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.snapshots')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.snapshotCount}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.checkpoints')}</p>
+                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.checkpointCount}</p>
               </div>
               <div>
                 <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.objects')}</p>
@@ -247,7 +244,7 @@ export const PiRecoveryPanel: React.FC = () => {
                         : t('contextPanel.recovery.native.combinedOperation')}
                     </p>
                     <p className={cn('mt-1 typography-micro', operationTone(operation))}>
-                      {operation.state} · {operation.workspaceState} · {operation.conversationState}
+                      {operation.state} · {operation.fileState} · {operation.conversationState}
                     </p>
                   </div>
                   {operation.state === 'complete' ? (
@@ -262,11 +259,6 @@ export const PiRecoveryPanel: React.FC = () => {
                     </Button>
                   ) : null}
                 </div>
-                {operation.destinationPath ? (
-                  <p className="mt-2 break-all font-mono typography-micro text-muted-foreground">
-                    {operation.destinationPath}
-                  </p>
-                ) : null}
                 {operation.failure ? (
                   <p className="mt-2 typography-meta text-[var(--status-error)]">{operation.failure.message}</p>
                 ) : null}
@@ -285,29 +277,27 @@ export const PiRecoveryPanel: React.FC = () => {
             {t('contextPanel.recovery.native.timeline')}
           </h3>
           <div className="mt-3 space-y-2">
-            {snapshots.map((item) => (
+            {checkpoints.map((item) => (
               <div key={item.id} className="rounded-xl border border-border/60 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate typography-ui-label text-foreground">{snapshotTitle(item)}</p>
+                    <p className="truncate typography-ui-label text-foreground">{checkpointTitle(item)}</p>
                     <p className="mt-1 typography-micro text-muted-foreground">
-                      {item.source} · {item.availability} · {new Date(item.createdAt).toLocaleString()}
+                      {item.source} · {item.state} · {new Date(item.createdAt).toLocaleString()}
                     </p>
                   </div>
                   <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
                     {formatWorkspaceArchiveBytes(item.byteLength)}
                   </span>
                 </div>
-                {item.restoredFrom ? (
-                  <p className="mt-2 truncate font-mono typography-micro text-muted-foreground">
-                    ← {item.restoredFrom}
-                  </p>
-                ) : null}
+                <p className="mt-2 typography-micro text-muted-foreground">
+                  {item.changedPathCount} {t('chat.recoveryDialog.filesAffected')}
+                </p>
               </div>
             ))}
-            {snapshots.length === 0 ? (
+            {checkpoints.length === 0 ? (
               <p className="py-2 typography-meta text-muted-foreground">
-                {t('contextPanel.recovery.native.noSnapshots')}
+                {t('contextPanel.recovery.native.noCheckpoints')}
               </p>
             ) : null}
           </div>

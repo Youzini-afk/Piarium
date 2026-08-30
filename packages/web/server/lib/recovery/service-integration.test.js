@@ -31,18 +31,27 @@ describe('Web Application Host workspace recovery service', () => {
       piariumVersion: '1.2.3',
     });
     harness = await createDocumentAuthorityHarness({ hostId: runtime.services.hostId });
-    await fs.promises.writeFile(`${harness.workspaceRoot}/note.txt`, 'service content');
+    const notePath = `${harness.workspaceRoot}/note.txt`;
+    await fs.promises.writeFile(notePath, 'before service');
     const engine = createWorkspaceRecoveryEngine({
       authorityId: runtime.services.hostId,
       dataDir: runtimeDataDir,
       documents: harness.authority,
       sessionNavigation: {
         commit: async () => ({ alreadyApplied: false, markerId: 'service-marker', snapshot: {} }),
+        commitLeaf: async () => ({ alreadyApplied: false, markerId: 'service-undo', snapshot: {} }),
         prepare: async () => ({
           currentLeafId: 'service-current-leaf',
           expectedLeafId: 'service-current-leaf',
+          removedEntryIds: ['service-user-1', 'service-assistant-1'],
           targetId: 'service-assistant-1',
-          targetLeafId: 'service-assistant-1',
+          targetLeafId: 'service-before-leaf',
+        }),
+        prepareLeaf: async ({ targetLeafId }) => ({
+          currentLeafId: 'service-before-leaf',
+          expectedLeafId: 'service-before-leaf',
+          removedEntryIds: [],
+          targetLeafId,
         }),
       },
     });
@@ -57,23 +66,10 @@ describe('Web Application Host workspace recovery service', () => {
       status: 'ready',
       capabilities: { bindings: true, checkpoints: true, combined: true },
     });
-    const captured = await api.captureSnapshot({ workspaceId: harness.identity.workspaceId });
-    expect(captured.status).toBe('captured');
-    const listed = await api.listSnapshots({ workspaceId: harness.identity.workspaceId });
-    expect(listed.status).toBe('ready');
-    expect(listed.page.snapshots).toHaveLength(1);
-    const read = await api.readSnapshot({
-      snapshotId: captured.snapshot.id,
-      workspaceId: harness.identity.workspaceId,
-    });
-    expect(read.status).toBe('ready');
-    expect(read.manifest.entries).toContainEqual(expect.objectContaining({ path: 'note.txt', kind: 'regular-file' }));
-
     const turn = await api.recordTurnStart({
       activeWriterScopes: ['pi-worker:worker-1'],
-      beforeSnapshotId: captured.snapshot.id,
       executionId: 'service-execution-1',
-      provenance: 'observed-during',
+      provenance: 'caused-by',
       runtimeGeneration: 1,
       sessionId: 'service-session-1',
       userEntryId: 'service-user-1',
@@ -81,12 +77,26 @@ describe('Web Application Host workspace recovery service', () => {
       workspaceId: harness.identity.workspaceId,
     });
     expect(turn).toMatchObject({ status: 'ready', binding: { status: 'pending' } });
+    const mutation = {
+      executionId: 'service-execution-1',
+      mutationId: 'service-mutation-1',
+      path: notePath,
+      toolCallId: 'service-tool-1',
+      toolName: 'write',
+      workspaceId: harness.identity.workspaceId,
+    };
+    expect(await api.recordMutationBefore(mutation)).toMatchObject({ recorded: true, status: 'ready' });
+    await fs.promises.writeFile(notePath, 'after service');
+    expect(await api.recordMutationAfter({ ...mutation, succeeded: true }))
+      .toMatchObject({ recorded: true, status: 'ready' });
     const settled = await api.recordTurnSettled({
       activeWriterScopes: ['pi-worker:worker-1'],
-      afterSnapshotId: captured.snapshot.id,
       assistantEntryId: 'service-assistant-1',
       executionId: 'service-execution-1',
-      provenance: 'observed-during',
+      mutationObserved: true,
+      observationComplete: true,
+      observedResourceIds: ['note.txt'],
+      provenance: 'caused-by',
       workspaceId: harness.identity.workspaceId,
     });
     expect(settled).toMatchObject({ status: 'ready', binding: { status: 'ready' } });
@@ -94,32 +104,16 @@ describe('Web Application Host workspace recovery service', () => {
       entryId: 'service-assistant-1',
       sessionId: 'service-session-1',
       workspaceId: harness.identity.workspaceId,
-    })).toMatchObject({ position: 'after', snapshotId: captured.snapshot.id, status: 'ready' });
+    })).toMatchObject({ position: 'after', status: 'ready' });
     const checkpoint = await api.createCheckpoint({
       name: 'Service checkpoint',
       workspaceId: harness.identity.workspaceId,
     });
-    expect(checkpoint).toMatchObject({ status: 'captured', snapshot: { label: 'Service checkpoint' } });
-    const destination = path.join(harness.root, 'service-restored-workspace');
-    const prepared = await api.prepareRestore({
-      newWorkspacePath: destination,
-      targetSnapshotId: captured.snapshot.id,
-      workspaceId: harness.identity.workspaceId,
-    });
-    expect(prepared).toMatchObject({ status: 'ready', plan: { targetSnapshotId: captured.snapshot.id } });
-    const applied = await api.applyRestore({
-      expectedRevision: prepared.plan.revision,
-      mode: 'new-workspace',
-      newWorkspacePath: destination,
-      operationId: prepared.plan.id,
-    });
-    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
-    expect(await api.getOperation(prepared.plan.id)).toMatchObject({
-      status: 'ready',
-      operation: { destinationPath: destination, state: 'complete' },
-    });
+    expect(checkpoint).toMatchObject({ status: 'ready', checkpoint: { label: 'Service checkpoint' } });
+    expect(await api.listCheckpoints({ workspaceId: harness.identity.workspaceId }))
+      .toMatchObject({ status: 'ready', page: { checkpoints: expect.any(Array) } });
     const combined = await api.prepareCombinedRecovery({
-      entryId: 'service-assistant-1',
+      entryId: 'service-user-1',
       sessionId: 'service-session-1',
       workspaceId: harness.identity.workspaceId,
     });
@@ -127,16 +121,20 @@ describe('Web Application Host workspace recovery service', () => {
       status: 'ready',
       plan: {
         expectedLeafId: 'service-current-leaf',
-        navigationKind: 'entry',
-        targetLeafId: 'service-assistant-1',
-        targetSnapshotId: captured.snapshot.id,
+        affectedPaths: ['note.txt'],
+        targetLeafId: 'service-before-leaf',
       },
     });
-    expect(await api.cancelCombinedOperation(combined.plan.id))
-      .toMatchObject({ status: 'ready', operation: { state: 'aborted' } });
+    const applied = await api.applyCombinedRecovery({
+      conflictPolicy: 'abort',
+      expectedRevision: combined.plan.revision,
+      operationId: combined.plan.id,
+    });
+    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('before service');
     expect(await api.listCombinedOperations(harness.identity.workspaceId)).toMatchObject({
       status: 'ready',
-      operations: [expect.objectContaining({ id: combined.plan.id, state: 'aborted' })],
+      operations: [expect.objectContaining({ id: combined.plan.id, state: 'complete' })],
     });
   });
 });

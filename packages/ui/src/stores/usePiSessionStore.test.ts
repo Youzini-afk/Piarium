@@ -310,7 +310,9 @@ describe('Pi session event state', () => {
       },
     };
     const message = { content: 'hello', role: 'user' as const, timestamp: 7 };
-    const started = reducePiAgentEvent(initial, { message, type: 'message_start' });
+    const accepted = reducePiAgentEvent(initial, positionedAgentEvent({ type: 'agent_start' }));
+    expect(accepted.submission?.status).toBe('accepted');
+    const started = reducePiAgentEvent(accepted, { message, type: 'message_start' });
     expect(started.liveUser).toEqual(message);
     expect(started.view?.newTurn?.turnId).toBe('turn:live-user:7');
 

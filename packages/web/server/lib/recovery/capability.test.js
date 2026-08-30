@@ -12,19 +12,23 @@ afterEach(async () => {
 });
 
 describe('workspace.recovery-primitives Web Host capability', () => {
-  it('validates JSON input across capture, restore, and combined recovery primitives', async () => {
+  it('validates JSON input across journal, checkpoint, combined, and storage primitives', async () => {
     harness = await createDocumentAuthorityHarness();
     await fs.promises.writeFile(`${harness.workspaceRoot}/note.txt`, 'content');
     const engine = createWorkspaceRecoveryEngine({
       authorityId: harness.authority.hostId,
       dataDir: harness.dataDir,
       documents: harness.authority,
+      sessionNavigation: {},
     });
     const capability = createWorkspaceRecoveryCapabilityHandler(engine);
-    const captured = await capability('captureSnapshot', { workspaceId: harness.identity.workspaceId });
-    expect(captured.status).toBe('captured');
-    const listed = await capability('listSnapshots', { workspaceId: harness.identity.workspaceId });
-    expect(listed.page.snapshots).toHaveLength(1);
+    const created = await capability('createCheckpoint', {
+      name: 'Before refactor',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(created).toMatchObject({ status: 'ready', checkpoint: { source: 'named' } });
+    const listed = await capability('listCheckpoints', { workspaceId: harness.identity.workspaceId });
+    expect(listed.page.checkpoints).toHaveLength(1);
     const global = await capability('setDefaultStorageLocation', { mode: 'workspace-adjacent' });
     expect(global).toMatchObject({
       status: 'ready',
@@ -38,8 +42,8 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       workspaceId: harness.identity.workspaceId,
     });
     expect(inherited).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
-    await expect(capability('captureSnapshot', { workspaceId: '' })).rejects.toThrow(/workspaceId/);
-    await expect(capability('prepareRestore', {})).rejects.toThrow(/targetSnapshotId/);
+    await expect(capability('createCheckpoint', { name: 'x', workspaceId: '' })).rejects.toThrow(/workspaceId/);
+    await expect(capability('recordMutationBefore', {})).rejects.toThrow(/executionId/);
     await expect(capability('prepareCombinedRecovery', {})).rejects.toThrow(/entryId/);
   });
 });

@@ -334,7 +334,7 @@ export const RecoverySettings: React.FC = () => {
   }, [refresh, t, workspaceId]);
 
   const visibleStorageWorkspaces = React.useMemo(() => storageWorkspaces.filter((workspace) => (
-    workspace.snapshotCount > 0
+    workspace.checkpointCount > 0
     || workspace.objectCount > 0
     || workspace.locationSource === 'workspace'
   )), [storageWorkspaces]);
@@ -346,7 +346,7 @@ export const RecoverySettings: React.FC = () => {
   )), [visibleStorageWorkspaces]);
   const cleanableStorageWorkspaces = React.useMemo(() => visibleStorageWorkspaces.filter((workspace) => (
     workspace.storageAvailable
-    && (workspace.snapshotCount > 0 || workspace.objectCount > 0)
+    && (workspace.checkpointCount > 0 || workspace.objectCount > 0)
   )), [visibleStorageWorkspaces]);
 
   const selectedLocation = status?.storage.location;
@@ -510,7 +510,7 @@ export const RecoverySettings: React.FC = () => {
                             })
                             : t('settings.piarium.recovery.storage.neverUsed')}
                           {' · '}
-                          {t('settings.piarium.recovery.storage.snapshotCount', { count: workspace.snapshotCount })}
+                          {t('settings.piarium.recovery.storage.checkpointCount', { count: workspace.checkpointCount })}
                           {' · '}
                           {formatWorkspaceArchiveBytes(workspace.byteLength)}
                         </p>
@@ -558,7 +558,7 @@ export const RecoverySettings: React.FC = () => {
                         size="xs"
                         disabled={maintenanceBusy !== null
                           || !workspace.storageAvailable
-                          || (workspace.snapshotCount === 0 && workspace.objectCount === 0)}
+                          || (workspace.checkpointCount === 0 && workspace.objectCount === 0)}
                         onClick={() => void maintainStorageWorkspaces('cleanup', [workspace])}
                       >
                         {t('settings.piarium.recovery.storage.cleanupOne')}
@@ -569,7 +569,7 @@ export const RecoverySettings: React.FC = () => {
                         size="xs"
                         disabled={maintenanceBusy !== null
                           || !workspace.storageAvailable
-                          || (workspace.snapshotCount === 0 && workspace.objectCount === 0)}
+                          || (workspace.checkpointCount === 0 && workspace.objectCount === 0)}
                         className="text-[var(--status-error)] hover:text-[var(--status-error)]"
                         onClick={() => void deleteStoredWorkspaceHistory(workspace)}
                       >
@@ -607,12 +607,12 @@ export const RecoverySettings: React.FC = () => {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.snapshots')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.snapshotCount}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.checkpoints')}</p>
+                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.checkpointCount}</p>
               </div>
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.readySnapshots')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.readySnapshotCount}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.readyCheckpoints')}</p>
+                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.readyCheckpointCount}</p>
               </div>
               <div>
                 <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.objects')}</p>
@@ -694,7 +694,7 @@ export const RecoverySettings: React.FC = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={busy !== null || status.storage.snapshotCount === 0}
+                disabled={busy !== null || status.storage.checkpointCount === 0}
                 className="text-[var(--status-error)] hover:text-[var(--status-error)]"
                 onClick={() => void deleteHistory()}
               >

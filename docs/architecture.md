@@ -363,8 +363,8 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings, extension-owned config documents, and native package updates with source/provenance shown |
 | App metadata | Atomic Piarium JSON | Archive state and optional session workspace binding now; recovery preference, pin, tags, and view preferences are application-owned additions |
 | Project workspace preferences | `~/.config/piarium/projects/<path-id>.json` | One Piarium-owned, path-derived authority for worktree setup, notes, todos, plans, draft starters, and project actions; writes preserve unknown fields, reject malformed JSON, and fail on external revision conflicts instead of overwriting them |
-| Workspace checkpoints | `pi-workspace-history` | Access through tree hooks, commands, and recovery bridge v1; never mirror private snapshot state |
-| Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |
+| Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@3` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
+| Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
@@ -397,9 +397,8 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 Disabling a package keeps its installation and native configuration intact, filters all Pi resource
 types from that package, and restores the package's previous native filters when enabled again.
 
-Piarium provisions four global foundational Pi packages when a runtime generation first becomes
-available: the maintained `pi-mcp-adapter`, `@gotgenes/pi-permission-system`,
-`pi-workspace-history`, and `pi-wtf`. This is a broker-owned bootstrap layered on top of the same Pi
+Piarium provisions two global foundational Pi packages when a runtime generation first becomes
+available: the maintained `pi-mcp-adapter` and `@gotgenes/pi-permission-system`. This is a broker-owned bootstrap layered on top of the same Pi
 package operations, not a second package manager. It does not block the Host handshake or cloud
 health endpoint; the first newly created session waits for the bootstrap, while sessions already
 bound to a worker keep running. Existing enabled or disabled packages are adopted as-is. A configured
@@ -502,27 +501,30 @@ section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md)
 
 ## 8. Recovery model
 
-The following section describes the current plugin-backed implementation. The approved replacement
-direction is the Host-owned design in
-[native-workspace-recovery-design.md](native-workspace-recovery-design.md); current paths remain only
-until its complete phases replace them. The default implementation will be the statically distributed,
-replaceable built-in extension `piarium.builtin.recovery`, not a Pi package or separately published npm
-package; fixed Host code retains only privileged safety primitives and the conversation-only fallback.
+Conversation-only rollback remains Pi-native: it branches Pi's append-only session tree and restores
+editable user text/images without touching files. Combined rollback uses the selected
+`piarium.workspace-recovery@3` Host service, whose distribution default is the statically shipped,
+replaceable `piarium.builtin.recovery` extension.
 
-Piarium owns one recovery interaction model, not one recovery storage engine. Conversation-only
-rollback branches Pi's append-only session tree and restores editable user text/images without
-touching files. Combined rollback calls the same Pi tree navigation API and lets
-`pi-workspace-history` restore files through its standard `session_before_tree` hook. Undo, redo,
-and checkpoints call that plugin's registered commands. Prompt repair calls `pi-wtf`.
+The provider records a lightweight checkpoint for a bound user turn. Pi's built-in `write` and `edit`
+tools negotiate a blocking mutation boundary with the Application Host: the old state of the one target
+path is durable before the original tool writes, and the final state is recorded afterward. New
+sessions and ordinary turns never establish a complete workspace baseline.
 
-Recovery providers advertise explicit modes and actions. Current command/tree integration works
-without a plugin fork; recovery bridge v1 lets future versions add structured results, files-only
-restore, preview, and richer history. Piarium does not parse `turn-snapshots.json`, copy shadow Git,
-or silently substitute an internal file engine when a provider lacks a capability.
+Pi recovery navigation reports which entries leave the active branch. The provider folds only the
+change sets attached to those entries and restores their affected paths. Matching paths execute
+directly from the message action. Later user edits, dirty buffers, incomplete shell/external coverage,
+or the always-ask preference produce the small recovery chooser. There is no normal full-manifest
+planner, global maintenance mode, safety archive, or new-workspace fallback.
 
-The normal per-message action follows the user's conversation-only, conversation+files, or
-always-ask preference. Detailed provider status, checkpoints, history, and diagnostics live in the
-right sidebar/settings. Provider notifications and dirty-workspace safeguards remain authoritative.
+Before applying an inverse, Piarium stores the current versions of affected paths for compensation and
+redo. A Host restart resolves an interrupted operation from that small set. Generic native processes do
+not expose a portable pre-write file list; watcher-only `bash`, terminal, Git, extension, or unrelated
+process changes are marked incomplete instead of causing a full-workspace scan.
+
+Storage location, verified transfer, cleanup, and explicit deletion remain provider-owned and
+replaceable. Conversation-only fallback remains available when no provider is selected. The complete
+contract is documented in [native-workspace-recovery-design.md](native-workspace-recovery-design.md).
 
 ## 9. Trust and security
 

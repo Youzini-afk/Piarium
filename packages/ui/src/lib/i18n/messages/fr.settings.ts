@@ -1998,7 +1998,7 @@ export const settingsDict = {
   'settings.piarium.recovery.preference.conversation.label': 'Conversation uniquement',
   'settings.piarium.recovery.preference.conversation.description': 'Déplace la branche de conversation Pi et restaure l’instruction modifiable sans changer les fichiers de l’espace de travail.',
   'settings.piarium.recovery.preference.both.label': 'Conversation et fichiers',
-  'settings.piarium.recovery.preference.both.description': 'Open a verified combined plan for the conversation and workspace, with an explicit new-workspace fallback when in-place recovery is unsafe.',
+  'settings.piarium.recovery.preference.both.description': 'Return the conversation and the files changed by those turns. Later edits are shown only when they create a real path conflict.',
   'settings.piarium.recovery.preference.ask.label': 'Always ask',
   'settings.piarium.recovery.preference.ask.description': 'Choose conversation-only, coordinated in-place recovery, or a new recovered workspace each time.',
   'settings.piarium.recovery.providers.title': 'Fournisseurs de récupération',

@@ -8,55 +8,34 @@ import {
   parseRecoveryStorageLocation,
   parseRecoveryStorageStatus,
   parseRecoveryStorageWorkspaceSummary,
-  parseWorkspaceRecoveryCaptureInput,
-  parseWorkspaceRecoveryCaptureResult,
+  parseWorkspaceCombinedRecoveryPlan,
+  parseWorkspaceRecoveryCheckpointSummary,
   parseWorkspaceRecoveryEntryBindingResult,
-  parseWorkspaceRecoveryManifestEntry,
-  parseWorkspaceRecoveryReadResult,
-  parseWorkspaceRecoverySnapshotSummary,
+  parseWorkspaceRecoveryMutationAfterInput,
   parseWorkspaceRecoveryTurnBinding,
 } from "../src/index.js";
 
-const summary = (availability = "ready") => ({
-  availability,
+const checkpoint = () => ({
   byteLength: 5,
-  consistency: availability === "incomplete" ? "incomplete" : "validated",
-  coverage: { excludedUnknown: 1, issues: [], knownAbsent: 0, present: 2, unstable: 0 },
-  createdAt: "2026-08-28T00:00:00.000Z",
-  entryCount: 3,
-  id: "snapshot-1",
-  manifestHash: `sha256-${"a".repeat(64)}`,
-  parentSnapshotId: null,
-  policyRevision: "phase1-default-v1",
+  changedPathCount: 1,
+  createdAt: "2026-08-30T00:00:00.000Z",
+  entryId: "user-1",
+  executionId: "execution-1",
+  id: "checkpoint-1",
   sequence: 1,
-  source: "manual",
+  sessionId: "session-1",
+  source: "turn",
+  state: "ready",
   workspaceId: "workspace-1",
 });
 
-test("rejects unsafe manifest paths and unauthenticated content identifiers", () => {
-  assert.throws(
-    () => parseWorkspaceRecoveryManifestEntry({
-      comparisonKey: "../escape",
-      coverage: "present",
-      kind: "regular-file",
-      objectHash: `sha256-${"b".repeat(64)}`,
-      path: "../escape",
-    }),
-    WorkspaceRecoveryContractError,
-  );
-  assert.throws(
-    () => parseWorkspaceRecoverySnapshotSummary({ ...summary(), manifestHash: "not-a-content-hash" }),
-    WorkspaceRecoveryContractError,
-  );
-});
-
-test("owns the versioned workspace recovery service identity", () => {
+test("owns the affected-file journal service version", () => {
   assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID, "piarium.workspace-recovery");
-  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 2);
-  assert.equal(parseWorkspaceRecoverySnapshotSummary(summary()).availability, "ready");
+  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 3);
+  assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
-test("parses every storage mode without accepting custom roots on another mode", () => {
+test("parses every storage mode and journal-oriented storage counts", () => {
   assert.deepEqual(parseRecoveryStorageLocation({ mode: "application-data" }), { mode: "application-data" });
   assert.deepEqual(parseRecoveryStorageLocation({ mode: "workspace-local" }), { mode: "workspace-local" });
   assert.deepEqual(parseRecoveryStorageLocation({ mode: "workspace-adjacent" }), { mode: "workspace-adjacent" });
@@ -68,30 +47,27 @@ test("parses every storage mode without accepting custom roots on another mode",
     () => parseRecoveryStorageLocation({ mode: "application-data", customRoot: "/escape" }),
     WorkspaceRecoveryContractError,
   );
-});
-
-test("keeps global and project recovery storage authority explicit", () => {
   assert.equal(parseRecoveryStorageStatus({
     authorityId: "authority-1",
     byteLength: 0,
+    checkpointCount: 0,
     encryption: { available: false, enabled: false },
     location: { mode: "workspace-local" },
     locationSource: "global",
     objectCount: 0,
-    readySnapshotCount: 0,
+    readyCheckpointCount: 0,
     registryRevision: 1,
-    snapshotCount: 0,
     state: "missing",
-  }).locationSource, "global");
+  }).checkpointCount, 0);
   assert.equal(parseRecoveryStorageWorkspaceSummary({
     byteLength: 0,
     canonicalRoot: "/workspace",
+    checkpointCount: 0,
     lastActivityAt: null,
     location: { mode: "application-data" },
     locationSource: "workspace",
     migrationRequired: false,
     objectCount: 0,
-    snapshotCount: 0,
     state: "missing",
     storageAvailable: true,
     workspaceAvailable: true,
@@ -99,94 +75,82 @@ test("keeps global and project recovery storage authority explicit", () => {
   }).workspaceAvailable, true);
 });
 
-test("keeps missing, malformed, incomplete, and corrupt snapshot results distinct", () => {
-  assert.equal(parseWorkspaceRecoveryReadResult({
-    status: "incomplete",
-    manifest: { entries: [], manifestHash: summary("incomplete").manifestHash, nextCursor: null, snapshot: summary("incomplete") },
-  }).status, "incomplete");
-  for (const status of ["missing", "malformed", "corrupt"] as const) {
-    assert.equal(parseWorkspaceRecoveryReadResult({
-      failure: {
-        code: status === "missing" ? "snapshot-missing" : `snapshot-${status}`,
-        message: status,
-        retryable: false,
-      },
-      snapshotId: "snapshot-1",
-      status,
-    }).status, status);
-  }
-});
+test("keeps mutation boundaries, turn binding coverage, and entry binding explicit", () => {
+  assert.equal(parseWorkspaceRecoveryMutationAfterInput({
+    executionId: "execution-1",
+    mutationId: "mutation-1",
+    path: "/workspace/note.txt",
+    succeeded: true,
+    toolCallId: "tool-1",
+    toolName: "write",
+    workspaceId: "workspace-1",
+  }).succeeded, true);
+  assert.throws(() => parseWorkspaceRecoveryMutationAfterInput({
+    executionId: "execution-1",
+    mutationId: "mutation-1",
+    path: "/workspace/note.txt",
+    toolCallId: "tool-1",
+    toolName: "write",
+    workspaceId: "workspace-1",
+  }), WorkspaceRecoveryContractError);
 
-test("keeps capture witnesses and entry bindings explicit", () => {
-  assert.deepEqual(parseWorkspaceRecoveryCaptureInput({
-    baseSnapshotId: "snapshot-1",
-    changedResourceIds: ["src/b.ts", "src/a.ts", "src/a.ts"],
-    source: "turn-after",
-    workspaceId: "workspace-1",
-  }), {
-    baseSnapshotId: "snapshot-1",
-    changedResourceIds: ["src/a.ts", "src/b.ts"],
-    source: "turn-after",
-    workspaceId: "workspace-1",
-  });
-  const captured = parseWorkspaceRecoveryCaptureResult({
-    reused: false,
-    snapshot: summary(),
-    status: "captured",
-    witness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
-  });
-  assert.deepEqual(captured, {
-    reused: false,
-    snapshot: summary(),
-    status: "captured",
-    witness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
-  });
-  assert.deepEqual(parseWorkspaceRecoveryEntryBindingResult({
-    reason: "entry-unbound",
-    status: "unbound",
-  }), {
-    reason: "entry-unbound",
-    status: "unbound",
-  });
   const binding = parseWorkspaceRecoveryTurnBinding({
     activeWriterScopes: [],
-    afterWitness: { epoch: 1, mutationRevision: 2, writerRevision: 5 },
-    beforeWitness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
+    checkpointId: "checkpoint-1",
     executionId: "execution-1",
-    provenance: "observed-during",
+    provenance: "caused-by",
     runtimeGeneration: 1,
-    runtimeKey: "1:worker-1",
+    runtimeKey: "worker-1@1",
     sessionId: "session-1",
     startedAt: "2026-08-30T00:00:00.000Z",
     status: "ready",
+    unrecordedResourceIds: [],
     userEntryId: "user-1",
     workerId: "worker-1",
     workspaceId: "workspace-1",
   });
-  assert.deepEqual({
-    afterWitness: binding.afterWitness,
-    beforeWitness: binding.beforeWitness,
-  }, {
-    afterWitness: { epoch: 1, mutationRevision: 2, writerRevision: 5 },
-    beforeWitness: { epoch: 1, mutationRevision: 2, writerRevision: 3 },
+  assert.equal(binding.checkpointId, "checkpoint-1");
+  assert.deepEqual(parseWorkspaceRecoveryEntryBindingResult({
+    reason: "checkpoint-incomplete",
+    status: "incomplete",
+  }), {
+    reason: "checkpoint-incomplete",
+    status: "incomplete",
   });
 });
 
-test("browser-safe API uses the generic extension service invocation contract", async () => {
+test("plans only affected paths and keeps conflict handling explicit", () => {
+  const plan = parseWorkspaceCombinedRecoveryPlan({
+    affectedPaths: ["src/a.ts"],
+    changedBytes: 12,
+    conflicts: [{ kind: "content-changed", message: "changed", path: "src/a.ts" }],
+    coverage: "ready",
+    createdAt: "2026-08-30T00:00:00.000Z",
+    entryId: "user-1",
+    expectedLeafId: "leaf-2",
+    id: "operation-1",
+    removedEntryIds: ["user-1", "assistant-1"],
+    revision: `sha256-${"a".repeat(64)}`,
+    sessionId: "session-1",
+    targetLeafId: "leaf-1",
+    workspaceId: "workspace-1",
+  });
+  assert.deepEqual(plan.affectedPaths, ["src/a.ts"]);
+  assert.equal(plan.conflicts[0]?.kind, "content-changed");
+});
+
+test("browser-safe API invokes only the v3 checkpoint method", async () => {
   const requests: unknown[] = [];
   const api = createWorkspaceRecoveryAPI(async (request) => {
     requests.push(request);
-    return {
-      page: { nextCursor: null, snapshots: [summary()] },
-      status: "ready",
-    };
+    return { page: { checkpoints: [checkpoint()], nextCursor: null }, status: "ready" };
   });
-  const result = await api.listSnapshots({ workspaceId: "workspace-1" });
+  const result = await api.listCheckpoints({ workspaceId: "workspace-1" });
   assert.equal(result.status, "ready");
   assert.deepEqual(requests, [{
     args: [{ workspaceId: "workspace-1" }],
-    method: "listSnapshots",
+    method: "listCheckpoints",
     serviceId: "piarium.workspace-recovery",
-    version: 2,
+    version: 3,
   }]);
 });

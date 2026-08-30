@@ -1,5 +1,8 @@
 import React from 'react';
-import type { WorkspaceCombinedRecoveryOperation } from '@piarium/extension-contract';
+import type {
+  WorkspaceCombinedRecoveryOperation,
+  WorkspaceCombinedRecoveryPlan,
+} from '@piarium/extension-contract';
 import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
 import type {
   ModelDescriptor,
@@ -12,6 +15,10 @@ import { toast } from '@/components/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
+import {
+  getWorkspaceRecoveryAPI,
+  requireWorkspaceRecoveryResult,
+} from '@/lib/recovery/workspaceRecovery';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -61,6 +68,7 @@ import { projectPiMessageHistory } from './piMessageHistory';
 import { projectPiAssistantWaiting } from './piAssistantWaiting';
 import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
+import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -217,6 +225,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const transferPendingPiDraft = usePiDraftStore((state) => state.transferPendingDraft);
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
+  const [recoveryPlan, setRecoveryPlan] = React.useState<WorkspaceCombinedRecoveryPlan | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
@@ -516,22 +525,48 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       await refreshEntries(currentSessionId).catch(() => undefined);
       toast.success(t('chat.recoveryDialog.completed'));
-    } else if (operation.state === 'alternate-ready') {
-      toast.success(t('chat.recoveryDialog.newWorkspaceReady', {
-        path: operation.destinationPath ?? '',
-      }));
     }
     setRecoveryBusyEntryId(null);
   }, [currentSessionId, refreshEntries, t, updateDraft]);
+
+  const runCombinedRecovery = React.useCallback(async (entry: PiSessionMessageEntry) => {
+    if (!currentSessionId || currentRecord?.snapshot?.workspace?.kind !== 'workspace') return;
+    setRecoveryBusyEntryId(entry.id);
+    try {
+      const workspace = currentRecord.snapshot.workspace;
+      const prepared = requireWorkspaceRecoveryResult(
+        await getWorkspaceRecoveryAPI().prepareCombinedRecovery({
+          entryId: entry.id,
+          sessionId: currentSessionId,
+          workspaceId: workspace.authorityId ?? workspace.id,
+        }),
+      );
+      if (shouldOpenRecoveryDialog(recoveryPreference, prepared.plan)) {
+        setRecoveryPlan(prepared.plan);
+        setRecoveryEntry(entry);
+        return;
+      }
+      const applied = requireWorkspaceRecoveryResult(
+        await getWorkspaceRecoveryAPI().applyCombinedRecovery({
+          conflictPolicy: 'abort',
+          expectedRevision: prepared.plan.revision,
+          operationId: prepared.plan.id,
+        }),
+      );
+      await handleCombinedRecoveryResult(applied.operation);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      setRecoveryBusyEntryId(null);
+    }
+  }, [currentRecord?.snapshot, currentSessionId, handleCombinedRecoveryResult, recoveryPreference]);
 
   const handleRecover = React.useCallback((entry: PiSessionMessageEntry) => {
     if (recoveryPreference === 'conversation' || currentRecord?.snapshot?.workspace?.kind !== 'workspace') {
       void runConversationRecovery(entry);
       return;
     }
-    setRecoveryBusyEntryId(entry.id);
-    setRecoveryEntry(entry);
-  }, [currentRecord?.snapshot?.workspace?.kind, recoveryPreference, runConversationRecovery]);
+    void runCombinedRecovery(entry);
+  }, [currentRecord?.snapshot?.workspace?.kind, recoveryPreference, runCombinedRecovery, runConversationRecovery]);
 
   const handleFork = React.useCallback(async (entry: PiSessionMessageEntry) => {
     if (!currentSessionId || forkBusyEntryId) return;
@@ -837,14 +872,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         </React.Suspense>
       ) : null}
 
-      {recoveryEntry && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
+      {recoveryEntry && recoveryPlan && currentSessionId && snapshot?.workspace?.kind === 'workspace' ? (
         <PiRecoveryDialog
-          entryId={recoveryEntry.id}
           open
-          sessionId={currentSessionId}
-          workspaceId={snapshot.workspace.authorityId ?? snapshot.workspace.id}
+          plan={recoveryPlan}
           onClose={() => {
             setRecoveryEntry(null);
+            setRecoveryPlan(null);
             setRecoveryBusyEntryId(null);
           }}
           onCombinedResult={handleCombinedRecoveryResult}

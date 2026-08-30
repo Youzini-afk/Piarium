@@ -126,6 +126,10 @@ import {
   readSessionFeatures,
   SessionFeatureConflictError,
 } from "./session-features.js";
+import {
+  createWorkspaceMutationJournalTools,
+  WorkspaceMutationJournalBridge,
+} from "./workspace-mutation-journal.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -324,6 +328,30 @@ function resolveConversationNavigationTarget(
     editable: editableRecoveryContent(target),
     targetLeafId,
   };
+}
+
+function recoveryRemovedEntryIds(
+  manager: SessionManager,
+  currentLeafId: string | null,
+  targetLeafId: string | null,
+): string[] {
+  if (currentLeafId === targetLeafId) return [];
+  const removed: string[] = [];
+  let cursor = currentLeafId;
+  while (cursor !== null && cursor !== targetLeafId) {
+    const entry = manager.getEntry(cursor);
+    if (!entry) break;
+    removed.push(entry.id);
+    cursor = entry.parentId;
+  }
+  if (cursor !== targetLeafId) {
+    throw new HostError(
+      "session_navigation_target_conflict",
+      "Combined recovery can only restore an ancestor of the current conversation branch",
+      { retryable: false },
+    );
+  }
+  return removed;
 }
 
 interface PersistedRecoveryNavigationMarker {
@@ -537,6 +565,8 @@ export class SessionHost {
   #runtime: AgentSessionRuntime | undefined;
   #turnIndex = 0;
   #unsubscribe: (() => void) | undefined;
+  #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
+  #workspaceMutationJournalEnabled = false;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -566,6 +596,22 @@ export class SessionHost {
 
   get session(): AgentSession {
     return this.runtime.session;
+  }
+
+  setWorkspaceMutationJournalEnabled(enabled: boolean): void {
+    this.#workspaceMutationJournalEnabled = enabled;
+    if (!enabled) {
+      this.#workspaceMutationJournal?.dispose();
+      this.#workspaceMutationJournal = undefined;
+    }
+  }
+
+  respondWorkspaceMutation(
+    sessionId: string,
+    requestId: string,
+    accepted: boolean,
+  ): boolean {
+    return this.#workspaceMutationJournal?.respond(sessionId, requestId, accepted) ?? false;
   }
 
   async create(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
@@ -866,6 +912,7 @@ export class SessionHost {
       currentLeafId,
       ...resolved.editable,
       expectedLeafId: currentLeafId,
+      removedEntryIds: recoveryRemovedEntryIds(manager, currentLeafId, resolved.targetLeafId),
       targetId,
       targetLeafId: resolved.targetLeafId,
     };
@@ -881,7 +928,12 @@ export class SessionHost {
       throw new HostError("recovery_target_not_found", `Unknown session leaf: ${targetLeafId}`);
     }
     const currentLeafId = manager.getLeafId();
-    return { currentLeafId, expectedLeafId: currentLeafId, targetLeafId };
+    return {
+      currentLeafId,
+      expectedLeafId: currentLeafId,
+      removedEntryIds: recoveryRemovedEntryIds(manager, currentLeafId, targetLeafId),
+      targetLeafId,
+    };
   }
 
   async commitRecoveryNavigation(
@@ -2541,6 +2593,8 @@ export class SessionHost {
       this.#unsubscribe = undefined;
       this.ui.cancelAll();
       this.auth.cancelAll();
+      this.#workspaceMutationJournal?.dispose();
+      this.#workspaceMutationJournal = undefined;
     });
     await this.#bindSession();
   }
@@ -2548,6 +2602,13 @@ export class SessionHost {
   #createRuntimeFactory(): CreateAgentSessionRuntimeFactory {
     if (this.#runtimeFactory) return this.#runtimeFactory;
     return async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+      const workspaceMutationJournal = this.#workspaceMutationJournalEnabled
+        ? new WorkspaceMutationJournalBridge({
+            emit: (event, data) => this.#emit(event, data),
+            sessionId: sessionManager.getSessionId(),
+          })
+        : undefined;
+      this.#workspaceMutationJournal = workspaceMutationJournal;
       const requiresTrust = hasPiariumTrustRequiringProjectResources(cwd);
       const storedDecision = this.#trustStore.get(cwd);
       const initialTrust =
@@ -2628,6 +2689,9 @@ export class SessionHost {
       const configured = await this.#configureServices?.(services);
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
+        ...(workspaceMutationJournal === undefined
+          ? {}
+          : { customTools: createWorkspaceMutationJournalTools(cwd, workspaceMutationJournal) }),
         services,
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
@@ -2796,6 +2860,8 @@ export class SessionHost {
     this.#unsubscribe = undefined;
     this.ui.cancelAll();
     this.auth.cancelAll();
+    this.#workspaceMutationJournal?.dispose();
+    this.#workspaceMutationJournal = undefined;
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();

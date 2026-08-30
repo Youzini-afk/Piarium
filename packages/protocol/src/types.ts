@@ -480,6 +480,9 @@ export interface RecoveryOperationResult {
 }
 
 export interface HostHandshakeParams {
+  capabilities?: {
+    workspaceMutationJournal?: boolean;
+  };
   clientName: string;
   clientVersion: string;
   mode: HostMode;

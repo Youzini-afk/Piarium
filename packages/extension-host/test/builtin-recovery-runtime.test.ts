@@ -48,12 +48,10 @@ test("the built-in recovery Host activates on service invocation and withdraws o
     return {
       capabilities: {
         bindings: true,
-        capture: true,
         checkpoints: true,
         combined: true,
-        diff: true,
-        read: true,
-        restore: true,
+        journal: true,
+        redo: true,
         storageManagement: true,
       },
       identity: {
@@ -66,13 +64,13 @@ test("the built-in recovery Host activates on service invocation and withdraws o
       storage: {
         authorityId: runtime.services.hostId,
         byteLength: 0,
+        checkpointCount: 0,
         encryption: { available: false, enabled: false },
         location: { mode: "application-data" },
         locationSource: "global",
         objectCount: 0,
-        readySnapshotCount: 0,
+        readyCheckpointCount: 0,
         registryRevision: 0,
-        snapshotCount: 0,
         state: "missing",
         workspaceId: "workspace-1",
       },

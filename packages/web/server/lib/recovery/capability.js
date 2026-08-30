@@ -4,16 +4,13 @@ import {
   parseSetRecoveryStorageLocationInput,
   parseWorkspaceCombinedRecoveryApplyInput,
   parseWorkspaceCombinedRecoveryPrepareInput,
-  parseWorkspaceRecoveryCaptureInput,
   parseWorkspaceRecoveryCheckpointInput,
+  parseWorkspaceRecoveryCheckpointQuery,
   parseWorkspaceRecoveryEntryTarget,
-  parseWorkspaceRecoverySnapshotDiffInput,
-  parseWorkspaceRecoverySnapshotQuery,
-  parseWorkspaceRecoverySnapshotReadInput,
+  parseWorkspaceRecoveryMutationAfterInput,
+  parseWorkspaceRecoveryMutationBeforeInput,
   parseWorkspaceRecoveryTurnSettledInput,
   parseWorkspaceRecoveryTurnStartInput,
-  parseWorkspaceRestoreApplyInput,
-  parseWorkspaceRestorePrepareInput,
 } from '@piarium/extension-contract';
 
 const asRecord = (value, label) => {
@@ -34,13 +31,16 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
     const input = asRecord(params, 'workspace.recovery-primitives.status');
     return engine.status(requiredText(input.workspaceId, 'workspaceId'));
   }
-  if (method === 'captureSnapshot') return engine.captureSnapshot(parseWorkspaceRecoveryCaptureInput(params));
   if (method === 'createCheckpoint') return engine.createCheckpoint(parseWorkspaceRecoveryCheckpointInput(params));
+  if (method === 'recordMutationBefore') {
+    return engine.recordMutationBefore(parseWorkspaceRecoveryMutationBeforeInput(params));
+  }
+  if (method === 'recordMutationAfter') {
+    return engine.recordMutationAfter(parseWorkspaceRecoveryMutationAfterInput(params));
+  }
   if (method === 'recordTurnStart') return engine.recordTurnStart(parseWorkspaceRecoveryTurnStartInput(params));
   if (method === 'recordTurnSettled') return engine.recordTurnSettled(parseWorkspaceRecoveryTurnSettledInput(params));
   if (method === 'resolveEntry') return engine.resolveEntry(parseWorkspaceRecoveryEntryTarget(params));
-  if (method === 'prepareRestore') return engine.prepareRestore(parseWorkspaceRestorePrepareInput(params));
-  if (method === 'applyRestore') return engine.applyRestore(parseWorkspaceRestoreApplyInput(params));
   if (method === 'prepareCombinedRecovery') {
     return engine.prepareCombinedRecovery(parseWorkspaceCombinedRecoveryPrepareInput(params));
   }
@@ -59,22 +59,12 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
     const input = asRecord(params, 'workspace.recovery-primitives.cancelCombinedOperation');
     return engine.cancelCombinedOperation(requiredText(input.operationId, 'operationId'));
   }
-  if (method === 'getOperation') {
-    const input = asRecord(params, 'workspace.recovery-primitives.getOperation');
-    return engine.getOperation(requiredText(input.operationId, 'operationId'));
-  }
-  if (method === 'cancelOperation') {
-    const input = asRecord(params, 'workspace.recovery-primitives.cancelOperation');
-    return engine.cancelOperation(requiredText(input.operationId, 'operationId'));
-  }
-  if (method === 'listSnapshots') return engine.listSnapshots(parseWorkspaceRecoverySnapshotQuery(params));
+  if (method === 'listCheckpoints') return engine.listCheckpoints(parseWorkspaceRecoveryCheckpointQuery(params));
   if (method === 'listCombinedOperations') {
     const input = asRecord(params, 'workspace.recovery-primitives.listCombinedOperations');
     return engine.listCombinedOperations(requiredText(input.workspaceId, 'workspaceId'));
   }
   if (method === 'listStorageWorkspaces') return engine.listStorageWorkspaces();
-  if (method === 'readSnapshot') return engine.readSnapshot(parseWorkspaceRecoverySnapshotReadInput(params));
-  if (method === 'diffSnapshots') return engine.diffSnapshots(parseWorkspaceRecoverySnapshotDiffInput(params));
   if (method === 'storageStatus') {
     const input = asRecord(params, 'workspace.recovery-primitives.storageStatus');
     return engine.storageStatus(input.workspaceId === undefined

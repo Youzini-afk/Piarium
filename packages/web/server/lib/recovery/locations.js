@@ -31,6 +31,7 @@ export const writeRecoveryJsonAtomic = async (filePath, value, options = {}) => 
   const directory = pathModule.dirname(filePath);
   await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  const previous = `${filePath}.previous`;
   let handle;
   try {
     handle = await fsPromises.open(temporary, 'wx', 0o600);
@@ -38,12 +39,41 @@ export const writeRecoveryJsonAtomic = async (filePath, value, options = {}) => 
     await handle.sync();
     await handle.close();
     handle = null;
-    await fsPromises.rename(temporary, filePath);
+    try {
+      await fsPromises.rename(temporary, filePath);
+    } catch (error) {
+      if (!['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(error?.code)) throw error;
+      await fsPromises.rm(previous, { force: true });
+      let preserved = false;
+      try {
+        await fsPromises.rename(filePath, previous);
+        preserved = true;
+      } catch (preserveError) {
+        if (preserveError?.code !== 'ENOENT') throw preserveError;
+      }
+      try {
+        await fsPromises.rename(temporary, filePath);
+      } catch (replaceError) {
+        if (preserved) await fsPromises.rename(previous, filePath).catch(() => undefined);
+        throw replaceError;
+      }
+      if (preserved) await fsPromises.rm(previous, { force: true });
+    }
     await syncDirectory(directory, fsPromises);
   } catch (error) {
     await handle?.close().catch(() => undefined);
     await fsPromises.unlink(temporary).catch(() => undefined);
     throw error;
+  }
+};
+
+export const readRecoveryJsonAtomic = async (filePath, options = {}) => {
+  const fsPromises = options.fsPromises ?? fs.promises;
+  try {
+    return JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return JSON.parse(await fsPromises.readFile(`${filePath}.previous`, 'utf8'));
   }
 };
 
@@ -197,7 +227,7 @@ export const createRecoveryLocationRegistry = ({
 
   const read = async () => {
     try {
-      return parseDocument(JSON.parse(await fsPromises.readFile(registryPath, 'utf8')), authorityId);
+      return parseDocument(await readRecoveryJsonAtomic(registryPath, { fsPromises }), authorityId);
     } catch (error) {
       if (error?.code === 'ENOENT') return emptyDocument(authorityId);
       if (error instanceof RecoveryPrimitiveError) throw error;

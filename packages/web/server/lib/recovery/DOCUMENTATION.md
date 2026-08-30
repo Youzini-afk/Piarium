@@ -1,18 +1,61 @@
-# Native workspace recovery
+# Affected-file recovery journal
 
-Piarium recovery follows an IDE-local-history model rather than treating every chat turn as a new workspace archive.
+Piarium message recovery is an operation journal, not a workspace archive.
 
-## Checkpoint layers
+## Normal turn path
 
-1. Resolving a workspace schedules one non-blocking baseline. This is the only normal path that scans the full workspace.
-2. Every Pi turn records a durable content witness (`epoch` plus `mutationRevision`) before and after execution. If the witness did not change, combined recovery performs zero filesystem operations and only navigates the conversation.
-3. Once a ready baseline exists, the Pi writer watcher reports the paths affected during a turn. The next checkpoint inherits the previous manifest and re-reads only those files or directories.
-4. A watcher reset, unavailable watcher, or missing baseline falls back to a full capture. This preserves coverage for shell and external writes without making a full scan the common path.
+1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.
+2. The Web Host negotiates `workspaceMutationJournal` with the Pi worker.
+3. Pi's built-in `write` and `edit` tools are wrapped without changing their parameters or behavior.
+   Before the original tool executes, the worker sends `workspace.mutation.request` and waits.
+4. The recovery service resolves that one path, stores its old state and content-addressed bytes, then
+   acknowledges the worker. The tool can now write.
+5. After the tool returns or throws, the worker waits while Piarium records the final state. Repeated
+   writes to one path preserve the first before-image and the last after-image.
+6. Turn settlement compares watcher paths with the exact journal. An unchanged turn is a ready
+   zero-path checkpoint. A path changed only by `bash`, a terminal, Git, or another uncontrolled process
+   is reported as incomplete rather than triggering a full-workspace fallback.
 
-Writer revisions fence concurrent activity but are not part of content identity. A writer can open and close without changing files; such a turn remains a valid no-op checkpoint.
+New sessions, ordinary prompts, and unchanged turns therefore perform no recursive scan. Work scales
+with the files actually written by the journalled tools.
 
-## Integrity
+## Restore path
 
-Objects remain content-addressed. A capture publishes its manifest only after every referenced object exists with the expected size, and restore verifies object hashes before applying them. Staged manifest rows are committed to SQLite in one transaction rather than one durable transaction per file.
+Conversation navigation reports the entry IDs that will leave the active Pi branch. Piarium loads the
+turn checkpoints bound to those entries and folds their path operations into:
 
-The filesystem watcher is a path-discovery accelerator, not the source of file contents. If it reports incomplete coverage, Piarium uses the full-capture fallback instead of claiming an exact incremental checkpoint.
+- the expected current state for each affected path;
+- the state to restore before the selected message.
+
+Preparation hashes only those paths. Matching paths restore immediately. A later user edit or dirty
+buffer becomes a path conflict and is the only normal reason to show the recovery chooser. Before any
+write, Piarium stores the current version of the affected paths as the redo/compensation state. It does
+not create a whole-workspace safety checkpoint or enter global maintenance mode.
+
+The small SQLite operation record is durable. If file application or Pi navigation fails, Piarium
+compensates only paths already changed by that operation. Startup resolves an interrupted operation
+from those recorded paths; it never leaves the workspace locked while waiting for a conversation step.
+
+## Coverage boundary
+
+`write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation
+boundary. A generic native process can modify unknown paths without a portable pre-write hook. Watcher
+events identify those paths only after the change, so such a turn is explicitly incomplete for combined
+rollback. Conversation-only rollback remains available.
+
+An independent IDE local-history layer may later preserve more external changes as they pass through
+Documents or editor VFS operations. It must not reintroduce a per-turn full scan or claim universal
+shell rollback without a real copy-on-write or operating-system interception provider.
+
+## Persistence
+
+Each selected recovery provider owns the same user-configurable storage-location model:
+
+- application data under `PIARIUM_DATA_DIR`;
+- inside the workspace;
+- beside the workspace;
+- a custom directory.
+
+The payload contains `catalog.sqlite`, `objects/`, and `staging/`. Content objects use SHA-256 over the
+uncompressed bytes. Checkpoints store only affected-path state references. Location transfer verifies
+the destination before switching authority; cleanup removes unreachable objects.

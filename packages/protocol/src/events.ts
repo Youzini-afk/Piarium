@@ -17,6 +17,19 @@ import type {
 import type { PiAgentEvent } from "./session.js";
 import type { ProviderConfigDeleteScope } from "./provider.js";
 
+interface WorkspaceMutationRequestBase {
+  path: string;
+  requestId: string;
+  sessionId: string;
+  toolCallId: string;
+  toolName: "write" | "edit";
+}
+
+export type WorkspaceMutationRequest = WorkspaceMutationRequestBase & (
+  | { phase: "before"; succeeded?: never }
+  | { phase: "after"; succeeded: boolean }
+);
+
 export interface HostEventMap {
   "agent.event": {
     event: PiAgentEvent;
@@ -81,6 +94,7 @@ export interface HostEventMap {
     sessionId: string;
     signal: string | null;
   };
+  "workspace.mutation.request": WorkspaceMutationRequest;
 }
 
 export const HOST_EVENTS = [
@@ -103,6 +117,7 @@ export const HOST_EVENTS = [
   "session.closed",
   "session.snapshot",
   "session.worker.exited",
+  "workspace.mutation.request",
 ] as const satisfies readonly (keyof HostEventMap)[];
 
 const HOST_EVENT_SET = new Set<string>(HOST_EVENTS);

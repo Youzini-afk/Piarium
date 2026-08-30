@@ -182,6 +182,10 @@ export interface HostMethodMap {
     params: { level: ThinkingLevel; sessionId: string };
     result: SessionSnapshot;
   };
+  "workspace.mutation.respond": {
+    params: { accepted: boolean; requestId: string; sessionId: string };
+    result: { accepted: boolean };
+  };
   "project.trust.respond": {
     params: { remember: boolean; requestId: string; trusted: boolean };
     result: { accepted: boolean };
@@ -375,6 +379,7 @@ export interface HostMethodMap {
       editorImages?: ImageAttachment[];
       editorText?: string;
       expectedLeafId: string | null;
+      removedEntryIds: string[];
       targetId: string;
       targetLeafId: string | null;
     };
@@ -384,6 +389,7 @@ export interface HostMethodMap {
     result: {
       currentLeafId: string | null;
       expectedLeafId: string | null;
+      removedEntryIds: string[];
       targetLeafId: string | null;
     };
   };

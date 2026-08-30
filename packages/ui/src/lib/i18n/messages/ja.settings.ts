@@ -1790,7 +1790,7 @@ export const settingsDict = {
   'settings.piarium.recovery.preference.conversation.label': '会話のみ',
   'settings.piarium.recovery.preference.conversation.description': 'ワークスペースのファイルを変更せずに Pi の会話ブランチを移動し、編集可能なプロンプトを復元します。',
   'settings.piarium.recovery.preference.both.label': '会話とファイル',
-  'settings.piarium.recovery.preference.both.description': 'Open a verified combined plan for the conversation and workspace, with an explicit new-workspace fallback when in-place recovery is unsafe.',
+  'settings.piarium.recovery.preference.both.description': 'Return the conversation and the files changed by those turns. Later edits are shown only when they create a real path conflict.',
   'settings.piarium.recovery.preference.ask.label': 'Always ask',
   'settings.piarium.recovery.preference.ask.description': 'Choose conversation-only, coordinated in-place recovery, or a new recovered workspace each time.',
   'settings.piarium.recovery.providers.title': '復元プロバイダー',
