@@ -230,7 +230,9 @@ test("reports broker activation failure instead of publishing a false ready stat
         packageRoot: SYSTEM_ROOT,
         subscribe: () => () => {},
         warmup: async () => {
-          throw new Error("broker warmup failed");
+          throw Object.assign(new Error("broker warmup failed"), {
+            code: "host-entry-unavailable",
+          });
         },
         workerCount: 0,
       } as unknown as PiRuntimeBroker),
@@ -250,6 +252,7 @@ test("reports broker activation failure instead of publishing a false ready stat
     assert.equal(disposed, true);
     assert.equal(lifecycle.snapshot.status, "failed");
     assert.match(lifecycle.snapshot.issue ?? "", /broker warmup failed/);
+    assert.equal(lifecycle.snapshot.issueCode, "host-entry-unavailable");
     assert.throws(() => lifecycle.requireBroker(), PiRuntimeNotReadyError);
   } finally {
     await rm(dataDir, { force: true, recursive: true });

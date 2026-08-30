@@ -195,6 +195,30 @@ test("returns the missing module name when an external package root cannot load"
   }
 });
 
+test("preserves a typed Host installation failure through the runtime snapshot", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => [systemReady],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+    });
+
+    const snapshot = await manager.refresh();
+
+    assert.equal(snapshot.status, "failed");
+    assert.equal(snapshot.issueCode, "host-entry-unavailable");
+    assert.match(snapshot.issue ?? "", /installation files required to start Pi are missing/);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
 test("does not download or install when PATH already has a usable Pi", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
   try {

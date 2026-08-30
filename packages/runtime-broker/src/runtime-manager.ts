@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import type {
   PiRuntimeInstallPlan,
   PiRuntimeInstallation,
+  PiRuntimeIssueCode,
   PiRuntimeManagerStatus,
   PiRuntimeSnapshot,
   RuntimeSourceKind,
@@ -23,6 +24,7 @@ import {
   type RuntimeInstallerOptions,
 } from "./runtime-installer.js";
 import { probePiRuntime } from "./runtime-probe.js";
+import { piRuntimeIssueCodeFromError } from "./errors.js";
 import {
   loadRuntimeSelection,
   saveRuntimeSelection,
@@ -82,6 +84,7 @@ export class PiRuntimeManager {
   #installations: PiRuntimeInstallation[] = [];
   #installPlan: PiRuntimeInstallPlan | undefined;
   #issue: string | undefined;
+  #issueCode: PiRuntimeIssueCode | undefined;
   #operationId: string | undefined;
   #revision = 0;
   #selectedId: string | undefined;
@@ -107,6 +110,7 @@ export class PiRuntimeManager {
       ...(this.#active === undefined ? {} : { active: this.#active }),
       ...(this.#operationId === undefined ? {} : { operationId: this.#operationId }),
       ...(this.#issue === undefined ? {} : { issue: this.#issue }),
+      ...(this.#issueCode === undefined ? {} : { issueCode: this.#issueCode }),
       ...(this.#installPlan === undefined ? {} : { installPlan: this.#installPlan }),
     };
   }
@@ -344,6 +348,7 @@ export class PiRuntimeManager {
       this.#active = { ...installation, state: "failed", issue };
       this.#status = "failed";
       this.#issue = issue;
+      this.#issueCode = piRuntimeIssueCodeFromError(error);
     }
   }
 
@@ -354,12 +359,14 @@ export class PiRuntimeManager {
     this.#operationId = randomUUID();
     this.#status = status;
     this.#issue = undefined;
+    this.#issueCode = undefined;
     this.#emit();
     try {
       await work();
     } catch (error) {
       this.#status = "failed";
       this.#issue = error instanceof Error ? error.message : String(error);
+      this.#issueCode = piRuntimeIssueCodeFromError(error);
     }
     this.#emit();
     return this.snapshot;

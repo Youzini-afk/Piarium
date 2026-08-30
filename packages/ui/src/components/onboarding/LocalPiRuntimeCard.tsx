@@ -1,16 +1,22 @@
 import React from 'react';
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import {
+  PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE,
+  type PiRuntimeSnapshot,
+} from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
 import { piRuntimeSourceLabelKey } from '@/lib/pi-runtime/source-label';
+import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 
 interface LocalPiRuntimeCardProps {
   onContinue: () => Promise<void> | void;
 }
+
+const PIARIUM_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases/latest';
 
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
@@ -110,12 +116,15 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
 
   const installation = discoveredInstall(snapshot);
   const status = snapshot.status;
+  const hostEntryUnavailable = snapshot.issueCode === PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE;
   const busyStatus = status === 'discovering' || status === 'installing' || status === 'upgrading' || status === 'probing' || busy;
   const sourceLabel = installation
     ? t(piRuntimeSourceLabelKey(installation.source))
     : '';
 
-  const title = status === 'ready'
+  const title = hostEntryUnavailable
+    ? t('onboarding.localSetup.status.hostEntryUnavailable')
+    : status === 'ready'
     ? t('onboarding.localSetup.status.readyWithVersion', { version: installation?.version ?? '' })
     : status === 'missing'
       ? t('onboarding.localSetup.status.missing')
@@ -131,7 +140,9 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
                 ? t('onboarding.localSetup.status.probing')
                 : t('onboarding.localSetup.status.discovering');
 
-  const detail = status === 'ready' && installation
+  const detail = hostEntryUnavailable
+    ? t('onboarding.localSetup.status.hostEntryUnavailableDetail')
+    : status === 'ready' && installation
     ? t('onboarding.localSetup.status.readyDetail', {
         source: sourceLabel,
         commandPath: installation.commandPath ?? installation.packageRoot ?? '',
@@ -208,6 +219,16 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
             )}>
               {detail}
             </p>
+            {hostEntryUnavailable && snapshot.issue ? (
+              <details className="pt-1 typography-micro text-muted-foreground">
+                <summary className="cursor-pointer select-none">
+                  {t('onboarding.localSetup.status.hostEntryUnavailableDiagnostics')}
+                </summary>
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-background/60 p-2 font-mono text-destructive">
+                  {snapshot.issue}
+                </pre>
+              </details>
+            ) : null}
           </div>
         </div>
 
@@ -296,16 +317,28 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
 
       {status === 'failed' ? (
         <div className="space-y-2">
+          {hostEntryUnavailable ? (
+            <Button
+              type="button"
+              size="lg"
+              className="w-full"
+              disabled={busyStatus}
+              onClick={() => void openExternalUrl(PIARIUM_RELEASES_URL)}
+            >
+              {t('onboarding.localSetup.actions.downloadPiariumAgain')}
+            </Button>
+          ) : null}
           <Button
             type="button"
-            size="lg"
+            size={hostEntryUnavailable ? 'default' : 'lg'}
+            variant={hostEntryUnavailable ? 'outline' : 'default'}
             className="w-full"
             disabled={busyStatus || !piRuntime}
             onClick={() => void runAction(() => piRuntime!.refresh())}
           >
             {t('onboarding.localSetup.actions.retryDetect')}
           </Button>
-          {piRuntime?.capabilities.install ? (
+          {!hostEntryUnavailable && piRuntime?.capabilities.install ? (
             <Button
               type="button"
               variant="outline"
@@ -316,15 +349,17 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
               {t('onboarding.localSetup.actions.upgradePi')}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            disabled={busyStatus}
-            onClick={() => void handleSelectExisting()}
-          >
-            {t('onboarding.localSetup.actions.selectExisting')}
-          </Button>
+          {!hostEntryUnavailable ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={busyStatus}
+              onClick={() => void handleSelectExisting()}
+            >
+              {t('onboarding.localSetup.actions.selectExisting')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

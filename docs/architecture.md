@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## 1. Context
 
@@ -125,7 +125,11 @@ frames and event sequence numbers, correlates concurrent requests, denies projec
 owns catalog/per-session workers, and performs graceful then process-tree shutdown. Electron starts
 and handshakes the catalog worker whenever the local runtime is available, verifies that packaged
 worker files are unpacked, and awaits broker disposal during ordinary quit, update, relaunch, hard
-signals, and startup failure.
+signals, and startup failure. Electron resolves that external Host entry once and gives the same
+absolute path to Runtime Manager probes and live Broker generations. A path inside `app.asar` is never
+an executable fallback for an external Node process. Packaging launches the unpacked Host and completes
+a real handshake; the Windows unpacked-app smoke also activates a seeded Pi package root instead of
+accepting the runtime-setup screen as proof that the Host works.
 
 `@piarium/runtime-client` is the browser-safe surface client. The Web server exposes the same
 Pi-native method names through `/api/piarium/runtime/ws`; it validates every untrusted parameter,
@@ -578,6 +582,9 @@ settings, package source URLs, message content, fleet goals, or unknown health f
 
 - Protocol parse errors close only the offending connection after a bounded diagnostic.
 - Worker crashes retain the session and expose restart/recovery actions.
+- A missing or inaccessible application Host is reported as `host-entry-unavailable`, separately from
+  Pi installation/version failures; onboarding offers Piarium reinstallation and does not suggest that
+  upgrading or selecting a different Pi can repair application files.
 - Extension failures are attributed to package/source and do not become anonymous chat errors.
 - Writes use explicit leases, temporary files, fsync where meaningful, atomic same-volume replace,
   and post-write verification.

@@ -51,6 +51,14 @@ export type PiRuntimeManagerStatus =
   | "upgrading"
   | "failed";
 
+export const PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE = "host-entry-unavailable" as const;
+
+export const PI_RUNTIME_ISSUE_CODES = [
+  PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE,
+] as const;
+
+export type PiRuntimeIssueCode = (typeof PI_RUNTIME_ISSUE_CODES)[number];
+
 export type PiRuntimeInstallAction = "none" | "install" | "upgrade" | "keep-newer";
 
 export type PiRuntimeInstallManager = "npm" | "bun" | "pnpm" | "standalone";
@@ -74,6 +82,7 @@ export interface PiRuntimeSnapshot {
   active?: PiRuntimeInstallation;
   operationId?: string;
   issue?: string;
+  issueCode?: PiRuntimeIssueCode;
   installPlan?: PiRuntimeInstallPlan;
 }
 

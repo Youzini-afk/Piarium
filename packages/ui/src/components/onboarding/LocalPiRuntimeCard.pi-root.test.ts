@@ -13,4 +13,13 @@ describe('Local Pi runtime onboarding', () => {
     expect(source).not.toContain('getPiRuntimeConnection');
     expect(source).not.toContain('ensurePiRuntime');
   });
+
+  test('separates a broken Piarium Host installation from Pi runtime actions', () => {
+    const source = readFileSync(new URL('./LocalPiRuntimeCard.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE');
+    expect(source).toContain('onboarding.localSetup.status.hostEntryUnavailable');
+    expect(source).toContain('onboarding.localSetup.actions.downloadPiariumAgain');
+    expect(source).toContain('https://github.com/Youzini-afk/Piarium/releases/latest');
+    expect(source).toContain('!hostEntryUnavailable && piRuntime?.capabilities.install');
+  });
 });

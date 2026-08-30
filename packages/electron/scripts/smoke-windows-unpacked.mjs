@@ -10,12 +10,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const electronDir = path.resolve(__dirname, '..');
 const appPath = path.resolve(process.argv[2] ?? path.join(electronDir, 'dist', 'win-unpacked', 'Piarium.exe'));
+const smokePiPackageRoot = path.resolve(
+  electronDir,
+  '..',
+  'pi-host',
+  'node_modules',
+  '@earendil-works',
+  'pi-coding-agent',
+);
 
 if (process.platform !== 'win32') {
   throw new Error('The unpacked Windows smoke test must run on Windows.');
 }
 if (!existsSync(appPath)) {
   throw new Error(`Missing unpacked Piarium executable at ${appPath}`);
+}
+if (!existsSync(path.join(smokePiPackageRoot, 'package.json'))) {
+  throw new Error(`Missing Pi package used by the packaged Host smoke at ${smokePiPackageRoot}`);
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -478,8 +489,15 @@ const waitForRenderer = async (userDataDir) => {
           return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
         }
         if (lastState.layout?.runtimeSetup === true && lastState.layout?.localRuntimeContinueReady !== true) {
-          const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
-          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', monaco, state: lastState };
+          const runtimeStatus = lastState.diagnostics?.runtimeSnapshot?.status;
+          const runtimeStillWorking = runtimeStatus === 'discovering'
+            || runtimeStatus === 'installing'
+            || runtimeStatus === 'probing'
+            || runtimeStatus === 'upgrading';
+          if (!runtimeStillWorking) {
+            const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
+            return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', monaco, state: lastState };
+          }
         }
         if (!continuedFromOnboarding && lastState.layout?.localRuntimeContinueReady === true) {
           const continuation = await devTools.evaluate(`(() => {
@@ -521,6 +539,15 @@ const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
 try {
   await fsp.mkdir(userDataDir, { recursive: true });
   await fsp.mkdir(smokeWorkspaceRoot, { recursive: true });
+  await fsp.writeFile(
+    path.join(userDataDir, 'runtime-selection.json'),
+    `${JSON.stringify({
+      selectedId: 'custom:selected',
+      customNodePath: process.execPath,
+      customPackageRoot: smokePiPackageRoot,
+    }, null, 2)}\n`,
+    'utf8',
+  );
   await fsp.writeFile(
     path.join(smokeWorkspaceRoot, 'packaged-language-smoke.ts'),
     'export const packagedLanguageSmoke: number = 1;\n',
@@ -617,22 +644,11 @@ try {
     );
   }
   if (renderer.mode === 'runtime-setup') {
-    const log = await readLog();
-    console.log(JSON.stringify({
-      appPath,
-      builtinLanguage,
-      builtinRecovery,
-      health: 'ok',
-      layout,
-      piVersion: null,
-      profile: profileSource ? 'seeded' : 'clean',
-      renderer: 'runtime-setup',
-      monaco: renderer.monaco,
-      runtimeDiscovery: renderer.state?.diagnostics?.runtimeSnapshot ?? null,
-      terminal: 'create-close-ok',
-      workspaceView: renderer.state?.diagnostics?.workspaceView ?? null,
-    }, null, 2));
-  } else {
+    throw describeSmokeFailure(
+      'Packaged Windows application did not activate the seeded Pi runtime through its external Host.',
+      renderer,
+    );
+  }
   if (!layout.closeControl) {
     throw describeSmokeFailure('Packaged renderer did not expose the Windows close control.', renderer);
   }
@@ -660,11 +676,15 @@ try {
   if (layout.composerFrame.width > MAX_COMPOSER_FRAME_WIDTH_PX + LAYOUT_TOLERANCE_PX) {
     throw new Error(`Composer frame is wider than the fork-derived 48rem column: ${layout.composerFrame.width}px.`);
   }
-  const log = await readLog();
-  if (!log.includes('[pi-runtime] ready')) {
-    throw describeSmokeFailure(`Pi runtime readiness was not logged.\n${log}`, renderer);
+  const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
+  if (
+    runtimeSnapshot?.status !== 'ready'
+    || runtimeSnapshot.active?.id !== 'custom:selected'
+    || runtimeSnapshot.active?.source !== 'custom'
+  ) {
+    throw describeSmokeFailure('Packaged renderer did not retain the selected custom Pi runtime.', renderer);
   }
-  const piVersion = log.match(/piVersion: '([^']+)'/)?.[1] ?? 'unknown';
+  const piVersion = runtimeSnapshot.active.version ?? 'unknown';
   console.log(JSON.stringify({
     appPath,
     builtinLanguage,
@@ -677,7 +697,6 @@ try {
     monaco: renderer.monaco,
     terminal: 'create-close-ok',
   }, null, 2));
-  }
 } catch (error) {
   const log = await readLog();
   const suffix = `\n--- main.log ---\n${log.slice(-6_000)}`;

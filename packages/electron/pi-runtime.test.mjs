@@ -63,14 +63,69 @@ test('resolves the unpacked Pi host entry in packaged apps', async () => {
 });
 
 test('fails closed when the packaged Pi host is absent', () => {
+  let error;
   assert.throws(
-    () => resolveElectronPiHostEntry({
-      packaged: true,
-      resourcesPath: path.join(os.tmpdir(), 'piarium-missing-resources'),
-      resolvedEntry: path.join(os.tmpdir(), 'piarium-missing-app.asar', 'main.js'),
-    }),
-    /Packaged Pi host is missing/,
+    () => {
+      try {
+        resolveElectronPiHostEntry({
+          packaged: true,
+          resourcesPath: path.join(os.tmpdir(), 'piarium-missing-resources'),
+          resolvedEntry: path.join(os.tmpdir(), 'piarium-missing-app.asar', 'main.js'),
+        });
+      } catch (caught) {
+        error = caught;
+        throw caught;
+      }
+    },
+    /Piarium installation files required to start Pi are missing/,
   );
+  assert.equal(error.code, 'host-entry-unavailable');
+});
+
+test('never returns an app.asar entry to an external Node process', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-asar-entry-'));
+  const asarEntry = path.join(root, 'resources', 'app.asar', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js');
+  await fs.mkdir(path.dirname(asarEntry), { recursive: true });
+  await fs.writeFile(asarEntry, 'export {};\n');
+  try {
+    let error;
+    assert.throws(
+      () => {
+        try {
+          resolveElectronPiHostEntry({
+            packaged: true,
+            resourcesPath: path.join(root, 'resources'),
+            resolvedEntry: asarEntry,
+          });
+        } catch (caught) {
+          error = caught;
+          throw caught;
+        }
+      },
+      /Piarium installation files required to start Pi are missing/,
+    );
+    assert.equal(error.code, 'host-entry-unavailable');
+    assert.ok(error.candidates.every((candidate) => !candidate.includes(`${path.sep}app.asar${path.sep}`)));
+  } finally {
+    await fs.rm(root, { force: true, recursive: true });
+  }
+});
+
+test('repairs an ASAR-derived entry even when packaged detection is unavailable', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-asar-detection-'));
+  const resourcesPath = path.join(root, 'resources');
+  const unpackedEntry = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js');
+  await fs.mkdir(path.dirname(unpackedEntry), { recursive: true });
+  await fs.writeFile(unpackedEntry, 'export {};\n');
+  try {
+    assert.equal(resolveElectronPiHostEntry({
+      packaged: false,
+      resourcesPath,
+      resolvedEntry: path.join(resourcesPath, 'app.asar', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
+    }), unpackedEntry);
+  } finally {
+    await fs.rm(root, { force: true, recursive: true });
+  }
 });
 
 test('desktop broker handshakes with the compiled Pi host', async () => {
@@ -81,8 +136,8 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
     clientVersion: '0.1.0-test',
     emit: (event) => events.push(event),
     foundationalPackages: [],
+    hostEntry: fileURLToPath(new URL('../pi-host/dist/host-bootstrap.js', import.meta.url)),
     packaged: false,
-    resolvedEntry: fileURLToPath(new URL('../pi-host/dist/host-bootstrap.js', import.meta.url)),
     resourcesPath: '',
   });
   try {
@@ -99,6 +154,8 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
 test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
   const main = await source('./main.mjs');
   assert.match(main, /requirePiRuntime: false/);
+  assert.match(main, /hostEntry: getDesktopPiHostEntry\(\)/);
+  assert.match(main, /const hostEntry = getDesktopPiHostEntry\(\);[\s\S]*hostEntry,/);
   assert.match(main, /createPiRuntimeBroker:/);
   assert.doesNotMatch(main, /await ensurePiRuntime\(\);[\s\S]*startWebUiServer/);
   assert.match(
@@ -106,4 +163,22 @@ test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
     /await killSidecar\(\);[\s\S]*await shutdownPiRuntime\(\);/,
   );
   assert.match(main, /await shutdownBackgroundServices\(\);[\s\S]*app\.exit\(1\)/);
+});
+
+test('desktop packaging and Windows smoke execute the external Host boundary', async () => {
+  const [afterPack, packageScript, smoke, verifier] = await Promise.all([
+    source('./scripts/after-pack.cjs'),
+    source('./scripts/package.mjs'),
+    source('./scripts/smoke-windows-unpacked.mjs'),
+    source('./scripts/verify-packaged-pi-host.mjs'),
+  ]);
+
+  assert.match(afterPack, /verify-packaged-pi-host\.mjs/);
+  assert.match(packageScript, /PIARIUM_PACKAGING_NODE = process\.execPath/);
+  assert.match(afterPack, /PIARIUM_PACKAGING_NODE \|\| process\.execPath/);
+  assert.match(verifier, /await lifecycle\.start\(\)/);
+  assert.match(smoke, /runtime-selection\.json/);
+  assert.match(smoke, /selectedId: 'custom:selected'/);
+  assert.match(smoke, /runtimeStillWorking/);
+  assert.match(smoke, /did not activate the seeded Pi runtime through its external Host/);
 });

@@ -2,13 +2,14 @@ import type {
   ExtensionUiResponse,
   HostHandshakeResult,
   PiRuntimeInstallation,
+  PiRuntimeIssueCode,
   PiRuntimeSnapshot,
   ProviderAuthResponse,
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
 } from "@piarium/protocol";
-import { PiRuntimeNotReadyError } from "./errors.js";
+import { PiRuntimeNotReadyError, piRuntimeIssueCodeFromError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
 import {
   PiRuntimeBroker,
@@ -52,6 +53,7 @@ export class PiRuntimeLifecycle {
   readonly #snapshotListeners = new Set<(snapshot: PiRuntimeSnapshot) => void>();
   readonly #workerGenerations = new Map<string, number>();
   #activationIssue: string | undefined;
+  #activationIssueCode: PiRuntimeIssueCode | undefined;
   #currentId = 0;
   #handshake: HostHandshakeResult | undefined;
   #nextId = 1;
@@ -71,7 +73,10 @@ export class PiRuntimeLifecycle {
       ...(options.targetVersion === undefined ? {} : { targetVersion: options.targetVersion }),
     });
     this.#managerUnsubscribe = this.#manager.subscribe((snapshot) => {
-      if (snapshot.status !== "ready") this.#activationIssue = undefined;
+      if (snapshot.status !== "ready") {
+        this.#activationIssue = undefined;
+        this.#activationIssueCode = undefined;
+      }
       this.#publishSnapshot();
     });
   }
@@ -83,8 +88,14 @@ export class PiRuntimeLifecycle {
     };
     if (snapshot.status === "ready" && snapshot.active && !this.#currentMatches(snapshot.active)) {
       snapshot.status = this.#activationIssue ? "failed" : "probing";
-      if (this.#activationIssue) snapshot.issue = this.#activationIssue;
-      else delete snapshot.issue;
+      if (this.#activationIssue) {
+        snapshot.issue = this.#activationIssue;
+        if (this.#activationIssueCode) snapshot.issueCode = this.#activationIssueCode;
+        else delete snapshot.issueCode;
+      } else {
+        delete snapshot.issue;
+        delete snapshot.issueCode;
+      }
     }
     return snapshot;
   }
@@ -331,6 +342,7 @@ export class PiRuntimeLifecycle {
       return await this.#ensureBroker(installation);
     } catch (error) {
       this.#activationIssue = error instanceof Error ? error.message : String(error);
+      this.#activationIssueCode = piRuntimeIssueCodeFromError(error);
       this.#publishSnapshot();
       throw error;
     }
@@ -341,6 +353,7 @@ export class PiRuntimeLifecycle {
     if (current && this.#generationMatches(current, installation)) {
       this.#handshake = current.handshake;
       this.#activationIssue = undefined;
+      this.#activationIssueCode = undefined;
       return current.handshake;
     }
     const id = this.#nextId;
@@ -386,6 +399,7 @@ export class PiRuntimeLifecycle {
     this.#currentId = id;
     this.#handshake = handshake;
     this.#activationIssue = undefined;
+    this.#activationIssueCode = undefined;
     this.#publishSnapshot();
     return handshake;
   }

@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 module.exports = (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
@@ -61,6 +62,41 @@ module.exports = (context) => {
       throw new Error(`Missing unpacked application-host runtime file at ${packagedPath}`);
     }
   }
+
+  const packagedHostEntry = path.join(
+    unpackedNodeModulesPath,
+    '@piarium',
+    'pi-host',
+    'dist',
+    'host-bootstrap.js',
+  );
+  const packagedBrokerEntry = path.join(
+    unpackedNodeModulesPath,
+    '@piarium',
+    'runtime-broker',
+    'dist',
+    'index.js',
+  );
+  const piPackageRoot = path.resolve(
+    __dirname,
+    '..',
+    '..',
+    'pi-host',
+    'node_modules',
+    '@earendil-works',
+    'pi-coding-agent',
+  );
+  const packagingNode = process.env.PIARIUM_PACKAGING_NODE || process.execPath;
+  execFileSync(packagingNode, [
+    path.join(__dirname, 'verify-packaged-pi-host.mjs'),
+    packagedBrokerEntry,
+    packagedHostEntry,
+    piPackageRoot,
+  ], {
+    cwd: path.resolve(__dirname, '..', '..', '..'),
+    stdio: 'inherit',
+    windowsHide: true,
+  });
 
   if (context.electronPlatformName !== 'darwin') return;
 

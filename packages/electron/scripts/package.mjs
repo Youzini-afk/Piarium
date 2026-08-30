@@ -15,6 +15,7 @@ const targetArchitecture = resolveTargetArchitecture({ environment: env, builder
 const require = createRequire(import.meta.url);
 const electronVersion = require('electron/package.json').version;
 env.PIARIUM_TARGET_ARCH = targetArchitecture.node;
+env.PIARIUM_PACKAGING_NODE = process.execPath;
 
 if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
   builderArgs.push(`--config.electronVersion=${electronVersion}`);

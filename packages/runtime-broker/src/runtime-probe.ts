@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HostHandshakeResult, RuntimeSourceKind } from "@piarium/protocol";
 import { assertPiSdkResolvable } from "@piarium/pi-host/sdk";
+import { assertExternalPiHostEntry, piRuntimeIssueCodeFromError } from "./errors.js";
 import { PiHostClient } from "./host-client.js";
 
 export interface PiRuntimeProbeOptions {
@@ -22,10 +23,14 @@ export interface PiRuntimeProbeResult {
 function formatProbeError(error: unknown, stderr: string): Error {
   const message = error instanceof Error ? error.message : String(error);
   const detail = [message, stderr.trim()].filter(Boolean).join("\n");
-  return new Error(detail);
+  const formatted = new Error(detail, { cause: error });
+  const issueCode = piRuntimeIssueCodeFromError(error);
+  if (issueCode) Object.assign(formatted, { code: issueCode });
+  return formatted;
 }
 
 export async function probePiRuntime(options: PiRuntimeProbeOptions): Promise<PiRuntimeProbeResult> {
+  assertExternalPiHostEntry(options.hostEntry);
   if (options.packageRoot) {
     try {
       assertPiSdkResolvable(options.packageRoot);

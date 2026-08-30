@@ -13,7 +13,11 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTray, createTrayController } from './tray.mjs';
 import { NotificationListener } from './notification-listener.mjs';
-import { createDesktopPiRuntimeBroker } from './pi-runtime.mjs';
+import {
+  createDesktopPiRuntimeBroker,
+  electronPiHostEntryCandidates,
+  resolveElectronPiHostEntry,
+} from './pi-runtime.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
@@ -43,6 +47,7 @@ import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
 import { resolvePiariumDataDir } from '@piarium/web/server/lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from '@piarium/web/server/lib/platform/inherited-env.js';
 import { createSettingsFileStore } from '@piarium/settings-store';
+import { PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE } from '@piarium/protocol';
 
 const execFileAsync = promisify(execFile);
 
@@ -289,6 +294,30 @@ const state = {
   keepAwakeBlockerId: null,
 };
 
+let resolvedDesktopPiHostEntry;
+const getDesktopPiHostEntry = () => {
+  if (resolvedDesktopPiHostEntry) return resolvedDesktopPiHostEntry;
+  const options = {
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  };
+  try {
+    resolvedDesktopPiHostEntry = resolveElectronPiHostEntry(options);
+  } catch (error) {
+    if (error?.code !== PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE) throw error;
+    const [expectedEntry] = electronPiHostEntryCandidates(options);
+    if (!expectedEntry) throw error;
+    // Keep the application host alive so Runtime Manager can publish a typed,
+    // repairable installation error instead of crashing the whole desktop app.
+    resolvedDesktopPiHostEntry = expectedEntry;
+    log.error('[pi-runtime] packaged Host entry is unavailable', {
+      expectedEntry,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return resolvedDesktopPiHostEntry;
+};
+
 const emitPiRuntimeEvent = (event) => {
   if (event.kind === 'diagnostic') {
     if (event.level === 'error') {
@@ -344,6 +373,7 @@ const ensurePiRuntime = async () => {
     ...(agentDir ? { agentDir } : {}),
     clientVersion: APP_VERSION,
     emit: emitPiRuntimeEvent,
+    hostEntry: getDesktopPiHostEntry(),
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
   });
@@ -1562,6 +1592,7 @@ const spawnLocalServer = async () => {
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
   const { startWebUiServer } = await import('@piarium/web/server/index.js');
+  const hostEntry = getDesktopPiHostEntry();
 
   const handle = await startWebUiServer({
     port: chosenPort,
@@ -1569,6 +1600,7 @@ const spawnLocalServer = async () => {
     uiPassword: desktopUiPassword || null,
     attachSignals: false,
     exitOnShutdown: false,
+    hostEntry,
     apiOnly: false,
     requirePiRuntime: false,
     createPiRuntimeBroker: (brokerOptions) => createDesktopPiRuntimeBroker({
