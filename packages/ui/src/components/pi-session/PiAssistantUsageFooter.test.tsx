@@ -10,7 +10,7 @@ const renderUsage = (usage: PiUsage): string => renderToStaticMarkup(
 );
 
 describe('Pi assistant usage footer', () => {
-  test('renders the response breakdown with explicit cache read and write fields', () => {
+  test('renders compact metric icons and omits empty cache fields', () => {
     const markup = renderUsage({
       cacheRead: 8_000,
       cacheWrite: 0,
@@ -20,12 +20,16 @@ describe('Pi assistant usage footer', () => {
       totalTokens: 10_500,
     });
     expect(markup).toContain('Token');
-    expect(markup).toContain('Input 2,000');
-    expect(markup).toContain('Output 500');
-    expect(markup).toContain('Cache Read 8,000');
-    expect(markup).toContain('Cache Write 0');
+    expect(markup).toContain('href="#oc-arrow-down"');
+    expect(markup).toContain('href="#oc-arrow-up"');
+    expect(markup).toContain('href="#oc-database-2"');
+    expect(markup).toContain('href="#oc-bar-chart-box"');
+    expect(markup).toContain('title="Input: 2,000"');
+    expect(markup).toContain('title="Output: 500"');
+    expect(markup).toContain('title="Cache Read: 8,000"');
+    expect(markup).not.toContain('Cache Write');
     expect(markup).not.toContain('Reasoning');
-    expect(markup).toContain('Total 10,500');
+    expect(markup).toContain('title="Total: 10,500"');
   });
 
   test('renders nothing when the provider reports no usage', () => {

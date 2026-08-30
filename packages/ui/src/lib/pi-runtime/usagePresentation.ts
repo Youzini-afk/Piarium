@@ -32,17 +32,12 @@ export interface PiUsagePresentation {
   };
 }
 
-export interface PiUsagePresentationOptions {
-  includeZeroCacheMetrics?: boolean;
-}
-
 const positive = (value: unknown): number => (
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 );
 
 export const projectPiUsagePresentation = (
   usage: PiUsage | undefined,
-  options: PiUsagePresentationOptions = {},
 ): PiUsagePresentation | undefined => {
   if (!usage) return undefined;
   const values = {
@@ -63,11 +58,7 @@ export const projectPiUsagePresentation = (
     { key: 'cacheRead', value: values.cacheRead },
     { key: 'cacheWrite', value: values.cacheWrite },
     { key: 'cacheWrite1h', value: values.cacheWrite1h },
-  ].filter((metric) => (
-    metric.value > 0
-    || (options.includeZeroCacheMetrics === true
-      && (metric.key === 'cacheRead' || metric.key === 'cacheWrite'))
-  )) as PiUsageMetric[];
+  ].filter((metric) => metric.value > 0) as PiUsageMetric[];
   const cacheInput = values.input + values.cacheRead + values.cacheWrite;
   const cacheReported = values.cacheRead > 0 || values.cacheWrite > 0;
   return {
