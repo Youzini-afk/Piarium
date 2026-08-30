@@ -60,7 +60,7 @@
     "cron-parser": "^5.5.0",
     "diff": "8.0.4",
     "dompurify": "^3.4.13",
-    "fuse.js": "^7.1.0",
+    "fuse.js": "^7.5.0",
     "ghostty-web": "^0.4.0",
     "html-to-image": "^1.11.13",
     "jsonc-parser": "^3.3.1",
