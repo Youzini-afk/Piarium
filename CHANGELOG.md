@@ -5,14 +5,23 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.8
+
+Piarium 0.9.8 makes workspace rollback proportional to the files Pi actually changed, while refining
+desktop updates and response-usage reporting.
+
 - Show a locked “Restarting Piarium” transition while the desktop updater stops background services
   and hands off to the installer, with interaction restored if the restart request fails
 - Keep Host-registered workspace identities valid across project-selection changes so background checkpoints
   and rollback cannot be rejected by stale settings; normalize Windows path identities consistently
 - Aggregate token usage across every model call in a user turn and render it once after the final response,
   using compact icons and showing cache-read or cache-write totals only when present
-- Replace per-turn full workspace scans with background baselines, witness-only no-op rollback, and watcher-path
-  incremental checkpoints; batch fallback manifests and parallelize object capture for large workspaces
+- Replace workspace-wide snapshots and scans with an affected-file journal: Pi write and edit mutations capture
+  immutable before-images, while unchanged turns create no workspace payload
+- Restore only journaled paths through content-addressed objects, keep redo data, and surface precise conflicts or
+  incomplete coverage instead of silently scanning or rewriting the whole workspace
+- Apply ordinary rollback directly and reserve the recovery dialog for choices, conflicts, or incomplete external
+  mutations, keeping the common path immediate and visually quiet
 
 ## 0.9.7
 
