@@ -228,7 +228,7 @@
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.134.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.9.2",
     "concurrently": "^10.0.4",
