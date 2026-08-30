@@ -2544,6 +2544,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.modeValue.none": "—",
   "chat.reasoningTrace.thinking": "Міркування",
   "chat.reasoningTrace.justification": "Обґрунтування",
+  "chat.piActivity.title": "Активність",
   "chat.reasoningTrace.expandAria": "Розгорнути слід міркування",
   "chat.reasoningTrace.collapseAria": "Згорнути слід міркування",
   "chat.reasoningTrace.thought": "Обдумав",

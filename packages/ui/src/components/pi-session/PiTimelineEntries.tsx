@@ -50,6 +50,11 @@ import {
 } from './piTimelineProjection';
 import type { PiAssistantWaitingPresentation } from './piAssistantWaiting';
 import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
+import {
+  PI_SORTED_LIVE_ASSISTANT_ID,
+  projectPiSortedTurn,
+  type PiSortedTurnProjection,
+} from './piSortedTurnProjection';
 
 export interface PiTimelineProps {
   assistantWaiting?: PiAssistantWaitingPresentation;
@@ -531,6 +536,117 @@ const AssistantMessage: React.FC<{
   </div>
 );
 
+const PiSortedActivityGroup: React.FC<{
+  cwd: string;
+  editor?: EditorAPI;
+  executionById: Record<string, PiToolExecutionState>;
+  hiddenThinkingLabel: string;
+  projection: PiSortedTurnProjection;
+  resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
+}> = ({ cwd, editor, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
+  const { t } = useI18n();
+  const activityRenderMode = useUIStore((state) => state.activityRenderMode);
+  const [expanded, setExpanded] = React.useState(activityRenderMode === 'summary');
+  React.useEffect(() => {
+    setExpanded(activityRenderMode === 'summary');
+  }, [activityRenderMode]);
+
+  const running = projection.activity.some((item) => (
+    item.streaming
+    || (item.kind === 'tool' && executionById[item.call.id]?.status === 'running')
+  ));
+  const latest = projection.activity.at(-1);
+  const latestLabel = latest?.kind === 'tool'
+    ? latest.call.name
+    : latest?.kind === 'thinking'
+      ? hiddenThinkingLabel
+      : latest?.kind === 'justification'
+        ? t('chat.reasoningTrace.justification')
+        : '';
+
+  return (
+    <section
+      className="overflow-hidden rounded-xl border border-border/60 bg-muted/10"
+      data-pi-sorted-activity="true"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left typography-meta text-muted-foreground hover:bg-muted/25"
+        aria-expanded={expanded}
+      >
+        <Icon
+          name={running ? 'loader-4' : 'check'}
+          className={cn(
+            'size-3.5 shrink-0',
+            running ? 'animate-spin text-primary' : 'text-[var(--status-success)]',
+          )}
+        />
+        <span className="font-medium text-foreground/85">{t('chat.piActivity.title')}</span>
+        {latestLabel ? <span className="min-w-0 flex-1 truncate">· {latestLabel}</span> : <span className="flex-1" />}
+        <span className="typography-micro">{projection.activity.length}</span>
+        <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
+      </button>
+      {expanded ? (
+        <div className="space-y-2 border-t border-border/50 px-3 py-2">
+          {projection.activity.map((item, index) => {
+            const next = projection.activity[index + 1];
+            const message = projection.messagesBySourceId.get(item.sourceId);
+            const showUsage = next?.sourceId !== item.sourceId
+              && !projection.answersBySourceId.has(item.sourceId)
+              && message?.stopReason !== 'pending';
+            return (
+              <React.Fragment key={item.id}>
+                {item.kind === 'tool' ? (
+                  <PiToolCard
+                    call={item.call}
+                    cwd={cwd}
+                    editor={editor}
+                    execution={executionById[item.call.id]}
+                    result={resultByCallId.get(item.call.id)}
+                  />
+                ) : item.kind === 'thinking' ? (
+                  <div data-pi-activity-kind="thinking">
+                    <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
+                      <Icon name="brain" className="size-3.5" />
+                      {hiddenThinkingLabel}{item.content.redacted ? ' (redacted)' : ''}
+                    </div>
+                    {!item.content.redacted ? (
+                      <div className="ml-2 border-l border-border/60 pl-3 text-muted-foreground">
+                        <MarkdownRenderer
+                          content={item.content.thinking}
+                          messageId={item.id}
+                          isStreaming={item.streaming}
+                          variant="reasoning"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-background/45 px-2.5 py-2" data-pi-activity-kind="justification">
+                    <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
+                      <Icon name="chat-1" className="size-3.5" />
+                      {t('chat.reasoningTrace.justification')}
+                    </div>
+                    <MarkdownRenderer
+                      content={item.content.text}
+                      messageId={item.id}
+                      isStreaming={item.streaming}
+                      variant="assistant"
+                      enableFileReferences
+                    />
+                  </div>
+                )}
+                {showUsage && message ? <PiAssistantUsageFooter usage={message.usage} /> : null}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
 export const PiTurnUserMessage: React.FC<{
   entry?: PiSessionMessageEntry;
   forkBusyEntryId?: string | null;
@@ -673,6 +789,7 @@ export const PiTimelineEntryList: React.FC<Omit<
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const chatRenderMode = useUIStore((state) => state.chatRenderMode);
   const { editor } = useRuntimeAPIs();
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
@@ -684,13 +801,31 @@ export const PiTimelineEntryList: React.FC<Omit<
     [entries, liveAssistant],
   );
   const resultByCallId = projectedResultByCallId ?? projection.resultByCallId;
+  const extensionEntries = React.useMemo(() => {
+    const renderedById = new Map<string, React.ReactNode>();
+    for (const entry of projection.visibleEntries) {
+      const rendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
+      if (rendered !== undefined) renderedById.set(entry.id, rendered);
+    }
+    return renderedById;
+  }, [cwd, messageRenderers, projection.visibleEntries, sessionId]);
+  const builtInEntries = React.useMemo(
+    () => projection.visibleEntries.filter((entry) => !extensionEntries.has(entry.id)),
+    [extensionEntries, projection.visibleEntries],
+  );
+  const sortedProjection = React.useMemo(
+    () => chatRenderMode === 'sorted'
+      ? projectPiSortedTurn(builtInEntries, projection.liveAssistant)
+      : undefined,
+    [builtInEntries, chatRenderMode, projection.liveAssistant],
+  );
+  const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
 
   return (
     <div className="flex flex-col gap-3">
         {projection.visibleEntries.map((entry) => {
-          const extensionRendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
-          if (extensionRendered !== undefined) {
-            return <React.Fragment key={entry.id}>{extensionRendered}</React.Fragment>;
+          if (extensionEntries.has(entry.id)) {
+            return <React.Fragment key={entry.id}>{extensionEntries.get(entry.id)}</React.Fragment>;
           }
           if (entry.type === 'message') {
             const { message } = entry;
@@ -708,25 +843,43 @@ export const PiTimelineEntryList: React.FC<Omit<
               );
             }
             if (message.role === 'assistant') {
-              const assistantText = message.content
+              const displayedMessage = chatRenderMode === 'sorted'
+                ? sortedProjection?.answersBySourceId.get(entry.id)
+                : message;
+              const showsActivity = sortedProjection?.activityAnchorId === entry.id
+                && sortedProjection.activity.length > 0;
+              if (!displayedMessage && !showsActivity) return null;
+              const assistantText = displayedMessage?.content
                 .filter((content) => content.type === 'text')
                 .map((content) => content.text)
                 .join('\n')
-                .trim();
+                .trim() ?? '';
               return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full">
-                  <AssistantMessage
-                    cwd={cwd}
-                    editor={editor}
-                    entryId={entry.id}
-                    executionById={toolExecutions}
-                    hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
-                    message={message}
-                    resultByCallId={resultByCallId}
-                  />
-                  {assistantText || onFork ? (
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full space-y-3">
+                  {showsActivity && sortedProjection ? (
+                    <PiSortedActivityGroup
+                      cwd={cwd}
+                      editor={editor}
+                      executionById={toolExecutions}
+                      hiddenThinkingLabel={resolvedThinkingLabel}
+                      projection={sortedProjection}
+                      resultByCallId={resultByCallId}
+                    />
+                  ) : null}
+                  {displayedMessage ? (
+                    <AssistantMessage
+                      cwd={cwd}
+                      editor={editor}
+                      entryId={entry.id}
+                      executionById={toolExecutions}
+                      hiddenThinkingLabel={resolvedThinkingLabel}
+                      message={displayedMessage}
+                      resultByCallId={resultByCallId}
+                    />
+                  ) : null}
+                  {displayedMessage && (assistantText || onFork) ? (
                   <div className={cn(
-                    'mt-1 flex h-6 items-center transition-opacity',
+                    'flex h-6 items-center transition-opacity',
                     isMobile
                       ? 'opacity-100'
                       : 'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100',
@@ -937,20 +1090,40 @@ export const PiTimelineEntryList: React.FC<Omit<
           );
         })}
 
-        {projection.liveAssistant && (
-          <article className="w-full" aria-live="polite">
-            <AssistantMessage
-              cwd={cwd}
-              editor={editor}
-              entryId={`live:${sessionId}`}
-              executionById={toolExecutions}
-              hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
-              message={projection.liveAssistant}
-              resultByCallId={resultByCallId}
-              streaming
-            />
-          </article>
-        )}
+        {projection.liveAssistant && (() => {
+          const displayedMessage = chatRenderMode === 'sorted'
+            ? sortedProjection?.answersBySourceId.get(PI_SORTED_LIVE_ASSISTANT_ID)
+            : projection.liveAssistant;
+          const showsActivity = sortedProjection?.activityAnchorId === PI_SORTED_LIVE_ASSISTANT_ID
+            && sortedProjection.activity.length > 0;
+          if (!displayedMessage && !showsActivity) return null;
+          return (
+            <article className="w-full space-y-3" aria-live="polite">
+              {showsActivity && sortedProjection ? (
+                <PiSortedActivityGroup
+                  cwd={cwd}
+                  editor={editor}
+                  executionById={toolExecutions}
+                  hiddenThinkingLabel={resolvedThinkingLabel}
+                  projection={sortedProjection}
+                  resultByCallId={resultByCallId}
+                />
+              ) : null}
+              {displayedMessage ? (
+                <AssistantMessage
+                  cwd={cwd}
+                  editor={editor}
+                  entryId={`live:${sessionId}`}
+                  executionById={toolExecutions}
+                  hiddenThinkingLabel={resolvedThinkingLabel}
+                  message={displayedMessage}
+                  resultByCallId={resultByCallId}
+                  streaming={chatRenderMode === 'live'}
+                />
+              ) : null}
+            </article>
+          );
+        })()}
     </div>
   );
 };

@@ -2439,6 +2439,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.modeValue.none': '—',
   'chat.reasoningTrace.thinking': '思考',
   'chat.reasoningTrace.justification': '正当化',
+  'chat.piActivity.title': 'アクティビティ',
   'chat.reasoningTrace.expandAria': '推論トレースを展開',
   'chat.reasoningTrace.collapseAria': '推論トレースを折りたたむ',
   'chat.reasoningTrace.thought': '思考',

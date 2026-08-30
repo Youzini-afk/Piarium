@@ -2205,6 +2205,7 @@ export const dict = {
   'chat.modelControls.modeValue.none': '—',
   'chat.reasoningTrace.thinking': 'Pensée',
   'chat.reasoningTrace.justification': 'Justification',
+  'chat.piActivity.title': 'Activité',
   'chat.reasoningTrace.expandAria': 'Développer la trace du raisonnement',
   'chat.reasoningTrace.collapseAria': 'Réduire la trace du raisonnement',
   'chat.reasoningTrace.thought': 'Pensée',

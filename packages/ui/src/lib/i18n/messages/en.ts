@@ -2436,6 +2436,7 @@ export const dict = {
   'chat.modelControls.modeValue.none': '—',
   'chat.reasoningTrace.thinking': 'Thinking',
   'chat.reasoningTrace.justification': 'Justification',
+  'chat.piActivity.title': 'Activity',
   'chat.reasoningTrace.expandAria': 'Expand reasoning trace',
   'chat.reasoningTrace.collapseAria': 'Collapse reasoning trace',
   'chat.reasoningTrace.thought': 'Thought',

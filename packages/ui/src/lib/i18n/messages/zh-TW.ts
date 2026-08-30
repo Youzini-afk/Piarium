@@ -2410,6 +2410,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.modeValue.none': '—',
   'chat.reasoningTrace.thinking': '思考',
   'chat.reasoningTrace.justification': '理由',
+  'chat.piActivity.title': '活動',
   'chat.reasoningTrace.expandAria': '展開推理軌跡',
   'chat.reasoningTrace.collapseAria': '摺疊推理軌跡',
   'chat.reasoningTrace.thought': '已思考',

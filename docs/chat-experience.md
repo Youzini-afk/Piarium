@@ -2,7 +2,7 @@
 
 Status: delivered; real-device and browser profiling remain release hardening
 
-Last updated: 2026-08-27
+Last updated: 2026-08-30
 
 ## 1. Outcome
 
@@ -116,8 +116,10 @@ accessory stack. There is no independent bar for each feature.
   or all-zero usage stays absent; Piarium does not reconstruct unsupported fields or sum a turn into context use.
 - Before the first assistant entry arrives, the newest unanswered turn shows the session model and a neutral
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
-- Thinking and tool activity use a progressive activity group. The final assistant answer remains readable
-  without repeated tool-result cards.
+- Chat presentation never changes Pi's live event transport. Live mode renders assistant text, thinking,
+  and tools in arrival order. Sorted mode streams thinking, tool calls, and tool-use justification into one
+  turn Activity group, with the terminal answer rendered after that group; unfinished answer text is withheld
+  from the sorted body rather than turning the whole response into a non-streaming request.
 - Copy, recover, and branch/fork actions remain attached to the message that owns them and call Pi's
   native session operations. Piarium does not pin messages or inject a second context layer over Pi packages.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal

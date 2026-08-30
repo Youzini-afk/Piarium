@@ -2543,6 +2543,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.modeValue.none": "—",
   "chat.reasoningTrace.thinking": "Pensando",
   "chat.reasoningTrace.justification": "Justificativa",
+  "chat.piActivity.title": "Atividade",
   "chat.reasoningTrace.expandAria": "Expandir rastro de raciocínio",
   "chat.reasoningTrace.collapseAria": "Recolher rastro de raciocínio",
   "chat.reasoningTrace.thought": "Pensou",
