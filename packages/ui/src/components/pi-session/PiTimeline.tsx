@@ -36,6 +36,7 @@ import {
   type PiAssistantWaitingPresentation,
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
+import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -113,6 +114,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           sessionId={sessionId}
           toolExecutions={toolExecutions}
         />
+        <PiTurnUsageFooter entries={[]} liveAssistant={item.message} />
       </div>
     );
   }
@@ -132,6 +134,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           sessionId={sessionId}
           toolExecutions={toolExecutions}
         />
+        <PiTurnUsageFooter entries={[item.entry]} />
       </div>
     );
   }
@@ -171,6 +174,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         sessionId={sessionId}
         toolExecutions={toolExecutions}
       />
+      <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} />
     </div>
   );
 };

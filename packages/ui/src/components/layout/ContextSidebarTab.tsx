@@ -9,7 +9,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import {
-  latestAssistantUsage,
+  latestAssistantTurnUsage,
   projectPiUsagePresentation,
   type PiUsageMetricKey,
 } from '@/lib/pi-runtime/usagePresentation';
@@ -162,7 +162,7 @@ export const ContextPanelContent: React.FC = () => {
 
   const entries = record?.branchEntries?.entries ?? [];
   const stats = record?.stats;
-  const usagePresentation = projectPiUsagePresentation(latestAssistantUsage(entries));
+  const usagePresentation = projectPiUsagePresentation(latestAssistantTurnUsage(entries));
   const tokens = usagePresentation?.values ?? EMPTY_USAGE_VALUES;
   const contextUsage = piSessionContextUsage(stats, record?.snapshot);
   const contextLimit = contextUsage?.contextLimit ?? null;

@@ -10,7 +10,7 @@ const renderUsage = (usage: PiUsage): string => renderToStaticMarkup(
 );
 
 describe('Pi assistant usage footer', () => {
-  test('renders a complete positive breakdown and omits unsupported zero fields', () => {
+  test('renders the response breakdown with explicit cache read and write fields', () => {
     const markup = renderUsage({
       cacheRead: 8_000,
       cacheWrite: 0,
@@ -23,7 +23,7 @@ describe('Pi assistant usage footer', () => {
     expect(markup).toContain('Input 2,000');
     expect(markup).toContain('Output 500');
     expect(markup).toContain('Cache Read 8,000');
-    expect(markup).not.toContain('Cache Write');
+    expect(markup).toContain('Cache Write 0');
     expect(markup).not.toContain('Reasoning');
     expect(markup).toContain('Total 10,500');
   });

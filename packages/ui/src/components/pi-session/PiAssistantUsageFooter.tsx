@@ -19,13 +19,14 @@ const formatNumber = (value: number): string => value.toLocaleString(getCurrentI
 
 export const PiAssistantUsageFooter: React.FC<{ usage: PiUsage }> = ({ usage }) => {
   const { t } = useI18n();
-  const presentation = projectPiUsagePresentation(usage);
+  const presentation = projectPiUsagePresentation(usage, { includeZeroCacheMetrics: true });
   if (!presentation) return null;
   return (
     <footer
       className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground/65"
       aria-label={t('chat.messageUsage.label')}
       data-pi-assistant-usage="true"
+      data-pi-turn-usage="true"
     >
       <span className="font-medium text-muted-foreground/80">{t('chat.messageUsage.label')}</span>
       {presentation.metrics.map((metric) => (

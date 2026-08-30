@@ -9,6 +9,8 @@ private runtime protocol and product surfaces still move together.
   and hands off to the installer, with interaction restored if the restart request fails
 - Keep Host-registered workspace identities valid across project-selection changes so background checkpoints
   and rollback cannot be rejected by stale settings; normalize Windows path identities consistently
+- Aggregate token usage across every model call in a user turn and render it once after the final response,
+  including explicit cache-read and cache-write totals
 
 ## 0.9.7
 

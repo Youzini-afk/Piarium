@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { PiSessionEntry, PiUsage } from '@piarium/protocol';
 import {
-  latestAssistantUsage,
+  aggregatePiUsage,
+  latestAssistantTurnUsage,
   projectPiUsagePresentation,
 } from './usagePresentation';
 
@@ -46,12 +47,46 @@ describe('Pi usage presentation', () => {
     expect(projectPiUsagePresentation(usage())).toBeUndefined();
   });
 
-  test('selects the latest assistant usage instead of a later tool or summary usage', () => {
-    const assistantUsage = usage({ input: 10, output: 4, totalTokens: 14 });
-    const laterUsage = usage({ input: 999, totalTokens: 999 });
+  test('sums every model call in one assistant response without losing cache or reasoning fields', () => {
+    expect(aggregatePiUsage([
+      usage({
+        cacheRead: 1_000,
+        cost: { cacheRead: 1, cacheWrite: 0, input: 2, output: 3, total: 6 },
+        input: 9_000,
+        output: 400,
+        reasoning: 100,
+        totalTokens: 10_400,
+      }),
+      usage({
+        cacheRead: 9_900,
+        cacheWrite: 50,
+        cacheWrite1h: 20,
+        cost: { cacheRead: 2, cacheWrite: 1, input: 1, output: 1, total: 5 },
+        input: 100,
+        output: 30,
+        reasoning: 20,
+        totalTokens: 10_080,
+      }),
+    ])).toEqual({
+      cacheRead: 10_900,
+      cacheWrite: 50,
+      cacheWrite1h: 20,
+      cost: { cacheRead: 3, cacheWrite: 1, input: 3, output: 4, total: 11 },
+      input: 9_100,
+      output: 430,
+      reasoning: 120,
+      totalTokens: 20_480,
+    });
+  });
+
+  test('aggregates the latest user turn and ignores tool-result or summary usage', () => {
+    const oldUsage = usage({ input: 999, totalTokens: 999 });
+    const toolCallUsage = usage({ cacheRead: 5, input: 10, output: 4, totalTokens: 19 });
+    const finalUsage = usage({ cacheRead: 7, input: 3, output: 2, totalTokens: 12 });
+    const unrelatedUsage = usage({ input: 5_000, totalTokens: 5_000 });
     const entries: PiSessionEntry[] = [
       {
-        id: 'assistant',
+        id: 'old-assistant',
         message: {
           api: 'messages',
           content: [],
@@ -60,24 +95,85 @@ describe('Pi usage presentation', () => {
           role: 'assistant',
           stopReason: 'stop',
           timestamp: 1,
-          usage: assistantUsage,
+          usage: oldUsage,
         },
         parentId: null,
         timestamp: '1',
         type: 'message',
       },
       {
-        details: {},
-        firstKeptEntryId: 'assistant',
-        id: 'compaction',
-        parentId: 'assistant',
-        summary: 'summary',
+        id: 'user',
+        message: { content: [], role: 'user', timestamp: 2 },
+        parentId: 'old-assistant',
         timestamp: '2',
+        type: 'message',
+      },
+      {
+        id: 'tool-call',
+        message: {
+          api: 'messages',
+          content: [],
+          model: 'model',
+          provider: 'provider',
+          role: 'assistant',
+          stopReason: 'toolUse',
+          timestamp: 3,
+          usage: toolCallUsage,
+        },
+        parentId: 'user',
+        timestamp: '3',
+        type: 'message',
+      },
+      {
+        id: 'tool-result',
+        message: {
+          content: [],
+          isError: false,
+          role: 'toolResult',
+          timestamp: 4,
+          toolCallId: 'call',
+          toolName: 'read',
+          usage: unrelatedUsage,
+        },
+        parentId: 'tool-call',
+        timestamp: '4',
+        type: 'message',
+      },
+      {
+        id: 'final-assistant',
+        message: {
+          api: 'messages',
+          content: [],
+          model: 'model',
+          provider: 'provider',
+          role: 'assistant',
+          stopReason: 'stop',
+          timestamp: 5,
+          usage: finalUsage,
+        },
+        parentId: 'tool-result',
+        timestamp: '5',
+        type: 'message',
+      },
+      {
+        details: {},
+        firstKeptEntryId: 'final-assistant',
+        id: 'compaction',
+        parentId: 'final-assistant',
+        summary: 'summary',
+        timestamp: '6',
         tokensBefore: 999,
         type: 'compaction',
-        usage: laterUsage,
+        usage: unrelatedUsage,
       },
     ];
-    expect(latestAssistantUsage(entries)).toBe(assistantUsage);
+    expect(latestAssistantTurnUsage(entries)).toEqual({
+      cacheRead: 12,
+      cacheWrite: 0,
+      cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+      input: 13,
+      output: 6,
+      totalTokens: 31,
+    });
   });
 });

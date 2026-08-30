@@ -35,7 +35,6 @@ export interface PiSortedTurnProjection {
   activity: readonly PiSortedTurnActivityItem[];
   activityAnchorId?: string;
   answersBySourceId: ReadonlyMap<string, PiAssistantMessage>;
-  messagesBySourceId: ReadonlyMap<string, PiAssistantMessage>;
 }
 
 interface AssistantSource {
@@ -68,12 +67,10 @@ export const projectPiSortedTurn = (
 ): PiSortedTurnProjection => {
   const activity: PiSortedTurnActivityItem[] = [];
   const answersBySourceId = new Map<string, PiAssistantMessage>();
-  const messagesBySourceId = new Map<string, PiAssistantMessage>();
   let activityAnchorId: string | undefined;
 
   for (const source of assistantSources(entries, liveAssistant)) {
     const { message } = source;
-    messagesBySourceId.set(source.id, message);
     const streaming = message.stopReason === 'pending';
     const hasToolCall = message.content.some((content) => content.type === 'toolCall');
     const answerContent: PiTextContent[] = [];
@@ -126,6 +123,5 @@ export const projectPiSortedTurn = (
     activity,
     ...(activityAnchorId ? { activityAnchorId } : {}),
     answersBySourceId,
-    messagesBySourceId,
   };
 };

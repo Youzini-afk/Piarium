@@ -49,7 +49,6 @@ import {
   projectPiTimeline,
 } from './piTimelineProjection';
 import type { PiAssistantWaitingPresentation } from './piAssistantWaiting';
-import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
 import {
   PI_SORTED_LIVE_ASSISTANT_ID,
   projectPiSortedTurn,
@@ -532,7 +531,6 @@ const AssistantMessage: React.FC<{
         {message.errorMessage}
       </div>
     )}
-    {!streaming ? <PiAssistantUsageFooter usage={message.usage} /> : null}
   </div>
 );
 
@@ -589,12 +587,7 @@ const PiSortedActivityGroup: React.FC<{
       </button>
       {expanded ? (
         <div className="space-y-2 border-t border-border/50 px-3 py-2">
-          {projection.activity.map((item, index) => {
-            const next = projection.activity[index + 1];
-            const message = projection.messagesBySourceId.get(item.sourceId);
-            const showUsage = next?.sourceId !== item.sourceId
-              && !projection.answersBySourceId.has(item.sourceId)
-              && message?.stopReason !== 'pending';
+          {projection.activity.map((item) => {
             return (
               <React.Fragment key={item.id}>
                 {item.kind === 'tool' ? (
@@ -637,7 +630,6 @@ const PiSortedActivityGroup: React.FC<{
                     />
                   </div>
                 )}
-                {showUsage && message ? <PiAssistantUsageFooter usage={message.usage} /> : null}
               </React.Fragment>
             );
           })}
