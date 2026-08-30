@@ -5,6 +5,21 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.7
+
+Piarium 0.9.7 fixes packaged desktop Pi startup and makes the chat rendering modes behave as their
+names describe.
+
+- Resolve Electron's external Pi Host once for both Runtime Manager probes and live Broker generations;
+  never hand an `app.asar` path to Node, and show a Piarium repair action when application Host files
+  are missing instead of suggesting a Pi upgrade
+- Launch the unpacked Host through a real Runtime Manager probe and live handshake during packaging,
+  and require the Windows production application to activate a selected Pi before release
+- Implement Sorted chat rendering as a live Activity group for thinking, tool calls, and tool-use
+  justification, followed by the completed answer; Live mode keeps the original arrival order
+- Preserve extension-owned message renderers, Activity expansion preferences, exact usage reporting,
+  and complete locale parity across both rendering modes
+
 ## 0.9.6
 
 Piarium 0.9.6 adds native Pi session-tree navigation and makes workspace recovery practical for
