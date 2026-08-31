@@ -81,6 +81,13 @@ export interface SurfaceActivationContext {
   readonly signal: AbortSignal;
   useService<TImplementation = unknown>(id: string, version: number): TImplementation | undefined;
   useServices<TImplementation = unknown>(id: string, version: number): TImplementation[];
+  /**
+   * Owner-scoped context key writer. Keys written through this writer are
+   * namespaced by owner identity and fenced by generation — writes from a
+   * stale generation are silently rejected. All keys are cleaned up when
+   * the owner scope is disposed.
+   */
+  readonly context: SurfaceContextWriter;
 }
 
 export type SurfaceDisposer = () => void | Promise<void>;
@@ -105,9 +112,37 @@ export interface SurfaceExtensionRuntimeOptions {
 
 /**
  * Provides context key values for evaluating contribution `when` expressions.
- * The Surface runtime calls this during visibility projection.
+ * The Surface runtime calls this during visibility projection. Also
+ * creates owner-scoped writers that namespace keys and fence by generation.
  */
 export interface SurfaceContextProvider {
   getContext(): ReadonlyMap<string, PiariumContextValue>;
   subscribe(keys: readonly string[], listener: () => void): () => void;
+  /**
+   * Create an owner-scoped context writer. Keys written through the
+   * returned writer are namespaced by owner identity and fenced by
+   * generation. The writer is invalidated when the returned disposer
+   * is called (which happens during owner scope disposal).
+   */
+  createWriter(owner: SurfaceOwnerIdentity): { writer: SurfaceContextWriter; dispose: () => void };
+}
+
+/**
+ * Owner-scoped writer for context key values. Each owner's keys are
+ * namespaced (the provider implementation decides the prefix scheme) and
+ * fenced by generation — writes from a stale generation are rejected.
+ * The writer is single-use: once the owner scope is disposed, further
+ * writes throw.
+ */
+export interface SurfaceContextWriter {
+  /**
+   * Set a context key value. The key is namespaced by owner identity.
+   * Returns true if the write was accepted, false if the writer's
+   * generation is stale.
+   */
+  set(key: string, value: PiariumContextValue): boolean;
+  /**
+   * Delete a context key value. Returns true if the key was removed.
+   */
+  delete(key: string): boolean;
 }

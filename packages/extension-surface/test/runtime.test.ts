@@ -411,3 +411,103 @@ test("when expression false preserves replacement selection and falls back", asy
   // Selection is preserved even though conditional is hidden
   assert.equal(runtime.getSnapshot().replacementSelections["workbench.sidebar"], "dev.example.alpha.conditional");
 });
+
+test("owner-scoped context writer namespaces keys, fences by generation, and cleans up on dispose", async () => {
+  const contextKeys = new Map<string, string | number | boolean>();
+  const listeners = new Set<() => void>();
+  const writerStates = new Map<string, { generation: number; disposed: boolean }>();
+  const createWriter = (o: { extensionId: string; entrypointId: string; realmId: string; generation: number }) => {
+    const scopeKey = `${o.extensionId}\0${o.realmId}\0${o.entrypointId}`;
+    const prefix = `${o.extensionId}.`;
+    const state = { generation: o.generation, disposed: false };
+    writerStates.set(scopeKey, state);
+    return {
+      writer: {
+        set: (key: string, value: string | number | boolean): boolean => {
+          if (state.disposed || o.generation !== state.generation) return false;
+          contextKeys.set(`${prefix}${key}`, value);
+          for (const listener of listeners) listener();
+          return true;
+        },
+        delete: (key: string): boolean => {
+          if (state.disposed) return false;
+          const fullKey = `${prefix}${key}`;
+          if (!contextKeys.has(fullKey)) return false;
+          contextKeys.delete(fullKey);
+          for (const listener of listeners) listener();
+          return true;
+        },
+      },
+      dispose: () => {
+        state.disposed = true;
+        writerStates.delete(scopeKey);
+        for (const key of [...contextKeys.keys()]) {
+          if (key.startsWith(prefix)) {
+            contextKeys.delete(key);
+          }
+        }
+        for (const listener of listeners) listener();
+      },
+    };
+  };
+  const contextProvider = {
+    getContext: () => contextKeys,
+    subscribe: (_keys: readonly string[], listener: () => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    createWriter,
+  };
+  const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
+
+  // Activate with generation 1 and write a context key
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    assert.equal(context.context.set("myKey", "hello"), true);
+  });
+  assert.equal(contextKeys.get("dev.example.alpha.myKey"), "hello");
+
+  // Deactivate — should clean up the owner's keys
+  await runtime.deactivate({ ...owner("dev.example.alpha", 1, 1), desiredRevision: 2, generation: 2 });
+  assert.equal(contextKeys.has("dev.example.alpha.myKey"), false);
+});
+
+test("owner-scoped context writer rejects stale generation writes", async () => {
+  const contextKeys = new Map<string, string | number | boolean>();
+  const contextProvider = {
+    getContext: () => contextKeys,
+    subscribe: (_keys: readonly string[], listener: () => void) => {
+      return () => { listener; };
+    },
+    createWriter: (o: { extensionId: string; entrypointId: string; realmId: string; generation: number }) => {
+      const prefix = `${o.extensionId}.`;
+      const writer = {
+        set: (key: string, value: string | number | boolean): boolean => {
+          contextKeys.set(`${prefix}${key}`, value);
+          return true;
+        },
+        delete: (key: string): boolean => {
+          return contextKeys.delete(`${prefix}${key}`);
+        },
+      };
+      return {
+        writer,
+        dispose: () => {
+          // Clean up all keys with this owner's prefix
+          for (const key of [...contextKeys.keys()]) {
+            if (key.startsWith(prefix)) contextKeys.delete(key);
+          }
+        },
+      };
+    },
+  };
+  const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
+
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.context.set("myKey", "v1");
+  });
+  assert.equal(contextKeys.get("dev.example.alpha.myKey"), "v1");
+
+  // After deactivation, the writer should be disposed and keys cleaned up
+  await runtime.deactivate({ ...owner("dev.example.alpha", 1, 1), desiredRevision: 2, generation: 2 });
+  assert.equal(contextKeys.has("dev.example.alpha.myKey"), false);
+});

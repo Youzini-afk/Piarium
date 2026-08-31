@@ -3,10 +3,12 @@ import {
   type SurfaceActivation,
   type SurfaceContextProvider,
   type SurfaceOwnerHandle,
+  type SurfaceOwnerIdentity,
 } from '@piarium/extension-surface';
 import type { PiariumApplicationSurface, PiariumContextValue } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
+  createOwnerScopedContextWriter,
   getWorkbenchContextKeyStore,
   subscribeWorkbenchContextKey,
 } from '@/lib/workbench/editors/context-keys';
@@ -30,6 +32,8 @@ const newRealmId = (): string => {
 /**
  * Adapter that exposes the workbench context key store as a
  * SurfaceContextProvider for `when` expression evaluation.
+ * Supports owner-scoped writers with namespace, generation fencing,
+ * and cleanup.
  */
 const workbenchContextProvider: SurfaceContextProvider = {
   getContext(): ReadonlyMap<string, PiariumContextValue> {
@@ -38,6 +42,9 @@ const workbenchContextProvider: SurfaceContextProvider = {
   subscribe(keys: readonly string[], listener: () => void): () => void {
     const unsubscribers = keys.map((key) => subscribeWorkbenchContextKey(key, listener));
     return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
+  },
+  createWriter(owner: SurfaceOwnerIdentity) {
+    return createOwnerScopedContextWriter(owner);
   },
 };
 

@@ -20,6 +20,7 @@ import type {
   SurfaceActivationOptions,
   SurfaceContribution,
   SurfaceContextProvider,
+  SurfaceContextWriter,
   SurfaceExternalService,
   SurfaceExtensionRuntimeOptions,
   SurfaceLayoutReference,
@@ -372,6 +373,7 @@ export class SurfaceExtensionRuntime {
                 .filter((service) => service.descriptor.id === id && service.descriptor.version === version)
                 .map((service) => service.implementation as TImplementation),
             ],
+            context: this.#createContextWriter(owner, scope),
           };
           try {
             await request.activation(context);
@@ -533,6 +535,23 @@ export class SurfaceExtensionRuntime {
 
   getServices<TImplementation = unknown>(id: string, version: number): TImplementation[] {
     return this.#matchingServices(id, version).map((service) => service.implementation as TImplementation);
+  }
+
+  /**
+   * Create an owner-scoped context writer. If no context provider is
+   * configured, returns a no-op writer that accepts all writes but
+   * stores nothing. The writer is fenced by generation: writes from
+   * a stale generation are silently rejected.
+   */
+  #createContextWriter(owner: SurfaceOwnerIdentity, scope: SurfaceOwnerScope): SurfaceContextWriter {
+    const provider = this.#contextProvider;
+    if (!provider?.createWriter) {
+      // No context provider or no writer support — return a no-op writer.
+      return { set: () => true, delete: () => false };
+    }
+    const { writer, dispose } = provider.createWriter(owner);
+    scope.onDispose(dispose);
+    return writer;
   }
 
   #handle(owner: SurfaceOwnerIdentity): SurfaceOwnerHandle {
