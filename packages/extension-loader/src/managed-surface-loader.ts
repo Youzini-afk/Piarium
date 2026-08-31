@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  isPiariumContributionCompatible,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetPayload,
@@ -394,11 +395,20 @@ const compatibleActivationPlans = (
     });
   }
   const staticContributions: PiariumExtensionStaticContribution[] = [];
+  // Incompatible contributions are retained in the static (declarative) plan
+  // so the catalog preserves the record, but they are NOT attached to
+  // executable entrypoint plans — their module code is not executed for them
+  // and they are not registered via context.contribute(). The Surface runtime's
+  // selectVisibleContributions also filters them as a defense-in-depth measure.
   for (const contribution of manifest.contributions ?? []) {
     if (!contribution.supports.includes(surface)) continue;
+    const compatible = isPiariumContributionCompatible(contribution.kind, contribution.contractVersion);
     if (contribution.entrypoint) {
       if (!compatibleEntrypointIds.has(contribution.entrypoint)) continue;
-      executable.get(contribution.entrypoint)?.contributions.push(contribution);
+      // Only attach compatible contributions to executable plans
+      if (compatible) {
+        executable.get(contribution.entrypoint)?.contributions.push(contribution);
+      }
       staticContributions.push(contribution);
       continue;
     }
@@ -923,6 +933,9 @@ export class SurfaceExtensionLoader {
         let activation: SurfaceActivation;
         const contributeDeclarative = (context: SurfaceActivationContext): void => {
           for (const contribution of plan.contributions) {
+            // Skip incompatible contributions — they are retained in the plan
+            // for catalog record-keeping but must not be registered or executed.
+            if (!isPiariumContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
             context.contribute(
               plan.mode === "declarative" && contribution.entrypoint
                 ? { ...contribution, entrypoint: plan.entrypointId }
@@ -947,11 +960,15 @@ export class SurfaceExtensionLoader {
           };
           await run(stagingContext);
           for (const contribution of plan.contributions) {
+            // Skip incompatible contributions — retained for catalog but not registered
+            if (!isPiariumContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
             if (!dynamic.has(contribution.id)) {
               context.contribute(contribution, declarativeImplementation(contribution));
             }
           }
           for (const contribution of dynamic.values()) {
+            // Dynamic contributions from the module are always registered —
+            // the module is responsible for only contributing compatible versions.
             context.contribute(contribution.descriptor, contribution.implementation);
           }
         };
