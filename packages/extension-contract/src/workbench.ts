@@ -199,6 +199,11 @@ export const parsePiariumWorkbenchShellContributionData = (
   const raw = record(data);
   if (!raw) throw new PiariumWorkbenchShellContractError("Shell contribution data must be an object", ["data must be an object"]);
   const issues: string[] = [];
+  // Reject unknown top-level fields (matches schema additionalProperties: false)
+  const allowedTopLevel = new Set(["contract", "seams"]);
+  for (const key of Object.keys(raw)) {
+    if (!allowedTopLevel.has(key)) issues.push(`data.${key} is not a recognized field`);
+  }
   const contract = raw.contract;
   if (contract !== PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT) {
     issues.push(`data.contract must be ${PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT}`);
@@ -225,6 +230,13 @@ export const parsePiariumWorkbenchShellContributionData = (
       if (!surfaceRaw) {
         issues.push(`data.seams.${surfaceKey} must be an object`);
         continue;
+      }
+      // Reject unknown fields in surface seams (matches schema additionalProperties: false)
+      const allowedSeamFields = new Set(["replacementTargets", "slots"]);
+      for (const fieldKey of Object.keys(surfaceRaw)) {
+        if (!allowedSeamFields.has(fieldKey)) {
+          issues.push(`data.seams.${surfaceKey}.${fieldKey} is not a recognized field`);
+        }
       }
       const replacementTargets = validateSeamIdentifiers(
         surfaceRaw.replacementTargets,

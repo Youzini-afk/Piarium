@@ -217,7 +217,8 @@
                   "required": ["target"],
                   "properties": { "target": { "const": "workbench.transition" } }
                 }
-              }
+              },
+              "not": { "required": ["when"] }
             }
           },
           {
@@ -235,6 +236,7 @@
                   "properties": { "target": { "const": "workbench.shell" } }
                 }
               },
+              "not": { "required": ["when"] },
               "allOf": [
                 {
                   "if": { "properties": { "supports": { "contains": { "const": "desktop" } } } },

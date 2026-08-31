@@ -328,7 +328,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
       }],
     },
     schemaValid: false, // schema enforces additionalProperties: false on shell data
-    runtimeValid: true, // runtime does not reject unknown fields in shell data
+    runtimeValid: false, // runtime now also rejects unknown fields in shell data
     compatible: true,
   },
   {
@@ -456,7 +456,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         when: { op: "defined", key: "editorIsOpen" },
       }],
     },
-    schemaValid: true,
+    schemaValid: false, // schema now rejects when on shell contributions
     runtimeValid: false, // runtime rejects when on shell contributions
     compatible: true,
   },
@@ -483,7 +483,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         when: { op: "defined", key: "editorIsOpen" },
       }],
     },
-    schemaValid: true,
+    schemaValid: false, // schema now rejects when on transition-scene contributions
     runtimeValid: false, // runtime rejects when on transition-scene contributions
     compatible: true,
   },
