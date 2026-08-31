@@ -43,8 +43,8 @@ import type {
   PiPluginSettingsAdapterRenderProps,
   PiSettingsPanelImplementation,
 } from './pi-integration-registry';
-import { AgentWorkspaceShell } from './builtin-agent-workspace';
-import { IdeWorkbenchShell } from './builtin-ide-workbench';
+import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
+import { IdeWorkbenchShell } from '@/workbenches/ide/IdeWorkbenchShell';
 import {
   WorkbenchOwnedView,
   WORKBENCH_REPLACEMENT_TARGETS,

@@ -1,5 +1,5 @@
 import type { PiariumProjectAction } from './project-config';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { pickWorkspaceRoot } from './documents/path';
 import { readWorkspaceTextFile } from './documents/workspace-text';

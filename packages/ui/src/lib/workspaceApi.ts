@@ -1,4 +1,4 @@
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { WorkspaceAPI } from './api/types';
 
 export const getWorkspaceAPI = (): WorkspaceAPI => {

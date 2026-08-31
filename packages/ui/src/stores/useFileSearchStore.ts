@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { FileSearchResult } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 

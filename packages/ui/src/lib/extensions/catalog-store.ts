@@ -8,7 +8,7 @@ import type {
   PiariumExtensionServiceRoutingContext,
 } from '@piarium/extension-contract';
 import { serviceRoutingRuleKey } from '@piarium/extension-contract';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 export interface PiariumExtensionCatalogStoreState {
   busyExtensionId: string | null;

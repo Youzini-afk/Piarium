@@ -4,7 +4,7 @@ import {
   type SurfaceOwnerHandle,
 } from '@piarium/extension-surface';
 import type { PiariumApplicationSurface } from '@piarium/extension-contract';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 const FALLBACK_HOST_ID = '00000000-0000-4000-8000-000000000000';
 

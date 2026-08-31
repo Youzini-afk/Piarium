@@ -13,7 +13,7 @@ import {
   resolvePiariumWorkbenchShellSurfaceSeams,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   getPiariumExtensionCatalogState,
   refreshPiariumExtensionCatalog,

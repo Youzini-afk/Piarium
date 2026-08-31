@@ -7,7 +7,7 @@ import type {
   RecoveryStatus,
   RuntimeContextTarget,
 } from '@piarium/protocol';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { runtimeFetch } from '@/lib/runtime-fetch';

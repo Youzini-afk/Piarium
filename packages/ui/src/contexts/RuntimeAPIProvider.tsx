@@ -4,8 +4,6 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { bindDocumentRegistry } from '@/lib/documents/session';
 import { bindLanguageServices } from '@/lib/language-services/session';
 import { bindRunDebugServices } from '@/lib/run-debug/session';
-import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
-import { RunDebugCoordinator } from '@/components/workbench/RunDebugCoordinator';
 
 export function RuntimeAPIProvider({ apis, children }: { apis: RuntimeAPIs; children: ReactNode }): JSX.Element {
   bindDocumentRegistry(apis.documents);
@@ -13,8 +11,6 @@ export function RuntimeAPIProvider({ apis, children }: { apis: RuntimeAPIs; chil
   bindRunDebugServices({ tasks: apis.tasks, debug: apis.debug, tests: apis.tests });
   return (
     <RuntimeAPIContext.Provider value={apis}>
-      <AgentEditorCoordinator />
-      <RunDebugCoordinator />
       {children}
     </RuntimeAPIContext.Provider>
   );

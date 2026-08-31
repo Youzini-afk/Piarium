@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getClientPlatform } from '@/lib/platform';
 import { useUIStore } from '@/stores/useUIStore';
 

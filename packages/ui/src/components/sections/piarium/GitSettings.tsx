@@ -2,7 +2,7 @@ import React from 'react';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';

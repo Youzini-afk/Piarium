@@ -1,7 +1,7 @@
 
 import * as gitHttp from './gitApiHttp';
 import { renderMagicPrompt } from './magicPrompts';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { generateStructuredInPiSession } from '@/lib/piStructuredGeneration';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';

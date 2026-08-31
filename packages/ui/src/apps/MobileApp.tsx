@@ -19,7 +19,9 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
+import { RunDebugCoordinator } from '@/components/workbench/RunDebugCoordinator';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
@@ -60,7 +62,7 @@ import { PiAppEffects } from './PiAppEffects';
 import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
 import { WorkbenchProfileBridge, WorkbenchReplacement, WORKBENCH_REPLACEMENT_TARGETS } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
-import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/lib/extensions/builtin-agent-workspace';
+import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/workbenches/agent/AgentWorkspaceShell';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
@@ -3086,6 +3088,8 @@ export function MobileApp({ apis }: MobileAppProps) {
         <TooltipProvider delayDuration={300} skipDelayDuration={150}>
           <div className="h-full bg-background text-foreground">
             <PiAppEffects backgroundWorkEnabled={piCatalogLoaded} />
+            <AgentEditorCoordinator />
+            <RunDebugCoordinator />
             <PiInteractionHost />
             <MobileAppUpdateToast />
             <WorkbenchProfileBridge />

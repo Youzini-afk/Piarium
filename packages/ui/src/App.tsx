@@ -42,8 +42,10 @@ import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
 import { WorkspaceEditReviewDialog } from '@/components/workbench/WorkspaceEditReviewDialog';
+import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
+import { RunDebugCoordinator } from '@/components/workbench/RunDebugCoordinator';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -745,6 +747,8 @@ function App({ apis }: AppProps) {
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
               <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+              <AgentEditorCoordinator />
+              <RunDebugCoordinator />
               <WorkbenchProfileBridge />
               <WorkbenchShellHost />
               <Toaster />

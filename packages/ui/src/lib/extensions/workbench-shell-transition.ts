@@ -12,7 +12,7 @@ import {
   type PiariumWorkbenchShellStatus,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import type { PiariumExtensionCatalogStoreState } from './catalog-store';
 import {

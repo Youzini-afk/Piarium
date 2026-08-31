@@ -4,7 +4,7 @@ import {
   type WorkspaceRecoveryFailedResult,
   type WorkspaceRecoveryFailure,
 } from '@piarium/extension-contract';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 export class WorkspaceRecoveryServiceError extends Error {
   readonly failure: WorkspaceRecoveryFailure;

@@ -11,7 +11,7 @@ import {
   getGlobalGitIdentity
 } from "@/lib/gitApi";
 import { reportSettingsSaveState, updateDesktopSettings } from "@/lib/persistence";
-import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { getRegisteredRuntimeAPIs } from "@/lib/runtime-api/registry";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
 export type GitIdentityAuthType = 'ssh' | 'token';

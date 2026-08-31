@@ -4,7 +4,7 @@ import {
   PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
 } from '@piarium/extension-contract';
 import type { RuntimeContextTarget } from '@piarium/protocol';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';

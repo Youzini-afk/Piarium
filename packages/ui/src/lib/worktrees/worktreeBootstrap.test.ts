@@ -18,7 +18,7 @@ mock.module('@/components/ui', () => ({
   },
 }));
 
-mock.module('@/contexts/runtimeAPIRegistry', () => ({
+mock.module('@/lib/runtime-api/registry', () => ({
   getRegisteredRuntimeAPIs: () => ({
     git: {
       worktree: {

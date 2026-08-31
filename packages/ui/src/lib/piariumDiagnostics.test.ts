@@ -6,7 +6,7 @@ const packageTargets: unknown[] = [];
 const agentTargets: unknown[] = [];
 const resourceTargets: unknown[] = [];
 
-mock.module('@/contexts/runtimeAPIRegistry', () => ({
+mock.module('@/lib/runtime-api/registry', () => ({
   getRegisteredRuntimeAPIs: () => ({
     git: {
       checkIsGitRepository: async () => true,

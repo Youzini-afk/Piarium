@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 type Deferred<T> = {

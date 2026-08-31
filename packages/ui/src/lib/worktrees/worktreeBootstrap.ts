@@ -1,5 +1,5 @@
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 

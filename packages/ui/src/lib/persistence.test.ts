@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';

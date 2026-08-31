@@ -1,4 +1,4 @@
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { isVSCodeRuntime, saveDesktopMarkdownFile } from '@/lib/desktop';
 
 export const downloadAsMarkdown = (content: string, filename: string): void => {

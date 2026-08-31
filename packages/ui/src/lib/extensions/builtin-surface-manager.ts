@@ -3,7 +3,7 @@ import type {
   PiariumExtensionCatalogEntry,
 } from '@piarium/extension-contract';
 import type { SurfaceOwnerIdentity } from '@piarium/extension-surface';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   BUILTIN_PI_INTEGRATION_DEFINITIONS,
   activateBuiltinPiIntegration,

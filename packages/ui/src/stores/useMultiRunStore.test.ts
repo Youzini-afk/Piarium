@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { SessionSnapshot } from '@piarium/protocol';
 import type { CreateGitWorktreePayload, RuntimeAPIs } from '@/lib/api/types';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from './useDirectoryStore';
 import { usePiSessionStore } from './usePiSessionStore';
 import { useProjectsStore } from './useProjectsStore';

@@ -1,5 +1,5 @@
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';

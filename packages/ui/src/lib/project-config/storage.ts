@@ -5,7 +5,7 @@ import type {
   PiariumResourceReference,
 } from '@/lib/api/types';
 import { requireWorkspaceEpoch } from '@/lib/documents/mutation-token';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { documentIdentityForPath, pickWorkspaceRoot } from '@/lib/documents/path';
 import { createProjectIdFromPath } from '@/lib/projectId';

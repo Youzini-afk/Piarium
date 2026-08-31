@@ -7,7 +7,9 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
+import { RunDebugCoordinator } from '@/components/workbench/RunDebugCoordinator';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useRouter } from '@/hooks/useRouter';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -41,6 +43,8 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full bg-background text-foreground">
               <PiAppEffects backgroundWorkEnabled />
+              <AgentEditorCoordinator />
+              <RunDebugCoordinator />
               <PiInteractionHost />
               <VSCodeLayout />
               <Toaster position="top-center" />

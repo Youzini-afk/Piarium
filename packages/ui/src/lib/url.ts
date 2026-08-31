@@ -1,4 +1,4 @@
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 type DesktopBridgeGlobal = {
   openExternal?: (url: string) => Promise<unknown>;

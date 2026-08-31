@@ -1,7 +1,7 @@
 import React from 'react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
-import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { dismissInitialSplash } from '@/lib/splash';
 import { TooltipProvider } from '@/components/ui/tooltip';

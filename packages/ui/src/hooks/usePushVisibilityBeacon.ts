@@ -1,7 +1,7 @@
 import React from 'react';
 import { isWebRuntime } from '@/lib/desktop';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 const HEARTBEAT_MS = 20000;
 
