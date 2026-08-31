@@ -212,6 +212,23 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "properties": { "kind": { "const": "shell" } },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["replacement"],
+              "properties": {
+                "data": { "$ref": "#/$defs/shellData" },
+                "replacement": {
+                  "type": "object",
+                  "required": ["target"],
+                  "properties": { "target": { "const": "workbench.shell" } }
+                }
+              }
+            }
           }
         ]
       }
@@ -273,6 +290,39 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "shellData": {
+      "type": "object",
+      "required": ["contract", "seams"],
+      "properties": {
+        "contract": { "const": "piarium-workbench-shell/v1" },
+        "seams": {
+          "type": "object",
+          "properties": {
+            "desktop": { "$ref": "#/$defs/shellSurfaceSeams" },
+            "mobile": { "$ref": "#/$defs/shellSurfaceSeams" },
+            "vscode": { "$ref": "#/$defs/shellSurfaceSeams" },
+            "web": { "$ref": "#/$defs/shellSurfaceSeams" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "shellSurfaceSeams": {
+      "type": "object",
+      "required": ["replacementTargets", "slots"],
+      "properties": {
+        "replacementTargets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "slots": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
     },
     "idList": {
       "type": "array",

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { SurfaceContribution } from '@piarium/extension-surface';
+import { PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT } from '@piarium/extension-contract';
 import {
   getWorkbenchShellStagingRequest,
   mountWorkbenchShellStagingHost,
@@ -11,7 +12,12 @@ import {
 const contribution = (): SurfaceContribution => ({
   descriptor: {
     contractVersion: 1,
-    data: {},
+    data: {
+      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      seams: {
+        web: { replacementTargets: [], slots: [] },
+      },
+    },
     id: 'dev.example.shell.main',
     kind: 'shell',
     replacement: { target: 'workbench.shell' },

@@ -1,10 +1,17 @@
 import type {
+  JsonObject,
   PiariumApplicationSurface,
   PiariumExtensionCatalogEntry,
   PiariumExtensionCatalogSnapshot,
   PiariumExtensionDiagnostic,
   PiariumExtensionStorageSnapshot,
 } from "./types.js";
+
+const record = (value: unknown): Record<string, unknown> | null => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
 
 export const PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
 
@@ -55,6 +62,172 @@ export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
   testHasFailure: "testHasFailure",
   taskIsRunning: "taskIsRunning",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Shell seam contract (v1)
+//
+// A shell contribution declares which replacement targets and slots it
+// actually hosts per surface. This makes the contract truthful: the
+// Extensions settings page can distinguish supported, dormant, and
+// missing selections instead of showing every target as available.
+// ---------------------------------------------------------------------------
+
+export const PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT = "piarium-workbench-shell/v1" as const;
+
+export interface PiariumWorkbenchShellSurfaceSeams {
+  replacementTargets: string[];
+  slots: string[];
+}
+
+export type PiariumWorkbenchShellContributionDataV1 = {
+  contract: typeof PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT;
+  seams: Partial<Record<PiariumApplicationSurface, PiariumWorkbenchShellSurfaceSeams>>;
+};
+
+const SHELL_SEAM_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+const FORBIDDEN_NESTED_TARGETS: Set<string> = new Set([
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition,
+]);
+
+export class PiariumWorkbenchShellContractError extends Error {
+  readonly issues: string[];
+
+  constructor(message: string, issues: string[]) {
+    super(message);
+    this.name = "PiariumWorkbenchShellContractError";
+    this.issues = issues;
+  }
+}
+
+const isShellSurface = (value: unknown): value is PiariumApplicationSurface => (
+  value === "desktop" || value === "mobile" || value === "vscode" || value === "web"
+);
+
+const validateSeamIdentifiers = (
+  values: unknown,
+  label: string,
+  issues: string[],
+): string[] => {
+  if (!Array.isArray(values)) {
+    issues.push(`${label} must be an array`);
+    return [];
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < values.length; index += 1) {
+    const item = values[index];
+    if (typeof item !== "string" || !SHELL_SEAM_ID_PATTERN.test(item)) {
+      issues.push(`${label}[${index}] must be a lowercase namespaced identifier`);
+      continue;
+    }
+    if (FORBIDDEN_NESTED_TARGETS.has(item)) {
+      issues.push(`${label}[${index}] must not be ${item} (prevents recursive shell mounting)`);
+      continue;
+    }
+    if (seen.has(item)) {
+      issues.push(`${label} contains duplicate ${item}`);
+      continue;
+    }
+    seen.add(item);
+    result.push(item);
+  }
+  return result;
+};
+
+/**
+ * Parse and validate shell contribution data. Throws
+ * `PiariumWorkbenchShellContractError` on validation failure.
+ *
+ * Rules:
+ * - `contract` must equal `PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT`
+ * - every surface in `supports` must have a `seams` entry
+ * - `seams` must not declare surfaces not in `supports`
+ * - `replacementTargets` and `slots` must be unique within and across each
+ *   surface's seam
+ * - no seam may include `workbench.shell` or `workbench.transition`
+ *   (prevents recursive nesting)
+ * - identifiers must match the standard contribution ID pattern
+ */
+export const parsePiariumWorkbenchShellContributionData = (
+  data: unknown,
+  supports: readonly PiariumApplicationSurface[],
+): PiariumWorkbenchShellContributionDataV1 => {
+  const raw = record(data);
+  if (!raw) throw new PiariumWorkbenchShellContractError("Shell contribution data must be an object", ["data must be an object"]);
+  const issues: string[] = [];
+  const contract = raw.contract;
+  if (contract !== PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT) {
+    issues.push(`data.contract must be ${PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT}`);
+  }
+  const rawSeams = record(raw.seams);
+  if (!rawSeams) {
+    issues.push("data.seams must be an object");
+  }
+  const supportSet = new Set(supports);
+  const seams: Partial<Record<PiariumApplicationSurface, PiariumWorkbenchShellSurfaceSeams>> = {};
+  const processedSurfaces = new Set<string>();
+  if (rawSeams) {
+    for (const [surfaceKey, surfaceValue] of Object.entries(rawSeams)) {
+      if (!isShellSurface(surfaceKey)) {
+        issues.push(`data.seams.${surfaceKey} is not a valid surface`);
+        continue;
+      }
+      if (!supportSet.has(surfaceKey)) {
+        issues.push(`data.seams.${surfaceKey} declares a surface not in contribution supports`);
+        continue;
+      }
+      processedSurfaces.add(surfaceKey);
+      const surfaceRaw = record(surfaceValue);
+      if (!surfaceRaw) {
+        issues.push(`data.seams.${surfaceKey} must be an object`);
+        continue;
+      }
+      const replacementTargets = validateSeamIdentifiers(
+        surfaceRaw.replacementTargets,
+        `data.seams.${surfaceKey}.replacementTargets`,
+        issues,
+      );
+      const slots = validateSeamIdentifiers(
+        surfaceRaw.slots,
+        `data.seams.${surfaceKey}.slots`,
+        issues,
+      );
+      // Cross-check: no overlap between targets and slots within a surface
+      const targetSet = new Set(replacementTargets);
+      for (const slot of slots) {
+        if (targetSet.has(slot)) {
+          issues.push(`data.seams.${surfaceKey} has ${slot} in both replacementTargets and slots`);
+        }
+      }
+      seams[surfaceKey] = { replacementTargets, slots };
+    }
+  }
+  // Every supported surface must have a seams entry
+  for (const surface of supports) {
+    if (!processedSurfaces.has(surface)) {
+      issues.push(`data.seams.${surface} is missing (surface is in contribution supports)`);
+    }
+  }
+  if (issues.length > 0) {
+    throw new PiariumWorkbenchShellContractError("Shell contribution data is invalid", issues);
+  }
+  return {
+    contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+    seams,
+  };
+};
+
+/**
+ * Resolve the seams for a specific surface from a parsed shell contribution
+ * data. Returns empty seams if the surface is not declared.
+ */
+export const resolvePiariumWorkbenchShellSurfaceSeams = (
+  data: PiariumWorkbenchShellContributionDataV1,
+  surface: PiariumApplicationSurface,
+): PiariumWorkbenchShellSurfaceSeams => (
+  data.seams[surface] ?? { replacementTargets: [], slots: [] }
+);
 
 export type PiariumWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";
 
@@ -156,12 +329,6 @@ export interface PiariumWorkbenchResolvedLayout {
 const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "vscode", "web"]);
 const SCOPES = new Set<PiariumWorkbenchLayoutScope>(["distribution", "user", "workspace"]);
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
-
-const record = (value: unknown): Record<string, unknown> | null => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-);
 
 const text = (value: unknown, label: string): string => {
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);

@@ -54,6 +54,8 @@ import {
 import {
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
   parsePiariumWorkbenchProfileSnapshot,
+  parsePiariumWorkbenchShellContributionData,
+  PiariumWorkbenchShellContractError,
 } from "./workbench.js";
 import {
   parsePiariumTransitionSceneContributionData,
@@ -394,6 +396,17 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
       else supports.push(surface as PiariumApplicationSurface);
     }
     if (supports.length === 0) issues.push(`${itemPath}.supports must contain at least one surface`);
+    if (kind === "shell") {
+      try {
+        parsePiariumWorkbenchShellContributionData(raw.data, supports);
+      } catch (error) {
+        if (error instanceof PiariumWorkbenchShellContractError) {
+          issues.push(...error.issues.map((issue) => `${itemPath}.${issue}`));
+        } else {
+          throw error;
+        }
+      }
+    }
     const entrypoint = raw.entrypoint === undefined ? undefined : identifier(raw.entrypoint, `${itemPath}.entrypoint`, issues);
     const requiresCapabilities = uniqueStrings(raw.requiresCapabilities, `${itemPath}.requiresCapabilities`, issues, true);
     let placement: PiariumExtensionStaticContribution["placement"];

@@ -20,6 +20,8 @@ import {
   PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
   PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+  PIARIUM_WORKBENCH_SLOTS,
 } from "@piarium/extension-contract";
 
 export interface PiariumBuiltinExtensionDefinition {
@@ -205,18 +207,81 @@ export const PIARIUM_BUILTIN_RECOVERY_EXTENSION = definition({
   }],
 });
 
+const AGENT_FEATURE_TARGETS = [
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+];
+
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION = definition({
   id: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   displayName: "Agent Workspace",
   contributions: [{
     contractVersion: 1,
-    data: {},
+    data: {
+      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      seams: {
+        web: {
+          replacementTargets: [
+            ...AGENT_FEATURE_TARGETS,
+            PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+          ],
+          slots: [],
+        },
+        desktop: {
+          replacementTargets: [
+            ...AGENT_FEATURE_TARGETS,
+            PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+          ],
+          slots: [],
+        },
+        mobile: {
+          replacementTargets: AGENT_FEATURE_TARGETS,
+          slots: [],
+        },
+      },
+    },
     entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
     id: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
     kind: "shell",
     replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
     supports: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
   }],
+});
+
+const IDE_FEATURE_TARGETS = [
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+];
+
+const IDE_STRUCTURE_TARGETS = [
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.activity,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.panel,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.status,
+];
+
+const IDE_SLOTS = [
+  PIARIUM_WORKBENCH_SLOTS.activityItems,
+  PIARIUM_WORKBENCH_SLOTS.primarySidebarViews,
+  PIARIUM_WORKBENCH_SLOTS.editorActions,
+  PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews,
+  PIARIUM_WORKBENCH_SLOTS.panelViews,
+  PIARIUM_WORKBENCH_SLOTS.statusItems,
+];
+
+const ideSeams = (surface: PiariumApplicationSurface) => ({
+  replacementTargets: [...IDE_FEATURE_TARGETS, ...IDE_STRUCTURE_TARGETS],
+  slots: IDE_SLOTS,
 });
 
 export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
@@ -232,7 +297,12 @@ export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
   },
   contributions: [{
     contractVersion: 1,
-    data: {},
+    data: {
+      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      seams: Object.fromEntries(
+        PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => [surface, ideSeams(surface)]),
+      ),
+    },
     entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
     id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
     kind: "shell",

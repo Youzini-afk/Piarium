@@ -10,6 +10,7 @@ import {
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
 } from '@piarium/extension-contract';
 import type { SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
@@ -59,7 +60,14 @@ const agentEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
   manifest: {
     contributions: [{
       contractVersion: 1,
-      data: {},
+      data: {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: { replacementTargets: [], slots: [] },
+          desktop: { replacementTargets: [], slots: [] },
+          mobile: { replacementTargets: [], slots: [] },
+        },
+      },
       id: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
       kind: 'shell',
       replacement: { target: 'workbench.shell' },
@@ -158,7 +166,13 @@ test('the IDE profile is ready on web and recovers on mobile where it has no she
       id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
       contributions: [{
         contractVersion: 1,
-        data: {},
+        data: {
+          contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+          seams: {
+            web: { replacementTargets: [], slots: [] },
+            desktop: { replacementTargets: [], slots: [] },
+          },
+        },
         id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
         kind: 'shell',
         replacement: { target: 'workbench.shell' },

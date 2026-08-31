@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { parsePiariumExtensionManifest } from "@piarium/extension-contract";
 import { initProject } from "../src/init.js";
 import { buildProject } from "../src/build.js";
 import { checkProject } from "../src/project.js";
@@ -74,6 +75,8 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.match(surface, /defineShellMount/);
   assert.match(surface, /PIARIUM_WORKBENCH_REPLACEMENT_TARGETS/);
   assert.doesNotMatch(surface, /@piarium\/ui|@\/components/);
+  const shellManifest = JSON.parse(await readFile(join(shell.directory, "piarium.extension.json"), "utf8"));
+  assert.doesNotThrow(() => parsePiariumExtensionManifest(shellManifest));
 
   const editor = await initProject({
     directory: join(root, "editor"),

@@ -6,6 +6,7 @@ import type {
 import {
   defaultPiariumWorkbenchProfileDocument,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceOwnerIdentity, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { startWorkbenchMountSession } from './workbench-mount';
@@ -61,7 +62,13 @@ const shellEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
     version: '1.0.0',
     contributions: [{
       contractVersion: 1,
-      data: {},
+      data: {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: { replacementTargets: [], slots: [] },
+          desktop: { replacementTargets: [], slots: [] },
+        },
+      },
       id: shellContributionId,
       kind: 'shell',
       replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
@@ -132,7 +139,12 @@ const emptySurface = (): SurfaceRegistrySnapshot => ({
 const contribution = (implementation: unknown): SurfaceContribution => ({
   descriptor: {
     contractVersion: 1,
-    data: {},
+    data: {
+      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      seams: {
+        web: { replacementTargets: [], slots: [] },
+      },
+    },
     id: shellContributionId,
     kind: 'shell',
     replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },

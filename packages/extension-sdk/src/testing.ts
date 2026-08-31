@@ -21,6 +21,7 @@ import {
   defaultPiariumWorkbenchProfileDocument,
   inspectPiariumWorkbenchShell,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
   resolvePiariumWorkbenchProfile,
 } from "@piarium/extension-contract";
 import type {
@@ -643,7 +644,12 @@ export const runWorkbenchProfileConformance = (): WorkbenchProfileConformanceRes
       version: "1.0.0",
       contributions: [{
         contractVersion: 1,
-        data: {},
+        data: {
+          contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+          seams: {
+            web: { replacementTargets: [], slots: [] },
+          },
+        },
         id: "dev.example.studio.shell",
         kind: "shell" as const,
         replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },

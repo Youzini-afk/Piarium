@@ -7,6 +7,7 @@ import {
   parsePiariumWorkbenchLayoutLayer,
   parsePiariumWorkbenchProfileApplyRequest,
   parsePiariumWorkbenchProfileDocument,
+  parsePiariumWorkbenchShellContributionData,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
@@ -19,10 +20,12 @@ import {
   PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
   PIARIUM_WORKBENCH_CONTEXT_KEYS,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
   PIARIUM_WORKBENCH_SLOTS,
   resolvePiariumWorkbenchLayout,
   resolvePiariumWorkbenchLayoutForProfile,
   resolvePiariumWorkbenchProfile,
+  resolvePiariumWorkbenchShellSurfaceSeams,
 } from "../src/index.js";
 
 test("workbench profile resolution layers distribution, user, and workspace without dropping missing references", () => {
@@ -369,6 +372,196 @@ test("resolves the official IDE Workbench on web and desktop without forcing mob
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" }).status, "ready");
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "desktop", userId: "default" }).status, "ready");
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "mobile", userId: "default" }).status, "builtin");
+});
+
+// ---------------------------------------------------------------------------
+// Shell seam contract tests
+// ---------------------------------------------------------------------------
+
+const agentSeams = {
+  contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+  seams: {
+    web: {
+      replacementTargets: [
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+      ],
+      slots: [],
+    },
+    desktop: {
+      replacementTargets: [
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+      ],
+      slots: [],
+    },
+    mobile: {
+      replacementTargets: [
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+      ],
+      slots: [],
+    },
+  },
+};
+
+test("parses a complete Agent shell seam declaration", () => {
+  const parsed = parsePiariumWorkbenchShellContributionData(agentSeams, ["web", "desktop", "mobile"]);
+  assert.equal(parsed.contract, PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT);
+  const webSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "web");
+  assert.equal(webSeams.replacementTargets.length, 7);
+  assert.equal(webSeams.slots.length, 0);
+  const mobileSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "mobile");
+  assert.ok(!mobileSeams.replacementTargets.includes(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer));
+});
+
+test("rejects a supported surface missing from seams", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      { contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
+      ["web", "desktop"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("missing")) === true,
+  );
+});
+
+test("rejects a seam for an unsupported surface", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: { replacementTargets: [], slots: [] },
+          mobile: { replacementTargets: [], slots: [] },
+        },
+      },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("not in contribution supports")) === true,
+  );
+});
+
+test("rejects duplicate replacement targets within a surface", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: {
+            replacementTargets: ["sessions.navigator", "sessions.navigator"],
+            slots: [],
+          },
+        },
+      },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("duplicate")) === true,
+  );
+});
+
+test("rejects workbench.shell as a nested target", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: {
+            replacementTargets: [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell],
+            slots: [],
+          },
+        },
+      },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("recursive")) === true,
+  );
+});
+
+test("rejects workbench.transition as a nested target", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: {
+            replacementTargets: [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition],
+            slots: [],
+          },
+        },
+      },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("recursive")) === true,
+  );
+});
+
+test("rejects a malformed contract string", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      { contract: "wrong", seams: { web: { replacementTargets: [], slots: [] } } },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("contract")) === true,
+  );
+});
+
+test("rejects the same identifier in both replacementTargets and slots", () => {
+  assert.throws(
+    () => parsePiariumWorkbenchShellContributionData(
+      {
+        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        seams: {
+          web: {
+            replacementTargets: ["workbench.panel"],
+            slots: ["workbench.panel"],
+          },
+        },
+      },
+      ["web"],
+    ),
+    (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("both")) === true,
+  );
+});
+
+test("resolves empty seams for an undeclared surface", () => {
+  const parsed = parsePiariumWorkbenchShellContributionData(
+    { contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
+    ["web"],
+  );
+  const desktop = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "desktop");
+  assert.deepEqual(desktop, { replacementTargets: [], slots: [] });
+});
+
+test("allows unknown third-party targets in seams", () => {
+  const parsed = parsePiariumWorkbenchShellContributionData(
+    {
+      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      seams: {
+        web: {
+          replacementTargets: ["my.custom.target"],
+          slots: ["my.custom.slot"],
+        },
+      },
+    },
+    ["web"],
+  );
+  const webSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "web");
+  assert.ok(webSeams.replacementTargets.includes("my.custom.target"));
+  assert.ok(webSeams.slots.includes("my.custom.slot"));
 });
 
 test("public workbench context keys stay stable identifiers", () => {

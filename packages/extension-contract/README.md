@@ -29,6 +29,13 @@ label `Agent`; official UI localizes that name. Its default `workbench.shell` co
 and `piarium.builtin.ide-workbench.shell` on web and desktop only. Selecting a profile does not
 enable or disable extensions.
 
+Shell contributions declare which replacement targets and slots they actually host per surface
+using the `piarium-workbench-shell/v1` contract in `data`. The parser
+`parsePiariumWorkbenchShellContributionData` validates that every supported surface has a seam
+entry, that no unsupported surface is declared, that targets and slots are unique, and that
+`workbench.shell` and `workbench.transition` never appear as nested targets. Use
+`resolvePiariumWorkbenchShellSurfaceSeams` to read the seams for a specific surface.
+
 Replaceable Motion and cross-Shell handoff are specified in
 [`docs/piarium-motion-platform.md`](../../docs/piarium-motion-platform.md). The contract describes
 transition lifecycles and owner identity; it does not prescribe which elements a Shell must render.
