@@ -225,6 +225,20 @@ replace either one, or any individual seam, without a product build. There is no
 branch. `@piarium/extension-contract` is the single owner of the target, slot, and context-key
 constants, and the profile document is revisioned so every mutation is expected-revision checked.
 
+Each shell contribution declares a **shell seam contract** (`PiariumWorkbenchShellContributionDataV1`)
+that lists which replacement targets and slots the shell supports per surface (`web`, `desktop`,
+`mobile`). The contract is validated at manifest parse time and surfaced in the Extensions settings
+page via a pure seam projection. Targets the shell does not declare are hidden from the settings UI;
+existing selections for those targets are preserved as **dormant** and can be cleared explicitly. The
+six IDE structural targets (activity, primary sidebar, editor, secondary sidebar, panel, status) are
+real `WorkbenchReplacement` hosts in the IDE shell, not hardcoded layout. Agent Mobile wraps
+`MobileSessionsSheet` and `SettingsView` in `WorkbenchReplacement` for `sessions.navigator` and
+`settings.workbench` respectively; `workspace.explorer` is not declared on mobile. The
+`editorActions` and `panelViews` slots receive JSON-safe props (workspaceId, groupId, resourceId,
+activePanelId) defined in `@piarium/extension-contract`. Managed shells can compose sub-regions via
+the `PiariumWorkbenchCompositionHost` API in `@piarium/extension-sdk`; the React binding provides
+`useWorkbenchCompositionHost` and `WorkbenchCompositionHostProvider`.
+
 Profile and layout resolution is layered. Layout layers merge `distribution → user → workspace`, and
 profile selection resolves `workspace → user → active`. Shell state is reported truthfully as
 `builtin`, `disabled`, `failed`, `missing`, or `ready`. A shell transition stages the candidate and

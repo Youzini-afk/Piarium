@@ -67,7 +67,22 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 - `@piarium/extension-sdk/testing` fixtures for enable/disable leak checks, async mount abort, profile switch without mutating desired enablement, and expected-revision document conflict
 
 `@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
-`defineReactEditor` wrap the same mount contract.
+`defineReactEditor` wrap the same mount contract. `defineReactShell` provides a
+`PiariumWorkbenchCompositionHost` to the Shell component via React context; use
+`useWorkbenchCompositionHost()` to access it and mount child replacements or slots into DOM
+containers without importing `@piarium/ui`.
+
+### Shell seam contract
+
+A `shell` contribution must declare a `PiariumWorkbenchShellContributionDataV1` data payload that
+lists which replacement targets and slots the shell supports per surface. The contract is validated
+at manifest parse time. Shells that do not declare a target for the current surface will not see
+that target in the Extensions settings page, and any existing selection for it is preserved as
+dormant. The six IDE structural targets (`workbench.activity`, `workbench.primary-sidebar`,
+`workbench.editor`, `workbench.secondary-sidebar`, `workbench.panel`, `workbench.status`) are
+real `WorkbenchReplacement` hosts in the IDE shell. The `editorActions` and `panelViews` slots
+receive JSON-safe props defined in `@piarium/extension-contract`
+(`PiariumWorkbenchEditorActionsSlotProps`, `PiariumWorkbenchPanelViewsSlotProps`).
 
 Animation does not impose an official page structure on a Shell. The versioned Transition Scene and
 future optional Motion-service boundary are specified in
