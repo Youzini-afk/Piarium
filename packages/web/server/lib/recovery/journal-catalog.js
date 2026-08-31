@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { RecoveryPrimitiveError } from './errors.js';
 
-export const RECOVERY_JOURNAL_SCHEMA_VERSION = 3;
+export const RECOVERY_JOURNAL_SCHEMA_VERSION = 4;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS metadata (
@@ -77,9 +78,42 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS operations_workspace_time
     ON operations(workspace_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS object_references (
+    owner_kind TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    object_hash TEXT NOT NULL,
+    PRIMARY KEY(owner_kind, owner_id, slot)
+  );
+  CREATE INDEX IF NOT EXISTS object_references_hash
+    ON object_references(object_hash);
+  CREATE TABLE IF NOT EXISTS operation_files (
+    operation_id TEXT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    expected_json TEXT,
+    target_json TEXT,
+    safety_json TEXT,
+    phase TEXT NOT NULL DEFAULT 'pending',
+    observed_fingerprint TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(operation_id, ordinal)
+  );
+  CREATE INDEX IF NOT EXISTS operation_files_path
+    ON operation_files(operation_id, path);
 `;
 
-const LEGACY_TABLES = [
+const V3_TABLES = [
+  'metadata',
+  'checkpoints',
+  'checkpoint_changes',
+  'turn_bindings',
+  'operations',
+];
+
+const V4_TABLES = [...V3_TABLES, 'object_references', 'operation_files'];
+
+const KNOWN_METADATALESS_LEGACY_TABLES = new Set([
   'snapshot_entries',
   'staged_entries',
   'workspace_heads',
@@ -89,8 +123,10 @@ const LEGACY_TABLES = [
   'operations',
   'checkpoint_changes',
   'checkpoints',
-  'metadata',
-];
+]);
+
+const RETIRED_CATALOG_MARKER = '.retired-recovery-schema-';
+const catalogStatuses = new WeakMap();
 
 const catalogPath = (root) => path.join(root, 'catalog.sqlite');
 
@@ -103,6 +139,91 @@ const syncDirectory = async (directory, fsPromises) => {
     if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
   } finally {
     await handle?.close().catch(() => undefined);
+  }
+};
+
+const databasePath = (root) => process.platform === 'win32'
+  ? path.toNamespacedPath(catalogPath(root))
+  : catalogPath(root);
+
+const storageMalformed = (message, cause) => new RecoveryPrimitiveError(
+  'storage-malformed',
+  message,
+  cause ? { cause } : undefined,
+);
+
+const parseSchemaVersion = (value, label = 'Recovery catalog schema version') => {
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value)) {
+    throw storageMalformed(`${label} is malformed`);
+  }
+  const version = Number(value);
+  if (!Number.isSafeInteger(version)) throw storageMalformed(`${label} is malformed`);
+  return version;
+};
+
+const requireTables = (tableNames, required, version) => {
+  const missing = required.filter((name) => !tableNames.has(name));
+  if (missing.length > 0) {
+    throw storageMalformed(
+      `Recovery catalog schema ${version} is missing required tables: ${missing.join(', ')}`,
+    );
+  }
+};
+
+const classifyCatalog = (root) => {
+  let database;
+  try {
+    database = new Database(databasePath(root), { fileMustExist: true, readonly: true });
+    const schemaObjects = database.prepare(`
+      SELECT type, name FROM sqlite_master
+      WHERE name NOT LIKE 'sqlite_%'
+    `).all();
+    const tableNames = new Set(
+      schemaObjects.filter((entry) => entry.type === 'table').map((entry) => entry.name),
+    );
+    if (!tableNames.has('metadata')) {
+      const nonIndexObjects = schemaObjects.filter((entry) => entry.type !== 'index');
+      if (nonIndexObjects.length === 0) return { kind: 'empty' };
+      const knownTables = nonIndexObjects.every((entry) => (
+        entry.type === 'table' && KNOWN_METADATALESS_LEGACY_TABLES.has(entry.name)
+      ));
+      if (knownTables) return { kind: 'retire', version: 'metadata-less' };
+      throw storageMalformed('Recovery catalog without metadata contains an unknown schema');
+    }
+    const versions = database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").all();
+    if (versions.length !== 1) throw storageMalformed('Recovery catalog schema metadata is malformed');
+    const version = parseSchemaVersion(versions[0].value);
+    if (version > RECOVERY_JOURNAL_SCHEMA_VERSION) {
+      throw new RecoveryPrimitiveError(
+        'storage-schema-newer',
+        `Recovery catalog schema ${version} is newer than supported schema ${RECOVERY_JOURNAL_SCHEMA_VERSION}`,
+      );
+    }
+    const migratedRows = database.prepare("SELECT value FROM metadata WHERE key = 'migrated_from'").all();
+    if (migratedRows.length > 1) throw storageMalformed('Recovery catalog migration metadata is malformed');
+    const migratedFrom = migratedRows.length === 1
+      ? parseSchemaVersion(migratedRows[0].value, 'Recovery catalog migrated-from version')
+      : undefined;
+    if (migratedFrom !== undefined && migratedFrom >= RECOVERY_JOURNAL_SCHEMA_VERSION) {
+      throw storageMalformed('Recovery catalog migration metadata is malformed');
+    }
+    if (version === RECOVERY_JOURNAL_SCHEMA_VERSION) {
+      requireTables(tableNames, V4_TABLES, version);
+      return { kind: 'current', migratedFrom };
+    }
+    if (version === 3) {
+      requireTables(tableNames, V3_TABLES, version);
+      return { kind: 'migrate', version };
+    }
+    return { kind: 'retire', version };
+  } catch (error) {
+    if (error instanceof RecoveryPrimitiveError) throw error;
+    throw storageMalformed(
+      `Recovery catalog cannot be inspected: ${error instanceof Error ? error.message : String(error)}`,
+      error,
+    );
+  } finally {
+    database?.close();
   }
 };
 
@@ -119,70 +240,462 @@ export const ensureRecoveryJournalLayout = async (root, fsPromises = fs.promises
   }
 };
 
-const initialize = (database) => {
+const configureWritableCatalog = (database) => {
   database.pragma('journal_mode = WAL');
   database.pragma('synchronous = FULL');
   database.pragma('foreign_keys = ON');
-  const metadataExists = database.prepare(
-    "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'metadata'",
-  ).get();
-  const stored = metadataExists
-    ? database.prepare('SELECT value FROM metadata WHERE key = ?').get('schema_version')
-    : null;
-  if (stored?.value !== String(RECOVERY_JOURNAL_SCHEMA_VERSION)) {
-    database.pragma('foreign_keys = OFF');
-    database.transaction(() => {
-      for (const table of LEGACY_TABLES) database.exec(`DROP TABLE IF EXISTS ${table}`);
-      database.exec(SCHEMA);
-      database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
-        .run('schema_version', String(RECOVERY_JOURNAL_SCHEMA_VERSION));
-    })();
-    database.pragma('foreign_keys = ON');
-    return { reset: Boolean(stored || metadataExists) };
+};
+
+const initializeEmptyCatalog = (database) => {
+  database.transaction(() => {
+    database.exec(SCHEMA);
+    database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
+      .run('schema_version', String(RECOVERY_JOURNAL_SCHEMA_VERSION));
+  })();
+};
+
+const referenceSlot = (...parts) => JSON.stringify(parts);
+
+const stateReference = (slot, state) => (
+  typeof state?.objectHash === 'string' ? [{ objectHash: state.objectHash, slot }] : []
+);
+
+const referencesFromOperationCollection = (collectionName, collection) => {
+  if (collection === undefined || collection === null) return [];
+  if (typeof collection !== 'object' || Array.isArray(collection)) {
+    throw storageMalformed(`Recovery operation ${collectionName} is malformed`);
   }
-  database.exec(SCHEMA);
-  return { reset: false };
+  const references = [];
+  for (const [resourceId, value] of Object.entries(collection)) {
+    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'value'), value));
+    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'expected'), value?.expected));
+    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'target'), value?.target));
+  }
+  return references;
+};
+
+const normalizedReferences = (references) => {
+  if (!Array.isArray(references)) throw new TypeError('Object references must be an array');
+  const bySlot = new Map();
+  for (const reference of references) {
+    if (typeof reference?.slot !== 'string' || typeof reference?.objectHash !== 'string') {
+      throw new TypeError('Each object reference requires string slot and objectHash fields');
+    }
+    bySlot.set(reference.slot, reference.objectHash);
+  }
+  return [...bySlot].map(([slot, objectHash]) => ({ objectHash, slot }));
+};
+
+export const deleteObjectReferences = (database, ownerKind, ownerId) => {
+  database.prepare('DELETE FROM object_references WHERE owner_kind = ? AND owner_id = ?')
+    .run(ownerKind, ownerId);
+};
+
+export const replaceObjectReferences = (database, ownerKind, ownerId, references) => {
+  if (typeof ownerKind !== 'string' || typeof ownerId !== 'string') {
+    throw new TypeError('Object reference ownerKind and ownerId must be strings');
+  }
+  const normalized = normalizedReferences(references);
+  deleteObjectReferences(database, ownerKind, ownerId);
+  const insert = database.prepare(`
+    INSERT INTO object_references(owner_kind, owner_id, slot, object_hash)
+    VALUES (?, ?, ?, ?)
+  `);
+  for (const reference of normalized) {
+    insert.run(ownerKind, ownerId, reference.slot, reference.objectHash);
+  }
+};
+
+const rebuildObjectReferencesInTransaction = (database) => {
+  database.prepare('DELETE FROM object_references').run();
+  for (const row of database.prepare(`
+    SELECT checkpoint_id, path, before_json, after_json FROM checkpoint_changes
+  `).all()) {
+    const before = parseJson(row.before_json, `Before state for ${row.path}`);
+    const after = row.after_json ? parseJson(row.after_json, `After state for ${row.path}`) : null;
+    replaceObjectReferences(
+      database,
+      'checkpoint-change',
+      JSON.stringify([row.checkpoint_id, row.path]),
+      [
+        ...stateReference('before', before),
+        ...stateReference('after', after),
+      ],
+    );
+  }
+  for (const row of database.prepare('SELECT id, data_json FROM operations').all()) {
+    const operation = parseJson(row.data_json, `Recovery operation ${row.id}`);
+    replaceObjectReferences(database, 'operation', row.id, [
+      ...referencesFromOperationCollection('targets', operation.targets),
+      ...referencesFromOperationCollection('safety', operation.safety),
+    ]);
+  }
+};
+
+export const rebuildObjectReferences = (database) => {
+  database.transaction(() => rebuildObjectReferencesInTransaction(database))();
+};
+
+const migrateV3Catalog = (database) => {
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE object_references (
+        owner_kind TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        object_hash TEXT NOT NULL,
+        PRIMARY KEY(owner_kind, owner_id, slot)
+      );
+      CREATE INDEX object_references_hash ON object_references(object_hash);
+      CREATE TABLE operation_files (
+        operation_id TEXT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        expected_json TEXT,
+        target_json TEXT,
+        safety_json TEXT,
+        phase TEXT NOT NULL DEFAULT 'pending',
+        observed_fingerprint TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(operation_id, ordinal)
+      );
+      CREATE INDEX operation_files_path
+        ON operation_files(operation_id, path);
+    `);
+    rebuildObjectReferencesInTransaction(database);
+    // Backfill operation_files for existing operations from their data_json.
+    // Operations that were in-progress (planned, applying-files, etc.) cannot
+    // have their per-file phase reliably reconstructed from v3 data, so they
+    // are marked 'needs-attention' to prevent false success on resume.
+    // Completed/aborted/compensated operations get 'safety-observed' for all
+    // their files since no further action is needed.
+    const TERMINAL_V3_STATES = new Set(['complete', 'aborted', 'compensated', 'needs-attention']);
+    const insertFile = database.prepare(`
+      INSERT INTO operation_files(operation_id, ordinal, path, expected_json, target_json, phase, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    for (const row of database.prepare("SELECT id, state, data_json FROM operations WHERE kind = 'combined'").all()) {
+      const operation = parseJson(row.data_json, `Recovery operation ${row.id}`);
+      const targets = operation.targets ?? {};
+      const affectedPaths = operation.plan?.affectedPaths ?? Object.keys(targets).sort();
+      const phase = TERMINAL_V3_STATES.has(row.state) ? 'safety-observed' : 'needs-attention';
+      let ordinal = 0;
+      for (const relativePath of affectedPaths) {
+        const states = targets[relativePath];
+        insertFile.run(
+          row.id,
+          ordinal,
+          relativePath,
+          states?.expected ? JSON.stringify(states.expected) : null,
+          states?.target ? JSON.stringify(states.target) : null,
+          phase,
+          now,
+        );
+        ordinal += 1;
+      }
+    }
+    database.prepare('UPDATE metadata SET value = ? WHERE key = ?')
+      .run(String(RECOVERY_JOURNAL_SCHEMA_VERSION), 'schema_version');
+    database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
+      .run('migrated_from', '3');
+  })();
+};
+
+const retiredCatalogPrefix = (root) => `${path.basename(root)}${RETIRED_CATALOG_MARKER}`;
+
+export const inspectRetiredRecoveryCatalogs = async (root, options = {}) => {
+  const fsPromises = options.fsPromises ?? fs.promises;
+  const parent = path.dirname(root);
+  let entries;
+  try {
+    entries = await fsPromises.readdir(parent, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { retiredCatalogCount: 0, state: 'ready' };
+    }
+    throw storageMalformed('Recovery catalog history cannot be inspected', error);
+  }
+  const prefix = retiredCatalogPrefix(root);
+  const retiredCatalogs = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+    .map((entry) => path.join(parent, entry.name))
+    .sort();
+  return {
+    retiredCatalogCount: retiredCatalogs.length,
+    retiredCatalogs,
+    state: retiredCatalogs.length > 0 ? 'retired-history' : 'ready',
+  };
+};
+
+const attachCatalogStatus = async (database, root, migratedFrom, fsPromises) => {
+  const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
+  const status = Object.freeze({
+    currentSchemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
+    state: retired.retiredCatalogCount > 0
+      ? 'retired-history'
+      : migratedFrom === undefined ? 'ready' : 'migrated',
+    ...(migratedFrom === undefined ? {} : { migratedFrom }),
+    retiredCatalogCount: retired.retiredCatalogCount,
+  });
+  catalogStatuses.set(database, status);
+  return database;
+};
+
+export const recoveryCatalogStatus = (database) => {
+  const status = catalogStatuses.get(database);
+  return status ? { ...status } : null;
+};
+
+const finishCreatedCatalog = async (root, fsPromises) => {
+  await fsPromises.chmod(catalogPath(root), 0o600);
+  await syncDirectory(root, fsPromises);
+};
+
+const createFreshCatalog = async (root, fsPromises) => {
+  await ensureRecoveryJournalLayout(root, fsPromises);
+  let database;
+  try {
+    database = new Database(databasePath(root));
+    configureWritableCatalog(database);
+    initializeEmptyCatalog(database);
+    await finishCreatedCatalog(root, fsPromises);
+    return database;
+  } catch (error) {
+    database?.close();
+    throw error;
+  }
+};
+
+const retirementFailure = (error) => {
+  if (['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(error?.code)) {
+    return new RecoveryPrimitiveError(
+      'recovery-in-progress',
+      'Recovery catalog is in use and cannot be retired',
+      { cause: error, retryable: true },
+    );
+  }
+  return new RecoveryPrimitiveError(
+    'storage-move-failed',
+    `Recovery catalog cannot be retired: ${error instanceof Error ? error.message : String(error)}`,
+    { cause: error },
+  );
+};
+
+const retireCatalogRoot = async (root, version, fsPromises) => {
+  const parent = path.dirname(root);
+  const nonce = randomUUID();
+  const replacementRoot = path.join(parent, `.${path.basename(root)}.replacement-${nonce}`);
+  const retiredRoot = path.join(
+    parent,
+    `${retiredCatalogPrefix(root)}${version}-${Date.now()}-${nonce}`,
+  );
+  let replacement;
+  try {
+    replacement = await createFreshCatalog(replacementRoot, fsPromises);
+    replacement.close();
+    replacement = null;
+    await syncDirectory(parent, fsPromises);
+    try {
+      await fsPromises.rename(root, retiredRoot);
+    } catch (error) {
+      throw retirementFailure(error);
+    }
+    try {
+      await fsPromises.rename(replacementRoot, root);
+    } catch (error) {
+      try {
+        await fsPromises.rename(retiredRoot, root);
+      } catch (rollbackError) {
+        throw new RecoveryPrimitiveError(
+          'storage-move-failed',
+          'Recovery catalog replacement failed and the original root could not be restored',
+          { cause: rollbackError },
+        );
+      }
+      throw retirementFailure(error);
+    }
+    await syncDirectory(parent, fsPromises);
+  } finally {
+    replacement?.close();
+    await fsPromises.rm(replacementRoot, { force: true, recursive: true }).catch(() => undefined);
+  }
+};
+
+/**
+ * Inspect a recovery catalog without mutating it.
+ *
+ * This is the read-only classification path. It never migrates, retires,
+ * creates, or writes metadata. It returns:
+ *   - null if the catalog root or catalog file does not exist
+ *   - { database, status } for a current or already-migrated v4 catalog
+ *     (database is opened readonly)
+ *   - { database: null, status, classification } for a catalog that needs
+ *     activation (migration, retirement, initialization) or is
+ *     future/malformed — the caller can report status without touching disk
+ *
+ * Callers that need to write must use openRecoveryJournalCatalog (activate).
+ */
+export const inspectRecoveryJournalCatalog = async (root, options = {}) => {
+  const fsPromises = options.fsPromises ?? fs.promises;
+  let rootStat;
+  try {
+    rootStat = await fsPromises.lstat(root);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery storage contains a symbolic link or non-directory');
+  }
+  let catalogStat;
+  try {
+    catalogStat = await fsPromises.lstat(catalogPath(root));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (catalogStat && (!catalogStat.isFile() || catalogStat.isSymbolicLink())) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is not a direct regular file');
+  }
+  if (!catalogStat) {
+    const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
+    return {
+      classification: { kind: 'missing' },
+      database: null,
+      status: {
+        currentSchemaVersion: 0,
+        retiredCatalogCount: retired.retiredCatalogCount,
+        state: retired.retiredCatalogCount > 0 ? 'retired-history' : 'missing',
+      },
+    };
+  }
+  const classification = classifyCatalog(root);
+  const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
+  if (classification.kind === 'current') {
+    const database = new Database(databasePath(root), { readonly: true });
+    configureReadableCatalog(database);
+    const status = Object.freeze({
+      currentSchemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
+      state: retired.retiredCatalogCount > 0
+        ? 'retired-history'
+        : classification.migratedFrom === undefined ? 'ready' : 'migrated',
+      ...(classification.migratedFrom === undefined ? {} : { migratedFrom: classification.migratedFrom }),
+      retiredCatalogCount: retired.retiredCatalogCount,
+    });
+    catalogStatuses.set(database, status);
+    return { classification, database, status };
+  }
+  // For migrate, retire, empty, or future schemas: return classification
+  // without opening a writable handle. The caller can report status and
+  // decide whether to activate (which may migrate or retire).
+  const state = classification.kind === 'migrate' ? 'ready'
+    : classification.kind === 'retire' ? 'ready'
+    : classification.kind === 'empty' ? 'missing'
+    : 'missing';
+  return {
+    classification,
+    database: null,
+    status: {
+      currentSchemaVersion: classification.kind === 'migrate' ? 3
+        : classification.kind === 'retire' && typeof classification.version === 'number' ? classification.version
+        : 0,
+      retiredCatalogCount: retired.retiredCatalogCount,
+      state: retired.retiredCatalogCount > 0 ? 'retired-history' : state,
+    },
+  };
+};
+
+const configureReadableCatalog = (database) => {
+  // Do NOT set journal_mode on a readonly connection — SQLite will reject
+  // the implicit write with SQLITE_READONLY. Only enable foreign_keys,
+  // which is a connection-level pragma that doesn't touch the database file.
+  database.pragma('foreign_keys = ON');
 };
 
 export const openRecoveryJournalCatalog = async (root, options = {}) => {
   const create = options.create === true;
   const fsPromises = options.fsPromises ?? fs.promises;
-  if (create) await ensureRecoveryJournalLayout(root, fsPromises);
-  else {
+  let rootStat;
+  try {
+    rootStat = await fsPromises.lstat(root);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    if (!create) return null;
+  }
+  if (rootStat && (!rootStat.isDirectory() || rootStat.isSymbolicLink())) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery storage contains a symbolic link or non-directory');
+  }
+  let catalogStat;
+  if (rootStat) {
     try {
-      const stat = await fsPromises.lstat(catalogPath(root));
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is not a direct regular file');
-      }
+      catalogStat = await fsPromises.lstat(catalogPath(root));
     } catch (error) {
-      if (error?.code === 'ENOENT') return null;
-      throw error;
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  if (catalogStat && (!catalogStat.isFile() || catalogStat.isSymbolicLink())) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is not a direct regular file');
+  }
+  if (!catalogStat) {
+    if (!create) return null;
+    let database;
+    try {
+      database = await createFreshCatalog(root, fsPromises);
+      return await attachCatalogStatus(database, root, undefined, fsPromises);
+    } catch (error) {
+      database?.close();
+      if (error instanceof RecoveryPrimitiveError) throw error;
+      throw storageMalformed(
+        `Recovery catalog cannot be opened: ${error instanceof Error ? error.message : String(error)}`,
+        error,
+      );
+    }
+  }
+  const classification = classifyCatalog(root);
+  if (classification.kind === 'retire') {
+    try {
+      await retireCatalogRoot(root, classification.version, fsPromises);
+    } catch (error) {
+      if (error instanceof RecoveryPrimitiveError) throw error;
+      throw storageMalformed(
+        `Recovery catalog cannot be retired: ${error instanceof Error ? error.message : String(error)}`,
+        error,
+      );
     }
   }
   let database;
   try {
-    const databasePath = process.platform === 'win32'
-      ? path.toNamespacedPath(catalogPath(root))
-      : catalogPath(root);
-    database = new Database(databasePath, create ? undefined : { fileMustExist: true });
-    const initialized = initialize(database);
-    if (initialized.reset) {
-      await fsPromises.rm(path.join(root, 'operations'), { force: true, recursive: true });
-      await fsPromises.rm(path.join(root, 'staging'), { force: true, recursive: true });
-      await fsPromises.mkdir(path.join(root, 'staging'), { recursive: true, mode: 0o700 });
+    if (classification.kind === 'empty') {
+      if (create) await ensureRecoveryJournalLayout(root, fsPromises);
+      database = new Database(databasePath(root), { fileMustExist: true });
+      configureWritableCatalog(database);
+      initializeEmptyCatalog(database);
+      if (create) await finishCreatedCatalog(root, fsPromises);
+      return await attachCatalogStatus(database, root, undefined, fsPromises);
     }
-    if (create) {
-      await fsPromises.chmod(catalogPath(root), 0o600);
-      await syncDirectory(root, fsPromises);
+    if (classification.kind === 'retire') {
+      database = new Database(databasePath(root), { fileMustExist: true });
+      configureWritableCatalog(database);
+      return await attachCatalogStatus(database, root, undefined, fsPromises);
     }
-    return database;
+    if (create) await ensureRecoveryJournalLayout(root, fsPromises);
+    database = new Database(databasePath(root), { fileMustExist: true });
+    configureWritableCatalog(database);
+    if (classification.kind === 'migrate') migrateV3Catalog(database);
+    else database.exec(SCHEMA);
+    if (create) await finishCreatedCatalog(root, fsPromises);
+    return await attachCatalogStatus(
+      database,
+      root,
+      classification.kind === 'migrate' ? 3 : classification.migratedFrom,
+      fsPromises,
+    );
   } catch (error) {
     database?.close();
     if (error instanceof RecoveryPrimitiveError) throw error;
-    throw new RecoveryPrimitiveError(
-      'storage-malformed',
+    throw storageMalformed(
       `Recovery catalog cannot be opened: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
+      error,
     );
   }
 };
@@ -269,6 +782,66 @@ export const writeOperationRow = (database, operation) => {
     workspaceId: operation.workspaceId,
   });
 };
+
+const OPERATION_FILE_PHASES = [
+  'pending', 'apply-intent', 'target-observed',
+  'compensate-intent', 'safety-observed', 'needs-attention',
+];
+
+export const initOperationFiles = (database, operationId, targets) => {
+  database.prepare('DELETE FROM operation_files WHERE operation_id = ?').run(operationId);
+  const insert = database.prepare(`
+    INSERT INTO operation_files(operation_id, ordinal, path, expected_json, target_json, phase, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `);
+  const now = new Date().toISOString();
+  let ordinal = 0;
+  for (const relativePath of Object.keys(targets).sort()) {
+    const states = targets[relativePath];
+    insert.run(
+      operationId,
+      ordinal,
+      relativePath,
+      states.expected ? JSON.stringify(states.expected) : null,
+      states.target ? JSON.stringify(states.target) : null,
+      now,
+    );
+    ordinal += 1;
+  }
+};
+
+export const updateOperationFilePhase = (database, operationId, path, phase, options = {}) => {
+  if (!OPERATION_FILE_PHASES.includes(phase)) {
+    throw new TypeError(`Invalid operation file phase: ${phase}`);
+  }
+  const now = new Date().toISOString();
+  if (options.safetyJson !== undefined) {
+    database.prepare(`
+      UPDATE operation_files
+      SET phase = ?, safety_json = ?, observed_fingerprint = ?, updated_at = ?
+      WHERE operation_id = ? AND path = ?
+    `).run(phase, options.safetyJson, options.observedFingerprint ?? null, now, operationId, path);
+  } else {
+    database.prepare(`
+      UPDATE operation_files
+      SET phase = ?, observed_fingerprint = ?, updated_at = ?
+      WHERE operation_id = ? AND path = ?
+    `).run(phase, options.observedFingerprint ?? null, now, operationId, path);
+  }
+};
+
+export const operationFileRows = (database, operationId) => (
+  database.prepare(`
+    SELECT * FROM operation_files WHERE operation_id = ?
+    ORDER BY ordinal ASC
+  `).all(operationId)
+);
+
+export const operationFileByPath = (database, operationId, path) => (
+  database.prepare(`
+    SELECT * FROM operation_files WHERE operation_id = ? AND path = ?
+  `).get(operationId, path)
+);
 
 export const verifyRecoveryJournalStore = async (root, options = {}) => {
   const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises: options.fsPromises });

@@ -4,21 +4,26 @@ import {
 } from "./services.js";
 import type { JsonObject, JsonValue, PiariumExtensionServiceInvocationRequest } from "./types.js";
 
-export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 3 as const;
+export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 4 as const;
 
 export type WorkspaceRecoveryFailureCode =
   | "invalid-request" | "workspace-not-found" | "workspace-untrusted"
   | "checkpoint-unavailable" | "checkpoint-missing" | "checkpoint-incomplete" | "checkpoint-corrupt"
   | "object-missing" | "object-corrupt" | "storage-malformed" | "storage-move-failed"
+  | "storage-schema-newer" | "storage-schema-retired" | "storage-overlap"
   | "operation-not-found" | "stale-plan" | "path-conflict" | "dirty-buffers"
-  | "locked-path" | "unsupported-metadata" | "navigation-conflict"
+  | "dirty-state-unavailable" | "lease-unavailable" | "locked-path" | "unsupported-metadata" | "navigation-conflict"
   | "recovery-in-progress" | "needs-attention" | "unavailable" | "internal";
+
+export type WorkspaceRecoveryFailureOrigin =
+  | "provider" | "coverage" | "storage" | "conflict" | "navigation" | "concurrency" | "internal";
 
 export interface WorkspaceRecoveryFailure {
   code: WorkspaceRecoveryFailureCode;
   details?: JsonObject;
   message: string;
   operationId?: string;
+  origin?: WorkspaceRecoveryFailureOrigin;
   retryable: boolean;
 }
 
@@ -119,7 +124,8 @@ export type WorkspaceRecoveryEntryBindingResult =
   | WorkspaceRecoveryFailedResult;
 
 export type WorkspaceRecoveryConflictKind = "content-changed" | "dirty-buffer" | "unsupported";
-export interface WorkspaceRecoveryConflict { kind: WorkspaceRecoveryConflictKind; message: string; path: string }
+export interface WorkspaceRecoveryConflict { fingerprint: string; kind: WorkspaceRecoveryConflictKind; message: string; path: string }
+export interface WorkspaceRecoveryConfirmedConflict { fingerprint: string; path: string }
 export interface WorkspaceCombinedRecoveryPrepareInput { entryId: string; sessionId: string; workspaceId: string }
 
 export interface WorkspaceCombinedRecoveryPlan {
@@ -139,8 +145,9 @@ export interface WorkspaceCombinedRecoveryPlan {
   workspaceId: string;
 }
 
-export type WorkspaceRecoveryConflictPolicy = "abort" | "overwrite";
+export type WorkspaceRecoveryConflictPolicy = "abort" | "overwrite-confirmed";
 export interface WorkspaceCombinedRecoveryApplyInput {
+  confirmedConflicts: WorkspaceRecoveryConfirmedConflict[];
   conflictPolicy: WorkspaceRecoveryConflictPolicy;
   expectedRevision: string;
   operationId: string;
@@ -178,9 +185,18 @@ export type RecoveryStorageLocation =
   | { mode: Exclude<RecoveryStorageMode, "custom"> }
   | { customRoot: string; mode: "custom" };
 
+export type RecoveryCatalogState = "missing" | "ready" | "migrated" | "retired-history";
+export interface RecoveryCatalogStatus {
+  currentSchemaVersion: number;
+  migratedFrom?: number;
+  retiredCatalogCount: number;
+  state: RecoveryCatalogState;
+}
+
 export interface RecoveryStorageStatus {
   authorityId: string;
   byteLength: number;
+  catalog: RecoveryCatalogStatus;
   checkpointCount: number;
   encryption: { available: boolean; enabled: boolean };
   location: RecoveryStorageLocation;
@@ -195,6 +211,7 @@ export interface RecoveryStorageStatus {
 export interface SetRecoveryStorageLocationInput { location: RecoveryStorageLocation; workspaceId: string }
 export interface RecoveryStorageWorkspaceSummary {
   byteLength: number;
+  catalog: RecoveryCatalogStatus;
   canonicalRoot: string;
   checkpointCount: number;
   failure?: WorkspaceRecoveryFailure;
@@ -236,12 +253,18 @@ export interface RecoveryStorageCleanupResult {
 export interface WorkspaceRecoveryStatus {
   capabilities: {
     bindings: boolean;
+    catalogLifecycle: boolean;
     checkpoints: boolean;
     combined: boolean;
+    conflictConfirmation: boolean;
+    dirtyStateBarrier: boolean;
     journal: boolean;
     redo: boolean;
+    retention: boolean;
     storageManagement: boolean;
+    workspaceLease: boolean;
   };
+  failures: WorkspaceRecoveryFailure[];
   identity: WorkspaceRecoveryIdentity;
   status: "ready";
   storage: RecoveryStorageStatus;
@@ -299,8 +322,12 @@ const stringList = (value: unknown, label: string): string[] => {
 const FAILURE_CODES: readonly WorkspaceRecoveryFailureCode[] = [
   "invalid-request", "workspace-not-found", "workspace-untrusted", "checkpoint-unavailable", "checkpoint-missing",
   "checkpoint-incomplete", "checkpoint-corrupt", "object-missing", "object-corrupt", "storage-malformed",
-  "storage-move-failed", "operation-not-found", "stale-plan", "path-conflict", "dirty-buffers", "locked-path",
+  "storage-move-failed", "storage-schema-newer", "storage-schema-retired", "storage-overlap", "operation-not-found",
+  "stale-plan", "path-conflict", "dirty-buffers", "dirty-state-unavailable", "lease-unavailable", "locked-path",
   "unsupported-metadata", "navigation-conflict", "recovery-in-progress", "needs-attention", "unavailable", "internal",
+];
+const FAILURE_ORIGINS: readonly WorkspaceRecoveryFailureOrigin[] = [
+  "provider", "coverage", "storage", "conflict", "navigation", "concurrency", "internal",
 ];
 
 export const parseWorkspaceRecoveryFailure = (value: unknown): WorkspaceRecoveryFailure => {
@@ -313,6 +340,7 @@ export const parseWorkspaceRecoveryFailure = (value: unknown): WorkspaceRecovery
     retryable: bool(raw.retryable, "failure.retryable"),
     ...(raw.details === undefined ? {} : { details: raw.details as JsonObject }),
     ...(optionalText(raw.operationId, "failure.operationId") ? { operationId: raw.operationId as string } : {}),
+    ...(raw.origin === undefined ? {} : { origin: oneOf(raw.origin, FAILURE_ORIGINS, "failure.origin") }),
   };
 };
 
@@ -393,7 +421,10 @@ export const parseWorkspaceRecoveryEntryTarget = (value: unknown): WorkspaceReco
 };
 export const parseWorkspaceCombinedRecoveryPrepareInput = (value: unknown): WorkspaceCombinedRecoveryPrepareInput => parseWorkspaceRecoveryEntryTarget(value);
 export const parseWorkspaceRecoveryConflict = (value: unknown): WorkspaceRecoveryConflict => {
-  const raw = record(value, "Workspace recovery conflict"); return { kind: oneOf(raw.kind, ["content-changed", "dirty-buffer", "unsupported"] as const, "conflict.kind"), message: text(raw.message, "conflict.message"), path: text(raw.path, "conflict.path") };
+  const raw = record(value, "Workspace recovery conflict"); return { fingerprint: text(raw.fingerprint, "conflict.fingerprint"), kind: oneOf(raw.kind, ["content-changed", "dirty-buffer", "unsupported"] as const, "conflict.kind"), message: text(raw.message, "conflict.message"), path: text(raw.path, "conflict.path") };
+};
+export const parseWorkspaceRecoveryConfirmedConflict = (value: unknown): WorkspaceRecoveryConfirmedConflict => {
+  const raw = record(value, "Confirmed workspace recovery conflict"); return { fingerprint: text(raw.fingerprint, "confirmedConflict.fingerprint"), path: text(raw.path, "confirmedConflict.path") };
 };
 export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCombinedRecoveryPlan => {
   const raw = record(value, "Combined recovery plan"); if (!Array.isArray(raw.conflicts)) throw new WorkspaceRecoveryContractError("plan.conflicts must be an array");
@@ -406,7 +437,12 @@ export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCom
   };
 };
 export const parseWorkspaceCombinedRecoveryApplyInput = (value: unknown): WorkspaceCombinedRecoveryApplyInput => {
-  const raw = record(value, "Combined recovery apply input"); return { conflictPolicy: oneOf(raw.conflictPolicy, ["abort", "overwrite"] as const, "apply.conflictPolicy"), expectedRevision: text(raw.expectedRevision, "apply.expectedRevision"), operationId: text(raw.operationId, "apply.operationId") };
+  const raw = record(value, "Combined recovery apply input"); if (!Array.isArray(raw.confirmedConflicts)) throw new WorkspaceRecoveryContractError("apply.confirmedConflicts must be an array");
+  const conflictPolicy = oneOf(raw.conflictPolicy, ["abort", "overwrite-confirmed"] as const, "apply.conflictPolicy");
+  const confirmedConflicts = raw.confirmedConflicts.map(parseWorkspaceRecoveryConfirmedConflict);
+  if (conflictPolicy === "abort" && confirmedConflicts.length > 0) throw new WorkspaceRecoveryContractError("abort cannot confirm conflicts");
+  if (conflictPolicy === "overwrite-confirmed" && confirmedConflicts.length === 0) throw new WorkspaceRecoveryContractError("overwrite-confirmed requires at least one confirmed conflict");
+  return { confirmedConflicts, conflictPolicy, expectedRevision: text(raw.expectedRevision, "apply.expectedRevision"), operationId: text(raw.operationId, "apply.operationId") };
 };
 
 const parseEditorImages = (value: unknown): WorkspaceRecoveryEditorImage[] => {
@@ -436,6 +472,15 @@ export const parseRecoveryStorageLocation = (value: unknown): RecoveryStorageLoc
   if (mode === "custom") return { customRoot: text(raw.customRoot, "location.customRoot"), mode };
   if (raw.customRoot !== undefined) throw new WorkspaceRecoveryContractError("location.customRoot is only valid for custom mode"); return { mode };
 };
+export const parseRecoveryCatalogStatus = (value: unknown): RecoveryCatalogStatus => {
+  const raw = record(value, "Recovery catalog status");
+  return {
+    currentSchemaVersion: count(raw.currentSchemaVersion, "catalog.currentSchemaVersion"),
+    retiredCatalogCount: count(raw.retiredCatalogCount, "catalog.retiredCatalogCount"),
+    state: oneOf(raw.state, ["missing", "ready", "migrated", "retired-history"] as const, "catalog.state"),
+    ...(raw.migratedFrom === undefined ? {} : { migratedFrom: positive(raw.migratedFrom, "catalog.migratedFrom") }),
+  };
+};
 export const parseSetRecoveryStorageLocationInput = (value: unknown): SetRecoveryStorageLocationInput => {
   const raw = record(value, "Set recovery storage location input"); return { location: parseRecoveryStorageLocation(raw.location), workspaceId: text(raw.workspaceId, "storage.workspaceId") };
 };
@@ -445,7 +490,7 @@ export const parseRecoveryStorageCleanupInput = (value: unknown): RecoveryStorag
 export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatus => {
   const raw = record(value, "Recovery storage status"); const encryption = record(raw.encryption, "storage.encryption");
   return {
-    authorityId: text(raw.authorityId, "storage.authorityId"), byteLength: count(raw.byteLength, "storage.byteLength"), checkpointCount: count(raw.checkpointCount, "storage.checkpointCount"),
+    authorityId: text(raw.authorityId, "storage.authorityId"), byteLength: count(raw.byteLength, "storage.byteLength"), catalog: parseRecoveryCatalogStatus(raw.catalog), checkpointCount: count(raw.checkpointCount, "storage.checkpointCount"),
     encryption: { available: bool(encryption.available, "storage.encryption.available"), enabled: bool(encryption.enabled, "storage.encryption.enabled") },
     location: parseRecoveryStorageLocation(raw.location), locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "storage.locationSource"),
     objectCount: count(raw.objectCount, "storage.objectCount"), readyCheckpointCount: count(raw.readyCheckpointCount, "storage.readyCheckpointCount"), registryRevision: count(raw.registryRevision, "storage.registryRevision"),
@@ -455,7 +500,7 @@ export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatu
 export const parseRecoveryStorageWorkspaceSummary = (value: unknown): RecoveryStorageWorkspaceSummary => {
   const raw = record(value, "Recovery storage workspace summary");
   return {
-    byteLength: count(raw.byteLength, "workspace.byteLength"), canonicalRoot: text(raw.canonicalRoot, "workspace.canonicalRoot"), checkpointCount: count(raw.checkpointCount, "workspace.checkpointCount"),
+    byteLength: count(raw.byteLength, "workspace.byteLength"), canonicalRoot: text(raw.canonicalRoot, "workspace.canonicalRoot"), catalog: parseRecoveryCatalogStatus(raw.catalog), checkpointCount: count(raw.checkpointCount, "workspace.checkpointCount"),
     lastActivityAt: raw.lastActivityAt === null ? null : isoTimestamp(raw.lastActivityAt, "workspace.lastActivityAt"), location: parseRecoveryStorageLocation(raw.location),
     locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "workspace.locationSource"), migrationRequired: bool(raw.migrationRequired, "workspace.migrationRequired"),
     objectCount: count(raw.objectCount, "workspace.objectCount"), state: oneOf(raw.state, ["missing", "ready", "incomplete", "malformed", "corrupt", "unavailable"] as const, "workspace.state"),
@@ -506,8 +551,8 @@ export const parseWorkspaceCombinedRecoveryListResult = (value: unknown): Worksp
   return { operations: raw.operations.map(parseWorkspaceCombinedRecoveryOperation), status: oneOf(raw.status, ["ready"] as const, "combined operations.status") };
 };
 export const parseWorkspaceRecoveryStatusResult = (value: unknown): WorkspaceRecoveryStatusResult => {
-  const raw = record(value, "Workspace recovery status result"); if (raw.status === "failed") return failed(raw); const capabilities = record(raw.capabilities, "status.capabilities");
-  return { capabilities: { bindings: bool(capabilities.bindings, "status.capabilities.bindings"), checkpoints: bool(capabilities.checkpoints, "status.capabilities.checkpoints"), combined: bool(capabilities.combined, "status.capabilities.combined"), journal: bool(capabilities.journal, "status.capabilities.journal"), redo: bool(capabilities.redo, "status.capabilities.redo"), storageManagement: bool(capabilities.storageManagement, "status.capabilities.storageManagement") }, identity: parseWorkspaceRecoveryIdentity(raw.identity), status: oneOf(raw.status, ["ready"] as const, "status.status"), storage: parseRecoveryStorageStatus(raw.storage) };
+  const raw = record(value, "Workspace recovery status result"); if (raw.status === "failed") return failed(raw); const capabilities = record(raw.capabilities, "status.capabilities"); if (!Array.isArray(raw.failures)) throw new WorkspaceRecoveryContractError("status.failures must be an array");
+  return { capabilities: { bindings: bool(capabilities.bindings, "status.capabilities.bindings"), catalogLifecycle: bool(capabilities.catalogLifecycle, "status.capabilities.catalogLifecycle"), checkpoints: bool(capabilities.checkpoints, "status.capabilities.checkpoints"), combined: bool(capabilities.combined, "status.capabilities.combined"), conflictConfirmation: bool(capabilities.conflictConfirmation, "status.capabilities.conflictConfirmation"), dirtyStateBarrier: bool(capabilities.dirtyStateBarrier, "status.capabilities.dirtyStateBarrier"), journal: bool(capabilities.journal, "status.capabilities.journal"), redo: bool(capabilities.redo, "status.capabilities.redo"), retention: bool(capabilities.retention, "status.capabilities.retention"), storageManagement: bool(capabilities.storageManagement, "status.capabilities.storageManagement"), workspaceLease: bool(capabilities.workspaceLease, "status.capabilities.workspaceLease") }, failures: raw.failures.map(parseWorkspaceRecoveryFailure), identity: parseWorkspaceRecoveryIdentity(raw.identity), status: oneOf(raw.status, ["ready"] as const, "status.status"), storage: parseRecoveryStorageStatus(raw.storage) };
 };
 export const parseRecoveryStorageStatusResult = (value: unknown): RecoveryStorageStatusResult => {
   const raw = record(value, "Recovery storage result"); return raw.status === "failed" ? failed(raw) : { status: oneOf(raw.status, ["ready"] as const, "storage result.status"), storage: parseRecoveryStorageStatus(raw.storage) };

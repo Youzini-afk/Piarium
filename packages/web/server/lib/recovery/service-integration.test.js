@@ -64,7 +64,19 @@ describe('Web Application Host workspace recovery service', () => {
     const api = createWorkspaceRecoveryAPI((request) => runtime.invokeService(request));
     expect(await api.status(harness.identity.workspaceId)).toMatchObject({
       status: 'ready',
-      capabilities: { bindings: true, checkpoints: true, combined: true },
+      capabilities: {
+        bindings: true,
+        catalogLifecycle: true,
+        checkpoints: true,
+        combined: true,
+        conflictConfirmation: true,
+        dirtyStateBarrier: false,
+        journal: true,
+        redo: true,
+        retention: false,
+        storageManagement: true,
+        workspaceLease: false,
+      },
     });
     const turn = await api.recordTurnStart({
       activeWriterScopes: ['pi-worker:worker-1'],
@@ -126,6 +138,7 @@ describe('Web Application Host workspace recovery service', () => {
       },
     });
     const applied = await api.applyCombinedRecovery({
+      confirmedConflicts: [],
       conflictPolicy: 'abort',
       expectedRevision: combined.plan.revision,
       operationId: combined.plan.id,

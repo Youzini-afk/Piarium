@@ -548,6 +548,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       const applied = requireWorkspaceRecoveryResult(
         await getWorkspaceRecoveryAPI().applyCombinedRecovery({
+          confirmedConflicts: [],
           conflictPolicy: 'abort',
           expectedRevision: prepared.plan.revision,
           operationId: prepared.plan.id,

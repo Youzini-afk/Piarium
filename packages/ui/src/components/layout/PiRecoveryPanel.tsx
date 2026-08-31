@@ -106,6 +106,7 @@ export const PiRecoveryPanel: React.FC = () => {
       const api = getWorkspaceRecoveryAPI();
       const prepared = requireWorkspaceRecoveryResult(await api.prepareCombinedUndo(operation.id));
       const result = requireWorkspaceRecoveryResult(await api.applyCombinedRecovery({
+        confirmedConflicts: [],
         conflictPolicy: 'abort',
         expectedRevision: prepared.plan.revision,
         operationId: prepared.plan.id,

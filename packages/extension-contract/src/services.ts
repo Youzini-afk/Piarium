@@ -7,5 +7,5 @@ export const PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID = "piarium.workbench.layout";
 export const PIARIUM_EDITOR_MONACO_SERVICE_ID = "piarium.editor.monaco";
 export const PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID = "piarium.workspace-recovery";
 export const PIARIUM_EDITOR_MONACO_SERVICE_VERSION = 1 as const;
-export const PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION = 3 as const;
+export const PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION = 4 as const;
 export const PIARIUM_CORE_SERVICE_VERSION = 1 as const;

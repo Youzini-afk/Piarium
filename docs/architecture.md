@@ -363,7 +363,7 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings, extension-owned config documents, and native package updates with source/provenance shown |
 | App metadata | Atomic Piarium JSON | Archive state and optional session workspace binding now; recovery preference, pin, tags, and view preferences are application-owned additions |
 | Project workspace preferences | `~/.config/piarium/projects/<path-id>.json` | One Piarium-owned, path-derived authority for worktree setup, notes, todos, plans, draft starters, and project actions; writes preserve unknown fields, reject malformed JSON, and fail on external revision conflicts instead of overwriting them |
-| Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@3` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
+| Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@4` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
@@ -503,7 +503,7 @@ section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md)
 
 Conversation-only rollback remains Pi-native: it branches Pi's append-only session tree and restores
 editable user text/images without touching files. Combined rollback uses the selected
-`piarium.workspace-recovery@3` Host service, whose distribution default is the statically shipped,
+`piarium.workspace-recovery@4` Host service, whose distribution default is the statically shipped,
 replaceable `piarium.builtin.recovery` extension.
 
 The provider records a lightweight checkpoint for a bound user turn. Pi's built-in `write` and `edit`

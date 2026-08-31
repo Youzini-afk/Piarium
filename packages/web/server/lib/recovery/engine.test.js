@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -247,7 +248,13 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(target, 'utf8')).toBe('user-later');
 
     const forced = await engine.applyCombinedRecovery({
-      conflictPolicy: 'overwrite', expectedRevision: prepared.plan.revision, operationId: prepared.plan.id,
+      confirmedConflicts: prepared.plan.conflicts.map((conflict) => ({
+        fingerprint: conflict.fingerprint,
+        path: conflict.path,
+      })),
+      conflictPolicy: 'overwrite-confirmed',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
     });
     expect(forced.operation.state).toBe('complete');
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
@@ -399,5 +406,534 @@ describe('affected-file workspace recovery journal', () => {
       status: 'ready',
       storage: { checkpointCount: 1, location: { mode: 'application-data' } },
     });
+  });
+
+  it('reports v4 capabilities with unimplemented features as false', async () => {
+    const { engine, harness } = await createHarness();
+    const status = await engine.status(harness.identity.workspaceId);
+    expect(status).toMatchObject({
+      status: 'ready',
+      capabilities: {
+        bindings: true,
+        catalogLifecycle: true,
+        checkpoints: true,
+        combined: true,
+        conflictConfirmation: true,
+        dirtyStateBarrier: false,
+        journal: true,
+        redo: true,
+        retention: false,
+        storageManagement: true,
+        workspaceLease: false,
+      },
+      failures: [],
+    });
+  });
+
+  it('rejects overwrite-confirmed when a conflict fingerprint changed after review', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+    await fs.promises.writeFile(target, 'user-later-v1');
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared.plan.conflicts).toHaveLength(1);
+    // File changes again after conflict review — fingerprint must differ.
+    await fs.promises.writeFile(target, 'user-later-v2');
+    const stale = await engine.applyCombinedRecovery({
+      confirmedConflicts: prepared.plan.conflicts.map((conflict) => ({
+        fingerprint: conflict.fingerprint,
+        path: conflict.path,
+      })),
+      conflictPolicy: 'overwrite-confirmed',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(stale).toMatchObject({ status: 'failed', failure: { code: 'stale-plan', retryable: true } });
+    // The file must not have been overwritten.
+    expect(await fs.promises.readFile(target, 'utf8')).toBe('user-later-v2');
+  });
+
+  it('rejects overwrite-confirmed for dirty-buffer conflicts until the barrier is implemented', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+    await harness.authority.publishDirtyBuffers({
+      generation: 1,
+      ownerId: 'surface-1',
+      resources: [{
+        baseRevision: null,
+        localEditRevision: 1,
+        resource: { resourceId: 'note.txt', workspaceId: harness.identity.workspaceId },
+      }],
+      workspaceId: harness.identity.workspaceId,
+    });
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared.plan.conflicts[0].kind).toBe('dirty-buffer');
+    const rejected = await engine.applyCombinedRecovery({
+      confirmedConflicts: prepared.plan.conflicts.map((conflict) => ({
+        fingerprint: conflict.fingerprint,
+        path: conflict.path,
+      })),
+      conflictPolicy: 'overwrite-confirmed',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(rejected).toMatchObject({ status: 'failed', failure: { code: 'dirty-buffers' } });
+  });
+
+  it('deletes workspace history with scoped row deletion instead of removing the entire storage root', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+    const checkpoint = await engine.createCheckpoint({
+      name: 'Pre-delete', workspaceId: harness.identity.workspaceId,
+    });
+    expect(checkpoint.status).toBe('ready');
+    expect(checkpoint.checkpoint.id).toBeTruthy();
+
+    const deleted = await engine.deleteWorkspaceHistory(harness.identity.workspaceId);
+    expect(deleted).toMatchObject({ status: 'ready', result: { status: 'complete' } });
+
+    // The workspace's checkpoints should be gone from the catalog.
+    const statusAfter = await engine.storageStatus(harness.identity.workspaceId);
+    expect(statusAfter.storage.checkpointCount).toBe(0);
+
+    // The catalog must still be usable — creating a new checkpoint should
+    // succeed, proving the storage root and catalog were not rm-rfed.
+    const recreated = await engine.createCheckpoint({
+      name: 'Post-delete', workspaceId: harness.identity.workspaceId,
+    });
+    expect(recreated).toMatchObject({ status: 'ready', checkpoint: { label: 'Post-delete' } });
+  });
+
+  it('deletes only one workspace history when one catalog contains another workspace', async () => {
+    const { engine, harness } = await createHarness();
+    const notePath = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(notePath, 'before-1');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after-1');
+    await settleTurn(engine, harness);
+    const checkpoint = await engine.createCheckpoint({
+      name: 'WS1-checkpoint', workspaceId: harness.identity.workspaceId,
+    });
+    expect(checkpoint.status).toBe('ready');
+
+    const { objectPath, openRecoveryJournalCatalog } = await import('./journal-catalog.js');
+    const { createRecoveryLocationRegistry } = await import('./locations.js');
+    const locations = createRecoveryLocationRegistry({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      defaultRecoveryDir: undefined,
+      fsPromises: fs.promises,
+      pathModule: path,
+      storageOwnerId: 'piarium.builtin.recovery',
+    });
+    const selected = await locations.selection(harness.identity.workspaceId);
+    const storageRoot = await locations.resolve(harness.identity, selected.location);
+    const otherWorkspaceId = 'workspace-in-shared-catalog';
+    const otherCheckpointId = 'checkpoint-in-shared-catalog';
+    const otherObjectBytes = Buffer.from('preserve this other workspace object');
+    const otherObjectHash = `sha256-${createHash('sha256').update(otherObjectBytes).digest('hex')}`;
+    const otherObjectPath = objectPath(storageRoot, otherObjectHash);
+    await fs.promises.mkdir(path.dirname(otherObjectPath), { recursive: true });
+    await fs.promises.writeFile(otherObjectPath, otherObjectBytes);
+
+    const database = await openRecoveryJournalCatalog(storageRoot, { create: false, fsPromises: fs.promises });
+    let deletedWorkspaceObjectHashes;
+    try {
+      deletedWorkspaceObjectHashes = database.prepare(`
+        SELECT before_json, after_json FROM checkpoint_changes
+        WHERE checkpoint_id IN (SELECT id FROM checkpoints WHERE workspace_id = ?)
+      `).all(harness.identity.workspaceId).flatMap((row) => (
+        [row.before_json, row.after_json]
+          .filter(Boolean)
+          .map((raw) => JSON.parse(raw).objectHash)
+          .filter(Boolean)
+      ));
+      database.prepare(`
+        INSERT INTO checkpoints(id, workspace_id, sequence, source, state, created_at)
+        VALUES (?, ?, 1, 'named', 'ready', ?)
+      `).run(otherCheckpointId, otherWorkspaceId, new Date().toISOString());
+      const now = new Date().toISOString();
+      database.prepare(`
+        INSERT INTO checkpoint_changes(
+          checkpoint_id, path, tool_name, mutation_id, before_json, after_json, created_at, updated_at
+        ) VALUES (?, 'other.txt', 'write', 'other-mutation', ?, NULL, ?, ?)
+      `).run(otherCheckpointId, JSON.stringify({
+        byteLength: otherObjectBytes.length,
+        kind: 'regular-file',
+        objectHash: otherObjectHash,
+      }), now, now);
+    } finally {
+      database.close();
+    }
+
+    const deleted = await engine.deleteWorkspaceHistory(harness.identity.workspaceId);
+    expect(deleted).toMatchObject({ status: 'ready', result: { status: 'complete' } });
+
+    const preserved = await openRecoveryJournalCatalog(storageRoot, { create: false, fsPromises: fs.promises });
+    try {
+      expect(preserved.prepare('SELECT COUNT(*) AS count FROM checkpoints WHERE workspace_id = ?')
+        .get(harness.identity.workspaceId).count).toBe(0);
+      expect(preserved.prepare('SELECT id FROM checkpoints WHERE workspace_id = ?').all(otherWorkspaceId))
+        .toEqual([{ id: otherCheckpointId }]);
+      expect(preserved.prepare('SELECT path FROM checkpoint_changes WHERE checkpoint_id = ?').all(otherCheckpointId))
+        .toEqual([{ path: 'other.txt' }]);
+    } finally {
+      preserved.close();
+    }
+    expect(await fs.promises.readFile(otherObjectPath)).toEqual(otherObjectBytes);
+    for (const objectHash of deletedWorkspaceObjectHashes) {
+      await expect(fs.promises.lstat(objectPath(storageRoot, objectHash))).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+
+    const recreated = await engine.createCheckpoint({
+      name: 'WS1-post-delete', workspaceId: harness.identity.workspaceId,
+    });
+    expect(recreated).toMatchObject({ status: 'ready', checkpoint: { label: 'WS1-post-delete' } });
+  });
+
+  it('reconciles a crash in the apply-intent window by detecting the target was already written', async () => {
+    const { engine, harness } = await createHarness();
+    const notePath = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(notePath, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+
+    // Recovery semantics: target = 'before' (rollback destination), safety = 'after' (current).
+    // Use a spy fileStore that crashes after applyState writes the rollback target.
+    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    const crashApplyState = vi.fn(async (...args) => {
+      await realFileStore.applyState(...args);
+      throw new Error('SIMULATED_CRASH_AFTER_APPLY');
+    });
+    const crashFileStore = {
+      captureState: (...args) => realFileStore.captureState(...args),
+      applyState: crashApplyState,
+      verifyObject: (...args) => realFileStore.verifyObject(...args),
+    };
+    const crashEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      fileStore: crashFileStore,
+      sessionNavigation: {
+        commit: vi.fn(async () => ({ markerId: 'marker-1' })),
+        commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
+        prepare: vi.fn(async () => ({
+          editorText: 'draft',
+          expectedLeafId: 'leaf-current',
+          removedEntryIds: ['user-1', 'assistant-1'],
+          targetLeafId: 'leaf-before',
+        })),
+        prepareLeaf: vi.fn(async () => ({
+          expectedLeafId: 'leaf-before',
+          removedEntryIds: [],
+          targetLeafId: 'leaf-before',
+        })),
+      },
+    });
+    const crashed = await crashEngine.applyCombinedRecovery({
+      confirmedConflicts: [],
+      conflictPolicy: 'abort',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(crashed).toMatchObject({ status: 'failed', failure: { message: 'SIMULATED_CRASH_AFTER_APPLY' } });
+    expect(crashApplyState).toHaveBeenCalledOnce();
+
+    // applyState wrote the rollback target ('before') to disk before crashing.
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('before');
+
+    // The operation_files phase should still be 'apply-intent' because the
+    // crash happened before the phase update to target-observed.
+    const { openRecoveryJournalCatalog } = await import('./journal-catalog.js');
+    const { createRecoveryLocationRegistry } = await import('./locations.js');
+    const locations = createRecoveryLocationRegistry({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      defaultRecoveryDir: undefined,
+      fsPromises: fs.promises,
+      pathModule: path,
+      storageOwnerId: 'piarium.builtin.recovery',
+    });
+    const selected = await locations.selection(harness.identity.workspaceId);
+    const storageRoot = await locations.resolve(harness.identity, selected.location);
+    const db = await openRecoveryJournalCatalog(storageRoot, { create: false, fsPromises: fs.promises });
+    try {
+      const rows = db.prepare('SELECT phase FROM operation_files WHERE operation_id = ?').all(prepared.plan.id);
+      expect(rows).toHaveLength(1);
+      expect(rows.every((row) => row.phase === 'apply-intent')).toBe(true);
+    } finally {
+      db.close();
+    }
+
+    // Now create a fresh engine (simulating a restart) and call resumeCombinedOperations.
+    // It should reconcile: disk == target, phase == apply-intent → target-observed,
+    // then compensate writes safety ('after') back to disk.
+    const restartEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      sessionNavigation: {
+        commit: vi.fn(async () => ({ markerId: 'marker-1' })),
+        commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
+        prepare: vi.fn(async () => ({
+          editorText: 'draft',
+          expectedLeafId: 'leaf-current',
+          removedEntryIds: ['user-1', 'assistant-1'],
+          targetLeafId: 'leaf-before',
+        })),
+        prepareLeaf: vi.fn(async () => ({
+          expectedLeafId: 'leaf-before',
+          removedEntryIds: [],
+          targetLeafId: 'leaf-before',
+        })),
+      },
+    });
+    await restartEngine.resumeCombinedOperations();
+
+    // After resume, the file should be compensated back to safety ('after').
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
+  });
+
+  it('reconciles a crash in the compensate-intent window by detecting safety was already written', async () => {
+    const { engine, harness } = await createHarness();
+    const notePath = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(notePath, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+
+    // Recovery semantics: target = 'before', safety = 'after'.
+    // Phase 1: applyState writes target ('before') — succeeds.
+    // Phase 2: sessionNavigation.commit throws → triggers compensation.
+    // Phase 3: compensation applyState writes safety ('after') — then crashes.
+    // This leaves the operation in 'compensating-files' with phase 'compensate-intent'
+    // and the file at safety ('after') on disk.
+    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    let applyCallCount = 0;
+    const crashApplyState = vi.fn(async (...args) => {
+      applyCallCount += 1;
+      await realFileStore.applyState(...args);
+      if (applyCallCount === 2) {
+        // Second call is the compensation write — crash after it.
+        throw new Error('SIMULATED_CRASH_AFTER_COMPENSATE');
+      }
+    });
+    const crashFileStore = {
+      captureState: (...args) => realFileStore.captureState(...args),
+      applyState: crashApplyState,
+      verifyObject: (...args) => realFileStore.verifyObject(...args),
+    };
+    const crashEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      fileStore: crashFileStore,
+      sessionNavigation: {
+        commit: vi.fn(async () => { throw new Error('NAVIGATION_REJECTED'); }),
+        commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
+        prepare: vi.fn(async () => ({
+          editorText: 'draft',
+          expectedLeafId: 'leaf-current',
+          removedEntryIds: ['user-1', 'assistant-1'],
+          targetLeafId: 'leaf-before',
+        })),
+        prepareLeaf: vi.fn(async () => ({
+          expectedLeafId: 'leaf-before',
+          removedEntryIds: [],
+          targetLeafId: 'leaf-before',
+        })),
+      },
+    });
+    const crashed = await crashEngine.applyCombinedRecovery({
+      confirmedConflicts: [],
+      conflictPolicy: 'abort',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(crashed.status).toBe('failed');
+    expect(crashApplyState).toHaveBeenCalledTimes(2);
+
+    // After the crash: file is at safety ('after') because compensation wrote it.
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
+
+    // The operation_files phase should be 'compensate-intent' (crash before safety-observed).
+    const { openRecoveryJournalCatalog } = await import('./journal-catalog.js');
+    const { createRecoveryLocationRegistry } = await import('./locations.js');
+    const locations = createRecoveryLocationRegistry({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      defaultRecoveryDir: undefined,
+      fsPromises: fs.promises,
+      pathModule: path,
+      storageOwnerId: 'piarium.builtin.recovery',
+    });
+    const selected = await locations.selection(harness.identity.workspaceId);
+    const storageRoot = await locations.resolve(harness.identity, selected.location);
+    const db = await openRecoveryJournalCatalog(storageRoot, { create: false, fsPromises: fs.promises });
+    try {
+      const rows = db.prepare('SELECT phase FROM operation_files WHERE operation_id = ?').all(prepared.plan.id);
+      expect(rows.every((row) => row.phase === 'compensate-intent')).toBe(true);
+    } finally {
+      db.close();
+    }
+
+    // Restart: reconcile should detect disk == safety → phase = safety-observed.
+    // Then resume should converge the operation to 'compensated'.
+    const restartEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      sessionNavigation: {
+        commit: vi.fn(async () => ({ markerId: 'marker-1' })),
+        commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
+        prepare: vi.fn(async () => ({
+          editorText: 'draft',
+          expectedLeafId: 'leaf-current',
+          removedEntryIds: ['user-1', 'assistant-1'],
+          targetLeafId: 'leaf-before',
+        })),
+        prepareLeaf: vi.fn(async () => ({
+          expectedLeafId: 'leaf-before',
+          removedEntryIds: [],
+          targetLeafId: 'leaf-before',
+        })),
+      },
+    });
+    await restartEngine.resumeCombinedOperations();
+
+    // File should remain at safety ('after') — reconciliation detected it.
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
+
+    // The operation should converge to 'compensated', not 'aborted'.
+    expect(await restartEngine.getCombinedOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: { fileState: 'compensated', state: 'compensated' },
+    });
+  });
+
+  it('blocks retry when a file is in needs-attention state', async () => {
+    const { engine, harness } = await createHarness();
+    const notePath = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(notePath, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+
+    // Use a crash fileStore to capture safety and crash during applyState.
+    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    const crashApplyState = vi.fn(async (...args) => {
+      await realFileStore.applyState(...args);
+      throw new Error('SIMULATED_CRASH_AFTER_APPLY');
+    });
+    const crashFileStore = {
+      captureState: (...args) => realFileStore.captureState(...args),
+      applyState: crashApplyState,
+      verifyObject: (...args) => realFileStore.verifyObject(...args),
+    };
+    const crashEngine = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      fileStore: crashFileStore,
+      sessionNavigation: {
+        commit: vi.fn(async () => ({ markerId: 'marker-1' })),
+        commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
+        prepare: vi.fn(async () => ({
+          editorText: 'draft',
+          expectedLeafId: 'leaf-current',
+          removedEntryIds: ['user-1', 'assistant-1'],
+          targetLeafId: 'leaf-before',
+        })),
+        prepareLeaf: vi.fn(async () => ({
+          expectedLeafId: 'leaf-before',
+          removedEntryIds: [],
+          targetLeafId: 'leaf-before',
+        })),
+      },
+    });
+    const crashed = await crashEngine.applyCombinedRecovery({
+      confirmedConflicts: [],
+      conflictPolicy: 'abort',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(crashed.status).toBe('failed');
+
+    // Now manually set the file to needs-attention in the DB.
+    const { openRecoveryJournalCatalog, updateOperationFilePhase } = await import('./journal-catalog.js');
+    const { createRecoveryLocationRegistry } = await import('./locations.js');
+    const locations = createRecoveryLocationRegistry({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      defaultRecoveryDir: undefined,
+      fsPromises: fs.promises,
+      pathModule: path,
+      storageOwnerId: 'piarium.builtin.recovery',
+    });
+    const selected = await locations.selection(harness.identity.workspaceId);
+    const storageRoot = await locations.resolve(harness.identity, selected.location);
+    const db = await openRecoveryJournalCatalog(storageRoot, { create: false, fsPromises: fs.promises });
+    try {
+      updateOperationFilePhase(db, prepared.plan.id, 'note.txt', 'needs-attention');
+    } finally {
+      db.close();
+    }
+
+    // Reset the file to safety state ('after').
+    await fs.promises.writeFile(notePath, 'after');
+
+    // Attempt to retry with the original engine — should fail because
+    // needs-attention is a blocking terminal phase.
+    const result = await engine.applyCombinedRecovery({
+      confirmedConflicts: [],
+      conflictPolicy: 'abort',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(result).toMatchObject({ status: 'failed', failure: { code: 'needs-attention' } });
+    expect(await engine.getCombinedOperation(prepared.plan.id)).toMatchObject({
+      status: 'ready',
+      operation: {
+        failure: { code: 'needs-attention' },
+        fileState: 'needs-attention',
+        state: 'needs-attention',
+      },
+    });
+    // The file must not have been changed.
+    expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
   });
 });

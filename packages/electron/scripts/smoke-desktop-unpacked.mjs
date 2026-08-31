@@ -262,7 +262,7 @@ try {
       args: [],
       method: 'listStorageWorkspaces',
       serviceId: 'piarium.workspace-recovery',
-      version: 3,
+      version: 4,
     }),
     signal: AbortSignal.timeout(20_000),
   });

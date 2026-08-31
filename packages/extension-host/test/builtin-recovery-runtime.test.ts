@@ -20,7 +20,7 @@ test("the native recovery built-in declares a replaceable Host service without P
   const manifest = PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest;
   assert.equal(manifest.id, "piarium.builtin.recovery");
   assert.equal(manifest.version, PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION);
-  assert.equal(manifest.version, "0.2.0");
+  assert.equal(manifest.version, "0.3.0");
   assert.equal(manifest.entrypoints?.host?.mode, "brokered");
   assert.deepEqual(manifest.entrypoints?.host?.activation, ["service-request"]);
   assert.deepEqual(manifest.capabilities?.host, ["workspace.recovery-primitives"]);

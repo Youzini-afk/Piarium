@@ -170,10 +170,18 @@ full turn-start scan is not an acceptable fallback.
 
 ## Replaceability
 
-The service contract is version 3. A replacement provider implements the same checkpoint, mutation,
+The service contract is version 4. A replacement provider implements the same checkpoint, mutation,
 combined recovery, operation, and storage-management methods. Fixed Host code owns workspace identity,
 path containment, the negotiated Pi tool boundary, and Pi conversation navigation. Provider code owns
 the catalog, content objects, change-set folding, conflict policy, and UI contributions.
+
+Version 4 adds: per-file `operation_files` phase tracking (pending → apply-intent → target-observed →
+compensate-intent → safety-observed, with needs-attention as a blocking terminal), crash-window
+reconciliation in `resumeUnfinished` that compares on-disk state against target/safety before deciding
+to abort or compensate, confirmed-conflict-only `overwrite-confirmed` policy, scoped workspace-history
+deletion via row-level SQL instead of removing the storage root, and a read-only
+`inspectRecoveryJournalCatalog` path for status and inspection that never runs migrations or schema
+writes.
 
 Provider selection remains revisioned and scope-aware. Disabling a provider removes file recovery but
 never removes Pi-native conversation rollback.

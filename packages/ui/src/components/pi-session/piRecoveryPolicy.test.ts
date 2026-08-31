@@ -27,7 +27,7 @@ describe('Pi combined recovery policy', () => {
   it('opens only for explicit ask, real conflicts, or incomplete external coverage', () => {
     expect(shouldOpenRecoveryDialog('ask', plan())).toBe(true);
     expect(shouldOpenRecoveryDialog('both', plan({
-      conflicts: [{ kind: 'content-changed', message: 'changed', path: 'note.txt' }],
+      conflicts: [{ fingerprint: 'sha256-conflict-1', kind: 'content-changed', message: 'changed', path: 'note.txt' }],
     }))).toBe(true);
     expect(shouldOpenRecoveryDialog('both', plan({ coverage: 'incomplete' }))).toBe(true);
   });

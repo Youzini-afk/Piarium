@@ -8,6 +8,7 @@ import {
   parseRecoveryStorageLocation,
   parseRecoveryStorageStatus,
   parseRecoveryStorageWorkspaceSummary,
+  parseWorkspaceCombinedRecoveryApplyInput,
   parseWorkspaceCombinedRecoveryPlan,
   parseWorkspaceRecoveryCheckpointSummary,
   parseWorkspaceRecoveryEntryBindingResult,
@@ -31,7 +32,7 @@ const checkpoint = () => ({
 
 test("owns the affected-file journal service version", () => {
   assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID, "piarium.workspace-recovery");
-  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 3);
+  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 4);
   assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
@@ -50,6 +51,7 @@ test("parses every storage mode and journal-oriented storage counts", () => {
   assert.equal(parseRecoveryStorageStatus({
     authorityId: "authority-1",
     byteLength: 0,
+    catalog: { currentSchemaVersion: 4, retiredCatalogCount: 0, state: "ready" },
     checkpointCount: 0,
     encryption: { available: false, enabled: false },
     location: { mode: "workspace-local" },
@@ -62,6 +64,7 @@ test("parses every storage mode and journal-oriented storage counts", () => {
   assert.equal(parseRecoveryStorageWorkspaceSummary({
     byteLength: 0,
     canonicalRoot: "/workspace",
+    catalog: { currentSchemaVersion: 4, retiredCatalogCount: 0, state: "ready" },
     checkpointCount: 0,
     lastActivityAt: null,
     location: { mode: "application-data" },
@@ -123,7 +126,7 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
   const plan = parseWorkspaceCombinedRecoveryPlan({
     affectedPaths: ["src/a.ts"],
     changedBytes: 12,
-    conflicts: [{ kind: "content-changed", message: "changed", path: "src/a.ts" }],
+    conflicts: [{ fingerprint: `sha256-${"b".repeat(64)}`, kind: "content-changed", message: "changed", path: "src/a.ts" }],
     coverage: "ready",
     createdAt: "2026-08-30T00:00:00.000Z",
     entryId: "user-1",
@@ -137,9 +140,27 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
   });
   assert.deepEqual(plan.affectedPaths, ["src/a.ts"]);
   assert.equal(plan.conflicts[0]?.kind, "content-changed");
+  assert.deepEqual(parseWorkspaceCombinedRecoveryApplyInput({
+    confirmedConflicts: [{ fingerprint: plan.conflicts[0]?.fingerprint, path: "src/a.ts" }],
+    conflictPolicy: "overwrite-confirmed",
+    expectedRevision: plan.revision,
+    operationId: plan.id,
+  }).confirmedConflicts, [{ fingerprint: plan.conflicts[0]?.fingerprint, path: "src/a.ts" }]);
+  assert.throws(() => parseWorkspaceCombinedRecoveryApplyInput({
+    confirmedConflicts: [],
+    conflictPolicy: "overwrite-confirmed",
+    expectedRevision: plan.revision,
+    operationId: plan.id,
+  }), WorkspaceRecoveryContractError);
+  assert.throws(() => parseWorkspaceCombinedRecoveryApplyInput({
+    confirmedConflicts: [],
+    conflictPolicy: "overwrite",
+    expectedRevision: plan.revision,
+    operationId: plan.id,
+  }), WorkspaceRecoveryContractError);
 });
 
-test("browser-safe API invokes only the v3 checkpoint method", async () => {
+test("browser-safe API invokes only the v4 checkpoint method", async () => {
   const requests: unknown[] = [];
   const api = createWorkspaceRecoveryAPI(async (request) => {
     requests.push(request);
@@ -151,6 +172,6 @@ test("browser-safe API invokes only the v3 checkpoint method", async () => {
     args: [{ workspaceId: "workspace-1" }],
     method: "listCheckpoints",
     serviceId: "piarium.workspace-recovery",
-    version: 3,
+    version: 4,
   }]);
 });

@@ -66,7 +66,11 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
     try {
       const result = requireWorkspaceRecoveryResult(
         await getWorkspaceRecoveryAPI().applyCombinedRecovery({
-          conflictPolicy: plan.conflicts.length > 0 ? 'overwrite' : 'abort',
+          confirmedConflicts: plan.conflicts.map((conflict) => ({
+            fingerprint: conflict.fingerprint,
+            path: conflict.path,
+          })),
+          conflictPolicy: plan.conflicts.length > 0 ? 'overwrite-confirmed' : 'abort',
           expectedRevision: plan.revision,
           operationId: plan.id,
         }),

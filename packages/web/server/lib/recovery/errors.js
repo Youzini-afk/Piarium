@@ -6,6 +6,7 @@ export class RecoveryPrimitiveError extends Error {
     this.retryable = options.retryable === true;
     this.details = options.details;
     this.operationId = options.operationId;
+    this.origin = options.origin;
   }
 }
 
@@ -17,6 +18,7 @@ export const recoveryFailure = (error, fallbackCode = 'internal') => {
       retryable: error.retryable,
       ...(error.details ? { details: structuredClone(error.details) } : {}),
       ...(error.operationId ? { operationId: error.operationId } : {}),
+      ...(error.origin ? { origin: error.origin } : {}),
     };
   }
   if (error?.code === 'untrusted') {
