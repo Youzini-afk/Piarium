@@ -600,3 +600,8 @@ paths and migration-only comparison code were removed. No editor engine receives
 filesystem, process, or extension-lifecycle authority. The final verification evidence and any
 environment-specific omissions are recorded in that design document rather than inferred from this
 ledger.
+
+The ongoing UI dependency-boundary and extension-contract governance work — including loader-level
+incompatibility blocking, schema/runtime alignment, context-expression lifecycle, and
+application-client transport migration — is tracked in
+[ui-boundary-and-extension-contract-execution-plan.md](ui-boundary-and-extension-contract-execution-plan.md).
