@@ -19,6 +19,8 @@ import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDirtyResourceIds } from '@/lib/documents/hooks';
 import { peekEditorSessionLink, revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { PIARIUM_WORKBENCH_SLOTS } from '@piarium/extension-contract';
+import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 type WorkbenchPanelAreaProps = {
   workspaceId: string;
@@ -214,6 +216,11 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
             <span className="hidden">{documentEpoch}</span>
           </div>
         ) : null}
+        <WorkbenchContributionSlot
+          kind="view"
+          slot={PIARIUM_WORKBENCH_SLOTS.panelViews}
+          props={{ workspaceId, activePanelId: layout.activePanelId }}
+        />
       </div>
     </section>
   );

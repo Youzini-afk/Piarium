@@ -20,10 +20,13 @@ import { useI18n } from '@/lib/i18n';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import type { EditorGroupLeaf } from '@/lib/workbench/editors/types';
 import { ScrollingFileName } from '@/components/workbench/FilesExplorer';
+import { PIARIUM_WORKBENCH_SLOTS } from '@piarium/extension-contract';
+import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 type EditorGroupTabsProps = {
   group: EditorGroupLeaf;
   workspaceRoot: string;
+  workspaceId?: string;
   dirtyResourceIds: ReadonlySet<string>;
   isActiveGroup: boolean;
   alwaysShowActions: boolean;
@@ -38,6 +41,7 @@ type EditorGroupTabsProps = {
 export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
   group,
   workspaceRoot,
+  workspaceId,
   dirtyResourceIds,
   isActiveGroup,
   alwaysShowActions,
@@ -198,6 +202,21 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
           );
         })}
       </div>
+      {isActiveGroup && workspaceId ? (
+        <div className="flex shrink-0 items-center gap-1 px-1">
+          <WorkbenchContributionSlot
+            kind="view"
+            slot={PIARIUM_WORKBENCH_SLOTS.editorActions}
+            props={{
+              workspaceId,
+              groupId: group.groupId,
+              ...(group.activeTabId
+                ? { resourceId: group.tabs.find((tab) => tab.tabId === group.activeTabId)?.resourceId }
+                : {}),
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 };

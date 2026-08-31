@@ -70,6 +70,7 @@ import {
   workbenchInspectorOwnsTestCapability,
   workbenchInspectorOwnsRun,
 } from '@/lib/extensions/workbench-inspector';
+import { projectWorkbenchSeams } from '@/lib/extensions/workbench-seams';
 import {
   getMonacoExtensionInspectorSnapshot,
   subscribeMonacoExtensionInspector,
@@ -198,18 +199,15 @@ const WorkbenchProfileSection: React.FC = () => {
   const selectedExtensions = new Set(profile.extensionIds
     ?? installedExtensions.filter((entry) => entry.desired.enabled).map((entry) => entry.manifest.id));
   const missingExtensionIds = [...selectedExtensions].filter((extensionId) => !installedExtensionIds.has(extensionId)).sort();
-  const candidatesByTarget = new Map<string, typeof surface.contributions>();
-  for (const contribution of surface.contributions) {
-    const target = contribution.descriptor.replacement?.target;
-    if (!target) continue;
-    const current = candidatesByTarget.get(target) ?? [];
-    candidatesByTarget.set(target, [...current, contribution]);
-  }
-  const targets = [...new Set([
-    ...Object.keys(WORKBENCH_TARGET_LABELS),
-    ...Object.keys(resolved.replacementSelections),
-    ...candidatesByTarget.keys(),
-  ])];
+  const seamProjections = projectWorkbenchSeams({
+    layout: resolved,
+    shellContributionId: profileResolution.shellContributionId,
+    shellExtensionId: profileResolution.shellExtensionId,
+    shellStatus: profileResolution.status,
+    catalog: installedExtensions,
+    surface: piariumSurfaceRuntime.surface,
+    visibleContributions: surface.contributions,
+  });
   const run = (operation: Promise<void>) => {
     void operation.catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
@@ -360,32 +358,92 @@ const WorkbenchProfileSection: React.FC = () => {
             ))}
           </div>
         </div>
-        {targets.map((target) => {
-          const candidates = candidatesByTarget.get(target) ?? [];
-          const selected = resolved.replacementSelections[target] ?? '__builtin__';
-          const selectedMissing = selected !== '__builtin__'
-            && !candidates.some((candidate) => candidate.descriptor.id === selected);
+        {seamProjections.map((projection) => {
+          const target = projection.target;
+          const label = WORKBENCH_TARGET_LABELS[target] ? t(WORKBENCH_TARGET_LABELS[target]) : target;
+          const scopeOverride = workspaceId
+            ? { scope: 'workspace' as const, scopeId: workspaceId }
+            : { scope: 'user' as const, scopeId: 'default' };
+          if (projection.status === 'platform') {
+            return (
+              <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
+                <div className="min-w-0">
+                  <span className="typography-ui-label text-foreground">{label}</span>
+                </div>
+                <span className="typography-meta text-muted-foreground">
+                  {t('settings.piarium.extensions.workbench.platformManaged')}
+                </span>
+              </div>
+            );
+          }
+          if (projection.status === 'dormant') {
+            return (
+              <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
+                <div className="min-w-0">
+                  <span className="typography-ui-label text-foreground">{label}</span>
+                  <span className="ml-2 typography-micro text-muted-foreground">
+                    {t('settings.piarium.extensions.workbench.dormant')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 truncate typography-meta text-muted-foreground">{projection.selected}</span>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    disabled={profileBusy}
+                    onClick={() => run(setWorkbenchReplacementSelection(target, null, scopeOverride))}
+                  >
+                    {t('settings.piarium.extensions.workbench.clearOverride')}
+                  </Button>
+                </div>
+              </div>
+            );
+          }
+          if (projection.status === 'missing-selection') {
+            return (
+              <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
+                <div className="min-w-0">
+                  <span className="typography-ui-label text-foreground">{label}</span>
+                  <span className="ml-2 typography-micro text-warning">
+                    {t('settings.piarium.extensions.workbench.missingSelection')}
+                  </span>
+                </div>
+                <Select
+                  value={projection.selected}
+                  onValueChange={(value) => run(setWorkbenchReplacementSelection(
+                    target,
+                    value === '__builtin__' ? null : value,
+                    scopeOverride,
+                  ))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                    <SelectItem value={projection.selected}>{projection.selected}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          }
+          // supported
+          const candidates = projection.candidates;
           return (
             <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
               <div className="min-w-0">
-                <span className="typography-ui-label text-foreground">
-                  {WORKBENCH_TARGET_LABELS[target] ? t(WORKBENCH_TARGET_LABELS[target]) : target}
-                </span>
+                <span className="typography-ui-label text-foreground">{label}</span>
               </div>
               <Select
-                value={selected}
+                value={projection.selected}
                 onValueChange={(value) => run(setWorkbenchReplacementSelection(
                   target,
                   value === '__builtin__' ? null : value,
-                  workspaceId
-                    ? { scope: 'workspace', scopeId: workspaceId }
-                    : { scope: 'user', scopeId: 'default' },
+                  scopeOverride,
                 ))}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
-                  {selectedMissing ? <SelectItem value={selected}>{selected}</SelectItem> : null}
                   {candidates.map((candidate) => (
                     <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
                       {candidate.descriptor.title ?? candidate.descriptor.id}

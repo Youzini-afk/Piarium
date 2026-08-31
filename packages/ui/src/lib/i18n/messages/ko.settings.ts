@@ -1,4 +1,4 @@
-export const settingsDict = {
+﻿export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go 대시보드를 연결하여 롤링, 주간 및 월간 할당량을 표시합니다.',
   'settings.providers.page.openCodeGo.workspaceId': '워크스페이스 ID',
@@ -3275,6 +3275,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': '패널',
   'settings.piarium.extensions.workbench.target.status': '상태 표시줄',
   'settings.piarium.extensions.workbench.target.transition': '전환 장면',
+  'settings.piarium.extensions.workbench.platformManaged': '플랫폼 관리',
+  'settings.piarium.extensions.workbench.dormant': '현재 셸이 이 대상을 사용하지 않습니다',
+  'settings.piarium.extensions.workbench.missingSelection': '선택된 기여를 사용할 수 없습니다',
+  'settings.piarium.extensions.workbench.clearOverride': '지우기',
+
   'settings.piarium.extensions.candidate.title': '업데이트 후보 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '기능 검토 완료',
   'settings.piarium.extensions.candidate.deny': '거부',

@@ -9,6 +9,7 @@ type EditorGroupsLayoutProps = {
   tree: EditorGroupNode;
   activeGroupId: string;
   workspaceRoot: string;
+  workspaceId?: string;
   dirtyResourceIds: ReadonlySet<string>;
   alwaysShowActions: boolean;
   isMobile: boolean;
@@ -61,6 +62,7 @@ const EditorGroupPane: React.FC<{
   group: EditorGroupLeaf;
   activeGroupId: string;
   workspaceRoot: string;
+  workspaceId?: string;
   dirtyResourceIds: ReadonlySet<string>;
   alwaysShowActions: boolean;
   isMobile: boolean;
@@ -74,6 +76,7 @@ const EditorGroupPane: React.FC<{
   group,
   activeGroupId,
   workspaceRoot,
+  workspaceId,
   dirtyResourceIds,
   alwaysShowActions,
   isMobile,
@@ -96,6 +99,7 @@ const EditorGroupPane: React.FC<{
         <EditorGroupTabs
           group={group}
           workspaceRoot={workspaceRoot}
+          workspaceId={workspaceId}
           dirtyResourceIds={dirtyResourceIds}
           isActiveGroup={group.groupId === activeGroupId}
           alwaysShowActions={alwaysShowActions}
@@ -127,6 +131,7 @@ const EditorNode: React.FC<EditorGroupsLayoutProps & { node: EditorGroupNode }> 
         group={node}
         activeGroupId={rest.activeGroupId}
         workspaceRoot={rest.workspaceRoot}
+        workspaceId={rest.workspaceId}
         dirtyResourceIds={rest.dirtyResourceIds}
         alwaysShowActions={rest.alwaysShowActions}
         isMobile={rest.isMobile}

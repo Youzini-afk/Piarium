@@ -1,4 +1,4 @@
-export const settingsDict = {
+﻿export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',
   'settings.providers.page.openCodeGo.description': '連接 OpenCode Go 控制面板以顯示滾動、每週和每月配額。',
   'settings.providers.page.openCodeGo.workspaceId': '工作區 ID',
@@ -3275,6 +3275,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': '面板',
   'settings.piarium.extensions.workbench.target.status': '狀態列',
   'settings.piarium.extensions.workbench.target.transition': '轉場場景',
+  'settings.piarium.extensions.workbench.platformManaged': '平台管理',
+  'settings.piarium.extensions.workbench.dormant': '目前 Shell 不使用此目標',
+  'settings.piarium.extensions.workbench.missingSelection': '所選貢獻不可用',
+  'settings.piarium.extensions.workbench.clearOverride': '清除',
+
   'settings.piarium.extensions.candidate.title': '候選更新 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '能力已審查',
   'settings.piarium.extensions.candidate.deny': '拒絕',

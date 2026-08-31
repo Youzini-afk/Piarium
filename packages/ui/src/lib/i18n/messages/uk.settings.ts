@@ -1,4 +1,4 @@
-export const settingsDict = {
+﻿export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Відстеження використання OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Підключіть панель OpenCode Go, щоб бачити ковзну, тижневу та місячну квоту.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID робочого простору',
@@ -3275,6 +3275,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': 'Панель',
   'settings.piarium.extensions.workbench.target.status': 'Рядок стану',
   'settings.piarium.extensions.workbench.target.transition': 'Сцена переходу',
+  'settings.piarium.extensions.workbench.platformManaged': 'Керується платформою',
+  'settings.piarium.extensions.workbench.dormant': 'Поточна оболонка не використовує цю ціль',
+  'settings.piarium.extensions.workbench.missingSelection': 'Вибраний внесок недоступний',
+  'settings.piarium.extensions.workbench.clearOverride': 'Очистити',
+
   'settings.piarium.extensions.candidate.title': 'Кандидат оновлення v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Можливості перевірено',
   'settings.piarium.extensions.candidate.deny': 'Відхилити',

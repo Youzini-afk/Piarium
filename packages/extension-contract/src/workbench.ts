@@ -53,6 +53,50 @@ export const PIARIUM_WORKBENCH_SLOTS = {
   statusItems: "workbench.status.items",
 } as const;
 
+// ---------------------------------------------------------------------------
+// Public slot props types
+//
+// These are the JSON-safe props passed to contributions mounted in each
+// standard slot. They contain only serializable identifiers — no React
+// callbacks, stores, or Host paths. Extensions use command/document services
+// to perform actions.
+// ---------------------------------------------------------------------------
+
+/** Props for `workbench.editor.actions` — rendered in the active editor group's action strip. */
+export interface PiariumWorkbenchEditorActionsSlotProps {
+  workspaceId: string;
+  groupId: string;
+  resourceId?: string;
+  viewId?: string;
+}
+
+/** Props for `workbench.panel.views` — rendered in the panel content area. */
+export interface PiariumWorkbenchPanelViewsSlotProps {
+  workspaceId: string;
+  activePanelId: string;
+}
+
+/** Props for `workbench.activity.items` — rendered in the activity bar. */
+export interface PiariumWorkbenchActivityItemsSlotProps {
+  workspaceId: string;
+}
+
+/** Props for `workbench.primary-sidebar.views` — rendered in the primary sidebar. */
+export interface PiariumWorkbenchPrimarySidebarViewsSlotProps {
+  workspaceId: string;
+  activeActivityId: string;
+}
+
+/** Props for `workbench.secondary-sidebar.views` — rendered in the secondary sidebar. */
+export interface PiariumWorkbenchSecondarySidebarViewsSlotProps {
+  workspaceId: string;
+}
+
+/** Props for `workbench.status.items` — rendered in the status bar. */
+export interface PiariumWorkbenchStatusItemsSlotProps {
+  workspaceId: string;
+}
+
 export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
   editorHasSelection: "editorHasSelection",
   editorIsDirty: "editorIsDirty",

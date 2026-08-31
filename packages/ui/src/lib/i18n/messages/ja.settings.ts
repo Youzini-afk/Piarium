@@ -1,4 +1,4 @@
-import { settingsDict as englishSettingsDict } from './en.settings';
+﻿import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
@@ -2895,6 +2895,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': 'パネル',
   'settings.piarium.extensions.workbench.target.status': 'ステータスバー',
   'settings.piarium.extensions.workbench.target.transition': 'トランジションシーン',
+  'settings.piarium.extensions.workbench.platformManaged': 'プラットフォーム管理',
+  'settings.piarium.extensions.workbench.dormant': '現在のシェルはこのターゲットを使用しません',
+  'settings.piarium.extensions.workbench.missingSelection': '選択されたコントリビューションは利用できません',
+  'settings.piarium.extensions.workbench.clearOverride': 'クリア',
+
   'settings.piarium.extensions.candidate.title': '更新候補 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '機能を確認済み',
   'settings.piarium.extensions.candidate.deny': '拒否',

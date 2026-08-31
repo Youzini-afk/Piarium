@@ -58,7 +58,7 @@ import { useUpdateStore } from '@/stores/useUpdateStore';
 
 import { PiAppEffects } from './PiAppEffects';
 import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
-import { WorkbenchProfileBridge } from '@/lib/extensions/workbench-registry';
+import { WorkbenchProfileBridge, WorkbenchReplacement, WORKBENCH_REPLACEMENT_TARGETS } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
 import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/lib/extensions/builtin-agent-workspace';
 import { MobileChangesSurface } from './MobileChangesSurface';
@@ -2406,15 +2406,20 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
             >
               <ErrorBoundary>
-                <MobileSessionsSheet
-                  open
-                  variant="sidebar"
-                  // The surface asks to close after picking a session/project or
-                  // creating a worktree; the persistent landscape sidebar stays
-                  // put, portrait gives the space back to the chat.
-                  onOpenChange={(value) => {
-                    if (!value && isPortrait) setIpadSidebarOpen(false);
-                  }}
+                <WorkbenchReplacement
+                  target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+                  fallback={(
+                    <MobileSessionsSheet
+                      open
+                      variant="sidebar"
+                      // The surface asks to close after picking a session/project or
+                      // creating a worktree; the persistent landscape sidebar stays
+                      // put, portrait gives the space back to the chat.
+                      onOpenChange={(value) => {
+                        if (!value && isPortrait) setIpadSidebarOpen(false);
+                      }}
+                    />
+                  )}
                 />
               </ErrorBoundary>
             </div>
@@ -2506,10 +2511,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         />
 
         {sessionsSheetOpen ? (
-          <MobileSessionsSheet
-            open={sessionsSheetOpen}
-            onOpenChange={setSessionsSheetOpen}
-            variant={surfaceVariant === 'side' ? 'sidebar' : 'sheet'}
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+            fallback={(
+              <MobileSessionsSheet
+                open={sessionsSheetOpen}
+                onOpenChange={setSessionsSheetOpen}
+                variant={surfaceVariant === 'side' ? 'sidebar' : 'sheet'}
+              />
+            )}
           />
         ) : null}
 
@@ -2649,12 +2659,17 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             sideWidth={mobileLayout.isTabletLandscape ? sidePanelWidth : undefined}
           >
             <ErrorBoundary>
-              <SettingsView
-                forceMobile={!mobileLayout.isTabletLandscape}
-                isWindowed
-                initialMobileStage={settingsInitialMobileStage}
-                visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
-                onClose={() => setSettingsOpen(false)}
+              <WorkbenchReplacement
+                target={WORKBENCH_REPLACEMENT_TARGETS.settings}
+                fallback={(
+                  <SettingsView
+                    forceMobile={!mobileLayout.isTabletLandscape}
+                    isWindowed
+                    initialMobileStage={settingsInitialMobileStage}
+                    visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
+                    onClose={() => setSettingsOpen(false)}
+                  />
+                )}
               />
             </ErrorBoundary>
           </MobileSurfaceShell>

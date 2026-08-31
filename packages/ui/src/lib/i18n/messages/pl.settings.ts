@@ -1,4 +1,4 @@
-export const settingsDict = {
+﻿export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID przestrzeni roboczej',
@@ -3276,6 +3276,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': 'Panel',
   'settings.piarium.extensions.workbench.target.status': 'Pasek stanu',
   'settings.piarium.extensions.workbench.target.transition': 'Scena przejścia',
+  'settings.piarium.extensions.workbench.platformManaged': 'Zarządzane przez platformę',
+  'settings.piarium.extensions.workbench.dormant': 'Bieżąca powłoka nie używa tego celu',
+  'settings.piarium.extensions.workbench.missingSelection': 'Wybrany wkład jest niedostępny',
+  'settings.piarium.extensions.workbench.clearOverride': 'Wyczyść',
+
   'settings.piarium.extensions.candidate.title': 'Kandydat aktualizacji v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Uprawnienia sprawdzone',
   'settings.piarium.extensions.candidate.deny': 'Odmów',

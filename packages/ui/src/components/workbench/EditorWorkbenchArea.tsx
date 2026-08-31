@@ -145,6 +145,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
           tree={editorWorkbench.tree}
           activeGroupId={editorWorkbench.activeGroupId}
           workspaceRoot={root}
+          workspaceId={workspaceId}
           dirtyResourceIds={dirtyResourceIds}
           alwaysShowActions={isMobile || isTablet}
           isMobile={isMobile}

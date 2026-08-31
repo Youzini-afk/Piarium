@@ -1,4 +1,4 @@
-export const settingsDict = {
+﻿export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Monitoramento de uso do OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Conecte o painel do OpenCode Go para exibir as cotas móvel, semanal e mensal.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID do workspace',
@@ -3275,6 +3275,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': 'Painel',
   'settings.piarium.extensions.workbench.target.status': 'Barra de status',
   'settings.piarium.extensions.workbench.target.transition': 'Cena de transição',
+  'settings.piarium.extensions.workbench.platformManaged': 'Gerenciado pela plataforma',
+  'settings.piarium.extensions.workbench.dormant': 'O shell atual não usa este alvo',
+  'settings.piarium.extensions.workbench.missingSelection': 'A contribuição selecionada não está disponível',
+  'settings.piarium.extensions.workbench.clearOverride': 'Limpar',
+
   'settings.piarium.extensions.candidate.title': 'Atualização candidata v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Capacidades revisadas',
   'settings.piarium.extensions.candidate.deny': 'Negar',

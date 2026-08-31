@@ -73,6 +73,7 @@ import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
 import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
+import { WorkbenchPanelArea } from '@/components/workbench/WorkbenchPanelArea';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { resolveGitTopLevel } from '@/lib/gitApi';
 import {
@@ -719,50 +720,57 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         <div ref={mainAreaRef} className="flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
           <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2" aria-label={t('workbench.ide.title')}>
-            {ACTIVITIES.map((item) => (
-              <Tooltip key={item.id}>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t(item.ariaKey)}
-                    aria-pressed={layout.activity === item.id && layout.primaryVisible}
-                    className={cn(layout.activity === item.id && layout.primaryVisible && 'bg-[var(--interactive-selection)]')}
-                    onClick={() => {
-                      if (layout.activity === item.id) {
-                        patchLayout({ primaryVisible: !layout.primaryVisible });
-                        return;
-                      }
-                      patchLayout({ activity: item.id, primaryVisible: true });
-                    }}
-                  >
-                    <Icon name={item.icon} className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
-              </Tooltip>
-            ))}
-            <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.activityItems} />
-            <div className="mt-auto flex flex-col gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
-                    aria-pressed={layout.secondaryVisible}
-                    onClick={() => patchLayout({ secondaryVisible: !layout.secondaryVisible })}
-                  >
-                    <Icon name="robot-2" className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            <WorkbenchReplacement
+              target={WORKBENCH_REPLACEMENT_TARGETS.activity}
+              fallback={(
+                <>
+                  {ACTIVITIES.map((item) => (
+                    <Tooltip key={item.id}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t(item.ariaKey)}
+                          aria-pressed={layout.activity === item.id && layout.primaryVisible}
+                          className={cn(layout.activity === item.id && layout.primaryVisible && 'bg-[var(--interactive-selection)]')}
+                          onClick={() => {
+                            if (layout.activity === item.id) {
+                              patchLayout({ primaryVisible: !layout.primaryVisible });
+                              return;
+                            }
+                            patchLayout({ activity: item.id, primaryVisible: true });
+                          }}
+                        >
+                          <Icon name={item.icon} className="size-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
+                    </Tooltip>
+                  ))}
+                  <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.activityItems} />
+                  <div className="mt-auto flex flex-col gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                          aria-pressed={layout.secondaryVisible}
+                          onClick={() => patchLayout({ secondaryVisible: !layout.secondaryVisible })}
+                        >
+                          <Icon name="robot-2" className="size-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        {layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </>
+              )}
+            />
           </nav>
           ) : null}
 
@@ -772,36 +780,43 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 className="flex min-h-0 min-w-0 flex-col border-r border-border bg-sidebar"
                 style={{ flex: `${layout.mainWeights[0]} 1 0%` }}
               >
-                <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews} />
-                {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
-                {layout.activity === 'search' ? (
-                  <IdeSearchPanel
-                    key={searchDirectoryKey}
-                    directory={directory}
-                    focusRequestId={searchFocusRequestId}
-                    mode={searchDraft.mode}
-                    query={searchDraft.query}
-                    onModeChange={(mode) => updateSearchDraft({ mode })}
-                    onQueryChange={(query) => updateSearchDraft({ query })}
-                  />
-                ) : null}
-                {layout.activity === 'git' ? (
-                  <React.Suspense fallback={null}>
-                    <GitView
-                      isActive
-                      directoryOverride={gitDirectory}
-                      showDirectorySelector
-                      sessionDirectory={directory}
-                      isFollowingSessionDirectory={!containedSelectedGitDirectory}
-                      followDirectoryLabel={t('workspace.git.workspace')}
-                      onDirectoryChange={handleGitDirectoryChange}
-                      onFollowSessionDirectory={handleFollowWorkspaceGitDirectory}
-                      onViewDiff={openGitDiffInEditor}
-                    />
-                  </React.Suspense>
-                ) : null}
-                {layout.activity === 'run' ? <IdeRunPanel /> : null}
-                {layout.activity === 'extensions' ? <IdeExtensionsPanel /> : null}
+                <WorkbenchReplacement
+                  target={WORKBENCH_REPLACEMENT_TARGETS.primarySidebar}
+                  fallback={(
+                    <>
+                      <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews} />
+                      {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
+                      {layout.activity === 'search' ? (
+                        <IdeSearchPanel
+                          key={searchDirectoryKey}
+                          directory={directory}
+                          focusRequestId={searchFocusRequestId}
+                          mode={searchDraft.mode}
+                          query={searchDraft.query}
+                          onModeChange={(mode) => updateSearchDraft({ mode })}
+                          onQueryChange={(query) => updateSearchDraft({ query })}
+                        />
+                      ) : null}
+                      {layout.activity === 'git' ? (
+                        <React.Suspense fallback={null}>
+                          <GitView
+                            isActive
+                            directoryOverride={gitDirectory}
+                            showDirectorySelector
+                            sessionDirectory={directory}
+                            isFollowingSessionDirectory={!containedSelectedGitDirectory}
+                            followDirectoryLabel={t('workspace.git.workspace')}
+                            onDirectoryChange={handleGitDirectoryChange}
+                            onFollowSessionDirectory={handleFollowWorkspaceGitDirectory}
+                            onViewDiff={openGitDiffInEditor}
+                          />
+                        </React.Suspense>
+                      ) : null}
+                      {layout.activity === 'run' ? <IdeRunPanel /> : null}
+                      {layout.activity === 'extensions' ? <IdeExtensionsPanel /> : null}
+                    </>
+                  )}
+                />
               </aside>
               <div
                 role="separator"
@@ -817,33 +832,46 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             style={{ flex: `${layout.mainWeights[1]} 1 0%` }}
           >
             <main className="relative min-h-0 flex-1 overflow-hidden">
-              {workspace.status === 'ready' ? (
-                <EditorWorkbenchArea />
-              ) : (
-                <div className="flex h-full items-center justify-center px-4 text-center typography-ui text-muted-foreground">
-                  {workspace.status === 'loading'
-                    ? t('common.loading')
-                    : workspace.status === 'error'
-                      ? t('common.unavailable')
-                      : t('workbench.ide.status.noWorkspace')}
-                </div>
-              )}
-              {isMultiRunLauncherOpen ? (
-                <div className="absolute inset-0 z-10 bg-background">
-                  <ErrorBoundary>
-                    <MultiRunLauncher
-                      isWindowed
-                      initialPrompt={multiRunLauncherPrefillPrompt}
-                      onCreated={() => setMultiRunLauncherOpen(false)}
-                      onCancel={() => setMultiRunLauncherOpen(false)}
-                    />
-                  </ErrorBoundary>
-                </div>
-              ) : null}
-              <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
-              <ErrorBoundary><ArchiveView /></ErrorBoundary>
-              <ErrorBoundary><WorktreesView /></ErrorBoundary>
+              <WorkbenchReplacement
+                target={WORKBENCH_REPLACEMENT_TARGETS.editor}
+                fallback={(
+                  <>
+                    {workspace.status === 'ready' ? (
+                      <EditorWorkbenchArea showPanel={false} />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-4 text-center typography-ui text-muted-foreground">
+                        {workspace.status === 'loading'
+                          ? t('common.loading')
+                          : workspace.status === 'error'
+                            ? t('common.unavailable')
+                            : t('workbench.ide.status.noWorkspace')}
+                      </div>
+                    )}
+                    {isMultiRunLauncherOpen ? (
+                      <div className="absolute inset-0 z-10 bg-background">
+                        <ErrorBoundary>
+                          <MultiRunLauncher
+                            isWindowed
+                            initialPrompt={multiRunLauncherPrefillPrompt}
+                            onCreated={() => setMultiRunLauncherOpen(false)}
+                            onCancel={() => setMultiRunLauncherOpen(false)}
+                          />
+                        </ErrorBoundary>
+                      </div>
+                    ) : null}
+                    <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                    <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                    <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                  </>
+                )}
+              />
             </main>
+            {workspace.status === 'ready' ? (
+              <WorkbenchReplacement
+                target={WORKBENCH_REPLACEMENT_TARGETS.panel}
+                fallback={<WorkbenchPanelArea workspaceId={workspaceId ?? ''} directory={directory ?? ''} />}
+              />
+            ) : null}
           </div>
 
           {layout.secondaryVisible ? (
@@ -859,12 +887,19 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 style={{ flex: `${layout.mainWeights[2]} 1 0%` }}
               >
                 <div className="relative min-h-0 flex-1 overflow-hidden">
-                  <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
-                  <div className="h-full min-h-0">
-                    <ErrorBoundary>
-                      <ChatView active />
-                    </ErrorBoundary>
-                  </div>
+                  <WorkbenchReplacement
+                    target={WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar}
+                    fallback={(
+                      <>
+                        <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
+                        <div className="h-full min-h-0">
+                          <ErrorBoundary>
+                            <ChatView active />
+                          </ErrorBoundary>
+                        </div>
+                      </>
+                    )}
+                  />
                   {sessionPickerOpen ? (
                     <div
                       id={SESSION_PICKER_REGION_ID}
@@ -907,20 +942,27 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
         {layout.statusVisible ? (
         <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-border px-3 typography-micro text-muted-foreground">
-          <span className="truncate">{workspaceLabel}</span>
-          <span className="truncate">{branchLabel || t('workbench.ide.status.noBranch')}</span>
-          {workspaceId ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="ml-auto"
-              onClick={() => showWorkbenchPanel(workspaceId, 'terminal')}
-            >
-              {t('workbench.panel.terminal')}
-            </Button>
-          ) : null}
-          <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.statusItems} />
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.status}
+            fallback={(
+              <>
+                <span className="truncate">{workspaceLabel}</span>
+                <span className="truncate">{branchLabel || t('workbench.ide.status.noBranch')}</span>
+                {workspaceId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="ml-auto"
+                    onClick={() => showWorkbenchPanel(workspaceId, 'terminal')}
+                  >
+                    {t('workbench.panel.terminal')}
+                  </Button>
+                ) : null}
+                <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.statusItems} />
+              </>
+            )}
+          />
         </footer>
         ) : null}
 

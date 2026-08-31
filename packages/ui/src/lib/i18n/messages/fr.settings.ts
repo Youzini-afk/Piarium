@@ -1,4 +1,4 @@
-import { settingsDict as englishSettingsDict } from './en.settings';
+﻿import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
@@ -3104,6 +3104,11 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.panel': 'Panneau',
   'settings.piarium.extensions.workbench.target.status': 'Barre d\'état',
   'settings.piarium.extensions.workbench.target.transition': 'Scène de transition',
+  'settings.piarium.extensions.workbench.platformManaged': 'Géré par la plateforme',
+  'settings.piarium.extensions.workbench.dormant': 'Le shell actuel n\u2019utilise pas cette cible',
+  'settings.piarium.extensions.workbench.missingSelection': 'La contribution sélectionnée n\u2019est pas disponible',
+  'settings.piarium.extensions.workbench.clearOverride': 'Effacer',
+
   'settings.piarium.extensions.candidate.title': 'Mise à jour candidate v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Capacités vérifiées',
   'settings.piarium.extensions.candidate.deny': 'Refuser',
