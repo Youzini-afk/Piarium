@@ -503,6 +503,52 @@ Files listed by `package.json.files` alongside `dist` remain package assets. The
 and debug templates publish their runnable starter adapter under `runtime/` and resolve it with the
 Host asset API. The generated Node test template uses `kind: "node-test"`, so it needs no extra process.
 
+## Context expression (`when`)
+
+A contribution may declare a structured `when` expression that controls its visibility based on
+workbench context keys. The expression is evaluated by the Surface runtime against the current
+context key store; contributions whose `when` evaluates to `false` are hidden but remain in the
+registry — their replacement selections are preserved and fall back to available candidates.
+
+The `when` field accepts a `PiariumContextExpressionV1` object with one of five operators:
+
+| Operator | Fields | Semantics |
+| --- | --- | --- |
+| `defined` | `key` | True when the key exists in the context |
+| `equals` | `key`, `value` | True when the key exists and its value strictly equals `value` |
+| `not` | `expression` | Negation of the inner expression |
+| `all` | `expressions` | True when every expression is true (empty array is true) |
+| `any` | `expressions` | True when at least one expression is true (empty array is false) |
+
+```json
+{
+  "when": {
+    "op": "all",
+    "expressions": [
+      { "op": "defined", "key": "editorIsOpen" },
+      { "op": "any", "expressions": [
+        { "op": "equals", "key": "language", "value": "markdown" },
+        { "op": "equals", "key": "language", "value": "typescript" }
+      ]}
+    ]
+  }
+}
+```
+
+`when` is allowed on all contribution kinds except `shell` and `transition-scene`. Context changes
+on those kinds would bypass Workbench Profile stage-and-commit and Recovery invariants. The
+manifest parser rejects `when` on disallowed kinds at parse time.
+
+## Contribution compatibility
+
+Each contribution declares a `contractVersion` alongside its `kind`. The runtime checks
+compatibility before validating kind-specific data. A contribution with an unknown
+`contractVersion` is still parsed (structure, id, kind, supports) so the catalog can retain the
+record, but its data payload is not validated and it is not visible in the Surface. The CLI
+`check` command reports these as `incompatibleContributions` in its JSON output — the check still
+succeeds (exit 0) because the manifest is structurally valid, but the contributions are not
+executable on the current runtime.
+
 ## Check and test
 
 ```sh
@@ -512,6 +558,10 @@ piarium-extension test
 ```
 
 `check` validates the contract, version agreement, path containment, and published entrypoint files.
+The JSON output includes `incompatibleContributions` (contributions with unknown contract versions
+that are parsed but not executable), `missingFiles` (referenced entrypoint files that don't exist),
+and `referencedFiles` (all declared entrypoint file paths). A check with incompatible contributions
+still succeeds (exit 0) because the manifest is structurally valid.
 `test` rebuilds and executes the public conformance harnesses:
 
 - managed/native Surface activation, committed contribution/service state, deactivation, and leak

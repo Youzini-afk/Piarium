@@ -31,8 +31,10 @@ reliable as code, a script, or normal documentation.
 
 ## Ownership and trust boundaries
 
-- `packages/ui` owns shared React presentation, runtime-facing client contracts, Pi domain state, the
-  Document Registry, and the Editor Workbench Kernel. It does not own privileged processes.
+- `packages/application-client` owns the framework-neutral `RuntimeAPIs` aggregate interface, all API
+  interfaces, typed failures, and pure DTO types. It has no React, Zustand, or UI component dependencies.
+- `packages/ui` owns shared React presentation, Pi domain state, the Document Registry, and the Editor
+  Workbench Kernel. It does not own privileged processes or the runtime-facing client contracts.
 - `packages/web` owns Web/remote surfaces and the trusted application host, including document, search,
   language, task, debug, test, and Pi runtime services.
 - `packages/electron` is the native shell. It hosts the Web application host in-process and must not

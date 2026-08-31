@@ -33,7 +33,10 @@ then saves through the same expected-document-version authority.
 
 `check` parses the manifest with `@piarium/extension-contract`, checks that the manifest version and
 `package.json` version agree, and checks every declared Host or executable Surface file. Errors name
-the failing path and the next useful action.
+the failing path and the next useful action. The JSON output includes `incompatibleContributions`
+(contributions with unknown contract versions — parsed but not executable on the current runtime),
+`missingFiles`, and `referencedFiles`. A check with incompatible contributions still succeeds (exit 0)
+because the manifest is structurally valid.
 
 `build` bundles each declared executable entrypoint with esbuild. Host entrypoints use the Node 22
 platform; Surface entrypoints use the browser platform. The manifest `file` remains the exact output

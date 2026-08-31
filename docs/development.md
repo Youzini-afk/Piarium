@@ -29,7 +29,7 @@ or implementation in the same coherent change.
 | Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
 | Piarium extension platform | [piarium-extension-platform.md](piarium-extension-platform.md) and [piarium-extension-authoring.md](piarium-extension-authoring.md) |
 | Shared UI, themes, localization, settings, interactions | [packages/ui/DOCUMENTATION.md](../packages/ui/DOCUMENTATION.md) |
-| Shared UI runtime APIs, authenticated URLs, runtime switching | [packages/ui/src/lib/api/DOCUMENTATION.md](../packages/ui/src/lib/api/DOCUMENTATION.md) |
+| Shared runtime APIs, authenticated URLs, runtime switching | [packages/application-client/README.md](../packages/application-client/README.md) and [packages/ui/src/lib/api/DOCUMENTATION.md](../packages/ui/src/lib/api/DOCUMENTATION.md) |
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
 | Electron ownership, packaging, signing, smoke checks | [packages/electron/README.md](../packages/electron/README.md) |
 | Web CLI commands and output modes | [packages/web/bin/lib/DOCUMENTATION.md](../packages/web/bin/lib/DOCUMENTATION.md) |

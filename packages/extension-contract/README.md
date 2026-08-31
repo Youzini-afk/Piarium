@@ -53,4 +53,16 @@ same version/conflict boundary. The optional Surface-local Monaco service uses
 serializable view snapshots, ranges, actions, and declarative decorations—never a Monaco editor,
 model, DOM node, or `RuntimeAPIs` capability.
 
+Contributions may declare a structured `when` expression (`PiariumContextExpressionV1`) that
+controls visibility based on workbench context keys. The expression supports `defined`, `equals`,
+`not`, `all`, and `any` operators. The parser `parsePiariumContextExpression` and evaluator
+`evaluatePiariumContextExpression` are exported from this package. `when` is not allowed on `shell`
+or `transition-scene` contributions — context changes on those kinds would bypass Workbench Profile
+stage-and-commit and Recovery invariants.
+
+Contribution compatibility is checked before kind-specific data validation. A contribution with an
+unknown `contractVersion` is still parsed (structure, id, kind, supports) but its data payload is
+not validated. Use `checkPiariumContributionCompatibility` and `isPiariumContributionCompatible`
+to determine whether a contribution is executable on the current runtime.
+
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

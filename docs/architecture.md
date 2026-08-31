@@ -141,6 +141,15 @@ Piarium does not impose renderer payload, pending-request, or buffered-output ce
 deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
+`@piarium/application-client` is the framework-neutral application client boundary. It owns the
+`RuntimeAPIs` aggregate interface, all 24 API interfaces (Terminal, Git, Files, Documents, Settings,
+Permissions, Notifications, Extensions, Language, Tasks, Debug, Tests, etc.), typed failures
+(DocumentsError, FilesystemError, LanguageServicesError, RunServicesError, WorkspaceSearchError),
+and pure DTO types (WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch). It has no React,
+Zustand, or UI component dependencies — only `@piarium/protocol` and `@piarium/extension-contract`.
+Web, VS Code, and UI non-render code import from it directly rather than reaching into
+`@piarium/ui/lib/api`.
+
 Desktop first-launch and local recovery use this same authenticated connection and require a
 successful Pi host handshake. The surface shows the negotiated Pi, host, Node, and runtime-source
 versions; it does not probe OpenCode health, ask for an OpenCode binary, or run an installation
