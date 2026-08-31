@@ -19,7 +19,7 @@ export type WorkbenchMountImplementation<TProps extends object> = {
 
 type WorkbenchMountFailurePhase = 'dispose' | 'mount' | 'render';
 
-interface WorkbenchMountSession {
+export interface WorkbenchMountSession {
   dispose(reason?: unknown): Promise<void>;
   readonly mounted: Promise<void>;
   readonly signal: AbortSignal;

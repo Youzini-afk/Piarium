@@ -18,6 +18,7 @@ import type {
   PiariumEditorMonacoViewResultV1,
   PiariumEditorMonacoWaitForStateRequestV1,
   PiariumExtensionAssetPayload,
+  PiariumExtensionContributionKind,
   PiariumExtensionServiceProvision,
   PiariumExtensionServiceRoutingContext,
   PiariumExtensionStaticContribution,
@@ -419,6 +420,39 @@ export type {
 
 export const defineShellMount = defineSurfaceMount;
 export const defineViewMount = defineSurfaceMount;
+
+// ---------------------------------------------------------------------------
+// Shell composition host API
+//
+// A managed Shell can mount child contributions (replacements and slots) via
+// the composition host. This is the public, framework-neutral API for
+// external Shells that need to compose sub-regions without importing
+// @piarium/ui private modules.
+// ---------------------------------------------------------------------------
+
+export interface PiariumWorkbenchChildMount {
+  dispose(reason?: unknown): Promise<void>;
+}
+
+export interface PiariumWorkbenchCompositionHost {
+  mountReplacement(options: {
+    container: HTMLElement;
+    target: string;
+    props?: JsonObject;
+  }): Promise<PiariumWorkbenchChildMount>;
+
+  mountSlot(options: {
+    container: HTMLElement;
+    slot: string;
+    kind?: PiariumExtensionContributionKind;
+    props?: JsonObject;
+  }): Promise<PiariumWorkbenchChildMount>;
+}
+
+export interface PiariumShellMountContext<TProps extends object = Record<string, unknown>>
+  extends PiariumSurfaceMountContext<TProps> {
+  readonly workbench: PiariumWorkbenchCompositionHost;
+}
 export const defineTransitionSceneMount = (
   implementation:
     | PiariumSurfaceMount<PiariumTransitionSceneMountProps>

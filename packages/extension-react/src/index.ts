@@ -1,8 +1,10 @@
-import { createElement, type ComponentType, useSyncExternalStore } from "react";
+import { createElement, createContext, useContext, type ComponentType, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
   PiariumManagedSurfaceContext,
+  PiariumShellMountContext,
   PiariumSurfaceMountImplementation,
+  PiariumWorkbenchCompositionHost,
   PiariumTransitionSceneMountProps,
   PiariumTransitionSceneFrameV1,
 } from "@piarium/extension-sdk";
@@ -20,6 +22,25 @@ export interface PiariumReactReplacementProps {
 
 export type PiariumReactReplacementContribution = PiariumReactContribution<PiariumReactReplacementProps>;
 export type PiariumReactTransitionSceneContribution = PiariumReactContribution<PiariumTransitionSceneMountProps>;
+
+export interface PiariumReactShellProps {
+  workbench: PiariumWorkbenchCompositionHost;
+}
+
+export type PiariumReactShellContribution = PiariumReactContribution<PiariumReactShellProps>;
+
+const WorkbenchCompositionHostContext = createContext<PiariumWorkbenchCompositionHost | null>(null);
+
+/**
+ * Access the composition host supplied to a managed Shell mount.
+ * Returns `null` when the component is rendered outside a Shell mount
+ * (e.g. in tests or isolated previews).
+ */
+export const useWorkbenchCompositionHost = (): PiariumWorkbenchCompositionHost | null => (
+  useContext(WorkbenchCompositionHostContext)
+);
+
+export const WorkbenchCompositionHostProvider = WorkbenchCompositionHostContext.Provider;
 
 export const defineReactReplacement = (
   Component: ComponentType<PiariumReactReplacementProps>,
@@ -50,7 +71,34 @@ export const defineReactContribution = <TProps extends object>(
   },
 });
 
-export const defineReactShell = defineReactReplacement;
+export const defineReactShell = (
+  Component: ComponentType<PiariumReactShellProps>,
+): PiariumReactShellContribution => ({
+  Component,
+  framework: "react-19",
+  mount: (container, context) => {
+    const shellContext = context as PiariumShellMountContext<PiariumReactShellProps>;
+    const workbench = shellContext.workbench;
+    const root = createRoot(container, {
+      onUncaughtError: (error) => context.reportError(error),
+    });
+    try {
+      root.render(createElement(
+        WorkbenchCompositionHostProvider,
+        { value: workbench },
+        createElement(Component, { workbench }),
+      ));
+    } catch (error) {
+      try {
+        root.unmount();
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "React shell mount and cleanup failed");
+      }
+      throw error;
+    }
+    return () => root.unmount();
+  },
+});
 export const defineReactView = defineReactContribution;
 export const defineReactEditor = defineReactContribution;
 export const defineReactTransitionScene = (
