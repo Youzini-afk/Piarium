@@ -1,9 +1,75 @@
 import { expect, test } from 'bun:test';
 import type { JsonObject } from '@piarium/extension-contract';
 import type { SurfaceContribution } from '@piarium/extension-surface';
-import { createWorkbenchCompositionHost } from './workbench-composition-host';
+import {
+  createWorkbenchCompositionHost,
+  getWorkbenchCompositionInspectorSnapshot,
+  type WorkbenchCompositionHostOptions,
+} from './workbench-composition-host';
 
-const makeContribution = (id: string): SurfaceContribution => ({
+type StubElement = HTMLElement & {
+  children: StubElement[];
+  __setParent?(next: StubElement): void;
+};
+
+const createDocumentStub = (): Document => {
+  const documentStub = {} as Document;
+  documentStub.createElement = (() => createContainer(documentStub)) as Document['createElement'];
+  return documentStub;
+};
+
+const createContainer = (ownerDocument = createDocumentStub()): StubElement => {
+  const children: StubElement[] = [];
+  let parent: StubElement | null = null;
+  const element = {
+    dataset: {},
+    className: '',
+    textContent: '',
+    ownerDocument,
+    style: {},
+    get children() { return children; },
+    appendChild(child: StubElement) {
+      children.push(child);
+      child.__setParent?.(element as StubElement);
+      return child;
+    },
+    remove() {
+      if (!parent) return;
+      const index = parent.children.indexOf(element as StubElement);
+      if (index >= 0) parent.children.splice(index, 1);
+      parent = null;
+    },
+    __setParent(next: StubElement) { parent = next; },
+  } as unknown as StubElement & { __setParent(next: StubElement): void };
+  return element;
+};
+
+const childOwner = (generation = 1) => ({
+  desiredRevision: generation,
+  entrypointId: 'main',
+  extensionId: 'dev.example.child',
+  extensionVersion: '1.0.0',
+  generation,
+  hostId: 'host-1',
+  realmId: 'child-realm',
+});
+
+const shellOwner = {
+  desiredRevision: 1,
+  entrypointId: 'main',
+  extensionId: 'dev.example.shell',
+  extensionVersion: '1.0.0',
+  generation: 1,
+  hostId: 'host-1',
+  realmId: 'shell-realm',
+};
+
+const makeContribution = (
+  id: string,
+  generation = 1,
+  onMount?: (context: { owner: SurfaceContribution['owner']; props: JsonObject }) => void,
+  onDispose?: () => void,
+): SurfaceContribution => ({
   descriptor: {
     contractVersion: 1,
     data: {},
@@ -13,140 +79,142 @@ const makeContribution = (id: string): SurfaceContribution => ({
     supports: ['web'],
   },
   implementation: {
-    mount: (container: HTMLElement) => {
-      container.textContent = `mounted:${id}`;
-      return () => { container.textContent = ''; };
+    mount: (container: HTMLElement, context: { owner: SurfaceContribution['owner']; props: JsonObject }) => {
+      onMount?.(context);
+      container.textContent = `mounted:${id}:${generation}`;
+      return () => {
+        container.textContent = '';
+        onDispose?.();
+      };
     },
   },
-  owner: {
-    desiredRevision: 1,
-    entrypointId: 'main',
-    extensionId: 'dev.example',
-    extensionVersion: '1.0.0',
-    generation: 1,
-    hostId: 'host-1',
-    realmId: 'realm-1',
-  },
+  owner: childOwner(generation),
 });
 
-const owner = {
-  desiredRevision: 1,
-  entrypointId: 'main',
-  extensionId: 'dev.example.shell',
-  extensionVersion: '1.0.0',
-  generation: 1,
-  hostId: 'host-1',
-  realmId: 'realm-1',
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const optionHarness = (overrides: Partial<WorkbenchCompositionHostOptions> = {}) => {
+  const listeners = new Set<() => void>();
+  const errors: unknown[] = [];
+  const options: WorkbenchCompositionHostOptions = {
+    shellContributionId: 'dev.example.shell.entry',
+    owner: shellOwner,
+    allowedReplacementTargets: new Set(['workbench.test']),
+    allowedSlots: new Set(['workbench.test.views']),
+    activate: async () => undefined,
+    resolveReplacement: () => undefined,
+    resolveSlotCandidates: () => [],
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onError: (error) => { errors.push(error); },
+    ...overrides,
+  };
+  return {
+    options,
+    errors,
+    emit: () => { for (const listener of listeners) listener(); },
+    listenerCount: () => listeners.size,
+  };
 };
 
-// Minimal DOM stub for tests that don't have a full jsdom environment.
-const createContainer = (): HTMLElement => {
-  const store: Record<string, unknown> = {};
-  const children: HTMLElement[] = [];
-  const element = {
-    textContent: '',
-    get children() { return children; },
-    appendChild(child: HTMLElement) { children.push(child); return child; },
-    style: store,
-  } as unknown as HTMLElement;
-  return element;
-};
-
-const createChildContainer = (): HTMLElement => {
-  return createContainer();
-};
-
-// Patch document.createElement for the slot test
-const ensureDocumentStub = () => {
-  if (typeof document === 'undefined') {
-    (globalThis as Record<string, unknown>).document = {
-      createElement: () => createChildContainer(),
-    };
-  }
-};
-
-test('mountReplacement mounts the resolved contribution', async () => {
-  const contribution = makeContribution('dev.example.replace');
-  const container = createContainer();
-  const host = createWorkbenchCompositionHost({
-    owner,
-    onError: () => {},
+test('replacement mounts with the child owner and removes its DOM on dispose', async () => {
+  let receivedOwner: SurfaceContribution['owner'] | undefined;
+  const contribution = makeContribution('dev.example.replace', 1, (context) => {
+    receivedOwner = context.owner;
+  });
+  const harness = optionHarness({
     resolveReplacement: () => ({ contribution, props: {} }),
-    resolveSlotCandidates: () => [],
   });
+  const host = createWorkbenchCompositionHost(harness.options);
+  const container = createContainer();
   const child = await host.mountReplacement({ container, target: 'workbench.test' });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(container.textContent).toBe('mounted:dev.example.replace');
+  expect(container.children).toHaveLength(1);
+  expect(container.children[0]?.textContent).toBe('mounted:dev.example.replace:1');
+  expect(receivedOwner).toEqual(contribution.owner);
+  expect(getWorkbenchCompositionInspectorSnapshot().entries).toHaveLength(1);
+  expect(getWorkbenchCompositionInspectorSnapshot().entries[0]).toEqual({
+    contributionId: contribution.descriptor.id,
+    extensionId: contribution.owner.extensionId,
+    generation: contribution.owner.generation,
+    host: 'replacement',
+    hostId: 'workbench.test',
+    shellContributionId: 'dev.example.shell.entry',
+  });
   await child.dispose();
-  expect(container.textContent).toBe('');
+  expect(container.children).toHaveLength(0);
+  expect(getWorkbenchCompositionInspectorSnapshot().entries).toEqual([]);
+  expect(harness.listenerCount()).toBe(0);
 });
 
-test('mountReplacement returns no-op child when no candidate', async () => {
-  const container = createContainer();
-  const host = createWorkbenchCompositionHost({
-    owner,
-    onError: () => {},
-    resolveReplacement: () => undefined,
-    resolveSlotCandidates: () => [],
+test('replacement follows owner generation changes and disposes the previous child', async () => {
+  let current: SurfaceContribution | undefined;
+  let disposed = 0;
+  const first = makeContribution('dev.example.replace', 1, undefined, () => { disposed += 1; });
+  const second = makeContribution('dev.example.replace', 2, undefined, () => { disposed += 1; });
+  const harness = optionHarness({
+    resolveReplacement: () => current ? { contribution: current, props: {} } : undefined,
   });
+  const host = createWorkbenchCompositionHost(harness.options);
+  const container = createContainer();
   const child = await host.mountReplacement({ container, target: 'workbench.test' });
-  await child.dispose(); // should not throw
-  expect(container.textContent).toBe('');
-});
-
-test('mountSlot mounts all resolved contributions in child containers', async () => {
-  ensureDocumentStub();
-  const contributions = [makeContribution('dev.example.slot1'), makeContribution('dev.example.slot2')];
-  const container = createContainer();
-  const host = createWorkbenchCompositionHost({
-    owner,
-    onError: () => {},
-    resolveReplacement: () => undefined,
-    resolveSlotCandidates: () => contributions,
-  });
-  const child = await host.mountSlot({ container, slot: 'workbench.test.views' });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(container.children.length).toBe(2);
-  expect(container.children[0].textContent).toBe('mounted:dev.example.slot1');
-  expect(container.children[1].textContent).toBe('mounted:dev.example.slot2');
+  expect(container.children).toHaveLength(0);
+  current = first;
+  harness.emit();
+  await tick();
+  expect(container.children[0]?.textContent).toBe('mounted:dev.example.replace:1');
+  current = second;
+  harness.emit();
+  await tick();
+  expect(disposed).toBe(1);
+  expect(container.children[0]?.textContent).toBe('mounted:dev.example.replace:2');
   await child.dispose();
-  expect(container.children[0].textContent).toBe('');
-  expect(container.children[1].textContent).toBe('');
+  expect(disposed).toBe(2);
 });
 
-test('mountSlot returns no-op child when no candidates', async () => {
+test('Shell host disposal automatically cleans slot children and subscriptions', async () => {
+  let disposed = 0;
+  const contributions = [
+    makeContribution('dev.example.slot1', 1, undefined, () => { disposed += 1; }),
+    makeContribution('dev.example.slot2', 1, undefined, () => { disposed += 1; }),
+  ];
+  const harness = optionHarness({ resolveSlotCandidates: () => contributions });
+  const host = createWorkbenchCompositionHost(harness.options);
   const container = createContainer();
-  const host = createWorkbenchCompositionHost({
-    owner,
-    onError: () => {},
-    resolveReplacement: () => undefined,
-    resolveSlotCandidates: () => [],
-  });
-  const child = await host.mountSlot({ container, slot: 'workbench.test.views' });
-  await child.dispose();
-  expect(container.children.length).toBe(0);
+  await host.mountSlot({ container, slot: 'workbench.test.views', props: { value: 'ok' } });
+  expect(container.children).toHaveLength(2);
+  expect(harness.listenerCount()).toBe(1);
+  await host.dispose('shell removed');
+  expect(disposed).toBe(2);
+  expect(container.children).toHaveLength(0);
+  expect(harness.listenerCount()).toBe(0);
 });
 
-test('mountSlot passes props to contributions', async () => {
-  ensureDocumentStub();
-  const contributions = [makeContribution('dev.example.slot')];
+test('composition rejects undeclared seams and non-JSON props', async () => {
+  const harness = optionHarness();
+  const host = createWorkbenchCompositionHost(harness.options);
   const container = createContainer();
-  let receivedProps: JsonObject | undefined;
-  const host = createWorkbenchCompositionHost({
-    owner,
-    onError: () => {},
-    resolveReplacement: () => undefined,
-    resolveSlotCandidates: () => contributions.map((c) => ({
-      ...c,
-      implementation: {
-        mount: (_container: HTMLElement, context: { props: JsonObject }) => {
-          receivedProps = context.props;
-          return () => {};
-        },
-      },
-    })),
+  await expect(host.mountReplacement({ container, target: 'workbench.undeclared' })).rejects.toThrow(/did not declare/);
+  await expect(host.mountReplacement({
+    container,
+    target: 'workbench.test',
+    props: { callback: (() => undefined) as never },
+  })).rejects.toThrow(/JSON-safe/);
+});
+
+test('initial child mount failure rejects and releases the host point', async () => {
+  const contribution = makeContribution('dev.example.failed');
+  contribution.implementation = {
+    mount: () => { throw new Error('child failed'); },
+  };
+  const harness = optionHarness({
+    resolveReplacement: () => ({ contribution, props: {} }),
   });
-  await host.mountSlot({ container, slot: 'workbench.test.views', props: { foo: 'bar' } });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(receivedProps).toEqual({ foo: 'bar' });
+  const host = createWorkbenchCompositionHost(harness.options);
+  const container = createContainer();
+  await expect(host.mountReplacement({ container, target: 'workbench.test' })).rejects.toThrow('child failed');
+  expect(container.children).toHaveLength(0);
+  expect(harness.listenerCount()).toBe(0);
+  expect(harness.errors).toHaveLength(1);
 });

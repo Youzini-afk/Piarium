@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 ## 1. Context
 
@@ -231,13 +231,17 @@ that lists which replacement targets and slots the shell supports per surface (`
 page via a pure seam projection. Targets the shell does not declare are hidden from the settings UI;
 existing selections for those targets are preserved as **dormant** and can be cleared explicitly. The
 six IDE structural targets (activity, primary sidebar, editor, secondary sidebar, panel, status) are
-real `WorkbenchReplacement` hosts in the IDE shell, not hardcoded layout. Agent Mobile wraps
-`MobileSessionsSheet` and `SettingsView` in `WorkbenchReplacement` for `sessions.navigator` and
-`settings.workbench` respectively; `workspace.explorer` is not declared on mobile. The
+real `WorkbenchReplacement` hosts in the IDE shell, not hardcoded layout. Agent Mobile keeps the
+session Sheet/sidebar chrome, safe-area and dismissal behavior in the Shell while replacing only its
+navigator content; Settings follows the same Shell-owned-frame rule. `workspace.explorer` is not
+declared on mobile. The
 `editorActions` and `panelViews` slots receive JSON-safe props (workspaceId, groupId, resourceId,
 activePanelId) defined in `@piarium/extension-contract`. Managed shells can compose sub-regions via
 the `PiariumWorkbenchCompositionHost` API in `@piarium/extension-sdk`; the React binding provides
-`useWorkbenchCompositionHost` and `WorkbenchCompositionHostProvider`.
+`useWorkbenchCompositionHost` and `WorkbenchCompositionHostProvider`. The composition host follows
+replacement selection and child owner generations, attributes each mount to the child owner, and
+disposes all child mounts when the Shell retires. Isolated Shells remain self-contained in v1 and do
+not receive a parent-realm DOM composition bridge.
 
 Profile and layout resolution is layered. Layout layers merge `distribution → user → workspace`, and
 profile selection resolves `workspace → user → active`. Shell state is reported truthfully as

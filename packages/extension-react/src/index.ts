@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type {
   PiariumManagedSurfaceContext,
   PiariumShellMountContext,
+  PiariumShellMountImplementation,
   PiariumSurfaceMountImplementation,
   PiariumWorkbenchCompositionHost,
   PiariumTransitionSceneMountProps,
@@ -27,7 +28,10 @@ export interface PiariumReactShellProps {
   workbench: PiariumWorkbenchCompositionHost;
 }
 
-export type PiariumReactShellContribution = PiariumReactContribution<PiariumReactShellProps>;
+export interface PiariumReactShellContribution extends PiariumShellMountImplementation<PiariumReactShellProps> {
+  Component: ComponentType<PiariumReactShellProps>;
+  framework: "react-19";
+}
 
 const WorkbenchCompositionHostContext = createContext<PiariumWorkbenchCompositionHost | null>(null);
 
@@ -76,9 +80,8 @@ export const defineReactShell = (
 ): PiariumReactShellContribution => ({
   Component,
   framework: "react-19",
-  mount: (container, context) => {
-    const shellContext = context as PiariumShellMountContext<PiariumReactShellProps>;
-    const workbench = shellContext.workbench;
+  mount: (container, context: PiariumShellMountContext<PiariumReactShellProps>) => {
+    const workbench = context.workbench;
     const root = createRoot(container, {
       onUncaughtError: (error) => context.reportError(error),
     });

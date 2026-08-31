@@ -2,7 +2,7 @@
 
 Status: 十一个切片已交付；本文是工作台的基础架构与归属约定
 
-Last updated: 2026-08-25
+Last updated: 2026-08-31
 
 这份文档规定 Piarium 工作台的目标架构、已固定的产品决策,以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。它按十一个切片组织,因为实现是按这个顺序落地的;交付进度见
@@ -71,11 +71,15 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 
 因此不得新增第二个插件管理器、第二个 contribution registry、IDE 专属 loader 或 Cordis 运行时。Cordis 只作为动态生命周期的设计参考，不成为依赖。
 
-### 3.2 当前工作台仍然是硬编码产品壳
+### 3.2 Shell ownership 已迁移，内部组合仍按真实区域演进
 
-当前 `MainLayout.tsx`、`ContextPanel.tsx`、`SettingsView.tsx` 等仍直接拥有大量布局、页面和 Surface 分发。`App.tsx` 虽已通过 `workbench.shell` 提供 replacement seam，但 fallback 仍是完整产品 Shell。
+Core 日常 fallback 已收敛为 Recovery Shell；Agent 与 IDE 都由普通 built-in Shell contribution
+提供。`MainLayout.tsx` 仍是 Agent Shell 的第一方内部组合实现，而不是 Core fallback。官方 Shell
+通过按 Surface 声明的 seam contract 公开自己真实承载的 replacement targets/slots；IDE 的 Activity、
+Primary Sidebar、Editor、Secondary Sidebar、Panel 与 Status 均保留 Shell 几何并替换区域内容。
 
-目标不是在这些组件中增加 IDE 条件分支，而是逐步把它们注册为 `piarium.builtin.agent-workspace` 的贡献。迁移完成后，Core fallback 只剩 Recovery Shell。
+后续拆分 `MainLayout.tsx`、`ContextPanel.tsx` 或 `SettingsView.tsx` 必须服务于明确的 ownership、性能或
+复用问题，不能为了形式把每个内部组件注册成 contribution，也不能恢复第二个硬编码 Shell owner。
 
 ### 3.3 当前文件编辑不是 IDE 文档内核
 

@@ -55,6 +55,30 @@ test('framework-neutral mounts receive props and dispose exactly once after abor
   expect(container.textContent).toBe('');
 });
 
+test('mount sessions forward the Shell composition context supplied by the host', async () => {
+  const workbench = {
+    mountReplacement: async () => ({ dispose: async () => undefined }),
+    mountSlot: async () => ({ dispose: async () => undefined }),
+  };
+  let received: unknown;
+  const session = startWorkbenchMountSession({
+    container: {} as HTMLElement,
+    contributionId: 'dev.example.mount.shell',
+    implementation: {
+      mount: (_container, context) => {
+        received = (context as typeof context & { workbench?: unknown }).workbench;
+      },
+    },
+    context: { workbench },
+    onError: (error) => { throw error; },
+    owner: owner(),
+    props: { target: 'workbench.shell' },
+  });
+  await session.mounted;
+  expect(received).toBe(workbench);
+  await session.dispose();
+});
+
 test('prop changes can abort and remount a contribution with current props', async () => {
   const container = { textContent: '' } as HTMLElement;
   const signals: AbortSignal[] = [];

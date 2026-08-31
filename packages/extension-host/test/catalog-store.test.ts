@@ -166,6 +166,83 @@ test("reconciles Piarium-owned built-ins while preserving their desired state", 
   assert.equal(trimmed.extensions.some((entry) => entry.manifest.id === extensionId), false);
 });
 
+test("repairs only known legacy built-ins before strict catalog reconciliation", async () => {
+  const dataDir = await temporaryDirectory();
+  const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const seeded = await catalog.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  const shellDefinition = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.find(({ manifest }) => (
+    manifest.contributions?.some((contribution) => contribution.kind === "shell")
+  ));
+  assert.ok(shellDefinition);
+  const disabled = await catalog.setEnabled(shellDefinition.manifest.id, false, seeded.revision);
+  const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as {
+    extensions: Record<string, Record<string, unknown>>;
+    revision: number;
+  };
+  const legacyRecord = stored.extensions[shellDefinition.manifest.id];
+  assert.ok(legacyRecord);
+  const legacyManifest = legacyRecord.manifest as {
+    contributions: Array<{ data?: unknown; kind: string }>;
+  };
+  const shellContribution = legacyManifest.contributions.find(({ kind }) => kind === "shell");
+  assert.ok(shellContribution);
+  shellContribution.data = {};
+  legacyRecord.resolvedVersion = "0.0.0";
+  legacyRecord.selectedVersion = "0.0.0";
+  legacyRecord.candidate = {};
+  await writeFile(catalog.store.catalogPath, JSON.stringify(stored, null, 2), "utf8");
+
+  const restarted = new ApplicationExtensionCatalog({ dataDir });
+  const repaired = await restarted.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  const repairedRecord = repaired.extensions.find(({ manifest }) => manifest.id === shellDefinition.manifest.id);
+  assert.ok(repairedRecord);
+  assert.equal(repaired.revision, disabled.revision + 1);
+  assert.equal(repairedRecord.desired.enabled, false);
+  assert.deepEqual(repairedRecord.manifest, shellDefinition.manifest);
+  assert.equal(repairedRecord.resolvedVersion, shellDefinition.manifest.version);
+  assert.equal(repairedRecord.selectedVersion, shellDefinition.manifest.version);
+  assert.equal(repairedRecord.candidate, undefined);
+  const stable = await restarted.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  assert.equal(stable.revision, repaired.revision);
+});
+
+test("does not use built-in reconciliation to repair an invalid external extension", async () => {
+  const dataDir = await temporaryDirectory();
+  const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const seeded = await catalog.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  await catalog.upsert(installation(), seeded.revision);
+  const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as {
+    extensions: Record<string, Record<string, unknown>>;
+  };
+  const external = stored.extensions["dev.example.extension"];
+  assert.ok(external);
+  external.resolvedVersion = "9.9.9";
+  const invalidCatalog = `${JSON.stringify(stored, null, 2)}\n`;
+  await writeFile(catalog.store.catalogPath, invalidCatalog, "utf8");
+
+  const restarted = new ApplicationExtensionCatalog({ dataDir });
+  await assert.rejects(
+    () => restarted.reconcileBuiltins(
+      PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+      PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    ),
+    ExtensionCatalogStorageError,
+  );
+  assert.equal(await readFile(catalog.store.catalogPath, "utf8"), invalidCatalog);
+});
+
 test("candidate capability deltas require explicit decisions and carry unchanged decisions forward", async () => {
   const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
   const installed = await catalog.upsert(installation(), 0);

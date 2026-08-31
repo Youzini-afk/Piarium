@@ -6,6 +6,7 @@ import type {
 import {
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
   PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+  PIARIUM_WORKBENCH_SLOTS,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution } from '@piarium/extension-surface';
 import { projectWorkbenchSeams } from './workbench-seams';
@@ -100,7 +101,7 @@ const ideEntry = (enabled = true): PiariumExtensionCatalogEntry => ({
               PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.panel,
               PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.status,
             ],
-            slots: [],
+            slots: Object.values(PIARIUM_WORKBENCH_SLOTS),
           },
           desktop: {
             replacementTargets: [
@@ -117,7 +118,7 @@ const ideEntry = (enabled = true): PiariumExtensionCatalogEntry => ({
               PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.panel,
               PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.status,
             ],
-            slots: [],
+            slots: Object.values(PIARIUM_WORKBENCH_SLOTS),
           },
         },
       },
@@ -280,11 +281,13 @@ test('missing selected contribution is distinct from dormant', () => {
     shellStatus: 'ready',
     catalog: [ideEntry()],
     surface: 'web',
-    visibleContributions: [],
+    visibleContributions: [candidate('dev.example.available-editor', PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor)],
   });
   const editor = projections.find((p) => p.target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor);
   expect(editor?.status).toBe('missing-selection');
   expect(editor?.selected).toBe('dev.example.missing-editor');
+  expect(editor?.status === 'missing-selection' ? editor.candidates.map((item) => item.descriptor.id) : [])
+    .toEqual(['dev.example.available-editor']);
 });
 
 test('profile input object is not mutated', () => {
@@ -312,12 +315,14 @@ test('shell and transition are always platform', () => {
     shellStatus: 'ready',
     catalog: [agentEntry()],
     surface: 'web',
-    visibleContributions: [],
+    visibleContributions: [candidate('dev.example.transition', PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition)],
   });
   const shell = projections.find((p) => p.target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell);
   expect(shell?.status).toBe('platform');
   const transition = projections.find((p) => p.target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition);
   expect(transition?.status).toBe('platform');
+  expect(transition?.status === 'platform' ? transition.candidates.map((item) => item.descriptor.id) : [])
+    .toEqual(['dev.example.transition']);
 });
 
 test('malformed shell contract shows existing selections as dormant, not supported', () => {

@@ -70,7 +70,11 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 `defineReactEditor` wrap the same mount contract. `defineReactShell` provides a
 `PiariumWorkbenchCompositionHost` to the Shell component via React context; use
 `useWorkbenchCompositionHost()` to access it and mount child replacements or slots into DOM
-containers without importing `@piarium/ui`.
+containers without importing `@piarium/ui`. Child mounts follow selected contribution generations
+and are automatically disposed when the Shell unmounts; retaining the returned handle is only needed
+when the Shell wants to dispose that host point earlier. Calls are limited to seams declared by the
+Shell contract and accept JSON-safe props only. Isolated iframe/Worker Shells are self-contained in
+v1 and do not receive this parent-realm DOM composition host.
 
 ### Shell seam contract
 
@@ -585,6 +589,7 @@ The Extension Inspector uses public host and Surface state. It shows:
 - Host and Surface owner realms, generation, current status, update timestamp, and cleanup generation;
 - manifest and live dynamic contributions, including slot placement and replacement targets;
 - the active Shell contribution and whether the inspected extension owns it;
+- the active Shell's declared targets/slots, dormant Profile selections, and managed child mounts with owner generation;
 - document, language, debug, and test service ownership from granted capabilities and live Host providers;
 - live Host and Surface service providers;
 - optional Monaco active-view and owner-scoped decoration registration counts;

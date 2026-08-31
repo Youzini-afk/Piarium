@@ -307,7 +307,11 @@ test("typed document and language clients plus workbench mounts are public SDK c
     extensionId: "dev.example.language",
     packageRoot,
   });
-  assert.equal(typeof defineShellMount, "function");
+  const shellMount = defineShellMount((_container, mount) => {
+    assert.equal(typeof mount.workbench.mountReplacement, "function");
+    assert.equal(typeof mount.workbench.mountSlot, "function");
+  });
+  assert.equal(typeof shellMount.mount, "function");
   assert.equal(typeof defineEditorMount, "function");
   const editorMount = defineEditorMount((_container, mount) => {
     const snapshot = mount.props.document.getSnapshot();

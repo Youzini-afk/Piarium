@@ -52,33 +52,7 @@
               }
             ]
           }
-        },
-        "allOf": [{
-          "if": { "properties": { "kind": { "const": "editor" } }, "required": ["kind"] },
-          "then": {
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "languageIds": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": { "$ref": "#/$defs/text" }
-                  },
-                  "filenames": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": { "$ref": "#/$defs/text" }
-                  },
-                  "priority": { "type": "number" }
-                },
-                "anyOf": [{ "required": ["languageIds"] }, { "required": ["filenames"] }]
-              }
-            }
-          }
-        }]
+        }
       }
     },
     "requires": {
@@ -197,6 +171,32 @@
         },
         "allOf": [
           {
+            "if": { "properties": { "kind": { "const": "editor" } }, "required": ["kind"] },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "languageIds": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "$ref": "#/$defs/text" }
+                    },
+                    "filenames": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "$ref": "#/$defs/text" }
+                    },
+                    "priority": { "type": "number" }
+                  },
+                  "anyOf": [{ "required": ["languageIds"] }, { "required": ["filenames"] }]
+                }
+              }
+            }
+          },
+          {
             "if": {
               "properties": { "kind": { "const": "transition-scene" } },
               "required": ["kind"]
@@ -227,7 +227,29 @@
                   "required": ["target"],
                   "properties": { "target": { "const": "workbench.shell" } }
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "desktop" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["desktop"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["desktop"] } } } } } }
+                },
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "mobile" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["mobile"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["mobile"] } } } } } }
+                },
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "vscode" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["vscode"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["vscode"] } } } } } }
+                },
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "web" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["web"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["web"] } } } } } }
+                }
+              ]
             }
           }
         ]
@@ -294,6 +316,7 @@
     "shellData": {
       "type": "object",
       "required": ["contract", "seams"],
+      "additionalProperties": false,
       "properties": {
         "contract": { "const": "piarium-workbench-shell/v1" },
         "seams": {
@@ -311,11 +334,17 @@
     "shellSurfaceSeams": {
       "type": "object",
       "required": ["replacementTargets", "slots"],
+      "additionalProperties": false,
       "properties": {
         "replacementTargets": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/id" }
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/id" },
+              { "not": { "enum": ["workbench.shell", "workbench.transition"] } }
+            ]
+          }
         },
         "slots": {
           "type": "array",

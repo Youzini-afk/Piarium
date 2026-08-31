@@ -64,6 +64,7 @@ import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
   describeWorkbenchContributionPlacement,
+  describeWorkbenchShellSeams,
   workbenchInspectorOwnsDocuments,
   workbenchInspectorOwnsLanguage,
   workbenchInspectorOwnsDebugCapability,
@@ -71,6 +72,10 @@ import {
   workbenchInspectorOwnsRun,
 } from '@/lib/extensions/workbench-inspector';
 import { projectWorkbenchSeams } from '@/lib/extensions/workbench-seams';
+import {
+  getWorkbenchCompositionInspectorSnapshot,
+  subscribeWorkbenchCompositionInspector,
+} from '@/lib/extensions/workbench-composition-host';
 import {
   getMonacoExtensionInspectorSnapshot,
   subscribeMonacoExtensionInspector,
@@ -365,14 +370,35 @@ const WorkbenchProfileSection: React.FC = () => {
             ? { scope: 'workspace' as const, scopeId: workspaceId }
             : { scope: 'user' as const, scopeId: 'default' };
           if (projection.status === 'platform') {
+            const selectedMissing = projection.selected !== '__builtin__'
+              && !projection.candidates.some((candidate) => candidate.descriptor.id === projection.selected);
             return (
               <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
                 <div className="min-w-0">
                   <span className="typography-ui-label text-foreground">{label}</span>
+                  <span className="ml-2 typography-micro text-muted-foreground">
+                    {t('settings.piarium.extensions.workbench.platformManaged')}
+                  </span>
                 </div>
-                <span className="typography-meta text-muted-foreground">
-                  {t('settings.piarium.extensions.workbench.platformManaged')}
-                </span>
+                <Select
+                  value={projection.selected}
+                  onValueChange={(value) => run(setWorkbenchReplacementSelection(
+                    target,
+                    value === '__builtin__' ? null : value,
+                    scopeOverride,
+                  ))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                    {selectedMissing ? <SelectItem value={projection.selected}>{projection.selected}</SelectItem> : null}
+                    {projection.candidates.map((candidate) => (
+                      <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
+                        {candidate.descriptor.title ?? candidate.descriptor.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             );
           }
@@ -421,6 +447,11 @@ const WorkbenchProfileSection: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
                     <SelectItem value={projection.selected}>{projection.selected}</SelectItem>
+                    {projection.candidates.map((candidate) => (
+                      <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
+                        {candidate.descriptor.title ?? candidate.descriptor.id}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -641,10 +672,11 @@ const ServiceRoutingSection: React.FC = () => {
 
 const ExtensionCard: React.FC<{
   busy: boolean;
+  composition: ReturnType<typeof getWorkbenchCompositionInspectorSnapshot>;
   entry: PiariumExtensionCatalogEntry;
   hostState: PiariumExtensionHostStateSnapshot | null;
   surface: ReturnType<typeof useSurfaceRegistrySnapshot>;
-}> = ({ busy, entry, hostState, surface }) => {
+}> = ({ busy, composition, entry, hostState, surface }) => {
   const { t } = useI18n();
   const [inspectOpen, setInspectOpen] = React.useState(false);
   const [removeOpen, setRemoveOpen] = React.useState(false);
@@ -676,6 +708,25 @@ const ExtensionCard: React.FC<{
     })
     : undefined;
   const ownsActiveShell = profileResolution?.shellExtensionId === entry.manifest.id;
+  const shellSeamSummary = profileResolution ? describeWorkbenchShellSeams(
+    profileResolution.shellContributionId,
+    profileResolution.shellExtensionId,
+    hostState?.catalog.extensions ?? [],
+    piariumSurfaceRuntime.surface,
+  ) : null;
+  const activeSeamProjection = profileResolution ? projectWorkbenchSeams({
+    layout: profileResolution.layout,
+    shellContributionId: profileResolution.shellContributionId,
+    shellExtensionId: profileResolution.shellExtensionId,
+    shellStatus: profileResolution.status,
+    catalog: hostState?.catalog.extensions ?? [],
+    surface: piariumSurfaceRuntime.surface,
+    visibleContributions: surface.contributions,
+  }) : [];
+  const dormantSeams = activeSeamProjection.filter((projection) => projection.status === 'dormant');
+  const mountedShellChildren = composition.entries.filter((child) => (
+    child.shellContributionId === profileResolution?.shellContributionId
+  ));
   const documentOwner = entry.capabilityGrants.some((grant) => (
     workbenchInspectorOwnsDocuments(grant.capability) && grant.granted
   ));
@@ -938,6 +989,34 @@ const ExtensionCard: React.FC<{
                       ? t('settings.piarium.extensions.inspector.activeShellId', { id: profileResolution.shellContributionId })
                       : t('settings.piarium.extensions.inspector.none')}
                 </div>
+                {ownsActiveShell && shellSeamSummary ? (
+                  <div className="mt-2 space-y-1 typography-micro text-muted-foreground">
+                    {shellSeamSummary.contractIssues.map((issue) => (
+                      <div key={`contract-issue:${issue}`} className="text-[color:var(--status-error)]">{issue}</div>
+                    ))}
+                    {shellSeamSummary.declaredReplacementTargets.map((target) => (
+                      <div key={`declared-target:${target}`}>
+                        {t('settings.piarium.extensions.inspector.replaces', { target })}
+                      </div>
+                    ))}
+                    {shellSeamSummary.declaredSlots.map((slot) => (
+                      <div key={`declared-slot:${slot}`}>
+                        {t('settings.piarium.extensions.inspector.slot', { slot })}
+                      </div>
+                    ))}
+                    {dormantSeams.map((seam) => (
+                      <div key={`dormant:${seam.target}`}>
+                        {t('settings.piarium.extensions.workbench.dormant')} · {seam.target} · {seam.selected}
+                      </div>
+                    ))}
+                    {mountedShellChildren.map((child) => (
+                      <div key={`${child.host}:${child.hostId}:${child.contributionId}:${child.generation}`}>
+                        {child.host} · {child.hostId} · {child.contributionId}
+                        {` · ${t('settings.piarium.extensions.inspector.cleanup')} #${child.generation}`}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <div>
                 <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.contributions')}</div>
@@ -1141,6 +1220,11 @@ export const ExtensionsPage: React.FC = () => {
   const { t } = useI18n();
   const state = usePiariumExtensionCatalog();
   const surface = useSurfaceRegistrySnapshot();
+  const composition = React.useSyncExternalStore(
+    subscribeWorkbenchCompositionInspector,
+    getWorkbenchCompositionInspectorSnapshot,
+    getWorkbenchCompositionInspectorSnapshot,
+  );
   const extensions = state.snapshot?.catalog.extensions ?? [];
   const hostDiagnostics = [
     ...(state.snapshot?.catalog.diagnostics ?? []),
@@ -1184,6 +1268,7 @@ export const ExtensionsPage: React.FC = () => {
           {extensions.map((entry) => (
             <ExtensionCard
               key={entry.manifest.id}
+              composition={composition}
               entry={entry}
               hostState={state.snapshot}
               surface={surface}

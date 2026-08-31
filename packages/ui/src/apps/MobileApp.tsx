@@ -2406,21 +2406,27 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
             >
               <ErrorBoundary>
-                <WorkbenchReplacement
-                  target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                  fallback={(
-                    <MobileSessionsSheet
-                      open
-                      variant="sidebar"
-                      // The surface asks to close after picking a session/project or
-                      // creating a worktree; the persistent landscape sidebar stays
-                      // put, portrait gives the space back to the chat.
-                      onOpenChange={(value) => {
-                        if (!value && isPortrait) setIpadSidebarOpen(false);
-                      }}
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center border-b border-border/30 px-4">
+                    <h2 className="truncate typography-ui-label font-semibold text-foreground">
+                      {t('mobile.sessions.sheet.title')}
+                    </h2>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    <WorkbenchReplacement
+                      target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+                      fallback={(
+                        <MobileSessionsSheet
+                          open
+                          variant="content"
+                          onOpenChange={(value) => {
+                            if (!value && isPortrait) setIpadSidebarOpen(false);
+                          }}
+                        />
+                      )}
                     />
-                  )}
-                />
+                  </div>
+                </div>
               </ErrorBoundary>
             </div>
           </aside>
@@ -2511,16 +2517,24 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         />
 
         {sessionsSheetOpen ? (
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-            fallback={(
+          <MobileSurfaceShell
+            open
+            onClose={() => setSessionsSheetOpen(false)}
+            ariaLabel={t('mobile.sessions.sheet.title')}
+            title={t('mobile.sessions.sheet.title')}
+            variant={surfaceVariant === 'side' ? 'side' : 'sheet'}
+          >
+            <WorkbenchReplacement
+              target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+              fallback={(
               <MobileSessionsSheet
-                open={sessionsSheetOpen}
+                open
                 onOpenChange={setSessionsSheetOpen}
-                variant={surfaceVariant === 'side' ? 'sidebar' : 'sheet'}
+                variant="content"
               />
-            )}
-          />
+              )}
+            />
+          </MobileSurfaceShell>
         ) : null}
 
         {/* Mounted only while open (like the sessions sheet) so each surface

@@ -418,7 +418,6 @@ export type {
   PiariumTransitionSceneTempo,
 } from "@piarium/extension-contract";
 
-export const defineShellMount = defineSurfaceMount;
 export const defineViewMount = defineSurfaceMount;
 
 // ---------------------------------------------------------------------------
@@ -453,6 +452,22 @@ export interface PiariumShellMountContext<TProps extends object = Record<string,
   extends PiariumSurfaceMountContext<TProps> {
   readonly workbench: PiariumWorkbenchCompositionHost;
 }
+
+export interface PiariumShellMountImplementation<TProps extends object = Record<string, unknown>> {
+  mount(
+    container: HTMLElement,
+    context: PiariumShellMountContext<TProps>,
+  ): void | PiariumSurfaceMountDisposer | Promise<void | PiariumSurfaceMountDisposer>;
+}
+
+export type PiariumShellMount<TProps extends object = Record<string, unknown>> =
+  PiariumShellMountImplementation<TProps>["mount"];
+
+export const defineShellMount = <TProps extends object = Record<string, unknown>>(
+  implementation: PiariumShellMount<TProps> | PiariumShellMountImplementation<TProps>,
+): PiariumShellMountImplementation<TProps> => typeof implementation === "function"
+  ? { mount: implementation }
+  : implementation;
 export const defineTransitionSceneMount = (
   implementation:
     | PiariumSurfaceMount<PiariumTransitionSceneMountProps>

@@ -1,5 +1,4 @@
 import type {
-  JsonObject,
   PiariumApplicationSurface,
   PiariumExtensionCatalogEntry,
   PiariumExtensionCatalogSnapshot,

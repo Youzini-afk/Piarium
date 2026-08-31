@@ -72,9 +72,9 @@ import { MobileSurfaceShell } from './MobileSurfaceShell';
 type MobileSessionsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 'sheet' (default) wraps the content in the swipe-dismiss MobileSurfaceShell;
-      'sidebar' renders the same content inline for the iPad persistent sidebar. */
-  variant?: 'sheet' | 'sidebar';
+  /** 'sheet' (default) owns its MobileSurfaceShell; 'sidebar' includes inline
+      sidebar chrome; 'content' renders navigator content for a Shell-owned frame. */
+  variant?: 'sheet' | 'sidebar' | 'content';
 };
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
@@ -1363,6 +1363,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         />
       </div>
   );
+
+  if (variant === 'content') {
+    if (!open) return null;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {trailingActions ? (
+          <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border/30 px-4 py-2">
+            {trailingActions}
+          </div>
+        ) : null}
+        {surfaceContent}
+      </div>
+    );
+  }
 
   if (variant === 'sidebar') {
     if (!open) return null;

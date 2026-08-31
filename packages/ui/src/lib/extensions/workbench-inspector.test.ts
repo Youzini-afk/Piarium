@@ -85,6 +85,7 @@ describe('workbench inspector summaries', () => {
     expect(summary?.declaredReplacementTargets).toEqual([PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor]);
     expect(summary?.declaredSlots).toEqual([PIARIUM_WORKBENCH_SLOTS.editorActions]);
     expect(summary?.contractValid).toBe(true);
+    expect(summary?.contractIssues).toEqual([]);
   });
 
   test('describeWorkbenchShellSeams returns null for missing shell ids', () => {
@@ -113,6 +114,7 @@ describe('workbench inspector summaries', () => {
     );
     expect(summary).not.toBeNull();
     expect(summary?.contractValid).toBe(false);
+    expect(summary?.contractIssues.length).toBeGreaterThan(0);
     expect(summary?.declaredReplacementTargets).toEqual([]);
   });
 });

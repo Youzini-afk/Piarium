@@ -15,7 +15,7 @@ import type { SurfaceContribution } from '@piarium/extension-surface';
 export type WorkbenchSeamProjection =
   | { status: 'supported'; target: string; selected: string; candidates: SurfaceContribution[] }
   | { status: 'dormant'; target: string; selected: string }
-  | { status: 'missing-selection'; target: string; selected: string }
+  | { status: 'missing-selection'; target: string; selected: string; candidates: SurfaceContribution[] }
   | { status: 'platform'; target: string; selected: string; candidates: SurfaceContribution[] };
 
 export interface WorkbenchSeamProjectionInput {
@@ -111,7 +111,7 @@ export const projectWorkbenchSeams = (input: WorkbenchSeamProjectionInput): Work
       const selectedMissing = selected !== '__builtin__'
         && !candidates.some((candidate) => candidate.descriptor.id === selected);
       if (selectedMissing) {
-        projections.push({ status: 'missing-selection', target, selected });
+        projections.push({ status: 'missing-selection', target, selected, candidates });
       } else {
         projections.push({ status: 'supported', target, selected, candidates });
       }

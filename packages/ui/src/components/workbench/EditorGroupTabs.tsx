@@ -20,7 +20,10 @@ import { useI18n } from '@/lib/i18n';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import type { EditorGroupLeaf } from '@/lib/workbench/editors/types';
 import { ScrollingFileName } from '@/components/workbench/FilesExplorer';
-import { PIARIUM_WORKBENCH_SLOTS } from '@piarium/extension-contract';
+import {
+  PIARIUM_WORKBENCH_SLOTS,
+  type PiariumWorkbenchEditorActionsSlotProps,
+} from '@piarium/extension-contract';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 type EditorGroupTabsProps = {
@@ -117,12 +120,13 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
   if (group.tabs.length === 0) {
     return <div className="typography-ui-label font-medium truncate px-3 py-1.5">{t('filesView.editor.selectFile')}</div>;
   }
+  const activeTab = group.tabs.find((tab) => tab.tabId === group.activeTabId) ?? group.tabs[0];
 
   return (
-    <div className={cn('relative min-w-0 flex-1', !isActiveGroup && 'opacity-80')}>
+    <div className={cn('relative flex min-w-0 flex-1 items-center', !isActiveGroup && 'opacity-80')}>
       <div
         ref={scrollRef}
-        className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-none px-3 py-1.5"
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-none px-3 py-1.5"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         {group.tabs.map((tab) => {
@@ -210,10 +214,8 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
             props={{
               workspaceId,
               groupId: group.groupId,
-              ...(group.activeTabId
-                ? { resourceId: group.tabs.find((tab) => tab.tabId === group.activeTabId)?.resourceId }
-                : {}),
-            }}
+              ...(activeTab ? { resourceId: activeTab.resourceId, viewId: activeTab.viewId } : {}),
+            } satisfies PiariumWorkbenchEditorActionsSlotProps}
           />
         </div>
       ) : null}

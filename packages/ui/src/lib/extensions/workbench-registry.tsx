@@ -7,7 +7,10 @@ import type {
   PiariumWorkbenchDistributionProfile,
 } from '@piarium/extension-contract';
 import {
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  parsePiariumWorkbenchShellContributionData,
   resolvePiariumWorkbenchLayout,
+  resolvePiariumWorkbenchShellSurfaceSeams,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -22,6 +25,7 @@ import {
   type WorkbenchMountImplementation,
 } from './workbench-mount';
 import { piariumSurfaceRuntime } from './surface-runtime';
+import { createWorkbenchCompositionHost } from './workbench-composition-host';
 
 export { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS as WORKBENCH_REPLACEMENT_TARGETS } from '@piarium/extension-contract';
 export { startWorkbenchMountSession } from './workbench-mount';
@@ -191,20 +195,64 @@ const WorkbenchMountHost = <TProps extends object>({
     if (!container) return;
     let active = true;
     let mountFailed = false;
+    const reportMountError = (error: unknown, phase: 'dispose' | 'mount' | 'render') => {
+      console.error(
+        `[Piarium Extensions] Contribution ${contribution.descriptor.id} from ${contribution.owner.extensionId} failed during ${phase}:`,
+        error,
+      );
+      if (!active || phase === 'dispose') return;
+      mountFailed = true;
+      setFailure({ contributionKey, error, implementation, props });
+    };
+    let composition: ReturnType<typeof createWorkbenchCompositionHost> | null = null;
+    if (contribution.descriptor.kind === 'shell') {
+      try {
+        const shellData = parsePiariumWorkbenchShellContributionData(
+          contribution.descriptor.data,
+          contribution.descriptor.supports,
+        );
+        const seams = resolvePiariumWorkbenchShellSurfaceSeams(shellData, piariumSurfaceRuntime.surface);
+        composition = createWorkbenchCompositionHost({
+          shellContributionId: contribution.descriptor.id,
+          owner: contribution.owner,
+          allowedReplacementTargets: new Set(seams.replacementTargets),
+          allowedSlots: new Set(seams.slots),
+          activate: triggerVisibleSurfaceContributions,
+          resolveReplacement: (target) => {
+            if (target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell
+              || target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition) return undefined;
+            const selected = selectedReplacement(piariumSurfaceRuntime.getSnapshot(), target);
+            if (!selected || workbenchContributionInstanceKey(selected) === contributionKey) return undefined;
+            return { contribution: selected, props: { target } };
+          },
+          resolveSlotCandidates: (slot, kind) => piariumSurfaceRuntime.getSnapshot().visibleContributions.filter((candidate) => (
+            candidate.descriptor.placement?.slot === slot
+            && candidate.descriptor.replacement === undefined
+            && (kind === undefined || candidate.descriptor.kind === kind)
+          )),
+          subscribe: piariumSurfaceRuntime.subscribe,
+          onError: (error, phase) => {
+            console.error(
+              `[Piarium Extensions] Child contribution hosted by ${contribution.descriptor.id} failed during ${phase}:`,
+              error,
+            );
+          },
+        });
+      } catch (error) {
+        reportMountError(error, 'mount');
+        return;
+      }
+    }
     const session = startWorkbenchMountSession({
       container,
       contributionId: contribution.descriptor.id,
       implementation,
       owner: contribution.owner,
       props,
+      ...(composition ? { context: { workbench: composition } } : {}),
       onError: (error, phase) => {
-        console.error(
-          `[Piarium Extensions] Contribution ${contribution.descriptor.id} from ${contribution.owner.extensionId} failed during ${phase}:`,
-          error,
-        );
-        if (!active || phase === 'dispose') return;
-        mountFailed = true;
-        setFailure({ contributionKey, error, implementation, props });
+        reportMountError(error, phase);
+        void composition?.dispose(error);
         void session.dispose(error);
       },
     });
@@ -213,7 +261,11 @@ const WorkbenchMountHost = <TProps extends object>({
     });
     return () => {
       active = false;
-      void session.dispose(`Surface contribution ${contribution.descriptor.id} was unmounted`);
+      const reason = `Surface contribution ${contribution.descriptor.id} was unmounted`;
+      void (async () => {
+        await composition?.dispose(reason);
+        await session.dispose(reason);
+      })();
     };
   }, [contribution, contributionKey, implementation, onMountReady, props]);
 

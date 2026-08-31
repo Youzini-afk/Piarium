@@ -43,6 +43,7 @@ export type WorkbenchInspectorShellSeamSummary = {
   declaredReplacementTargets: readonly string[];
   declaredSlots: readonly string[];
   contractValid: boolean;
+  contractIssues: readonly string[];
 };
 
 /**
@@ -64,10 +65,14 @@ export const describeWorkbenchShellSeams = (
   if (!contribution.supports.includes(surface)) return null;
   let data: PiariumWorkbenchShellContributionDataV1 | null = null;
   let contractValid = true;
+  let contractIssues: string[] = [];
   try {
     data = parsePiariumWorkbenchShellContributionData(contribution.data, contribution.supports);
-  } catch {
+  } catch (error) {
     contractValid = false;
+    contractIssues = Array.isArray((error as { issues?: unknown }).issues)
+      ? [...(error as { issues: string[] }).issues]
+      : [error instanceof Error ? error.message : String(error)];
   }
   let seams: PiariumWorkbenchShellSurfaceSeams | null = null;
   if (data) {
@@ -85,6 +90,7 @@ export const describeWorkbenchShellSeams = (
     declaredReplacementTargets: seams?.replacementTargets ?? [],
     declaredSlots: seams?.slots ?? [],
     contractValid,
+    contractIssues,
   };
 };
 

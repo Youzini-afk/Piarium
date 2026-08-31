@@ -2,6 +2,10 @@ import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   PIARIUM_WORKBENCH_SLOTS,
+  type PiariumWorkbenchActivityItemsSlotProps,
+  type PiariumWorkbenchPrimarySidebarViewsSlotProps,
+  type PiariumWorkbenchSecondarySidebarViewsSlotProps,
+  type PiariumWorkbenchStatusItemsSlotProps,
 } from '@piarium/extension-contract';
 import { CommandPalette } from '@/components/ui/CommandPalette';
 import { HelpDialog } from '@/components/ui/HelpDialog';
@@ -748,7 +752,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                       <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
                     </Tooltip>
                   ))}
-                  <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.activityItems} />
+                  {workspaceId ? (
+                    <WorkbenchContributionSlot
+                      kind="view"
+                      slot={PIARIUM_WORKBENCH_SLOTS.activityItems}
+                      props={{ workspaceId } satisfies PiariumWorkbenchActivityItemsSlotProps}
+                    />
+                  ) : null}
                   <div className="mt-auto flex flex-col gap-1">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -784,7 +794,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   target={WORKBENCH_REPLACEMENT_TARGETS.primarySidebar}
                   fallback={(
                     <>
-                      <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews} />
+                      {workspaceId ? (
+                        <WorkbenchContributionSlot
+                          kind="view"
+                          slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews}
+                          props={{
+                            workspaceId,
+                            activeActivityId: layout.activity,
+                          } satisfies PiariumWorkbenchPrimarySidebarViewsSlotProps}
+                        />
+                      ) : null}
                       {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
                       {layout.activity === 'search' ? (
                         <IdeSearchPanel
@@ -834,43 +853,36 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             <main className="relative min-h-0 flex-1 overflow-hidden">
               <WorkbenchReplacement
                 target={WORKBENCH_REPLACEMENT_TARGETS.editor}
-                fallback={(
-                  <>
-                    {workspace.status === 'ready' ? (
-                      <EditorWorkbenchArea showPanel={false} />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-4 text-center typography-ui text-muted-foreground">
-                        {workspace.status === 'loading'
-                          ? t('common.loading')
-                          : workspace.status === 'error'
-                            ? t('common.unavailable')
-                            : t('workbench.ide.status.noWorkspace')}
-                      </div>
-                    )}
-                    {isMultiRunLauncherOpen ? (
-                      <div className="absolute inset-0 z-10 bg-background">
-                        <ErrorBoundary>
-                          <MultiRunLauncher
-                            isWindowed
-                            initialPrompt={multiRunLauncherPrefillPrompt}
-                            onCreated={() => setMultiRunLauncherOpen(false)}
-                            onCancel={() => setMultiRunLauncherOpen(false)}
-                          />
-                        </ErrorBoundary>
-                      </div>
-                    ) : null}
-                    <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
-                    <ErrorBoundary><ArchiveView /></ErrorBoundary>
-                    <ErrorBoundary><WorktreesView /></ErrorBoundary>
-                  </>
+                fallback={workspace.status === 'ready' ? (
+                  <EditorWorkbenchArea showPanel={false} />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-4 text-center typography-ui text-muted-foreground">
+                    {workspace.status === 'loading'
+                      ? t('common.loading')
+                      : workspace.status === 'error'
+                        ? t('common.unavailable')
+                        : t('workbench.ide.status.noWorkspace')}
+                  </div>
                 )}
               />
+              {isMultiRunLauncherOpen ? (
+                <div className="absolute inset-0 z-10 bg-background">
+                  <ErrorBoundary>
+                    <MultiRunLauncher
+                      isWindowed
+                      initialPrompt={multiRunLauncherPrefillPrompt}
+                      onCreated={() => setMultiRunLauncherOpen(false)}
+                      onCancel={() => setMultiRunLauncherOpen(false)}
+                    />
+                  </ErrorBoundary>
+                </div>
+              ) : null}
+              <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+              <ErrorBoundary><ArchiveView /></ErrorBoundary>
+              <ErrorBoundary><WorktreesView /></ErrorBoundary>
             </main>
-            {workspace.status === 'ready' ? (
-              <WorkbenchReplacement
-                target={WORKBENCH_REPLACEMENT_TARGETS.panel}
-                fallback={<WorkbenchPanelArea workspaceId={workspaceId ?? ''} directory={directory ?? ''} />}
-              />
+            {workspace.status === 'ready' && workspaceId && directory ? (
+              <WorkbenchPanelArea workspaceId={workspaceId} directory={directory} replaceable />
             ) : null}
           </div>
 
@@ -891,7 +903,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                     target={WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar}
                     fallback={(
                       <>
-                        <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
+                        {workspaceId ? (
+                          <WorkbenchContributionSlot
+                            kind="view"
+                            slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews}
+                            props={{ workspaceId } satisfies PiariumWorkbenchSecondarySidebarViewsSlotProps}
+                          />
+                        ) : null}
                         <div className="h-full min-h-0">
                           <ErrorBoundary>
                             <ChatView active />
@@ -929,7 +947,10 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden">
                         <ErrorBoundary>
-                          <PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />
+                          <WorkbenchReplacement
+                            target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+                            fallback={<PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />}
+                          />
                         </ErrorBoundary>
                       </div>
                     </div>
@@ -959,7 +980,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                     {t('workbench.panel.terminal')}
                   </Button>
                 ) : null}
-                <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.statusItems} />
+                {workspaceId ? (
+                  <WorkbenchContributionSlot
+                    kind="view"
+                    slot={PIARIUM_WORKBENCH_SLOTS.statusItems}
+                    props={{ workspaceId } satisfies PiariumWorkbenchStatusItemsSlotProps}
+                  />
+                ) : null}
               </>
             )}
           />

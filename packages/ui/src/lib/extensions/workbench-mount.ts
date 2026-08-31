@@ -2,7 +2,7 @@ import type { SurfaceContribution } from '@piarium/extension-surface';
 
 type MountDisposer = () => void | Promise<void>;
 
-interface WorkbenchMountContext<TProps extends object> {
+export interface WorkbenchMountContext<TProps extends object> {
   readonly contributionId: string;
   readonly owner: Readonly<SurfaceContribution['owner']>;
   readonly props: Readonly<TProps>;
@@ -32,18 +32,20 @@ export const startWorkbenchMountSession = <TProps extends object>(options: {
   onError(error: unknown, phase: WorkbenchMountFailurePhase): void;
   owner: SurfaceContribution['owner'];
   props: TProps;
+  context?: Readonly<Record<string, unknown>>;
 }): WorkbenchMountSession => {
   const controller = new AbortController();
   let disposer: MountDisposer | undefined;
   let disposal: Promise<void> | null = null;
   const mounted = Promise.resolve().then(async () => {
     const returned = await options.implementation.mount(options.container, {
+      ...(options.context ?? {}),
       contributionId: options.contributionId,
       owner: { ...options.owner },
       props: options.props,
       reportError: (error) => options.onError(error, 'render'),
       signal: controller.signal,
-    });
+    } as WorkbenchMountContext<TProps>);
     if (returned !== undefined && typeof returned !== 'function') {
       throw new TypeError(`Surface contribution ${options.contributionId} mount must return a disposer or undefined`);
     }

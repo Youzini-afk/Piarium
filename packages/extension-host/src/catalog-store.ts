@@ -39,6 +39,17 @@ interface LastValidCatalog {
   storageState: "missing" | "ready";
 }
 
+interface CatalogMutationRead {
+  document: PiariumExtensionCatalogDocument;
+  repaired?: boolean;
+  storageState: "missing" | "ready";
+}
+
+interface ParsedBuiltinDefinition {
+  definition: PiariumBuiltinExtensionDefinition;
+  manifest: PiariumExtensionManifest;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -181,6 +192,94 @@ function sameCapabilityGrants(
   return JSON.stringify(project(left)) === JSON.stringify(project(right));
 }
 
+function rawCapabilityGrantsMatch(
+  value: unknown,
+  expected: readonly PiariumExtensionCapabilityGrant[],
+): boolean {
+  if (!Array.isArray(value)) return false;
+  const parsed: PiariumExtensionCapabilityGrant[] = [];
+  for (const item of value) {
+    if (
+      !isRecord(item)
+      || typeof item.capability !== "string"
+      || typeof item.granted !== "boolean"
+      || typeof item.manifestVersion !== "string"
+      || (item.realm !== "host" && item.realm !== "surface")
+      || typeof item.updatedAt !== "string"
+    ) return false;
+    parsed.push({
+      capability: item.capability,
+      granted: item.granted,
+      manifestVersion: item.manifestVersion,
+      realm: item.realm,
+      updatedAt: item.updatedAt,
+    });
+  }
+  return sameCapabilityGrants(parsed, expected);
+}
+
+function repairKnownBuiltinRecords(
+  value: unknown,
+  manifests: readonly ParsedBuiltinDefinition[],
+  ownedPrefix: string,
+  now: string,
+): { changed: boolean; value: unknown } {
+  if (!isRecord(value) || !isRecord(value.extensions)) return { changed: false, value };
+
+  const extensions = { ...value.extensions };
+  const desiredIds = new Set(manifests.map(({ manifest }) => manifest.id));
+  let changed = false;
+
+  for (const [extensionId, rawRecord] of Object.entries(extensions)) {
+    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
+    if (
+      rawRecord.source.kind === "builtin"
+      && typeof rawRecord.source.specifier === "string"
+      && rawRecord.source.specifier.startsWith(ownedPrefix)
+      && !desiredIds.has(extensionId)
+    ) {
+      delete extensions[extensionId];
+      changed = true;
+    }
+  }
+
+  for (const { manifest } of manifests) {
+    const rawRecord = extensions[manifest.id];
+    if (!isRecord(rawRecord) || !isRecord(rawRecord.source)) continue;
+    if (rawRecord.source.kind !== "builtin" || rawRecord.source.specifier !== manifest.id) continue;
+
+    const nextRecord = structuredClone(rawRecord);
+    const manifestChanged = rawRecord.manifest === undefined
+      || canonicalJson(rawRecord.manifest) !== canonicalJson(manifest);
+    const artifactVersionChanged = rawRecord.resolvedVersion !== manifest.version
+      || rawRecord.selectedVersion !== manifest.version;
+    nextRecord.manifest = structuredClone(manifest);
+    nextRecord.resolvedVersion = manifest.version;
+    nextRecord.selectedVersion = manifest.version;
+    nextRecord.source = { display: "Piarium", kind: "builtin", specifier: manifest.id };
+    const desiredGrants = builtinCapabilityGrants(
+      manifest,
+      typeof rawRecord.updatedAt === "string" ? rawRecord.updatedAt : now,
+    );
+    if (!rawCapabilityGrantsMatch(rawRecord.capabilityGrants, desiredGrants)) {
+      nextRecord.capabilityGrants = desiredGrants;
+    }
+    delete nextRecord.candidate;
+    if (manifestChanged || artifactVersionChanged) {
+      delete nextRecord.integrity;
+      delete nextRecord.resolvedPath;
+    }
+    if (canonicalJson(rawRecord) === canonicalJson(nextRecord)) continue;
+    nextRecord.updatedAt = now;
+    extensions[manifest.id] = nextRecord;
+    changed = true;
+  }
+
+  return changed
+    ? { changed, value: { ...value, extensions } }
+    : { changed, value };
+}
+
 function capabilitiesReviewed(record: PiariumExtensionInstallationRecord): boolean {
   if (record.source.kind === "builtin") return true;
   const decided = new Set(record.capabilityGrants
@@ -304,7 +403,7 @@ export class ExtensionCatalogStore {
     definitions: readonly PiariumBuiltinExtensionDefinition[],
     ownedPrefix: string,
   ): Promise<CatalogReadState> {
-    const manifests = definitions.map((definition) => ({
+    const manifests: ParsedBuiltinDefinition[] = definitions.map((definition) => ({
       definition,
       manifest: parsePiariumExtensionManifest(definition.manifest),
     }));
@@ -367,7 +466,7 @@ export class ExtensionCatalogStore {
         changed = true;
       }
       return changed;
-    });
+    }, (now) => this.#readForBuiltinReconciliation(manifests, ownedPrefix, now));
   }
 
   selectBuiltinArtifact(candidate: PiariumExtensionPreparedArtifact): Promise<CatalogReadState> {
@@ -618,16 +717,18 @@ export class ExtensionCatalogStore {
 
   async #mutateCurrent(
     mutator: (document: PiariumExtensionCatalogDocument, now: string) => boolean,
+    reader: (now: string) => Promise<CatalogMutationRead> = () => this.#readStrictForMutation(),
   ): Promise<CatalogReadState> {
     return this.#serialize(async () => {
       await mkdir(this.directory, { mode: 0o700, recursive: true });
       await this.#readOrCreateIdentity();
       const release = await acquireLock(this.#lockPath);
       try {
-        const strictRead = await this.#readStrictForMutation();
-        const document = strictRead.document;
         const now = new Date().toISOString();
-        const changed = mutator(document, now);
+        const strictRead = await reader(now);
+        const document = strictRead.document;
+        const mutated = mutator(document, now);
+        const changed = strictRead.repaired === true || mutated;
         if (changed) {
           document.revision += 1;
           document.updatedAt = now;
@@ -697,6 +798,31 @@ export class ExtensionCatalogStore {
           ? "catalog_invalid"
           : "catalog_read_failed",
         "Cannot mutate an unreadable Piarium extension catalog",
+        { cause: error },
+      );
+    }
+  }
+
+  async #readForBuiltinReconciliation(
+    manifests: readonly ParsedBuiltinDefinition[],
+    ownedPrefix: string,
+    now: string,
+  ): Promise<CatalogMutationRead> {
+    try {
+      const raw = JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown;
+      const repaired = repairKnownBuiltinRecords(raw, manifests, ownedPrefix, now);
+      return {
+        document: parsePiariumExtensionCatalogDocument(repaired.value),
+        repaired: repaired.changed,
+        storageState: "ready",
+      };
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return { document: emptyDocument(), storageState: "missing" };
+      throw new ExtensionCatalogStorageError(
+        error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+          ? "catalog_invalid"
+          : "catalog_read_failed",
+        "Cannot reconcile built-ins in an unreadable Piarium extension catalog",
         { cause: error },
       );
     }
