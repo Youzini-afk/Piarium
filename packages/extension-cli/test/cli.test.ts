@@ -242,6 +242,7 @@ test("CLI output modes preserve validation and emit script-safe results", async 
   assert.deepEqual(JSON.parse(jsonLines[0] as string), {
     command: "check",
     extensionId: "dev.example.output",
+    incompatibleContributions: [],
     missingFiles: [],
     ok: true,
     referencedFiles: [],

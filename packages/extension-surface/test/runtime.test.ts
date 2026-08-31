@@ -303,3 +303,41 @@ test("layout references hide and reorder live contributions while preserving mis
   ]);
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["second", "first"]);
 });
+
+test("unsupported contract version contributions are registered but not visible", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.contribute(page("dev.example.alpha.v1", 0), "v1");
+    context.contribute({
+      id: "dev.example.alpha.v99",
+      kind: "settings-page",
+      contractVersion: 99,
+      supports: ["web"],
+      placement: { order: 10 },
+      data: {},
+    }, "v99");
+  });
+  const snapshot = runtime.getSnapshot();
+  // Both contributions are registered
+  assert.equal(snapshot.contributions.length, 2);
+  // Only the compatible v1 contribution is visible
+  assert.deepEqual(snapshot.visibleContributions.map((item) => item.implementation), ["v1"]);
+});
+
+test("same extension can have compatible and incompatible contributions simultaneously", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.contribute(page("dev.example.alpha.view", 0), "view-impl");
+    context.contribute({
+      id: "dev.example.alpha.future",
+      kind: "view",
+      contractVersion: 2,
+      supports: ["web"],
+      data: {},
+    }, "future-impl");
+  });
+  const snapshot = runtime.getSnapshot();
+  assert.equal(snapshot.contributions.length, 2);
+  assert.equal(snapshot.visibleContributions.length, 1);
+  assert.equal(snapshot.visibleContributions[0].descriptor.id, "dev.example.alpha.view");
+});

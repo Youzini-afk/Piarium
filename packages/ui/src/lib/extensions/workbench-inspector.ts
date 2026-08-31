@@ -10,6 +10,7 @@ import {
   PIARIUM_LANGUAGE_SERVICE_ID,
   PIARIUM_TASKS_SERVICE_ID,
   PIARIUM_TEST_SERVICE_ID,
+  checkPiariumContributionCompatibility,
   parsePiariumWorkbenchShellContributionData,
   resolvePiariumWorkbenchShellSurfaceSeams,
 } from '@piarium/extension-contract';
@@ -21,17 +22,28 @@ type WorkbenchInspectorContribution = {
   live: boolean;
   placement?: string;
   replacement?: string;
+  contractCompatibility?: 'supported' | 'unsupported-contract-version';
+  contractVersion?: number;
+  supportedVersions?: number[];
 };
 
 export const describeWorkbenchContributionPlacement = (
-  contribution: Pick<PiariumExtensionStaticContribution, 'id' | 'kind' | 'placement' | 'replacement'>,
-): Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement'> => {
-  const next: Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement'> = {
+  contribution: Pick<PiariumExtensionStaticContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractVersion'>,
+): Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractCompatibility' | 'contractVersion' | 'supportedVersions'> => {
+  const next: Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractCompatibility' | 'contractVersion' | 'supportedVersions'> = {
     id: contribution.id,
     kind: contribution.kind,
   };
   if (contribution.placement?.slot) next.placement = contribution.placement.slot;
   if (contribution.replacement?.target) next.replacement = contribution.replacement.target;
+  const compatibility = checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion);
+  next.contractVersion = contribution.contractVersion;
+  if (compatibility.status === 'supported') {
+    next.contractCompatibility = 'supported';
+  } else {
+    next.contractCompatibility = 'unsupported-contract-version';
+    next.supportedVersions = compatibility.supportedVersions;
+  }
   return next;
 };
 

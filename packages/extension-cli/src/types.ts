@@ -36,6 +36,12 @@ export interface CheckResult {
   project: LoadedExtensionProject;
   referencedFiles: string[];
   missingFiles: string[];
+  incompatibleContributions: Array<{
+    id: string;
+    kind: string;
+    contractVersion: number;
+    supportedVersions: number[];
+  }>;
 }
 
 export interface BuildOutput {

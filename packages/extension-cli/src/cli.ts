@@ -122,11 +122,20 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
       if (result.missingFiles.length > 0) {
         throw new Error(`Manifest is valid, but referenced entrypoint files are missing: ${result.missingFiles.join(", ")}. Run piarium-extension build to create them.`);
       }
+      const incompatibleLines = result.incompatibleContributions.map((item) => (
+        `  ${item.kind} contractVersion ${item.contractVersion} is not supported (supported: ${item.supportedVersions.join(", ")})`
+      ));
       cliOutput.success({
-        human: [`OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`],
+        human: [
+          `OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`,
+          ...(incompatibleLines.length > 0
+            ? ["Incompatible contribution versions (parsed but not executable):", ...incompatibleLines]
+            : []),
+        ],
         json: {
           command: "check",
           extensionId: result.project.manifest.id,
+          incompatibleContributions: result.incompatibleContributions,
           missingFiles: result.missingFiles,
           referencedFiles: result.referencedFiles,
           version: result.project.manifest.version,

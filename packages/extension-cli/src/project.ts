@@ -2,6 +2,7 @@ import { access, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
   PIARIUM_EXTENSION_MANIFEST_FILE,
+  checkPiariumContributionCompatibility,
   parsePiariumExtensionManifest,
   type PiariumExtensionManifest,
 } from "@piarium/extension-contract";
@@ -124,7 +125,18 @@ export const checkProject = async (directory = "."): Promise<CheckResult> => {
       else throw error;
     }
   }
-  return { project, referencedFiles: referenced.map((entrypoint) => entrypoint.file), missingFiles };
+  const incompatibleContributions = (project.manifest.contributions ?? [])
+    .map((contribution) => checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion))
+    .filter((result): result is Extract<typeof result, { status: "unsupported-contract-version" }> => (
+      result.status === "unsupported-contract-version"
+    ))
+    .map((result) => ({
+      id: `${result.kind}@${result.contractVersion}`,
+      kind: result.kind,
+      contractVersion: result.contractVersion,
+      supportedVersions: result.supportedVersions,
+    }));
+  return { project, referencedFiles: referenced.map((entrypoint) => entrypoint.file), missingFiles, incompatibleContributions };
 };
 
 export const formatContractError = (error: unknown): string[] => {

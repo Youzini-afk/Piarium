@@ -54,17 +54,32 @@ describe('workbench inspector summaries', () => {
     expect(describeWorkbenchContributionPlacement({
       id: 'dev.example.view',
       kind: 'view',
+      contractVersion: 1,
       placement: { slot: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, order: 10 },
     })).toEqual({
       id: 'dev.example.view',
       kind: 'view',
+      contractVersion: 1,
+      contractCompatibility: 'supported',
       placement: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews,
     });
     expect(describeWorkbenchContributionPlacement({
       id: 'dev.example.shell',
       kind: 'shell',
+      contractVersion: 1,
       replacement: { target: 'workbench.shell' },
     }).replacement).toBe('workbench.shell');
+  });
+
+  test('describe contribution placement reports unsupported contract version', () => {
+    const result = describeWorkbenchContributionPlacement({
+      id: 'dev.example.future',
+      kind: 'view',
+      contractVersion: 99,
+    });
+    expect(result.contractCompatibility).toBe('unsupported-contract-version');
+    expect(result.contractVersion).toBe(99);
+    expect(result.supportedVersions).toEqual([1]);
   });
 
   test('identifies document and language owners from public service and capability ids', () => {

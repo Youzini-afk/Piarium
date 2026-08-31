@@ -1,6 +1,7 @@
 import {
   parsePiariumExtensionManifest,
   isPiariumExtensionId,
+  isPiariumContributionCompatible,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
   type PiariumExtensionDiagnostic,
@@ -164,6 +165,10 @@ function selectVisibleContributions(
   const replacements = new Map<string, SurfaceContribution[]>();
   for (const contribution of contributions) {
     if (layoutReferences.get(contribution.descriptor.id)?.visible === false) continue;
+    // Exclude contributions whose contract version is not compatible with
+    // the current runtime. They remain in the registry (catalog retains
+    // the record) but are not visible or activatable.
+    if (!isPiariumContributionCompatible(contribution.descriptor.kind, contribution.descriptor.contractVersion)) continue;
     const target = contribution.descriptor.replacement?.target;
     if (!target) additive.push(contribution);
     else {

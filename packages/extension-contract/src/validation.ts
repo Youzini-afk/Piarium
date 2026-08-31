@@ -65,6 +65,9 @@ import {
   parsePiariumExtensionServiceRoutingContext,
   parsePiariumExtensionServiceRoutingSnapshot,
 } from "./service-routing.js";
+import {
+  isPiariumContributionCompatible,
+} from "./compatibility.js";
 import semver from "semver";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -363,7 +366,22 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
     if (!kind || !CONTRIBUTION_KINDS.has(kind as PiariumExtensionContributionKind)) issues.push(`${itemPath}.kind is unsupported`);
     const data = isRecord(raw.data) ? jsonValue(raw.data, `${itemPath}.data`, issues) as JsonObject : {};
     if (!isRecord(raw.data)) issues.push(`${itemPath}.data must be an object`);
-    if (kind === "editor") {
+    const contractVersion = positiveRevision(raw.contractVersion, `${itemPath}.contractVersion`, issues);
+    const rawSupports = uniqueStrings(raw.supports, `${itemPath}.supports`, issues);
+    const supports: PiariumApplicationSurface[] = [];
+    for (const surface of rawSupports) {
+      if (!SURFACES.has(surface as PiariumApplicationSurface)) issues.push(`${itemPath}.supports contains unsupported surface ${surface}`);
+      else supports.push(surface as PiariumApplicationSurface);
+    }
+    if (supports.length === 0) issues.push(`${itemPath}.supports must contain at least one surface`);
+    // Only validate kind-specific data for contributions whose contract
+    // version is compatible with the current runtime. Unsupported versions
+    // are still parsed (structure, id, kind, supports) so the catalog can
+    // retain the record, but their data payload is not validated.
+    const kindKnown = kind !== undefined && CONTRIBUTION_KINDS.has(kind as PiariumExtensionContributionKind);
+    const versionCompatible = kindKnown
+      && isPiariumContributionCompatible(kind as PiariumExtensionContributionKind, contractVersion);
+    if (versionCompatible && kind === "editor") {
       const languageIds = data.languageIds === undefined
         ? []
         : uniqueStrings(data.languageIds, `${itemPath}.data.languageIds`, issues);
@@ -377,7 +395,7 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
         issues.push(`${itemPath}.data.priority must be finite`);
       }
     }
-    if (kind === "transition-scene") {
+    if (versionCompatible && kind === "transition-scene") {
       try {
         parsePiariumTransitionSceneContributionData(data);
       } catch (error) {
@@ -388,15 +406,7 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
         }
       }
     }
-    const contractVersion = positiveRevision(raw.contractVersion, `${itemPath}.contractVersion`, issues);
-    const rawSupports = uniqueStrings(raw.supports, `${itemPath}.supports`, issues);
-    const supports: PiariumApplicationSurface[] = [];
-    for (const surface of rawSupports) {
-      if (!SURFACES.has(surface as PiariumApplicationSurface)) issues.push(`${itemPath}.supports contains unsupported surface ${surface}`);
-      else supports.push(surface as PiariumApplicationSurface);
-    }
-    if (supports.length === 0) issues.push(`${itemPath}.supports must contain at least one surface`);
-    if (kind === "shell") {
+    if (versionCompatible && kind === "shell") {
       try {
         parsePiariumWorkbenchShellContributionData(raw.data, supports);
       } catch (error) {
