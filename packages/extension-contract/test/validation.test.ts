@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import semver from "semver";
 import * as Ajv2020Module from "ajv/dist/2020.js";
 import {
   PiariumExtensionContractError,
@@ -344,7 +345,7 @@ test("published JSON Schema and runtime parser agree on shell seam fixtures", as
   const validateSchema = new Ajv2020({
     allErrors: true,
     strict: false,
-    formats: { "semver-range": true },
+    formats: { "semver-range": (input: string) => semver.validRange(input) !== null },
   }).compile(schema);
   type ShellSeams = { replacementTargets: string[]; slots: string[] };
   type MutableShellManifest = Record<string, unknown> & {

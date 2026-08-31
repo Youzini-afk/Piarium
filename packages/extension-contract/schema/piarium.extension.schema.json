@@ -49,6 +49,13 @@
               {
                 "if": { "properties": { "mode": { "const": "isolated" } }, "required": ["mode"] },
                 "else": { "not": { "required": ["isolation"] } }
+              },
+              {
+                "if": {
+                  "properties": { "mode": { "enum": ["managed", "isolated", "native"] } },
+                  "required": ["mode"]
+                },
+                "then": { "required": ["file"] }
               }
             ]
           }
