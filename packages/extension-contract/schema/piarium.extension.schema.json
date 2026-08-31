@@ -156,7 +156,7 @@
             "items": { "$ref": "#/$defs/surface" }
           },
           "title": { "$ref": "#/$defs/text" },
-          "when": { "$ref": "#/$defs/text" },
+          "when": { "$ref": "#/$defs/contextExpression" },
           "requiresCapabilities": { "$ref": "#/$defs/idList" },
           "placement": {
             "type": "object",
@@ -383,6 +383,50 @@
       }
     },
     "surface": { "enum": ["desktop", "mobile", "vscode", "web"] },
-    "text": { "type": "string", "minLength": 1 }
+    "text": { "type": "string", "minLength": 1 },
+    "contextExpression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "key"],
+          "properties": {
+            "op": { "const": "defined" },
+            "key": { "$ref": "#/$defs/text" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "key", "value"],
+          "properties": {
+            "op": { "const": "equals" },
+            "key": { "$ref": "#/$defs/text" },
+            "value": { "type": ["string", "number", "boolean"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "expression"],
+          "properties": {
+            "op": { "const": "not" },
+            "expression": { "$ref": "#/$defs/contextExpression" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "expressions"],
+          "properties": {
+            "op": { "enum": ["all", "any"] },
+            "expressions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/contextExpression" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
   }
 }

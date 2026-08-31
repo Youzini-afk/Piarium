@@ -339,5 +339,76 @@ test("same extension can have compatible and incompatible contributions simultan
   const snapshot = runtime.getSnapshot();
   assert.equal(snapshot.contributions.length, 2);
   assert.equal(snapshot.visibleContributions.length, 1);
-  assert.equal(snapshot.visibleContributions[0].descriptor.id, "dev.example.alpha.view");
+  assert.equal(snapshot.visibleContributions[0]?.descriptor.id, "dev.example.alpha.view");
+});
+
+test("when expression hides contributions when context is false and shows when true", async () => {
+  const contextKeys = new Map<string, string | number | boolean>();
+  const listeners = new Set<() => void>();
+  const contextProvider = {
+    getContext: () => contextKeys,
+    subscribe: (_keys: readonly string[], listener: () => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+  const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.contribute({
+      id: "dev.example.alpha.conditional",
+      kind: "view",
+      contractVersion: 1,
+      supports: ["web"],
+      data: {},
+      when: { op: "defined", key: "editorIsOpen" },
+    }, "conditional");
+    context.contribute(page("dev.example.alpha.always", 0), "always");
+  });
+  // When editorIsOpen is not set, conditional is hidden
+  assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["always"]);
+  // When editorIsOpen is true, conditional is visible
+  contextKeys.set("editorIsOpen", true);
+  for (const listener of listeners) listener();
+  // Trigger re-publish by setting layout references (which calls #publish)
+  runtime.setLayoutReferences([]);
+  assert.deepEqual(
+    runtime.getSnapshot().visibleContributions.map((item) => item.implementation).sort(),
+    ["always", "conditional"],
+  );
+});
+
+test("when expression false preserves replacement selection and falls back", async () => {
+  const contextKeys = new Map<string, string | number | boolean>();
+  const contextProvider = {
+    getContext: () => contextKeys,
+    subscribe: (_keys: readonly string[], listener: () => void) => {
+      return () => { listener; };
+    },
+  };
+  const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.contribute({
+      id: "dev.example.alpha.primary",
+      kind: "view",
+      contractVersion: 1,
+      supports: ["web"],
+      data: { fallback: true },
+      replacement: { target: "workbench.sidebar" },
+    }, "primary");
+    context.contribute({
+      id: "dev.example.alpha.conditional",
+      kind: "view",
+      contractVersion: 1,
+      supports: ["web"],
+      data: {},
+      replacement: { target: "workbench.sidebar" },
+      when: { op: "defined", key: "editorIsOpen" },
+    }, "conditional");
+  });
+  // Select the conditional replacement
+  runtime.setReplacementSelection("workbench.sidebar", "dev.example.alpha.conditional");
+  // When editorIsOpen is not set, conditional is hidden; fallback should show
+  assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["primary"]);
+  // Selection is preserved even though conditional is hidden
+  assert.equal(runtime.getSnapshot().replacementSelections["workbench.sidebar"], "dev.example.alpha.conditional");
 });

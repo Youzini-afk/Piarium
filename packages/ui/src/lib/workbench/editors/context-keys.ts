@@ -1,3 +1,5 @@
+import { evaluatePiariumContextExpression, type PiariumContextExpressionV1 } from '@piarium/extension-contract';
+
 const keys = new Map<string, string | boolean | number>();
 const listenersByKey = new Map<string, Set<() => void>>();
 
@@ -41,4 +43,13 @@ export const subscribeWorkbenchContextKey = (key: string, listener: () => void):
 
 export const whenWorkbenchContext = (expression: Record<string, string | boolean | number>): boolean => (
   Object.entries(expression).every(([key, value]) => keys.get(key) === value)
+);
+
+/**
+ * Evaluate a structured PiariumContextExpressionV1 against the workbench
+ * context key store. This is the structured-expression counterpart to
+ * whenWorkbenchContext, used by extension contribution visibility projection.
+ */
+export const evaluateWorkbenchContextExpression = (expression: PiariumContextExpressionV1): boolean => (
+  evaluatePiariumContextExpression(expression, keys as ReadonlyMap<string, string | number | boolean>)
 );

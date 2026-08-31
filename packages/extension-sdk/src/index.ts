@@ -381,6 +381,8 @@ export {
 } from "@piarium/extension-contract";
 
 export type {
+  PiariumContextExpressionV1,
+  PiariumContextValue,
   PiariumEditorDocumentApplyEditsResult,
   PiariumEditorDocumentController,
   PiariumEditorDocumentEdit,

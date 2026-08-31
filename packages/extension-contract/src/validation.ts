@@ -68,6 +68,10 @@ import {
 import {
   isPiariumContributionCompatible,
 } from "./compatibility.js";
+import {
+  parsePiariumContextExpression,
+  PiariumContextExpressionError,
+} from "./context-expression.js";
 import semver from "semver";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -463,7 +467,24 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
       ...(placement ? { placement } : {}),
       ...(replacement ? { replacement } : {}),
       ...(text(raw.title) ? { title: text(raw.title) as string } : {}),
-      ...(text(raw.when) ? { when: text(raw.when) as string } : {}),
+      ...(raw.when !== undefined ? (() => {
+        // Shell and transition-scene cannot use `when` — context changes
+        // would bypass Profile stage-and-commit and Recovery invariants.
+        if (kind === "shell" || kind === "transition-scene") {
+          issues.push(`${itemPath}.when is not allowed for shell or transition-scene contributions`);
+          return {};
+        }
+        try {
+          const parsed = parsePiariumContextExpression(raw.when);
+          return { when: parsed };
+        } catch (error) {
+          if (error instanceof PiariumContextExpressionError) {
+            issues.push(...error.issues.map((issue) => `${itemPath}.${issue}`));
+            return {};
+          }
+          throw error;
+        }
+      })() : {}),
     });
   });
   return result;

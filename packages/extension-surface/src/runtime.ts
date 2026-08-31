@@ -2,6 +2,7 @@ import {
   parsePiariumExtensionManifest,
   isPiariumExtensionId,
   isPiariumContributionCompatible,
+  evaluatePiariumContextExpression,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
   type PiariumExtensionDiagnostic,
@@ -17,6 +18,7 @@ import type {
   SurfaceActivationContext,
   SurfaceActivationOptions,
   SurfaceContribution,
+  SurfaceContextProvider,
   SurfaceExternalService,
   SurfaceExtensionRuntimeOptions,
   SurfaceLayoutReference,
@@ -160,15 +162,23 @@ function selectVisibleContributions(
   contributions: SurfaceContribution[],
   replacementSelections: ReadonlyMap<string, string>,
   layoutReferences: ReadonlyMap<string, SurfaceLayoutReference>,
+  contextProvider?: SurfaceContextProvider,
 ): SurfaceContribution[] {
   const additive: SurfaceContribution[] = [];
   const replacements = new Map<string, SurfaceContribution[]>();
+  const context = contextProvider?.getContext();
   for (const contribution of contributions) {
     if (layoutReferences.get(contribution.descriptor.id)?.visible === false) continue;
     // Exclude contributions whose contract version is not compatible with
     // the current runtime. They remain in the registry (catalog retains
     // the record) but are not visible or activatable.
     if (!isPiariumContributionCompatible(contribution.descriptor.kind, contribution.descriptor.contractVersion)) continue;
+    // Evaluate `when` context expression if present and a context provider
+    // is available. When false, the contribution is hidden but its
+    // registration and replacement selection are preserved.
+    if (contribution.descriptor.when && context) {
+      if (!evaluatePiariumContextExpression(contribution.descriptor.when, context)) continue;
+    }
     const target = contribution.descriptor.replacement?.target;
     if (!target) additive.push(contribution);
     else {
@@ -255,8 +265,11 @@ export class SurfaceExtensionRuntime {
     visibleContributions: [],
   };
 
+  readonly #contextProvider: SurfaceContextProvider | undefined;
+
   constructor(options: SurfaceExtensionRuntimeOptions) {
     this.surface = options.surface;
+    this.#contextProvider = options.contextProvider;
   }
 
   getSnapshot = (): SurfaceRegistrySnapshot => this.#snapshot;
@@ -684,6 +697,7 @@ export class SurfaceExtensionRuntime {
       contributions,
       this.#replacementSelections,
       this.#layoutReferences,
+      this.#contextProvider,
     );
     this.#snapshot = {
       actual: [...this.#actual.values()].map((state) => ({ ...state, diagnostics: [...state.diagnostics] })),

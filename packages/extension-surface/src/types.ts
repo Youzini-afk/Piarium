@@ -1,5 +1,7 @@
 import type {
   PiariumApplicationSurface,
+  PiariumContextExpressionV1,
+  PiariumContextValue,
   PiariumExtensionActualState,
   PiariumExtensionServiceProvision,
   PiariumExtensionServiceRequirement,
@@ -92,4 +94,21 @@ export interface SurfaceOwnerHandle {
 
 export interface SurfaceExtensionRuntimeOptions {
   surface: PiariumApplicationSurface;
+  /**
+   * Optional provider for evaluating `when` context expressions on
+   * contributions. When provided, contributions whose `when` expression
+   * evaluates to false are excluded from visibleContributions (but remain
+   * in the registry). When not provided, `when` expressions are ignored
+   * (all compatible contributions are visible).
+   */
+  contextProvider?: SurfaceContextProvider;
+}
+
+/**
+ * Provides context key values for evaluating contribution `when` expressions.
+ * The Surface runtime calls this during visibility projection.
+ */
+export interface SurfaceContextProvider {
+  getContext(): ReadonlyMap<string, PiariumContextValue>;
+  subscribe(keys: readonly string[], listener: () => void): () => void;
 }

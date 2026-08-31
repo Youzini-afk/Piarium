@@ -8,6 +8,14 @@ export type JsonObject = { [key: string]: JsonValue };
 
 export type PiariumApplicationSurface = "desktop" | "mobile" | "vscode" | "web";
 export type PiariumExtensionHostMode = "brokered" | "native";
+
+export type PiariumContextValue = string | number | boolean;
+
+export type PiariumContextExpressionV1 =
+  | { op: "defined"; key: string }
+  | { op: "equals"; key: string; value: PiariumContextValue }
+  | { op: "not"; expression: PiariumContextExpressionV1 }
+  | { op: "all" | "any"; expressions: PiariumContextExpressionV1[] };
 export type PiariumExtensionSurfaceMode = "declarative" | "isolated" | "managed" | "native";
 export type PiariumExtensionIsolationKind = "iframe" | "worker";
 export type PiariumExtensionActivationEvent =
@@ -89,7 +97,7 @@ export interface PiariumExtensionStaticContribution {
   requiresCapabilities?: string[];
   supports: PiariumApplicationSurface[];
   title?: string;
-  when?: string;
+  when?: PiariumContextExpressionV1;
 }
 
 export interface PiariumExtensionManifest {
