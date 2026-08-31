@@ -1,10 +1,15 @@
 import {
   SurfaceExtensionRuntime,
   type SurfaceActivation,
+  type SurfaceContextProvider,
   type SurfaceOwnerHandle,
 } from '@piarium/extension-surface';
-import type { PiariumApplicationSurface } from '@piarium/extension-contract';
+import type { PiariumApplicationSurface, PiariumContextValue } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import {
+  getWorkbenchContextKeyStore,
+  subscribeWorkbenchContextKey,
+} from '@/lib/workbench/editors/context-keys';
 
 const FALLBACK_HOST_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -22,7 +27,24 @@ const newRealmId = (): string => {
   return `surface-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
-export const piariumSurfaceRuntime = new SurfaceExtensionRuntime({ surface: readSurface() });
+/**
+ * Adapter that exposes the workbench context key store as a
+ * SurfaceContextProvider for `when` expression evaluation.
+ */
+const workbenchContextProvider: SurfaceContextProvider = {
+  getContext(): ReadonlyMap<string, PiariumContextValue> {
+    return getWorkbenchContextKeyStore() as ReadonlyMap<string, PiariumContextValue>;
+  },
+  subscribe(keys: readonly string[], listener: () => void): () => void {
+    const unsubscribers = keys.map((key) => subscribeWorkbenchContextKey(key, listener));
+    return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
+  },
+};
+
+export const piariumSurfaceRuntime = new SurfaceExtensionRuntime({
+  surface: readSurface(),
+  contextProvider: workbenchContextProvider,
+});
 
 let hostIdPromise: Promise<string> | null = null;
 

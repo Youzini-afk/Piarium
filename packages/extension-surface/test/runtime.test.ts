@@ -368,9 +368,8 @@ test("when expression hides contributions when context is false and shows when t
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["always"]);
   // When editorIsOpen is true, conditional is visible
   contextKeys.set("editorIsOpen", true);
+  // The runtime subscribes to context key changes and re-publishes automatically
   for (const listener of listeners) listener();
-  // Trigger re-publish by setting layout references (which calls #publish)
-  runtime.setLayoutReferences([]);
   assert.deepEqual(
     runtime.getSnapshot().visibleContributions.map((item) => item.implementation).sort(),
     ["always", "conditional"],

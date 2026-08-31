@@ -11,6 +11,12 @@ export const setWorkbenchContextKey = (key: string, value: string | boolean | nu
 
 export const getWorkbenchContextKey = (key: string): string | boolean | number | undefined => keys.get(key);
 
+/**
+ * Return a read-only view of the entire context key store.
+ * Used by the Surface runtime to evaluate `when` expressions.
+ */
+export const getWorkbenchContextKeyStore = (): ReadonlyMap<string, string | boolean | number> => keys;
+
 export const clearWorkbenchContextKeys = (prefix?: string): void => {
   const removed: string[] = [];
   if (!prefix) {

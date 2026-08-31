@@ -3,6 +3,7 @@ import {
   isPiariumExtensionId,
   isPiariumContributionCompatible,
   evaluatePiariumContextExpression,
+  collectPiariumContextExpressionKeys,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
   type PiariumExtensionDiagnostic,
@@ -266,6 +267,8 @@ export class SurfaceExtensionRuntime {
   };
 
   readonly #contextProvider: SurfaceContextProvider | undefined;
+  #contextUnsubscribe: (() => void) | undefined;
+  #contextSubscribedKeys: ReadonlySet<string> = new Set();
 
   constructor(options: SurfaceExtensionRuntimeOptions) {
     this.surface = options.surface;
@@ -709,7 +712,32 @@ export class SurfaceExtensionRuntime {
       services: [...services],
       visibleContributions,
     };
+    this.#syncContextSubscription(contributions);
     for (const listener of this.#listeners) listener();
+  }
+
+  /**
+   * Subscribe to context key changes for all `when` expressions referenced by
+   * active contributions. When any referenced key changes, re-publish so
+   * visibleContributions reflects the new context state.
+   */
+  #syncContextSubscription(contributions: readonly SurfaceContribution[]): void {
+    if (!this.#contextProvider) return;
+    const keys = new Set<string>();
+    for (const contribution of contributions) {
+      if (contribution.descriptor.when) {
+        for (const key of collectPiariumContextExpressionKeys(contribution.descriptor.when)) keys.add(key);
+      }
+    }
+    // Only resubscribe if the key set actually changed
+    if (keys.size === this.#contextSubscribedKeys.size && [...keys].every((k) => this.#contextSubscribedKeys.has(k))) return;
+    this.#contextUnsubscribe?.();
+    this.#contextUnsubscribe = undefined;
+    this.#contextSubscribedKeys = keys;
+    if (keys.size === 0) return;
+    this.#contextUnsubscribe = this.#contextProvider.subscribe([...keys], () => {
+      this.#publish();
+    });
   }
 
   #enqueue<T>(_extensionId: string, operation: () => Promise<T>): Promise<T> {
