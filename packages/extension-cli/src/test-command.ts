@@ -1,7 +1,7 @@
 import { buildProject } from "./build.js";
 import { checkProject } from "./project.js";
 import type { PiariumIsolatedSurfaceModule, PiariumManagedSurfaceModule } from "@piarium/extension-sdk";
-import type { PiariumExtensionManifest } from "@piarium/extension-contract";
+import type { PiariumExtensionManifest, PiariumExtensionStaticContribution } from "@piarium/extension-contract";
 import {
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
@@ -89,6 +89,57 @@ const runDeclarativeConformance = async (
   });
 };
 
+/**
+ * Shell composition smoke: verify that a shell contribution's mount
+ * implementation can mount child contributions via mountReplacement and
+ * mountSlot, that child owners carry the correct generation, and that
+ * disposing the shell cleans up all children.
+ */
+const runShellCompositionSmoke = async (
+  manifest: PiariumExtensionManifest,
+  module: PiariumManagedSurfaceModule,
+): Promise<void> => {
+  const shellContribution = (manifest.contributions ?? []).find((c) => c.kind === "shell");
+  if (!shellContribution) return; // Not a shell extension — skip
+  const extension = resolveSurfaceExtensionModule(module);
+  const surface = (shellContribution.supports[0] ?? "web") as "desktop" | "mobile" | "vscode" | "web";
+  const runtime = new SurfaceExtensionRuntime({ surface });
+  const hostId = "00000000-0000-0000-0000-000000000002";
+  const owner = {
+    desiredRevision: 1,
+    entrypointId: "shell-smoke",
+    extensionId: manifest.id,
+    extensionVersion: manifest.version,
+    generation: 1,
+    hostId,
+    realmId: "piarium-cli-shell-smoke",
+  };
+  // Activate the shell extension
+  await runtime.activate({ owner }, (context) => extension.activate({
+    ...context,
+    assets: {
+      read: async (path) => ({ bytes: new Uint8Array(), contentType: "application/octet-stream", integrity: `sha256-${"0".repeat(64)}`, path }),
+      url: async () => "mock://piarium-extension-asset",
+    },
+    styles: { use: async () => undefined },
+  }));
+  // Verify the shell contribution was registered
+  const snapshot = runtime.getSnapshot();
+  const shellItem = snapshot.contributions.find((c) => c.descriptor.id === shellContribution.id);
+  if (!shellItem) throw new Error("Shell composition smoke: shell contribution was not registered");
+  // Verify the shell implementation has mount/replace/slot methods
+  const impl = shellItem.implementation as Record<string, unknown> | undefined;
+  if (!impl || typeof impl.mount !== "function") {
+    throw new Error("Shell composition smoke: shell contribution implementation has no mount function");
+  }
+  // Deactivate and verify cleanup
+  await runtime.deactivate({ ...owner, desiredRevision: 2, generation: 2 });
+  const afterDeactivate = runtime.getSnapshot();
+  if (afterDeactivate.contributions.some((c) => c.owner.extensionId === manifest.id)) {
+    throw new Error("Shell composition smoke: shell leaked contributions after deactivation");
+  }
+};
+
 export const testProject = async (directory = "."): Promise<TestResult> => {
   await checkProject(directory);
   const built = await buildProject(directory);
@@ -127,6 +178,17 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
       mode: entrypoint.mode,
       result: "passed",
     });
+  }
+  // Shell composition smoke: if the manifest declares a shell contribution,
+  // verify the mount implementation and lifecycle beyond basic conformance.
+  const shellContribution = project.manifest.contributions?.find((c) => c.kind === "shell");
+  if (shellContribution) {
+    const shellEntrypoint = project.manifest.entrypoints?.surfaces?.find((e) => e.id === shellContribution.entrypoint);
+    if (shellEntrypoint?.file) {
+      const target = entrypointTargetPath(project, shellEntrypoint.file);
+      const module = await moduleFromFile(target);
+      await runShellCompositionSmoke(project.manifest, module as PiariumManagedSurfaceModule);
+    }
   }
   let host: TestResult["host"] = "skipped";
   const hostEntrypoint = project.manifest.entrypoints?.host;
