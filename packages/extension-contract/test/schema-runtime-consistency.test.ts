@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Ajv2020Ctor = Ajv2020 as any;
 import semver from "semver";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -13,7 +15,7 @@ const schemaPath = join(__dirname, "..", "schema", "piarium.extension.schema.jso
 const schema = JSON.parse(await readFile(schemaPath, "utf8")) as object;
 
 // Register a real semver-range format validator instead of the always-true stub.
-const validateSchema = new Ajv2020({
+const validateSchema = new Ajv2020Ctor({
   allErrors: true,
   strict: false,
   formats: {

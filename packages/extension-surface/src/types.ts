@@ -1,6 +1,5 @@
 import type {
   PiariumApplicationSurface,
-  PiariumContextExpressionV1,
   PiariumContextValue,
   PiariumExtensionActualState,
   PiariumExtensionServiceProvision,

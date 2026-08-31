@@ -167,7 +167,7 @@ test("parsePiariumExtensionManifest accepts structured when on view", () => {
     }],
   };
   const parsed = parsePiariumExtensionManifest(manifest);
-  assert.deepEqual(parsed.contributions?.[0].when, { op: "defined", key: "editorIsOpen" });
+  assert.deepEqual(parsed.contributions![0]!.when, { op: "defined", key: "editorIsOpen" });
 });
 
 test("parsePiariumExtensionManifest rejects when on shell", () => {

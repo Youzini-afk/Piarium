@@ -8,7 +8,13 @@ import {
   PiariumExtensionContractError,
 } from "../src/index.js";
 
-const manifest = () => ({
+const manifest = (): {
+  schemaVersion: number;
+  id: string;
+  version: string;
+  engines: { piarium: string };
+  contributions: Array<Record<string, unknown>>;
+} => ({
   schemaVersion: 1,
   id: "dev.example.compat",
   version: "1.0.0",
@@ -16,10 +22,10 @@ const manifest = () => ({
   contributions: [
     {
       id: "dev.example.compat.view",
-      kind: "view" as const,
+      kind: "view",
       contractVersion: 1,
       data: {},
-      supports: ["web" as const],
+      supports: ["web"],
     },
   ],
 });
@@ -54,15 +60,15 @@ test("all contribution kinds have v1 in supported versions", () => {
 
 test("parsePiariumExtensionManifest accepts contractVersion 1", () => {
   const parsed = parsePiariumExtensionManifest(manifest());
-  assert.equal(parsed.contributions?.[0].contractVersion, 1);
+  assert.equal(parsed.contributions![0]!.contractVersion, 1);
 });
 
 test("parsePiariumExtensionManifest parses higher contractVersion without throwing", () => {
   const m = manifest();
   (m.contributions![0] as { contractVersion: number }).contractVersion = 99;
-  // Should not throw — the manifest is structurally valid, just incompatible
+  // Should not throw �?the manifest is structurally valid, just incompatible
   const parsed = parsePiariumExtensionManifest(m);
-  assert.equal(parsed.contributions?.[0].contractVersion, 99);
+  assert.equal(parsed.contributions![0]!.contractVersion, 99);
 });
 
 test("parsePiariumExtensionManifest skips kind-specific data validation for unsupported version", () => {
@@ -78,7 +84,7 @@ test("parsePiariumExtensionManifest skips kind-specific data validation for unsu
     supports: ["web"],
   };
   const parsed = parsePiariumExtensionManifest(m);
-  assert.equal(parsed.contributions?.[0].contractVersion, 2);
+  assert.equal(parsed.contributions![0]!.contractVersion, 2);
 });
 
 test("parsePiariumExtensionManifest still validates kind-specific data for v1 editor", () => {
@@ -111,7 +117,7 @@ test("parsePiariumExtensionManifest validates shell data only for compatible ver
     replacement: { target: "workbench.shell" },
   };
   const parsed = parsePiariumExtensionManifest(m);
-  assert.equal(parsed.contributions?.[0].contractVersion, 2);
+  assert.equal(parsed.contributions![0]!.contractVersion, 2);
 });
 
 test("same extension can have both compatible and incompatible contributions", () => {
@@ -134,6 +140,6 @@ test("same extension can have both compatible and incompatible contributions", (
   ];
   const parsed = parsePiariumExtensionManifest(m);
   assert.equal(parsed.contributions?.length, 2);
-  assert.equal(parsed.contributions?.[0].contractVersion, 1);
-  assert.equal(parsed.contributions?.[1].contractVersion, 99);
+  assert.equal(parsed.contributions![0]!.contractVersion, 1);
+  assert.equal(parsed.contributions![1]!.contractVersion, 99);
 });
