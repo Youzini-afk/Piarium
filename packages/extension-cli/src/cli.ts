@@ -125,10 +125,13 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
       const incompatibleLines = result.incompatibleContributions.map((item) => (
         `  ${item.id} (${item.kind} contractVersion ${item.contractVersion} is not supported; supported: ${item.supportedVersions.join(", ")})`
       ));
+      const hasIncompatible = incompatibleLines.length > 0;
       cliOutput.success({
         human: [
-          `OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`,
-          ...(incompatibleLines.length > 0
+          hasIncompatible
+            ? `WARN: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`
+            : `OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`,
+          ...(hasIncompatible
             ? ["Incompatible contribution versions (parsed but not executable):", ...incompatibleLines]
             : []),
         ],
@@ -137,14 +140,14 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
           extensionId: result.project.manifest.id,
           incompatibleContributions: result.incompatibleContributions,
           missingFiles: result.missingFiles,
-          ok: true,
+          ok: !hasIncompatible,
           referencedFiles: result.referencedFiles,
           version: result.project.manifest.version,
-          ...(incompatibleLines.length > 0 ? { warnings: incompatibleLines } : {}),
+          ...(hasIncompatible ? { warnings: incompatibleLines } : {}),
         },
-        quiet: `ok ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}${incompatibleLines.length > 0 ? ` incompatible:${incompatibleLines.length}` : ""}`,
+        quiet: `${hasIncompatible ? "warn" : "ok"} ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}${hasIncompatible ? ` incompatible:${incompatibleLines.length}` : ""}`,
       });
-      return 0;
+      return hasIncompatible ? 1 : 0;
     }
     if (parsed.command === "build") {
       const result = await buildProject(parsed.directory);

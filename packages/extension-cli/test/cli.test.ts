@@ -316,13 +316,13 @@ test("check reports incompatible contributions for unknown contract version", as
     error: (...values) => jsonErrors.push(values.join(" ")),
     log: (...values) => jsonLines.push(values.join(" ")),
   });
-  assert.equal(exit, 0);
+  assert.equal(exit, 1);
   assert.equal(jsonErrors.length, 0);
   const result = JSON.parse(jsonLines[0] as string) as {
     incompatibleContributions: Array<{ id: string; kind: string; contractVersion: number }>;
     ok: boolean;
   };
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
   assert.equal(result.incompatibleContributions.length, 1);
   assert.equal(result.incompatibleContributions[0]!.kind, "view");
   assert.equal(result.incompatibleContributions[0]!.contractVersion, 99);
