@@ -817,9 +817,12 @@ export class SurfaceExtensionLoader {
       const currentEntrypoints = desiredPlans
         .map((plan) => this.#active.get(keyFor(entry.manifest.id, plan.entrypointId)))
         .filter((value): value is ActiveEntrypoint => value !== undefined);
-      if (currentEntrypoints.length > 0 && selected.slot === "selected"
+      if (selected.slot === "selected"
+        && (currentEntrypoints.length > 0 || executablePlans.length > 0)
         && !this.#requirementsSatisfied(selected, hostState)) {
-        for (const active of currentEntrypoints) await this.#deactivate(active, entry.desired.revision);
+        if (currentEntrypoints.length > 0) {
+          for (const active of currentEntrypoints) await this.#deactivate(active, entry.desired.revision);
+        }
         this.#diagnose(entry.manifest.id, "required_service_withdrawn", "A required extension service is no longer available");
         continue;
       }
@@ -1257,7 +1260,14 @@ export class SurfaceExtensionLoader {
           ?? (candidates.length === 1 && state.services.providers.some((provider) => (
             provider.providerId === selectedId && provider.extensionId === candidates[0]?.extensionId
           )) ? candidates[0] : undefined);
-        if (selected) selectedProviders.push(selected);
+        if (selected) {
+          selectedProviders.push(selected);
+        } else {
+          // No explicit selection: pass all matching providers so the runtime
+          // sees them as available. The runtime's "selected" binding check
+          // accepts externalProviders.length > 0 as satisfying the requirement.
+          selectedProviders.push(...matches);
+        }
       } else if (matches.length === 1) selectedProviders.push(matches[0] as PiariumExtensionServiceProviderSnapshot);
     }
     return [...new Map(selectedProviders.map((provider) => [provider.providerId, provider])).values()];
@@ -1340,7 +1350,14 @@ export class SurfaceExtensionLoader {
       const count = externalCount + localExternalCount + localCount;
       if ((requirement.binding ?? "single") === "single") return count === 1;
       if (requirement.binding === "selected") {
-        return externalCount > 0
+        // For "selected" binding, any active provider (not just the chosen one)
+        // satisfies the requirement. The selection itself is resolved at mount time.
+        const activeProviders = state.services.providers.filter((provider) => (
+          provider.status === "active"
+          && provider.descriptor.id === requirement.id
+          && provider.descriptor.version === requirement.version
+        )).length;
+        return activeProviders > 0
           || localExternalCount > 0
           || this.#surfaceRuntime.getService(requirement.id, requirement.version) !== undefined;
       }

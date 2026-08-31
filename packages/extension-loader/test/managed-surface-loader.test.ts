@@ -640,6 +640,177 @@ test("declarative contributions honor capability availability and required Host 
   assert.equal(loader.getSnapshot().diagnostics.some((item) => item.code === "required_surface_capability_withdrawn"), true);
 });
 
+const serviceManifest = (binding: "single" | "selected" | "all"): PiariumExtensionManifest => ({
+  schemaVersion: 1,
+  id: `dev.example.binding-${binding}`,
+  version: "1.0.0",
+  engines: { piarium: "*" },
+  requires: { services: [{ id: "dev.example.matrix-service", version: 1, binding }] },
+  entrypoints: {
+    surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
+  },
+  contributions: [{
+    contractVersion: 1,
+    data: {},
+    entrypoint: "main",
+    id: `dev.example.binding-${binding}.page`,
+    kind: "page",
+    supports: ["web"],
+  }],
+});
+
+const matrixProvider = (providerId: string): PiariumExtensionHostStateSnapshot["services"]["providers"][number] => ({
+  descriptor: { id: "dev.example.matrix-service", version: 1 },
+  entrypointId: "host",
+  extensionId: `dev.example.provider-${providerId}`,
+  extensionVersion: "1.0.0",
+  generation: 1,
+  providerId: `dev.example.provider-${providerId}:host:1:dev.example.matrix-service@1`,
+  providerKey: `dev.example.provider-${providerId}:host:dev.example.matrix-service@1`,
+  status: "active",
+});
+
+test("service binding matrix: single requires exactly one provider", async () => {
+  const artifactIntegrity = integrityFor("binding-single");
+  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("single") };
+  let current = snapshot(1, entry);
+  let stateRevision = 1;
+  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
+      contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-single.page", kind: "page", supports: ["web"],
+    }, {}) } }),
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current, stateRevision, providers),
+      invokeService: async () => null,
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId, module: asset("main", request.integrity, "runtime/surface/main/module.cjs"), styles: [] }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  // Zero providers — single binding should NOT activate
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+
+  // One provider — single binding should activate
+  providers = [matrixProvider("a")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+
+  // Two providers — single binding should withdraw (count !== 1)
+  providers = [matrixProvider("a"), matrixProvider("b")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+});
+
+test("service binding matrix: selected activates with at least one provider", async () => {
+  const artifactIntegrity = integrityFor("binding-selected");
+  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("selected") };
+  let current = snapshot(1, entry);
+  let stateRevision = 1;
+  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
+      contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-selected.page", kind: "page", supports: ["web"],
+    }, {}) } }),
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current, stateRevision, providers),
+      invokeService: async () => null,
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId, module: asset("main", request.integrity, "runtime/surface/main/module.cjs"), styles: [] }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  // Zero providers — selected should NOT activate
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+
+  // One provider — selected should activate
+  providers = [matrixProvider("a")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+
+  // Two providers — selected should still activate (at least one is enough)
+  providers = [matrixProvider("a"), matrixProvider("b")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+});
+
+test("service binding matrix: all activates with at least one provider", async () => {
+  const artifactIntegrity = integrityFor("binding-all");
+  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("all") };
+  let current = snapshot(1, entry);
+  let stateRevision = 1;
+  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
+      contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-all.page", kind: "page", supports: ["web"],
+    }, {}) } }),
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current, stateRevision, providers),
+      invokeService: async () => null,
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId, module: asset("main", request.integrity, "runtime/surface/main/module.cjs"), styles: [] }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  // Zero providers — all should NOT activate
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+
+  // One provider — all should activate
+  providers = [matrixProvider("a")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+
+  // Two providers — all should still activate
+  providers = [matrixProvider("a"), matrixProvider("b")];
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+});
+
 test("evaluates a self-contained CommonJS managed module without a module URL", async () => {
   const loaded = await evaluateManagedSurfaceModule(
     "module.exports={default:{activate(){return 'active'}}};",
