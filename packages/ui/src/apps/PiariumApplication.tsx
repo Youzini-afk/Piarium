@@ -2,6 +2,12 @@ import React from 'react';
 
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
+import { registerWorkbenchShells } from '@/workbenches/register-shells';
+
+// Register workbench shell components before the extension runtime activates.
+// This must happen before startSurfaceExtensions so that shell contributions
+// can resolve their React components from the registry.
+registerWorkbenchShells();
 
 const App = React.lazy(async () => {
   const [appModule, extensionRuntime] = await Promise.all([

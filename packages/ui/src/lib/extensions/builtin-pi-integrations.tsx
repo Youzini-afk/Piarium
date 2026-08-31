@@ -43,8 +43,7 @@ import type {
   PiPluginSettingsAdapterRenderProps,
   PiSettingsPanelImplementation,
 } from './pi-integration-registry';
-import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
-import { IdeWorkbenchShell } from '@/workbenches/ide/IdeWorkbenchShell';
+import { resolveWorkbenchShellComponent } from './shell-component-registry';
 import {
   WorkbenchOwnedView,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -160,9 +159,10 @@ const contributionImplementation = (
   }
   const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
   if (contribution?.kind === 'shell') {
-    const Component = definition.manifest.id === PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID
-      ? IdeWorkbenchShell
-      : AgentWorkspaceShell;
+    const Component = resolveWorkbenchShellComponent(definition.manifest.id);
+    if (!Component) {
+      throw new Error(`Built-in shell component not registered for extension: ${definition.manifest.id}`);
+    }
     return { framework: 'react-19', Component };
   }
   if (contribution?.kind === 'transition-scene') {

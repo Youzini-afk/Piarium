@@ -18,7 +18,7 @@ import {
   resolvePiariumRootTrackingRemote,
 } from '@/lib/piariumWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { renderPiComposerSubmission } from '@/components/pi-session/piComposerSubmission';
+import { renderPiComposerSubmission } from '@/lib/pi-session/piComposerSubmission';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
