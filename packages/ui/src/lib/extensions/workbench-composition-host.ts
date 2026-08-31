@@ -186,7 +186,9 @@ const mountContribution = async (
     contributionId: contribution.descriptor.id,
     implementation,
     onError: (error, phase) => {
-      options.onError(error, phase);
+      // Mount errors are reported by the serial binding's catch — don't double-report.
+      // Only forward render and dispose errors here.
+      if (phase !== 'mount') options.onError(error, phase);
       if (phase !== 'dispose') mountFailure = error;
     },
     owner: contribution.owner,
