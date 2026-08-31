@@ -5,6 +5,26 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.9
+
+Piarium 0.9.9 turns the Agent and IDE workbenches into a more complete extension platform, hardens
+the native recovery journal, and closes several lifecycle gaps across chat, desktop, and cloud builds.
+
+- Change the composer send action into a real stop control while Pi is responding, without leaving
+  queued or in-flight turns behind an inactive send button
+- Harden recovery with read-only catalog inspection, per-file crash phases, conflict fingerprints,
+  scoped workspace-history deletion, and deterministic compensation after interrupted restores
+- Publish truthful Shell seam declarations, mount all six IDE regions through real replacement hosts,
+  and let managed Shells compose replacement and slot children with generation-owned cleanup
+- Add structured `when` expressions and transactional owner-scoped context keys for managed and isolated
+  extensions; failed or superseded candidates cannot leak state into the active workbench
+- Retain unsupported contribution contracts in the catalog while preventing their execution, report the
+  exact compatibility failure, and make `single`, `selected`, and `all` service binding unambiguous
+- Move framework-neutral application APIs and runtime auth/fetch/URL switching into
+  `@piarium/application-client`, enforce UI dependency layers, and load official Shells by Surface
+- Exercise generated external Shells through real replacement, slot, and disposer behavior, and keep the
+  extracted application client in the reproducible cloud/Docker runtime dependency graph
+
 ## 0.9.8
 
 Piarium 0.9.8 makes workspace rollback proportional to the files Pi actually changed, while refining
