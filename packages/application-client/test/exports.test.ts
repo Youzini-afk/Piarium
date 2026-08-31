@@ -25,3 +25,13 @@ test("DocumentsError preserves reason and status", async () => {
   assert.equal(error.status, 403);
   assert.equal(error.name, "DocumentsError");
 });
+
+test("application-client exports transport functions", async () => {
+  const mod = await import("../src/index.js");
+  assert.ok(typeof mod.runtimeFetch === "function", "runtimeFetch should be exported");
+  assert.ok(typeof mod.buildRuntimeAuthHeaders === "function", "buildRuntimeAuthHeaders should be exported");
+  assert.ok(typeof mod.configureRuntimeUrlResolver === "function", "configureRuntimeUrlResolver should be exported");
+  assert.ok(typeof mod.switchRuntimeEndpoint === "function", "switchRuntimeEndpoint should be exported");
+  assert.ok(typeof mod.registerRelayTunnelProvider === "function", "registerRelayTunnelProvider should be exported");
+  assert.ok(typeof mod.registerRelayTunnelLifecycle === "function", "registerRelayTunnelLifecycle should be exported");
+});

@@ -3,8 +3,13 @@ import { installRuntimeFetchBridge } from '@piarium/ui/lib/runtime-fetch';
 import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
 import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
 import { configureRuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import { registerRelayTransport } from '@piarium/ui/lib/relay/register-transport';
 import type { EmbeddedSessionRuntimeBootstrap } from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
 import { createWebAPIs } from './api';
+
+// Register the UI's relay tunnel implementation with the application-client
+// transport layer. Must happen before any runtime endpoint switch.
+registerRelayTransport();
 
 const sameOrigin = (left: string, right: string): boolean => {
   if (!left || !right) return false;
