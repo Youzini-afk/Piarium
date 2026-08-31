@@ -269,6 +269,62 @@ test("manifest and managed contributions publish as one Surface generation", asy
   assert.equal(owners[0]?.generation, owners[1]?.generation);
 });
 
+test("eager entrypoint with only incompatible contributions does not execute its module", async () => {
+  const artifactIntegrity = integrityFor("incompatible-only");
+  const incompatibleManifest: PiariumExtensionManifest = {
+    schemaVersion: 1,
+    id: "dev.example.incompatible-only",
+    version: "1.0.0",
+    engines: { piarium: "*" },
+    entrypoints: {
+      surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
+    },
+    contributions: [
+      // Both contributions target the eager "main" entrypoint but use contractVersion 99
+      { contractVersion: 99, data: {}, entrypoint: "main", id: "dev.example.incompatible-only.page", kind: "page", supports: ["web"] },
+      { contractVersion: 99, data: {}, entrypoint: "main", id: "dev.example.incompatible-only.command", kind: "command", supports: ["web"] },
+    ],
+  };
+  const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: incompatibleManifest });
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  let evaluations = 0;
+  let entrypointReads = 0;
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: () => {
+      evaluations += 1;
+      throw new Error("incompatible-only entrypoint must not evaluate a module");
+    },
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current),
+      invokeService: async () => { throw new Error("unexpected service invocation"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async () => {
+        entrypointReads += 1;
+        throw new Error("incompatible-only entrypoint must not read module bytes");
+      },
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+  await loader.reconcile();
+  // No visible contributions — both were incompatible
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  // No active entrypoints — the eager plan was skipped
+  assert.equal(loader.getSnapshot().active.length, 0);
+  // Module was never evaluated or read
+  assert.equal(evaluations, 0);
+  assert.equal(entrypointReads, 0);
+});
+
 test("lazy Surface entrypoints index declarative contributions and activate once per real event", async () => {
   const artifactIntegrity = integrityFor("lazy-events");
   const lazyManifest: PiariumExtensionManifest = {

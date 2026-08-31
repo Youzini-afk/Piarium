@@ -395,6 +395,10 @@ const compatibleActivationPlans = (
     });
   }
   const staticContributions: PiariumExtensionStaticContribution[] = [];
+  // Track which entrypoints have at least one incompatible static contribution
+  // and which have at least one compatible static contribution.
+  const entrypointHasIncompatible = new Set<string>();
+  const entrypointHasCompatible = new Set<string>();
   // Incompatible contributions are retained in the static (declarative) plan
   // so the catalog preserves the record, but they are NOT attached to
   // executable entrypoint plans — their module code is not executed for them
@@ -408,14 +412,34 @@ const compatibleActivationPlans = (
       // Only attach compatible contributions to executable plans
       if (compatible) {
         executable.get(contribution.entrypoint)?.contributions.push(contribution);
+        entrypointHasCompatible.add(contribution.entrypoint);
+      } else {
+        entrypointHasIncompatible.add(contribution.entrypoint);
       }
       staticContributions.push(contribution);
       continue;
     }
     staticContributions.push(contribution);
   }
+  // Remove eager executable plans where ALL static contributions are
+  // incompatible. An eager entrypoint whose every declared contribution is
+  // incompatible would execute its module for no visible effect — the module
+  // might still contribute dynamically, but the manifest has declared that
+  // every static contribution it owns uses an unsupported contract version.
+  // Entrypoints with no static contributions at all are retained (they may
+  // contribute dynamically). Lazy entrypoints are retained (they may
+  // contribute when triggered).
+  const executablePlans = [...executable.values()].filter((plan) => {
+    if (plan.contributions.length > 0) return true;
+    if (!plan.entrypoint) return true;
+    // Has this entrypoint been declared with contributions, all incompatible?
+    if (entrypointHasIncompatible.has(plan.entrypointId) && !entrypointHasCompatible.has(plan.entrypointId)) {
+      return !entrypointIsEager(plan.entrypoint);
+    }
+    return true;
+  });
   return {
-    executable: [...executable.values()],
+    executable: executablePlans,
     ...(staticContributions.length > 0 || compatibleEntrypoints.some((entrypoint) => entrypoint.mode === "declarative")
       ? {
           manifest: {
