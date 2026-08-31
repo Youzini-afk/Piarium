@@ -98,6 +98,14 @@ const packageRelease = async (tag, outputArgument) => {
     cliRun(['build', sample]);
     cliRun(['check', sample]);
     cliRun(['test', sample]);
+
+    // Also smoke a shell template project to verify the shell composition
+    // contract (mountReplacement, mountSlot, disposer) is exercised.
+    const shellSample = path.join(smokeRoot, 'shell-extension');
+    cliRun(['init', shellSample, '--id', 'dev.piarium.shell-smoke', '--name', 'Shell Smoke', '--template', 'shell']);
+    cliRun(['build', shellSample]);
+    cliRun(['check', shellSample]);
+    cliRun(['test', shellSample]);
     const generated = JSON.parse(await readFile(path.join(sample, 'package.json'), 'utf8'));
     for (const dependency of ['@piarium/extension-contract', '@piarium/extension-sdk']) {
       if (generated.dependencies?.[dependency] !== release.version) {
