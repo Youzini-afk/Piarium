@@ -1,4 +1,4 @@
-import type { NotificationPayload, NotificationsAPI } from '@piarium/ui/lib/api/types';
+import type { NotificationPayload, NotificationsAPI } from '@piarium/application-client';
 
 const showWebviewNotification = async (payload?: NotificationPayload): Promise<boolean> => {
   if (typeof Notification === 'undefined') {

@@ -1,5 +1,5 @@
 import { createConfiguredWebAPIs } from './runtimeConfig';
-import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import '@piarium/ui/styles/application';
 import '@piarium/ui/styles/fonts';
 

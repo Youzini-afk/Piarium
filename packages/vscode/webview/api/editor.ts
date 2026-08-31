@@ -1,6 +1,6 @@
 
 import { sendBridgeMessage } from './bridge';
-import type { EditorAPI } from '@piarium/ui/lib/api/types';
+import type { EditorAPI } from '@piarium/application-client';
 
 export const createVSCodeEditorAPI = (): EditorAPI => ({
   openFile: async (path: string, line?: number, column?: number) => {

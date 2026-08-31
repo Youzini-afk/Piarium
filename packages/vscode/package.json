@@ -239,6 +239,7 @@
   "dependencies": {
     "@piarium/extension-contract": "workspace:*",
     "@piarium/extension-host": "workspace:*",
+    "@piarium/application-client": "workspace:*",
     "@piarium/ui": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",

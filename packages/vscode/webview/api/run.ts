@@ -4,7 +4,7 @@ import type {
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 const absentDebug = (workspaceId: string): PiariumDebugSessionStatus => ({
   status: 'absent',

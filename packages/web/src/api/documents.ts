@@ -16,8 +16,8 @@ import type {
   PiariumWorkspaceFileEvent,
   PiariumWorkspaceIdentity,
   Subscription,
-} from '@piarium/ui/lib/api/types';
-import { DocumentsError, parseDocumentsFailureReason } from '@piarium/ui/lib/api/documents-errors';
+} from '@piarium/application-client';
+import { DocumentsError, parseDocumentsFailureReason } from '@piarium/application-client';
 import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import {

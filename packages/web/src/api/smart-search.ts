@@ -4,7 +4,7 @@ import type {
   SmartSearchConfigResponse,
   SmartSearchDoctorResponse,
   SmartSearchStatusResponse,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const STATUS_ENDPOINT = '/api/smart-search/status';

@@ -1,4 +1,4 @@
-import type { ApnsTokenPayload, PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@piarium/ui/lib/api/types';
+import type { ApnsTokenPayload, PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const fetchJson = async <T>(input: string | URL | Request, init?: RequestInit): Promise<T | null> => {

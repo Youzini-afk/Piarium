@@ -20,7 +20,7 @@ import type {
   GitHubGitAuthorResult,
   GitHubUserSummary,
   GitHubTerminalAuthResult,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import type { RuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
 

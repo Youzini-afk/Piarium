@@ -1,7 +1,7 @@
 import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
 import { registerSW } from 'virtual:pwa-register';
 
-import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { getStoredMobileLayoutPreference } from '@piarium/ui/lib/mobileLayoutPreference';
 import type { HostedSurface } from '@piarium/ui/lib/runtimeSurface';
 import {

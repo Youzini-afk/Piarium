@@ -34,6 +34,7 @@
     "@octokit/rest": "^22.0.1",
     "@piarium/extension-contract": "workspace:*",
     "@piarium/extension-host": "workspace:*",
+    "@piarium/application-client": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "@piarium/settings-store": "workspace:*",

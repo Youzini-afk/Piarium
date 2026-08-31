@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DocumentsError } from '@piarium/ui/lib/api/documents-errors';
+import { DocumentsError } from '@piarium/application-client';
 
 describe('VS Code documents API errors', () => {
   it('parses maintenance reason and status from the bridge response', async () => {

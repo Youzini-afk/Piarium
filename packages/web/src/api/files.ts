@@ -3,11 +3,11 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import {
   FilesystemError,
   parseFilesystemErrorReason,
-} from '@piarium/ui/lib/api/files-errors';
+} from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');

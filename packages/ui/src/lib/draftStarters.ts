@@ -1,17 +1,9 @@
 import type { IconName } from "@/components/icon/icons";
 import type { I18nKey } from "@/lib/i18n";
+import type { DraftStarterRef, DraftStarterType } from "@piarium/application-client";
 
-// A draft starter is a reference to an existing command or skill, pinned to the
-// onboarding/draft welcome screen as a one-click chip. Scope (global vs project)
-// is NOT stored here — it is encoded by which list the ref lives in (global =
-// settings.json, project = project config), derived from the command/skill's own
-// scope when pinned.
-export type DraftStarterType = 'command' | 'skill';
-
-export type DraftStarterRef = {
-    type: DraftStarterType;
-    name: string;
-};
+// Re-export the framework-neutral types for backward compatibility.
+export type { DraftStarterRef, DraftStarterType };
 
 // Piarium's built-in session commands. They are always
 // available to pin, keep their bespoke icons, and seed the default global set.

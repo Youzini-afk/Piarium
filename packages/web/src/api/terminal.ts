@@ -16,7 +16,7 @@ import type {
   ResizeTerminalPayload,
   TerminalSession,
   ForceKillOptions,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 export const createWebTerminalAPI = (): TerminalAPI => ({
   async listShells() {

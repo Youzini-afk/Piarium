@@ -1,4 +1,4 @@
-import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import {
   createRuntimeUrlResolver,
   getRuntimeUrlResolver,

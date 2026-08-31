@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkspaceSearchError } from '@piarium/ui/lib/api/search-errors';
+import { WorkspaceSearchError } from '@piarium/application-client';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
 
 const runtimeFetchMock = vi.fn();

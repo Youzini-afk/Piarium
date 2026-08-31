@@ -2,7 +2,7 @@ import type {
   LanguageServicesAPI,
   PiariumLanguageFeatureResult,
   PiariumLanguageProviderStatus,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 const absentStatus = (workspaceId: string, languageId: string): PiariumLanguageProviderStatus => ({
   status: 'absent',

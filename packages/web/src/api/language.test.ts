@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LanguageServicesError } from '@piarium/ui/lib/api/language-errors';
+import { LanguageServicesError } from '@piarium/application-client';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
 
 const runtimeFetchMock = vi.fn();

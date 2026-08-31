@@ -1,4 +1,4 @@
-import type { RuntimeAPIs, TerminalAPI } from '@piarium/ui/lib/api/types';
+import type { RuntimeAPIs, TerminalAPI } from '@piarium/application-client';
 import { createVSCodeFilesAPI } from './files';
 import { createVSCodeSettingsAPI } from './settings';
 import { createVSCodePermissionsAPI } from './permissions';

@@ -1,0 +1,33 @@
+{
+  "name": "@piarium/application-client",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "description": "Framework-neutral Piarium application client boundary: RuntimeAPIs, typed failures, transport, and runtime switch primitives.",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun run --cwd ../protocol build && bun run --cwd ../extension-contract build && tsc -p tsconfig.build.json",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/protocol": "0.1.0",
+    "@piarium/extension-contract": "0.2.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

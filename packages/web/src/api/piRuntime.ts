@@ -1,5 +1,5 @@
 import type { PiRuntimeSnapshot } from '@piarium/protocol';
-import type { PiRuntimeManagementAPI } from '@piarium/ui/lib/api/types';
+import type { PiRuntimeManagementAPI } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import { getRuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
 

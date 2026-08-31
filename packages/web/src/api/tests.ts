@@ -3,7 +3,7 @@ import type {
   PiariumTestEvent,
   PiariumTestRunStatus,
   WorkspaceTestAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { postRunJson, subscribeRunSse } from './run-transport';
 
 export const createWebWorkspaceTestAPI = (): WorkspaceTestAPI => ({

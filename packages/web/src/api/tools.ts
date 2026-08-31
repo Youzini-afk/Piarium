@@ -1,4 +1,4 @@
-import type { ToolsAPI } from '@piarium/ui/lib/api/types';
+import type { ToolsAPI } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 export const createWebToolsAPI = (): ToolsAPI => ({

@@ -9,7 +9,7 @@ import type {
   PiariumDebugThread,
   PiariumDebugVariable,
   WorkspaceDebugAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { postRunJson, subscribeRunSse } from './run-transport';
 
 const control = <T>(method: string, request: unknown): Promise<T> => (

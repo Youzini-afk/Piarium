@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: [
+      { find: '@piarium/application-client', replacement: path.resolve(__dirname, '../application-client/src/index.ts') },
       { find: '@piarium/extension-contract', replacement: path.resolve(__dirname, '../extension-contract/src/index.ts') },
       { find: '@piarium/extension-loader', replacement: path.resolve(__dirname, '../extension-loader/src/index.ts') },
       { find: '@piarium/extension-sdk', replacement: path.resolve(__dirname, '../extension-sdk/src/index.ts') },

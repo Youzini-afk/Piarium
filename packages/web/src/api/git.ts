@@ -3,7 +3,7 @@ import type {
   GitAPI,
   CreateGitCommitOptions,
   GitLogOptions,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 export const createWebGitAPI = (): GitAPI => ({
   cloneRepository: gitApiHttp.cloneRepository,

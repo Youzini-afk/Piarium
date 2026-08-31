@@ -5,7 +5,7 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 

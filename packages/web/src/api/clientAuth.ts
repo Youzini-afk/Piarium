@@ -6,7 +6,7 @@ import type {
   RemoteClientPurgeRevokedResult,
   RemoteClientRecord,
   RemoteClientRevokeResult,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const jsonOrNull = async <T>(response: Response): Promise<T | null> => {

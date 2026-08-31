@@ -3,8 +3,8 @@ import type {
   WorkspaceContentSearchResult,
   WorkspaceContentSearchHit,
   WorkspaceSearchAPI,
-} from '@piarium/ui/lib/api/types';
-import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@piarium/ui/lib/api/search-errors';
+} from '@piarium/application-client';
+import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import { getRuntimeEndpointGeneration } from '@piarium/ui/lib/runtime-switch';
 

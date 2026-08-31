@@ -1,4 +1,4 @@
-import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@piarium/ui/lib/api/types';
+import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@piarium/application-client';
 import { sendBridgeMessage } from './bridge';
 
 const sanitizePayload = (data: unknown): SettingsPayload => {

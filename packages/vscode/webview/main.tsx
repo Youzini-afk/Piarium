@@ -1,7 +1,7 @@
 import { createVSCodeAPIs } from './api';
 import { onCommand, onThemeChange, sendBridgeMessage } from './api/bridge';
 import { VSCodeRuntimeTransport } from './piRuntimeTransport';
-import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,

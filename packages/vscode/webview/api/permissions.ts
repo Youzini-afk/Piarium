@@ -1,4 +1,4 @@
-import type { DirectoryPermissionRequest, PermissionsAPI, StartAccessingResult } from '@piarium/ui/lib/api/types';
+import type { DirectoryPermissionRequest, PermissionsAPI, StartAccessingResult } from '@piarium/application-client';
 
 export const createVSCodePermissionsAPI = (): PermissionsAPI => ({
   async requestDirectoryAccess(request: DirectoryPermissionRequest) {

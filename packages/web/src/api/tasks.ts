@@ -3,7 +3,7 @@ import type {
   PiariumTaskListResult,
   PiariumTaskRunStatus,
   WorkspaceTasksAPI,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import { postRunJson, subscribeRunSse } from './run-transport';
 
 export const createWebWorkspaceTasksAPI = (): WorkspaceTasksAPI => ({

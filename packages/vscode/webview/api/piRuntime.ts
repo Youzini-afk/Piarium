@@ -1,5 +1,5 @@
 import type { PiRuntimeSnapshot } from '@piarium/protocol';
-import type { PiRuntimeManagementAPI } from '@piarium/ui/lib/api/types';
+import type { PiRuntimeManagementAPI } from '@piarium/application-client';
 import { disconnectPiRuntime, getPiRuntimeConnection } from '@piarium/ui/lib/pi-runtime/client';
 
 const snapshotFromError = (error: unknown, revision: number): PiRuntimeSnapshot => ({

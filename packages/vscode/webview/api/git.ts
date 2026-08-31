@@ -42,7 +42,7 @@ import type {
   CherryPickResponse,
   RevertCommitResponse,
   ResetToCommitResponse,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 
 const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeBootstrapStatus> => {
   return sendBridgeMessage<GitWorktreeBootstrapStatus>('api:git/worktrees/bootstrap-status', { directory });

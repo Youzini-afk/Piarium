@@ -25,9 +25,9 @@ import type {
   PiariumLanguageTextEdit,
   PiariumLanguageWorkspaceEdit,
   Subscription,
-} from '@piarium/ui/lib/api/types';
+} from '@piarium/application-client';
 import type { JsonValue } from '@piarium/extension-contract';
-import { LanguageServicesError, parseLanguageServicesFailureReason } from '@piarium/ui/lib/api/language-errors';
+import { LanguageServicesError, parseLanguageServicesFailureReason } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import {
   getRuntimeEndpointGeneration,

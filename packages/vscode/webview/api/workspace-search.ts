@@ -2,8 +2,8 @@ import type {
   WorkspaceContentSearchRequest,
   WorkspaceContentSearchResult,
   WorkspaceSearchAPI,
-} from '@piarium/ui/lib/api/types';
-import { WorkspaceSearchError } from '@piarium/ui/lib/api/search-errors';
+} from '@piarium/application-client';
+import { WorkspaceSearchError } from '@piarium/application-client';
 import { getRuntimeEndpointGeneration } from '@piarium/ui/lib/runtime-switch';
 import { sendBridgeMessageWithOptions } from './bridge';
 

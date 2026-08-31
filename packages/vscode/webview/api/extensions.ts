@@ -9,7 +9,7 @@ import {
   parsePiariumExtensionServiceRoutingSnapshot,
   parsePiariumWorkbenchProfileSnapshot,
 } from '@piarium/extension-contract';
-import type { ExtensionsAPI } from '@piarium/ui/lib/api/types';
+import type { ExtensionsAPI } from '@piarium/application-client';
 import { getVSCodeAPI, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 
 export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({

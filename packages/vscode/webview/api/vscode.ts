@@ -1,4 +1,4 @@
-import type { VSCodeAPI } from '@piarium/ui/lib/api/types';
+import type { VSCodeAPI } from '@piarium/application-client';
 import { executeVSCodeCommand, openVSCodeExternalUrl, sendBridgeMessage } from './bridge';
 
 export const createVSCodeActionsAPI = (): VSCodeAPI => ({

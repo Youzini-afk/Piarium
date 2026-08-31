@@ -1,4 +1,4 @@
-import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@piarium/ui/lib/api/types';
+import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const SETTINGS_ENDPOINT = '/api/config/settings';

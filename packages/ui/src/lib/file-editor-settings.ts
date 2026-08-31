@@ -1,34 +1,25 @@
-export type FileEditorProfileToggle = 'profile' | 'on' | 'off';
-export type FileEditorLineNumbers = FileEditorProfileToggle | 'relative';
-export type FileEditorWhitespace = 'none' | 'boundary' | 'selection' | 'trailing' | 'all';
-export type FileEditorCursorStyle = 'line' | 'block' | 'underline';
-export type FileEditorCursorBlinking = 'blink' | 'smooth' | 'phase' | 'expand' | 'solid';
-export type FileEditorAccessibilitySupport = 'auto' | 'on' | 'off';
+// Types are owned by @piarium/application-client. Re-exported for backward compatibility.
+export type {
+  FileEditorProfileToggle,
+  FileEditorLineNumbers,
+  FileEditorWhitespace,
+  FileEditorCursorStyle,
+  FileEditorCursorBlinking,
+  FileEditorAccessibilitySupport,
+  FileEditorSettings,
+  FileEditorSettingsPatch,
+} from '@piarium/application-client';
 
-export interface FileEditorSettings {
-  accessibilitySupport: FileEditorAccessibilitySupport;
-  autoClosingBrackets: boolean;
-  autoClosingQuotes: boolean;
-  autoSurround: boolean;
-  cursorBlinking: FileEditorCursorBlinking;
-  cursorStyle: FileEditorCursorStyle;
-  detectIndentation: boolean;
-  folding: boolean;
-  fontLigatures: boolean;
-  formatOnSave: boolean;
-  formatOnType: boolean;
-  insertSpaces: boolean;
-  lineHeight: number;
-  lineNumbers: FileEditorLineNumbers;
-  minimap: FileEditorProfileToggle;
-  renderWhitespace: FileEditorWhitespace;
-  smoothScrolling: boolean;
-  stickyScroll: FileEditorProfileToggle;
-  tabSize: number;
-  wordWrap: FileEditorProfileToggle;
-}
-
-export type FileEditorSettingsPatch = Partial<FileEditorSettings>;
+import type {
+  FileEditorProfileToggle,
+  FileEditorLineNumbers,
+  FileEditorWhitespace,
+  FileEditorCursorStyle,
+  FileEditorCursorBlinking,
+  FileEditorAccessibilitySupport,
+  FileEditorSettings,
+  FileEditorSettingsPatch,
+} from '@piarium/application-client';
 
 export const DEFAULT_FILE_EDITOR_SETTINGS: Readonly<FileEditorSettings> = Object.freeze({
   accessibilitySupport: 'auto',
