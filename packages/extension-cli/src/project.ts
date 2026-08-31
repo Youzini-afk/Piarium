@@ -126,15 +126,18 @@ export const checkProject = async (directory = "."): Promise<CheckResult> => {
     }
   }
   const incompatibleContributions = (project.manifest.contributions ?? [])
-    .map((contribution) => checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion))
-    .filter((result): result is Extract<typeof result, { status: "unsupported-contract-version" }> => (
-      result.status === "unsupported-contract-version"
+    .map((contribution) => ({
+      contributionId: contribution.id,
+      result: checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion),
+    }))
+    .filter((entry): entry is { contributionId: string; result: Extract<typeof entry.result, { status: "unsupported-contract-version" }> } => (
+      entry.result.status === "unsupported-contract-version"
     ))
-    .map((result) => ({
-      id: `${result.kind}@${result.contractVersion}`,
-      kind: result.kind,
-      contractVersion: result.contractVersion,
-      supportedVersions: result.supportedVersions,
+    .map((entry) => ({
+      id: entry.contributionId,
+      kind: entry.result.kind,
+      contractVersion: entry.result.contractVersion,
+      supportedVersions: entry.result.supportedVersions,
     }));
   return { project, referencedFiles: referenced.map((entrypoint) => entrypoint.file), missingFiles, incompatibleContributions };
 };

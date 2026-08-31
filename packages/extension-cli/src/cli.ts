@@ -123,7 +123,7 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
         throw new Error(`Manifest is valid, but referenced entrypoint files are missing: ${result.missingFiles.join(", ")}. Run piarium-extension build to create them.`);
       }
       const incompatibleLines = result.incompatibleContributions.map((item) => (
-        `  ${item.kind} contractVersion ${item.contractVersion} is not supported (supported: ${item.supportedVersions.join(", ")})`
+        `  ${item.id} (${item.kind} contractVersion ${item.contractVersion} is not supported; supported: ${item.supportedVersions.join(", ")})`
       ));
       cliOutput.success({
         human: [
@@ -137,10 +137,12 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
           extensionId: result.project.manifest.id,
           incompatibleContributions: result.incompatibleContributions,
           missingFiles: result.missingFiles,
+          ok: true,
           referencedFiles: result.referencedFiles,
           version: result.project.manifest.version,
+          ...(incompatibleLines.length > 0 ? { warnings: incompatibleLines } : {}),
         },
-        quiet: `ok ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}`,
+        quiet: `ok ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}${incompatibleLines.length > 0 ? ` incompatible:${incompatibleLines.length}` : ""}`,
       });
       return 0;
     }

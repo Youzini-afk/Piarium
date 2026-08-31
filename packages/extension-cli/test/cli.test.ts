@@ -326,6 +326,7 @@ test("check reports incompatible contributions for unknown contract version", as
   assert.equal(result.incompatibleContributions.length, 1);
   assert.equal(result.incompatibleContributions[0]!.kind, "view");
   assert.equal(result.incompatibleContributions[0]!.contractVersion, 99);
+  assert.equal(result.incompatibleContributions[0]!.id, "dev.example.incompat.view");
 });
 
 test("check reports when validation errors for shell and transition-scene", async () => {
