@@ -57,6 +57,7 @@ import { insertPiComposerMention } from './piComposerMentions';
 import { PiComposerAgentControl } from './PiComposerAgentControl';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
+import { projectPiComposerActions } from './piComposerActions';
 
 interface PiComposerProps {
   active: boolean;
@@ -158,6 +159,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [autocomplete, setAutocomplete] = React.useState<PiComposerAutocomplete>(null);
   const [confirmedMentions, setConfirmedMentions] = React.useState<ReadonlySet<string>>(() => new Set());
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [aborting, setAborting] = React.useState(false);
   const [clearingQueue, setClearingQueue] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
   const piariumCommands = React.useMemo<readonly CommandInfo[]>(() => [
@@ -180,6 +182,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     inlineDraftKey ? state.drafts[inlineDraftKey]?.length ?? 0 : 0
   ));
   const canSend = draft.trim().length > 0 || images.length > 0 || inlineDraftCount > 0;
+  const composerActions = projectPiComposerActions({
+    aborting,
+    busy,
+    canAbort: Boolean(onAbort),
+    canSend,
+    sending,
+  });
   const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const snippets = useSnippetsStore((state) => state.snippets);
   const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
@@ -249,6 +258,18 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       setClearingQueue(false);
     }
   }, [clearingQueue, onClearQueue]);
+
+  const handleAbort = React.useCallback(async () => {
+    if (!onAbort || aborting) return;
+    setAborting(true);
+    try {
+      await onAbort();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAborting(false);
+    }
+  }, [aborting, onAbort]);
 
   const insertTranscript = React.useCallback((text: string) => {
     const next = [draft.trimEnd(), text.trim()]
@@ -686,35 +707,70 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 radius="1rem"
                 sendIconSizeClass="size-4"
               />
-              {busy && onAbort && (
+              {composerActions.showSecondaryStop && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      onClick={() => void onAbort()}
-                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                      disabled={aborting}
+                      onClick={() => void handleAbort()}
+                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-wait disabled:opacity-50"
                       aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
+                      data-pi-composer-secondary-stop="true"
                     >
-                      <Icon name="stop" className="size-3.5" />
+                      <Icon
+                        name={aborting ? 'loader-4' : 'stop'}
+                        className={cn('size-3.5', aborting && 'animate-spin')}
+                      />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">{t('chat.chatInput.actions.stopGeneratingAria')}</TooltipContent>
                 </Tooltip>
               )}
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!canSend || sending}
-                className={cn(
-                  'flex size-8 items-center justify-center rounded-lg transition-colors',
-                  canSend && !sending
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    : 'cursor-not-allowed bg-transparent text-muted-foreground/35',
-                )}
-                aria-label={t('chat.chatInput.actions.sendMessageAria')}
-              >
-                <Icon name={sending ? 'loader-4' : 'arrow-up'} className={cn('size-4', sending && 'animate-spin')} />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (composerActions.primary === 'stop') void handleAbort();
+                      else void submit();
+                    }}
+                    disabled={composerActions.primary === 'stop' ? aborting : !canSend || sending}
+                    className={cn(
+                      'flex size-8 items-center justify-center rounded-lg transition-colors',
+                      composerActions.primary === 'stop'
+                        ? aborting
+                          ? 'cursor-wait bg-primary/70 text-primary-foreground'
+                          : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        : canSend && !sending
+                          ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                          : 'cursor-not-allowed bg-transparent text-muted-foreground/35',
+                    )}
+                    aria-label={composerActions.primary === 'stop'
+                      ? t('chat.chatInput.actions.stopGeneratingAria')
+                      : t('chat.chatInput.actions.sendMessageAria')}
+                    aria-busy={composerActions.primary === 'stop' ? aborting : undefined}
+                    data-pi-composer-primary-action={composerActions.primary}
+                  >
+                    <Icon
+                      name={composerActions.primary === 'stop'
+                        ? aborting ? 'loader-4' : 'stop'
+                        : sending ? 'loader-4' : 'arrow-up'}
+                      className={cn(
+                        'size-4',
+                        ((composerActions.primary === 'stop' && aborting)
+                          || (composerActions.primary === 'send' && sending))
+                          && 'animate-spin',
+                      )}
+                    />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {composerActions.primary === 'stop'
+                    ? t('chat.chatInput.actions.stopGeneratingAria')
+                    : t('chat.chatInput.actions.sendMessageAria')}
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </div>
