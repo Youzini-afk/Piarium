@@ -255,3 +255,63 @@ test("parsePiariumExtensionManifest rejects invalid when expression", () => {
     },
   );
 });
+
+test("parsePiariumContextExpression rejects extra fields on defined", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "defined", key: "a", extra: true }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("unexpected field"));
+    },
+  );
+});
+
+test("parsePiariumContextExpression rejects extra fields on equals", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "equals", key: "a", value: 1, extra: true }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("unexpected field"));
+    },
+  );
+});
+
+test("parsePiariumContextExpression rejects extra fields on not", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "not", expression: { op: "defined", key: "a" }, extra: true }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("unexpected field"));
+    },
+  );
+});
+
+test("parsePiariumContextExpression rejects extra fields on all", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "all", expressions: [], extra: true }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("unexpected field"));
+    },
+  );
+});
+
+test("parsePiariumContextExpression rejects NaN value in equals", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "equals", key: "a", value: NaN }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("finite number"));
+    },
+  );
+});
+
+test("parsePiariumContextExpression rejects Infinity value in equals", () => {
+  assert.throws(
+    () => parsePiariumContextExpression({ op: "equals", key: "a", value: Infinity }),
+    (error: unknown) => {
+      if (!(error instanceof PiariumContextExpressionError)) return false;
+      return error.issues.some((issue) => issue.includes("finite number"));
+    },
+  );
+});

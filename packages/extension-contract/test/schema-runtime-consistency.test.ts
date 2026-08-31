@@ -103,6 +103,28 @@ test("unsupported contract version fixtures are runtimeValid but not compatible"
   }
 });
 
+test("editor/shell/transition schema rules are scoped to contractVersion 1", () => {
+  // A future editor with contractVersion 2 should NOT trigger the v1 data
+  // rules (anyOf languageIds/filenames). The schema should accept it
+  // (it's a future version, not yet validated) and the runtime should accept it
+  // (it's parsed but not compatible).
+  const futureEditor = {
+    schemaVersion: 1,
+    id: "dev.example.future-editor",
+    version: "1.0.0",
+    engines: { piarium: ">=0.2.0" },
+    contributions: [{
+      id: "dev.example.future-editor.view",
+      kind: "editor",
+      contractVersion: 2,
+      data: { futureField: true },
+      supports: ["web"],
+    }],
+  };
+  assert.equal(schemaValid(futureEditor), true, "future editor should be schemaValid (v1 rules don't apply)");
+  assert.equal(runtimeValid(futureEditor), true, "future editor should be runtimeValid (parsed but not compatible)");
+});
+
 const minimalManifest = () => ({
   schemaVersion: 1,
   id: "dev.example.minimal",

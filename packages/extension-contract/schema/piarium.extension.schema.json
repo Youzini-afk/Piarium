@@ -178,7 +178,7 @@
         },
         "allOf": [
           {
-            "if": { "properties": { "kind": { "const": "editor" } }, "required": ["kind"] },
+            "if": { "properties": { "kind": { "const": "editor" }, "contractVersion": { "const": 1 } }, "required": ["kind", "contractVersion"] },
             "then": {
               "properties": {
                 "data": {
@@ -205,8 +205,8 @@
           },
           {
             "if": {
-              "properties": { "kind": { "const": "transition-scene" } },
-              "required": ["kind"]
+              "properties": { "kind": { "const": "transition-scene" }, "contractVersion": { "const": 1 } },
+              "required": ["kind", "contractVersion"]
             },
             "then": {
               "required": ["replacement"],
@@ -223,8 +223,8 @@
           },
           {
             "if": {
-              "properties": { "kind": { "const": "shell" } },
-              "required": ["kind"]
+              "properties": { "kind": { "const": "shell" }, "contractVersion": { "const": 1 } },
+              "required": ["kind", "contractVersion"]
             },
             "then": {
               "required": ["replacement"],

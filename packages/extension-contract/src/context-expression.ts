@@ -14,8 +14,18 @@ export class PiariumContextExpressionError extends Error {
 }
 
 const isContextValue = (value: unknown): value is PiariumContextValue => (
-  typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  typeof value === "string" || typeof value === "boolean"
+  || (typeof value === "number" && Number.isFinite(value))
 );
+
+// Reject extra fields on each expression variant (matches schema additionalProperties: false)
+const checkNoExtraFields = (value: Record<string, unknown>, allowed: string[], path: string, issues: string[]): void => {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      issues.push(`${path} has unexpected field '${key}'`);
+    }
+  }
+};
 
 /**
  * Parse a raw JSON value into a PiariumContextExpressionV1.
@@ -40,6 +50,7 @@ const parseExpression = (value: unknown, path: string, issues: string[]): Piariu
   }
   switch (op) {
     case "defined": {
+      checkNoExtraFields(value, ["op", "key"], path, issues);
       const key = typeof value.key === "string" ? value.key : undefined;
       if (!key) {
         issues.push(`${path}.key must be a non-empty string`);
@@ -48,18 +59,20 @@ const parseExpression = (value: unknown, path: string, issues: string[]): Piariu
       return { op: "defined", key };
     }
     case "equals": {
+      checkNoExtraFields(value, ["op", "key", "value"], path, issues);
       const key = typeof value.key === "string" ? value.key : undefined;
       if (!key) {
         issues.push(`${path}.key must be a non-empty string`);
         return { op: "defined", key: "invalid" };
       }
       if (!isContextValue(value.value)) {
-        issues.push(`${path}.value must be a string, number, or boolean`);
+        issues.push(`${path}.value must be a string, finite number, or boolean`);
         return { op: "defined", key };
       }
       return { op: "equals", key, value: value.value };
     }
     case "not": {
+      checkNoExtraFields(value, ["op", "expression"], path, issues);
       if (value.expression === undefined) {
         issues.push(`${path}.expression is required`);
         return { op: "defined", key: "invalid" };
@@ -68,6 +81,7 @@ const parseExpression = (value: unknown, path: string, issues: string[]): Piariu
     }
     case "all":
     case "any": {
+      checkNoExtraFields(value, ["op", "expressions"], path, issues);
       if (!Array.isArray(value.expressions)) {
         issues.push(`${path}.expressions must be an array`);
         return { op, expressions: [] };
