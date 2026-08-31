@@ -3,7 +3,7 @@ import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 

@@ -1,8 +1,8 @@
-import type { EditorAPI } from '@/lib/api/types';
+import type { EditorAPI } from '@piarium/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench } from '@/lib/workbench/editors/session';
 import { createLegacyTextEditorViewState } from '@/lib/workbench/editors/view-state-core';

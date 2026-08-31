@@ -8,7 +8,7 @@ import { applyPatchDecisionsToDocument } from '@/lib/agent-editor/document-write
 import { parseUnifiedHunks } from '@/lib/agent-editor/patch';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import type { HunkDecision } from '@/lib/agent-editor/types';
-import type { EditorAPI } from '@/lib/api/types';
+import type { EditorAPI } from '@piarium/application-client';
 
 type PatchHunkReviewProps = {
   cwd: string;

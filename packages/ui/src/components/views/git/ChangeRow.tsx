@@ -5,7 +5,7 @@ import {
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import type { GitStatus } from '@/lib/api/types';
+import type { GitStatus } from '@piarium/application-client';
 import { useI18n } from '@/lib/i18n';
 
 type ChangeDescriptor = {

@@ -1,6 +1,6 @@
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
-import type { PiariumLanguageWorkspaceEdit } from '@/lib/api/types';
+import type { PiariumLanguageWorkspaceEdit } from '@piarium/application-client';
 import { requestWorkspaceEditReview, type WorkspaceEditReviewKind } from './workspace-edit-review';
 import { toDocumentWorkspaceEditInput } from './workspace-edit';
 

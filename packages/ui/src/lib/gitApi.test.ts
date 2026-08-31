@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { GitAPI, GitStatus } from "./api/types"
+import type { GitAPI, GitStatus } from "@piarium/application-client"
 import { getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 
 const status: GitStatus = {

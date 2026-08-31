@@ -1,4 +1,4 @@
-import type { GitLogEntry } from '@/lib/api/types';
+import type { GitLogEntry } from '@piarium/application-client';
 
 type LaneColor = string;
 

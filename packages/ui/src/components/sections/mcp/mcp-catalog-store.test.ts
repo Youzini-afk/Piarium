@@ -20,7 +20,7 @@ const nextSnapshot: PiMcpConfigSnapshot = {
   provider: { bridgeVersion: 1, state: 'active' },
 };
 
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
+mock.module('@piarium/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
 mock.module('@/lib/pi-runtime/mcp', () => ({
   getPiMcpConfigSnapshot: async () => {
     if (!deferSnapshot) return nextSnapshot;

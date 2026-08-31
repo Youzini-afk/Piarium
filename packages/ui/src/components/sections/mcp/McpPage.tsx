@@ -35,7 +35,7 @@ import {
   getPiConfigTextDocument,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {

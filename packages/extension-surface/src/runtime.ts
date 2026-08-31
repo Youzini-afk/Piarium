@@ -1,5 +1,6 @@
 import {
   parsePiariumExtensionManifest,
+  checkPiariumContributionCompatibility,
   isPiariumExtensionId,
   isPiariumContributionCompatible,
   evaluatePiariumContextExpression,
@@ -21,6 +22,7 @@ import type {
   SurfaceContribution,
   SurfaceContextProvider,
   SurfaceContextWriter,
+  SurfaceContextWriterLease,
   SurfaceExternalService,
   SurfaceExtensionRuntimeOptions,
   SurfaceLayoutReference,
@@ -32,11 +34,25 @@ import type {
 
 interface ActiveOwner {
   contributions: SurfaceContribution[];
+  contextLease: SurfaceContextWriterLease | null;
+  diagnostics: PiariumExtensionDiagnostic[];
   externalServices: SurfaceExternalService[];
   owner: SurfaceOwnerIdentity;
   requirements: PiariumExtensionServiceRequirement[];
   scope: SurfaceOwnerScope;
+  serviceSelections: Readonly<Record<string, string>>;
   services: SurfaceService[];
+}
+
+interface ServiceConsumer {
+  externalServices: readonly SurfaceExternalService[];
+  requirements: readonly PiariumExtensionServiceRequirement[];
+  serviceSelections: Readonly<Record<string, string>>;
+}
+
+interface ResolvedServiceCandidate {
+  identity: string;
+  implementation: unknown;
 }
 
 interface RequestVersion {
@@ -270,6 +286,7 @@ export class SurfaceExtensionRuntime {
   readonly #contextProvider: SurfaceContextProvider | undefined;
   #contextUnsubscribe: (() => void) | undefined;
   #contextSubscribedKeys: ReadonlySet<string> = new Set();
+  #contextPublicationSuppressed = 0;
 
   constructor(options: SurfaceExtensionRuntimeOptions) {
     this.surface = options.surface;
@@ -330,9 +347,14 @@ export class SurfaceExtensionRuntime {
           const key = ownerKey(owner);
           const scope = new SurfaceOwnerScope();
           const stagedContributions: SurfaceContribution[] = [];
+          const stagedDiagnostics: PiariumExtensionDiagnostic[] = [];
           const stagedServices: SurfaceService[] = [];
           const granted = new Set(request.options.grantedCapabilities ?? []);
           const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
+          const serviceSelections = Object.fromEntries(Object.entries(request.options.serviceSelections ?? {}).map(([key, value]) => {
+            if (!key.trim() || !value.trim()) throw new Error("Surface service selection keys and provider IDs must be non-empty");
+            return [key, value];
+          }));
           const externalServices = [...(request.options.externalServices ?? [])].map((service) => ({
             descriptor: validateService(service.descriptor),
             ...(service.dispose ? { dispose: service.dispose } : {}),
@@ -340,12 +362,31 @@ export class SurfaceExtensionRuntime {
             providerId: service.providerId,
           }));
           for (const service of externalServices) {
+            if (!service.providerId.trim()) throw new Error(`Surface external service provider ID is required: ${service.descriptor.id}`);
+          }
+          for (const service of externalServices) {
             if (service.dispose) scope.onDispose(service.dispose);
           }
+          const contextLease = this.#createContextWriter(owner, scope);
           const context: SurfaceActivationContext = {
             signal: scope.signal,
             contribute: (descriptor, implementation) => {
               const normalized = normalizeContribution(owner, descriptor);
+              const compatibility = checkPiariumContributionCompatibility(
+                normalized.kind,
+                normalized.contractVersion,
+              );
+              if (compatibility.status === "unsupported-contract-version") {
+                stagedDiagnostics.push({
+                  code: "unsupported-contract-version",
+                  extensionId: owner.extensionId,
+                  message: `Contribution ${normalized.id} declares unsupported ${normalized.kind} contract version ${normalized.contractVersion}; supported versions: ${compatibility.supportedVersions.join(", ")}`,
+                  realmId: owner.realmId,
+                  severity: "warning",
+                  timestamp: new Date().toISOString(),
+                });
+                return;
+              }
               if (!normalized.supports.includes(this.surface)) {
                 throw new SurfaceRegistryConflictError(
                   `Contribution ${normalized.id} does not support ${this.surface}`,
@@ -363,17 +404,19 @@ export class SurfaceExtensionRuntime {
             },
             onDispose: (disposer) => scope.onDispose(disposer),
             useService: <TImplementation = unknown>(id: string, version: number): TImplementation | undefined => {
-              const external = externalServices.filter((service) => service.descriptor.id === id && service.descriptor.version === version);
-              if (external.length === 1) return external[0]?.implementation as TImplementation;
-              return this.getService<TImplementation>(id, version);
+              const candidates = this.#servicesForConsumer(
+                { externalServices, requirements, serviceSelections },
+                id,
+                version,
+              );
+              return candidates.length === 1 ? candidates[0]?.implementation as TImplementation : undefined;
             },
-            useServices: <TImplementation = unknown>(id: string, version: number): TImplementation[] => [
-              ...this.getServices<TImplementation>(id, version),
-              ...externalServices
-                .filter((service) => service.descriptor.id === id && service.descriptor.version === version)
-                .map((service) => service.implementation as TImplementation),
-            ],
-            context: this.#createContextWriter(owner, scope),
+            useServices: <TImplementation = unknown>(id: string, version: number): TImplementation[] => this.#servicesForConsumer(
+              { externalServices, requirements, serviceSelections },
+              id,
+              version,
+            ).map((service) => service.implementation as TImplementation),
+            context: contextLease?.writer ?? unavailableContextWriter,
           };
           try {
             await request.activation(context);
@@ -384,10 +427,13 @@ export class SurfaceExtensionRuntime {
           this.#assertLatest(key, owner);
           candidates.set(key, {
             contributions: stagedContributions,
+            contextLease,
+            diagnostics: stagedDiagnostics,
             externalServices,
             owner: { ...owner },
             requirements,
             scope,
+            serviceSelections,
             services: stagedServices,
           });
         }
@@ -398,10 +444,40 @@ export class SurfaceExtensionRuntime {
         // arrive while it is in flight; publish this committed generation first, then let that
         // queued request replace or deactivate it without turning a successful catalog commit
         // into a partial rollback.
-        for (const [key, candidate] of candidates) {
-          this.#activeOwners.set(key, candidate);
-          this.#actual.set(key, actual(candidate.owner, "active"));
-        }
+        this.#withContextPublicationSuppressed(() => {
+          const publishContextLayers = () => {
+            for (const candidate of candidates.values()) {
+              try {
+                candidate.contextLease?.commit();
+              } catch (error) {
+                try { candidate.contextLease?.dispose(); } catch { /* Failure remains attributed below. */ }
+                candidate.diagnostics.push(diagnostic(
+                  candidate.owner,
+                  "context_commit_failed",
+                  error instanceof Error ? error.message : String(error),
+                ));
+              }
+            }
+          };
+          try {
+            if (this.#contextProvider?.batch) this.#contextProvider.batch(publishContextLayers);
+            else publishContextLayers();
+          } catch (error) {
+            for (const candidate of candidates.values()) {
+              try { candidate.contextLease?.dispose(); } catch { /* Failure remains attributed below. */ }
+              if (candidate.diagnostics.some((item) => item.code === "context_commit_failed")) continue;
+              candidate.diagnostics.push(diagnostic(
+                candidate.owner,
+                "context_commit_failed",
+                error instanceof Error ? error.message : String(error),
+              ));
+            }
+          }
+          for (const [key, candidate] of candidates) {
+            this.#activeOwners.set(key, candidate);
+            this.#actual.set(key, actual(candidate.owner, "active", candidate.diagnostics));
+          }
+        });
         this.#publish();
         for (const [key, oldOwner] of previous) {
           if (!oldOwner) continue;
@@ -418,7 +494,10 @@ export class SurfaceExtensionRuntime {
           const key = ownerKey(request.options.owner);
           const oldOwner = previous.get(key);
           this.#actual.set(key, oldOwner
-            ? actual(oldOwner.owner, "active", [diagnostic(request.options.owner, "candidate_activation_failed", error instanceof Error ? error.message : String(error))])
+            ? actual(oldOwner.owner, "active", [
+                ...oldOwner.diagnostics,
+                diagnostic(request.options.owner, "candidate_activation_failed", error instanceof Error ? error.message : String(error)),
+              ])
             : actual(request.options.owner, error instanceof SurfaceActivationStaleError ? "inactive" : "failed", [
               diagnostic(request.options.owner, error instanceof SurfaceActivationStaleError ? "activation_superseded" : "activation_failed", error instanceof Error ? error.message : String(error)),
             ]));
@@ -511,15 +590,15 @@ export class SurfaceExtensionRuntime {
     this.#publish();
   }
 
-  setServiceSelection(id: string, version: number, extensionId: string | null): void {
+  setServiceSelection(id: string, version: number, providerId: string | null): void {
     if (!isPiariumExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
       throw new Error(`Invalid Surface service selection: ${id}@${version}`);
     }
     const key = `${id}@${version}`;
-    if (extensionId === null) this.#serviceSelections.delete(key);
+    if (providerId === null) this.#serviceSelections.delete(key);
     else {
-      if (!isPiariumExtensionId(extensionId)) throw new Error(`Invalid Surface service provider ID: ${extensionId}`);
-      this.#serviceSelections.set(key, extensionId);
+      if (!providerId.trim()) throw new Error("Surface service provider ID must be non-empty");
+      this.#serviceSelections.set(key, providerId);
     }
     this.#publish();
   }
@@ -537,21 +616,12 @@ export class SurfaceExtensionRuntime {
     return this.#matchingServices(id, version).map((service) => service.implementation as TImplementation);
   }
 
-  /**
-   * Create an owner-scoped context writer. If no context provider is
-   * configured, returns a no-op writer that accepts all writes but
-   * stores nothing. The writer is fenced by generation: writes from
-   * a stale generation are silently rejected.
-   */
-  #createContextWriter(owner: SurfaceOwnerIdentity, scope: SurfaceOwnerScope): SurfaceContextWriter {
+  #createContextWriter(owner: SurfaceOwnerIdentity, scope: SurfaceOwnerScope): SurfaceContextWriterLease | null {
     const provider = this.#contextProvider;
-    if (!provider?.createWriter) {
-      // No context provider or no writer support — return a no-op writer.
-      return { set: () => true, delete: () => false };
-    }
-    const { writer, dispose } = provider.createWriter(owner);
-    scope.onDispose(dispose);
-    return writer;
+    if (!provider) return null;
+    const lease = provider.createWriter(owner);
+    scope.onDispose(() => lease.dispose());
+    return lease;
   }
 
   #handle(owner: SurfaceOwnerIdentity): SurfaceOwnerHandle {
@@ -615,17 +685,8 @@ export class SurfaceExtensionRuntime {
   #requirementsSatisfied(owner: ActiveOwner, owners: ReadonlyMap<string, ActiveOwner>): boolean {
     return owner.requirements.every((requirement) => {
       if (requirement.optional) return true;
-      const local = this.#matchingServices(requirement.id, requirement.version, owners);
-      const external = owner.externalServices.filter((service) => (
-        service.descriptor.id === requirement.id && service.descriptor.version === requirement.version
-      ));
-      const count = local.length + external.length;
-      if (requirement.binding === "selected") {
-        const selected = this.#serviceSelections.get(`${requirement.id}@${requirement.version}`);
-        return external.length > 0 || Boolean(selected && local.some((service) => service.owner.extensionId === selected));
-      }
-      if ((requirement.binding ?? "single") === "single") return count === 1;
-      return count > 0;
+      const resolved = this.#servicesForConsumer(owner, requirement.id, requirement.version, owners);
+      return requirement.binding === "all" ? resolved.length > 0 : resolved.length === 1;
     });
   }
 
@@ -673,28 +734,67 @@ export class SurfaceExtensionRuntime {
       for (const requirement of activeOwner.requirements) {
         if (requirement.optional) continue;
         const serviceKey = `${requirement.id}@${requirement.version}`;
-        const providers = serviceGroups.get(serviceKey) ?? [];
-        const externalProviders = activeOwner.externalServices.filter((service) => (
-          service.descriptor.id === requirement.id && service.descriptor.version === requirement.version
-        ));
-        const providerCount = providers.length + externalProviders.length;
-        if (providerCount === 0) {
+        const candidatesForRequirement = this.#serviceCandidatesForConsumer(
+          activeOwner,
+          requirement.id,
+          requirement.version,
+          candidateOwners,
+        );
+        if (candidatesForRequirement.length === 0) {
           throw new SurfaceRegistryConflictError(`Required Surface service is unavailable: ${serviceKey}`, [requirement.id]);
         }
         if (requirement.binding === "selected") {
-          const selected = this.#serviceSelections.get(serviceKey);
-          const selectedLocal = selected && providers.some((provider) => provider.owner.extensionId === selected);
-          if (!selectedLocal && externalProviders.length === 0) {
+          const selected = this.#selectionFor(activeOwner, serviceKey);
+          const matches = selected
+            ? candidatesForRequirement.filter((candidate) => candidate.identity === selected)
+            : [];
+          if (matches.length !== 1) {
             throw new SurfaceRegistryConflictError(`Selected Surface service provider is unavailable: ${serviceKey}`, [requirement.id]);
           }
-        } else if ((requirement.binding ?? "single") === "single" && providerCount !== 1) {
+        } else if ((requirement.binding ?? "single") === "single" && candidatesForRequirement.length !== 1) {
           throw new SurfaceRegistryConflictError(`Required Surface service is ambiguous: ${serviceKey}`, [
-            ...providers.map((provider) => provider.owner.extensionId),
-            ...externalProviders.map((provider) => provider.providerId),
+            ...candidatesForRequirement.map((provider) => provider.identity),
           ]);
         }
       }
     }
+  }
+
+  #selectionFor(consumer: ServiceConsumer, serviceKey: string): string | undefined {
+    return consumer.serviceSelections[serviceKey] ?? this.#serviceSelections.get(serviceKey);
+  }
+
+  #serviceCandidatesForConsumer(
+    consumer: ServiceConsumer,
+    id: string,
+    version: number,
+    owners: ReadonlyMap<string, ActiveOwner> = this.#activeOwners,
+  ): ResolvedServiceCandidate[] {
+    const local = this.#matchingServices(id, version, owners).map((service) => ({
+      identity: service.owner.extensionId,
+      implementation: service.implementation,
+    }));
+    const external = consumer.externalServices
+      .filter((service) => service.descriptor.id === id && service.descriptor.version === version)
+      .map((service) => ({ identity: service.providerId, implementation: service.implementation }));
+    return [...local, ...external];
+  }
+
+  #servicesForConsumer(
+    consumer: ServiceConsumer,
+    id: string,
+    version: number,
+    owners: ReadonlyMap<string, ActiveOwner> = this.#activeOwners,
+  ): ResolvedServiceCandidate[] {
+    const candidates = this.#serviceCandidatesForConsumer(consumer, id, version, owners);
+    const requirement = consumer.requirements.find((item) => item.id === id && item.version === version);
+    if (!requirement) return candidates.length === 1 ? candidates : [];
+    if (requirement.binding === "all") return candidates;
+    if (requirement.binding === "selected") {
+      const selected = this.#selectionFor(consumer, `${id}@${version}`);
+      return selected ? candidates.filter((candidate) => candidate.identity === selected) : [];
+    }
+    return candidates.length === 1 ? candidates : [];
   }
 
   #markLatest(key: string, request: RequestVersion): void {
@@ -755,8 +855,20 @@ export class SurfaceExtensionRuntime {
     this.#contextSubscribedKeys = keys;
     if (keys.size === 0) return;
     this.#contextUnsubscribe = this.#contextProvider.subscribe([...keys], () => {
+      if (this.#contextPublicationSuppressed > 0) {
+        return;
+      }
       this.#publish();
     });
+  }
+
+  #withContextPublicationSuppressed(operation: () => void): void {
+    this.#contextPublicationSuppressed += 1;
+    try {
+      operation();
+    } finally {
+      this.#contextPublicationSuppressed -= 1;
+    }
   }
 
   #enqueue<T>(_extensionId: string, operation: () => Promise<T>): Promise<T> {
@@ -765,3 +877,8 @@ export class SurfaceExtensionRuntime {
     return result;
   }
 }
+
+const unavailableContextWriter: SurfaceContextWriter = {
+  delete: () => false,
+  set: () => false,
+};

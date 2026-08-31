@@ -35,7 +35,7 @@ import {
   listPiAgentProviders,
   runPiAgentProviderAction,
 } from '@/lib/pi-runtime/agent-providers';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import {
   PluginOptionalBooleanField,
   PluginOptionalSelectField,

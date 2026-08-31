@@ -1,4 +1,4 @@
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 export type IntegratePlan = {
   repoRoot: string;

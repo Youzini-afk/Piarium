@@ -8,7 +8,7 @@ import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/Setting
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useI18n } from '@/lib/i18n';
 import {
   pluginSettingsPackageIdentity,

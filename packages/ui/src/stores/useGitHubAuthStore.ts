@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { GitHubAuthStatus, RuntimeAPIs } from '@/lib/api/types';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { GitHubAuthStatus, RuntimeAPIs } from '@piarium/application-client';
+import { runtimeFetch } from '@piarium/application-client';
 
 type GitHubAuthStatusWithError = GitHubAuthStatus & { error?: string };
 

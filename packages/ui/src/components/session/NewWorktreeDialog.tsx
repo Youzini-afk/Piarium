@@ -65,7 +65,7 @@ import type {
   GitHubIssuesListResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestSummary,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';

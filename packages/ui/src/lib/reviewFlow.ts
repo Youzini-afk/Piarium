@@ -10,7 +10,7 @@ import type {
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {

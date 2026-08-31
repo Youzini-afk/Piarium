@@ -4,7 +4,7 @@ import {
   DocumentsError,
   isDocumentsError,
   parseDocumentsFailureReason,
-} from './documents-errors';
+} from '@piarium/application-client';
 
 describe('DocumentsError', () => {
   test('retains the maintenance reason and HTTP status', () => {

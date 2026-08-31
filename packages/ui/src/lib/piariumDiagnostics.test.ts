@@ -196,13 +196,10 @@ mock.module('@/lib/pi-runtime/fleet', () => ({
   }),
 }));
 
-mock.module('@/lib/runtime-url', () => ({
+mock.module('@piarium/application-client', () => ({
   getRuntimeUrlResolver: () => ({
     health: () => 'https://runtime.example/health?piarium_url_token=secret-token',
   }),
-}));
-
-mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: async () => new Response(JSON.stringify({
     apiOnly: false,
     compatibility: {

@@ -6,7 +6,7 @@ import {
 import type { RuntimeContextTarget } from '@piarium/protocol';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { piariumSurfaceRuntime } from './surface-runtime';
 import { startBuiltinPiariumExtensions } from './builtin-surface-manager';

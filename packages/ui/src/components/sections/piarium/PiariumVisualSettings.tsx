@@ -1,5 +1,5 @@
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
@@ -62,9 +62,9 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { TerminalShellOption } from '@/lib/api/types';
+import type { TerminalShellOption } from '@piarium/application-client';
 import { isTerminalShell } from '@/lib/terminalShell';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
 

@@ -2,11 +2,11 @@ import type {
   LanguageServicesAPI,
   PiariumLanguageServiceEvent,
   Subscription,
-} from '@/lib/api/types';
-import { LanguageServicesError } from '@/lib/api/language-errors';
+} from '@piarium/application-client';
+import { LanguageServicesError } from '@piarium/application-client';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentIdentity } from '@/lib/documents/types';
-import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
 import {
   clearLanguageDiagnosticsForWorkspace,
   replaceLanguageDiagnostics,

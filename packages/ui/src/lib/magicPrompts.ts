@@ -1,4 +1,4 @@
-import { runtimeFetch } from './runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 export type MagicPromptId =
   | 'git.commit.generate.visible'

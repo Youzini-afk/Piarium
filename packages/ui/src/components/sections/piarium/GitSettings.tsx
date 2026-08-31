@@ -5,7 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import {
   SettingsSection,
   SettingsControlGroup,

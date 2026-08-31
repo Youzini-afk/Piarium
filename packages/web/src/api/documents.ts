@@ -19,11 +19,11 @@ import type {
 } from '@piarium/application-client';
 import { DocumentsError, parseDocumentsFailureReason } from '@piarium/application-client';
 import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/ui/lib/runtime-switch';
+} from '@piarium/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {

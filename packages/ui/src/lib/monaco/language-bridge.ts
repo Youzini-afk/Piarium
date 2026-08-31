@@ -8,7 +8,7 @@ import type {
   PiariumLanguageDiagnostic,
   PiariumLanguageFeatureRequest,
   PiariumResourceReference,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';

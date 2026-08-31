@@ -9,7 +9,7 @@ import { Icon } from "@/components/icon/Icon";
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { InstanceServiceUrls } from './InstanceServiceUrls';

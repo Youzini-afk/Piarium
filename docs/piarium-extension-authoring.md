@@ -473,6 +473,11 @@ activation. Multi-provider services publish stable `providerKey` identities; inv
 latest provider generation through application-host routing. Extensions do not inspect or prioritize
 one another.
 
+`binding: "single"` requires exactly one compatible provider across Host, Surface-local, and active
+Surface providers. `binding: "selected"` requires an explicit persisted provider selection and never
+falls back to an arbitrary provider merely because one is present. `binding: "all"` exposes every
+compatible provider through `useServices`.
+
 ## Build mapping
 
 The manifest names published artifacts. `package.json` can map each entrypoint ID to source:
@@ -539,15 +544,22 @@ The `when` field accepts a `PiariumContextExpressionV1` object with one of five 
 on those kinds would bypass Workbench Profile stage-and-commit and Recovery invariants. The
 manifest parser rejects `when` on disallowed kinds at parse time.
 
+Managed extensions publish custom values with `context.context.set("ready", true)` and reference the
+fully namespaced key, for example `dev.example.my-extension.ready`, from `when`. The writer adds the
+extension prefix itself. Candidate writes remain invisible until activation and catalog commit both
+succeed; candidate failure preserves the old generation's values. After replacement or disable, stale
+writers return `false` and cleanup affects only that exact owner/entrypoint generation. Isolated
+extensions use `await context.context.set(...)` / `delete(...)` with the same semantics.
+
 ## Contribution compatibility
 
 Each contribution declares a `contractVersion` alongside its `kind`. The runtime checks
 compatibility before validating kind-specific data. A contribution with an unknown
 `contractVersion` is still parsed (structure, id, kind, supports) so the catalog can retain the
 record, but its data payload is not validated and it is not visible in the Surface. The CLI
-`check` command reports these as `incompatibleContributions` in its JSON output — the check still
-succeeds (exit 0) because the manifest is structurally valid, but the contributions are not
-executable on the current runtime.
+`check` command reports these as `incompatibleContributions` in its JSON output and exits non-zero for
+the current Piarium target. The installed Catalog record and Profile references remain intact, while
+the Surface reports `unsupported-contract-version` and does not register or execute that contribution.
 
 ## Check and test
 

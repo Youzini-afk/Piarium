@@ -1,7 +1,7 @@
 import type { ImageAttachment, ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
 import { create } from 'zustand';
 import { normalizePath } from '@/lib/pathNormalization';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 
 export interface PiDraftState {

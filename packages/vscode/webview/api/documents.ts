@@ -16,7 +16,7 @@ import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/ui/lib/runtime-switch';
+} from '@piarium/application-client';
 import { sendBridgeMessage } from './bridge';
 
 const assertGeneration = (generation: number): void => {

@@ -22,8 +22,8 @@ import type {
   PiariumDebugVariable,
   PiariumTaskConfiguration,
   PiariumTestItem,
-} from '@/lib/api/types';
-import { RunServicesError } from '@/lib/api/run-errors';
+} from '@piarium/application-client';
+import { RunServicesError } from '@piarium/application-client';
 import { ideDebugControlAvailability } from '@/lib/workbench/ide-debug-controls';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';

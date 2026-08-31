@@ -26,7 +26,7 @@ import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   armPiTimelineTurn,

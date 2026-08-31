@@ -22,7 +22,7 @@ import {
 import { withPrColors } from '@/lib/theme/themes/prColors';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import {
   getInitialSystemPreference,
   publishEmbeddedThemeBootstrap,
@@ -31,7 +31,7 @@ import {
 } from './theme-embedded-bootstrap';
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import {
   PIARIUM_THEME_STORAGE_KEY,
   readStoredThemeState,

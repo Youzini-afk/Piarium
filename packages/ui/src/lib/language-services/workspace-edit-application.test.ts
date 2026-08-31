@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import type { PiariumLanguageWorkspaceEdit } from '@/lib/api/types';
+import type { PiariumLanguageWorkspaceEdit } from '@piarium/application-client';
 import { applyLanguageWorkspaceEdit } from './workspace-edit-application';
 
 const identity = { workspaceId: 'workspace-one', resourceId: 'src/a.ts' };

@@ -16,8 +16,8 @@ import {
   setDesktopMinimizeToTray,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl } from '@piarium/application-client';
 import {
   SettingsSection,
   SettingsCheckboxRow,

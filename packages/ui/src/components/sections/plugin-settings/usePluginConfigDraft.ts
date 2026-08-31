@@ -27,7 +27,7 @@ import {
   parsePiJsonObjectDocument,
 } from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import {
   notifyPiRuntimeCatalogChanged,
   subscribePiRuntimeCatalogChanged,

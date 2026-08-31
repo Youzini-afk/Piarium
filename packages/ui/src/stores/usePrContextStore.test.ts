@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { usePrContextStore, getPrContextKey } from './usePrContextStore';
-import type { GitHubAPI, GitHubPullRequestContextResult } from '@/lib/api/types';
+import type { GitHubAPI, GitHubPullRequestContextResult } from '@piarium/application-client';
 
 const makeGithub = (result: GitHubPullRequestContextResult) => {
   let calls = 0;

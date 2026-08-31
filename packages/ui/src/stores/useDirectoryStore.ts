@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';

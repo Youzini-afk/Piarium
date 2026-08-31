@@ -1,4 +1,4 @@
-import type { PiariumLanguageDiagnostic } from '@/lib/api/types';
+import type { PiariumLanguageDiagnostic } from '@piarium/application-client';
 import { setWorkbenchProblems } from '@/lib/workbench/editors/panels';
 
 const recordKey = (

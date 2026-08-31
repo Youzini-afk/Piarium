@@ -1,4 +1,4 @@
-import type { PiariumDebugSessionStatus } from '@/lib/api/types';
+import type { PiariumDebugSessionStatus } from '@piarium/application-client';
 
 export interface IdeDebugControlAvailability {
   canContinue: boolean;

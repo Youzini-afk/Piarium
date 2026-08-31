@@ -7,7 +7,7 @@ import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 const LICENSE_URL = 'https://github.com/Youzini-afk/Piarium/blob/main/LICENSE';
 

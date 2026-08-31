@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import {
   resolveDefaultDirectory,
   resolveRestoredDirectory,

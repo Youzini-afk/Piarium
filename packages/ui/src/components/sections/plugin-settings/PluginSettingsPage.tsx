@@ -6,7 +6,7 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { consumePluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import {
   pluginSettingsAdapterForPackage,

@@ -9,6 +9,13 @@ multiple service providers, ordered contributions, and retained layout reference
 that are temporarily absent. Actual state remains attributed to extension, entrypoint, realm, and
 generation. This package does not import React or load external bundles.
 
+Owner context keys participate in the same activation transaction. A candidate writes into a private
+layer; the layer becomes visible only after the external commit succeeds. Replacing an owner fences the
+old writer before cleanup, and disposing one entrypoint cannot remove another entrypoint or a newer
+generation's values. `single`, `selected`, and `all` service requirements use the same complete provider
+set: selected requires one explicit matching provider, single requires exactly one candidate, and all
+exposes every compatible candidate.
+
 Most extension authors use `@piarium/extension-sdk`; this lower-level package is public for alternate
 Surface hosts and advanced lifecycle tests. See the
 [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

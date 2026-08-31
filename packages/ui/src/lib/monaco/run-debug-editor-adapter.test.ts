@@ -7,7 +7,7 @@ import type {
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { bindRunDebugServices, resetRunDebugServices } from '@/lib/run-debug/session';
 import {
   createRunDebugEditorAdapter,

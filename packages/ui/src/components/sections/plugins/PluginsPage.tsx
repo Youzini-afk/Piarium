@@ -39,7 +39,7 @@ import {
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';

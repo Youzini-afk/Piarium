@@ -16,7 +16,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { PiSettingsContributionSlot } from '@/lib/extensions/pi-integration-registry';
 import type { PiariumSettingsSection } from './types';
 

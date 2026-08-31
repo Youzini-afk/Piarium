@@ -3,12 +3,12 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import type { GitHubAuthStatus, GitHubGitAuthorResult, GitHubTerminalAuthResult } from '@/lib/api/types';
+import type { GitHubAuthStatus, GitHubGitAuthorResult, GitHubTerminalAuthResult } from '@piarium/application-client';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import { Icon } from "@/components/icon/Icon";
 import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
 

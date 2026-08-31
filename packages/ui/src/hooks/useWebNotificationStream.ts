@@ -1,9 +1,9 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
 import { useUIStore } from '@/stores/useUIStore';
-import type { NotificationPayload } from '@/lib/api/types';
+import type { NotificationPayload } from '@piarium/application-client';
 
 const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
 

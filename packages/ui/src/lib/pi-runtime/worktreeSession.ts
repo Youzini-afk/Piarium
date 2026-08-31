@@ -1,5 +1,5 @@
 import type { SessionSnapshot } from '@piarium/protocol';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import {
   getWorktreeSetupCommands,

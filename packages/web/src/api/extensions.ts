@@ -20,8 +20,8 @@ import {
   type PiariumExtensionLocalSourceReloadRequest,
 } from '@piarium/extension-contract';
 import type { ExtensionsAPI } from '@piarium/application-client';
-import { refreshLocalRuntimeUrlAuthToken } from '@piarium/ui/lib/runtime-auth';
-import { fetchWithoutRuntimeRouting } from '@piarium/ui/lib/runtime-fetch';
+import { refreshLocalRuntimeUrlAuthToken } from '@piarium/application-client';
+import { fetchWithoutRuntimeRouting } from '@piarium/application-client';
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '');
 

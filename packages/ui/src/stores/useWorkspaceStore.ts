@@ -20,7 +20,7 @@ import type {
   WorkspaceListResult,
   WorkspaceRootInfo,
   WorkspaceUploadFile,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { getWorkspaceAPI } from '@/lib/workspaceApi';
 import type { WorkspaceArchiveMode } from '@/lib/workspaceArchive';
 import { useProjectsStore } from '@/stores/useProjectsStore';

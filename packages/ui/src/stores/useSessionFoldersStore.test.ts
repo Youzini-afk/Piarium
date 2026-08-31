@@ -32,10 +32,10 @@ mock.module('@/lib/desktop', () => ({
   isVSCodeRuntime: () => false,
 }));
 
-mock.module('@/lib/runtime-fetch', () => ({
+mock.module('@piarium/application-client', () => ({
+  getRuntimeKey: () => runtimeKey,
   runtimeFetch: mock(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
 }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
 const { useSessionFoldersStore } = await import('./useSessionFoldersStore');
 

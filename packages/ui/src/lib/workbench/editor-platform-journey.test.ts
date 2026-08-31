@@ -5,7 +5,7 @@ import type {
   DocumentsAPI,
   PiariumDocumentReadResult,
   PiariumResourceReference,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import {
   consumeEditorContextAttachments,
   resetEditorContextAttachments,
@@ -16,7 +16,7 @@ import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/ses
 import { documentKey } from '@/lib/documents/types';
 import { FileEditorModelRegistry } from '@/lib/monaco/model-registry';
 import type { MonacoRuntime } from '@/lib/monaco/runtime';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import {
   armWorkbenchProfileTransitionPhase,
   beginWorkbenchProfileTransition,

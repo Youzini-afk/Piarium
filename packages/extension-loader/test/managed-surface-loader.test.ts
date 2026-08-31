@@ -78,6 +78,7 @@ const hostState = (
   catalog: PiariumExtensionCatalogSnapshot,
   revision = catalog.revision,
   providers: PiariumExtensionHostStateSnapshot['services']['providers'] = [],
+  selections: Record<string, string> = {},
 ): PiariumExtensionHostStateSnapshot => ({
   catalog,
   revision,
@@ -88,7 +89,7 @@ const hostState = (
     hostId: catalog.hostId,
     storageState: 'missing',
   },
-  services: { hostId: catalog.hostId, providers, revision, selections: {} },
+  services: { hostId: catalog.hostId, providers, revision, selections },
   workbench: {
     authoritative: true,
     diagnostics: [],
@@ -323,6 +324,14 @@ test("eager entrypoint with only incompatible contributions does not execute its
   // Module was never evaluated or read
   assert.equal(evaluations, 0);
   assert.equal(entrypointReads, 0);
+  assert.deepEqual(
+    loader.getSnapshot().diagnostics.map((item) => ({ code: item.code, entrypointId: item.entrypointId })),
+    [
+      { code: "unsupported-contract-version", entrypointId: "main" },
+      { code: "unsupported-contract-version", entrypointId: "main" },
+    ],
+  );
+  assert.match(loader.getSnapshot().diagnostics[0]?.message ?? "", /page contract version 99/);
 });
 
 test("lazy Surface entrypoints index declarative contributions and activate once per real event", async () => {
@@ -717,23 +726,33 @@ test("service binding matrix: single requires exactly one provider", async () =>
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 });
 
-test("service binding matrix: selected activates with at least one provider", async () => {
+test("service binding matrix: selected requires and resolves the explicit provider", async () => {
   const artifactIntegrity = integrityFor("binding-selected");
   const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("selected") };
   let current = snapshot(1, entry);
   let stateRevision = 1;
   let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  let selections: Record<string, string> = {};
+  const resolvedProviders: string[] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
-    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
-      contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-selected.page", kind: "page", supports: ["web"],
-    }, {}) } }),
+    evaluateModule: () => ({ default: { activate: async (ctx: {
+      contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void;
+      useService<T>(id: string, version: number): T | undefined;
+    }) => {
+      const service = ctx.useService<{ provider(): Promise<string> }>("dev.example.matrix-service", 1);
+      assert.ok(service);
+      resolvedProviders.push(await service.provider());
+      ctx.contribute({
+        contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-selected.page", kind: "page", supports: ["web"],
+      }, {});
+    } } }),
     host: {
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => hostState(current, stateRevision, providers),
-      invokeService: async () => null,
+      hostState: async () => hostState(current, stateRevision, providers, selections),
+      invokeService: async (request) => request.providerId ?? "missing",
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       requestCandidateApplication: async () => current,
       readAsset: async () => { throw new Error("unexpected asset read"); },
@@ -751,17 +770,32 @@ test("service binding matrix: selected activates with at least one provider", as
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 
-  // One provider — selected should activate
+  // One provider without a selection remains unsatisfied.
   providers = [matrixProvider("a")];
   stateRevision += 1;
   await loader.reconcile();
-  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 
-  // Two providers — selected should still activate (at least one is enough)
-  providers = [matrixProvider("a"), matrixProvider("b")];
+  // An explicit provider selection activates and resolves that exact provider.
+  selections = { "dev.example.matrix-service@1": matrixProvider("a").providerId };
   stateRevision += 1;
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+  assert.deepEqual(resolvedProviders, [matrixProvider("a").providerId]);
+
+  // Changing the explicit selection rebinds to the chosen provider.
+  providers = [matrixProvider("a"), matrixProvider("b")];
+  selections = { "dev.example.matrix-service@1": matrixProvider("b").providerId };
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+  assert.deepEqual(resolvedProviders, [matrixProvider("a").providerId, matrixProvider("b").providerId]);
+
+  // A stale selection withdraws the dependent instead of binding an arbitrary provider.
+  selections = { "dev.example.matrix-service@1": "dev.example.provider-missing:host:1:dev.example.matrix-service@1" };
+  stateRevision += 1;
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 });
 
 test("service binding matrix: all activates with at least one provider", async () => {
@@ -1392,13 +1426,71 @@ test("isolated Workers are background-only and reject visual contributions witho
       callCapability: async () => null,
       callService: async () => null,
       contribute: () => { contributions += 1; },
+      deleteContext: () => false,
       grantedCapabilities: [],
       hasService: () => false,
       readAsset: async () => { throw new Error("unexpected asset read"); },
+      setContext: () => false,
     }), /background-only/);
     assert.equal(contributions, 0);
     assert.equal(realm.disposed, true);
     assert.equal(terminated, true);
+  } finally {
+    if (workerDescriptor) Object.defineProperty(globalThis, "Worker", workerDescriptor);
+    else delete (globalThis as { Worker?: unknown }).Worker;
+  }
+});
+
+test("isolated realm requests bridge owner-scoped context writes", async () => {
+  const workerDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Worker");
+  class TestWorker {
+    addEventListener(): void {}
+    postMessage(message: { nonce: string; version: number }, transfer: Transferable[]): void {
+      const port = transfer[0] as MessagePort;
+      port.onmessage = (event: MessageEvent<{ id?: string; success?: boolean; type?: string }>) => {
+        if (event.data.type !== "response" || event.data.success !== true) return;
+        if (event.data.id === "set") {
+          port.postMessage({ id: "delete", method: "context.delete", params: { key: "ready" }, type: "request" });
+        } else if (event.data.id === "delete") {
+          port.postMessage({ type: "ready", version: message.version });
+        }
+      };
+      port.start();
+      port.postMessage({ type: "hello", nonce: message.nonce, version: message.version });
+      port.postMessage({
+        id: "set",
+        method: "context.set",
+        params: { key: "ready", value: true },
+        type: "request",
+      });
+    }
+    terminate(): void {}
+  }
+  Object.defineProperty(globalThis, "Worker", { configurable: true, value: TestWorker });
+  try {
+    const realm = browserIsolatedSurfaceRealmFactory.create("", [], {
+      entrypointId: "worker",
+      extensionId: "dev.example.worker-context",
+      integrity: integrityFor("worker-context"),
+      kind: "worker",
+      realmId: "worker-context-test",
+    });
+    const values = new Map<string, string | number | boolean>();
+    await realm.activate({
+      callCapability: async () => null,
+      callService: async () => null,
+      contribute: () => undefined,
+      deleteContext: (key) => values.delete(key),
+      grantedCapabilities: [],
+      hasService: () => false,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      setContext: (key, value) => {
+        values.set(key, value);
+        return true;
+      },
+    });
+    assert.equal(values.has("ready"), false);
+    realm.dispose();
   } finally {
     if (workerDescriptor) Object.defineProperty(globalThis, "Worker", workerDescriptor);
     else delete (globalThis as { Worker?: unknown }).Worker;

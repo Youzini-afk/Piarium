@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@/lib/api/types';
+import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@piarium/application-client';
 import { validateContextFileOpen } from './contextFileOpenGuard';
 
 const resource = (resourceId: string): PiariumResourceReference => ({

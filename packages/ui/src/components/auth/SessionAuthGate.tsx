@@ -10,11 +10,11 @@ import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeExtraHeadersSync } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@piarium/application-client';
 import { dismissInitialSplash } from '@/lib/splash';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {

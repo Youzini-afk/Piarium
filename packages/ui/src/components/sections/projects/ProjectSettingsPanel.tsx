@@ -7,7 +7,7 @@ import {
   type ProjectIdentitySaveData,
 } from '@/components/sections/projects/useProjectIdentityForm';
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;

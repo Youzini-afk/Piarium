@@ -344,7 +344,7 @@ onCommand('settingsSynced', () => {
 onCommand('activeEditorFile', (payload) => {
   void Promise.all([
     import('@/stores/usePiEditorContextStore'),
-    import('@/lib/runtime-switch'),
+    import('@piarium/application-client'),
   ]).then(([context, runtime]) => {
     const ownerId = 'vscode:active-editor';
     if (!payload || typeof payload !== 'object') {
@@ -377,6 +377,8 @@ onCommand('showNotification', (payload) => {
 });
 
 const bootstrap = async () => {
+  const { registerWorkbenchShells } = await import('@piarium/ui/workbenches/register-shells');
+  await registerWorkbenchShells('vscode');
   const { startSurfaceExtensions } = await import('@piarium/ui/lib/extensions/managed-runtime');
   void startSurfaceExtensions().catch((error) => {
     console.error('[Piarium Extensions] Managed Surface startup failed:', error);

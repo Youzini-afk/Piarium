@@ -9,7 +9,7 @@ import {
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
 declare const __APP_VERSION__: string | undefined;

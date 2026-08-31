@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import type { AgentFileChangeHint, AgentFileChangeKind, ToolFileChange } from './types';

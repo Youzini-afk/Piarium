@@ -17,7 +17,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 import {
   deleteScheduledTask,
   deleteScheduledTaskLoopFile,

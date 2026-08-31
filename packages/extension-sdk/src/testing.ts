@@ -183,6 +183,7 @@ export const runIsolatedExtensionConformance = async (options: {
 }): Promise<IsolatedConformanceResult> => {
   const controller = new AbortController();
   const contributions = new Map<string, PiariumExtensionStaticContribution>();
+  const contextValues = new Map<string, string | number | boolean>();
   const disposers: Array<() => void | Promise<void>> = [];
   const grantedCapabilities = new Set(options.grantedCapabilities ?? []);
   const services = [...(options.services ?? [])];
@@ -206,6 +207,13 @@ export const runIsolatedExtensionConformance = async (options: {
         return capabilities.call(capability, method, params);
       },
       has: (capability) => grantedCapabilities.has(capability),
+    },
+    context: {
+      delete: async (key) => contextValues.delete(key),
+      set: async (key, value) => {
+        contextValues.set(key, value);
+        return true;
+      },
     },
     contribute: (descriptor) => {
       if (contributions.has(descriptor.id)) throw new Error(`Isolated contribution provided more than once: ${descriptor.id}`);

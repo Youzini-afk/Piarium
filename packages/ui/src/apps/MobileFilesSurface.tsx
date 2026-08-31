@@ -29,8 +29,8 @@ import { useDocumentRecord } from '@/lib/documents/hooks';
 import { resolveTextDocumentIdentity } from '@/lib/documents/workspace-text';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
 import { isBinaryFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
-import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { FileListEntry, FileSearchResult } from '@piarium/application-client';
+import { runtimeFetch } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 
 type MobileFilesRoute =

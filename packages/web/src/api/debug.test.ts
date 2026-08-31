@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunServicesError } from '@piarium/application-client';
-import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
+import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/application-client';
 
-const runtimeFetchMock = vi.fn();
+const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
 
-vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
+vi.mock('@piarium/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@piarium/application-client')>(),
   runtimeFetch: runtimeFetchMock,
 }));
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { MobileWorkspaceShell } from '@/apps/mobileWorkspaceShell';
-import { switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
+import { switchRuntimeEndpointSafely } from '@piarium/application-client';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 
 export const MOBILE_WORKSPACE_DISCONNECTED_EVENT = 'piarium:mobile-workspace-disconnected';

@@ -16,7 +16,7 @@ mock.module('@/lib/desktop', () => ({
   },
 }));
 
-mock.module('@/lib/runtime-fetch', () => ({
+mock.module('@piarium/application-client', () => ({
   runtimeFetch: async () => new Response(null, { status: 204 }),
 }));
 

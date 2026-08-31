@@ -21,7 +21,7 @@ import {
   runPiAgentProviderAction,
 } from '@/lib/pi-runtime/agent-providers';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 import { AgentProviderActionDialog } from './AgentProviderActionDialog';

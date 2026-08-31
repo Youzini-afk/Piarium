@@ -3,13 +3,13 @@ import type { SessionSnapshot } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
-import { attachActiveEditorContext } from '@/lib/agent-editor/attach';
+import { attachActiveEditorContext } from '@/features/agent-editor/attach-active-editor';
 import {
   getEditorContextAttachmentsRevision,
   listEditorContextAttachments,
   subscribeEditorContextAttachments,
 } from '@/lib/agent-editor/attachments';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
 
 export const PiActiveEditorContextSuggestion: React.FC<{ snapshot: SessionSnapshot }> = ({ snapshot }) => {

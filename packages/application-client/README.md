@@ -17,13 +17,14 @@ It has no React, Zustand, or UI component dependencies. It depends only on `@pia
 
 - `packages/web` — Web/remote surface API implementations
 - `packages/vscode` — VS Code webview API implementations
-- `packages/ui` — shared React presentation (re-exports for backward compatibility)
+- `packages/ui` — shared React presentation and client-side kernels
 
-Web and VS Code non-render code imports from `@piarium/application-client` directly rather than
-reaching into `@piarium/ui/lib/api`.
+All three consumers import contracts and transport primitives directly from
+`@piarium/application-client`; the former UI forwarding modules have been removed. Relay is injected
+through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
+the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.
 
 ## History
 
-This package was extracted from `packages/ui/src/lib/api/types.ts` to clarify the boundary between
-framework-neutral client contracts and React presentation. The UI's `types.ts` and error files are
-now thin re-exports from this package.
+This package was extracted from the former UI-owned API and transport modules to clarify the boundary
+between framework-neutral client behavior and React presentation.

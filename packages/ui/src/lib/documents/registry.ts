@@ -4,10 +4,10 @@ import type {
   PiariumResourceReference,
   PiariumWorkspaceFileEvent,
   Subscription,
-} from '@/lib/api/types';
-import { DocumentsError } from '@/lib/api/documents-errors';
+} from '@piarium/application-client';
+import { DocumentsError } from '@piarium/application-client';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
-import { getRuntimeEndpointGeneration } from '@/lib/runtime-switch';
+import { getRuntimeEndpointGeneration } from '@piarium/application-client';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
 import { requireWorkspaceEpoch } from './mutation-token';
 import { getDocumentRecoverySessionId } from './recovery-session';

@@ -4,8 +4,8 @@ Shared UI code can run in Web, Electron-through-Web, the VS Code companion, host
 Capacitor client. `@piarium/application-client` owns the framework-neutral `RuntimeAPIs` contract
 and typed failure shapes; each surface supplies the implementations that actually apply to it.
 
-This module (`src/lib/api/`) re-exports those types for backward compatibility. New code should
-import from `@piarium/application-client` directly.
+The former `src/lib/api/*` and `src/lib/runtime-*` forwarding modules have been removed. UI, Web, and
+VS Code code import from `@piarium/application-client` directly.
 
 ## Choosing an owner
 
@@ -46,7 +46,7 @@ switch rather than reused across hosts.
 
 ## Runtime switching and parity
 
-`src/lib/runtime-switch.ts` changes endpoint/auth ownership and drives established reset/rebind hooks.
+`@piarium/application-client` changes endpoint/auth ownership and drives established reset/rebind hooks.
 Asynchronous work captures the runtime or owner generation it belongs to; a completion from the prior
 host cannot commit into the new one. Caches whose IDs or paths can collide include runtime identity.
 

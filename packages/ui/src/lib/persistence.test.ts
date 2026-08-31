@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
-import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
+import type { RuntimeAPIs, SettingsPayload } from '@piarium/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
@@ -16,7 +16,7 @@ import {
   syncDesktopSettings,
   updateDesktopSettings,
 } from './persistence';
-import { switchRuntimeEndpoint } from './runtime-switch';
+import { switchRuntimeEndpoint } from '@piarium/application-client';
 
 type TestWindow = {
   __PIARIUM_HOME__?: string;

@@ -5,7 +5,7 @@ import { SettingsControlGroup } from '@/components/sections/shared/SettingsSecti
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import {
   hermesMemoryRuntimeState,
   observedHermesMemoryCommand,

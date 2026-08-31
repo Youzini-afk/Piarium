@@ -12,13 +12,13 @@ import type {
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@/lib/api/types';
-import { RunServicesError } from '@/lib/api/run-errors';
+} from '@piarium/application-client';
+import { RunServicesError } from '@piarium/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import {
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
-} from '@/lib/runtime-switch';
+} from '@piarium/application-client';
 import { setWorkbenchContextKey } from '@/lib/workbench/editors/context-keys';
 
 type Bound = {

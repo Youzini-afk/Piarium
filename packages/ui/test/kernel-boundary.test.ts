@@ -5,8 +5,7 @@ import { join, relative } from 'node:path';
 
 // This test file runs under `bun test`, not vitest (vitest only includes
 // src/**/*.test.{ts,tsx}). It tracks dependency boundary violations that
-// need refactoring. Known violations are listed below so the test can
-// distinguish them from new regressions.
+// define the executable dependency direction for framework-neutral kernels.
 
 const uiRoot = join(import.meta.dirname, '..', 'src');
 
@@ -15,6 +14,7 @@ const KERNEL_DIRS = [
   'lib/workbench/editors',
   'lib/language-services',
   'lib/run-debug',
+  'lib/agent-editor',
 ];
 
 const FORBIDDEN_PATTERNS = [
@@ -38,6 +38,13 @@ const EXTENSIONS_FORBIDDEN = [
 
 // Lib (kernel) must not import from workbenches.
 const LIB_FORBIDDEN_WORKBENCHES = [
+  /from ['"]@\/workbenches\//,
+];
+
+// Settings metadata/registry stays below the React page composition owned by
+// workbenches/settings. Shared icon and i18n types remain allowed.
+const SETTINGS_COMPOSITION_FORBIDDEN = [
+  /from ['"]@\/components\/sections\//,
   /from ['"]@\/workbenches\//,
 ];
 
@@ -90,5 +97,12 @@ describe('kernel boundary', () => {
     let files: string[] = [];
     try { files = walkTs(extDir); } catch { /* dir may not exist yet */ }
     checkPatterns(files, EXTENSIONS_FORBIDDEN, 'lib/extensions');
+  });
+
+  test('lib/settings does not own React page composition', () => {
+    const settingsDir = join(uiRoot, 'lib', 'settings');
+    let files: string[] = [];
+    try { files = walkTs(settingsDir); } catch { /* dir may not exist yet */ }
+    checkPatterns(files, SETTINGS_COMPOSITION_FORBIDDEN, 'lib/settings');
   });
 });

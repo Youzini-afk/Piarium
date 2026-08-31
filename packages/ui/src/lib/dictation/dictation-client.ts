@@ -6,8 +6,8 @@
  * the runtime URL resolver so runtime switches never leak a stale endpoint.
  */
 
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { refreshRuntimeUrlAuthToken } from '@piarium/application-client';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 

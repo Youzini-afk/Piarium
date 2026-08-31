@@ -1,4 +1,4 @@
-import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
 import { MonacoLanguageBridge } from './language-bridge';
 import type { FileEditorModelRegistry } from './model-registry';
 import type { MonacoRuntime } from './runtime';

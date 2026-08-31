@@ -16,6 +16,13 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
   refresh behavior.
 - `src/components/sections/shared/DOCUMENTATION.md`: Settings layout, controls, save feedback, and
   search integration.
+- `src/workbenches`: official Agent/IDE Shells and Settings React composition. Lower `lib` modules do
+  not import this layer.
+- `src/features`: narrow React/store integrations, such as adapting the active-editor Store to the
+  framework-neutral Agent/editor kernel.
+
+Runtime API types and auth/fetch/URL/switch primitives are imported directly from
+`@piarium/application-client`; UI-owned forwarding modules are not part of the boundary.
 
 ## Theme and component system
 

@@ -1,4 +1,4 @@
-import type { TerminalAPI } from './api/types';
+import type { TerminalAPI } from '@piarium/application-client';
 
 export const waitForTerminalExit = (
   terminal: TerminalAPI,

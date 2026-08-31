@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { FileSearchResult } from '@/lib/api/types';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { FileSearchResult } from '@piarium/application-client';
+import { getRuntimeKey } from '@piarium/application-client';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;

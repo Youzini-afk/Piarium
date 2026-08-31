@@ -1,7 +1,7 @@
 import type { PiRuntimeSnapshot } from '@piarium/protocol';
 import type { PiRuntimeManagementAPI } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
-import { getRuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
 
 const MANAGER_PREFIX = '/api/piarium/runtime-manager';
 

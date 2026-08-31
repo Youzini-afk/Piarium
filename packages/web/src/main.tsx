@@ -110,6 +110,8 @@ const start = async (): Promise<void> => {
   window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
 
   if (hostedSurface === 'mobile') {
+    const { registerWorkbenchShells } = await import('@piarium/ui/workbenches/register-shells');
+    await registerWorkbenchShells('mobile');
     const { renderMobileApp } = await import('@piarium/ui/apps/renderMobileApp');
     renderMobileApp(window.__PIARIUM_RUNTIME_APIS__);
     void import('@piarium/ui/lib/extensions/managed-runtime').then(({ startSurfaceExtensions }) => (

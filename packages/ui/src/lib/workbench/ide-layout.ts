@@ -6,7 +6,7 @@ import {
   type JsonValue,
 } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { getRuntimeKey, registerRuntimeEndpointSwitchBlocker } from '@/lib/runtime-switch';
+import { getRuntimeKey, registerRuntimeEndpointSwitchBlocker } from '@piarium/application-client';
 
 const IDE_WORKBENCH_LAYOUT_VERSION = 1 as const;
 const WRITE_COALESCE_MS = 250;

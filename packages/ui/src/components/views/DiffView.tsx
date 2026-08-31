@@ -3,9 +3,9 @@ import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
-import type { GitStatus } from '@/lib/api/types';
+import type { GitStatus } from '@piarium/application-client';
 import {
     DropdownMenu,
     DropdownMenuContent,

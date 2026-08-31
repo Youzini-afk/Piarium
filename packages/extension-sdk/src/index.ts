@@ -5,6 +5,7 @@ import type {
 import type {
   JsonObject,
   JsonValue,
+  PiariumContextValue,
   PiariumEditorDocumentController,
   PiariumEditorMonacoClearDecorationsRequestV1,
   PiariumEditorMonacoExecuteActionRequestV1,
@@ -173,6 +174,10 @@ export interface PiariumIsolatedSurfaceContext {
     read(path: string): Promise<PiariumExtensionAssetPayload>;
   };
   readonly capabilities: PiariumIsolatedCapabilityClient;
+  readonly context: {
+    delete(key: string): Promise<boolean>;
+    set(key: string, value: PiariumContextValue): Promise<boolean>;
+  };
   contribute(descriptor: PiariumExtensionStaticContribution, options?: { viewId?: string }): void;
   effect(disposer: () => void | Promise<void>): void;
   readonly services: PiariumIsolatedServiceClient;

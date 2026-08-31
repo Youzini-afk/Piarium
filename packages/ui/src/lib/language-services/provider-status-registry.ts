@@ -1,4 +1,4 @@
-import type { PiariumLanguageProviderStatus } from '@/lib/api/types';
+import type { PiariumLanguageProviderStatus } from '@piarium/application-client';
 
 const listeners = new Set<() => void>();
 const snapshots = new Map<string, PiariumLanguageProviderStatus>();

@@ -1,7 +1,7 @@
 import React from 'react';
-import type { DocumentsAPI } from '@/lib/api/types';
+import type { DocumentsAPI } from '@piarium/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type WorkbenchWorkspaceResolution =

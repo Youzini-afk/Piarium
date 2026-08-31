@@ -1,6 +1,6 @@
 import React from 'react';
 import type { RuntimeContextTarget } from '@piarium/protocol';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 

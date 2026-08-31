@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { WorkspaceEntry } from '@/lib/api/types';
+import type { WorkspaceEntry } from '@piarium/application-client';
 import { normalizeWorkspaceSortMode, sortWorkspaceEntries } from './workspaceSort';
 
 const entry = (name: string, type: WorkspaceEntry['type'], mtimeMs: number): WorkspaceEntry => ({

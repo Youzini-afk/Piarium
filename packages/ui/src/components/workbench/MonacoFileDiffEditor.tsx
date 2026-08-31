@@ -28,7 +28,7 @@ import {
   releasePiEditorContextOwner,
 } from '@/stores/usePiEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapter';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';

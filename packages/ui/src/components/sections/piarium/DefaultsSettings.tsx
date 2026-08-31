@@ -27,7 +27,7 @@ import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { useUIStore } from '@/stores/useUIStore';

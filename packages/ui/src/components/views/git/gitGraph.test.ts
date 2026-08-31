@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { assignLanes } from './gitGraph';
-import type { GitLogEntry } from '@/lib/api/types';
+import type { GitLogEntry } from '@piarium/application-client';
 
 function makeCommit(hash: string, parents: string[], refs = ''): GitLogEntry {
   return {

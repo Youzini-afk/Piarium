@@ -47,7 +47,7 @@ let copyImpl: (
   name?: string,
 ) => Promise<PiResourceDocumentSnapshot>;
 
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
+mock.module('@piarium/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
 mock.module('@/lib/pi-runtime/resources', () => ({
   listPiResources: (...args: Parameters<typeof listImpl>) => listImpl(...args),
   getPiResource: (...args: Parameters<typeof getImpl>) => getImpl(...args),

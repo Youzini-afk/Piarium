@@ -3,8 +3,8 @@ import type {
   DocumentsAPI,
   PiariumDocumentReadResult,
   PiariumResourceReference,
-} from '@/lib/api/types';
-import { DocumentsError } from '@/lib/api/documents-errors';
+} from '@piarium/application-client';
+import { DocumentsError } from '@piarium/application-client';
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from './workspace-text';
 
 const resource = (resourceId: string): PiariumResourceReference => ({

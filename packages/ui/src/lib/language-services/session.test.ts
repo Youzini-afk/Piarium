@@ -3,7 +3,7 @@ import type {
   DocumentsAPI,
   LanguageServicesAPI,
   PiariumLanguageDocumentSyncRequest,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import {
   acquireLanguageDocument,

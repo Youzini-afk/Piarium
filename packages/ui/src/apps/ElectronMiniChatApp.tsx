@@ -10,7 +10,7 @@ import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';

@@ -10,13 +10,13 @@ import {
   type HostMode,
 } from '@piarium/protocol';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { refreshRuntimeUrlAuthToken } from '@piarium/application-client';
 import {
   getRuntimeApiBaseUrl,
   getRuntimeKey,
   subscribeRuntimeEndpointWillChange,
-} from '@/lib/runtime-switch';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+} from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
 
 export interface PiRuntimeConnection {
   client: PiRuntimeClient;

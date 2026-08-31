@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 interface ServerTTSStatusCache {
   available: boolean;

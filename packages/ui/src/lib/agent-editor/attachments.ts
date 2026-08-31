@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import type { EditorContextAttachment } from './types';
 
 const listeners = new Set<() => void>();

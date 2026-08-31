@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { addEditorContextAttachment, consumeEditorContextAttachments, listEditorContextAttachments, resetEditorContextAttachments, restoreEditorContextAttachments } from './attachments';
 import { projectEditorContextAttachments } from './projection';
 import { extractToolFileChanges, recordHintsFromToolCall, peekAgentFileChangeHint, resetAgentFileChangeHints } from './hints';

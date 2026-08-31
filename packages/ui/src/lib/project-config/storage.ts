@@ -3,7 +3,7 @@ import type {
   FilesAPI,
   PiariumDocumentReadResult,
   PiariumResourceReference,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { requireWorkspaceEpoch } from '@/lib/documents/mutation-token';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';

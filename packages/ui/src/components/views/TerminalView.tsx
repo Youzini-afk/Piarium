@@ -4,7 +4,7 @@ import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalSto
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
-import { type TerminalStreamEvent } from '@/lib/api/types';
+import { type TerminalStreamEvent } from '@piarium/application-client';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';

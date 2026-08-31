@@ -12,7 +12,7 @@ import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import { initializeLocale, I18nProvider } from './lib/i18n'
-import type { RuntimeAPIs } from './lib/api/types'
+import type { RuntimeAPIs } from '@piarium/application-client'
 
 declare global {
   interface Window {

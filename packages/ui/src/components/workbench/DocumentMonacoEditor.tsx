@@ -18,7 +18,7 @@ import {
   releasePiEditorContextOwner,
 } from '@/stores/usePiEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   EMPTY_INLINE_COMMENT_DRAFTS,

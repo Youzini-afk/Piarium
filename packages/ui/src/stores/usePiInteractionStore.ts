@@ -12,7 +12,7 @@ import type {
 import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 
 export interface PiProjectTrustPrompt extends ProjectTrustRequest {
   role: RuntimeWorkerRole;

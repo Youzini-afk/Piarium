@@ -1,5 +1,5 @@
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { CreateGitWorktreePayload, GitAPI, GitWorktreeCreateResult } from '@/lib/api/types';
+import type { CreateGitWorktreePayload, GitAPI, GitWorktreeCreateResult } from '@piarium/application-client';
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,

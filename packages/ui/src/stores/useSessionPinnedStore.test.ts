@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { getPinnedSessionKey, isSessionPinned, useSessionPinnedStore } from './useSessionPinnedStore';
 
 describe('useSessionPinnedStore', () => {

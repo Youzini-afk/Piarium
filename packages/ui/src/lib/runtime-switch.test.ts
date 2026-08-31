@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  activateRelayTunnel as activateRegisteredRelayTunnel,
+  deactivateRelayTunnel as deactivateRegisteredRelayTunnel,
   getRuntimeApiBaseUrl,
   getRuntimeEndpointGeneration,
   getRuntimeKey,
@@ -8,15 +10,33 @@ import {
   subscribeRuntimeEndpointWillChange,
   switchRuntimeEndpoint,
   switchRuntimeEndpointSafely,
-} from './runtime-switch';
-import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
+} from '@piarium/application-client';
+import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from '@piarium/application-client';
 import {
   activateRelayTunnel,
   deactivateRelayTunnel,
   getActiveRelayDescriptor,
 } from './relay/runtime-tunnel';
+import { registerRelayTransport } from './relay/register-transport';
 
 describe('runtime endpoint switching', () => {
+  test('uses the registered UI relay lifecycle without importing it into application-client', () => {
+    const descriptor = {
+      relayUrl: 'wss://relay.example.com',
+      serverId: 'server-registered',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
+      grant: 'one-time-secret',
+    };
+    registerRelayTransport();
+    activateRegisteredRelayTunnel(descriptor);
+    expect(getActiveRelayDescriptor()).toEqual({
+      relayUrl: descriptor.relayUrl,
+      serverId: descriptor.serverId,
+      hostEncPubJwk: descriptor.hostEncPubJwk,
+    });
+    deactivateRegisteredRelayTunnel();
+    expect(getActiveRelayDescriptor()).toBeNull();
+  });
   test('awaits registered durability blockers before changing generation or endpoint', async () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-before.example', runtimeKey: 'runtime-before' });
     let release: (() => void) | undefined;

@@ -1,4 +1,4 @@
-import type { RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import type { RuntimeEndpointChangedDetail } from '@piarium/application-client';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';

@@ -4,7 +4,7 @@ import {
   getRuntimeUrlResolver,
   setRuntimeUrlResolver,
   type RuntimeUrlResolver,
-} from '@piarium/ui/lib/runtime-url';
+} from '@piarium/application-client';
 import { useDirectoryStore } from '@piarium/ui/stores/useDirectoryStore';
 import { createWebTerminalAPI } from './terminal';
 import { createWebGitAPI } from './git';

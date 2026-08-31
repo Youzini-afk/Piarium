@@ -4,7 +4,7 @@ import type {
   WorkspaceSearchAPI,
 } from '@piarium/application-client';
 import { WorkspaceSearchError } from '@piarium/application-client';
-import { getRuntimeEndpointGeneration } from '@piarium/ui/lib/runtime-switch';
+import { getRuntimeEndpointGeneration } from '@piarium/application-client';
 import { sendBridgeMessageWithOptions } from './bridge';
 
 export const createVSCodeWorkspaceSearchAPI = (): WorkspaceSearchAPI => ({

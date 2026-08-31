@@ -1,12 +1,12 @@
 import type { SessionSummary } from '@piarium/protocol';
 
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 import { useUIStore } from '@/stores/useUIStore';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 /**
  * Builds the lightweight session overview the native iOS widgets render (home medium,

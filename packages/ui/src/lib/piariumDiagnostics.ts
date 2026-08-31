@@ -9,8 +9,8 @@ import type {
 } from '@piarium/protocol';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { runtimeFetch } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';

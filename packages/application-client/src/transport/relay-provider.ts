@@ -64,7 +64,10 @@ export const getActiveRelayTunnel = (): RelayTunnelFetchClient | null => registe
  * Activate the relay tunnel with the given descriptor.
  */
 export const activateRelayTunnel = (descriptor: RelayRuntimeDescriptor): void => {
-  registeredLifecycle?.activate(descriptor);
+  if (!registeredLifecycle) {
+    throw new Error("Relay transport lifecycle is not registered");
+  }
+  registeredLifecycle.activate(descriptor);
 };
 
 /**

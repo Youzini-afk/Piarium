@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { PiSessionEntry } from '@piarium/protocol';
-import { switchRuntimeEndpoint } from './runtime-switch';
+import { switchRuntimeEndpoint } from '@piarium/application-client';
 
 import {
   assertAutoReviewRuntimeStillCurrent,

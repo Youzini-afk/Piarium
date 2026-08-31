@@ -21,8 +21,8 @@ import type {
   GitHubUserSummary,
   GitHubTerminalAuthResult,
 } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
-import type { RuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import { runtimeFetch } from '@piarium/application-client';
+import type { RuntimeUrlResolver } from '@piarium/application-client';
 
 interface WebGitHubAPIOptions {
   urls: RuntimeUrlResolver;

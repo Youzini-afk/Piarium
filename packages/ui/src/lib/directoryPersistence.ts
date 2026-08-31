@@ -1,10 +1,10 @@
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { isDesktopLocalOriginActive, isVSCodeRuntime } from '@/lib/desktop';
 import {
   resolveRuntimeWorkspaceRoot,
   resolveWorkspaceAwareRestoredDirectory,
 } from '@/lib/defaultDirectory';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';

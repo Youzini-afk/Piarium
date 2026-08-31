@@ -103,26 +103,40 @@ test("unsupported contract version fixtures are runtimeValid but not compatible"
   }
 });
 
-test("editor/shell/transition schema rules are scoped to contractVersion 1", () => {
-  // A future editor with contractVersion 2 should NOT trigger the v1 data
-  // rules (anyOf languageIds/filenames). The schema should accept it
-  // (it's a future version, not yet validated) and the runtime should accept it
-  // (it's parsed but not compatible).
-  const futureEditor = {
-    schemaVersion: 1,
-    id: "dev.example.future-editor",
-    version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
-    contributions: [{
-      id: "dev.example.future-editor.view",
-      kind: "editor",
-      contractVersion: 2,
+test("editor, shell, and transition rules are scoped to their supported contract version", () => {
+  const futureContributions = [
+    { id: "editor", kind: "editor", data: { futureField: true } },
+    {
+      id: "shell",
+      kind: "shell",
       data: { futureField: true },
-      supports: ["web"],
-    }],
-  };
-  assert.equal(schemaValid(futureEditor), true, "future editor should be schemaValid (v1 rules don't apply)");
-  assert.equal(runtimeValid(futureEditor), true, "future editor should be runtimeValid (parsed but not compatible)");
+      replacement: { target: "future.shell" },
+      when: { key: "future.shell.ready", op: "defined" },
+    },
+    {
+      id: "transition",
+      kind: "transition-scene",
+      data: { futureField: true },
+      replacement: { target: "future.transition" },
+      when: { key: "future.transition.ready", op: "defined" },
+    },
+  ];
+  for (const contribution of futureContributions) {
+    const manifest = {
+      schemaVersion: 1,
+      id: `dev.example.future-${contribution.id}`,
+      version: "1.0.0",
+      engines: { piarium: ">=0.2.0" },
+      contributions: [{
+        ...contribution,
+        id: `dev.example.future-${contribution.id}.view`,
+        contractVersion: 2,
+        supports: ["web"],
+      }],
+    };
+    assert.equal(schemaValid(manifest), true, `future ${contribution.kind} should not use v1 schema rules`);
+    assert.equal(runtimeValid(manifest), true, `future ${contribution.kind} should remain readable but incompatible`);
+  }
 });
 
 const minimalManifest = () => ({

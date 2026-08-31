@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ProjectEntry } from "@/lib/api/types"
+import type { ProjectEntry } from "@piarium/application-client"
 import type { DesktopSettings } from "@/lib/desktop"
 import { useProjectsStore } from "./useProjectsStore"
 

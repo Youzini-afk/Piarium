@@ -13,7 +13,7 @@ import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useRouter } from '@/hooks/useRouter';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 
 interface VSCodeAppProps {

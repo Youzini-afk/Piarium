@@ -28,11 +28,11 @@ import type {
 } from '@piarium/application-client';
 import type { JsonValue } from '@piarium/extension-contract';
 import { LanguageServicesError, parseLanguageServicesFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/ui/lib/runtime-switch';
+} from '@piarium/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {

@@ -34,10 +34,10 @@ import type {
   CherryPickResponse,
   RevertCommitResponse,
   ResetToCommitResponse,
-} from './api/types';
-import { runtimeFetch } from './runtime-fetch';
-import { getRuntimeUrlResolver } from './runtime-url';
-import { getRuntimeKey } from './runtime-switch';
+} from '@piarium/application-client';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { getRuntimeKey } from '@piarium/application-client';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
@@ -597,7 +597,7 @@ export async function validateGitWorktree(directory: string, payload: CreateGitW
   return response.json();
 }
 
-export async function getGitWorktreeBootstrapStatus(directory: string): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
+export async function getGitWorktreeBootstrapStatus(directory: string): Promise<import('@piarium/application-client').GitWorktreeBootstrapStatus> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/bootstrap-status`, directory));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));

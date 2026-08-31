@@ -1,5 +1,5 @@
-import type { DocumentsAPI, PiariumDocumentReadResult } from '@/lib/api/types';
-import { DocumentsError } from '@/lib/api/documents-errors';
+import type { DocumentsAPI, PiariumDocumentReadResult } from '@piarium/application-client';
+import { DocumentsError } from '@piarium/application-client';
 import { documentIdentityForPath } from './path';
 import { requireWorkspaceEpoch } from './mutation-token';
 import type { DocumentIdentity } from './types';

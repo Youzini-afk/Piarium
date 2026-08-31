@@ -1,7 +1,12 @@
 import { buildProject } from "./build.js";
 import { checkProject } from "./project.js";
-import type { PiariumIsolatedSurfaceModule, PiariumManagedSurfaceModule } from "@piarium/extension-sdk";
-import type { PiariumExtensionManifest, PiariumExtensionStaticContribution } from "@piarium/extension-contract";
+import type {
+  PiariumIsolatedSurfaceModule,
+  PiariumManagedSurfaceModule,
+  PiariumShellMountImplementation,
+  PiariumWorkbenchCompositionHost,
+} from "@piarium/extension-sdk";
+import type { PiariumExtensionManifest } from "@piarium/extension-contract";
 import {
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
@@ -95,7 +100,7 @@ const runDeclarativeConformance = async (
  * mountSlot, that child owners carry the correct generation, and that
  * disposing the shell cleans up all children.
  */
-const runShellCompositionSmoke = async (
+export const runShellCompositionSmoke = async (
   manifest: PiariumExtensionManifest,
   module: PiariumManagedSurfaceModule,
 ): Promise<void> => {
@@ -104,7 +109,7 @@ const runShellCompositionSmoke = async (
   const extension = resolveSurfaceExtensionModule(module);
   const surface = (shellContribution.supports[0] ?? "web") as "desktop" | "mobile" | "vscode" | "web";
   const runtime = new SurfaceExtensionRuntime({ surface });
-  const hostId = "00000000-0000-0000-0000-000000000002";
+  const hostId = "00000000-0000-4000-8000-000000000002";
   const owner = {
     desiredRevision: 1,
     entrypointId: "shell-smoke",
@@ -127,10 +132,82 @@ const runShellCompositionSmoke = async (
   const snapshot = runtime.getSnapshot();
   const shellItem = snapshot.contributions.find((c) => c.descriptor.id === shellContribution.id);
   if (!shellItem) throw new Error("Shell composition smoke: shell contribution was not registered");
-  // Verify the shell implementation has mount/replace/slot methods
-  const impl = shellItem.implementation as Record<string, unknown> | undefined;
+  const impl = shellItem.implementation as PiariumShellMountImplementation | undefined;
   if (!impl || typeof impl.mount !== "function") {
     throw new Error("Shell composition smoke: shell contribution implementation has no mount function");
+  }
+  class SmokeElement {
+    readonly dataset: Record<string, string> = {};
+    readonly ownerDocument: { createElement(tagName: string): SmokeElement };
+    readonly children: SmokeElement[] = [];
+    parent: SmokeElement | null = null;
+    textContent = "";
+    constructor(ownerDocument: { createElement(tagName: string): SmokeElement }) {
+      this.ownerDocument = ownerDocument;
+    }
+    append(...nodes: SmokeElement[]): void {
+      for (const node of nodes) {
+        node.remove();
+        node.parent = this;
+        this.children.push(node);
+      }
+    }
+    remove(): void {
+      if (!this.parent) return;
+      const index = this.parent.children.indexOf(this);
+      if (index >= 0) this.parent.children.splice(index, 1);
+      this.parent = null;
+    }
+    replaceChildren(...nodes: SmokeElement[]): void {
+      for (const child of this.children) child.parent = null;
+      this.children.length = 0;
+      this.append(...nodes);
+    }
+  }
+  const smokeDocument = {
+    createElement: (tagName: string): SmokeElement => {
+      void tagName;
+      return new SmokeElement(smokeDocument);
+    },
+  };
+  const container = new SmokeElement(smokeDocument);
+  const mounted: Array<{ kind: "replacement" | "slot"; value: string }> = [];
+  const disposed: string[] = [];
+  const child = (label: string) => ({
+    dispose: async () => { disposed.push(label); },
+  });
+  const workbench: PiariumWorkbenchCompositionHost = {
+    mountReplacement: async ({ target }) => {
+      mounted.push({ kind: "replacement", value: target });
+      return child(`replacement:${target}`);
+    },
+    mountSlot: async ({ slot }) => {
+      mounted.push({ kind: "slot", value: slot });
+      return child(`slot:${slot}`);
+    },
+  };
+  const controller = new AbortController();
+  const disposer = await impl.mount(container as unknown as HTMLElement, {
+    contributionId: shellContribution.id,
+    owner,
+    props: {},
+    reportError: (error) => { throw error; },
+    signal: controller.signal,
+    workbench,
+  });
+  if (typeof disposer !== "function") {
+    throw new Error("Shell composition smoke: shell mount did not return a disposer");
+  }
+  if (mounted.length !== 2
+    || mounted[0]?.kind !== "replacement"
+    || mounted[0]?.value !== "workbench.editor"
+    || mounted[1]?.kind !== "slot"
+    || mounted[1]?.value !== "workbench.primary-sidebar.views") {
+    throw new Error(`Shell composition smoke: expected editor replacement and primary-sidebar slot, received ${JSON.stringify(mounted)}`);
+  }
+  await disposer();
+  if (disposed.length !== 2 || container.children.length !== 0) {
+    throw new Error("Shell composition smoke: shell or child mounts were not disposed");
   }
   // Deactivate and verify cleanup
   await runtime.deactivate({ ...owner, desiredRevision: 2, generation: 2 });

@@ -5,7 +5,7 @@ import type {
   PiariumDocumentRecoveryJournalSummary,
   PiariumResourceReference,
   PiariumWorkspaceFileEvent,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { DocumentRegistry } from './registry';
 import { documentKey } from './types';
 

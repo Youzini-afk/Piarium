@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 export interface LegacyEditorTabsSnapshot {

@@ -1,5 +1,5 @@
 import { invokeDesktop } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 export type PreviewElementMetadata = {
   frame: 'top';

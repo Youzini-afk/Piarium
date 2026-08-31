@@ -5,6 +5,11 @@ Extensions export an `activate` function or use `defineSurfaceExtension`, `defin
 or `defineHostExtension`. Activation contexts own contributions, services, disposers, authenticated
 assets, styles, revisioned storage, and capability clients without importing Piarium's product UI.
 
+Managed Surface extensions write custom context keys with `context.context.set(localKey, value)` and
+`delete(localKey)`. Piarium prefixes the extension ID, stages candidate values until activation commits,
+and returns `false` to a disposed or superseded writer. Isolated extensions receive the same owner-scoped
+client through their message bridge; its `set` and `delete` methods return promises.
+
 Host extensions open independent namespaced documents with
 `await context.storage.open({ scope, key, schemaVersion? })`. Each document client exposes its own
 snapshot, refresh, revision-checked update, and schema version. Piarium injects the extension ID, so

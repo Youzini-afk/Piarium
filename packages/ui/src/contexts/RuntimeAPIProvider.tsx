@@ -1,6 +1,6 @@
 import React, { type JSX, type ReactNode } from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { bindDocumentRegistry } from '@/lib/documents/session';
 import { bindLanguageServices } from '@/lib/language-services/session';
 import { bindRunDebugServices } from '@/lib/run-debug/session';

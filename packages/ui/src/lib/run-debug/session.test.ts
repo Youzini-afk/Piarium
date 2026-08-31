@@ -9,7 +9,7 @@ import type {
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import {
   acquireRunDebugView,
   bindRunDebugServices,

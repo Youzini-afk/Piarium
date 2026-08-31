@@ -5,7 +5,7 @@ import type {
   RuntimeContextTarget,
 } from '@piarium/protocol';
 import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 export type AgentProviderFilter = 'all' | string;
 export type AgentStatusFilter = 'all' | PiAgentStatus;

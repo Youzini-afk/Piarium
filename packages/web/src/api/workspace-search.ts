@@ -5,8 +5,8 @@ import type {
   WorkspaceSearchAPI,
 } from '@piarium/application-client';
 import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
-import { getRuntimeEndpointGeneration } from '@piarium/ui/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeEndpointGeneration } from '@piarium/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {

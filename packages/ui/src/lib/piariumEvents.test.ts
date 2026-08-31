@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
-mock.module('./runtime-url', () => ({
+mock.module('@piarium/application-client', () => ({
   getRuntimeUrlResolver: () => ({ sse: (path: string) => `http://runtime.test${path}` }),
-}));
-
-mock.module('./runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
 }));
 

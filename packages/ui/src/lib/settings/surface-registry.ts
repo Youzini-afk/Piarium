@@ -7,21 +7,34 @@ import type { JsonValue } from '@piarium/extension-contract';
 import {
   createBuiltinSurfaceController,
   piariumSurfaceRuntime,
+  type BuiltinSurfaceController,
 } from '@/lib/extensions/surface-runtime';
 import { startBuiltinPiariumExtensions } from '@/lib/extensions/builtin-surface-manager';
-import { BUILTIN_SETTINGS_EXTENSION_ID, registerBuiltinSettingsContributions } from './builtin-settings-contributions';
+import type { SurfaceActivation } from '@piarium/extension-surface';
 import type { SettingsPageImplementation, SettingsPageMeta, SettingsPageRegistration } from './page-types';
 
 export { piariumSurfaceRuntime };
 
-const builtinSettingsController = createBuiltinSurfaceController({
-  activate: registerBuiltinSettingsContributions,
-  extensionId: BUILTIN_SETTINGS_EXTENSION_ID,
-  extensionVersion: '0.1.0',
-});
+let builtinSettingsController: BuiltinSurfaceController | null = null;
+
+export const registerBuiltinSettingsContributionSource = (source: {
+  activate: SurfaceActivation;
+  extensionId: string;
+  extensionVersion: string;
+}): void => {
+  if (builtinSettingsController) return;
+  builtinSettingsController = createBuiltinSurfaceController(source);
+};
+
+const requireBuiltinSettingsController = (): BuiltinSurfaceController => {
+  if (!builtinSettingsController) {
+    throw new Error('Built-in Settings workbench composition was not registered before use');
+  }
+  return builtinSettingsController;
+};
 
 export const ensureBuiltinSettingsContributions = (): Promise<void> => {
-  return builtinSettingsController.ensure().then(() => {
+  return requireBuiltinSettingsController().ensure().then(() => {
     void startBuiltinPiariumExtensions().catch((error) => {
       console.error('[Piarium Extensions] Failed to load built-in integration state:', error);
     });
@@ -32,7 +45,7 @@ export const ensureBuiltinSettingsContributions = (): Promise<void> => {
 };
 
 export const setBuiltinSettingsContributionsEnabled = (enabled: boolean): Promise<void> => {
-  return builtinSettingsController.setEnabled(enabled);
+  return requireBuiltinSettingsController().setEnabled(enabled);
 };
 
 const stringData = (data: Record<string, JsonValue>, key: string): string | undefined => (

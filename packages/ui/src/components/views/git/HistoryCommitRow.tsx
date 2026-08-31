@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import type { GitLogEntry, CommitFileEntry } from '@piarium/application-client';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';

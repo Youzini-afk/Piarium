@@ -1,9 +1,9 @@
 import { RunServicesError, parseRunServicesFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/ui/lib/runtime-switch';
+} from '@piarium/application-client';
 import type { Subscription } from '@piarium/application-client';
 
 const assertRunGeneration = (generation: number): void => {

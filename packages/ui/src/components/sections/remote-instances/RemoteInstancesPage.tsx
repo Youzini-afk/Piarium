@@ -40,7 +40,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
+import type { PendingPairingRecord, RemoteClientRecord } from '@piarium/application-client';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
@@ -66,8 +66,8 @@ import {
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@piarium/application-client';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);

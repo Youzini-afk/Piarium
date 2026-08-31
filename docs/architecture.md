@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## 1. Context
 
@@ -251,6 +251,13 @@ the `PiariumWorkbenchCompositionHost` API in `@piarium/extension-sdk`; the React
 replacement selection and child owner generations, attributes each mount to the child owner, and
 disposes all child mounts when the Shell retires. Isolated Shells remain self-contained in v1 and do
 not receive a parent-realm DOM composition bridge.
+
+Contribution `when` expressions read the shared context-key projection. Extension writers are
+owner-scoped activation resources: managed candidates stage values locally, isolated candidates use the
+same semantics over their MessagePort, and values publish only when the generation commits. A retired
+writer cannot mutate or clean up a newer generation. Built-in Settings metadata remains below the
+workbench layer, while React page composition and official Shell registration live under
+`packages/ui/src/workbenches`.
 
 Profile and layout resolution is layered. Layout layers merge `distribution → user → workspace`, and
 profile selection resolves `workspace → user → active`. Shell state is reported truthfully as

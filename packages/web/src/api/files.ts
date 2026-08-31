@@ -8,7 +8,7 @@ import {
   FilesystemError,
   parseFilesystemErrorReason,
 } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 

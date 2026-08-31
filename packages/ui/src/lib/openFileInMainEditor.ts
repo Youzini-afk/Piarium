@@ -1,4 +1,4 @@
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';

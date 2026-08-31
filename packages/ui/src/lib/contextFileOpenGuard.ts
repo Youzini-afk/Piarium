@@ -1,7 +1,7 @@
-import type { DocumentsAPI } from '@/lib/api/types';
+import type { DocumentsAPI } from '@piarium/application-client';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
-import { DocumentsError } from '@/lib/api/documents-errors';
+import { DocumentsError } from '@piarium/application-client';
 import { readWorkspaceTextFile } from '@/lib/documents/workspace-text';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>

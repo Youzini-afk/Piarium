@@ -66,6 +66,8 @@ export interface SurfaceActivationOptions {
   grantedCapabilities?: Iterable<string>;
   owner: SurfaceOwnerIdentity;
   requirements?: PiariumExtensionServiceRequirement[];
+  /** Provider IDs already resolved by the owning Host/profile for selected bindings. */
+  serviceSelections?: Readonly<Record<string, string>>;
 }
 
 export interface SurfaceActivationContext {
@@ -119,20 +121,35 @@ export interface SurfaceContextProvider {
   getContext(): ReadonlyMap<string, PiariumContextValue>;
   subscribe(keys: readonly string[], listener: () => void): () => void;
   /**
-   * Create an owner-scoped context writer. Keys written through the
-   * returned writer are namespaced by owner identity and fenced by
-   * generation. The writer is invalidated when the returned disposer
-   * is called (which happens during owner scope disposal).
+   * Create an owner-scoped context writer lease. Writes remain private to the
+   * candidate until the Surface activation transaction commits. `commit()`
+   * must synchronously publish the complete candidate layer, fence the prior
+   * generation for the same owner, and not expose an intermediate layer.
    */
-  createWriter(owner: SurfaceOwnerIdentity): { writer: SurfaceContextWriter; dispose: () => void };
+  createWriter(owner: SurfaceOwnerIdentity): SurfaceContextWriterLease;
+  /**
+   * Optionally batch several owner-lease commits into one context-store
+   * notification boundary. The operation itself is synchronous and contains
+   * only leases created by this provider.
+   */
+  batch?(operation: () => void): void;
+}
+
+export interface SurfaceContextWriterLease {
+  /** Publish the staged owner layer. Calling this more than once is a no-op. */
+  commit(): void;
+  /**
+   * Dispose only this lease. A stale lease must never remove a newer owner
+   * generation or another entrypoint's values.
+   */
+  dispose(): void;
+  readonly writer: SurfaceContextWriter;
 }
 
 /**
- * Owner-scoped writer for context key values. Each owner's keys are
- * namespaced (the provider implementation decides the prefix scheme) and
- * fenced by generation — writes from a stale generation are rejected.
- * The writer is single-use: once the owner scope is disposed, further
- * writes throw.
+ * Owner-scoped writer for context key values. Candidate writes are staged;
+ * after commit, only the currently active lease for that logical owner may
+ * mutate its published layer. A disposed or superseded writer returns false.
  */
 export interface SurfaceContextWriter {
   /**

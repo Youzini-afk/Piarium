@@ -10,7 +10,6 @@ import {
   type PiariumBuiltinExtensionDefinition,
 } from '@piarium/extension-builtins';
 import {
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   type PiariumApplicationSurface,
 } from '@piarium/extension-contract';
 import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/extension-surface';

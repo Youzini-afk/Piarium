@@ -6,9 +6,9 @@ import type {
   GitBranch,
   GitLogResponse,
   GitIdentitySummary,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;

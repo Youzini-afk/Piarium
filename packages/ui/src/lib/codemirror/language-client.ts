@@ -3,7 +3,7 @@ import { autocompletion, type Completion } from '@codemirror/autocomplete';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension } from '@codemirror/state';
 import { hoverTooltip, type EditorView } from '@codemirror/view';
-import type { PiariumLanguageDiagnostic } from '@/lib/api/types';
+import type { PiariumLanguageDiagnostic } from '@piarium/application-client';
 import { getBoundLanguageServices } from '@/lib/language-services/session';
 import {
   getLanguageDiagnosticsForResource,

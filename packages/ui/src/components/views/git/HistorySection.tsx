@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { HistoryCommitRow } from './HistoryCommitRow';
-import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import type { GitLogEntry, CommitFileEntry } from '@piarium/application-client';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { assignLanes } from './gitGraph';
 import type { LanedCommit } from './gitGraph';

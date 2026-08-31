@@ -21,7 +21,7 @@ import { useI18n } from '@/lib/i18n';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
 import { convertThemeToXterm } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
-import type { TerminalStreamEvent } from '@/lib/api/types';
+import type { TerminalStreamEvent } from '@piarium/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
 import { useUIStore } from '@/stores/useUIStore';

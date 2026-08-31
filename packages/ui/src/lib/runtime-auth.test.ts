@@ -10,7 +10,7 @@ import {
   setRuntimeAuthCredentialProvider,
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
-} from './runtime-auth';
+} from '@piarium/application-client';
 
 describe('runtime auth headers', () => {
   test('does not add authorization by default', async () => {

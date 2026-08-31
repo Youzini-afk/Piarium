@@ -1,4 +1,4 @@
-import { runtimeFetch } from './runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 const PASSKEY_LIST_ENDPOINT = '/api/passkeys';
 const PASSKEY_STATUS_ENDPOINT = '/auth/passkey/status';

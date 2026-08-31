@@ -8,6 +8,7 @@ import {
 import type { PiariumApplicationSurface, PiariumContextValue } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
+  batchWorkbenchContextKeyUpdates,
   createOwnerScopedContextWriter,
   getWorkbenchContextKeyStore,
   subscribeWorkbenchContextKey,
@@ -36,6 +37,9 @@ const newRealmId = (): string => {
  * and cleanup.
  */
 const workbenchContextProvider: SurfaceContextProvider = {
+  batch(operation): void {
+    batchWorkbenchContextKeyUpdates(operation);
+  },
   getContext(): ReadonlyMap<string, PiariumContextValue> {
     return getWorkbenchContextKeyStore() as ReadonlyMap<string, PiariumContextValue>;
   },

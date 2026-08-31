@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
 
@@ -310,7 +310,10 @@ mock.module('@/lib/directoryPersistence', () => ({
   applyPersistedDirectoryPreferences: mock(() => restoreDirectoryPreferences()),
 }));
 
-mock.module('@/lib/runtime-fetch', () => ({
+mock.module('@piarium/application-client', () => ({
+  getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
+  getRuntimeExtraHeadersSync: mock(() => ({})),
+  getRuntimeKey: () => runtimeKey,
   runtimeFetch: mock(async () => {
     if (runtimeFetchRejects) {
       throw new Error('offline');
@@ -321,15 +324,6 @@ mock.module('@/lib/runtime-fetch', () => ({
       headers: { 'content-type': 'application/json' },
     });
   }),
-}));
-
-mock.module('@/lib/runtime-auth', () => ({
-  getRuntimeExtraHeadersSync: mock(() => ({})),
-}));
-
-mock.module('@/lib/runtime-switch', () => ({
-  getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
-  getRuntimeKey: () => runtimeKey,
   subscribeRuntimeEndpointChanged: (listener: () => void) => {
     runtimeEndpointChangedListener = listener;
     return () => {

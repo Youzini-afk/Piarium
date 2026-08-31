@@ -1,5 +1,5 @@
 import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 const SETTINGS_ENDPOINT = '/api/config/settings';
 

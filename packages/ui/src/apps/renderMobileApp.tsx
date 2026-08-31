@@ -6,7 +6,7 @@ import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/application-client';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';
@@ -18,6 +18,7 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { MobileApp } from './MobileApp';
+import { registerBuiltinSettingsWorkbench } from '@/workbenches/settings/register';
 
 const initializeSharedPreferences = (apis: RuntimeAPIs) => {
   initializeLocale();
@@ -43,6 +44,7 @@ const initializeSharedPreferences = (apis: RuntimeAPIs) => {
 };
 
 export function renderMobileApp(apis: RuntimeAPIs) {
+  registerBuiltinSettingsWorkbench();
   initializeSharedPreferences(apis);
 
   // Expose the widget snapshot builder so the native shell can read the session overview

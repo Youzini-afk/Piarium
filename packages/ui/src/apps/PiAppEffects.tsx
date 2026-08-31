@@ -4,7 +4,7 @@ import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { usePiSessionAutoCleanup } from '@/hooks/usePiSessionAutoCleanup';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { resumeAutoReviewRun } from '@/lib/reviewFlow';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 

@@ -28,7 +28,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
   getRuntimeKey,
   subscribeRuntimeEndpointChanged,
-} from '@/lib/runtime-switch';
+} from '@piarium/application-client';
 import { requestPluginSettingsIntegration } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';

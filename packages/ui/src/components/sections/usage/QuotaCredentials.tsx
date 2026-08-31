@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 type ProviderId = 'opencode-go' | 'ollama-cloud' | 'cursor';
 type Status = { configured: boolean; workspaceId?: string; secretMasked?: string };

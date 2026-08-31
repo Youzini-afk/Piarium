@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RuntimeAPISelector, RuntimeAPIs } from '@/lib/api/types';
+import type { RuntimeAPISelector, RuntimeAPIs } from '@piarium/application-client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 
 export const useRuntimeAPIs = (): RuntimeAPIs => {

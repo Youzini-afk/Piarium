@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   buildPermissionSystemCommand,

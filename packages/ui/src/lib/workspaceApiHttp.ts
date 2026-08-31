@@ -16,7 +16,7 @@ import type {
   WorkspaceRootInfo,
   WorkspaceUploadFile,
   WorkspaceUploadResult,
-} from './api/types';
+} from '@piarium/application-client';
 
 const API_BASE = '/api/workspace';
 

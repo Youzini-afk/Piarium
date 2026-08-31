@@ -12,7 +12,7 @@ import {
 } from "@/lib/gitApi";
 import { reportSettingsSaveState, updateDesktopSettings } from "@/lib/persistence";
 import { getRegisteredRuntimeAPIs } from "@/lib/runtime-api/registry";
-import { runtimeFetch } from "@/lib/runtime-fetch";
+import { runtimeFetch } from "@piarium/application-client";
 
 export type GitIdentityAuthType = 'ssh' | 'token';
 

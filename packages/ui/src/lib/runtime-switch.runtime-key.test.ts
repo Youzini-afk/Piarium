@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
-import { getRuntimeKey } from './runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 type RuntimeWindow = typeof globalThis & {
   __PIARIUM_API_BASE_URL__?: string;

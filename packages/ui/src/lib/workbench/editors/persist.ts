@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { restoreEditorWorkbenchSnapshot, serializeEditorWorkbenchSnapshot } from './snapshot';
 import type { EditorWorkbenchState, SnapshotRestoreResult } from './types';
 

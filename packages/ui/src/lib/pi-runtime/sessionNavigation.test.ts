@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 import type { SessionSnapshot, SessionSummary } from '@piarium/protocol';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';

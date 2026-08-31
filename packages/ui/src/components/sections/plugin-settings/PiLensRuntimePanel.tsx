@@ -5,7 +5,7 @@ import { SettingsControlGroup } from '@/components/sections/shared/SettingsSecti
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {

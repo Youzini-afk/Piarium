@@ -28,7 +28,7 @@ import {
   subscribePiConfig,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { parsePluginTextObjectDraft } from './usePluginConfigDraft';
 

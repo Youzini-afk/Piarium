@@ -3,7 +3,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { TerminalShell } from '@/lib/api/types';
+import type { TerminalShell } from '@piarium/application-client';
 import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 import type { FileEditorSettings } from '@/lib/file-editor-settings';
 

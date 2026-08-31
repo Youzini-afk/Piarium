@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
-import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
-import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
+import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from '@piarium/application-client';
+import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '@piarium/application-client';
+import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@piarium/application-client';
 
 const originalFetch = globalThis.fetch;
 

@@ -23,8 +23,8 @@ import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/c
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@piarium/application-client';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'piarium.mobile.connections.v1';
 const MOBILE_SECURE_STORAGE_PREFIX = 'piarium.mobile.';

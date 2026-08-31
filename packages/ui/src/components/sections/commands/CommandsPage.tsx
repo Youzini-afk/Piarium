@@ -8,7 +8,7 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 

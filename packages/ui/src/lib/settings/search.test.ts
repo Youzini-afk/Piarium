@@ -6,6 +6,9 @@ mock.module('@/hooks/useProviderLogo', () => ({
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));
 
+const { registerBuiltinSettingsWorkbench } = await import('@/workbenches/settings/register');
+registerBuiltinSettingsWorkbench();
+
 const { buildSettingsSearchResults } = await import('./search');
 const { getSettingsPageMeta } = await import('./metadata');
 const { ensureBuiltinSettingsContributions, piariumSurfaceRuntime } = await import('./surface-registry');

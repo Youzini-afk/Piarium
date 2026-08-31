@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@/lib/api/types';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@piarium/application-client';
+import { getRuntimeKey } from '@piarium/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { applyPatchDecisionsToDocument } from './document-write';
 import { recordHintsFromToolCall, resetAgentFileChangeHints } from './hints';

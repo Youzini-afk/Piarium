@@ -256,6 +256,77 @@ test("multiple service providers require an explicit single-provider selection",
   assert.equal(runtime.getService("dev.example.shared", 1), "beta");
 });
 
+test("selected service binding resolves exactly the configured provider", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.provide({ id: "dev.example.shared", multiple: true, version: 1 }, "alpha");
+  });
+  await runtime.activate({ owner: owner("dev.example.beta", 1, 1) }, (context) => {
+    context.provide({ id: "dev.example.shared", multiple: true, version: 1 }, "beta");
+  });
+  runtime.setServiceSelection("dev.example.shared", 1, "dev.example.beta");
+  await runtime.activate({
+    owner: owner("dev.example.consumer", 1, 1),
+    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
+  }, (context) => {
+    assert.equal(context.useService("dev.example.shared", 1), "beta");
+    assert.deepEqual(context.useServices("dev.example.shared", 1), ["beta"]);
+  });
+});
+
+test("selected external binding rejects an absent selection and exposes only the chosen provider", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const externalServices = ["host-a", "host-b"].map((providerId) => ({
+    descriptor: { id: "dev.example.shared", multiple: true, version: 1 },
+    implementation: providerId,
+    providerId,
+  }));
+  await assert.rejects(() => runtime.activate({
+    externalServices,
+    owner: owner("dev.example.consumer", 1, 1),
+    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
+  }, () => undefined), /Selected Surface service provider is unavailable/);
+  await runtime.activate({
+    externalServices,
+    owner: owner("dev.example.consumer", 2, 2),
+    requirements: [{ binding: "selected", id: "dev.example.shared", version: 1 }],
+    serviceSelections: { "dev.example.shared@1": "host-b" },
+  }, (context) => {
+    assert.equal(context.useService("dev.example.shared", 1), "host-b");
+    assert.deepEqual(context.useServices("dev.example.shared", 1), ["host-b"]);
+  });
+});
+
+test("single and all service bindings use the same complete provider set", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.provide({ id: "dev.example.shared", multiple: true, version: 1 }, "local");
+  });
+  const external = {
+    descriptor: { id: "dev.example.shared", multiple: true, version: 1 },
+    implementation: "external",
+    providerId: "host-provider",
+  };
+  await assert.rejects(() => runtime.activate({
+    externalServices: [external],
+    owner: owner("dev.example.single-consumer", 1, 1),
+    requirements: [{ binding: "single", id: "dev.example.shared", version: 1 }],
+  }, () => undefined), /ambiguous/);
+  await runtime.activate({
+    externalServices: [external],
+    owner: owner("dev.example.all-consumer", 1, 1),
+    requirements: [{ binding: "all", id: "dev.example.shared", version: 1 }],
+  }, (context) => {
+    assert.deepEqual(context.useServices("dev.example.shared", 1), ["local", "external"]);
+    assert.equal(context.useService("dev.example.shared", 1), undefined);
+  });
+  await assert.rejects(() => runtime.activate({
+    externalServices: [external],
+    owner: owner("dev.example.version-consumer", 1, 1),
+    requirements: [{ binding: "single", id: "dev.example.shared", version: 2 }],
+  }, () => undefined), /unavailable/);
+});
+
 test("required-service withdrawal tears down dependents before their provider", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const cleanup: string[] = [];
@@ -304,7 +375,7 @@ test("layout references hide and reorder live contributions while preserving mis
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["second", "first"]);
 });
 
-test("unsupported contract version contributions are registered but not visible", async () => {
+test("unsupported contract version contributions are diagnosed without entering the registry", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
     context.contribute(page("dev.example.alpha.v1", 0), "v1");
@@ -318,10 +389,10 @@ test("unsupported contract version contributions are registered but not visible"
     }, "v99");
   });
   const snapshot = runtime.getSnapshot();
-  // Both contributions are registered
-  assert.equal(snapshot.contributions.length, 2);
-  // Only the compatible v1 contribution is visible
+  assert.equal(snapshot.contributions.length, 1);
   assert.deepEqual(snapshot.visibleContributions.map((item) => item.implementation), ["v1"]);
+  assert.equal(snapshot.actual[0]?.diagnostics[0]?.code, "unsupported-contract-version");
+  assert.match(snapshot.actual[0]?.diagnostics[0]?.message ?? "", /settings-page contract version 99/);
 });
 
 test("same extension can have compatible and incompatible contributions simultaneously", async () => {
@@ -337,9 +408,10 @@ test("same extension can have compatible and incompatible contributions simultan
     }, "future-impl");
   });
   const snapshot = runtime.getSnapshot();
-  assert.equal(snapshot.contributions.length, 2);
+  assert.equal(snapshot.contributions.length, 1);
   assert.equal(snapshot.visibleContributions.length, 1);
   assert.equal(snapshot.visibleContributions[0]?.descriptor.id, "dev.example.alpha.view");
+  assert.equal(snapshot.actual[0]?.diagnostics[0]?.code, "unsupported-contract-version");
 });
 
 test("when expression hides contributions when context is false and shows when true", async () => {
@@ -351,6 +423,11 @@ test("when expression hides contributions when context is false and shows when t
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    createWriter: () => ({
+      commit: () => undefined,
+      dispose: () => undefined,
+      writer: { delete: () => false, set: () => false },
+    }),
   };
   const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
@@ -383,6 +460,11 @@ test("when expression false preserves replacement selection and falls back", asy
     subscribe: (_keys: readonly string[], listener: () => void) => {
       return () => { listener; };
     },
+    createWriter: () => ({
+      commit: () => undefined,
+      dispose: () => undefined,
+      writer: { delete: () => false, set: () => false },
+    }),
   };
   const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
@@ -412,40 +494,33 @@ test("when expression false preserves replacement selection and falls back", asy
   assert.equal(runtime.getSnapshot().replacementSelections["workbench.sidebar"], "dev.example.alpha.conditional");
 });
 
-test("owner-scoped context writer namespaces keys, fences by generation, and cleans up on dispose", async () => {
+test("owner-scoped context writes stay staged until the activation transaction commits", async () => {
   const contextKeys = new Map<string, string | number | boolean>();
   const listeners = new Set<() => void>();
-  const writerStates = new Map<string, { generation: number; disposed: boolean }>();
-  const createWriter = (o: { extensionId: string; entrypointId: string; realmId: string; generation: number }) => {
-    const scopeKey = `${o.extensionId}\0${o.realmId}\0${o.entrypointId}`;
-    const prefix = `${o.extensionId}.`;
-    const state = { generation: o.generation, disposed: false };
-    writerStates.set(scopeKey, state);
+  const createWriter = (o: { extensionId: string }) => {
+    const staged = new Map<string, string | number | boolean>();
+    let committed = false;
+    let disposed = false;
     return {
       writer: {
         set: (key: string, value: string | number | boolean): boolean => {
-          if (state.disposed || o.generation !== state.generation) return false;
-          contextKeys.set(`${prefix}${key}`, value);
-          for (const listener of listeners) listener();
+          if (disposed) return false;
+          staged.set(`${o.extensionId}.${key}`, value);
           return true;
         },
         delete: (key: string): boolean => {
-          if (state.disposed) return false;
-          const fullKey = `${prefix}${key}`;
-          if (!contextKeys.has(fullKey)) return false;
-          contextKeys.delete(fullKey);
-          for (const listener of listeners) listener();
-          return true;
+          if (disposed) return false;
+          return staged.delete(`${o.extensionId}.${key}`);
         },
       },
+      commit: () => {
+        committed = true;
+        for (const [key, value] of staged) contextKeys.set(key, value);
+        for (const listener of listeners) listener();
+      },
       dispose: () => {
-        state.disposed = true;
-        writerStates.delete(scopeKey);
-        for (const key of [...contextKeys.keys()]) {
-          if (key.startsWith(prefix)) {
-            contextKeys.delete(key);
-          }
-        }
+        disposed = true;
+        if (committed) for (const key of staged.keys()) contextKeys.delete(key);
         for (const listener of listeners) listener();
       },
     };
@@ -460,10 +535,15 @@ test("owner-scoped context writer namespaces keys, fences by generation, and cle
   };
   const runtime = new SurfaceExtensionRuntime({ surface: "web", contextProvider });
 
-  // Activate with generation 1 and write a context key
-  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+  let releaseCommit!: () => void;
+  const commitGate = new Promise<void>((resolve) => { releaseCommit = resolve; });
+  const activating = runtime.activateWithCommit({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
     assert.equal(context.context.set("myKey", "hello"), true);
-  });
+  }, () => commitGate);
+  await Promise.resolve();
+  assert.equal(contextKeys.has("dev.example.alpha.myKey"), false);
+  releaseCommit();
+  await activating;
   assert.equal(contextKeys.get("dev.example.alpha.myKey"), "hello");
 
   // Deactivate — should clean up the owner's keys
@@ -471,31 +551,37 @@ test("owner-scoped context writer namespaces keys, fences by generation, and cle
   assert.equal(contextKeys.has("dev.example.alpha.myKey"), false);
 });
 
-test("owner-scoped context writer rejects stale generation writes", async () => {
+test("failed candidate context writes never replace the active context layer", async () => {
   const contextKeys = new Map<string, string | number | boolean>();
+  let activeWriter: { set(key: string, value: string | number | boolean): boolean } | undefined;
   const contextProvider = {
     getContext: () => contextKeys,
     subscribe: (_keys: readonly string[], listener: () => void) => {
       return () => { listener; };
     },
-    createWriter: (o: { extensionId: string; entrypointId: string; realmId: string; generation: number }) => {
+    createWriter: (o: { extensionId: string }) => {
       const prefix = `${o.extensionId}.`;
+      const staged = new Map<string, string | number | boolean>();
+      let committed = false;
+      let disposed = false;
       const writer = {
         set: (key: string, value: string | number | boolean): boolean => {
-          contextKeys.set(`${prefix}${key}`, value);
+          if (disposed) return false;
+          staged.set(`${prefix}${key}`, value);
           return true;
         },
-        delete: (key: string): boolean => {
-          return contextKeys.delete(`${prefix}${key}`);
-        },
+        delete: (key: string): boolean => !disposed && staged.delete(`${prefix}${key}`),
       };
       return {
         writer,
+        commit: () => {
+          committed = true;
+          activeWriter = writer;
+          for (const [key, value] of staged) contextKeys.set(key, value);
+        },
         dispose: () => {
-          // Clean up all keys with this owner's prefix
-          for (const key of [...contextKeys.keys()]) {
-            if (key.startsWith(prefix)) contextKeys.delete(key);
-          }
+          disposed = true;
+          if (committed && activeWriter === writer) for (const key of staged.keys()) contextKeys.delete(key);
         },
       };
     },
@@ -506,8 +592,37 @@ test("owner-scoped context writer rejects stale generation writes", async () => 
     context.context.set("myKey", "v1");
   });
   assert.equal(contextKeys.get("dev.example.alpha.myKey"), "v1");
+  await assert.rejects(() => runtime.activate({ owner: owner("dev.example.alpha", 2, 2) }, (context) => {
+    context.context.set("myKey", "v2");
+    throw new Error("candidate failed");
+  }), /candidate failed/);
+  assert.equal(contextKeys.get("dev.example.alpha.myKey"), "v1");
+});
 
-  // After deactivation, the writer should be disposed and keys cleaned up
-  await runtime.deactivate({ ...owner("dev.example.alpha", 1, 1), desiredRevision: 2, generation: 2 });
-  assert.equal(contextKeys.has("dev.example.alpha.myKey"), false);
+test("a context publication failure after persistent commit does not roll back the committed owner", async () => {
+  let contextDisposed = false;
+  const runtime = new SurfaceExtensionRuntime({
+    surface: "web",
+    contextProvider: {
+      createWriter: () => ({
+        commit: () => { throw new Error("context store unavailable"); },
+        dispose: () => { contextDisposed = true; },
+        writer: { delete: () => false, set: () => !contextDisposed },
+      }),
+      getContext: () => new Map(),
+      subscribe: () => () => undefined,
+    },
+  });
+  let persistentCommit = false;
+  let retainedWriter: import("../src/index.js").SurfaceContextWriter | undefined;
+  await runtime.activateWithCommit({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    retainedWriter = context.context;
+    context.context.set("ready", true);
+    context.contribute(page("dev.example.alpha.page"), "committed");
+  }, () => { persistentCommit = true; });
+  assert.equal(persistentCommit, true);
+  assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["committed"]);
+  assert.equal(runtime.getSnapshot().actual[0]?.status, "active");
+  assert.equal(runtime.getSnapshot().actual[0]?.diagnostics[0]?.code, "context_commit_failed");
+  assert.equal(retainedWriter?.set("late", true), false);
 });

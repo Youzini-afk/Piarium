@@ -64,7 +64,7 @@ mock.module('@/lib/walkthrough/api', () => ({
   // makes the whole module fail to load, which reads as an unrelated crash.
   fetchWalkthroughStage: async () => null,
 }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'local' }));
+mock.module('@piarium/application-client', () => ({ getRuntimeKey: () => 'local' }));
 
 const { useWalkthroughStore } = await import('./useWalkthroughStore');
 

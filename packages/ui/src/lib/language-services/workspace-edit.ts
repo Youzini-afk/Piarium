@@ -1,4 +1,4 @@
-import type { PiariumLanguageWorkspaceEdit } from '@/lib/api/types';
+import type { PiariumLanguageWorkspaceEdit } from '@piarium/application-client';
 import type {
   DocumentWorkspaceEditInput,
   DocumentWorkspaceResourceOperation,

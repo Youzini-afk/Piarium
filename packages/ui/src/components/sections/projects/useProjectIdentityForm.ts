@@ -2,7 +2,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry } from '@piarium/application-client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;

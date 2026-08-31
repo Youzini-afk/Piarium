@@ -1,6 +1,6 @@
 import React from 'react';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl } from '@piarium/application-client';
 import {
   desktopHostsGet,
   getDesktopHostApiUrl,

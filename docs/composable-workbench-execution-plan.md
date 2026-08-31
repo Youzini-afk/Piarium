@@ -2,7 +2,7 @@
 
 Status: 十一个切片已交付；本文是工作台的基础架构与归属约定
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 这份文档规定 Piarium 工作台的目标架构、已固定的产品决策,以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。它按十一个切片组织,因为实现是按这个顺序落地的;交付进度见
@@ -709,7 +709,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 
 ### 18.2 写入边界
 
-- `packages/ui/src/lib/api/types.ts`：Workspace identity、resource DTO、DocumentsAPI；
+- `packages/application-client/src/types.ts`：Workspace identity、resource DTO、DocumentsAPI；
 - `packages/web/src/api` 与 server routes/services：resource mapping、read/write、watch、recovery storage；
 - `packages/vscode` bridge：workspace FS 和 watcher 实现；
 - `packages/extension-host` / SDK capability：resource-scoped document access；

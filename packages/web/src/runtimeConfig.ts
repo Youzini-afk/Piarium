@@ -1,8 +1,8 @@
-import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/ui/lib/runtime-auth';
-import { installRuntimeFetchBridge } from '@piarium/ui/lib/runtime-fetch';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
+import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/application-client';
+import { installRuntimeFetchBridge } from '@piarium/application-client';
+import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/application-client';
 import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
-import { configureRuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import { configureRuntimeUrlResolver } from '@piarium/application-client';
 import { registerRelayTransport } from '@piarium/ui/lib/relay/register-transport';
 import type { EmbeddedSessionRuntimeBootstrap } from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
 import { createWebAPIs } from './api';

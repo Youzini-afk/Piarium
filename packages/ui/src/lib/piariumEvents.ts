@@ -1,5 +1,5 @@
-import { getRuntimeUrlResolver } from './runtime-url';
-import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';

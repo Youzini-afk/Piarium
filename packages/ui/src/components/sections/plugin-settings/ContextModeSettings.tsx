@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 interface ContextModeSettingsProps {

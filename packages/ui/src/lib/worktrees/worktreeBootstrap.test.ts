@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
+import type { GitWorktreeBootstrapStatus } from '@piarium/application-client';
 
 const bootstrapStatusCalls: string[] = [];
 let bootstrapStatusResult: GitWorktreeBootstrapStatus = {

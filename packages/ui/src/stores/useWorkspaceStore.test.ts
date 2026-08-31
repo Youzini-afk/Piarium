@@ -5,7 +5,7 @@ import type {
   WorkspaceEntry,
   WorkspaceListResult,
   WorkspaceRootInfo,
-} from "@/lib/api/types";
+} from "@piarium/application-client";
 
 const calls: Array<{ name: string; path?: string; payload?: unknown }> = [];
 

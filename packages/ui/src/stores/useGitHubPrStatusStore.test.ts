@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { GitHubPullRequestStatus, RuntimeAPIs } from "@/lib/api/types"
+import type { GitHubPullRequestStatus, RuntimeAPIs } from "@piarium/application-client"
 
 let runtimeKey = "runtime-a"
-mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
+mock.module("@piarium/application-client", () => ({ getRuntimeKey: () => runtimeKey }))
 
 const { getGitHubPrStatusKey, useGitHubPrStatusStore } = await import("./useGitHubPrStatusStore")
 

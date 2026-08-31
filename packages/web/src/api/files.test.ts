@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@piarium/application-client';
 
 const runtimeFetchMock = vi.fn();
 
-vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
+vi.mock('@piarium/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@piarium/application-client')>(),
   runtimeFetch: runtimeFetchMock,
 }));
 

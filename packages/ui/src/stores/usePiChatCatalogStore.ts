@@ -4,7 +4,7 @@ import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-event
 import { buildPiChatCatalog, type PiChatCatalog } from '@/lib/pi-runtime/chat-catalog';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { listPiResources } from '@/lib/pi-runtime/resources';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 
 export interface PiChatCatalogEntry extends PiChatCatalog {
   error: string | null;

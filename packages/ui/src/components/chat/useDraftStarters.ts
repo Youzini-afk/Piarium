@@ -10,7 +10,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters } from '@/lib/project-config';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { listPiResources } from '@/lib/pi-runtime/resources';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import type { IconName } from '@/components/icon/icons';
 import {
     BUILTIN_STARTERS,

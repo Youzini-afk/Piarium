@@ -453,7 +453,7 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
         };
       }
     }
-    if (kind === "transition-scene" && replacement?.target !== PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition) {
+    if (versionCompatible && kind === "transition-scene" && replacement?.target !== PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition) {
       issues.push(`${itemPath}.replacement.target must be ${PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition}`);
     }
     result.push({
@@ -470,7 +470,7 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
       ...(raw.when !== undefined ? (() => {
         // Shell and transition-scene cannot use `when` — context changes
         // would bypass Profile stage-and-commit and Recovery invariants.
-        if (kind === "shell" || kind === "transition-scene") {
+        if (versionCompatible && (kind === "shell" || kind === "transition-scene")) {
           issues.push(`${itemPath}.when is not allowed for shell or transition-scene contributions`);
           return {};
         }

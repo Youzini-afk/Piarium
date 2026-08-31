@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  checkPiariumContributionCompatibility,
   isPiariumContributionCompatible,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
@@ -174,6 +175,7 @@ interface SurfaceActivationPlan {
 
 interface CompatibleSurfacePlans {
   executable: SurfaceActivationPlan[];
+  incompatible: PiariumExtensionStaticContribution[];
   manifest?: SurfaceActivationPlan;
 }
 
@@ -395,6 +397,7 @@ const compatibleActivationPlans = (
     });
   }
   const staticContributions: PiariumExtensionStaticContribution[] = [];
+  const incompatible: PiariumExtensionStaticContribution[] = [];
   // Track which entrypoints have at least one incompatible static contribution
   // and which have at least one compatible static contribution.
   const entrypointHasIncompatible = new Set<string>();
@@ -407,6 +410,7 @@ const compatibleActivationPlans = (
   for (const contribution of manifest.contributions ?? []) {
     if (!contribution.supports.includes(surface)) continue;
     const compatible = isPiariumContributionCompatible(contribution.kind, contribution.contractVersion);
+    if (!compatible) incompatible.push(contribution);
     if (contribution.entrypoint) {
       if (!compatibleEntrypointIds.has(contribution.entrypoint)) continue;
       // Only attach compatible contributions to executable plans
@@ -416,10 +420,10 @@ const compatibleActivationPlans = (
       } else {
         entrypointHasIncompatible.add(contribution.entrypoint);
       }
-      staticContributions.push(contribution);
+      if (compatible) staticContributions.push(contribution);
       continue;
     }
-    staticContributions.push(contribution);
+    if (compatible) staticContributions.push(contribution);
   }
   // Remove eager executable plans where ALL static contributions are
   // incompatible. An eager entrypoint whose every declared contribution is
@@ -440,6 +444,7 @@ const compatibleActivationPlans = (
   });
   return {
     executable: executablePlans,
+    incompatible,
     ...(staticContributions.length > 0 || compatibleEntrypoints.some((entrypoint) => entrypoint.mode === "declarative")
       ? {
           manifest: {
@@ -765,6 +770,20 @@ export class SurfaceExtensionLoader {
       const selected = publicCandidateSelection(entry);
       if (!entry.desired.enabled || !selected) continue;
       const plans = compatibleActivationPlans(selected.manifest, this.#surface);
+      for (const contribution of plans.incompatible) {
+        const compatibility = checkPiariumContributionCompatibility(
+          contribution.kind,
+          contribution.contractVersion,
+        );
+        if (compatibility.status !== "unsupported-contract-version") continue;
+        this.#diagnose(
+          entry.manifest.id,
+          "unsupported-contract-version",
+          `Contribution ${contribution.id} declares unsupported ${contribution.kind} contract version ${contribution.contractVersion}; supported versions: ${compatibility.supportedVersions.join(", ")}`,
+          contribution.entrypoint ? { entrypointId: contribution.entrypoint } : {},
+          "warning",
+        );
+      }
       if (plans.manifest) desiredKeys.add(keyFor(entry.manifest.id, plans.manifest.entrypointId));
       for (const plan of plans.executable) {
         const key = keyFor(entry.manifest.id, plan.entrypointId);
@@ -928,6 +947,7 @@ export class SurfaceExtensionLoader {
       }
       const currentHostState = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
       const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
+      const serviceSelections = this.#resolvedServiceSelections(selection, currentHostState, externalProviders);
       const hostExternalServices = this.#externalServices(externalProviders);
       const matchingLocalFactories = this.#matchingLocalServiceFactories(selection.manifest.requires?.services ?? []);
       const serviceBindings = this.#serviceBindingSignature(externalProviders, matchingLocalFactories);
@@ -1058,6 +1078,7 @@ export class SurfaceExtensionLoader {
                     return Promise.resolve(handler(...args));
                   },
                   contribute: (descriptor, implementation) => stagingContext.contribute(descriptor, implementation),
+                  deleteContext: (key) => stagingContext.context.delete(key),
                   grantedCapabilities,
                   hasService: (serviceId, version, providerId) => providerId
                     ? externalServices.some((service) => (
@@ -1075,6 +1096,7 @@ export class SurfaceExtensionLoader {
                     });
                     return (await verifyAsset(value, selection.integrity)).payload;
                   },
+                  setContext: (key, value) => stagingContext.context.set(key, value),
                 });
               });
             };
@@ -1111,6 +1133,7 @@ export class SurfaceExtensionLoader {
             ...(selection.manifest.requires?.services
               ? { requirements: selection.manifest.requires.services }
               : {}),
+            ...(Object.keys(serviceSelections).length > 0 ? { serviceSelections } : {}),
           },
         });
         activated.push({
@@ -1262,13 +1285,8 @@ export class SurfaceExtensionLoader {
           )) ? candidates[0] : undefined);
         if (selected) {
           selectedProviders.push(selected);
-        } else {
-          // No explicit selection: pass all matching providers so the runtime
-          // sees them as available. The runtime's "selected" binding check
-          // accepts externalProviders.length > 0 as satisfying the requirement.
-          selectedProviders.push(...matches);
         }
-      } else if (matches.length === 1) selectedProviders.push(matches[0] as PiariumExtensionServiceProviderSnapshot);
+      } else selectedProviders.push(...matches);
     }
     return [...new Map(selectedProviders.map((provider) => [provider.providerId, provider])).values()];
   }
@@ -1350,19 +1368,42 @@ export class SurfaceExtensionLoader {
       const count = externalCount + localExternalCount + localCount;
       if ((requirement.binding ?? "single") === "single") return count === 1;
       if (requirement.binding === "selected") {
-        // For "selected" binding, any active provider (not just the chosen one)
-        // satisfies the requirement. The selection itself is resolved at mount time.
-        const activeProviders = state.services.providers.filter((provider) => (
-          provider.status === "active"
-          && provider.descriptor.id === requirement.id
-          && provider.descriptor.version === requirement.version
-        )).length;
-        return activeProviders > 0
-          || localExternalCount > 0
-          || this.#surfaceRuntime.getService(requirement.id, requirement.version) !== undefined;
+        const serviceKey = `${requirement.id}@${requirement.version}`;
+        const selected = state.services.selections[serviceKey]
+          ?? this.#surfaceRuntime.getSnapshot().serviceSelections[serviceKey];
+        if (!selected) return false;
+        const matches = [
+          ...external.map((provider) => provider.providerId),
+          ...this.#externalServiceFactories
+            .filter((factory) => factory.descriptor.id === requirement.id && factory.descriptor.version === requirement.version)
+            .map((factory) => factory.providerId),
+          ...this.#surfaceRuntime.getSnapshot().services
+            .filter((service) => service.descriptor.id === requirement.id && service.descriptor.version === requirement.version)
+            .map((service) => service.owner.extensionId),
+        ].filter((providerId) => providerId === selected);
+        return matches.length === 1;
       }
       return count > 0;
     });
+  }
+
+  #resolvedServiceSelections(
+    selection: ArtifactSelection,
+    state: PiariumExtensionHostStateSnapshot,
+    providers: readonly PiariumExtensionServiceProviderSnapshot[],
+  ): Record<string, string> {
+    const resolved: Record<string, string> = {};
+    for (const requirement of selection.manifest.requires?.services ?? []) {
+      if (requirement.binding !== "selected") continue;
+      const serviceKey = `${requirement.id}@${requirement.version}`;
+      const configured = state.services.selections[serviceKey];
+      if (!configured) continue;
+      const provider = providers.find((candidate) => (
+        candidate.descriptor.id === requirement.id && candidate.descriptor.version === requirement.version
+      ));
+      resolved[serviceKey] = provider?.providerId ?? configured;
+    }
+    return resolved;
   }
 
   #serviceBindingSignature(
@@ -1474,13 +1515,22 @@ export class SurfaceExtensionLoader {
     code: string,
     message: string,
     details: Pick<SurfaceExtensionLoaderDiagnostic, "entrypointId" | "integrity" | "moduleGeneration"> = {},
+    severity: SurfaceExtensionLoaderDiagnostic["severity"] = "error",
   ): void {
+    if (this.#diagnostics.some((item) => (
+      item.code === code
+      && item.extensionId === extensionId
+      && item.message === message
+      && item.entrypointId === details.entrypointId
+      && item.integrity === details.integrity
+      && item.moduleGeneration === details.moduleGeneration
+    ))) return;
     this.#diagnostics.push({
       code,
       extensionId,
       message,
       realmId: this.#realmId,
-      severity: "error",
+      severity,
       timestamp: new Date().toISOString(),
       ...details,
     });

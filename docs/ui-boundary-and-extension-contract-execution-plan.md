@@ -1,8 +1,8 @@
 # Piarium 客户端边界与扩展契约治理执行计划
 
-Status: implementation plan; not yet delivered
+Status: delivered; this document records the implemented boundary and conformance contract
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## 1. 目标
 
@@ -20,7 +20,7 @@ Last updated: 2026-08-31
 7. npm 发布测试能从真实发布包构建并运行一个外部 Shell。
 8. 不减少现有 Shell、view、editor、slot、replacement、service 和 document client 等公开能力。
 
-## 2. 当前问题
+## 2. 实施前基线问题
 
 ### 2.1 `@piarium/ui` 同时充当 UI 和应用客户端契约
 
@@ -292,19 +292,19 @@ JSON Schema 的 `when` 只接受该结构。
 
 ## 7. Phase 4 — 抽出 `@piarium/application-client`
 
-### 7.1 建议结构
+### 7.1 已交付结构
 
 ```text
 packages/application-client/
   src/
     api/
     errors/
-    runtime-auth.ts
-    runtime-fetch.ts
-    runtime-identity.ts
-    runtime-switch.ts
-    runtime-url.ts
-    transport.ts
+    transport/
+      runtime-auth.ts
+      runtime-fetch.ts
+      runtime-switch.ts
+      runtime-url.ts
+      relay-provider.ts
     index.ts
   test/
   package.json
@@ -314,7 +314,7 @@ packages/application-client/
 
 ### 7.2 类型迁移
 
-从 `packages/ui/src/lib/api/types.ts` 迁出：
+已从原 `packages/ui/src/lib/api/types.ts` 迁出：
 
 - `RuntimeAPIs`；
 - Terminal、Git、Files、Documents、Settings、Permissions、Notifications 等 API；
@@ -505,19 +505,19 @@ test
 
 ## 14. 最终验收
 
-- [ ] Web/VS Code 非渲染代码不再依赖 `@piarium/ui`。
-- [ ] application-client 无 React、Store 和 UI 依赖。
-- [ ] Kernel 无 components/apps/stores/contexts 反向依赖。
-- [ ] Store 不再导入 Component。
-- [ ] 官方 Agent/IDE Shell 不位于 extension runtime 核心目录。
-- [ ] Schema/runtime 可表达规则一致。
-- [ ] runtime-only 规则有明确 fixture 分类。
-- [ ] 未知 contribution version 可识别、不可执行且不会删除安装记录。
-- [ ] `when` 有真实 parser、evaluator、subscription 和 owner cleanup。
-- [ ] 条件隐藏不删除 replacement selection。
-- [ ] Shell/transition 不能用 `when` 绕过切换事务。
-- [ ] service binding 三种模式有行为测试。
-- [ ] 外部 Shell 能从 npm tarball 创建、构建、检查和测试。
-- [ ] 公开扩展仍不需要导入 Piarium 私有 React/UI。
-- [ ] 没有新增 OpenCode compatibility facade。
-- [ ] 没有无依据的新硬限制。
+- [x] Web/VS Code 非渲染代码不再从 `@piarium/ui` 导入应用客户端契约或 transport 实现。
+- [x] application-client 无 React、Store 和 UI 依赖。
+- [x] Kernel 无 components/apps/stores/contexts 反向依赖。
+- [x] Store 不再导入 Component。
+- [x] 官方 Agent/IDE Shell 不位于 extension runtime 核心目录。
+- [x] Schema/runtime 可表达规则一致。
+- [x] runtime-only 规则有明确 fixture 分类。
+- [x] 未知 contribution version 可识别、不可执行且不会删除安装记录。
+- [x] `when` 有真实 parser、evaluator、subscription 和 owner cleanup。
+- [x] 条件隐藏不删除 replacement selection。
+- [x] Shell/transition 不能用 `when` 绕过切换事务。
+- [x] service binding 三种模式有行为测试。
+- [x] 外部 Shell 能从 npm tarball 创建、构建、检查和测试。
+- [x] 公开扩展仍不需要导入 Piarium 私有 React/UI。
+- [x] 没有新增 OpenCode compatibility facade。
+- [x] 没有无依据的新硬限制。

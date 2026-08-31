@@ -4,8 +4,8 @@ import {
   createRuntimeUrlResolver,
   getRuntimeUrlResolver,
   setRuntimeUrlResolver,
-} from './runtime-url';
-import { setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from './runtime-auth';
+} from '@piarium/application-client';
+import { setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from '@piarium/application-client';
 
 describe('createRuntimeUrlResolver', () => {
   const withWindow = <T>(value: unknown, callback: () => T): T => {

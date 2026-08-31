@@ -1,10 +1,10 @@
-import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
+import type { ProjectEntry, TerminalShell } from '@piarium/application-client';
 import type { RecoveryPreference } from '@piarium/protocol';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { FileEditorSettingsPatch } from '@/lib/file-editor-settings';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@piarium/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 type ManagedRemoteTunnelPreset = {

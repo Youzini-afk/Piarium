@@ -15,7 +15,7 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 
 type WorktreeListEntry = {
   path?: string;

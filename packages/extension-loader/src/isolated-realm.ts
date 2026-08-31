@@ -1,5 +1,6 @@
 import type {
   JsonValue,
+  PiariumContextValue,
   PiariumExtensionAssetPayload,
   PiariumExtensionStaticContribution,
 } from "@piarium/extension-contract";
@@ -27,9 +28,11 @@ export interface IsolatedRealmActivationContext {
   callCapability(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
   callService(serviceId: string, version: number, providerId: string | undefined, method: string, args: JsonValue[]): Promise<JsonValue>;
   contribute(descriptor: PiariumExtensionStaticContribution, implementation: IsolatedContributionImplementation): void;
+  deleteContext(key: string): boolean;
   grantedCapabilities: readonly string[];
   hasService(serviceId: string, version: number, providerId?: string): boolean;
   readAsset(path: string): Promise<PiariumExtensionAssetPayload>;
+  setContext(key: string, value: PiariumContextValue): boolean;
 }
 
 export interface IsolatedRealmIdentity {
@@ -130,6 +133,10 @@ const bootstrapSource = (nonce: string): string => `
         has: (capability) => grants.includes(capability),
       },
       contribute: (descriptor, options = {}) => send({ type: 'contribute', descriptor, viewId: options.viewId || 'main' }),
+      context: {
+        delete: (key) => request('context.delete', { key }),
+        set: (key, value) => request('context.set', { key, value }),
+      },
       effect: (disposer) => {
         if (typeof disposer !== 'function') throw new Error('Isolated effect disposer must be a function');
         disposers.push(disposer);
@@ -322,6 +329,20 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
         : {};
       let result: unknown;
       if (message.method === "asset.read") result = await this.#activation.readAsset(String(params.path ?? ""));
+      else if (message.method === "context.delete") {
+        const key = String(params.key ?? "");
+        if (!key.trim()) throw new Error("Isolated Surface context key is required");
+        result = this.#activation.deleteContext(key);
+      }
+      else if (message.method === "context.set") {
+        const key = String(params.key ?? "");
+        const value = params.value;
+        if (!key.trim()) throw new Error("Isolated Surface context key is required");
+        if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+          throw new Error("Isolated Surface context value must be a string, number, or boolean");
+        }
+        result = this.#activation.setContext(key, value);
+      }
       else if (message.method === "capability.call") result = await this.#activation.callCapability(
         String(params.capability ?? ""),
         String(params.method ?? ""),

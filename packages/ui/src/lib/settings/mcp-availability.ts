@@ -7,7 +7,7 @@ import {
 } from '@piarium/protocol';
 import { listPiPackages } from '@/lib/pi-runtime/packages';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 export interface McpSettingsAvailabilityState {
   error: string | null;

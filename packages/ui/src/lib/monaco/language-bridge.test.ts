@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { editor, languages } from 'monaco-editor/editor';
 
-import type { LanguageServicesAPI, PiariumLanguageDiagnostic } from '@/lib/api/types';
+import type { LanguageServicesAPI, PiariumLanguageDiagnostic } from '@piarium/application-client';
 import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { DocumentIdentity, DocumentRecord, DocumentWorkspaceEditInput } from '@/lib/documents/types';
 import { MonacoLanguageBridge } from './language-bridge';

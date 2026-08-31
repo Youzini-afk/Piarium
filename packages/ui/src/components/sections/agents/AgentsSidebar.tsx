@@ -19,7 +19,7 @@ import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/Setting
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { AGENT_KIND_LABEL_KEYS, filterAgentsCatalog } from './agents-catalog-model';
 import {

@@ -54,7 +54,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import type { UsageWindow } from '@/types';
-import type { GitHubAuthStatus } from '@/lib/api/types';
+import type { GitHubAuthStatus } from '@piarium/application-client';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -65,8 +65,8 @@ import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRunt
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl } from '@piarium/application-client';
 import { shouldResetDesktopMainTabToChat } from '@/components/layout/mainTabGuards';
 import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";

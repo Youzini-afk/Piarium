@@ -4,7 +4,7 @@ import type {
   FilesAPI,
   PiariumDocumentReadResult,
   PiariumResourceReference,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import {
   createPiariumProjectConfigStore,

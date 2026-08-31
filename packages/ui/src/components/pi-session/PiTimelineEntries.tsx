@@ -17,7 +17,7 @@ import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDi
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
-import type { EditorAPI } from '@/lib/api/types';
+import type { EditorAPI } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';

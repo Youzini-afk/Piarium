@@ -11,7 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { MultiRunAgentSelection } from '@/types/multirun';
 

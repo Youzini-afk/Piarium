@@ -71,7 +71,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGitRepositorySelectionStore } from '@/stores/useGitRepositorySelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
+import type { FileSearchResult, WorkspaceContentSearchHit } from '@piarium/application-client';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';

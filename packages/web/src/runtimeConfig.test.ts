@@ -1,26 +1,26 @@
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('@piarium/ui/lib/runtime-auth', () => ({
+vi.mock('@piarium/application-client', () => ({
+  configureRuntimeUrlResolver: vi.fn(() => ({})),
+  getRuntimeApiBaseUrl: vi.fn(() => ''),
   getRuntimeBearerTokenSync: vi.fn(() => ''),
   getRuntimeExtraHeadersSync: vi.fn(() => ({})),
-  refreshLocalRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
-  refreshRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
-  setRuntimeBearerToken: vi.fn(),
-  setRuntimeExtraHeaders: vi.fn(),
-}));
-vi.mock('@piarium/ui/lib/runtime-fetch', () => ({ installRuntimeFetchBridge: vi.fn() }));
-vi.mock('@piarium/ui/lib/runtime-switch', () => ({
-  getRuntimeApiBaseUrl: vi.fn(() => ''),
   getRuntimeKey: vi.fn(() => 'local'),
   initializeRuntimeEndpoint: vi.fn(),
+  installRuntimeFetchBridge: vi.fn(),
+  refreshLocalRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
+  refreshRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
+  registerRelayTunnelLifecycle: vi.fn(),
+  registerRelayTunnelProvider: vi.fn(),
+  setRuntimeBearerToken: vi.fn(),
+  setRuntimeExtraHeaders: vi.fn(),
   switchRuntimeEndpoint: vi.fn(),
 }));
 vi.mock('@piarium/ui/lib/desktopRelayRestore', () => ({ restoreDesktopRelayRuntime: vi.fn(() => Promise.resolve()) }));
-vi.mock('@piarium/ui/lib/runtime-url', () => ({ configureRuntimeUrlResolver: vi.fn(() => ({})) }));
 vi.mock('./api', () => ({ createWebAPIs: vi.fn() }));
 
-import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/ui/lib/runtime-auth';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
+import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/application-client';
+import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/application-client';
 import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
 import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
 

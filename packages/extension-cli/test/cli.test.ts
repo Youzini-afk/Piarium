@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePiariumExtensionManifest } from "@piarium/extension-contract";
+import { parsePiariumExtensionManifest, type PiariumExtensionStaticContribution } from "@piarium/extension-contract";
 import { initProject } from "../src/init.js";
 import { buildProject } from "../src/build.js";
 import { checkProject } from "../src/project.js";
-import { testProject } from "../src/test-command.js";
+import { runShellCompositionSmoke, testProject } from "../src/test-command.js";
 import { runCli } from "../src/cli.js";
+import { defineShellMount, defineSurfaceExtension } from "@piarium/extension-sdk";
 
 const temporaryDirectory = async (): Promise<string> => mkdtemp(join(tmpdir(), "piarium-extension-cli-test-"));
 
@@ -74,9 +75,12 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   const surface = await readFile(join(shell.directory, "src/surface.ts"), "utf8");
   assert.match(surface, /defineShellMount/);
   assert.match(surface, /PIARIUM_WORKBENCH_REPLACEMENT_TARGETS/);
+  assert.match(surface, /mount\.workbench\.mountReplacement/);
+  assert.match(surface, /mount\.workbench\.mountSlot/);
   assert.doesNotMatch(surface, /@piarium\/ui|@\/components/);
   const shellManifest = JSON.parse(await readFile(join(shell.directory, "piarium.extension.json"), "utf8"));
   assert.doesNotThrow(() => parsePiariumExtensionManifest(shellManifest));
+  assert.equal(shellManifest.contributions?.[0]?.kind, "shell");
 
   const editor = await initProject({
     directory: join(root, "editor"),
@@ -159,6 +163,57 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.doesNotMatch(testHost, /test-adapter\.mjs/);
   const testManifest = await readFile(join(tests.directory, "piarium.extension.json"), "utf8");
   assert.match(testManifest, /workspace\.test/);
+});
+
+test("shell composition smoke invokes replacement, slot, and disposer behavior", async () => {
+  const descriptor: PiariumExtensionStaticContribution = {
+    contractVersion: 1,
+    data: {
+      contract: "piarium-workbench-shell/v1",
+      seams: { web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] } },
+    },
+    entrypoint: "dev.example.shell-smoke.surface",
+    id: "dev.example.shell-smoke.shell",
+    kind: "shell",
+    replacement: { target: "workbench.shell" },
+    supports: ["web"],
+  };
+  const manifest = parsePiariumExtensionManifest({
+    schemaVersion: 1,
+    id: "dev.example.shell-smoke",
+    version: "1.0.0",
+    engines: { piarium: "*" },
+    entrypoints: {
+      surfaces: [{
+        file: "dist/surface.cjs",
+        id: "dev.example.shell-smoke.surface",
+        mode: "managed",
+        supports: ["web"],
+      }],
+    },
+    contributions: [descriptor],
+  });
+  const { entrypoint: descriptorEntrypoint, ...dynamicDescriptor } = descriptor;
+  void descriptorEntrypoint;
+  await runShellCompositionSmoke(manifest, {
+    default: defineSurfaceExtension((context) => {
+      context.contribute(dynamicDescriptor, defineShellMount(async (container, mount) => {
+        const replacement = await mount.workbench.mountReplacement({
+          container,
+          target: "workbench.editor",
+        });
+        const slot = await mount.workbench.mountSlot({
+          container,
+          slot: "workbench.primary-sidebar.views",
+        });
+        return async () => {
+          await slot.dispose();
+          await replacement.dispose();
+          container.replaceChildren();
+        };
+      }));
+    }),
+  });
 });
 
 

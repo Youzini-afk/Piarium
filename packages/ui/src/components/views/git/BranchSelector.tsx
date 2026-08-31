@@ -23,7 +23,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { GitRemote } from '@/lib/api/types';
+import type { GitRemote } from '@piarium/application-client';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchInfo {

@@ -1,4 +1,4 @@
-import type { WorkspaceEntry } from '@/lib/api/types';
+import type { WorkspaceEntry } from '@piarium/application-client';
 
 export type WorkspaceSortMode = 'name-asc' | 'name-desc' | 'modified-desc' | 'modified-asc';
 

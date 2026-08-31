@@ -7,8 +7,8 @@ import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { getRuntimeKey } from '@/lib/runtime-switch';
-import type { TerminalShell } from '@/lib/api/types';
+import { getRuntimeKey } from '@piarium/application-client';
+import type { TerminalShell } from '@piarium/application-client';
 import type { RecoveryPreference } from '@piarium/protocol';
 import {
   DEFAULT_FILE_EDITOR_SETTINGS,

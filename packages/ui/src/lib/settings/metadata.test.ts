@@ -6,6 +6,9 @@ mock.module('@/hooks/useProviderLogo', () => ({
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));
 
+const { registerBuiltinSettingsWorkbench } = await import('@/workbenches/settings/register');
+registerBuiltinSettingsWorkbench();
+
 const { getSettingsPageMeta, getSettingsPageMetadata, resolveSettingsSlug } = await import('./metadata');
 const {
   ensureBuiltinSettingsContributions,

@@ -24,7 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import type { GitRemote, GitStatusFile } from '@/lib/api/types';
+import type { GitRemote, GitStatusFile } from '@piarium/application-client';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 
 const EMPTY_GIT_REMOTES: GitRemote[] = [];

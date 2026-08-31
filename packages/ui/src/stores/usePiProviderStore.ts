@@ -9,7 +9,7 @@ import {
   listPiModels,
   listPiProviders,
 } from '@/lib/pi-runtime/providers';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 
 export interface PiProviderView extends ProviderDescriptor {
   connected: boolean;

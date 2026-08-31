@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';

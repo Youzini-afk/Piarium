@@ -1,9 +1,9 @@
-import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from './api/types';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from '@piarium/application-client';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
-import { runtimeFetch } from './runtime-fetch';
-import { getRuntimeUrlResolver } from './runtime-url';
-import { refreshRuntimeUrlAuthToken } from './runtime-auth';
+import { runtimeFetch } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { refreshRuntimeUrlAuthToken } from '@piarium/application-client';
 import { isTerminalShell } from './terminalShell';
 
 type Message = Record<string, unknown> & { t: string; s?: string; q?: number };

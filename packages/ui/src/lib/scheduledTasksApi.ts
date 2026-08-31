@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from '@piarium/protocol';
-import { runtimeFetch } from './runtime-fetch';
+import { runtimeFetch } from '@piarium/application-client';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
 

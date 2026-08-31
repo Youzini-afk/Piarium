@@ -20,7 +20,7 @@ import type {
   PiariumLanguageSymbol,
   PiariumLanguageTextEdit,
   PiariumResourceReference,
-} from '@/lib/api/types';
+} from '@piarium/application-client';
 import type { MonacoRuntime } from './runtime';
 
 export const PIARIUM_RESOURCE_URI_SCHEME = 'piarium-resource';

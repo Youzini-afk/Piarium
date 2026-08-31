@@ -3,11 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const refreshLocalRuntimeUrlAuthToken = vi.fn();
 const fetchWithoutRuntimeRouting = vi.fn();
 
-vi.mock('@piarium/ui/lib/runtime-auth', () => ({
-  refreshLocalRuntimeUrlAuthToken,
-}));
-vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
+vi.mock('@piarium/application-client', () => ({
   fetchWithoutRuntimeRouting,
+  refreshLocalRuntimeUrlAuthToken,
 }));
 
 const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');

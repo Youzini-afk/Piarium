@@ -1,4 +1,4 @@
-import type { PiariumWorkspaceFileEvent } from '@/lib/api/types';
+import type { PiariumWorkspaceFileEvent } from '@piarium/application-client';
 
 type WatchPosition = Pick<PiariumWorkspaceFileEvent, 'sourceId' | 'generation' | 'sequence'>;
 

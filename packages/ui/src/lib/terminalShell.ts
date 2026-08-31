@@ -1,4 +1,4 @@
-import type { TerminalShell } from '@/lib/api/types';
+import type { TerminalShell } from '@piarium/application-client';
 
 const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'] as const satisfies ReadonlyArray<Exclude<TerminalShell, 'auto'>>;
 

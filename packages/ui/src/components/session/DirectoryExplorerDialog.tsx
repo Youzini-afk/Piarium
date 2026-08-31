@@ -38,7 +38,7 @@ import { useI18n } from '@/lib/i18n';
 import {
   isFilesystemError,
   type FilesystemErrorReason,
-} from '@/lib/api/files-errors';
+} from '@piarium/application-client';
 import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 interface DirectoryExplorerDialogProps {

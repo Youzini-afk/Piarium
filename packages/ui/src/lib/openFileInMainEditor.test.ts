@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { EditorAPI, RuntimeAPIs } from './api/types';
+import type { EditorAPI, RuntimeAPIs } from '@piarium/application-client';
 import { openFileInMainEditor } from './openFileInMainEditor';
 import { setWorkbenchWorkspaceResolutionForTests } from '@/lib/extensions/workbench-workspace';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';

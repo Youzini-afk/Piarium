@@ -42,8 +42,8 @@ import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
-import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeBearerTokenSync } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl } from '@piarium/application-client';
 import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {

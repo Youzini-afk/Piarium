@@ -9,7 +9,7 @@ import type {
   RuntimeContextTarget,
 } from '@piarium/protocol';
 import { getPiRuntimeConnection } from './client';
-import { getRuntimeKey } from '../runtime-switch';
+import { getRuntimeKey } from '@piarium/application-client';
 
 export const getPiConfigDocument = async (
   target: RuntimeContextTarget,
