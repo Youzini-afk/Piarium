@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-27
+Last updated: 2026-08-31
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -19,7 +19,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 4 | OpenChamber fork product base | Complete |
 | 5 | Direct Pi-native engine migration | Complete |
 | 6 | Recovery UX and ecosystem integrations | Complete |
-| 7 | Windows release | **In progress** — the only open product boundary |
+| 7 | Windows release | Complete |
 | 8 | OpenChamber upstream capability absorption | Complete |
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
@@ -333,12 +333,11 @@ the integration surface each adapter consumes is recorded in
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.
 
-## Phase 7 — Windows release (in progress)
+## Phase 7 — Windows release (complete)
 
-This is the only open product boundary. Desktop runtime discovery, install planning, and the unsigned
-x64 pipeline are done; the remaining work is installer graph hygiene, an optional offline
-distribution, and clean-profile release journeys. Packaging commands and signing live in
-[packages/electron/README.md](../packages/electron/README.md).
+Windows x64 and ARM64 ship as required release assets from matching native runners. Desktop runtime
+discovery, install planning, the installer graph, and the packaging smoke path are done. Packaging
+commands and signing live in [packages/electron/README.md](../packages/electron/README.md).
 
 - Implemented: Electron's Node mode hosts the compiled Piarium Host bootstrap and broker; running the
   desktop shell requires no separate Node download. Windows product/installer identity and GitHub
@@ -354,15 +353,23 @@ distribution, and clean-profile release journeys. Packaging commands and signing
   `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API prebuild,
   and performs a clean-profile unpacked-app smoke including the health endpoint, renderer app-ready
   state, and terminal create/close cycle.
-- Remaining release boundary: make the ordinary installer graph free of the three Pi SDK packages,
-  produce an optional offline distribution with a verified standalone payload, and smoke both from
-  the current release commit.
-- Remaining release boundary: exercise install/no-install/upgrade/custom-runtime journeys on a clean
-  Windows profile, then verify signed release artifacts, update-in-place, crash recovery, and
-  uninstall data retention.
+- Implemented: the ordinary installer graph carries no Pi SDK package. `build.files` ships only the
+  bundled main process and preload, so the SDK is never a packaged payload; the Host resolves the
+  selected package root at runtime. `afterPack` proves this by driving a real Runtime Manager probe
+  and live external Host handshake against an out-of-tree package root before the build is accepted.
+- Implemented: the release workflow packages Windows ARM64 on the native `windows-11-arm` runner and
+  publishes `latest-arm64.yml` beside its architecture-specific installer and blockmap, keeping the
+  x64 and ARM64 updater channels separate.
+- Signing is supported but unused by public releases. `package.mjs` accepts `CSC_LINK`/`WIN_CSC_LINK`
+  (and maps the legacy `WINDOWS_CSC_*` names) and otherwise falls back to an unsigned NSIS installer.
+  Producing signed artifacts is a credential decision, not outstanding engineering.
+- Not delivered: the optional offline distribution with a verified standalone payload. Runtime
+  installation and standalone-runtime selection exist in the broker, but no pipeline produces that
+  payload and no release asset carries it.
 
-Acceptance: install on a clean Windows user profile, run the Phase 5–6 smoke journey, restart with
-active history intact, upgrade in place, and uninstall without deleting user projects or sessions.
+Acceptance: met for install on a clean Windows user profile and the Phase 5–6 smoke journey, which
+run in CI on every release. Update-in-place, crash recovery, and uninstall data retention are
+verified manually; they have no automated release gate.
 
 ## Phase 8 — OpenChamber upstream capability absorption (complete)
 
