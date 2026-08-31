@@ -22,6 +22,7 @@ const canonicalLockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock
 export const CLOUD_RUNTIME_SCHEMA_VERSION = 2;
 export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-contract',
+  'application-client',
   'extension-builtins',
   'extension-host',
   'protocol',
@@ -66,6 +67,10 @@ const cloudIdentityTextExtensions = new Set([
 ]);
 
 const packageFiles = Object.freeze({
+  'application-client': {
+    required: ['package.json', 'dist'],
+    optional: [],
+  },
   'extension-contract': {
     required: ['package.json', 'dist'],
     optional: [],
@@ -358,6 +363,10 @@ const buildSourcePackages = ({ json }) => {
   run('bun', ['run', '--cwd', 'packages/runtime-client', 'build'], {
     json,
     label: 'Pi runtime client build',
+  });
+  run('bun', ['run', '--cwd', 'packages/application-client', 'build'], {
+    json,
+    label: 'Piarium application client build',
   });
   run('bun', ['run', '--cwd', 'packages/extension-loader', 'build'], {
     json,

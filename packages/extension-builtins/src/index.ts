@@ -279,7 +279,7 @@ const IDE_SLOTS = [
   PIARIUM_WORKBENCH_SLOTS.statusItems,
 ];
 
-const ideSeams = (surface: PiariumApplicationSurface) => ({
+const ideSeams = () => ({
   replacementTargets: [...IDE_FEATURE_TARGETS, ...IDE_STRUCTURE_TARGETS],
   slots: IDE_SLOTS,
 });
@@ -300,7 +300,7 @@ export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
     data: {
       contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: Object.fromEntries(
-        PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => [surface, ideSeams(surface)]),
+        PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => [surface, ideSeams()]),
       ),
     },
     entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
