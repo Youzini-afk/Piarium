@@ -103,10 +103,11 @@
     "release:test:arm": "./scripts/test-release-build.sh aarch64",
     "release:npm:prepare": "node scripts/npm-public-release.mjs prepare",
     "release:npm:verify": "node scripts/npm-public-release.mjs verify",
-    "release:npm:test": "node --test scripts/npm-public-release.test.mjs && bun run --cwd packages/extension-contract test && bun run --cwd packages/extension-surface test && bun run --cwd packages/extension-sdk test && bun run --cwd packages/extension-cli test",
-    "release:npm:build": "bun run --cwd packages/extension-contract build && bun run --cwd packages/extension-surface build && bun run --cwd packages/extension-sdk build && bun run --cwd packages/extension-react build && bun run --cwd packages/extension-cli build",
+    "release:npm:test": "node --test scripts/npm-public-release.test.mjs && bun run --cwd packages/extension-contract test && bun run --cwd packages/extension-surface test && bun run --cwd packages/extension-sdk test && bun run --cwd packages/extension-cli test && bun run --cwd packages/application-client test",
+    "release:npm:build": "bun run --cwd packages/extension-contract build && bun run --cwd packages/extension-surface build && bun run --cwd packages/extension-sdk build && bun run --cwd packages/extension-react build && bun run --cwd packages/extension-cli build && bun run --cwd packages/application-client build",
     "release:npm:package": "node scripts/npm-public-release.mjs package",
-    "release:npm:publish": "node scripts/npm-public-release.mjs publish"
+    "release:npm:publish": "node scripts/npm-public-release.mjs publish",
+    "smoke:extension": "node scripts/smoke-extension.mjs"
   },
   "overrides": {
     "@babel/core": "7.29.7",

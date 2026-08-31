@@ -290,6 +290,94 @@ test("CLI output modes preserve validation and emit script-safe results", async 
   );
 });
 
+test("check reports incompatible contributions for unknown contract version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-cli-incompat-"));
+  await writeFile(join(root, "package.json"), JSON.stringify({
+    name: "dev.example.incompat",
+    version: "1.0.0",
+  }));
+  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: "dev.example.incompat",
+    version: "1.0.0",
+    engines: { piarium: ">=0.2.0" },
+    contributions: [{
+      id: "dev.example.incompat.view",
+      kind: "view",
+      contractVersion: 99,
+      data: {},
+      supports: ["web"],
+    }],
+  }));
+
+  const jsonLines: string[] = [];
+  const jsonErrors: string[] = [];
+  const exit = await runCli(["check", root, "--json"], {
+    error: (...values) => jsonErrors.push(values.join(" ")),
+    log: (...values) => jsonLines.push(values.join(" ")),
+  });
+  assert.equal(exit, 0);
+  assert.equal(jsonErrors.length, 0);
+  const result = JSON.parse(jsonLines[0] as string) as {
+    incompatibleContributions: Array<{ id: string; kind: string; contractVersion: number }>;
+    ok: boolean;
+  };
+  assert.equal(result.ok, true);
+  assert.equal(result.incompatibleContributions.length, 1);
+  assert.equal(result.incompatibleContributions[0].kind, "view");
+  assert.equal(result.incompatibleContributions[0].contractVersion, 99);
+});
+
+test("check reports when validation errors for shell and transition-scene", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-cli-when-"));
+  await writeFile(join(root, "package.json"), JSON.stringify({
+    name: "dev.example.when",
+    version: "1.0.0",
+  }));
+  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: "dev.example.when",
+    version: "1.0.0",
+    engines: { piarium: ">=0.2.0" },
+    contributions: [
+      {
+        id: "dev.example.when.shell",
+        kind: "shell",
+        contractVersion: 1,
+        data: {
+          contract: "piarium-workbench-shell/v1",
+          seams: { web: { replacementTargets: ["workbench.editor"], slots: [] } },
+        },
+        supports: ["web"],
+        replacement: { target: "workbench.shell" },
+        when: { op: "defined", key: "editorIsOpen" },
+      },
+      {
+        id: "dev.example.when.view",
+        kind: "view",
+        contractVersion: 1,
+        data: {},
+        supports: ["web"],
+        when: { op: "defined", key: "editorIsOpen" },
+      },
+    ],
+  }));
+
+  const jsonLines: string[] = [];
+  const jsonErrors: string[] = [];
+  const exit = await runCli(["check", root, "--json"], {
+    error: (...values) => jsonErrors.push(values.join(" ")),
+    log: (...values) => jsonLines.push(values.join(" ")),
+  });
+  assert.equal(exit, 1);
+  const result = JSON.parse(jsonLines[0] as string) as {
+    errors: string[];
+    ok: boolean;
+  };
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((e) => e.includes("when") && e.includes("shell")));
+});
+
 const mkdirSource = async (root: string): Promise<void> => {
   const { mkdir } = await import("node:fs/promises");
   await mkdir(join(root, "src"), { recursive: true });

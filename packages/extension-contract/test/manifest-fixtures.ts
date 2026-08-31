@@ -389,4 +389,102 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     runtimeValid: false,
     compatible: true,
   },
+  {
+    label: "view contribution with valid structured when expression",
+    manifest: {
+      ...baseManifest(),
+      contributions: [{
+        ...baseContribution(),
+        when: { op: "defined", key: "editorIsOpen" },
+      }],
+    },
+    schemaValid: true,
+    runtimeValid: true,
+    compatible: true,
+  },
+  {
+    label: "view contribution with nested when expression (all/any)",
+    manifest: {
+      ...baseManifest(),
+      contributions: [{
+        ...baseContribution(),
+        when: {
+          op: "all",
+          expressions: [
+            { op: "defined", key: "editorIsOpen" },
+            { op: "any", expressions: [
+              { op: "equals", key: "language", value: "markdown" },
+              { op: "equals", key: "language", value: "typescript" },
+            ]},
+          ],
+        },
+      }],
+    },
+    schemaValid: true,
+    runtimeValid: true,
+    compatible: true,
+  },
+  {
+    label: "view contribution with invalid when operator",
+    manifest: {
+      ...baseManifest(),
+      contributions: [{
+        ...baseContribution(),
+        when: { op: "invalid-op", key: "editorIsOpen" },
+      }],
+    },
+    schemaValid: false,
+    runtimeValid: false,
+    compatible: true,
+  },
+  {
+    label: "shell contribution with when (disallowed)",
+    manifest: {
+      ...baseManifest(),
+      contributions: [{
+        id: "dev.example.fixtures.shell",
+        kind: "shell",
+        contractVersion: 1,
+        data: {
+          contract: "piarium-workbench-shell/v1",
+          seams: {
+            web: { replacementTargets: ["workbench.editor"], slots: [] },
+          },
+        },
+        supports: ["web"],
+        replacement: { target: "workbench.shell" },
+        when: { op: "defined", key: "editorIsOpen" },
+      }],
+    },
+    schemaValid: true,
+    runtimeValid: false, // runtime rejects when on shell contributions
+    compatible: true,
+  },
+  {
+    label: "transition-scene contribution with when (disallowed)",
+    manifest: {
+      ...baseManifest(),
+      contributions: [{
+        id: "dev.example.fixtures.transition",
+        kind: "transition-scene",
+        contractVersion: 1,
+        data: {
+          contract: "piarium-transition-scene/v1",
+          scenes: ["workbench-profile"],
+          durations: {
+            "workbench-profile": {
+              covering: { quick: 100, reduced: 200, standard: 300 },
+              revealing: { quick: 100, reduced: 200, standard: 300 },
+            },
+          },
+        },
+        supports: ["web"],
+        replacement: { target: "workbench.transition" },
+        when: { op: "defined", key: "editorIsOpen" },
+      }],
+    },
+    schemaValid: true,
+    runtimeValid: false, // runtime rejects when on transition-scene contributions
+    compatible: true,
+  },
 ];
