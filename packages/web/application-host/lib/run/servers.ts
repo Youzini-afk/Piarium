@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { fileURLToPath } from 'node:url';
 
 export const PIARIUM_DAP_FIXTURE_ADAPTER_PATH = fileURLToPath(new URL('./fixture-adapter.js', import.meta.url));

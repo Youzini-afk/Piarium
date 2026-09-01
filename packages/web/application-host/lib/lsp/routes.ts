@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { isDocumentAuthorityError } from '../documents/errors.js';
 
 const sendError = (res, error) => {

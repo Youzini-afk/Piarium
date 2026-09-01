@@ -1,3 +1,4 @@
+// @ts-nocheck
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';

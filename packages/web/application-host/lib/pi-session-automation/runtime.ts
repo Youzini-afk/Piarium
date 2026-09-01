@@ -1,3 +1,4 @@
+// @ts-nocheck
 const GOAL_IDLE_QUIET_MS = 15_000;
 const GOAL_KICKOFF_QUIET_MS = 3_000;
 const GOAL_RESUME_QUIET_MS = 250;

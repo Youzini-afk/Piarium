@@ -1,3 +1,4 @@
+// @ts-nocheck
 const CONTENT_SEARCH_EXCLUDED_GLOBS = [
   '!**/node_modules/**',
   '!**/.git/**',

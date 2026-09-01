@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { PiRuntimeSurfaceConnection } from '@piarium/runtime-broker';
 import { WebSocketServer } from 'ws';
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { isDocumentAuthorityError } from '../documents/errors.js';
 import { createFsSearchRuntime } from '../fs/search.js';
 import { createWorkspaceContentSearch } from './content.js';

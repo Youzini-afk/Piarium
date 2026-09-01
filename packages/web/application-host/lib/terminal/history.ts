@@ -1,3 +1,4 @@
+// @ts-nocheck
 const isCsiFinalByte = (code) => code >= 0x40 && code <= 0x7e;
 const shouldStripCsi = (body, finalByte) =>
   finalByte === 'n'

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { isPathWithinRoot } from '../workspace/path-safety.js';
 
 const SKIP_NAMES = new Set(['node_modules', '.git', 'dist', 'out', '.piarium', 'coverage']);

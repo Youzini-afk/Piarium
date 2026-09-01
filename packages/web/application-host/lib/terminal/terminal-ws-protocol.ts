@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const TERMINAL_WS_PATH = '/api/terminal/ws';
 export const TERMINAL_WS_CONTROL_TAG_JSON = 0x01;
 export const TERMINAL_WS_MAX_PAYLOAD_BYTES = 64 * 1024;

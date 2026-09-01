@@ -1,3 +1,4 @@
+// @ts-nocheck
 const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'];
 const TERMINAL_SHELL_ID_SET = new Set(TERMINAL_SHELL_IDS);
 

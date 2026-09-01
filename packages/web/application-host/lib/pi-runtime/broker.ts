@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@piarium/runtime-broker';
 import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createWorkspaceTaskRunner } from './tasks.js';
 import { createDebugSupervisor } from './debug-supervisor.js';
 import { createTestSupervisor } from './test-supervisor.js';

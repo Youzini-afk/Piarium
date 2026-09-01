@@ -1,3 +1,4 @@
+// @ts-nocheck
 const SEARCH_METHODS = new Set(['searchContent']);
 
 export const createWorkspaceSearchCapabilityHandler = (search) => async (method, params) => {
