@@ -1,6 +1,8 @@
-import type { Express } from "express";
-import type { Server } from "http";
-import type { PiRuntimeBroker } from "@piarium/runtime-broker";
+import type { Express } from 'express';
+import type { Server } from 'node:http';
+import type { PiRuntimeBroker } from '@piarium/runtime-broker';
+
+// ── Server lifecycle ─────────────────────────────────────────────────────
 
 export interface WebUiServerController {
   expressApp: Express;
@@ -25,11 +27,12 @@ export interface StartWebUiServerOptions {
 }
 
 export declare function startWebUiServer(
-  options?: StartWebUiServerOptions
+  options?: StartWebUiServerOptions,
 ): Promise<WebUiServerController>;
 
 export declare function gracefulShutdown(options?: { exitProcess?: boolean }): Promise<void>;
-export declare function parseArgs(argv?: string[]): {
+
+export interface ParsedServeCliArgs {
   port: number;
   host?: string;
   uiPassword: string | null;
@@ -39,4 +42,48 @@ export declare function parseArgs(argv?: string[]): {
   tunnelConfigPath?: string | null;
   tunnelToken?: string;
   tunnelHostname?: string;
-};
+}
+
+export declare function parseArgs(argv?: string[]): ParsedServeCliArgs;
+
+// ── Platform facade ──────────────────────────────────────────────────────
+// Cross-package consumers (Electron, VS Code) should import these from
+// '@piarium/web/server' instead of deep-importing server/lib/*.
+
+export declare function resolvePiariumDataDir(
+  processLike?: Pick<NodeJS.Process, 'env' | 'platform'>,
+): string;
+
+export declare function clearAppImageArgv0FromProcessEnv(): void;
+
+export declare function pathLooksUserConfigured(
+  value: string,
+  home: string,
+  delim: string,
+): boolean;
+
+export declare function mergePathValues(
+  primary: string,
+  fallback: string,
+  delim: string,
+): string;
+
+// ── Filesystem facade ────────────────────────────────────────────────────
+
+export interface OutsideFileGrantOptions {
+  scopes?: readonly string[];
+  fsPromises?: Pick<typeof import('node:fs/promises'), 'realpath' | 'stat'>;
+  path?: Pick<typeof import('node:path'), 'dirname'>;
+  crypto?: Pick<Crypto, 'randomUUID'>;
+}
+
+export interface OutsideFileGrantResult {
+  path: string;
+  outsideFileGrant: string;
+  expiresAt: number;
+}
+
+export declare function mintOutsideFileGrant(
+  targetPath: string,
+  options?: OutsideFileGrantOptions,
+): Promise<OutsideFileGrantResult>;

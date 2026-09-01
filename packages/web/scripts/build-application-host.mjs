@@ -69,8 +69,6 @@ try {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       // Skip test files
       if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.ts')) continue;
-      // Skip source maps and declarations (they're in staging from tsc)
-      if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.ts.map')) continue;
 
       const srcPath = path.join(srcDir, entry.name);
       const destPath = path.join(destDir, entry.name);
@@ -79,9 +77,10 @@ try {
         fs.mkdirSync(destPath, { recursive: true });
         copyAssets(srcPath, destPath);
       } else {
-        // Only copy non-JS/TS files (JS/TS are emitted by tsc)
+        // Copy non-JS/TS files (JS/TS are emitted by tsc) and hand-written .d.ts files
         const ext = path.extname(entry.name);
-        if (ext !== '.js' && ext !== '.ts' && ext !== '.mjs' && ext !== '.mts' && ext !== '.cjs' && ext !== '.cts') {
+        const isDeclaration = entry.name.endsWith('.d.ts');
+        if (isDeclaration || (ext !== '.js' && ext !== '.ts' && ext !== '.mjs' && ext !== '.mts' && ext !== '.cjs' && ext !== '.cts' && ext !== '.d.ts.map' && ext !== '.js.map')) {
           fs.copyFileSync(srcPath, destPath);
         }
       }

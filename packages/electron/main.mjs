@@ -43,9 +43,11 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
-import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
-import { resolvePiariumDataDir } from '@piarium/web/server/lib/platform/data-paths.js';
-import { clearAppImageArgv0FromProcessEnv } from '@piarium/web/server/lib/platform/inherited-env.js';
+import {
+  mintOutsideFileGrant,
+  resolvePiariumDataDir,
+  clearAppImageArgv0FromProcessEnv,
+} from '@piarium/web/server/index.js';
 import { createSettingsFileStore } from '@piarium/settings-store';
 import { PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE } from '@piarium/protocol';
 
@@ -1500,7 +1502,7 @@ const loadShellEnv = () => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/lib/platform/path-utils.js';
+import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/index.js';
 
 // import/start the server in-process. The server and its children (Pi host,
 // git, etc.) inherit process.env directly now — there is no sidecar

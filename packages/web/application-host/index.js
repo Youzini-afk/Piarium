@@ -105,6 +105,9 @@ import {
 } from './lib/platform/core-routes.js';
 import { createPlatformEnvironmentRuntime } from './lib/platform/environment-runtime.js';
 import { resolvePiariumDataDir } from './lib/platform/data-paths.js';
+import { clearAppImageArgv0FromProcessEnv } from './lib/platform/inherited-env.js';
+import { pathLooksUserConfigured, mergePathValues } from './lib/platform/path-utils.js';
+import { mintOutsideFileGrant } from './lib/fs/routes.js';
 import { createProjectDirectoryRuntime } from './lib/platform/project-directory-runtime.js';
 import { registerPiariumRoutes } from './lib/platform/piarium-routes.js';
 import { createPlatformRoutesRuntime } from './lib/platform/routes-runtime.js';
@@ -1307,4 +1310,11 @@ export {
   gracefulShutdown,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
+  // Platform facade — cross-package consumers (Electron) should import
+  // these from '@piarium/web/server' instead of deep-importing server/lib/*.
+  resolvePiariumDataDir,
+  clearAppImageArgv0FromProcessEnv,
+  pathLooksUserConfigured,
+  mergePathValues,
+  mintOutsideFileGrant,
 };
