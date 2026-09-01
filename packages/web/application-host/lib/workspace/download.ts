@@ -1,11 +1,76 @@
 import fs from 'fs';
 import path from 'path';
 import { ZipFile } from 'yazl';
+import type { Readable } from 'stream';
 
 import { WorkspacePathError, resolveWorkspacePath } from './path-safety.js';
+import type { ResolvedWorkspacePath } from './path-safety.js';
 import { WorkspacePayloadTooLargeError } from './filesystem.js';
+import type { WorkspaceConfig } from './workspace-config.js';
 
-const safeDownloadName = (nameValue) => {
+type PathModule = typeof import('path');
+type FsPromises = typeof fs.promises;
+
+export interface DownloadDependencies {
+  fsPromises?: FsPromises | undefined;
+  pathModule?: PathModule | undefined;
+}
+
+interface DownloadLimits {
+  maxBytes: number;
+  maxFiles: number;
+}
+
+interface DownloadTotals {
+  files: number;
+  bytes: number;
+}
+
+interface FileDownloadInfo {
+  type: 'file';
+  filePath: string;
+  fileName: string;
+}
+
+interface ArchiveDownloadInfo {
+  type: 'archive';
+  directoryPath: string;
+  baseName: string;
+  fileName: string;
+}
+
+type DownloadInfo = FileDownloadInfo | ArchiveDownloadInfo;
+
+interface ArchiveDownloadStream extends ArchiveDownloadInfo {
+  stream: Readable;
+  totals: DownloadTotals;
+}
+
+interface ResolvedDownloadInfo {
+  resolved: ResolvedWorkspacePath;
+  stat: fs.Stats;
+  download: DownloadInfo;
+}
+
+interface DirectoryEntry {
+  zipPath: string;
+}
+
+interface FileEntry {
+  absolutePath: string;
+  zipPath: string;
+  mtime: Date;
+  mode: number;
+}
+
+export interface WorkspaceDownloadInfo {
+  type: 'file' | 'archive';
+  fileName: string;
+}
+
+export type WorkspaceDownloadResult = FileDownloadInfo | ArchiveDownloadStream;
+
+const safeDownloadName = (nameValue: unknown): string => {
   const cleaned = String(nameValue || 'workspace')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
     .replace(/[. ]+$/g, '')
@@ -13,21 +78,21 @@ const safeDownloadName = (nameValue) => {
   return cleaned || 'workspace';
 };
 
-const toZipPath = (...segments) => (
+const toZipPath = (...segments: unknown[]): string => (
   segments
-    .filter((segment) => typeof segment === 'string' && segment.length > 0)
+    .filter((segment): segment is string => typeof segment === 'string' && segment.length > 0)
     .join('/')
     .replace(/\\/g, '/')
     .replace(/\/+/g, '/')
     .replace(/^\/+/, '')
 );
 
-const getLimits = (config) => ({
+const getLimits = (config: WorkspaceConfig): DownloadLimits => ({
   maxBytes: Number.isFinite(config.maxDownloadBytes) ? config.maxDownloadBytes : 12 * 1024 * 1024 * 1024,
   maxFiles: Number.isFinite(config.maxDownloadFiles) ? config.maxDownloadFiles : 0,
 });
 
-const assertWithinLimits = (totals, limits) => {
+const assertWithinLimits = (totals: DownloadTotals, limits: DownloadLimits): void => {
   if (limits.maxFiles > 0 && totals.files > limits.maxFiles) {
     throw new WorkspacePayloadTooLargeError('Directory contains too many files to download');
   }
@@ -36,7 +101,11 @@ const assertWithinLimits = (totals, limits) => {
   }
 };
 
-const getDownloadInfoFromResolvedPath = (resolved, stat, pathModule) => {
+const getDownloadInfoFromResolvedPath = (
+  resolved: ResolvedWorkspacePath,
+  stat: fs.Stats,
+  pathModule: PathModule,
+): DownloadInfo => {
   if (stat.isFile()) {
     return {
       type: 'file',
@@ -58,7 +127,11 @@ const getDownloadInfoFromResolvedPath = (resolved, stat, pathModule) => {
   throw new WorkspacePathError('Path is not a file or directory');
 };
 
-const resolveDownloadInfo = async (pathValue, config, dependencies = {}) => {
+const resolveDownloadInfo = async (
+  pathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: DownloadDependencies = {},
+): Promise<ResolvedDownloadInfo> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -77,20 +150,24 @@ const resolveDownloadInfo = async (pathValue, config, dependencies = {}) => {
   };
 };
 
-const createDirectoryZipStream = async (download, config, dependencies = {}) => {
+const createDirectoryZipStream = async (
+  download: ArchiveDownloadInfo,
+  config: WorkspaceConfig,
+  dependencies: DownloadDependencies = {},
+): Promise<ArchiveDownloadStream> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
   const limits = getLimits(config);
-  const totals = {
+  const totals: DownloadTotals = {
     files: 0,
     bytes: 0,
   };
-  const directories = [];
-  const files = [];
+  const directories: DirectoryEntry[] = [];
+  const files: FileEntry[] = [];
 
-  const collectDirectory = async (absolutePath, zipPath) => {
+  const collectDirectory = async (absolutePath: string, zipPath: string): Promise<void> => {
     directories.push({ zipPath });
 
     const entries = await fsPromises.readdir(absolutePath, { withFileTypes: true });
@@ -140,12 +217,16 @@ const createDirectoryZipStream = async (download, config, dependencies = {}) => 
 
   return {
     ...download,
-    stream: zipFile.outputStream,
+    stream: zipFile.outputStream as Readable,
     totals,
   };
 };
 
-export const getWorkspaceDownloadInfo = async (pathValue, config, dependencies = {}) => {
+export const getWorkspaceDownloadInfo = async (
+  pathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: DownloadDependencies = {},
+): Promise<WorkspaceDownloadInfo> => {
   const { download } = await resolveDownloadInfo(pathValue, config, dependencies);
   return {
     type: download.type,
@@ -153,7 +234,11 @@ export const getWorkspaceDownloadInfo = async (pathValue, config, dependencies =
   };
 };
 
-export const resolveWorkspaceDownload = async (pathValue, config, dependencies = {}) => {
+export const resolveWorkspaceDownload = async (
+  pathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: DownloadDependencies = {},
+): Promise<WorkspaceDownloadResult> => {
   const { download } = await resolveDownloadInfo(pathValue, config, dependencies);
 
   if (download.type === 'file') {

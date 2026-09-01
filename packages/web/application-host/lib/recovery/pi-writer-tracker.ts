@@ -1,30 +1,159 @@
 import { PiRuntimeBrokerError } from '@piarium/runtime-broker';
 
-const admissionError = (error) => {
+interface AdmissionFailure {
+  code?: string | undefined;
+  message?: string | undefined;
+  statusCode?: number | undefined;
+  currentEpoch?: number | undefined;
+}
+
+interface PiWriter {
+  markMutated: () => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface MutationOwner {
+  kind: string;
+  id: string;
+  generation?: number | undefined;
+}
+
+interface WatchSubscription {
+  ready: Promise<boolean>;
+  settle: () => Promise<void>;
+  close: () => void;
+}
+
+interface WorkspaceWatchEvent {
+  kind?: string | undefined;
+  resource?: {
+    workspaceId?: string | undefined;
+    resourceId?: string | undefined;
+  } | undefined;
+}
+
+interface PiWriterDocuments {
+  resolveScopeId?: ((scopeId: unknown) => Promise<string | null>) | undefined;
+  watch?: ((
+    workspaceId: string,
+    listener: (event: WorkspaceWatchEvent) => void,
+  ) => WatchSubscription) | undefined;
+  registerWriterForScope: (
+    scopeId: unknown,
+    owner: MutationOwner,
+    options: Record<string, unknown>,
+  ) => Promise<PiWriter | null>;
+}
+
+interface PiWriterLease {
+  closed: boolean;
+  close: () => Promise<void>;
+}
+
+interface PiWriterState {
+  closed: boolean;
+  changedResourceIds: Set<string>;
+  closedPromise: Promise<void>;
+  closePromise: Promise<void> | null;
+  closing: boolean;
+  fallbackLease: PiWriterLease | null;
+  holders: number;
+  mutationObserved: boolean;
+  ready: Promise<void> | null;
+  resolveClosed: () => void;
+  retired: boolean;
+  watch: WatchSubscription | null;
+  watchAvailable: boolean;
+  watchCoverageComplete: boolean;
+  writer: PiWriter | null;
+}
+
+interface SettledSummary {
+  changedResourceIds: string[];
+  coverageComplete: boolean;
+  mutationObserved: boolean;
+}
+
+interface PiWriterAdmissionRequest {
+  cwd?: string | undefined;
+  method?: string | undefined;
+  phase?: string | undefined;
+  sessionId?: string | undefined;
+  workerId?: string | undefined;
+}
+
+interface ResolvedAdmissionRequest {
+  cwd: string;
+  method?: string | undefined;
+  phase?: string | undefined;
+  sessionId?: string | undefined;
+  workerId: string;
+}
+
+interface PiWriterAcquireOptions {
+  fallback?: boolean | undefined;
+}
+
+interface SessionSnapshotData {
+  cwd?: string | undefined;
+  isRunning?: boolean | undefined;
+  busy?: boolean | undefined;
+  isStreaming?: boolean | undefined;
+}
+
+interface PiEventEnvelopeData extends SessionSnapshotData {
+  sessionId?: string | undefined;
+  event?: { type?: string | undefined } | undefined;
+}
+
+interface HostEventEnvelope {
+  kind?: string | undefined;
+  event?: string | undefined;
+  data?: PiEventEnvelopeData | undefined;
+}
+
+interface PiWorkerEvent {
+  kind?: string | undefined;
+  workerId: string;
+  sessionId?: string | undefined;
+  envelope?: HostEventEnvelope | undefined;
+}
+
+interface PiWorkspaceWriterTracker {
+  admit: (request: PiWriterAdmissionRequest) => Promise<PiWriterLease | null>;
+  processEvent: (event: PiWorkerEvent | undefined) => Promise<void>;
+  waitForIdle: (workerId: string) => Promise<SettledSummary | null>;
+  dispose: () => Promise<void>;
+}
+
+const admissionError = (error: unknown): PiRuntimeBrokerError | unknown => {
   if (error instanceof PiRuntimeBrokerError) return error;
-  if (
-    !error
-    || typeof error !== 'object'
-    || typeof error.code !== 'string'
-    || !Number.isInteger(error.statusCode)
-  ) return error;
-  const currentEpoch = Number.isSafeInteger(error.currentEpoch) && error.currentEpoch > 0
-    ? error.currentEpoch
+  if (!error || typeof error !== 'object') return error;
+  const failure = error as AdmissionFailure;
+  if (typeof failure.code !== 'string' || !Number.isInteger(failure.statusCode)) return error;
+  const currentEpoch = Number.isSafeInteger(failure.currentEpoch) && (failure.currentEpoch as number) > 0
+    ? failure.currentEpoch as number
     : undefined;
-  return new PiRuntimeBrokerError(error.code, error.message || 'Pi session writer admission failed', {
+  return new PiRuntimeBrokerError(failure.code, failure.message || 'Pi session writer admission failed', {
     ...(currentEpoch === undefined ? {} : { details: { currentEpoch } }),
-    retryable: error.code === 'maintenance' || error.code === 'stale-epoch',
+    retryable: failure.code === 'maintenance' || failure.code === 'stale-epoch',
   });
 };
 
-export const createPiWorkspaceWriterTracker = ({ documents }) => {
-  const snapshots = new Map();
-  const settledSummaries = new Map();
-  const writers = new Map();
+export const createPiWorkspaceWriterTracker = ({
+  documents,
+}: { documents: PiWriterDocuments }): PiWorkspaceWriterTracker => {
+  const snapshots = new Map<string, SessionSnapshotData | undefined>();
+  const settledSummaries = new Map<string, SettledSummary>();
+  const writers = new Map<string, PiWriterState>();
   let disposed = false;
 
-  const finalize = async (workerId, state, force = false) => {
-    if (!state || state.closed || state.closePromise) return state?.closePromise;
+  const finalize = async (
+    workerId: string,
+    state: PiWriterState | undefined,
+    force = false,
+  ): Promise<void> => {
+    if (!state || state.closed || state.closePromise) return state?.closePromise ?? undefined;
     if (!force && state.holders > 0) return undefined;
     state.closing = true;
     state.closePromise = (async () => {
@@ -63,7 +192,11 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     return state.closePromise;
   };
 
-  const closeLease = (workerId, state, lease) => {
+  const closeLease = (
+    workerId: string,
+    state: PiWriterState,
+    lease: PiWriterLease,
+  ): Promise<void> => {
     if (lease.closed) return state.closePromise || Promise.resolve();
     lease.closed = true;
     if (state.fallbackLease === lease) state.fallbackLease = null;
@@ -71,21 +204,27 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     return finalize(workerId, state) || Promise.resolve();
   };
 
-  const forceRelease = (workerId) => {
+  const forceRelease = (workerId: string): Promise<void> => {
     const state = writers.get(workerId);
     if (state) state.retired = true;
     return finalize(workerId, state, true) || Promise.resolve();
   };
 
-  const createState = ({ cwd, method, phase, sessionId, workerId }) => {
+  const createState = ({
+    cwd,
+    method,
+    phase,
+    sessionId,
+    workerId,
+  }: ResolvedAdmissionRequest): PiWriterState => {
     settledSummaries.delete(workerId);
-    let resolveClosed = () => {};
-    const closedPromise = new Promise((resolve) => {
+    let resolveClosed: () => void = () => {};
+    const closedPromise = new Promise<void>((resolve) => {
       resolveClosed = () => resolve();
     });
-    const state = {
+    const state: PiWriterState = {
       closed: false,
-      changedResourceIds: new Set(),
+      changedResourceIds: new Set<string>(),
       closedPromise,
       closePromise: null,
       closing: false,
@@ -123,8 +262,8 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         } catch {
           state.watch?.close();
           state.watch = null;
-            state.watchAvailable = false;
-            state.watchCoverageComplete = false;
+          state.watchAvailable = false;
+          state.watchCoverageComplete = false;
         }
       }
       const writer = await documents.registerWriterForScope(cwd, {
@@ -143,7 +282,7 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         state.resolveClosed();
         if (writers.get(workerId) === state) writers.delete(workerId);
       }
-    })().catch((error) => {
+    })().catch((error: unknown) => {
       state.watch?.close();
       state.closed = true;
       state.resolveClosed();
@@ -153,7 +292,10 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     return state;
   };
 
-  const acquire = async ({ cwd, method, phase, sessionId, workerId }, { fallback = false } = {}) => {
+  const acquire = async (
+    { cwd, method, phase, sessionId, workerId }: PiWriterAdmissionRequest,
+    { fallback = false }: PiWriterAcquireOptions = {},
+  ): Promise<PiWriterLease | null> => {
     if (disposed) {
       throw new PiRuntimeBrokerError('runtime_not_ready', 'Pi workspace writer admission is stopping', {
         retryable: true,
@@ -181,7 +323,7 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
         continue;
       }
       if (fallback && state.fallbackLease) return state.fallbackLease;
-      const lease = {
+      const lease: PiWriterLease = {
         closed: false,
         close: () => closeLease(workerId, state, lease),
       };
@@ -191,10 +333,10 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     }
   };
 
-  const admit = (request) => acquire(request);
+  const admit = (request: PiWriterAdmissionRequest): Promise<PiWriterLease | null> => acquire(request);
 
-  const ensureFallback = async (event, sessionId) => {
-    if (!event?.workerId || disposed) return;
+  const ensureFallback = async (event: PiWorkerEvent, sessionId: string): Promise<void> => {
+    if (!event.workerId || disposed) return;
     const snapshot = snapshots.get(sessionId);
     const cwd = typeof snapshot?.cwd === 'string' ? snapshot.cwd : '';
     if (!cwd) return;
@@ -206,7 +348,7 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
     }
   };
 
-  const processEvent = (event) => {
+  const processEvent = (event: PiWorkerEvent | undefined): Promise<void> => {
     if (event?.kind === 'worker.exit') return forceRelease(event.workerId);
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return Promise.resolve();
     const envelope = event.envelope;
@@ -238,14 +380,14 @@ export const createPiWorkspaceWriterTracker = ({ documents }) => {
   return {
     admit,
     processEvent,
-    async waitForIdle(workerId) {
+    async waitForIdle(workerId: string): Promise<SettledSummary | null> {
       const state = writers.get(workerId);
       if (state) await state.closedPromise;
       const summary = settledSummaries.get(workerId) ?? null;
       settledSummaries.delete(workerId);
       return summary;
     },
-    async dispose() {
+    async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
       await Promise.allSettled([...writers].map(([workerId]) => forceRelease(workerId)));

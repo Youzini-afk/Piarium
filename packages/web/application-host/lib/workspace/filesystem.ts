@@ -3,8 +3,137 @@ import path from 'path';
 import { ensureWorkspaceRoot } from './workspace-config.js';
 import { WorkspacePathError, normalizeWorkspaceRelativePath, resolveWorkspacePath } from './path-safety.js';
 
+export interface WorkspaceConfig {
+  root: string;
+  lockdown: boolean;
+  trashEnabled: boolean;
+  maxReadBytes: number;
+  maxUploadBytes: number;
+  maxDownloadBytes: number;
+  maxDownloadFiles: number;
+  maxArchiveBytes: number;
+  maxExtractBytes: number;
+  maxExtractFiles: number;
+  archivePreviewLimit: number;
+  customCommandsEnabled: boolean;
+}
+
+export interface ResolvedWorkspacePath {
+  rootPath: string;
+  rootRealPath: string;
+  relativePath: string;
+  absolutePath: string;
+  realPath: string;
+}
+
+export interface GitSummary {
+  branch: string | null;
+  remote: string | null;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  type: 'file' | 'directory' | 'symlink';
+  size: number;
+  modifiedAt: string;
+  mtimeMs: number;
+  isProject?: true | undefined;
+  git?: GitSummary | undefined;
+}
+
+export interface WorkspaceDependencies {
+  fsPromises?: typeof fs.promises | undefined;
+  pathModule?: typeof path | undefined;
+}
+
+export interface CreateWorkspaceEntryContext {
+  rootPath: string;
+  fsPromises?: typeof fs.promises | undefined;
+  pathModule?: typeof path | undefined;
+}
+
+export interface CreateWorkspaceEntryOptions {
+  rootListing?: boolean | undefined;
+  includeGit?: boolean | undefined;
+}
+
+export interface CreateWorkspaceFileDependencies extends WorkspaceDependencies {
+  content?: string | undefined;
+}
+
+export interface DeleteWorkspaceEntryDependencies extends WorkspaceDependencies {
+  permanent?: boolean | undefined;
+}
+
+export interface UploadBuffer {
+  name?: string | undefined;
+  buffer: Buffer;
+}
+
+export interface UploadFile {
+  name?: string | undefined;
+  contentBase64?: string | undefined;
+}
+
+export interface MultipartUploadFile {
+  originalname?: string | undefined;
+  name?: string | undefined;
+  buffer?: Buffer | undefined;
+}
+
+export interface WorkspaceRootInfo {
+  root: string;
+  relativeRoot: string;
+  exists: boolean;
+  mtimeMs: number;
+  limits: {
+    maxReadBytes: number;
+    maxUploadBytes: number;
+    maxDownloadBytes: number;
+    maxDownloadFiles: number;
+    maxArchiveBytes: number;
+    maxExtractBytes: number;
+    maxExtractFiles: number;
+    archivePreviewLimit: number;
+  };
+  features: {
+    lockdown: boolean;
+    trash: boolean;
+    customCommands: boolean;
+  };
+  separator: string;
+}
+
+export interface WorkspaceDirectoryListing {
+  path: string;
+  relativePath: string;
+  entries: WorkspaceEntry[];
+}
+
+export interface WorkspaceMutationResult {
+  success: true;
+  entry: WorkspaceEntry;
+}
+
+export interface WorkspaceDeleteResult {
+  success: true;
+  trashed: boolean;
+  trashPath?: string | undefined;
+}
+
+export interface WorkspaceUploadResult {
+  success: true;
+  entries: WorkspaceEntry[];
+}
+
 export class WorkspaceConflictError extends Error {
-  constructor(message) {
+  statusCode: number;
+  constructor(message: string) {
     super(message);
     this.name = 'WorkspaceConflictError';
     this.statusCode = 409;
@@ -12,25 +141,30 @@ export class WorkspaceConflictError extends Error {
 }
 
 export class WorkspacePayloadTooLargeError extends Error {
-  constructor(message) {
+  statusCode: number;
+  constructor(message: string) {
     super(message);
     this.name = 'WorkspacePayloadTooLargeError';
     this.statusCode = 413;
   }
 }
 
-const toIsoString = (value) => new Date(value).toISOString();
+const toIsoString = (value: number | Date): string => new Date(value).toISOString();
 
-const toRelativePath = (rootPath, absolutePath, pathModule) => (
+const toRelativePath = (
+  rootPath: string,
+  absolutePath: string,
+  pathModule: typeof path,
+): string => (
   pathModule.relative(rootPath, absolutePath).replace(/\\/g, '/')
 );
 
-const safeTrashName = (name) => {
+const safeTrashName = (name: string): string => {
   const cleaned = String(name || 'entry').replace(/[\\/]/g, '-').trim();
   return cleaned || 'entry';
 };
 
-async function readGitSummary(absolutePath) {
+async function readGitSummary(absolutePath: string): Promise<GitSummary | null> {
   try {
     const git = await import('../git/index.js');
     if (!await git.isGitRepository(absolutePath)) {
@@ -49,7 +183,11 @@ async function readGitSummary(absolutePath) {
   }
 }
 
-export const createWorkspaceEntry = async (absolutePath, context, options = {}) => {
+export const createWorkspaceEntry = async (
+  absolutePath: string,
+  context: CreateWorkspaceEntryContext,
+  options: CreateWorkspaceEntryOptions = {},
+): Promise<WorkspaceEntry> => {
   const {
     rootPath,
     fsPromises = fs.promises,
@@ -64,7 +202,7 @@ export const createWorkspaceEntry = async (absolutePath, context, options = {}) 
   const name = pathModule.basename(absolutePath);
   const isDirectory = lstat.isDirectory();
   const isSymlink = lstat.isSymbolicLink();
-  const type = isSymlink ? 'symlink' : (isDirectory ? 'directory' : 'file');
+  const type: WorkspaceEntry['type'] = isSymlink ? 'symlink' : (isDirectory ? 'directory' : 'file');
   const relativePath = toRelativePath(rootPath, absolutePath, pathModule);
   const isProject = rootListing && isDirectory && name !== '.trash';
   const git = includeGit && isProject ? await readGitSummary(absolutePath) : null;
@@ -77,12 +215,15 @@ export const createWorkspaceEntry = async (absolutePath, context, options = {}) 
     size: lstat.size,
     modifiedAt: toIsoString(lstat.mtimeMs),
     mtimeMs: lstat.mtimeMs,
-    ...(isProject ? { isProject: true } : {}),
+    ...(isProject ? { isProject: true as const } : {}),
     ...(git ? { git } : {}),
   };
 };
 
-export const getWorkspaceRootInfo = async (config, dependencies = {}) => {
+export const getWorkspaceRootInfo = async (
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceRootInfo> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -114,7 +255,11 @@ export const getWorkspaceRootInfo = async (config, dependencies = {}) => {
   };
 };
 
-export const listWorkspaceDirectory = async (relativePathValue, config, dependencies = {}) => {
+export const listWorkspaceDirectory = async (
+  relativePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceDirectoryListing> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -128,7 +273,7 @@ export const listWorkspaceDirectory = async (relativePathValue, config, dependen
     root: config.root,
     fsPromises,
     pathModule,
-  });
+  }) as ResolvedWorkspacePath;
   const stat = await fsPromises.stat(resolved.absolutePath);
   if (!stat.isDirectory()) {
     throw new WorkspacePathError('Path is not a directory', 400);
@@ -136,7 +281,7 @@ export const listWorkspaceDirectory = async (relativePathValue, config, dependen
 
   const dirents = await fsPromises.readdir(resolved.absolutePath, { withFileTypes: true });
   const rootListing = resolved.relativePath === '';
-  const entries = [];
+  const entries: WorkspaceEntry[] = [];
   for (const dirent of dirents) {
     if (rootListing && dirent.name === '.trash') {
       continue;
@@ -162,7 +307,11 @@ export const listWorkspaceDirectory = async (relativePathValue, config, dependen
   };
 };
 
-export const getWorkspaceEntry = async (relativePathValue, config, dependencies = {}) => {
+export const getWorkspaceEntry = async (
+  relativePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceEntry> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -172,7 +321,7 @@ export const getWorkspaceEntry = async (relativePathValue, config, dependencies 
     root: config.root,
     fsPromises,
     pathModule,
-  });
+  }) as ResolvedWorkspacePath;
   return createWorkspaceEntry(resolved.absolutePath, {
     rootPath: resolved.rootPath,
     fsPromises,
@@ -180,7 +329,11 @@ export const getWorkspaceEntry = async (relativePathValue, config, dependencies 
   });
 };
 
-export const createWorkspaceFolder = async (relativePathValue, config, dependencies = {}) => {
+export const createWorkspaceFolder = async (
+  relativePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceMutationResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -191,7 +344,7 @@ export const createWorkspaceFolder = async (relativePathValue, config, dependenc
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   if (!resolved.relativePath) {
     throw new WorkspacePathError('Cannot create the workspace root');
   }
@@ -206,7 +359,11 @@ export const createWorkspaceFolder = async (relativePathValue, config, dependenc
   };
 };
 
-export const createWorkspaceFile = async (relativePathValue, config, dependencies = {}) => {
+export const createWorkspaceFile = async (
+  relativePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: CreateWorkspaceFileDependencies = {},
+): Promise<WorkspaceMutationResult> => {
   const {
     content = '',
     fsPromises = fs.promises,
@@ -218,7 +375,7 @@ export const createWorkspaceFile = async (relativePathValue, config, dependencie
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   if (!resolved.relativePath) {
     throw new WorkspacePathError('Cannot create the workspace root as a file');
   }
@@ -234,7 +391,12 @@ export const createWorkspaceFile = async (relativePathValue, config, dependencie
   };
 };
 
-export const moveWorkspaceEntry = async (fromValue, toValue, config, dependencies = {}) => {
+export const moveWorkspaceEntry = async (
+  fromValue: string,
+  toValue: string,
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceMutationResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -244,17 +406,17 @@ export const moveWorkspaceEntry = async (fromValue, toValue, config, dependencie
     root: config.root,
     fsPromises,
     pathModule,
-  });
+  }) as ResolvedWorkspacePath;
   const to = await resolveWorkspacePath(toValue, {
     root: config.root,
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   if (!from.relativePath || !to.relativePath) {
     throw new WorkspacePathError('Cannot move the workspace root');
   }
-  const destinationExists = await fsPromises.lstat(to.absolutePath).then(() => true).catch((error) => {
+  const destinationExists = await fsPromises.lstat(to.absolutePath).then(() => true).catch((error: NodeJS.ErrnoException) => {
     if (error?.code === 'ENOENT') return false;
     throw error;
   });
@@ -273,7 +435,11 @@ export const moveWorkspaceEntry = async (fromValue, toValue, config, dependencie
   };
 };
 
-export const deleteWorkspaceEntry = async (relativePathValue, config, dependencies = {}) => {
+export const deleteWorkspaceEntry = async (
+  relativePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: DeleteWorkspaceEntryDependencies = {},
+): Promise<WorkspaceDeleteResult> => {
   const {
     permanent = false,
     fsPromises = fs.promises,
@@ -284,7 +450,7 @@ export const deleteWorkspaceEntry = async (relativePathValue, config, dependenci
     root: config.root,
     fsPromises,
     pathModule,
-  });
+  }) as ResolvedWorkspacePath;
   if (!resolved.relativePath) {
     throw new WorkspacePathError('Cannot delete the workspace root');
   }
@@ -306,7 +472,7 @@ export const deleteWorkspaceEntry = async (relativePathValue, config, dependenci
   };
 };
 
-const normalizeUploadName = (nameValue) => {
+const normalizeUploadName = (nameValue: string): string => {
   const name = normalizeWorkspaceRelativePath(nameValue || '');
   if (!name || name.includes('/')) {
     throw new WorkspacePathError('Uploaded file names must be simple relative file names');
@@ -314,7 +480,12 @@ const normalizeUploadName = (nameValue) => {
   return name;
 };
 
-const uploadWorkspaceBuffers = async (targetPathValue, files, config, dependencies = {}) => {
+const uploadWorkspaceBuffers = async (
+  targetPathValue: string,
+  files: UploadBuffer[],
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceUploadResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -328,13 +499,13 @@ const uploadWorkspaceBuffers = async (targetPathValue, files, config, dependenci
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   await fsPromises.mkdir(targetDir.absolutePath, { recursive: true });
 
   let totalBytes = 0;
-  const uploaded = [];
+  const uploaded: WorkspaceEntry[] = [];
   for (const file of files) {
-    const name = normalizeUploadName(file?.name);
+    const name = normalizeUploadName(file?.name ?? '');
     const buffer = Buffer.isBuffer(file?.buffer) ? file.buffer : Buffer.from(file?.buffer || []);
     totalBytes += buffer.length;
     if (totalBytes > config.maxUploadBytes) {
@@ -345,7 +516,7 @@ const uploadWorkspaceBuffers = async (targetPathValue, files, config, dependenci
       fsPromises,
       pathModule,
       allowMissing: true,
-    });
+    }) as ResolvedWorkspacePath;
     await fsPromises.writeFile(target.absolutePath, buffer);
     uploaded.push(await createWorkspaceEntry(target.absolutePath, {
       rootPath: target.rootPath,
@@ -357,7 +528,12 @@ const uploadWorkspaceBuffers = async (targetPathValue, files, config, dependenci
   return { success: true, entries: uploaded };
 };
 
-export const uploadWorkspaceFiles = async (targetPathValue, files, config, dependencies = {}) => {
+export const uploadWorkspaceFiles = async (
+  targetPathValue: string,
+  files: UploadFile[],
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceUploadResult> => {
   if (!Array.isArray(files) || files.length === 0) {
     throw new WorkspacePathError('No files provided');
   }
@@ -371,13 +547,18 @@ export const uploadWorkspaceFiles = async (targetPathValue, files, config, depen
   return uploadWorkspaceBuffers(targetPathValue, buffers, config, dependencies);
 };
 
-export const uploadWorkspaceMultipartFiles = async (targetPathValue, files, config, dependencies = {}) => {
+export const uploadWorkspaceMultipartFiles = async (
+  targetPathValue: string,
+  files: MultipartUploadFile[],
+  config: WorkspaceConfig,
+  dependencies: WorkspaceDependencies = {},
+): Promise<WorkspaceUploadResult> => {
   if (!Array.isArray(files) || files.length === 0) {
     throw new WorkspacePathError('No files provided');
   }
   const buffers = files.map((file) => ({
     name: file?.originalname || file?.name,
-    buffer: file?.buffer,
+    buffer: file?.buffer ?? Buffer.from([]),
   }));
-  return uploadWorkspaceBuffers(targetPathValue, buffers, config, dependencies);
+  return uploadWorkspaceBuffers(targetPathValue, buffers as UploadBuffer[], config, dependencies);
 };

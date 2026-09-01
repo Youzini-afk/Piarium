@@ -2,10 +2,62 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+type PathModule = typeof import('path');
+type OsModule = typeof import('os');
+type FsPromises = typeof fs.promises;
+
+interface EnvLike {
+  PIARIUM_WORKSPACE_ROOT?: string | undefined;
+  PIARIUM_WORKSPACE_LOCKDOWN?: string | undefined;
+  PIARIUM_WORKSPACE_TRASH?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_READ_MB?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_UPLOAD_MB?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_DOWNLOAD_MB?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_DOWNLOAD_FILES?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_ARCHIVE_MB?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_EXTRACT_MB?: string | undefined;
+  PIARIUM_WORKSPACE_MAX_EXTRACT_FILES?: string | undefined;
+  PIARIUM_WORKSPACE_ARCHIVE_PREVIEW_LIMIT?: string | undefined;
+  PIARIUM_WORKSPACE_CUSTOM_COMMANDS?: string | undefined;
+  ZEABUR?: string | undefined;
+  DOCKER?: string | undefined;
+  PIARIUM_RUNTIME?: string | undefined;
+  [key: string]: string | undefined;
+}
+
+interface ResolveDefaultWorkspaceRootOptions {
+  env?: EnvLike | undefined;
+  cwd?: string | undefined;
+  pathModule?: PathModule | undefined;
+  osModule?: OsModule | undefined;
+}
+
+export interface WorkspaceConfig {
+  root: string;
+  lockdown: boolean;
+  trashEnabled: boolean;
+  maxReadBytes: number;
+  maxUploadBytes: number;
+  maxDownloadBytes: number;
+  maxDownloadFiles: number;
+  maxArchiveBytes: number;
+  maxExtractBytes: number;
+  maxExtractFiles: number;
+  archivePreviewLimit: number;
+  customCommandsEnabled: boolean;
+}
+
+export interface CreateWorkspaceConfigOptions {
+  env?: EnvLike | undefined;
+  cwd?: string | undefined;
+  pathModule?: PathModule | undefined;
+  osModule?: OsModule | undefined;
+}
+
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSE_VALUES = new Set(['0', 'false', 'no', 'off']);
 
-const parseBoolean = (value, fallback) => {
+const parseBoolean = (value: string | boolean | undefined, fallback: boolean): boolean => {
   if (typeof value === 'boolean') return value;
   if (typeof value !== 'string') return fallback;
   const normalized = value.trim().toLowerCase();
@@ -14,18 +66,23 @@ const parseBoolean = (value, fallback) => {
   return fallback;
 };
 
-const parseMegabytes = (value, fallbackMb) => {
+const parseMegabytes = (value: string | undefined, fallbackMb: number): number => {
   const parsed = Number.parseFloat(String(value ?? '').trim());
   const mb = Number.isFinite(parsed) && parsed >= 0 ? parsed : fallbackMb;
   return Math.max(0, Math.round(mb * 1024 * 1024));
 };
 
-const parseNonNegativeInteger = (value, fallback) => {
+const parseNonNegativeInteger = (value: string | undefined, fallback: number): number => {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 };
 
-const resolveDefaultWorkspaceRoot = ({ env = process.env, cwd = process.cwd(), pathModule = path, osModule = os } = {}) => {
+const resolveDefaultWorkspaceRoot = ({
+  env = process.env as EnvLike,
+  cwd = process.cwd(),
+  pathModule = path,
+  osModule = os,
+}: ResolveDefaultWorkspaceRootOptions = {}): string => {
   const explicit = typeof env.PIARIUM_WORKSPACE_ROOT === 'string'
     ? env.PIARIUM_WORKSPACE_ROOT.trim()
     : '';
@@ -41,9 +98,9 @@ const resolveDefaultWorkspaceRoot = ({ env = process.env, cwd = process.cwd(), p
   return pathModule.resolve(cwdBase, 'workspace');
 };
 
-export const createWorkspaceConfig = (options = {}) => {
+export const createWorkspaceConfig = (options: CreateWorkspaceConfigOptions = {}): WorkspaceConfig => {
   const {
-    env = process.env,
+    env = process.env as EnvLike,
     cwd = process.cwd(),
     pathModule = path,
     osModule = os,
@@ -69,7 +126,10 @@ export const createWorkspaceConfig = (options = {}) => {
   };
 };
 
-export const ensureWorkspaceRoot = async (config, fsPromises = fs.promises) => {
+export const ensureWorkspaceRoot = async (
+  config: WorkspaceConfig,
+  fsPromises: FsPromises = fs.promises,
+): Promise<string> => {
   await fsPromises.mkdir(config.root, { recursive: true });
   return config.root;
 };

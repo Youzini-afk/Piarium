@@ -1,55 +1,148 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
 import { RecoveryPrimitiveError } from './errors.js';
 
-const SCHEMA_VERSION = 1;
-const MODES = new Set(['application-data', 'workspace-local', 'workspace-adjacent', 'custom']);
-const DEFAULT_LOCATION = Object.freeze({ mode: 'application-data' });
+type FsPromises = typeof fs.promises;
+type PathModule = typeof path;
 
-const samePath = (left, right, pathModule = path) => {
+type RecoveryLocationMode = 'application-data' | 'workspace-local' | 'workspace-adjacent' | 'custom';
+type NonCustomRecoveryLocationMode = Exclude<RecoveryLocationMode, 'custom'>;
+
+interface CustomRecoveryLocation {
+  mode: 'custom';
+  customRoot: string;
+}
+
+interface DefaultRecoveryLocation {
+  mode: NonCustomRecoveryLocationMode;
+}
+
+type RecoveryLocation = CustomRecoveryLocation | DefaultRecoveryLocation;
+
+interface RecoveryLocationDocument {
+  authorityId: string;
+  defaultLocation: RecoveryLocation;
+  inheritedLocations: Record<string, RecoveryLocation>;
+  locations: Record<string, RecoveryLocation>;
+  revision: number;
+  schemaVersion: number;
+  updatedAt: string;
+}
+
+interface RecoveryStorageIdentity {
+  canonicalRoot: string;
+  workspaceId: string;
+}
+
+interface RecoveryLocationSelection {
+  defaultLocation: RecoveryLocation;
+  document: RecoveryLocationDocument;
+  location: RecoveryLocation;
+  migrationRequired: boolean;
+  source: 'workspace' | 'global';
+}
+
+interface ResolveRecoveryStorageRootOptions {
+  authorityId: string;
+  dataDir: string;
+  defaultRecoveryDir?: string | undefined;
+  fsPromises?: FsPromises | undefined;
+  identity: RecoveryStorageIdentity;
+  location: unknown;
+  pathModule?: PathModule | undefined;
+  storageOwnerId?: string | undefined;
+}
+
+interface CreateRecoveryLocationRegistryOptions {
+  authorityId: string;
+  dataDir: string;
+  defaultRecoveryDir?: string | undefined;
+  fsPromises?: FsPromises | undefined;
+  pathModule?: PathModule | undefined;
+  storageOwnerId?: string | undefined;
+}
+
+interface CommitOptions {
+  source?: 'global' | undefined;
+  expectedDefaultLocation?: unknown | undefined;
+}
+
+interface RecoveryLocationRegistry {
+  authorityId: string;
+  operationsRoot: string;
+  registryPath: string;
+  read(): Promise<RecoveryLocationDocument>;
+  globalSelection(): Promise<{ document: RecoveryLocationDocument; location: RecoveryLocation }>;
+  selection(workspaceId: string): Promise<RecoveryLocationSelection>;
+  materialize(workspaceId: string): Promise<RecoveryLocationSelection>;
+  resolve(identity: RecoveryStorageIdentity, location: unknown): Promise<string>;
+  commit(
+    workspaceId: string,
+    expectedLocation: unknown,
+    location: unknown,
+    options?: CommitOptions,
+  ): Promise<RecoveryLocationDocument>;
+  setDefault(location: unknown): Promise<RecoveryLocationDocument>;
+  validateLocation(location: unknown): Promise<RecoveryLocation>;
+  remove(workspaceId: string): Promise<RecoveryLocationDocument>;
+  samePath(left: string, right: string): boolean;
+}
+
+const SCHEMA_VERSION = 1;
+const MODES = new Set<string>(['application-data', 'workspace-local', 'workspace-adjacent', 'custom']);
+const DEFAULT_LOCATION: DefaultRecoveryLocation = Object.freeze({ mode: 'application-data' });
+
+const samePath = (left: string, right: string, pathModule: PathModule = path): boolean => {
   const a = pathModule.resolve(left);
   const b = pathModule.resolve(right);
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 };
 
-const syncDirectory = async (directory, fsPromises) => {
-  let handle;
+const syncDirectory = async (directory: string, fsPromises: FsPromises): Promise<void> => {
+  let handle: FileHandle | undefined;
   try {
     handle = await fsPromises.open(directory, 'r');
     await handle.sync();
   } catch (error) {
-    if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === undefined || !['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(code)) throw error;
   } finally {
     await handle?.close().catch(() => undefined);
   }
 };
 
-export const writeRecoveryJsonAtomic = async (filePath, value, options = {}) => {
+export const writeRecoveryJsonAtomic = async (
+  filePath: string,
+  value: unknown,
+  options: { fsPromises?: FsPromises | undefined; pathModule?: PathModule | undefined } = {},
+): Promise<void> => {
   const fsPromises = options.fsPromises ?? fs.promises;
   const pathModule = options.pathModule ?? path;
   const directory = pathModule.dirname(filePath);
   await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   const previous = `${filePath}.previous`;
-  let handle;
+  let handle: FileHandle | undefined;
   try {
     handle = await fsPromises.open(temporary, 'wx', 0o600);
     await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
     await handle.sync();
     await handle.close();
-    handle = null;
+    handle = undefined;
     try {
       await fsPromises.rename(temporary, filePath);
     } catch (error) {
-      if (!['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(error?.code)) throw error;
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === undefined || !['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(code)) throw error;
       await fsPromises.rm(previous, { force: true });
       let preserved = false;
       try {
         await fsPromises.rename(filePath, previous);
         preserved = true;
       } catch (preserveError) {
-        if (preserveError?.code !== 'ENOENT') throw preserveError;
+        if ((preserveError as NodeJS.ErrnoException)?.code !== 'ENOENT') throw preserveError;
       }
       try {
         await fsPromises.rename(temporary, filePath);
@@ -67,33 +160,37 @@ export const writeRecoveryJsonAtomic = async (filePath, value, options = {}) => 
   }
 };
 
-export const readRecoveryJsonAtomic = async (filePath, options = {}) => {
+export const readRecoveryJsonAtomic = async (
+  filePath: string,
+  options: { fsPromises?: FsPromises | undefined } = {},
+): Promise<unknown> => {
   const fsPromises = options.fsPromises ?? fs.promises;
   try {
     return JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
     return JSON.parse(await fsPromises.readFile(`${filePath}.previous`, 'utf8'));
   }
 };
 
-const normalizeLocation = (value) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !MODES.has(value.mode)) {
+const normalizeLocation = (value: unknown): RecoveryLocation => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !MODES.has((value as { mode?: unknown }).mode as string)) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery storage location is malformed');
   }
-  if (value.mode === 'custom') {
-    if (typeof value.customRoot !== 'string' || !value.customRoot.trim()) {
+  const candidate = value as { mode: string; customRoot?: unknown };
+  if (candidate.mode === 'custom') {
+    if (typeof candidate.customRoot !== 'string' || !candidate.customRoot.trim()) {
       throw new RecoveryPrimitiveError('storage-malformed', 'Custom recovery storage requires an absolute root');
     }
-    return { customRoot: value.customRoot, mode: 'custom' };
+    return { customRoot: candidate.customRoot, mode: 'custom' };
   }
-  if (value.customRoot !== undefined) {
+  if (candidate.customRoot !== undefined) {
     throw new RecoveryPrimitiveError('storage-malformed', 'customRoot is only valid for custom recovery storage');
   }
-  return { mode: value.mode };
+  return { mode: candidate.mode as NonCustomRecoveryLocationMode };
 };
 
-const emptyDocument = (authorityId) => ({
+const emptyDocument = (authorityId: string): RecoveryLocationDocument => ({
   authorityId,
   defaultLocation: DEFAULT_LOCATION,
   inheritedLocations: {},
@@ -103,51 +200,57 @@ const emptyDocument = (authorityId) => ({
   updatedAt: new Date(0).toISOString(),
 });
 
-const parseDocument = (value, authorityId) => {
+const parseDocument = (value: unknown, authorityId: string): RecoveryLocationDocument => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry must be an object');
   }
-  if (value.schemaVersion !== SCHEMA_VERSION || value.authorityId !== authorityId) {
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== SCHEMA_VERSION || record.authorityId !== authorityId) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry belongs to another schema or authority');
   }
-  if (!Number.isSafeInteger(value.revision) || value.revision < 0 || !value.locations || typeof value.locations !== 'object' || Array.isArray(value.locations)) {
+  if (!Number.isSafeInteger(record.revision) || (record.revision as number) < 0 || !record.locations || typeof record.locations !== 'object' || Array.isArray(record.locations)) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry revision or locations are malformed');
   }
-  if (typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) {
+  if (typeof record.updatedAt !== 'string' || !Number.isFinite(Date.parse(record.updatedAt))) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry timestamp is malformed');
   }
-  if (value.inheritedLocations !== undefined
-    && (!value.inheritedLocations || typeof value.inheritedLocations !== 'object' || Array.isArray(value.inheritedLocations))) {
+  if (record.inheritedLocations !== undefined
+    && (!record.inheritedLocations || typeof record.inheritedLocations !== 'object' || Array.isArray(record.inheritedLocations))) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry inherited locations are malformed');
   }
-  const inheritedLocations = value.inheritedLocations ?? {};
+  const inheritedLocations = (record.inheritedLocations ?? {}) as Record<string, unknown>;
+  const locations = record.locations as Record<string, unknown>;
   return {
     authorityId,
-    defaultLocation: normalizeLocation(value.defaultLocation ?? DEFAULT_LOCATION),
+    defaultLocation: normalizeLocation(record.defaultLocation ?? DEFAULT_LOCATION),
     inheritedLocations: Object.fromEntries(Object.entries(inheritedLocations)
       .map(([workspaceId, location]) => [workspaceId, normalizeLocation(location)])),
-    locations: Object.fromEntries(Object.entries(value.locations).map(([workspaceId, location]) => [
+    locations: Object.fromEntries(Object.entries(locations).map(([workspaceId, location]) => [
       workspaceId,
       normalizeLocation(location),
     ])),
-    revision: value.revision,
+    revision: record.revision as number,
     schemaVersion: SCHEMA_VERSION,
-    updatedAt: value.updatedAt,
+    updatedAt: record.updatedAt as string,
   };
 };
 
-const canonicalizeCreatableDirectory = async (target, fsPromises, pathModule) => {
+const canonicalizeCreatableDirectory = async (
+  target: string,
+  fsPromises: FsPromises,
+  pathModule: PathModule,
+): Promise<string> => {
   if (!pathModule.isAbsolute(target)) {
     throw new RecoveryPrimitiveError('invalid-request', 'Custom recovery storage root must be absolute');
   }
-  const suffix = [];
+  const suffix: string[] = [];
   let current = pathModule.resolve(target);
   for (;;) {
     try {
       const canonical = await fsPromises.realpath(current);
       return pathModule.resolve(canonical, ...suffix.reverse());
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       const parent = pathModule.dirname(current);
       if (parent === current) throw error;
       suffix.push(pathModule.basename(current));
@@ -165,7 +268,7 @@ export const resolveRecoveryStorageRoot = async ({
   location,
   pathModule = path,
   storageOwnerId = 'piarium.builtin.recovery',
-}) => {
+}: ResolveRecoveryStorageRootOptions): Promise<string> => {
   const selected = normalizeLocation(location);
   const ownerSegments = storageOwnerId === 'piarium.builtin.recovery' ? [] : [storageOwnerId];
   if (selected.mode === 'workspace-local') {
@@ -208,7 +311,7 @@ export const createRecoveryLocationRegistry = ({
   fsPromises = fs.promises,
   pathModule = path,
   storageOwnerId = 'piarium.builtin.recovery',
-}) => {
+}: CreateRecoveryLocationRegistryOptions): RecoveryLocationRegistry => {
   const registryPath = pathModule.join(
     dataDir,
     'extensions',
@@ -223,25 +326,27 @@ export const createRecoveryLocationRegistry = ({
     storageOwnerId,
     'recovery-location-operations',
   );
-  let queue = Promise.resolve();
+  let queue: Promise<unknown> = Promise.resolve();
 
-  const read = async () => {
+  const read = async (): Promise<RecoveryLocationDocument> => {
     try {
       return parseDocument(await readRecoveryJsonAtomic(registryPath, { fsPromises }), authorityId);
     } catch (error) {
-      if (error?.code === 'ENOENT') return emptyDocument(authorityId);
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return emptyDocument(authorityId);
       if (error instanceof RecoveryPrimitiveError) throw error;
       throw new RecoveryPrimitiveError('storage-malformed', 'Recovery location registry cannot be read', { cause: error });
     }
   };
 
-  const run = (operation) => {
+  const run = <T>(operation: () => Promise<T> | T): Promise<T> => {
     const result = queue.then(operation, operation);
     queue = result.then(() => undefined, () => undefined);
     return result;
   };
 
-  const update = (mutator) => run(async () => {
+  const update = (
+    mutator: (next: RecoveryLocationDocument, current: RecoveryLocationDocument) => Promise<boolean> | boolean,
+  ): Promise<RecoveryLocationDocument> => run(async () => {
     const current = await read();
     const next = structuredClone(current);
     const changed = await mutator(next, current);
@@ -252,7 +357,10 @@ export const createRecoveryLocationRegistry = ({
     return next;
   });
 
-  const selectedFromDocument = (document, workspaceId) => {
+  const selectedFromDocument = (
+    document: RecoveryLocationDocument,
+    workspaceId: string,
+  ): RecoveryLocationSelection => {
     const override = document.locations[workspaceId];
     if (override) {
       return {
@@ -278,14 +386,14 @@ export const createRecoveryLocationRegistry = ({
     operationsRoot,
     registryPath,
     read,
-    async globalSelection() {
+    async globalSelection(): Promise<{ document: RecoveryLocationDocument; location: RecoveryLocation }> {
       const document = await read();
       return { document, location: document.defaultLocation };
     },
-    async selection(workspaceId) {
+    async selection(workspaceId: string): Promise<RecoveryLocationSelection> {
       return selectedFromDocument(await read(), workspaceId);
     },
-    async materialize(workspaceId) {
+    async materialize(workspaceId: string): Promise<RecoveryLocationSelection> {
       await update((next, current) => {
         if (current.locations[workspaceId] || current.inheritedLocations[workspaceId]) return false;
         next.inheritedLocations[workspaceId] = DEFAULT_LOCATION;
@@ -293,7 +401,7 @@ export const createRecoveryLocationRegistry = ({
       });
       return selectedFromDocument(await read(), workspaceId);
     },
-    async resolve(identity, location) {
+    async resolve(identity: RecoveryStorageIdentity, location: unknown): Promise<string> {
       return resolveRecoveryStorageRoot({
         authorityId,
         dataDir,
@@ -305,7 +413,12 @@ export const createRecoveryLocationRegistry = ({
         storageOwnerId,
       });
     },
-    async commit(workspaceId, expectedLocation, location, options = {}) {
+    async commit(
+      workspaceId: string,
+      expectedLocation: unknown,
+      location: unknown,
+      options: CommitOptions = {},
+    ): Promise<RecoveryLocationDocument> {
       const normalized = normalizeLocation(location);
       return update((next, current) => {
         const authoritative = current.locations[workspaceId]
@@ -330,7 +443,7 @@ export const createRecoveryLocationRegistry = ({
           || Boolean(current.inheritedLocations[workspaceId]);
       });
     },
-    async setDefault(location) {
+    async setDefault(location: unknown): Promise<RecoveryLocationDocument> {
       const normalized = normalizeLocation(location);
       return update((next, current) => {
         if (JSON.stringify(current.defaultLocation) === JSON.stringify(normalized)) return false;
@@ -338,7 +451,7 @@ export const createRecoveryLocationRegistry = ({
         return true;
       });
     },
-    async validateLocation(location) {
+    async validateLocation(location: unknown): Promise<RecoveryLocation> {
       const normalized = normalizeLocation(location);
       if (normalized.mode === 'custom') {
         return {
@@ -348,7 +461,7 @@ export const createRecoveryLocationRegistry = ({
       }
       return normalized;
     },
-    async remove(workspaceId) {
+    async remove(workspaceId: string): Promise<RecoveryLocationDocument> {
       return update((next, current) => {
         if (!current.locations[workspaceId] && !current.inheritedLocations[workspaceId]) return false;
         delete next.locations[workspaceId];
@@ -356,6 +469,6 @@ export const createRecoveryLocationRegistry = ({
         return true;
       });
     },
-    samePath: (left, right) => samePath(left, right, pathModule),
+    samePath: (left: string, right: string): boolean => samePath(left, right, pathModule),
   };
 };

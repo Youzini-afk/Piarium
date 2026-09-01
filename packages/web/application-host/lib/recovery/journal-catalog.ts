@@ -130,33 +130,189 @@ const KNOWN_METADATALESS_LEGACY_TABLES = new Set([
 ]);
 
 const RETIRED_CATALOG_MARKER = '.retired-recovery-schema-';
-const catalogStatuses = new WeakMap();
 
-const catalogPath = (root) => path.join(root, 'catalog.sqlite');
+interface CatalogStatus {
+  currentSchemaVersion: number;
+  state: 'ready' | 'migrated' | 'retired-history' | 'missing';
+  migratedFrom?: number | undefined;
+  retiredCatalogCount: number;
+}
 
-const syncDirectory = async (directory, fsPromises) => {
-  let handle;
+const catalogStatuses = new WeakMap<Database, Readonly<CatalogStatus>>();
+
+type FsPromises = typeof import('node:fs/promises');
+
+interface ObjectReference {
+  objectHash: string;
+  slot: string;
+}
+
+interface StateWithHash {
+  objectHash?: string | undefined;
+  expected?: unknown;
+  target?: unknown;
+}
+
+interface SchemaObjectRow {
+  type: string;
+  name: string;
+}
+
+interface MetadataRow {
+  value: string;
+}
+
+interface CheckpointChangeRow {
+  workspace_id: string;
+  checkpoint_id: string;
+  path: string;
+  before_json: string;
+  after_json: string | null;
+}
+
+interface OperationRow {
+  id: string;
+  workspace_id: string;
+  data_json: string;
+  state: string;
+}
+
+interface OperationFileJoinRow {
+  workspace_id: string;
+  operation_id: string;
+  path: string;
+  expected_json: string | null;
+  target_json: string | null;
+  safety_json: string | null;
+}
+
+interface OperationFileRow {
+  operation_id: string;
+  ordinal: number;
+  path: string;
+  expected_json: string | null;
+  target_json: string | null;
+  safety_json: string | null;
+  phase: string;
+  observed_fingerprint: string | null;
+  updated_at: string;
+}
+
+interface CheckpointRow {
+  id: string;
+  workspace_id: string;
+  sequence: number;
+  source: string;
+  state: string;
+  created_at: string;
+  label: string | null;
+  session_id: string | null;
+  entry_id: string | null;
+  execution_id: string | null;
+  changed_path_count: number;
+  byte_length: number;
+}
+
+interface ChangeRow {
+  checkpoint_id: string;
+  path: string;
+  tool_name: string;
+  mutation_id: string;
+  before_json: string;
+  after_json: string | null;
+}
+
+interface BindingRow {
+  execution_id: string;
+  runtime_key: string;
+  runtime_generation: number;
+  worker_id: string;
+  session_id: string;
+  workspace_id: string;
+  user_entry_id: string;
+  assistant_entry_id: string | null;
+  checkpoint_id: string;
+  active_writer_scopes_json: string;
+  provenance: string;
+  status: string;
+  unrecorded_resource_ids_json: string;
+  failure_json: string | null;
+  started_at: string;
+  settled_at: string | null;
+}
+
+interface OperationData {
+  targets?: Record<string, unknown> | undefined;
+  safety?: Record<string, unknown> | undefined;
+  plan?: { affectedPaths?: string[] | undefined } | undefined;
+  [key: string]: unknown;
+}
+
+interface OperationInput {
+  id: string;
+  workspaceId: string;
+  kind: string;
+  state: string;
+  data: OperationData;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface FileState {
+  expected?: unknown;
+  target?: unknown;
+}
+
+interface OperationTargets {
+  [key: string]: FileState | undefined;
+}
+
+interface UpdateOperationFilePhaseOptions {
+  safetyJson?: string | undefined;
+  observedFingerprint?: string | null | undefined;
+}
+
+type CatalogClassification =
+  | { kind: 'empty' }
+  | { kind: 'missing' }
+  | { kind: 'retire'; version: number | 'metadata-less' }
+  | { kind: 'current'; migratedFrom: number | undefined }
+  | { kind: 'migrate'; version: number };
+
+type RetiredCatalogsResult = {
+  retiredCatalogCount: number;
+  retiredCatalogs: string[];
+  state: 'retired-history' | 'ready';
+} | {
+  retiredCatalogCount: number;
+  state: 'ready';
+};
+
+const catalogPath = (root: string): string => path.join(root, 'catalog.sqlite');
+
+const syncDirectory = async (directory: string, fsPromises: FsPromises): Promise<void> => {
+  let handle: import('node:fs/promises').FileHandle | undefined;
   try {
     handle = await fsPromises.open(directory, 'r');
     await handle.sync();
   } catch (error) {
-    if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+    if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException)?.code ?? '')) throw error;
   } finally {
     await handle?.close().catch(() => undefined);
   }
 };
 
-const databasePath = (root) => process.platform === 'win32'
+const databasePath = (root: string): string => process.platform === 'win32'
   ? path.toNamespacedPath(catalogPath(root))
   : catalogPath(root);
 
-const storageMalformed = (message, cause) => new RecoveryPrimitiveError(
+const storageMalformed = (message: string, cause?: unknown): RecoveryPrimitiveError => new RecoveryPrimitiveError(
   'storage-malformed',
   message,
   cause ? { cause } : undefined,
 );
 
-const parseSchemaVersion = (value, label = 'Recovery catalog schema version') => {
+const parseSchemaVersion = (value: unknown, label = 'Recovery catalog schema version'): number => {
   if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value)) {
     throw storageMalformed(`${label} is malformed`);
   }
@@ -165,7 +321,7 @@ const parseSchemaVersion = (value, label = 'Recovery catalog schema version') =>
   return version;
 };
 
-const requireTables = (tableNames, required, version) => {
+const requireTables = (tableNames: Set<string>, required: readonly string[], version: number): void => {
   const missing = required.filter((name) => !tableNames.has(name));
   if (missing.length > 0) {
     throw storageMalformed(
@@ -174,14 +330,14 @@ const requireTables = (tableNames, required, version) => {
   }
 };
 
-const classifyCatalog = (root) => {
-  let database;
+const classifyCatalog = (root: string): CatalogClassification => {
+  let database: Database | undefined;
   try {
     database = new Database(databasePath(root), { fileMustExist: true, readonly: true });
     const schemaObjects = database.prepare(`
       SELECT type, name FROM sqlite_master
       WHERE name NOT LIKE 'sqlite_%'
-    `).all();
+    `).all() as SchemaObjectRow[];
     const tableNames = new Set(
       schemaObjects.filter((entry) => entry.type === 'table').map((entry) => entry.name),
     );
@@ -194,19 +350,19 @@ const classifyCatalog = (root) => {
       if (knownTables) return { kind: 'retire', version: 'metadata-less' };
       throw storageMalformed('Recovery catalog without metadata contains an unknown schema');
     }
-    const versions = database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").all();
+    const versions = database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").all() as MetadataRow[];
     if (versions.length !== 1) throw storageMalformed('Recovery catalog schema metadata is malformed');
-    const version = parseSchemaVersion(versions[0].value);
+    const version = parseSchemaVersion(versions[0]!.value);
     if (version > RECOVERY_JOURNAL_SCHEMA_VERSION) {
       throw new RecoveryPrimitiveError(
         'storage-schema-newer',
         `Recovery catalog schema ${version} is newer than supported schema ${RECOVERY_JOURNAL_SCHEMA_VERSION}`,
       );
     }
-    const migratedRows = database.prepare("SELECT value FROM metadata WHERE key = 'migrated_from'").all();
+    const migratedRows = database.prepare("SELECT value FROM metadata WHERE key = 'migrated_from'").all() as MetadataRow[];
     if (migratedRows.length > 1) throw storageMalformed('Recovery catalog migration metadata is malformed');
     const migratedFrom = migratedRows.length === 1
-      ? parseSchemaVersion(migratedRows[0].value, 'Recovery catalog migrated-from version')
+      ? parseSchemaVersion(migratedRows[0]!.value, 'Recovery catalog migrated-from version')
       : undefined;
     if (migratedFrom !== undefined && migratedFrom >= RECOVERY_JOURNAL_SCHEMA_VERSION) {
       throw storageMalformed('Recovery catalog migration metadata is malformed');
@@ -231,7 +387,7 @@ const classifyCatalog = (root) => {
   }
 };
 
-export const ensureRecoveryJournalLayout = async (root, fsPromises = fs.promises) => {
+export const ensureRecoveryJournalLayout = async (root: string, fsPromises: FsPromises = fs.promises as FsPromises): Promise<void> => {
   await fsPromises.mkdir(root, { recursive: true, mode: 0o700 });
   await Promise.all(['objects', 'staging'].map((name) => (
     fsPromises.mkdir(path.join(root, name), { recursive: true, mode: 0o700 })
@@ -244,13 +400,13 @@ export const ensureRecoveryJournalLayout = async (root, fsPromises = fs.promises
   }
 };
 
-const configureWritableCatalog = (database) => {
+const configureWritableCatalog = (database: Database): void => {
   database.pragma('journal_mode = WAL');
   database.pragma('synchronous = FULL');
   database.pragma('foreign_keys = ON');
 };
 
-const initializeEmptyCatalog = (database) => {
+const initializeEmptyCatalog = (database: Database): void => {
   database.transaction(() => {
     database.exec(SCHEMA);
     database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
@@ -258,46 +414,48 @@ const initializeEmptyCatalog = (database) => {
   })();
 };
 
-const referenceSlot = (...parts) => JSON.stringify(parts);
+const referenceSlot = (...parts: unknown[]): string => JSON.stringify(parts);
 
-const stateReference = (slot, state) => (
-  typeof state?.objectHash === 'string' ? [{ objectHash: state.objectHash, slot }] : []
+const stateReference = (slot: string, state: unknown): ObjectReference[] => (
+  typeof (state as StateWithHash | null | undefined)?.objectHash === 'string'
+    ? [{ objectHash: (state as StateWithHash)!.objectHash!, slot }]
+    : []
 );
 
-const referencesFromOperationCollection = (collectionName, collection) => {
+const referencesFromOperationCollection = (collectionName: string, collection: unknown): ObjectReference[] => {
   if (collection === undefined || collection === null) return [];
   if (typeof collection !== 'object' || Array.isArray(collection)) {
     throw storageMalformed(`Recovery operation ${collectionName} is malformed`);
   }
-  const references = [];
-  for (const [resourceId, value] of Object.entries(collection)) {
+  const references: ObjectReference[] = [];
+  for (const [resourceId, value] of Object.entries(collection as Record<string, unknown>)) {
     references.push(...stateReference(referenceSlot(collectionName, resourceId, 'value'), value));
-    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'expected'), value?.expected));
-    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'target'), value?.target));
+    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'expected'), (value as StateWithHash | undefined)?.expected));
+    references.push(...stateReference(referenceSlot(collectionName, resourceId, 'target'), (value as StateWithHash | undefined)?.target));
   }
   return references;
 };
 
-const normalizedReferences = (references) => {
+const normalizedReferences = (references: unknown): ObjectReference[] => {
   if (!Array.isArray(references)) throw new TypeError('Object references must be an array');
-  const bySlot = new Map();
+  const bySlot = new Map<string, string>();
   for (const reference of references) {
-    if (typeof reference?.slot !== 'string' || typeof reference?.objectHash !== 'string') {
+    if (typeof (reference as ObjectReference | null | undefined)?.slot !== 'string' || typeof (reference as ObjectReference | null | undefined)?.objectHash !== 'string') {
       throw new TypeError('Each object reference requires string slot and objectHash fields');
     }
-    bySlot.set(reference.slot, reference.objectHash);
+    bySlot.set((reference as ObjectReference)!.slot, (reference as ObjectReference)!.objectHash);
   }
   return [...bySlot].map(([slot, objectHash]) => ({ objectHash, slot }));
 };
 
-export const deleteObjectReferences = (database, workspaceId, ownerKind, ownerId) => {
+export const deleteObjectReferences = (database: Database, workspaceId: string, ownerKind: string, ownerId: string): void => {
   database.prepare(`
     DELETE FROM object_references
     WHERE workspace_id = ? AND owner_kind = ? AND owner_id = ?
   `).run(workspaceId, ownerKind, ownerId);
 };
 
-export const replaceObjectReferences = (database, workspaceId, ownerKind, ownerId, references) => {
+export const replaceObjectReferences = (database: Database, workspaceId: string, ownerKind: string, ownerId: string, references: unknown): void => {
   if (typeof workspaceId !== 'string' || !workspaceId
     || typeof ownerKind !== 'string' || typeof ownerId !== 'string') {
     throw new TypeError('Object reference workspaceId, ownerKind, and ownerId must be strings');
@@ -313,13 +471,13 @@ export const replaceObjectReferences = (database, workspaceId, ownerKind, ownerI
   }
 };
 
-const rebuildObjectReferencesInTransaction = (database) => {
+const rebuildObjectReferencesInTransaction = (database: Database): void => {
   database.prepare('DELETE FROM object_references').run();
   for (const row of database.prepare(`
     SELECT c.workspace_id, cc.checkpoint_id, cc.path, cc.before_json, cc.after_json
     FROM checkpoint_changes cc
     JOIN checkpoints c ON c.id = cc.checkpoint_id
-  `).all()) {
+  `).all() as CheckpointChangeRow[]) {
     const before = parseJson(row.before_json, `Before state for ${row.path}`);
     const after = row.after_json ? parseJson(row.after_json, `After state for ${row.path}`) : null;
     replaceObjectReferences(
@@ -333,8 +491,8 @@ const rebuildObjectReferencesInTransaction = (database) => {
       ],
     );
   }
-  for (const row of database.prepare('SELECT id, workspace_id, data_json FROM operations').all()) {
-    const operation = parseJson(row.data_json, `Recovery operation ${row.id}`);
+  for (const row of database.prepare('SELECT id, workspace_id, data_json FROM operations').all() as Pick<OperationRow, 'id' | 'workspace_id' | 'data_json'>[]) {
+    const operation = parseJson(row.data_json, `Recovery operation ${row.id}`) as OperationData;
     replaceObjectReferences(database, row.workspace_id, 'operation', row.id, [
       ...referencesFromOperationCollection('targets', operation.targets),
       ...referencesFromOperationCollection('safety', operation.safety),
@@ -344,7 +502,7 @@ const rebuildObjectReferencesInTransaction = (database) => {
     SELECT o.workspace_id, f.operation_id, f.path, f.expected_json, f.target_json, f.safety_json
     FROM operation_files f
     JOIN operations o ON o.id = f.operation_id
-  `).all()) {
+  `).all() as OperationFileJoinRow[]) {
     replaceObjectReferences(
       database,
       row.workspace_id,
@@ -359,11 +517,11 @@ const rebuildObjectReferencesInTransaction = (database) => {
   }
 };
 
-export const rebuildObjectReferences = (database) => {
+export const rebuildObjectReferences = (database: Database): void => {
   database.transaction(() => rebuildObjectReferencesInTransaction(database))();
 };
 
-const migrateV3Catalog = (database) => {
+const migrateV3Catalog = (database: Database): void => {
   database.transaction(() => {
     database.exec(`
       CREATE TABLE object_references (
@@ -403,9 +561,9 @@ const migrateV3Catalog = (database) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const now = new Date().toISOString();
-    for (const row of database.prepare("SELECT id, state, data_json FROM operations WHERE kind = 'combined'").all()) {
-      const operation = parseJson(row.data_json, `Recovery operation ${row.id}`);
-      const targets = operation.targets ?? {};
+    for (const row of database.prepare("SELECT id, state, data_json FROM operations WHERE kind = 'combined'").all() as Pick<OperationRow, 'id' | 'state' | 'data_json'>[]) {
+      const operation = parseJson(row.data_json, `Recovery operation ${row.id}`) as OperationData;
+      const targets = (operation.targets ?? {}) as Record<string, FileState | undefined>;
       const affectedPaths = operation.plan?.affectedPaths ?? Object.keys(targets).sort();
       const phase = TERMINAL_V3_STATES.has(row.state) ? 'safety-observed' : 'needs-attention';
       let ordinal = 0;
@@ -433,7 +591,7 @@ const migrateV3Catalog = (database) => {
   })();
 };
 
-const migrateV4Catalog = (database) => {
+const migrateV4Catalog = (database: Database): void => {
   database.transaction(() => {
     database.exec(`
       DROP INDEX IF EXISTS object_references_hash;
@@ -460,16 +618,16 @@ const migrateV4Catalog = (database) => {
   })();
 };
 
-const retiredCatalogPrefix = (root) => `${path.basename(root)}${RETIRED_CATALOG_MARKER}`;
+const retiredCatalogPrefix = (root: string): string => `${path.basename(root)}${RETIRED_CATALOG_MARKER}`;
 
-export const inspectRetiredRecoveryCatalogs = async (root, options = {}) => {
-  const fsPromises = options.fsPromises ?? fs.promises;
+export const inspectRetiredRecoveryCatalogs = async (root: string, options: { fsPromises?: FsPromises | undefined } = {}): Promise<RetiredCatalogsResult> => {
+  const fsPromises = options.fsPromises ?? fs.promises as FsPromises;
   const parent = path.dirname(root);
-  let entries;
+  let entries: import('node:fs').Dirent[];
   try {
     entries = await fsPromises.readdir(parent, { withFileTypes: true });
   } catch (error) {
-    if (error?.code === 'ENOENT') {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
       return { retiredCatalogCount: 0, state: 'ready' };
     }
     throw storageMalformed('Recovery catalog history cannot be inspected', error);
@@ -486,7 +644,7 @@ export const inspectRetiredRecoveryCatalogs = async (root, options = {}) => {
   };
 };
 
-const attachCatalogStatus = async (database, root, migratedFrom, fsPromises) => {
+const attachCatalogStatus = async (database: Database, root: string, migratedFrom: number | undefined, fsPromises: FsPromises): Promise<Database> => {
   const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
   const status = Object.freeze({
     currentSchemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
@@ -495,24 +653,24 @@ const attachCatalogStatus = async (database, root, migratedFrom, fsPromises) => 
       : migratedFrom === undefined ? 'ready' : 'migrated',
     ...(migratedFrom === undefined ? {} : { migratedFrom }),
     retiredCatalogCount: retired.retiredCatalogCount,
-  });
+  }) as Readonly<CatalogStatus>;
   catalogStatuses.set(database, status);
   return database;
 };
 
-export const recoveryCatalogStatus = (database) => {
+export const recoveryCatalogStatus = (database: Database): Readonly<CatalogStatus> | null => {
   const status = catalogStatuses.get(database);
   return status ? { ...status } : null;
 };
 
-const finishCreatedCatalog = async (root, fsPromises) => {
+const finishCreatedCatalog = async (root: string, fsPromises: FsPromises): Promise<void> => {
   await fsPromises.chmod(catalogPath(root), 0o600);
   await syncDirectory(root, fsPromises);
 };
 
-const createFreshCatalog = async (root, fsPromises) => {
+const createFreshCatalog = async (root: string, fsPromises: FsPromises): Promise<Database> => {
   await ensureRecoveryJournalLayout(root, fsPromises);
-  let database;
+  let database: Database | undefined;
   try {
     database = new Database(databasePath(root));
     configureWritableCatalog(database);
@@ -525,8 +683,8 @@ const createFreshCatalog = async (root, fsPromises) => {
   }
 };
 
-const retirementFailure = (error) => {
-  if (['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(error?.code)) {
+const retirementFailure = (error: unknown): RecoveryPrimitiveError => {
+  if (['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException)?.code ?? '')) {
     return new RecoveryPrimitiveError(
       'recovery-in-progress',
       'Recovery catalog is in use and cannot be retired',
@@ -540,7 +698,7 @@ const retirementFailure = (error) => {
   );
 };
 
-const retireCatalogRoot = async (root, version, fsPromises) => {
+const retireCatalogRoot = async (root: string, version: number | 'metadata-less', fsPromises: FsPromises): Promise<void> => {
   const parent = path.dirname(root);
   const nonce = randomUUID();
   const replacementRoot = path.join(parent, `.${path.basename(root)}.replacement-${nonce}`);
@@ -548,7 +706,7 @@ const retireCatalogRoot = async (root, version, fsPromises) => {
     parent,
     `${retiredCatalogPrefix(root)}${version}-${Date.now()}-${nonce}`,
   );
-  let replacement;
+  let replacement: Database | null = null;
   try {
     replacement = await createFreshCatalog(replacementRoot, fsPromises);
     replacement.close();
@@ -580,6 +738,27 @@ const retireCatalogRoot = async (root, version, fsPromises) => {
   }
 };
 
+export interface InspectRecoveryJournalCatalogOptions {
+  fsPromises?: FsPromises | undefined;
+}
+
+export type InspectRecoveryJournalCatalogResult =
+  | null
+  | {
+      classification: CatalogClassification;
+      database: Database;
+      status: Readonly<CatalogStatus>;
+    }
+  | {
+      classification: CatalogClassification;
+      database: null;
+      status: {
+        currentSchemaVersion: number;
+        retiredCatalogCount: number;
+        state: 'ready' | 'migrated' | 'retired-history' | 'missing';
+      };
+    };
+
 /**
  * Inspect a recovery catalog without mutating it.
  *
@@ -590,27 +769,27 @@ const retireCatalogRoot = async (root, version, fsPromises) => {
  *     (database is opened readonly)
  *   - { database: null, status, classification } for a catalog that needs
  *     activation (migration, retirement, initialization) or is
- *     future/malformed — the caller can report status without touching disk
+ *     future/malformed �?the caller can report status without touching disk
  *
  * Callers that need to write must use openRecoveryJournalCatalog (activate).
  */
-export const inspectRecoveryJournalCatalog = async (root, options = {}) => {
-  const fsPromises = options.fsPromises ?? fs.promises;
-  let rootStat;
+export const inspectRecoveryJournalCatalog = async (root: string, options: InspectRecoveryJournalCatalogOptions = {}): Promise<InspectRecoveryJournalCatalogResult> => {
+  const fsPromises = options.fsPromises ?? fs.promises as FsPromises;
+  let rootStat: import('node:fs').Stats | undefined;
   try {
     rootStat = await fsPromises.lstat(root);
   } catch (error) {
-    if (error?.code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
     throw error;
   }
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery storage contains a symbolic link or non-directory');
   }
-  let catalogStat;
+  let catalogStat: import('node:fs').Stats | undefined;
   try {
     catalogStat = await fsPromises.lstat(catalogPath(root));
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
   }
   if (catalogStat && (!catalogStat.isFile() || catalogStat.isSymbolicLink())) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery catalog is not a direct regular file');
@@ -639,14 +818,14 @@ export const inspectRecoveryJournalCatalog = async (root, options = {}) => {
         : classification.migratedFrom === undefined ? 'ready' : 'migrated',
       ...(classification.migratedFrom === undefined ? {} : { migratedFrom: classification.migratedFrom }),
       retiredCatalogCount: retired.retiredCatalogCount,
-    });
+    }) as Readonly<CatalogStatus>;
     catalogStatuses.set(database, status);
     return { classification, database, status };
   }
   // For migrate, retire, empty, or future schemas: return classification
   // without opening a writable handle. The caller can report status and
   // decide whether to activate (which may migrate or retire).
-  const state = classification.kind === 'migrate' ? 'ready'
+  const state: 'ready' | 'missing' = classification.kind === 'migrate' ? 'ready'
     : classification.kind === 'retire' ? 'ready'
     : classification.kind === 'empty' ? 'missing'
     : 'missing';
@@ -663,32 +842,37 @@ export const inspectRecoveryJournalCatalog = async (root, options = {}) => {
   };
 };
 
-const configureReadableCatalog = (database) => {
-  // Do NOT set journal_mode on a readonly connection — SQLite will reject
+const configureReadableCatalog = (database: Database): void => {
+  // Do NOT set journal_mode on a readonly connection �?SQLite will reject
   // the implicit write with SQLITE_READONLY. Only enable foreign_keys,
   // which is a connection-level pragma that doesn't touch the database file.
   database.pragma('foreign_keys = ON');
 };
 
-export const openRecoveryJournalCatalog = async (root, options = {}) => {
+export interface OpenRecoveryJournalCatalogOptions {
+  create?: boolean | undefined;
+  fsPromises?: FsPromises | undefined;
+}
+
+export const openRecoveryJournalCatalog = async (root: string, options: OpenRecoveryJournalCatalogOptions = {}): Promise<Database | null> => {
   const create = options.create === true;
-  const fsPromises = options.fsPromises ?? fs.promises;
-  let rootStat;
+  const fsPromises = options.fsPromises ?? fs.promises as FsPromises;
+  let rootStat: import('node:fs').Stats | undefined;
   try {
     rootStat = await fsPromises.lstat(root);
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
     if (!create) return null;
   }
   if (rootStat && (!rootStat.isDirectory() || rootStat.isSymbolicLink())) {
     throw new RecoveryPrimitiveError('storage-malformed', 'Recovery storage contains a symbolic link or non-directory');
   }
-  let catalogStat;
+  let catalogStat: import('node:fs').Stats | undefined;
   if (rootStat) {
     try {
       catalogStat = await fsPromises.lstat(catalogPath(root));
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
     }
   }
   if (catalogStat && (!catalogStat.isFile() || catalogStat.isSymbolicLink())) {
@@ -696,7 +880,7 @@ export const openRecoveryJournalCatalog = async (root, options = {}) => {
   }
   if (!catalogStat) {
     if (!create) return null;
-    let database;
+    let database: Database | undefined;
     try {
       database = await createFreshCatalog(root, fsPromises);
       return await attachCatalogStatus(database, root, undefined, fsPromises);
@@ -721,7 +905,7 @@ export const openRecoveryJournalCatalog = async (root, options = {}) => {
       );
     }
   }
-  let database;
+  let database: Database | undefined;
   try {
     if (classification.kind === 'empty') {
       if (create) await ensureRecoveryJournalLayout(root, fsPromises);
@@ -748,7 +932,7 @@ export const openRecoveryJournalCatalog = async (root, options = {}) => {
     return await attachCatalogStatus(
       database,
       root,
-      classification.kind === 'migrate' ? classification.version : classification.migratedFrom,
+      classification.kind === 'migrate' ? classification.version : (classification.kind === 'current' ? classification.migratedFrom : undefined),
       fsPromises,
     );
   } catch (error) {
@@ -761,13 +945,28 @@ export const openRecoveryJournalCatalog = async (root, options = {}) => {
   }
 };
 
-export const objectPath = (root, objectHash) => {
+export const objectPath = (root: string, objectHash: string): string => {
   const match = /^sha256-([0-9a-f]{64})$/.exec(objectHash);
   if (!match) throw new RecoveryPrimitiveError('checkpoint-corrupt', `Recovery object hash is malformed: ${objectHash}`);
-  return path.join(root, 'objects', match[1].slice(0, 2), match[1].slice(2));
+  return path.join(root, 'objects', match[1]!.slice(0, 2), match[1]!.slice(2));
 };
 
-export const checkpointFromRow = (row) => ({
+export interface CheckpointFromRow {
+  byteLength: number;
+  changedPathCount: number;
+  createdAt: string;
+  id: string;
+  sequence: number;
+  source: string;
+  state: string;
+  workspaceId: string;
+  entryId?: string | undefined;
+  executionId?: string | undefined;
+  label?: string | undefined;
+  sessionId?: string | undefined;
+}
+
+export const checkpointFromRow = (row: CheckpointRow): CheckpointFromRow => ({
   byteLength: row.byte_length,
   changedPathCount: row.changed_path_count,
   createdAt: row.created_at,
@@ -782,7 +981,7 @@ export const checkpointFromRow = (row) => ({
   ...(row.session_id ? { sessionId: row.session_id } : {}),
 });
 
-const parseJson = (value, label) => {
+const parseJson = (value: string, label: string): unknown => {
   try {
     return JSON.parse(value);
   } catch (error) {
@@ -790,7 +989,16 @@ const parseJson = (value, label) => {
   }
 };
 
-export const changeFromRow = (row) => ({
+export interface ChangeFromRow {
+  after: unknown;
+  before: unknown;
+  checkpointId: string;
+  mutationId: string;
+  path: string;
+  toolName: string;
+}
+
+export const changeFromRow = (row: ChangeRow): ChangeFromRow => ({
   after: row.after_json ? parseJson(row.after_json, `After state for ${row.path}`) : null,
   before: parseJson(row.before_json, `Before state for ${row.path}`),
   checkpointId: row.checkpoint_id,
@@ -799,7 +1007,26 @@ export const changeFromRow = (row) => ({
   toolName: row.tool_name,
 });
 
-export const bindingFromRow = (row) => ({
+export interface BindingFromRow {
+  activeWriterScopes: unknown;
+  checkpointId: string;
+  executionId: string;
+  provenance: string;
+  runtimeGeneration: number;
+  runtimeKey: string;
+  sessionId: string;
+  startedAt: string;
+  status: string;
+  unrecordedResourceIds: unknown;
+  userEntryId: string;
+  workerId: string;
+  workspaceId: string;
+  assistantEntryId?: string | undefined;
+  failure?: unknown | undefined;
+  settledAt?: string | undefined;
+}
+
+export const bindingFromRow = (row: BindingRow): BindingFromRow => ({
   activeWriterScopes: parseJson(row.active_writer_scopes_json, 'Binding writer scopes'),
   checkpointId: row.checkpoint_id,
   executionId: row.execution_id,
@@ -818,14 +1045,14 @@ export const bindingFromRow = (row) => ({
   ...(row.settled_at ? { settledAt: row.settled_at } : {}),
 });
 
-export const operationFromRow = (row) => ({
-  ...parseJson(row.data_json, `Recovery operation ${row.id}`),
+export const operationFromRow = (row: Pick<OperationRow, 'id' | 'workspace_id' | 'state' | 'data_json'>): OperationData & { id: string; state: string; workspaceId: string } => ({
+  ...parseJson(row.data_json, `Recovery operation ${row.id}`) as OperationData,
   id: row.id,
   state: row.state,
   workspaceId: row.workspace_id,
 });
 
-export const writeOperationRow = (database, operation) => {
+export const writeOperationRow = (database: Database, operation: OperationInput): void => {
   database.transaction(() => {
     database.prepare(`
       INSERT INTO operations(id, workspace_id, kind, state, data_json, created_at, updated_at)
@@ -853,12 +1080,14 @@ export const writeOperationRow = (database, operation) => {
 const OPERATION_FILE_PHASES = [
   'pending', 'apply-intent', 'target-observed',
   'compensate-intent', 'safety-observed', 'needs-attention',
-];
+] as const;
 
-export const initOperationFiles = (database, operationId, targets) => {
-  const previousPaths = database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
-    .all(operationId).map((row) => row.path);
-  const operation = database.prepare('SELECT workspace_id FROM operations WHERE id = ?').get(operationId);
+type OperationFilePhase = typeof OPERATION_FILE_PHASES[number];
+
+export const initOperationFiles = (database: Database, operationId: string, targets: OperationTargets): void => {
+  const previousPaths = (database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
+    .all(operationId) as { path: string }[]).map((row) => row.path);
+  const operation = database.prepare('SELECT workspace_id FROM operations WHERE id = ?').get(operationId) as { workspace_id: string } | undefined;
   if (!operation) throw storageMalformed(`Recovery operation ${operationId} is missing`);
   for (const previousPath of previousPaths) {
     deleteObjectReferences(
@@ -877,6 +1106,7 @@ export const initOperationFiles = (database, operationId, targets) => {
   let ordinal = 0;
   for (const relativePath of Object.keys(targets).sort()) {
     const states = targets[relativePath];
+    if (!states) continue;
     insert.run(
       operationId,
       ordinal,
@@ -899,7 +1129,7 @@ export const initOperationFiles = (database, operationId, targets) => {
   }
 };
 
-export const updateOperationFilePhase = (database, operationId, path, phase, options = {}) => {
+export const updateOperationFilePhase = (database: Database, operationId: string, path: string, phase: OperationFilePhase, options: UpdateOperationFilePhaseOptions = {}): void => {
   if (!OPERATION_FILE_PHASES.includes(phase)) {
     throw new TypeError(`Invalid operation file phase: ${phase}`);
   }
@@ -922,7 +1152,7 @@ export const updateOperationFilePhase = (database, operationId, path, phase, opt
     FROM operation_files f
     JOIN operations o ON o.id = f.operation_id
     WHERE f.operation_id = ? AND f.path = ?
-  `).get(operationId, path);
+  `).get(operationId, path) as OperationFileJoinRow | undefined;
   if (!row) throw storageMalformed(`Recovery operation file ${operationId}:${path} is missing`);
   replaceObjectReferences(
     database,
@@ -937,54 +1167,55 @@ export const updateOperationFilePhase = (database, operationId, path, phase, opt
   );
 };
 
-export const operationFileRows = (database, operationId) => (
+export const operationFileRows = (database: Database, operationId: string): OperationFileRow[] => (
   database.prepare(`
     SELECT * FROM operation_files WHERE operation_id = ?
     ORDER BY ordinal ASC
-  `).all(operationId)
+  `).all(operationId) as OperationFileRow[]
 );
 
-export const operationFileByPath = (database, operationId, path) => (
+export const operationFileByPath = (database: Database, operationId: string, path: string): OperationFileRow | undefined => (
   database.prepare(`
     SELECT * FROM operation_files WHERE operation_id = ? AND path = ?
-  `).get(operationId, path)
+  `).get(operationId, path) as OperationFileRow | undefined
 );
 
-export const verifyRecoveryJournalStore = async (root, options = {}) => {
+export const verifyRecoveryJournalStore = async (root: string, options: { fsPromises?: FsPromises | undefined } = {}): Promise<{ checkpoints: number }> => {
   const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises: options.fsPromises });
   if (!database) return { checkpoints: 0 };
   try {
-    const integrity = database.pragma('integrity_check', { simple: true });
+    const integrity = database.pragma('integrity_check', { simple: true }) as unknown;
     if (integrity !== 'ok') throw new RecoveryPrimitiveError('storage-malformed', `Recovery catalog integrity check failed: ${integrity}`);
-    const refs = new Set();
-    for (const row of database.prepare('SELECT before_json, after_json FROM checkpoint_changes').iterate()) {
-      for (const raw of [row.before_json, row.after_json]) {
+    const refs = new Set<string>();
+    for (const row of database.prepare('SELECT before_json, after_json FROM checkpoint_changes').iterate() as Iterable<{ before_json: string; after_json: string | null }>) {
+      for (const raw of [row.before_json, row.after_json] as const) {
         if (!raw) continue;
-        const state = parseJson(raw, 'Checkpoint file state');
-        if (typeof state.objectHash === 'string') refs.add(state.objectHash);
+        const state = parseJson(raw, 'Checkpoint file state') as StateWithHash;
+        if (typeof state?.objectHash === 'string') refs.add(state.objectHash);
       }
     }
-    for (const row of database.prepare("SELECT data_json FROM operations WHERE kind = 'combined'").iterate()) {
-      const operation = parseJson(row.data_json, 'Recovery operation');
-      for (const collection of [operation.targets, operation.safety]) {
+    for (const row of database.prepare("SELECT data_json FROM operations WHERE kind = 'combined'").iterate() as Iterable<{ data_json: string }>) {
+      const operation = parseJson(row.data_json, 'Recovery operation') as OperationData;
+      for (const collection of [operation.targets, operation.safety] as const) {
         for (const value of Object.values(collection ?? {})) {
-          for (const state of [value, value?.expected, value?.target]) {
-            if (typeof state?.objectHash === 'string') refs.add(state.objectHash);
+          for (const state of [value, (value as StateWithHash | undefined)?.expected, (value as StateWithHash | undefined)?.target] as const) {
+            if (typeof (state as StateWithHash | null | undefined)?.objectHash === 'string') refs.add((state as StateWithHash)!.objectHash!);
           }
         }
       }
     }
+    const fsPromises = options.fsPromises ?? fs.promises as FsPromises;
     for (const hash of refs) {
-      let stat;
+      let stat: import('node:fs').Stats;
       try {
-        stat = await (options.fsPromises ?? fs.promises).lstat(objectPath(root, hash));
+        stat = await fsPromises.lstat(objectPath(root, hash));
       } catch (error) {
-        if (error?.code === 'ENOENT') throw new RecoveryPrimitiveError('object-missing', `Recovery object is missing: ${hash}`);
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') throw new RecoveryPrimitiveError('object-missing', `Recovery object is missing: ${hash}`);
         throw error;
       }
       if (!stat.isFile() || stat.isSymbolicLink()) throw new RecoveryPrimitiveError('object-corrupt', `Recovery object is invalid: ${hash}`);
     }
-    return { checkpoints: database.prepare('SELECT COUNT(*) AS count FROM checkpoints').get().count };
+    return { checkpoints: (database.prepare('SELECT COUNT(*) AS count FROM checkpoints').get() as { count: number })!.count };
   } finally {
     database.close();
   }

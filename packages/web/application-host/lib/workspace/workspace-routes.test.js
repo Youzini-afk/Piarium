@@ -43,7 +43,8 @@ const gbkTestZipDecoder = {
 };
 
 async function loadRoutesModule() {
-  return import(/* @vite-ignore */ `./workspace-routes.js?test=${Date.now()}-${Math.random()}`);
+  vi.resetModules();
+  return import('./workspace-routes.js');
 }
 
 async function createApp(env = {}, options = {}) {

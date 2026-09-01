@@ -1,9 +1,61 @@
 import fs from 'fs';
 import path from 'path';
+import type { WorkspaceConfig } from './workspace-config.js';
 import { ensureWorkspaceRoot } from './workspace-config.js';
 import { resolveWorkspacePath } from './path-safety.js';
 
-const resolveWorkspaceGitDirectory = async (relativePathValue, config, dependencies = {}) => {
+type PathModule = typeof import('path');
+type FsPromises = typeof fs.promises;
+type GitLibraries = typeof import('../git/index.js');
+
+export interface GitDependencies {
+  fsPromises?: FsPromises | undefined;
+  pathModule?: PathModule | undefined;
+  options?: Record<string, unknown> | undefined;
+}
+
+interface GitFetchPayload {
+  [key: string]: unknown;
+}
+
+interface GitClonePayload {
+  url?: unknown;
+  branch?: unknown;
+  directoryName?: unknown;
+}
+
+interface GitCommitPayload {
+  message?: unknown;
+  addAll?: unknown;
+  files?: unknown;
+}
+
+interface GitCommitOptions {
+  addAll: boolean;
+  files?: unknown[] | undefined;
+}
+
+interface GitStatusResult {
+  isGitRepository: boolean;
+  files?: unknown[];
+  branch?: string | null | undefined;
+  current?: string | undefined;
+  tracking?: string | null | undefined;
+  ahead?: number | undefined;
+  behind?: number | undefined;
+  isClean?: boolean | undefined;
+  [key: string]: unknown;
+}
+
+interface HttpError extends Error {
+  statusCode: number;
+}
+
+const resolveWorkspaceGitDirectory = async (
+  relativePathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<string> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -16,24 +68,24 @@ const resolveWorkspaceGitDirectory = async (relativePathValue, config, dependenc
   });
   const stat = await fsPromises.stat(resolved.absolutePath);
   if (!stat.isDirectory()) {
-    const error = new Error('Git operations require a workspace directory');
+    const error = new Error('Git operations require a workspace directory') as HttpError;
     error.statusCode = 400;
     throw error;
   }
   return resolved.absolutePath;
 };
 
-const getGitLibraries = async () => import('../git/index.js');
+const getGitLibraries = async (): Promise<GitLibraries> => import('../git/index.js');
 
-const createBadRequest = (message) => {
-  const error = new Error(message);
+const createBadRequest = (message: string): HttpError => {
+  const error = new Error(message) as HttpError;
   error.statusCode = 400;
   return error;
 };
 
-const hasControlCharacters = (value) => /[\0\r\n]/.test(value);
+const hasControlCharacters = (value: string): boolean => /[\0\r\n]/.test(value);
 
-const assertSafeGitArgument = (value, label) => {
+const assertSafeGitArgument = (value: unknown, label: string): string => {
   const text = String(value || '').trim();
   if (!text) {
     return '';
@@ -47,7 +99,7 @@ const assertSafeGitArgument = (value, label) => {
   return text;
 };
 
-const assertSafeCloneDirectoryName = (value) => {
+const assertSafeCloneDirectoryName = (value: unknown): string => {
   const text = String(value || '').trim();
   if (!text) {
     return '';
@@ -65,7 +117,11 @@ const assertSafeCloneDirectoryName = (value) => {
   return text;
 };
 
-export const getWorkspaceGitStatus = async (relativePathValue, config, dependencies = {}) => {
+export const getWorkspaceGitStatus = async (
+  relativePathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<GitStatusResult> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   if (!await git.isGitRepository(directory)) {
@@ -86,13 +142,23 @@ export const getWorkspaceGitStatus = async (relativePathValue, config, dependenc
   };
 };
 
-export const workspaceGitFetch = async (relativePathValue, payload, config, dependencies = {}) => {
+export const workspaceGitFetch = async (
+  relativePathValue: unknown,
+  payload: GitFetchPayload | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.fetch(directory, payload || {});
 };
 
-export const workspaceGitClone = async (relativePathValue, payload, config, dependencies = {}) => {
+export const workspaceGitClone = async (
+  relativePathValue: unknown,
+  payload: GitClonePayload | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   const url = assertSafeGitArgument(payload?.url, 'repository url');
@@ -111,46 +177,76 @@ export const workspaceGitClone = async (relativePathValue, payload, config, depe
   });
 };
 
-export const workspaceGitPull = async (relativePathValue, payload, config, dependencies = {}) => {
+export const workspaceGitPull = async (
+  relativePathValue: unknown,
+  payload: GitFetchPayload | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.pull(directory, payload || {});
 };
 
-export const workspaceGitPush = async (relativePathValue, payload, config, dependencies = {}) => {
+export const workspaceGitPush = async (
+  relativePathValue: unknown,
+  payload: GitFetchPayload | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.push(directory, payload || {});
 };
 
-export const workspaceGitCheckout = async (relativePathValue, branch, config, dependencies = {}) => {
+export const workspaceGitCheckout = async (
+  relativePathValue: unknown,
+  branch: string,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.checkoutBranch(directory, branch);
 };
 
-export const workspaceGitCommit = async (relativePathValue, payload, config, dependencies = {}) => {
+export const workspaceGitCommit = async (
+  relativePathValue: unknown,
+  payload: GitCommitPayload | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   const message = String(payload?.message || '').trim();
   if (!message) {
-    const error = new Error('message is required');
+    const error = new Error('message is required') as HttpError;
     error.statusCode = 400;
     throw error;
   }
-  return git.commit(directory, message, {
+  const commitOptions: GitCommitOptions = {
     addAll: payload?.addAll === true,
-    files: Array.isArray(payload?.files) ? payload.files : undefined,
-  });
+    files: Array.isArray(payload?.files) ? payload.files as unknown[] : undefined,
+  };
+  return git.commit(directory, message, commitOptions);
 };
 
-export const workspaceGitLog = async (relativePathValue, query, config, dependencies = {}) => {
+export const workspaceGitLog = async (
+  relativePathValue: unknown,
+  query: Record<string, unknown> | null | undefined,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.getLog(directory, query || {});
 };
 
-export const workspaceGitRemotes = async (relativePathValue, config, dependencies = {}) => {
+export const workspaceGitRemotes = async (
+  relativePathValue: unknown,
+  config: WorkspaceConfig,
+  dependencies: GitDependencies = {},
+): Promise<unknown> => {
   const directory = await resolveWorkspaceGitDirectory(relativePathValue, config, dependencies);
   const git = await getGitLibraries();
   return git.getRemotes(directory);

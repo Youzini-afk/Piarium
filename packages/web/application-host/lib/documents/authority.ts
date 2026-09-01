@@ -497,7 +497,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     if (!looksLikeFilesystemWorkspaceScopeId(scopeId)) return null;
     try {
-      const canonicalPath = await canonicalizePathIdentity(scopeId, {
+      const canonicalPath = await canonicalizePathIdentity(scopeId as string, {
         allowMissing: true,
         fsPromises,
         pathModule,

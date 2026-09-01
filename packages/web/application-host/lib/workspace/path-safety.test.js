@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,7 +8,8 @@ let workspaceRoot;
 const dirLinkType = process.platform === 'win32' ? 'junction' : 'dir';
 
 async function loadPathSafetyModule() {
-  return import(/* @vite-ignore */ `./path-safety.js?test=${Date.now()}-${Math.random()}`);
+  vi.resetModules();
+  return import('./path-safety.js');
 }
 
 describe('workspace path safety', () => {

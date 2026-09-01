@@ -7,19 +7,122 @@ import { extract as tarExtract, list as tarList } from 'tar';
 import { ensureWorkspaceRoot } from './workspace-config.js';
 import { WorkspacePathError, normalizeWorkspaceRelativePath, resolveWorkspacePath, isPathWithinRoot } from './path-safety.js';
 import { WorkspaceConflictError, WorkspacePayloadTooLargeError, createWorkspaceEntry } from './filesystem.js';
+import type {
+  WorkspaceConfig,
+  WorkspaceDependencies,
+  WorkspaceEntry,
+  ResolvedWorkspacePath,
+} from './filesystem.js';
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+type ArchiveFormat = 'tgz' | 'tar' | 'zip';
+type ArchiveEntryType = 'file' | 'directory';
+type ArchiveConflictMode = 'rename' | 'skip' | 'error';
+type ArchiveExtractMode = 'merge' | 'new-folder';
+
+interface ArchiveEntry {
+  path: string;
+  rawPath: string;
+  type: ArchiveEntryType;
+  size: number;
+}
+
+interface ZipArchiveEntry extends ArchiveEntry {
+  zipEntry: AdmZip.IZipEntry;
+}
+
+interface ArchivePreviewEntry {
+  path: string;
+  type: ArchiveEntryType;
+  size: number;
+}
+
+interface ArchiveAnalysis {
+  entries: ArchiveEntry[];
+  previewEntries: ArchivePreviewEntry[];
+  totalFiles: number;
+  totalDirectories: number;
+  totalBytes: number;
+  truncated: boolean;
+}
+
+interface ReadZipResult {
+  entries: ZipArchiveEntry[];
+  zip: AdmZip;
+}
+
+interface ReadTarResult {
+  entries: ArchiveEntry[];
+}
+
+interface ResolveArchiveResult {
+  resolved: ResolvedWorkspacePath;
+  format: ArchiveFormat;
+}
+
+interface ArchivePreviewResult {
+  archive: WorkspaceEntry;
+  format: ArchiveFormat;
+  entries: ArchivePreviewEntry[];
+  totalFiles: number;
+  totalDirectories: number;
+  totalBytes: number;
+  truncated: boolean;
+}
+
+interface ExtractPayload {
+  path?: string | undefined;
+  conflict?: string | undefined;
+  mode?: string | undefined;
+  destination?: string | undefined;
+  deleteArchive?: boolean | undefined;
+}
+
+interface ResolveArchiveDestinationResult {
+  mode: ArchiveExtractMode;
+  destination: ResolvedWorkspacePath;
+}
+
+interface ExtractStats {
+  filesCreated: number;
+  directoriesCreated: number;
+  bytesWritten: number;
+  conflictsRenamed: number;
+  conflictsSkipped: number;
+}
+
+interface ExtractResult {
+  success: true;
+  destination: string;
+  destinationEntry: WorkspaceEntry;
+  filesCreated: number;
+  directoriesCreated: number;
+  bytesWritten: number;
+  conflictsRenamed: number;
+  conflictsSkipped: number;
+  deletedArchive: boolean;
+}
+
+interface ArchiveDependencies extends WorkspaceDependencies {}
+
+// ── Constants ─────────────────────────────────────────────────────────────
 
 const ZIP_SYMLINK_MODE = 0o120000;
 const ZIP_FILE_TYPE_MASK = 0o170000;
-const TAR_FILE_TYPES = new Set(['File', 'OldFile', 'ContiguousFile']);
-const TAR_DIRECTORY_TYPES = new Set(['Directory', 'GNUDumpDir']);
-const DEFAULT_CONFLICT = 'rename';
+const TAR_FILE_TYPES = new Set<string>(['File', 'OldFile', 'ContiguousFile']);
+const TAR_DIRECTORY_TYPES = new Set<string>(['Directory', 'GNUDumpDir']);
+const DEFAULT_CONFLICT: ArchiveConflictMode = 'rename';
 const utf8FilenameDecoder = new TextDecoder('utf-8', { fatal: true });
 const lenientUtf8FilenameDecoder = new TextDecoder('utf-8');
 const gbkFilenameDecoder = new TextDecoder('gbk');
-const containsCjkCharacter = (value) => /[\u3400-\u9fff\uf900-\ufaff]/u.test(String(value || ''));
 
-const decodeZipFilename = (data, allowGbkFallback = true) => {
-  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data || []);
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+const containsCjkCharacter = (value: string): boolean => /[\u3400-\u9fff\uf900-\ufaff]/u.test(String(value || ''));
+
+const decodeZipFilename = (data: Buffer | Uint8Array, allowGbkFallback = true): string => {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   try {
     return utf8FilenameDecoder.decode(buffer);
   } catch {
@@ -33,11 +136,11 @@ const decodeZipFilename = (data, allowGbkFallback = true) => {
 
 const zipFilenameDecoder = {
   efs: true,
-  encode: (value) => Buffer.from(String(value || ''), 'utf8'),
+  encode: (value: string): Buffer => Buffer.from(String(value || ''), 'utf8'),
   decode: decodeZipFilename,
 };
 
-export const detectArchiveFormat = (pathValue) => {
+export const detectArchiveFormat = (pathValue: string): ArchiveFormat | null => {
   const lower = String(pathValue || '').toLowerCase();
   if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) return 'tgz';
   if (lower.endsWith('.tar')) return 'tar';
@@ -45,7 +148,7 @@ export const detectArchiveFormat = (pathValue) => {
   return null;
 };
 
-const stripArchiveExtension = (name) => {
+const stripArchiveExtension = (name: string): string => {
   const lower = name.toLowerCase();
   if (lower.endsWith('.tar.gz')) return name.slice(0, -7);
   if (lower.endsWith('.tgz')) return name.slice(0, -4);
@@ -54,22 +157,22 @@ const stripArchiveExtension = (name) => {
   return name;
 };
 
-const parentPathOf = (relativePath) => {
+const parentPathOf = (relativePath: string): string => {
   const normalized = normalizeWorkspaceRelativePath(relativePath);
   if (!normalized) return '';
   const index = normalized.lastIndexOf('/');
   return index >= 0 ? normalized.slice(0, index) : '';
 };
 
-const childPath = (parent, name) => {
+const childPath = (parent: string, name: string): string => {
   const safeParent = normalizeWorkspaceRelativePath(parent);
   const safeName = normalizeWorkspaceRelativePath(name);
   return safeParent ? `${safeParent}/${safeName}` : safeName;
 };
 
-const makeWorkspaceError = (message, statusCode = 400) => new WorkspacePathError(message, statusCode);
+const makeWorkspaceError = (message: string, statusCode = 400): WorkspacePathError => new WorkspacePathError(message, statusCode);
 
-export const sanitizeArchiveEntryPath = (entryPath) => {
+export const sanitizeArchiveEntryPath = (entryPath: string): string => {
   const raw = String(entryPath || '');
   if (!raw || raw === '.' || raw === './') {
     throw makeWorkspaceError('Archive entry path is empty');
@@ -81,13 +184,13 @@ export const sanitizeArchiveEntryPath = (entryPath) => {
   return normalized;
 };
 
-const normalizeEntryType = (inputType) => {
+const normalizeEntryType = (inputType: string): ArchiveEntryType => {
   if (inputType === 'directory') return 'directory';
   if (inputType === 'file') return 'file';
   throw makeWorkspaceError('Archive contains unsupported entry type', 415);
 };
 
-const createArchiveEntry = (rawPath, type, size = 0) => {
+const createArchiveEntry = (rawPath: string, type: string, size: number = 0): ArchiveEntry => {
   const normalizedType = normalizeEntryType(type);
   const normalizedPath = sanitizeArchiveEntryPath(rawPath);
   const normalizedSize = normalizedType === 'file' && Number.isFinite(Number(size))
@@ -101,29 +204,29 @@ const createArchiveEntry = (rawPath, type, size = 0) => {
   };
 };
 
-const assertZipEntrySupported = (entry) => {
-  if (entry?.header?.encrypted) {
+const assertZipEntrySupported = (entry: AdmZip.IZipEntry): void => {
+  if (entry.header.encrypted) {
     throw makeWorkspaceError('Encrypted archives are not supported', 415);
   }
-  const attr = Number(entry?.header?.attr ?? 0);
+  const attr = Number(entry.header.attr ?? 0);
   const unixType = (attr >>> 16) & ZIP_FILE_TYPE_MASK;
   if (unixType === ZIP_SYMLINK_MODE) {
     throw makeWorkspaceError('Archive symlink entries are not supported', 415);
   }
 };
 
-const zipEntrySize = (entry) => {
-  const headerSize = Number(entry?.header?.size);
+const zipEntrySize = (entry: AdmZip.IZipEntry): number => {
+  const headerSize = Number(entry.header.size);
   if (Number.isFinite(headerSize) && headerSize >= 0) return headerSize;
   return 0;
 };
 
-const readZipEntries = async (archivePath) => {
+const readZipEntries = async (archivePath: string): Promise<ReadZipResult> => {
   const zip = new AdmZip(archivePath, { decoder: zipFilenameDecoder });
-  const entries = [];
+  const entries: ZipArchiveEntry[] = [];
   for (const entry of zip.getEntries()) {
     assertZipEntrySupported(entry);
-    const entryName = entry?.header?.flags_efs === false
+    const entryName = entry.header.flags_efs === false
       ? entry.entryName
       : decodeZipFilename(entry.rawEntryName, false);
     entries.push({
@@ -134,14 +237,14 @@ const readZipEntries = async (archivePath) => {
   return { entries, zip };
 };
 
-const tarEntryType = (entry) => {
-  if (TAR_DIRECTORY_TYPES.has(entry?.type)) return 'directory';
-  if (TAR_FILE_TYPES.has(entry?.type)) return 'file';
+const tarEntryType = (entry: { type?: string | undefined }): ArchiveEntryType => {
+  if (entry.type && TAR_DIRECTORY_TYPES.has(entry.type)) return 'directory';
+  if (entry.type && TAR_FILE_TYPES.has(entry.type)) return 'file';
   throw makeWorkspaceError('Archive contains unsupported entry type', 415);
 };
 
-const readTarEntries = async (archivePath) => {
-  const entries = [];
+const readTarEntries = async (archivePath: string): Promise<ReadTarResult> => {
+  const entries: ArchiveEntry[] = [];
   await tarList({
     file: archivePath,
     strict: true,
@@ -155,9 +258,9 @@ const readTarEntries = async (archivePath) => {
   return { entries };
 };
 
-const assertNoArchivePathCollisions = (entries) => {
-  const seen = new Set();
-  const filePaths = new Set();
+const assertNoArchivePathCollisions = (entries: ArchiveEntry[]): void => {
+  const seen = new Set<string>();
+  const filePaths = new Set<string>();
   for (const entry of entries) {
     if (seen.has(entry.path)) {
       throw new WorkspaceConflictError('Archive contains duplicate entries');
@@ -179,13 +282,13 @@ const assertNoArchivePathCollisions = (entries) => {
   }
 };
 
-const analyzeEntries = (entries, config) => {
+const analyzeEntries = (entries: ArchiveEntry[], config: WorkspaceConfig): ArchiveAnalysis => {
   assertNoArchivePathCollisions(entries);
 
   let totalFiles = 0;
   let totalDirectories = 0;
   let totalBytes = 0;
-  const previewEntries = [];
+  const previewEntries: ArchivePreviewEntry[] = [];
   const previewLimit = Number.isFinite(config.archivePreviewLimit) ? config.archivePreviewLimit : 500;
   const maxFiles = Number.isFinite(config.maxExtractFiles) ? config.maxExtractFiles : 5000;
   const maxBytes = Number.isFinite(config.maxExtractBytes) ? config.maxExtractBytes : 500 * 1024 * 1024;
@@ -224,7 +327,12 @@ const analyzeEntries = (entries, config) => {
   };
 };
 
-const loadArchive = async (resolvedArchive, format, config, dependencies = {}) => {
+const loadArchive = async (
+  resolvedArchive: ResolvedWorkspacePath,
+  format: ArchiveFormat,
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ArchiveAnalysis> => {
   const {
     fsPromises = fs.promises,
   } = dependencies;
@@ -242,14 +350,19 @@ const loadArchive = async (resolvedArchive, format, config, dependencies = {}) =
       : await readTarEntries(resolvedArchive.absolutePath);
     return analyzeEntries(loaded.entries, config);
   } catch (error) {
-    if (Number.isInteger(error?.statusCode)) {
+    if (error && typeof error === 'object' && 'statusCode' in error && Number.isInteger((error as { statusCode: unknown }).statusCode)) {
       throw error;
     }
-    throw makeWorkspaceError(error?.message || 'Archive could not be read', 415);
+    const message = error instanceof Error ? error.message : 'Archive could not be read';
+    throw makeWorkspaceError(message, 415);
   }
 };
 
-const resolveArchive = async (archivePathValue, config, dependencies = {}) => {
+const resolveArchive = async (
+  archivePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ResolveArchiveResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -259,7 +372,7 @@ const resolveArchive = async (archivePathValue, config, dependencies = {}) => {
     root: config.root,
     fsPromises,
     pathModule,
-  });
+  }) as ResolvedWorkspacePath;
   const format = detectArchiveFormat(resolved.relativePath);
   if (!format) {
     throw makeWorkspaceError('Unsupported archive format', 415);
@@ -267,20 +380,29 @@ const resolveArchive = async (archivePathValue, config, dependencies = {}) => {
   return { resolved, format };
 };
 
-const assertAbsolutePathInside = (absolutePath, rootPath, pathModule) => {
+const assertAbsolutePathInside = (
+  absolutePath: string,
+  rootPath: string,
+  pathModule: typeof path,
+): void => {
   if (!isPathWithinRoot(absolutePath, rootPath, pathModule)) {
     throw makeWorkspaceError('Archive entry escapes destination', 403);
   }
 };
 
-const writeZipToDirectory = async (archivePath, entries, targetDir, dependencies) => {
+const writeZipToDirectory = async (
+  archivePath: string,
+  entries: ArchiveEntry[],
+  targetDir: string,
+  dependencies: ArchiveDependencies,
+): Promise<void> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
   const zip = new AdmZip(archivePath, { decoder: zipFilenameDecoder });
-  const entriesByPath = new Map(zip.getEntries().map((entry) => {
-    const entryName = entry?.header?.flags_efs === false
+  const entriesByPath = new Map<string, AdmZip.IZipEntry>(zip.getEntries().map((entry) => {
+    const entryName = entry.header.flags_efs === false
       ? entry.entryName
       : decodeZipFilename(entry.rawEntryName, false);
     return [sanitizeArchiveEntryPath(entryName), entry];
@@ -303,7 +425,11 @@ const writeZipToDirectory = async (archivePath, entries, targetDir, dependencies
   }
 };
 
-const writeTarToDirectory = async (archivePath, targetDir, dependencies) => {
+const writeTarToDirectory = async (
+  archivePath: string,
+  targetDir: string,
+  dependencies: ArchiveDependencies,
+): Promise<void> => {
   const {
     pathModule = path,
   } = dependencies;
@@ -316,7 +442,7 @@ const writeTarToDirectory = async (archivePath, targetDir, dependencies) => {
     noMtime: true,
     filter: (entryPath, entry) => {
       const normalized = sanitizeArchiveEntryPath(entryPath);
-      tarEntryType(entry);
+      tarEntryType(entry as { type?: string | undefined });
       const target = pathModule.resolve(targetDir, ...normalized.split('/'));
       assertAbsolutePathInside(target, targetDir, pathModule);
       return true;
@@ -327,7 +453,10 @@ const writeTarToDirectory = async (archivePath, targetDir, dependencies) => {
   });
 };
 
-const createTemporaryExtractDir = async (config, dependencies = {}) => {
+const createTemporaryExtractDir = async (
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ResolvedWorkspacePath> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -338,17 +467,22 @@ const createTemporaryExtractDir = async (config, dependencies = {}) => {
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   await fsPromises.mkdir(resolved.absolutePath, { recursive: true });
   return resolved;
 };
 
-export const resolveArchiveDestination = async (payload, archiveRelativePath, config, dependencies = {}) => {
+export const resolveArchiveDestination = async (
+  payload: ExtractPayload,
+  archiveRelativePath: string,
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ResolveArchiveDestinationResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
-  const mode = payload?.mode === 'merge' ? 'merge' : 'new-folder';
+  const mode: ArchiveExtractMode = payload?.mode === 'merge' ? 'merge' : 'new-folder';
   const archiveParent = parentPathOf(archiveRelativePath);
   const archiveName = pathModule.basename(archiveRelativePath);
   const defaultName = stripArchiveExtension(archiveName) || 'archive';
@@ -361,23 +495,29 @@ export const resolveArchiveDestination = async (payload, archiveRelativePath, co
     fsPromises,
     pathModule,
     allowMissing: true,
-  });
+  }) as ResolvedWorkspacePath;
   if (mode === 'new-folder' && !destination.relativePath) {
     throw makeWorkspaceError('Extract destination is required');
   }
   return { mode, destination };
 };
 
-const exists = async (absolutePath, fsPromises) => {
+const exists = async (
+  absolutePath: string,
+  fsPromises: typeof fs.promises,
+): Promise<fs.Stats | null> => {
   try {
     return await fsPromises.lstat(absolutePath);
   } catch (error) {
-    if (error?.code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
     throw error;
   }
 };
 
-export const allocateConflictPath = async (absolutePath, dependencies = {}) => {
+export const allocateConflictPath = async (
+  absolutePath: string,
+  dependencies: ArchiveDependencies = {},
+): Promise<string> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -398,14 +538,17 @@ export const allocateConflictPath = async (absolutePath, dependencies = {}) => {
   throw new WorkspaceConflictError('Could not allocate a non-conflicting path');
 };
 
-const summarizeTree = async (absolutePath, dependencies = {}) => {
+const summarizeTree = async (
+  absolutePath: string,
+  dependencies: ArchiveDependencies = {},
+): Promise<ExtractStats> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
   const stat = await fsPromises.lstat(absolutePath);
   if (!stat.isDirectory()) {
-    return { filesCreated: 1, directoriesCreated: 0, bytesWritten: stat.size };
+    return { filesCreated: 1, directoriesCreated: 0, bytesWritten: stat.size, conflictsRenamed: 0, conflictsSkipped: 0 };
   }
 
   let filesCreated = 0;
@@ -418,10 +561,16 @@ const summarizeTree = async (absolutePath, dependencies = {}) => {
     directoriesCreated += childSummary.directoriesCreated;
     bytesWritten += childSummary.bytesWritten;
   }
-  return { filesCreated, directoriesCreated, bytesWritten };
+  return { filesCreated, directoriesCreated, bytesWritten, conflictsRenamed: 0, conflictsSkipped: 0 };
 };
 
-const mergeOne = async (sourcePath, destinationPath, conflict, dependencies, stats) => {
+const mergeOne = async (
+  sourcePath: string,
+  destinationPath: string,
+  conflict: ArchiveConflictMode,
+  dependencies: ArchiveDependencies,
+  stats: ExtractStats,
+): Promise<void> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -466,13 +615,18 @@ const mergeOne = async (sourcePath, destinationPath, conflict, dependencies, sta
   stats.conflictsRenamed += 1;
 };
 
-const mergeDirectoryContents = async (sourceDir, destinationDir, conflict, dependencies = {}) => {
+const mergeDirectoryContents = async (
+  sourceDir: string,
+  destinationDir: string,
+  conflict: ArchiveConflictMode,
+  dependencies: ArchiveDependencies = {},
+): Promise<ExtractStats> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
   await fsPromises.mkdir(destinationDir, { recursive: true });
-  const stats = {
+  const stats: ExtractStats = {
     filesCreated: 0,
     directoriesCreated: 0,
     bytesWritten: 0,
@@ -486,7 +640,11 @@ const mergeDirectoryContents = async (sourceDir, destinationDir, conflict, depen
   return stats;
 };
 
-export const previewWorkspaceArchive = async (archivePathValue, config, dependencies = {}) => {
+export const previewWorkspaceArchive = async (
+  archivePathValue: string,
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ArchivePreviewResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
@@ -508,20 +666,24 @@ export const previewWorkspaceArchive = async (archivePathValue, config, dependen
   };
 };
 
-export const extractWorkspaceArchive = async (payload, config, dependencies = {}) => {
+export const extractWorkspaceArchive = async (
+  payload: ExtractPayload,
+  config: WorkspaceConfig,
+  dependencies: ArchiveDependencies = {},
+): Promise<ExtractResult> => {
   const {
     fsPromises = fs.promises,
     pathModule = path,
   } = dependencies;
-  const archivePathValue = payload?.path;
-  const conflict = ['rename', 'skip', 'error'].includes(payload?.conflict) ? payload.conflict : DEFAULT_CONFLICT;
+  const archivePathValue = payload?.path ?? '';
+  const conflict: ArchiveConflictMode = ['rename', 'skip', 'error'].includes(payload?.conflict ?? '') ? (payload!.conflict as ArchiveConflictMode) : DEFAULT_CONFLICT;
   const { resolved: archive, format } = await resolveArchive(archivePathValue, config, dependencies);
   const analysis = await loadArchive(archive, format, config, dependencies);
   const { mode, destination } = await resolveArchiveDestination(payload, archive.relativePath, config, dependencies);
   const temporary = await createTemporaryExtractDir(config, dependencies);
   let finalDestination = destination.absolutePath;
   let deletedArchive = false;
-  const stats = {
+  const stats: ExtractStats = {
     filesCreated: 0,
     directoriesCreated: 0,
     bytesWritten: 0,

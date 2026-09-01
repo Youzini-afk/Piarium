@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import fs from 'node:fs';
+import fs, { type Dirent, type Stats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { objectPath } from './journal-catalog.js';
 import { RecoveryPrimitiveError } from './errors.js';
@@ -9,12 +10,108 @@ import {
   WorkspacePathError,
 } from '../workspace/path-safety.js';
 
-export const normalizeResourceId = (value) => String(value || '')
+export interface RecoveryIdentity {
+  authorityId: string;
+  canonicalRoot: string;
+  filesystemProfile: string;
+  workspaceId: string;
+}
+
+export interface MissingState {
+  kind: 'missing';
+}
+
+export interface DirectoryState {
+  kind: 'directory';
+  mode?: number | undefined;
+}
+
+export interface SymlinkState {
+  kind: 'symlink';
+  mode?: number | undefined;
+  symlinkTarget: string;
+}
+
+export interface RegularFileState {
+  kind: 'regular-file';
+  byteLength: number;
+  mode?: number | undefined;
+  objectHash: string;
+}
+
+export interface UnsupportedState {
+  kind: 'unsupported';
+}
+
+export type RecoveryState =
+  | DirectoryState
+  | MissingState
+  | RegularFileState
+  | SymlinkState
+  | UnsupportedState;
+
+export interface RecoveryStateLike {
+  kind: string;
+  byteLength?: number | undefined;
+  mode?: number | undefined;
+  objectHash?: string | undefined;
+  symlinkTarget?: string | undefined;
+}
+
+export interface CapturedState {
+  path: string;
+  state: RecoveryState;
+}
+
+export interface FileHashResult {
+  byteLength: number;
+  objectHash: string;
+}
+
+export interface ResolvedPath {
+  absolute: string;
+  relative: string;
+}
+
+export interface StatTreeResult {
+  byteLength: number;
+  objectCount: number;
+}
+
+export interface CaptureStateOptions {
+  store?: boolean | undefined;
+}
+
+export interface RecoveryFileStoreOptions {
+  fsModule?: typeof fs | undefined;
+  fsPromises?: typeof fs.promises | undefined;
+  pathModule?: typeof path | undefined;
+}
+
+export interface RecoveryFileStore {
+  applyState: (
+    identity: RecoveryIdentity,
+    root: string,
+    relativePath: string,
+    state: RecoveryState,
+  ) => Promise<void>;
+  captureState: (
+    identity: RecoveryIdentity,
+    root: string,
+    inputPath: string,
+    options?: CaptureStateOptions | undefined,
+  ) => Promise<CapturedState>;
+  hashFile: (filePath: string) => Promise<FileHashResult>;
+  relativePathFor: (identity: RecoveryIdentity, inputPath: string) => Promise<ResolvedPath>;
+  verifyObject: (root: string, state: RecoveryState) => Promise<void>;
+}
+
+export const normalizeResourceId = (value: unknown): string => String(value || '')
   .replace(/\\/g, '/')
   .replace(/^\.\//, '')
   .replace(/\/+/g, '/');
 
-export const stateIdentity = (state) => JSON.stringify({
+export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringify({
   byteLength: state.byteLength ?? null,
   kind: state.kind,
   mode: state.mode ?? null,
@@ -22,9 +119,10 @@ export const stateIdentity = (state) => JSON.stringify({
   symlinkTarget: state.symlinkTarget ?? null,
 });
 
-export const sameState = (left, right) => stateIdentity(left) === stateIdentity(right);
+export const sameState = (left: RecoveryStateLike, right: RecoveryStateLike): boolean =>
+  stateIdentity(left) === stateIdentity(right);
 
-const statStable = (before, after) => (
+const statStable = (before: Stats, after: Stats): boolean => (
   before.dev === after.dev
   && before.ino === after.ino
   && before.mode === after.mode
@@ -32,9 +130,16 @@ const statStable = (before, after) => (
   && before.mtimeMs === after.mtimeMs
 );
 
-export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promises, pathModule = path } = {}) => {
-  const relativePathFor = async (identity, inputPath) => {
-    let contained;
+export const createRecoveryFileStore = ({
+  fsModule = fs,
+  fsPromises = fs.promises,
+  pathModule = path,
+}: RecoveryFileStoreOptions = {}): RecoveryFileStore => {
+  const relativePathFor = async (
+    identity: RecoveryIdentity,
+    inputPath: string,
+  ): Promise<ResolvedPath> => {
+    let contained: { relativePath: string; absolutePath: string };
     try {
       contained = pathModule.isAbsolute(inputPath)
         ? await assertAbsolutePathInWorkspace(inputPath, {
@@ -66,7 +171,7 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     return { absolute: contained.absolutePath, relative };
   };
 
-  const hashFile = async (filePath) => {
+  const hashFile = async (filePath: string): Promise<FileHashResult> => {
     const hash = createHash('sha256');
     let byteLength = 0;
     for await (const chunk of fsModule.createReadStream(filePath)) {
@@ -76,7 +181,12 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     return { byteLength, objectHash: `sha256-${hash.digest('hex')}` };
   };
 
-  const captureRegularFile = async (filePath, root, beforeStat, store) => {
+  const captureRegularFile = async (
+    filePath: string,
+    root: string,
+    beforeStat: Stats,
+    store: boolean,
+  ): Promise<RegularFileState> => {
     if (!store) {
       const hashed = await hashFile(filePath);
       const afterStat = await fsPromises.lstat(filePath);
@@ -89,7 +199,7 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     await fsPromises.mkdir(pathModule.dirname(staging), { recursive: true, mode: 0o700 });
     const hash = createHash('sha256');
     let byteLength = 0;
-    let handle;
+    let handle: FileHandle | null | undefined;
     try {
       handle = await fsPromises.open(staging, 'wx', 0o600);
       for await (const chunk of fsModule.createReadStream(filePath)) {
@@ -111,7 +221,7 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
         await fsPromises.lstat(target);
         await fsPromises.rm(staging, { force: true });
       } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
         await fsPromises.rename(staging, target);
       }
       return { byteLength, kind: 'regular-file', mode: beforeStat.mode & 0o7777, objectHash };
@@ -121,13 +231,18 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     }
   };
 
-  const captureState = async (identity, root, inputPath, { store = true } = {}) => {
+  const captureState = async (
+    identity: RecoveryIdentity,
+    root: string,
+    inputPath: string,
+    { store = true }: CaptureStateOptions = {},
+  ): Promise<CapturedState> => {
     const resolved = await relativePathFor(identity, inputPath);
-    let stat;
+    let stat: Stats;
     try {
       stat = await fsPromises.lstat(resolved.absolute);
     } catch (error) {
-      if (error?.code === 'ENOENT') return { path: resolved.relative, state: { kind: 'missing' } };
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { path: resolved.relative, state: { kind: 'missing' } };
       throw error;
     }
     if (stat.isSymbolicLink()) {
@@ -147,7 +262,7 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     return { path: resolved.relative, state: await captureRegularFile(resolved.absolute, root, stat, store) };
   };
 
-  const verifyObject = async (root, state) => {
+  const verifyObject = async (root: string, state: RecoveryState): Promise<void> => {
     if (state.kind !== 'regular-file' || !state.objectHash) return;
     const actual = await hashFile(objectPath(root, state.objectHash));
     if (actual.objectHash !== state.objectHash || actual.byteLength !== state.byteLength) {
@@ -155,21 +270,22 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     }
   };
 
-  const replaceFile = async (source, target) => {
+  const replaceFile = async (source: string, target: string): Promise<void> => {
     const temporary = `${target}.piarium-recovery-${randomUUID()}.tmp`;
     try {
       await fsPromises.copyFile(source, temporary);
       try {
         await fsPromises.rename(temporary, target);
       } catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(error?.code)) throw error;
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'EPERM') throw error;
         const previous = `${target}.piarium-recovery-${randomUUID()}.previous`;
         let preserved = false;
         try {
           await fsPromises.rename(target, previous);
           preserved = true;
         } catch (preserveError) {
-          if (preserveError?.code !== 'ENOENT') throw preserveError;
+          if ((preserveError as NodeJS.ErrnoException)?.code !== 'ENOENT') throw preserveError;
         }
         try {
           await fsPromises.rename(temporary, target);
@@ -184,14 +300,19 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     }
   };
 
-  const applyState = async (identity, root, relativePath, state) => {
+  const applyState = async (
+    identity: RecoveryIdentity,
+    root: string,
+    relativePath: string,
+    state: RecoveryState,
+  ): Promise<void> => {
     const { absolute } = await relativePathFor(identity, relativePath);
     if (state.kind === 'missing') {
-      let stat;
+      let stat: Stats;
       try {
         stat = await fsPromises.lstat(absolute);
       } catch (error) {
-        if (error?.code === 'ENOENT') return;
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return;
         throw error;
       }
       if (stat.isDirectory()) await fsPromises.rmdir(absolute);
@@ -205,7 +326,7 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
     }
     if (state.kind === 'symlink') {
       await fsPromises.rm(absolute, { force: true, recursive: false }).catch((error) => {
-        if (error?.code !== 'ENOENT') throw error;
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       });
       await fsPromises.mkdir(pathModule.dirname(absolute), { recursive: true });
       await fsPromises.symlink(state.symlinkTarget, absolute);
@@ -223,15 +344,19 @@ export const createRecoveryFileStore = ({ fsModule = fs, fsPromises = fs.promise
   return { applyState, captureState, hashFile, relativePathFor, verifyObject };
 };
 
-export const statTree = async (root, fsPromises = fs.promises, pathModule = path) => {
+export const statTree = async (
+  root: string,
+  fsPromises: typeof fs.promises = fs.promises,
+  pathModule: typeof path = path,
+): Promise<StatTreeResult> => {
   let byteLength = 0;
   let objectCount = 0;
-  const walk = async (directory) => {
-    let entries;
+  const walk = async (directory: string): Promise<void> => {
+    let entries: Dirent[];
     try {
       entries = await fsPromises.readdir(directory, { withFileTypes: true });
     } catch (error) {
-      if (error?.code === 'ENOENT') return;
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return;
       throw error;
     }
     for (const entry of entries) {

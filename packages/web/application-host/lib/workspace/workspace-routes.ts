@@ -20,6 +20,14 @@ import {
   uploadWorkspaceFiles,
   uploadWorkspaceMultipartFiles,
 } from './filesystem.js';
+import type {
+  MultipartUploadFile,
+  UploadFile,
+  WorkspaceConfig,
+  WorkspaceDependencies,
+  WorkspaceDirectoryListing,
+  WorkspaceEntry,
+} from './filesystem.js';
 import { getWorkspaceDownloadInfo, resolveWorkspaceDownload } from './download.js';
 import {
   getWorkspaceGitStatus,
@@ -33,35 +41,142 @@ import {
   workspaceGitRemotes,
 } from './git.js';
 
-const getRequestPath = (req) => {
+// ── Minimal Express-like types ───────────────────────────────────────────
+
+interface WorkspaceRequest {
+  query?: Record<string, string | undefined> | undefined;
+  body?: Record<string, unknown> | undefined;
+  files?: MultipartUploadFile[] | undefined;
+  is(type: string): boolean;
+}
+
+interface WorkspaceResponse extends NodeJS.WritableStream {
+  headersSent: boolean;
+  status(code: number): WorkspaceResponse;
+  json(data: unknown): void;
+  download(path: string, filename: string, options: Record<string, unknown>): void;
+  attachment(filename: string): WorkspaceResponse;
+  type(type: string): WorkspaceResponse;
+  destroy(error?: unknown): void;
+}
+
+interface WorkspaceApp {
+  get(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
+  post(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
+  patch(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
+  delete(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
+}
+
+// ── Domain types ──────────────────────────────────────────────────────────
+
+interface ProjectEntry {
+  id: string;
+  path: string;
+  label?: string | undefined;
+  addedAt?: number | undefined;
+  lastOpenedAt?: number | undefined;
+}
+
+interface WorkspaceSettings {
+  projects?: ProjectEntry[] | undefined;
+  activeProjectId?: string | undefined;
+  lastDirectory?: string | undefined;
+  [key: string]: unknown;
+}
+
+interface DocumentsAPI {
+  runMutationForScope: (
+    root: string,
+    scope: { kind: string; id: string },
+    operation: () => unknown,
+    options: Record<string, unknown>,
+  ) => unknown;
+}
+
+interface RouteContext {
+  config: WorkspaceConfig;
+  fsPromises: typeof fs.promises;
+  pathModule: typeof path;
+  osModule: typeof os;
+  documents?: DocumentsAPI | undefined;
+}
+
+interface RouteDependencies extends WorkspaceDependencies {
+  path?: typeof path | undefined;
+  osModule?: typeof os | undefined;
+  os?: typeof os | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  cwd?: string | undefined;
+  documents?: DocumentsAPI | undefined;
+  readSettingsFromDisk?: (() => Promise<WorkspaceSettings>) | undefined;
+  persistSettings?: ((changes: Partial<WorkspaceSettings>) => Promise<WorkspaceSettings>) | undefined;
+  sanitizeProjects?: ((value: unknown) => ProjectEntry[]) | undefined;
+}
+
+interface OpenProjectDependencies {
+  readSettingsFromDisk?: (() => Promise<WorkspaceSettings>) | undefined;
+  persistSettings?: ((changes: Partial<WorkspaceSettings>) => Promise<WorkspaceSettings>) | undefined;
+  sanitizeProjects?: ((value: unknown) => ProjectEntry[]) | undefined;
+}
+
+interface OpenProjectResult {
+  success: true;
+  project: ProjectEntry;
+  settings: WorkspaceSettings;
+}
+
+interface TreeEntry extends WorkspaceEntry {
+  children?: WorkspaceEntry[] | undefined;
+}
+
+interface TreeListing extends Omit<WorkspaceDirectoryListing, 'entries'> {
+  entries: TreeEntry[];
+}
+
+interface DownloadInfo {
+  type: 'file' | 'archive';
+  fileName: string;
+  filePath?: string | undefined;
+  directoryPath?: string | undefined;
+  baseName?: string | undefined;
+  stream?: NodeJS.ReadableStream | undefined;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+const getRequestPath = (req: WorkspaceRequest): string => {
   const candidate = typeof req.query?.path === 'string'
     ? req.query.path
     : (typeof req.body?.path === 'string' ? req.body.path : '');
   return candidate;
 };
 
-const DOWNLOAD_OPTIONS = { dotfiles: 'allow' };
+const DOWNLOAD_OPTIONS: Record<string, unknown> = { dotfiles: 'allow' };
 
-const toErrorStatus = (error) => {
-  if (Number.isInteger(error?.statusCode)) return error.statusCode;
-  if (error?.code === 'ENOENT') return 404;
-  if (error?.code === 'EEXIST') return 409;
-  if (error?.code === 'EACCES' || error?.code === 'EPERM') return 403;
-  if (error?.name === 'MulterError') return 413;
+const toErrorStatus = (error: unknown): number => {
+  if (error && typeof error === 'object') {
+    const err = error as NodeJS.ErrnoException & { statusCode?: number | undefined };
+    if (Number.isInteger(err.statusCode)) return err.statusCode!;
+    if (err.code === 'ENOENT') return 404;
+    if (err.code === 'EEXIST') return 409;
+    if (err.code === 'EACCES' || err.code === 'EPERM') return 403;
+    if (err.name === 'MulterError') return 413;
+  }
   return 500;
 };
 
-const sendError = (res, error) => {
+const sendError = (res: WorkspaceResponse, error: unknown): void => {
   const status = toErrorStatus(error);
   if (status >= 500) {
     console.error('[workspace] request failed:', error);
   }
+  const message = error instanceof Error ? error.message : 'Workspace request failed';
   return res.status(status).json({
-    error: error?.message || 'Workspace request failed',
+    error: message,
   });
 };
 
-const createRouteContext = (dependencies) => {
+const createRouteContext = (dependencies: RouteDependencies): RouteContext => {
   const fsPromises = dependencies.fsPromises || fs.promises;
   const pathModule = dependencies.pathModule || dependencies.path || path;
   const osModule = dependencies.osModule || dependencies.os || os;
@@ -71,28 +186,37 @@ const createRouteContext = (dependencies) => {
     cwd: dependencies.cwd || process.cwd(),
     pathModule,
     osModule,
-  });
+  }) as WorkspaceConfig;
 
   return { config, fsPromises, pathModule, osModule, documents: dependencies.documents };
 };
 
-const runWorkspaceMutation = (context, ownerId, operation, options = {}) => {
+const runWorkspaceMutation = <T,>(
+  context: RouteContext,
+  ownerId: string,
+  operation: () => Promise<T>,
+  options: Record<string, unknown> = {},
+): Promise<T> => {
   if (typeof context.documents?.runMutationForScope !== 'function') return operation();
   return context.documents.runMutationForScope(
     context.config.root,
     { kind: 'web-route', id: ownerId },
     operation,
     options,
-  );
+  ) as Promise<T>;
 };
 
-const readTree = async (relativePath, depth, context) => {
+const readTree = async (
+  relativePath: string,
+  depth: number,
+  context: RouteContext,
+): Promise<TreeListing> => {
   const current = await listWorkspaceDirectory(relativePath, context.config, context);
   if (depth <= 0) {
-    return current;
+    return current as TreeListing;
   }
 
-  const entries = [];
+  const entries: TreeEntry[] = [];
   for (const entry of current.entries) {
     if (entry.type !== 'directory') {
       entries.push(entry);
@@ -111,11 +235,15 @@ const readTree = async (relativePath, depth, context) => {
   };
 };
 
-const openWorkspaceProject = async (relativePathValue, dependencies, context) => {
+const openWorkspaceProject = async (
+  relativePathValue: string,
+  dependencies: OpenProjectDependencies,
+  context: RouteContext,
+): Promise<OpenProjectResult> => {
   const {
-    readSettingsFromDisk = async () => ({}),
+    readSettingsFromDisk = async (): Promise<WorkspaceSettings> => ({}),
     persistSettings = async (changes) => changes,
-    sanitizeProjects = (value) => Array.isArray(value) ? value : [],
+    sanitizeProjects = (value) => Array.isArray(value) ? value as ProjectEntry[] : [],
   } = dependencies;
 
   const resolved = await resolveWorkspacePath(relativePathValue, {
@@ -125,7 +253,7 @@ const openWorkspaceProject = async (relativePathValue, dependencies, context) =>
   });
   const stat = await context.fsPromises.stat(resolved.absolutePath);
   if (!stat.isDirectory()) {
-    const error = new Error('Only workspace directories can be opened as projects');
+    const error = new Error('Only workspace directories can be opened as projects') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
   }
@@ -136,7 +264,7 @@ const openWorkspaceProject = async (relativePathValue, dependencies, context) =>
   const now = Date.now();
   const existing = projects.find((project) => project.id === projectId || project.path === resolved.absolutePath);
   const label = context.pathModule.basename(resolved.absolutePath) || resolved.absolutePath;
-  const project = existing
+  const project: ProjectEntry = existing
     ? { ...existing, id: projectId, path: resolved.absolutePath, lastOpenedAt: now }
     : {
         id: projectId,
@@ -162,7 +290,9 @@ const openWorkspaceProject = async (relativePathValue, dependencies, context) =>
   };
 };
 
-export const registerWorkspaceRoutes = (app, dependencies = {}) => {
+// ── Route registration ────────────────────────────────────────────────────
+
+export const registerWorkspaceRoutes = (app: WorkspaceApp, dependencies: RouteDependencies = {}): void => {
   const context = createRouteContext(dependencies);
   const multipartUpload = multer({
     storage: multer.memoryStorage(),
@@ -174,15 +304,16 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
     },
   });
 
-  const parseMultipartUpload = (req, res) => new Promise((resolve, reject) => {
-    multipartUpload.array('files')(req, res, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(req.files || []);
+  const parseMultipartUpload = (req: WorkspaceRequest, res: WorkspaceResponse): Promise<MultipartUploadFile[]> =>
+    new Promise<MultipartUploadFile[]>((resolve, reject) => {
+      multipartUpload.array('files')(req, res, (error?: Error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(req.files || []);
+      });
     });
-  });
 
   app.get('/api/workspace/root', async (_req, res) => {
     try {
@@ -237,7 +368,7 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
         'workspace.file',
         () => createWorkspaceFile(getRequestPath(req), context.config, {
           ...context,
-          content: req.body?.content ?? '',
+          content: typeof req.body?.content === 'string' ? req.body.content : '',
         }),
       ));
     } catch (error) {
@@ -247,8 +378,12 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.patch('/api/workspace/move', async (req, res) => {
     try {
-      const from = req.body?.from ?? req.body?.oldPath;
-      const to = req.body?.to ?? req.body?.newPath;
+      const from = typeof req.body?.from === 'string' ? req.body.from
+        : typeof req.body?.oldPath === 'string' ? req.body.oldPath
+        : '';
+      const to = typeof req.body?.to === 'string' ? req.body.to
+        : typeof req.body?.newPath === 'string' ? req.body.newPath
+        : '';
       res.json(await runWorkspaceMutation(
         context,
         'workspace.move',
@@ -288,7 +423,7 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
       res.json(await runWorkspaceMutation(
         context,
         'workspace.upload',
-        () => uploadWorkspaceFiles(getRequestPath(req), req.body?.files, context.config, context),
+        () => uploadWorkspaceFiles(getRequestPath(req), req.body?.files as UploadFile[] | undefined ?? [], context.config, context),
       ));
     } catch (error) {
       sendError(res, error);
@@ -308,7 +443,7 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
       res.json(await runWorkspaceMutation(
         context,
         'workspace.archive.extract',
-        () => extractWorkspaceArchive(req.body, context.config, context),
+        () => extractWorkspaceArchive(req.body ?? {}, context.config, context),
       ));
     } catch (error) {
       sendError(res, error);
@@ -325,21 +460,22 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
 
   app.get('/api/workspace/download', async (req, res) => {
     try {
-      const download = await resolveWorkspaceDownload(getRequestPath(req), context.config, context);
+      const download = await resolveWorkspaceDownload(getRequestPath(req), context.config, context) as DownloadInfo;
       if (download.type === 'file') {
-        return res.download(download.filePath, download.fileName, DOWNLOAD_OPTIONS);
+        return res.download(download.filePath!, download.fileName, DOWNLOAD_OPTIONS);
       }
 
       res.attachment(download.fileName);
       res.type('zip');
-      download.stream.on('error', (error) => {
+      download.stream!.on('error', (error: unknown) => {
         if (!res.headersSent) {
           sendError(res, error);
           return;
         }
         res.destroy(error);
       });
-      return download.stream.pipe(res);
+      download.stream!.pipe(res as NodeJS.WritableStream);
+      return;
     } catch (error) {
       return sendError(res, error);
     }
