@@ -1,14 +1,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ExpectStatic } from 'vitest';
 import { createDocumentAuthority } from './authority.js';
 import { DocumentPathError, DocumentUntrustedError } from './errors.js';
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const waitUntil = async (probe, timeoutMs = 8000) => {
+const waitUntil = async <T>(probe: () => T | Promise<T>, timeoutMs = 8000): Promise<T> => {
   const started = Date.now();
-  let lastError;
+  let lastError: unknown;
   while (Date.now() - started < timeoutMs) {
     try {
       const value = await probe();
@@ -21,21 +22,62 @@ const waitUntil = async (probe, timeoutMs = 8000) => {
   throw lastError ?? new Error('Timed out waiting for document authority condition');
 };
 
-const operationId = () => `op-${Math.random().toString(36).slice(2)}`;
+const operationId = (): string => `op-${Math.random().toString(36).slice(2)}`;
 
-export const createDocumentAuthorityHarness = async (overrides = {}) => {
+interface DocumentResource {
+  workspaceId: string;
+  resourceId: string;
+}
+
+interface DocumentTokenOwner {
+  kind: string;
+  id: string;
+}
+
+interface DocumentToken {
+  workspaceId: string;
+  epoch: number;
+  owner: DocumentTokenOwner;
+}
+
+interface DocumentAuthorityHarnessOverrides {
+  trusted?: boolean | undefined;
+  allowedRoot?: string | undefined;
+  hostId?: string | undefined;
+  overflowLimit?: number | undefined;
+  authority?: Record<string, unknown> | undefined;
+}
+
+interface DocumentAuthorityHarness {
+  // The authority is produced by `createDocumentAuthority` (still authored in
+  // JavaScript with `checkJs` disabled), so its members are intentionally
+  // untyped here. Test fixtures lean on this loose surface.
+  authority: any;
+  identity: any;
+  root: string;
+  workspaceRoot: string;
+  dataDir: string;
+  setTrusted: (value: boolean) => void;
+  resource: (resourceId: string) => DocumentResource;
+  token: (epoch?: number, owner?: DocumentTokenOwner) => DocumentToken;
+  cleanup: () => Promise<void>;
+}
+
+export const createDocumentAuthorityHarness = async (
+  overrides: DocumentAuthorityHarnessOverrides = {},
+): Promise<DocumentAuthorityHarness> => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-documents-'));
   const workspaceRoot = path.join(root, 'workspace');
   const dataDir = path.join(root, 'data');
   await fs.promises.mkdir(workspaceRoot, { recursive: true });
-  let trusted = overrides.trusted ?? true;
+  let trusted: boolean = overrides.trusted ?? true;
   const allowedRootInput = overrides.allowedRoot ?? workspaceRoot;
   const allowedRoot = await fs.promises.realpath(allowedRootInput);
   const authority = createDocumentAuthority({
     hostId: overrides.hostId ?? '11111111-1111-4111-8111-111111111111',
     dataDir,
     isTrusted: async () => trusted,
-    isAllowedRoot: async (candidate) => {
+    isAllowedRoot: async (candidate: string) => {
       const normalized = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
       const allowed = process.platform === 'win32' ? allowedRoot.toLowerCase() : allowedRoot;
       return normalized === allowed || normalized.startsWith(`${allowed}${path.sep}`);
@@ -43,18 +85,24 @@ export const createDocumentAuthorityHarness = async (overrides = {}) => {
     overflowLimit: overrides.overflowLimit ?? 256,
     ...(overrides.authority ?? {}),
   });
-  const identity = await authority.resolveWorkspace({ path: workspaceRoot });
+  // `resolveWorkspace` is authored in JavaScript and its inferred return type
+  // includes `| undefined` (the catch branch falls through). The harness always
+  // resolves a fresh workspace before use, so we treat the identity as defined.
+  const identity: any = await authority.resolveWorkspace({ path: workspaceRoot });
   return {
     authority,
     identity,
     root,
     workspaceRoot,
     dataDir,
-    setTrusted: (value) => {
+    setTrusted: (value: boolean) => {
       trusted = value;
     },
-    resource: (resourceId) => ({ workspaceId: identity.workspaceId, resourceId }),
-    token: (epoch = identity.epoch, owner = { kind: 'test', id: 'document-contract' }) => ({
+    resource: (resourceId: string) => ({ workspaceId: identity.workspaceId, resourceId }),
+    token: (
+      epoch: number = identity.epoch,
+      owner: DocumentTokenOwner = { kind: 'test', id: 'document-contract' },
+    ) => ({
       workspaceId: identity.workspaceId,
       epoch,
       owner,
@@ -69,9 +117,23 @@ export const createDocumentAuthorityHarness = async (overrides = {}) => {
   };
 };
 
-export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEach, afterEach }) => {
+interface DocumentAuthorityContractContext {
+  describe: (...args: any[]) => void;
+  it: (...args: any[]) => void;
+  expect: ExpectStatic;
+  beforeEach: (...args: any[]) => void;
+  afterEach: (...args: any[]) => void;
+}
+
+export const defineDocumentAuthorityContract = ({
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+}: DocumentAuthorityContractContext): void => {
   describe('document authority contract', () => {
-    let harness;
+    let harness: any;
 
     beforeEach(async () => {
       harness = await createDocumentAuthorityHarness();
@@ -100,11 +162,11 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
       expect(binary.status).toBe('binary');
       expect(binary.content).toBeUndefined();
 
-      const fsPromises = {
+      const fsPromises: any = {
         ...fs.promises,
-        readFile: async (target, encoding) => {
+        readFile: async (target: any, encoding?: any) => {
           if (String(target).includes('denied.txt')) {
-            const error = new Error('EACCES: permission denied');
+            const error = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
             error.code = 'EACCES';
             throw error;
           }
@@ -198,7 +260,7 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
         operationId: operationId(),
       });
       const results = await Promise.all([firstWrite, secondWrite]);
-      expect(results.filter((result) => result.status === 'written').length).toBeGreaterThanOrEqual(1);
+      expect(results.filter((result: any) => result.status === 'written').length).toBeGreaterThanOrEqual(1);
       const final = await harness.authority.read(resource);
       expect(final.status).toBe('ready');
       expect(['first-write', 'second-write']).toContain(final.content);
@@ -206,11 +268,11 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
 
     it('preserves the previous document when atomic replacement fails', async () => {
       await harness.cleanup();
-      const fsPromises = {
+      const fsPromises: any = {
         ...fs.promises,
-        rename: async (source, destination) => {
+        rename: async (source: any, destination: any) => {
           if (String(source).includes('.piarium-tmp-') && String(destination).endsWith('protected.txt')) {
-            const error = new Error('EPERM: replacement denied');
+            const error = new Error('EPERM: replacement denied') as NodeJS.ErrnoException;
             error.code = 'EPERM';
             throw error;
           }
@@ -329,8 +391,8 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
         workspaceId: harness.identity.workspaceId,
         recoverySessionId: 'session-fenced',
       });
-      expect(journalHistory.some((entry) => entry.epoch === harness.identity.epoch)).toBe(true);
-      expect(journalHistory.some((entry) => entry.epoch === advanced.epoch)).toBe(true);
+      expect(journalHistory.some((entry: any) => entry.epoch === harness.identity.epoch)).toBe(true);
+      expect(journalHistory.some((entry: any) => entry.epoch === advanced.epoch)).toBe(true);
       const fresh = await harness.authority.write({
         token: freshToken,
         resource: note,
@@ -443,8 +505,8 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
     });
 
     it('watches created, changed, moved, deleted, and reset events without file bodies', async () => {
-      const events = [];
-      const subscription = harness.authority.watch(harness.identity.workspaceId, (event) => {
+      const events: any[] = [];
+      const subscription = harness.authority.watch(harness.identity.workspaceId, (event: any) => {
         events.push(event);
       });
       await waitUntil(() => harness.authority.hasWatch(harness.identity.workspaceId));
@@ -481,7 +543,7 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
         await fs.promises.symlink(outside, link);
         await expect(harness.authority.read(harness.resource('escape.txt'))).rejects.toBeInstanceOf(DocumentPathError);
       } catch (error) {
-        if (error?.code === 'EPERM') {
+        if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'EPERM') {
           // Windows without developer symlink privilege still covered by path traversal.
         } else {
           throw error;
@@ -526,8 +588,8 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
         recoverySessionId: 'session-1',
       });
       expect(afterMalformed).toHaveLength(1);
-      const originalWrite = fs.promises.writeFile.bind(fs.promises);
-      fs.promises.writeFile = async (...args) => {
+      const originalWrite: any = fs.promises.writeFile.bind(fs.promises);
+      (fs.promises as any).writeFile = async (...args: any[]) => {
         if (String(args[0]).includes('document-recovery') && String(args[0]).includes('.tmp')) {
           throw new Error('disk full');
         }
@@ -546,7 +608,7 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
           expectedRevision: null,
         })).rejects.toThrow(/disk full/);
       } finally {
-        fs.promises.writeFile = originalWrite;
+        (fs.promises as any).writeFile = originalWrite;
       }
       await expect(harness.authority.listRecoveryJournals({
         workspaceId: '../escape',

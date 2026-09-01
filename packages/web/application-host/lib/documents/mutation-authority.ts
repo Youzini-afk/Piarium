@@ -5,39 +5,141 @@ import { DocumentAuthorityError } from './errors.js';
 
 const SCHEMA_VERSION = 3;
 const LEGACY_SCHEMA_VERSION = 2;
-const WRITER_MODES = new Set(['controlled', 'process', 'external']);
+const WRITER_MODES = new Set<string>(['controlled', 'process', 'external']);
 
-// A PID is not enough to distinguish a restarted process or an abandoned authority
-// instance in the same Host. Instances in this process can be identified exactly;
-// another live process is deliberately retained because its instance cannot be
-// confirmed without a separate liveness protocol.
-const liveAuthorityInstances = new Set();
+// ── Types ────────────────────────────────────────────────────────────────
 
-const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+interface MutationOwner {
+  kind: string;
+  id: string;
+  generation?: number;
+}
 
-const malformedState = () => new DocumentAuthorityError('Workspace mutation authority state is malformed', {
+interface MaintenanceOwner {
+  pid: number;
+  authorityInstanceId: string;
+  acquiredAt: string;
+}
+
+interface ActiveWriter {
+  writerId: string;
+  pid: number;
+  authorityInstanceId: string;
+  epoch: number;
+  mode: string;
+  owner: MutationOwner;
+  purpose: string;
+  startedAt: string;
+}
+
+interface WorkspaceMutationEntry {
+  epoch: number;
+  maintenance: boolean;
+  maintenanceOwner: MaintenanceOwner | null;
+  mutationRevision: number;
+  writerRevision: number;
+  activeWriters: Record<string, ActiveWriter>;
+}
+
+interface MutationDocument {
+  schemaVersion: number;
+  hostId: string;
+  workspaces: Record<string, WorkspaceMutationEntry>;
+}
+
+interface MutationToken {
+  workspaceId: string;
+  epoch: number;
+  owner: unknown;
+}
+
+interface WatchPosition {
+  sourceId: string;
+  generation: number;
+  sequence: number;
+}
+
+interface WatchEvent {
+  sourceId: string;
+  generation: number;
+  sequence: number;
+}
+
+interface WorkspaceRuntime {
+  workspaceId: string;
+  reconciliationRequired: boolean;
+  watch: WatchPosition | null;
+  watchRevision: number;
+  lastDurableWitness: { epoch: number; maintenance: boolean; mutationRevision: number; writerRevision: number } | null;
+}
+
+interface RegisterWriterOptions {
+  mode?: string;
+  purpose?: string;
+}
+
+interface AdvanceEpochOptions {
+  expectedEpoch?: number;
+  maintenance?: boolean;
+}
+
+interface CaptureToken {
+  captureId: string;
+  workspaceId: string;
+  epoch: number;
+  mutationRevision: number;
+  writerRevision: number;
+  activeWriterIds: string[];
+  allowMaintenance?: boolean;
+  maintenance: boolean;
+  watchRevision: number;
+  watch: WatchPosition | null;
+}
+
+interface MutationOperationResult {
+  changed?: boolean;
+  result?: unknown;
+}
+
+interface WorkspaceMutationAuthorityOptions {
+  dataDir: string;
+  hostId: string;
+  fsModule?: unknown;
+  fsPromises?: unknown;
+  pathModule?: typeof path;
+  processLike?: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>;
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────
+
+const liveAuthorityInstances = new Set<string>();
+
+const positiveInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0;
+
+const malformedState = (): DocumentAuthorityError => new DocumentAuthorityError('Workspace mutation authority state is malformed', {
   code: 'failed',
   statusCode: 500,
 });
 
-const assertOwner = (owner) => {
+const assertOwner = (owner: unknown): MutationOwner => {
   if (!owner || typeof owner !== 'object' || Array.isArray(owner)) {
     throw new DocumentAuthorityError('Workspace mutation owner is required', { code: 'failed', statusCode: 400 });
   }
-  if (typeof owner.kind !== 'string' || !owner.kind.trim() || typeof owner.id !== 'string' || !owner.id.trim()) {
+  const o = owner as Record<string, unknown>;
+  if (typeof o.kind !== 'string' || !o.kind.trim() || typeof o.id !== 'string' || !o.id.trim()) {
     throw new DocumentAuthorityError('Workspace mutation owner is malformed', { code: 'failed', statusCode: 400 });
   }
-  if (owner.generation !== undefined && (!Number.isSafeInteger(owner.generation) || owner.generation < 0)) {
+  if (o.generation !== undefined && (!Number.isSafeInteger(o.generation) || (o.generation as number) < 0)) {
     throw new DocumentAuthorityError('Workspace mutation owner generation is malformed', { code: 'failed', statusCode: 400 });
   }
   return {
-    kind: owner.kind.trim(),
-    id: owner.id.trim(),
-    ...(owner.generation === undefined ? {} : { generation: owner.generation }),
+    kind: (o.kind as string).trim(),
+    id: (o.id as string).trim(),
+    ...(o.generation === undefined ? {} : { generation: o.generation as number }),
   };
 };
 
-const assertStoredOwner = (owner) => {
+const assertStoredOwner = (owner: unknown): MutationOwner => {
   try {
     return assertOwner(owner);
   } catch {
@@ -45,7 +147,7 @@ const assertStoredOwner = (owner) => {
   }
 };
 
-const defaultEntry = () => ({
+const defaultEntry = (): WorkspaceMutationEntry => ({
   epoch: 1,
   maintenance: false,
   maintenanceOwner: null,
@@ -54,27 +156,29 @@ const defaultEntry = () => ({
   activeWriters: {},
 });
 
-const assertMaintenanceOwner = (owner) => {
+const assertMaintenanceOwner = (owner: unknown): MaintenanceOwner => {
   if (!owner || typeof owner !== 'object' || Array.isArray(owner)
-    || !positiveInteger(owner.pid)
-    || typeof owner.authorityInstanceId !== 'string' || !owner.authorityInstanceId
-    || typeof owner.acquiredAt !== 'string' || !owner.acquiredAt) {
+    || !positiveInteger((owner as Record<string, unknown>).pid)
+    || typeof (owner as Record<string, unknown>).authorityInstanceId !== 'string' || !(owner as Record<string, unknown>).authorityInstanceId
+    || typeof (owner as Record<string, unknown>).acquiredAt !== 'string' || !(owner as Record<string, unknown>).acquiredAt) {
     throw malformedState();
   }
-  return owner;
+  return owner as MaintenanceOwner;
 };
 
-const assertDocument = (value, hostId) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(value.schemaVersion)
-    || value.hostId !== hostId
-    || !value.workspaces
-    || typeof value.workspaces !== 'object'
-    || Array.isArray(value.workspaces)) {
+const assertDocument = (value: unknown, hostId: string): { document: MutationDocument; migrated: boolean } => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw malformedState();
+  const v = value as Record<string, unknown>;
+  if (![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(v.schemaVersion as number)
+    || v.hostId !== hostId
+    || !v.workspaces
+    || typeof v.workspaces !== 'object'
+    || Array.isArray(v.workspaces)) {
     throw malformedState();
   }
 
-  for (const [workspaceId, entry] of Object.entries(value.workspaces)) {
+  const doc = v as unknown as MutationDocument;
+  for (const [workspaceId, entry] of Object.entries(doc.workspaces)) {
     if (!workspaceId || !entry || typeof entry !== 'object' || Array.isArray(entry)
       || !positiveInteger(entry.epoch)
       || !positiveInteger(entry.mutationRevision)
@@ -98,46 +202,42 @@ const assertDocument = (value, hostId) => {
       }
       assertStoredOwner(writer.owner);
     }
-    if (value.schemaVersion === SCHEMA_VERSION) {
+    if (doc.schemaVersion === SCHEMA_VERSION) {
       if (entry.maintenance) assertMaintenanceOwner(entry.maintenanceOwner);
       else if (entry.maintenanceOwner !== null) throw malformedState();
     }
   }
-  const migrated = value.schemaVersion === LEGACY_SCHEMA_VERSION;
+  const migrated = doc.schemaVersion === LEGACY_SCHEMA_VERSION;
   if (migrated) {
-    value.schemaVersion = SCHEMA_VERSION;
-    for (const entry of Object.values(value.workspaces)) {
+    doc.schemaVersion = SCHEMA_VERSION;
+    for (const entry of Object.values(doc.workspaces)) {
       if (entry.maintenance) entry.writerRevision += 1;
-      // A v2 lock has no live owner and therefore cannot authorize blocking a
-      // workspace in a new Host process.
       entry.maintenance = false;
       entry.maintenanceOwner = null;
     }
   }
-  return { document: value, migrated };
+  return { document: doc, migrated };
 };
 
-const processMayBeAlive = (processLike, pid) => {
+const processMayBeAlive = (processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>, pid: number): boolean => {
   if (pid === processLike.pid) return true;
   if (typeof processLike.kill !== 'function') return true;
   try {
     processLike.kill(pid, 0);
     return true;
   } catch (error) {
-    // Only ESRCH proves that the process is gone. EPERM and unknown platform
-    // failures must keep the writer fenced rather than creating a false negative.
-    return error?.code !== 'ESRCH';
+    return (error as NodeJS.ErrnoException)?.code !== 'ESRCH';
   }
 };
 
-const writerMayBeAlive = (processLike, writer) => {
+const writerMayBeAlive = (processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>, writer: ActiveWriter): boolean => {
   if (writer.pid === processLike.pid) {
     return liveAuthorityInstances.has(writer.authorityInstanceId);
   }
   return processMayBeAlive(processLike, writer.pid);
 };
 
-const cleanDeadWriters = (entry, processLike) => {
+const cleanDeadWriters = (entry: WorkspaceMutationEntry, processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>): boolean => {
   let removed = false;
   for (const [writerId, writer] of Object.entries(entry.activeWriters)) {
     if (writerMayBeAlive(processLike, writer)) continue;
@@ -148,31 +248,34 @@ const cleanDeadWriters = (entry, processLike) => {
   return removed;
 };
 
-const cleanDeadMaintenance = (entry, processLike) => {
+const cleanDeadMaintenance = (entry: WorkspaceMutationEntry, processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>): boolean => {
   if (!entry.maintenance) {
     if (entry.maintenanceOwner === null) return false;
     entry.maintenanceOwner = null;
     return true;
   }
-  if (entry.maintenanceOwner && writerMayBeAlive(processLike, entry.maintenanceOwner)) return false;
+  if (entry.maintenanceOwner && writerMayBeAlive(processLike, entry.maintenanceOwner as unknown as ActiveWriter)) return false;
   entry.maintenance = false;
   entry.maintenanceOwner = null;
   entry.writerRevision += 1;
   return true;
 };
 
-const durableWitness = (entry) => ({
+const durableWitness = (entry: WorkspaceMutationEntry) => ({
   epoch: entry.epoch,
   maintenance: entry.maintenance,
   mutationRevision: entry.mutationRevision,
   writerRevision: entry.writerRevision,
 });
 
-const sameWorkspaceContentWitness = (left, right) => left
+const sameWorkspaceContentWitness = (
+  left: { epoch: number; mutationRevision: number } | null,
+  right: { epoch: number; mutationRevision: number },
+): boolean => left !== null
   && left.epoch === right.epoch
   && left.mutationRevision === right.mutationRevision;
 
-const publicState = (runtime, entry) => ({
+const publicState = (runtime: WorkspaceRuntime, entry: WorkspaceMutationEntry) => ({
   workspaceId: runtime.workspaceId,
   epoch: entry.epoch,
   mutationRevision: entry.mutationRevision,
@@ -192,6 +295,8 @@ const publicState = (runtime, entry) => ({
   watch: runtime.watch ? { ...runtime.watch } : null,
 });
 
+// ── Factory ──────────────────────────────────────────────────────────────
+
 export const createWorkspaceMutationAuthority = ({
   dataDir,
   hostId,
@@ -199,7 +304,7 @@ export const createWorkspaceMutationAuthority = ({
   fsPromises,
   pathModule = path,
   processLike = process,
-}) => {
+}: WorkspaceMutationAuthorityOptions) => {
   const store = createSettingsFileStore({
     filePath: pathModule.join(dataDir, 'documents', 'mutation-authority.json'),
     defaultValue: {
@@ -207,31 +312,31 @@ export const createWorkspaceMutationAuthority = ({
       hostId,
       workspaces: {},
     },
-    ...(fsModule ? { fsModule } : {}),
-    ...(fsPromises ? { fsPromises } : {}),
+    ...(fsModule !== undefined ? { fsModule: fsModule as never } : {}),
+    ...(fsPromises !== undefined ? { fsPromises: fsPromises as never } : {}),
     pathModule,
     processLike,
   });
   const authorityInstanceId = randomUUID();
-  const runtimes = new Map();
-  const queues = new Map();
+  const runtimes = new Map<string, WorkspaceRuntime>();
+  const queues = new Map<string, Promise<unknown>>();
   let disposed = false;
-  let disposePromise = null;
+  let disposePromise: Promise<void> | null = null;
   liveAuthorityInstances.add(authorityInstanceId);
 
-  const ownsMaintenance = (entry) => entry.maintenanceOwner?.authorityInstanceId === authorityInstanceId
+  const ownsMaintenance = (entry: WorkspaceMutationEntry): boolean => entry.maintenanceOwner?.authorityInstanceId === authorityInstanceId
     && entry.maintenanceOwner.pid === processLike.pid;
-  const maintenanceOwner = () => ({
+  const maintenanceOwner = (): MaintenanceOwner => ({
     acquiredAt: new Date().toISOString(),
     authorityInstanceId,
     pid: processLike.pid,
   });
-  const maintenanceConflict = (entry) => new DocumentAuthorityError(
+  const maintenanceConflict = (entry: WorkspaceMutationEntry): DocumentAuthorityError => new DocumentAuthorityError(
     'Workspace maintenance is owned by another live Host process',
     { code: 'maintenance', statusCode: 409, currentEpoch: entry.epoch },
   );
 
-  const assertAvailable = () => {
+  const assertAvailable = (): void => {
     if (disposed) {
       throw new DocumentAuthorityError('Workspace mutation authority is disposed', {
         code: 'failed',
@@ -240,7 +345,7 @@ export const createWorkspaceMutationAuthority = ({
     }
   };
 
-  const ensureRuntime = (workspaceId) => {
+  const ensureRuntime = (workspaceId: string): WorkspaceRuntime => {
     let runtime = runtimes.get(workspaceId);
     if (!runtime) {
       runtime = {
@@ -255,17 +360,18 @@ export const createWorkspaceMutationAuthority = ({
     return runtime;
   };
 
-  const syncRuntime = (runtime, entry) => {
+  const syncRuntime = (runtime: WorkspaceRuntime, entry: WorkspaceMutationEntry): void => {
     const next = durableWitness(entry);
-    // Writer admission/release is lifecycle metadata, not evidence that file
-    // content changed. Only content/epoch movement invalidates a reusable head.
     if (runtime.lastDurableWitness && !sameWorkspaceContentWitness(runtime.lastDurableWitness, next)) {
       runtime.reconciliationRequired = true;
     }
     runtime.lastDurableWitness = next;
   };
 
-  const mutateWorkspace = (workspaceId, operation = () => ({ changed: false })) => store.transact((raw) => {
+  const mutateWorkspace = (
+    workspaceId: string,
+    operation: (entry: WorkspaceMutationEntry) => MutationOperationResult | void = () => ({ changed: false }),
+  ) => store.transact((raw) => {
     const normalized = assertDocument(raw, hostId);
     const { document } = normalized;
     let changed = normalized.migrated;
@@ -280,7 +386,7 @@ export const createWorkspaceMutationAuthority = ({
     const outcome = operation(entry) ?? {};
     changed ||= outcome.changed === true;
     return {
-      document,
+      document: document as unknown as Record<string, unknown>,
       result: {
         entry: structuredClone(entry),
         value: outcome.result,
@@ -289,7 +395,7 @@ export const createWorkspaceMutationAuthority = ({
     };
   });
 
-  const run = (workspaceId, operation) => {
+  const run = <Result>(workspaceId: string, operation: (runtime: WorkspaceRuntime) => Promise<Result>): Promise<Result> => {
     if (typeof workspaceId !== 'string' || !workspaceId) {
       return Promise.reject(new DocumentAuthorityError('workspaceId is required', { code: 'failed', statusCode: 400 }));
     }
@@ -302,19 +408,19 @@ export const createWorkspaceMutationAuthority = ({
     void current.finally(() => {
       if (queues.get(workspaceId) === current) queues.delete(workspaceId);
     }).catch(() => undefined);
-    return current;
+    return current as Promise<Result>;
   };
 
-  const validateTokenShape = (workspaceId, token) => {
+  const validateTokenShape = (workspaceId: string, token: unknown): MutationOwner => {
     if (!token || typeof token !== 'object' || Array.isArray(token)
-      || token.workspaceId !== workspaceId
-      || !positiveInteger(token.epoch)) {
+      || (token as Record<string, unknown>).workspaceId !== workspaceId
+      || !positiveInteger((token as Record<string, unknown>).epoch)) {
       throw new DocumentAuthorityError('Workspace mutation token is malformed', { code: 'failed', statusCode: 400 });
     }
-    return assertOwner(token.owner);
+    return assertOwner((token as Record<string, unknown>).owner);
   };
 
-  const validateAdmission = (entry, token) => {
+  const validateAdmission = (entry: WorkspaceMutationEntry, token: MutationToken): void => {
     if (token.epoch !== entry.epoch) {
       throw new DocumentAuthorityError('Workspace mutation epoch is stale', {
         code: 'stale-epoch',
@@ -331,27 +437,27 @@ export const createWorkspaceMutationAuthority = ({
     }
   };
 
-  const inspect = (workspaceId) => run(workspaceId, async (runtime) => {
+  const inspect = (workspaceId: string) => run(workspaceId, async (runtime) => {
     const { entry } = await mutateWorkspace(workspaceId);
     syncRuntime(runtime, entry);
     return publicState(runtime, entry);
   });
 
-  const registerWriter = (token, options = {}) => run(token?.workspaceId, async (runtime) => {
+  const registerWriter = (token: MutationToken | undefined, options: RegisterWriterOptions = {}) => run(token?.workspaceId ?? '', async (runtime) => {
     const owner = validateTokenShape(runtime.workspaceId, token);
     const writerId = randomUUID();
-    const writer = {
+    const writer: ActiveWriter = {
       writerId,
       pid: processLike.pid,
       authorityInstanceId,
-      epoch: token.epoch,
-      mode: WRITER_MODES.has(options.mode) ? options.mode : 'controlled',
+      epoch: token!.epoch,
+      mode: options.mode && WRITER_MODES.has(options.mode) ? options.mode : 'controlled',
       owner,
       purpose: typeof options.purpose === 'string' && options.purpose ? options.purpose : 'workspace-mutation',
       startedAt: new Date().toISOString(),
     };
     const { entry } = await mutateWorkspace(runtime.workspaceId, (current) => {
-      validateAdmission(current, token);
+      validateAdmission(current, token!);
       current.activeWriters[writerId] = writer;
       current.writerRevision += 1;
       return { changed: true };
@@ -391,28 +497,25 @@ export const createWorkspaceMutationAuthority = ({
     };
   });
 
-  // Native watch events are intentionally process-local. Durable controlled
-  // mutations are witnessed by mutationRevision/writerRevision, while the
-  // source/generation/sequence position detects filesystem activity without a
-  // whole-file settings rewrite for every event.
-  const observeWatchEvent = (workspaceId, event) => run(workspaceId, async (runtime) => {
+  const observeWatchEvent = (workspaceId: string, event: WatchEvent | unknown) => run(workspaceId, async (runtime) => {
     runtime.reconciliationRequired = true;
     runtime.watchRevision += 1;
     if (!event || typeof event !== 'object'
-      || typeof event.sourceId !== 'string' || !event.sourceId
-      || !positiveInteger(event.generation)
-      || !positiveInteger(event.sequence)) {
+      || typeof (event as Record<string, unknown>).sourceId !== 'string' || !(event as Record<string, unknown>).sourceId
+      || !positiveInteger((event as Record<string, unknown>).generation)
+      || !positiveInteger((event as Record<string, unknown>).sequence)) {
       return null;
     }
+    const e = event as WatchEvent;
     runtime.watch = {
-      sourceId: event.sourceId,
-      generation: event.generation,
-      sequence: event.sequence,
+      sourceId: e.sourceId,
+      generation: e.generation,
+      sequence: e.sequence,
     };
     return { ...runtime.watch };
   });
 
-  const setWatchBaseline = (workspaceId, position) => run(workspaceId, async (runtime) => {
+  const setWatchBaseline = (workspaceId: string, position: WatchPosition | null) => run(workspaceId, async (runtime) => {
     if (!position || typeof position.sourceId !== 'string' || !position.sourceId
       || !positiveInteger(position.generation)
       || !Number.isSafeInteger(position.sequence)
@@ -435,7 +538,7 @@ export const createWorkspaceMutationAuthority = ({
     return publicState(runtime, entry);
   });
 
-  const beginCapture = (workspaceId, options = {}) => run(workspaceId, async (runtime) => {
+  const beginCapture = (workspaceId: string, options: { allowMaintenance?: boolean } = {}) => run(workspaceId, async (runtime) => {
     const { entry } = await mutateWorkspace(workspaceId);
     syncRuntime(runtime, entry);
     return {
@@ -452,14 +555,14 @@ export const createWorkspaceMutationAuthority = ({
     };
   });
 
-  const completeCapture = (capture) => run(capture?.workspaceId, async (runtime) => {
+  const completeCapture = (capture: CaptureToken | undefined) => run(capture?.workspaceId ?? '', async (runtime) => {
     if (!capture || typeof capture.captureId !== 'string' || !capture.captureId
       || !Array.isArray(capture.activeWriterIds)) {
       throw new DocumentAuthorityError('Workspace capture token is malformed', { code: 'failed', statusCode: 400 });
     }
     const { entry } = await mutateWorkspace(runtime.workspaceId);
     syncRuntime(runtime, entry);
-    const reasons = [];
+    const reasons: string[] = [];
     if (capture.epoch !== entry.epoch) reasons.push('epoch-changed');
     if (capture.mutationRevision !== entry.mutationRevision) reasons.push('mutation-observed');
     if (capture.writerRevision !== entry.writerRevision) reasons.push('writer-activity');
@@ -483,7 +586,7 @@ export const createWorkspaceMutationAuthority = ({
     };
   });
 
-  const advanceEpoch = (workspaceId, options = {}) => run(workspaceId, async (runtime) => {
+  const advanceEpoch = (workspaceId: string, options: AdvanceEpochOptions = {}) => run(workspaceId, async (runtime) => {
     const transaction = await mutateWorkspace(workspaceId, (entry) => {
       if (options.expectedEpoch !== undefined && options.expectedEpoch !== entry.epoch) {
         throw new DocumentAuthorityError('Workspace mutation epoch is stale', {
@@ -514,7 +617,7 @@ export const createWorkspaceMutationAuthority = ({
     return publicState(runtime, transaction.entry);
   });
 
-  const setMaintenance = (workspaceId, enabled) => run(workspaceId, async (runtime) => {
+  const setMaintenance = (workspaceId: string, enabled: unknown) => run(workspaceId, async (runtime) => {
     const next = Boolean(enabled);
     const transaction = await mutateWorkspace(workspaceId, (entry) => {
       if (entry.maintenance === next) {
@@ -531,7 +634,7 @@ export const createWorkspaceMutationAuthority = ({
     return publicState(runtime, transaction.entry);
   });
 
-  const dispose = () => {
+  const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
     disposePromise = (async () => {
@@ -557,11 +660,8 @@ export const createWorkspaceMutationAuthority = ({
             changed = true;
           }
         }
-        return { document, write: changed };
+        return { document: document as unknown as Record<string, unknown>, result: undefined, write: changed };
       });
-      // Keep the instance live until its durable writer records have been
-      // removed. A peer in this process may otherwise mistake an in-progress
-      // disposal for an abandoned instance and advance the epoch too early.
       liveAuthorityInstances.delete(authorityInstanceId);
       runtimes.clear();
     })();

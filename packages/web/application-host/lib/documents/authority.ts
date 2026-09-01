@@ -18,20 +18,225 @@ import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './i
 import { createWorkspaceMutationAuthority } from './mutation-authority.js';
 import { createRecoveryJournalStore } from './recovery-journal.js';
 import { createSerialQueues } from './serialize.js';
-import { createWorkspaceWatcher } from './watch.js';
+import { createWorkspaceWatcher, type WorkspaceWatcher } from './watch.js';
 import {
   createWorkspaceRegistry,
   looksLikeCanonicalWorkspaceId,
   looksLikeFilesystemWorkspaceScopeId,
+  type WorkspaceMapping,
 } from './workspace-registry.js';
 
-const resourceKey = (resource) => `${resource.workspaceId}\0${resource.resourceId}`;
+// ── Types ────────────────────────────────────────────────────────────────
 
-const toIso = (mtimeMs) => new Date(mtimeMs).toISOString();
+interface DocumentResource {
+  workspaceId: string;
+  resourceId: string;
+}
 
-const withoutContent = (result) => {
+interface MutationToken {
+  workspaceId: string;
+  epoch: number;
+  owner: unknown;
+}
+
+interface MutationOwner {
+  kind: string;
+  id: string;
+  generation?: number;
+}
+
+interface ResolvedWorkspacePath {
+  absolutePath: string;
+  relativePath: string;
+}
+
+interface LoadedWorkspace extends WorkspaceMapping {
+  root: string;
+}
+
+interface ResolveResourceResult {
+  workspace: LoadedWorkspace;
+  resolved: ResolvedWorkspacePath;
+}
+
+type SnapshotResult =
+  | { status: 'missing'; resource: DocumentResource }
+  | { status: 'binary'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt: string }
+  | { status: 'unsupported-encoding'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt: string; candidates?: string[] }
+  | { status: 'ready'; resource: DocumentResource; revision: string; content: string; encoding: string; bom: boolean; byteLength: number; modifiedAt: string };
+
+type SnapshotWithEpoch = SnapshotResult & { epoch: number };
+
+type WithoutContentResult =
+  | { status: 'ready'; epoch: number; resource: DocumentResource; revision: string; encoding: string; bom: boolean; byteLength: number; modifiedAt?: string }
+  | SnapshotResult;
+
+interface WriteRequest {
+  resource: DocumentResource;
+  token: MutationToken;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  expectedRevision: string | null;
+}
+
+interface MoveRequest {
+  from: DocumentResource;
+  to: DocumentResource;
+  token: MutationToken;
+  expectedRevision: string;
+}
+
+interface DeleteRequest {
+  resource: DocumentResource;
+  token: MutationToken;
+  expectedRevision: string;
+}
+
+interface ResolveWorkspaceInput {
+  workspaceId?: string;
+  path?: string;
+}
+
+interface ResolveWorkspaceResult {
+  workspaceId: string;
+  hostId: string;
+  epoch: number;
+}
+
+interface WatchSubscription {
+  ready: Promise<boolean>;
+  settle: () => Promise<void>;
+  close: () => void;
+}
+
+interface WatcherRecord {
+  listeners: Set<(event: unknown) => void>;
+  controller: WorkspaceWatcher | null;
+  ready: Promise<WorkspaceWatcher | null> | null;
+}
+
+interface CaptureWatch {
+  subscription: WatchSubscription;
+  controller: WorkspaceWatcher;
+}
+
+interface DirtySurfaceRequest {
+  ownerId: string;
+  workspaceId: string;
+  generation: number;
+}
+
+interface DirtySurfaceRecord extends DirtySurfaceRequest {
+  key: string;
+  listener: (event: unknown) => void;
+  registrationId: string;
+}
+
+interface DirtySurfaceSubscription {
+  close: () => void;
+}
+
+interface DirtyBufferResource {
+  baseRevision: string | null;
+  localEditRevision: number;
+  resource: DocumentResource;
+}
+
+interface DirtyBufferRecord {
+  generation: number;
+  ownerId: string;
+  publicationRevision: number;
+  resources: DirtyBufferResource[];
+  updatedAt: string;
+  workspaceId: string;
+}
+
+interface DirtyBufferPublication {
+  generation: number;
+  ownerId: string;
+  resources: DirtyBufferResource[];
+  updatedAt: string;
+  workspaceId: string;
+}
+
+interface DirtyBarrierWaiter {
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
+interface DirtyBarrier {
+  barrierId: string;
+  caseSensitive: boolean;
+  paths: string[];
+  pending: Set<string>;
+  requiredPublications: Map<string, number>;
+  released: boolean;
+  surfaceKeys: Set<string>;
+  timer: ReturnType<typeof setTimeout> | null;
+  waiters: Set<DirtyBarrierWaiter>;
+  workspaceId: string;
+}
+
+interface DirtyStateBarrierHandle {
+  barrierId: string;
+  release: () => Promise<void>;
+  settle: () => Promise<void>;
+}
+
+interface DirtyStateBarrierAckRequest {
+  barrierId: string;
+  ownerId: string;
+  workspaceId: string;
+  generation: number;
+}
+
+interface PublishDirtyBuffersRequest {
+  ownerId: string;
+  workspaceId: string;
+  generation: number;
+  resources: unknown[];
+}
+
+interface ClearDirtyBuffersRequest {
+  ownerId: string;
+  workspaceId: string;
+  generation: number;
+}
+
+interface BeginDirtyStateBarrierOptions {
+  caseSensitive?: boolean;
+}
+
+interface JournalMutationRequest {
+  workspaceId?: string;
+  token?: MutationToken;
+}
+
+interface DocumentAuthorityOptions {
+  hostId: string;
+  dataDir: string;
+  fsPromises?: typeof fs.promises;
+  fsModule?: typeof fs;
+  pathModule?: typeof path;
+  processLike?: Pick<NodeJS.Process, 'pid' | 'platform' | 'kill'>;
+  isTrusted?: (root: string) => Promise<boolean>;
+  isAllowedRoot?: (root: string) => Promise<boolean>;
+  onWorkspaceResolved?: (resolved: ResolveWorkspaceResult) => void;
+  maxReadBytes?: number;
+  overflowLimit?: number;
+  dirtyBarrierTimeoutMs?: number;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+const resourceKey = (resource: DocumentResource): string => `${resource.workspaceId}\0${resource.resourceId}`;
+
+const toIso = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
+
+const withoutContent = (result: SnapshotWithEpoch): WithoutContentResult => {
   if (result.status === 'ready') {
-    const next = {
+    const next: WithoutContentResult = {
       status: 'ready',
       epoch: result.epoch,
       resource: result.resource,
@@ -40,13 +245,15 @@ const withoutContent = (result) => {
       bom: result.bom,
       byteLength: result.byteLength,
     };
-    if (result.modifiedAt) next.modifiedAt = result.modifiedAt;
+    if (result.modifiedAt) (next as { modifiedAt?: string }).modifiedAt = result.modifiedAt;
     return next;
   }
   return result;
 };
 
-export const createDocumentAuthority = (options) => {
+// ── Factory ──────────────────────────────────────────────────────────────
+
+export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const {
     hostId,
     dataDir,
@@ -75,14 +282,14 @@ export const createDocumentAuthority = (options) => {
     pathModule,
   });
   const queues = createSerialQueues();
-  const watchers = new Map();
-  const captureWatches = new Map();
-  const dirtyBuffersByOwner = new Map();
-  const dirtySurfaces = new Map();
-  const dirtyBarriers = new Map();
+  const watchers = new Map<string, WatcherRecord>();
+  const captureWatches = new Map<string, CaptureWatch>();
+  const dirtyBuffersByOwner = new Map<string, DirtyBufferRecord>();
+  const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
+  const dirtyBarriers = new Map<string, DirtyBarrier>();
   let dirtyPublicationRevision = 0;
   let disposed = false;
-  let disposePromise = null;
+  let disposePromise: Promise<void> | null = null;
   const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
   const mutations = createWorkspaceMutationAuthority({
     dataDir,
@@ -93,7 +300,7 @@ export const createDocumentAuthority = (options) => {
     processLike,
   });
 
-  const loadWorkspace = async (workspaceId) => {
+  const loadWorkspace = async (workspaceId: string): Promise<LoadedWorkspace> => {
     const mapping = await registry.get(workspaceId);
     if (!mapping) {
       throw new DocumentAuthorityError('Workspace is not registered on this application host', {
@@ -101,7 +308,7 @@ export const createDocumentAuthority = (options) => {
         statusCode: 404,
       });
     }
-    let root;
+    let root: string;
     try {
       root = await canonicalizePathIdentity(mapping.canonicalPath, { fsPromises, pathModule });
     } catch (error) {
@@ -119,7 +326,7 @@ export const createDocumentAuthority = (options) => {
     return { ...mapping, root };
   };
 
-  const fail = (error) => {
+  const fail = (error: unknown): never => {
     if (isDocumentAuthorityError(error)) throw error;
     if (error instanceof WorkspacePathError) {
       throw new DocumentPathError(
@@ -133,7 +340,7 @@ export const createDocumentAuthority = (options) => {
     });
   };
 
-  const resolveResourcePath = async (resource, allowMissing = false) => {
+  const resolveResourcePath = async (resource: DocumentResource, allowMissing = false): Promise<ResolveResourceResult> => {
     const workspace = await loadWorkspace(resource.workspaceId);
     try {
       const resolved = await resolveWorkspacePath(resource.resourceId, {
@@ -149,7 +356,7 @@ export const createDocumentAuthority = (options) => {
     throw new DocumentPathError('Path is outside workspace');
   };
 
-  const assertTokenWorkspace = (token, workspaceId) => {
+  const assertTokenWorkspace = (token: MutationToken | undefined, workspaceId: string | undefined): void => {
     if (!token || token.workspaceId !== workspaceId) {
       throw new DocumentAuthorityError('Workspace mutation token does not match the target workspace', {
         code: 'failed',
@@ -158,20 +365,20 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
-  const snapshotFile = async (resource, absolutePath) => {
-    let stat;
+  const snapshotFile = async (resource: DocumentResource, absolutePath: string): Promise<SnapshotResult> => {
+    let stat: import('node:fs').Stats;
     try {
       stat = await fsPromises.lstat(absolutePath);
     } catch (error) {
-      if (error?.code === 'ENOENT') return { status: 'missing', resource };
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { status: 'missing', resource };
       throw error;
     }
     if (stat.isSymbolicLink()) {
-      let real;
+      let real: string;
       try {
         real = await fsPromises.realpath(absolutePath);
       } catch (error) {
-        if (error?.code === 'ENOENT') return { status: 'missing', resource };
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { status: 'missing', resource };
         throw error;
       }
       const workspace = await loadWorkspace(resource.workspaceId);
@@ -202,14 +409,14 @@ export const createDocumentAuthority = (options) => {
       };
     }
     if (inspected.kind === 'unsupported-encoding') {
-      const result = {
+      const result: SnapshotResult = {
         status: 'unsupported-encoding',
         resource,
         revision,
         byteLength: inspected.byteLength,
         modifiedAt,
       };
-      if (inspected.candidates) result.candidates = inspected.candidates;
+      if (inspected.candidates) (result as { candidates?: string[] }).candidates = inspected.candidates;
       return result;
     }
     return {
@@ -224,7 +431,7 @@ export const createDocumentAuthority = (options) => {
     };
   };
 
-  const atomicReplace = async (absolutePath, bytes) => {
+  const atomicReplace = async (absolutePath: string, bytes: Uint8Array): Promise<void> => {
     await fsPromises.mkdir(pathModule.dirname(absolutePath), { recursive: true });
     const tmp = `${absolutePath}.piarium-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
@@ -236,7 +443,7 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
-  const resolveWorkspace = async (input = {}) => {
+  const resolveWorkspace = async (input: ResolveWorkspaceInput = {}): Promise<ResolveWorkspaceResult> => {
     try {
       if (input.workspaceId) {
         const mapping = await registry.get(input.workspaceId);
@@ -253,11 +460,11 @@ export const createDocumentAuthority = (options) => {
       if (!rawPath) {
         throw new DocumentAuthorityError('Workspace path is required', { code: 'failed', statusCode: 400 });
       }
-      let canonicalPath;
+      let canonicalPath: string;
       try {
         canonicalPath = await canonicalizePathIdentity(rawPath, { fsPromises, pathModule });
       } catch (error) {
-        if (error?.code === 'ENOENT') {
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
           throw new DocumentAuthorityError('Workspace path does not exist', { code: 'failed', statusCode: 404 });
         }
         throw error;
@@ -270,28 +477,26 @@ export const createDocumentAuthority = (options) => {
         throw new DocumentPathError('Workspace root is not allowed');
       }
       const mapping = await registry.resolve({ canonicalPath, create: true });
+      if (!mapping) throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
       const mutation = await mutations.inspect(mapping.workspaceId);
       const resolved = { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
-      void Promise.resolve().then(() => onWorkspaceResolved(resolved)).catch((error) => {
-        console.warn(`[Documents] Workspace resolution observer failed: ${error?.message || error}`);
+      void Promise.resolve().then(() => onWorkspaceResolved(resolved)).catch((error: unknown) => {
+        console.warn(`[Documents] Workspace resolution observer failed: ${(error as Error)?.message || error}`);
       });
       return resolved;
     } catch (error) {
       fail(error);
     }
+    throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
   };
 
-  const resolveScopeId = async (scopeId) => {
+  const resolveScopeId = async (scopeId: unknown): Promise<string | null> => {
     if (looksLikeCanonicalWorkspaceId(scopeId)) {
       const mapping = await registry.get(scopeId);
       return mapping ? mapping.workspaceId : null;
     }
     if (!looksLikeFilesystemWorkspaceScopeId(scopeId)) return null;
     try {
-      // A mutation may target a directory that does not exist yet (clone,
-      // mkdir, rename destination). A registered containing workspace is
-      // already sufficient for mutation accounting; this does not grant file
-      // access, which remains with the calling route's existing checks.
       const canonicalPath = await canonicalizePathIdentity(scopeId, {
         allowMissing: true,
         fsPromises,
@@ -308,14 +513,23 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
-  const registerWriterForScope = async (scopeId, owner, options = {}) => {
+  const registerWriterForScope = async (
+    scopeId: unknown,
+    owner: MutationOwner,
+    options: Record<string, unknown> = {},
+  ) => {
     const workspaceId = await resolveScopeId(scopeId);
     if (!workspaceId) return null;
     const state = await mutations.inspect(workspaceId);
     return mutations.registerWriter({ workspaceId, epoch: state.epoch, owner }, options);
   };
 
-  const runMutationForScope = async (scopeId, owner, operation, options = {}) => {
+  const runMutationForScope = async <Result>(
+    scopeId: unknown,
+    owner: MutationOwner,
+    operation: () => Promise<Result>,
+    options: Record<string, unknown> = {},
+  ): Promise<Result> => {
     const writer = await registerWriterForScope(scopeId, owner, options);
     try {
       return await operation();
@@ -330,7 +544,7 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
-  const read = (resource) => queues.run(resourceKey(resource), async () => {
+  const read = (resource: DocumentResource) => queues.run(resourceKey(resource), async () => {
     try {
       const mutation = await mutations.inspect(resource.workspaceId);
       const { resolved } = await resolveResourcePath(resource, true);
@@ -340,8 +554,8 @@ export const createDocumentAuthority = (options) => {
     }
   });
 
-  const write = (request) => queues.run(resourceKey(request.resource), async () => {
-    let writer;
+  const write = (request: WriteRequest) => queues.run(resourceKey(request.resource), async () => {
+    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-write' });
@@ -349,15 +563,15 @@ export const createDocumentAuthority = (options) => {
       const current = {
         ...(await snapshotFile(request.resource, resolved.absolutePath)),
         epoch: request.token.epoch,
-      };
+      } as SnapshotWithEpoch;
       if (request.expectedRevision === null) {
         if (current.status !== 'missing') {
           return { status: 'conflict', current: withoutContent(current) };
         }
-      } else if (current.status === 'missing' || current.revision !== request.expectedRevision) {
+      } else if (current.status === 'missing' || (current.status !== 'binary' && current.status !== 'unsupported-encoding' && current.revision !== request.expectedRevision)) {
         return { status: 'conflict', current: withoutContent(current) };
       }
-      let bytes;
+      let bytes: Uint8Array;
       try {
         bytes = encodeDocumentText({
           content: request.content,
@@ -373,7 +587,7 @@ export const createDocumentAuthority = (options) => {
       if (next.status !== 'ready') {
         throw new DocumentAuthorityError('Failed to read document after write', { code: 'failed', statusCode: 500 });
       }
-      const result = {
+      const result: { status: 'written'; revision: string; byteLength: number; modifiedAt?: string } = {
         status: 'written',
         revision: next.revision,
         byteLength: next.byteLength,
@@ -381,8 +595,8 @@ export const createDocumentAuthority = (options) => {
       if (next.modifiedAt) result.modifiedAt = next.modifiedAt;
       return result;
     } catch (error) {
-      if (error?.code === 'stale-epoch') {
-        return { status: 'stale-epoch', currentEpoch: error.currentEpoch };
+      if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
+        return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
       fail(error);
     } finally {
@@ -390,8 +604,8 @@ export const createDocumentAuthority = (options) => {
     }
   });
 
-  const move = (request) => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
-    let writer;
+  const move = (request: MoveRequest) => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
+    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       if (request.from.workspaceId !== request.to.workspaceId) {
         throw new DocumentAuthorityError('Document moves must stay within one workspace', {
@@ -406,7 +620,7 @@ export const createDocumentAuthority = (options) => {
       const current = {
         ...(await snapshotFile(request.from, source.resolved.absolutePath)),
         epoch: request.token.epoch,
-      };
+      } as SnapshotWithEpoch;
       if (current.status === 'missing') return { status: 'missing', resource: request.from };
       if (current.status !== 'ready' && current.status !== 'binary' && current.status !== 'unsupported-encoding') {
         return { status: 'conflict', current: withoutContent(current) };
@@ -420,17 +634,17 @@ export const createDocumentAuthority = (options) => {
       await fsPromises.rename(source.resolved.absolutePath, target.resolved.absolutePath);
       await writer.markMutated();
       const next = await snapshotFile(request.to, target.resolved.absolutePath);
-      const result = {
+      const result: { status: 'moved'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt?: string } = {
         status: 'moved',
         resource: request.to,
-        revision: next.revision,
-        byteLength: next.byteLength ?? 0,
+        revision: next.status === 'missing' ? '' : next.revision,
+        byteLength: next.status === 'missing' ? 0 : next.byteLength ?? 0,
       };
-      if (next.modifiedAt) result.modifiedAt = next.modifiedAt;
+      if (next.status !== 'missing' && next.modifiedAt) result.modifiedAt = next.modifiedAt;
       return result;
     } catch (error) {
-      if (error?.code === 'stale-epoch') {
-        return { status: 'stale-epoch', currentEpoch: error.currentEpoch };
+      if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
+        return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
       fail(error);
     } finally {
@@ -438,8 +652,8 @@ export const createDocumentAuthority = (options) => {
     }
   });
 
-  const remove = (request) => queues.run(resourceKey(request.resource), async () => {
-    let writer;
+  const remove = (request: DeleteRequest) => queues.run(resourceKey(request.resource), async () => {
+    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-delete' });
@@ -447,17 +661,17 @@ export const createDocumentAuthority = (options) => {
       const current = {
         ...(await snapshotFile(request.resource, resolved.absolutePath)),
         epoch: request.token.epoch,
-      };
+      } as SnapshotWithEpoch;
       if (current.status === 'missing') return { status: 'missing', resource: request.resource };
-      if (!current.revision || current.revision !== request.expectedRevision) {
+      if ((current.status === 'ready' || current.status === 'binary' || current.status === 'unsupported-encoding') && current.revision !== request.expectedRevision) {
         return { status: 'conflict', current: withoutContent(current) };
       }
       await fsPromises.unlink(resolved.absolutePath);
       await writer.markMutated();
       return { status: 'deleted', resource: request.resource };
     } catch (error) {
-      if (error?.code === 'stale-epoch') {
-        return { status: 'stale-epoch', currentEpoch: error.currentEpoch };
+      if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
+        return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
       fail(error);
     } finally {
@@ -465,58 +679,60 @@ export const createDocumentAuthority = (options) => {
     }
   });
 
-  const watch = (workspaceId, listener) => {
+  const watch = (workspaceId: string, listener: (event: unknown) => void): WatchSubscription => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', {
         code: 'failed',
         statusCode: 500,
       });
     }
-    let record = watchers.get(workspaceId);
+    let record: WatcherRecord | undefined = watchers.get(workspaceId);
     if (!record) {
-      record = { listeners: new Set(), controller: null, ready: null };
-      watchers.set(workspaceId, record);
-      record.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(([workspace]) => {
+      const newRecord: WatcherRecord = { listeners: new Set(), controller: null, ready: null };
+      watchers.set(workspaceId, newRecord);
+      newRecord.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(([workspace]) => {
         const controller = createWorkspaceWatcher({
           workspaceId,
           rootPath: workspace.root,
           fsModule,
           fsPromises,
           pathModule,
-          overflowLimit,
-          onEvent: (event) => {
+          ...(overflowLimit !== undefined ? { overflowLimit } : {}),
+          onEvent: (event: unknown) => {
             void mutations.observeWatchEvent(workspaceId, event).catch(() => undefined);
-            for (const current of record.listeners) current(event);
+            for (const current of newRecord.listeners) current(event);
           },
         });
-        if (watchers.get(workspaceId) !== record) {
+        if (watchers.get(workspaceId) !== newRecord) {
           controller.close();
           return null;
         }
-        record.controller = controller;
+        newRecord.controller = controller;
         return controller;
       }).catch(() => {
-        if (watchers.get(workspaceId) === record) watchers.delete(workspaceId);
+        if (watchers.get(workspaceId) === newRecord) watchers.delete(workspaceId);
         return null;
       });
+      record = newRecord;
     }
-    record.listeners.add(listener);
+    const rec = record;
+    rec.listeners.add(listener);
     return {
-      ready: Promise.resolve(record.ready).then((controller) => Boolean(controller)),
-      settle: () => Promise.resolve(record.ready).then((controller) => controller?.settle()),
+      ready: Promise.resolve(rec.ready).then((controller) => Boolean(controller)),
+      settle: () => Promise.resolve(rec.ready).then((controller) => controller?.settle()),
       close() {
-        record.listeners.delete(listener);
-        if (record.listeners.size === 0) {
-          record.controller?.close();
-          if (watchers.get(workspaceId) === record) watchers.delete(workspaceId);
+        rec.listeners.delete(listener);
+        if (rec.listeners.size === 0) {
+          rec.controller?.close();
+          if (watchers.get(workspaceId) === rec) watchers.delete(workspaceId);
         }
       },
     };
   };
 
-  const watcherController = (workspaceId) => watchers.get(workspaceId)?.controller ?? null;
+  const watcherController = (workspaceId: string): WorkspaceWatcher | null => watchers.get(workspaceId)?.controller ?? null;
 
-  const beginCapture = async (workspaceId, options = {}) => {
+  const beginCapture = async (workspaceId: string, options: Record<string, unknown> = {}) => {
     const subscription = watch(workspaceId, () => undefined);
     const record = watchers.get(workspaceId);
     const controller = await record?.ready;
@@ -535,19 +751,24 @@ export const createDocumentAuthority = (options) => {
     return capture;
   };
 
-  const completeCapture = async (capture) => {
-    const tracked = captureWatches.get(capture?.captureId);
+  const completeCapture = async (capture: unknown) => {
+    const captureId = (capture as { captureId?: string })?.captureId;
+    const tracked = captureId ? captureWatches.get(captureId) : undefined;
     try {
       await tracked?.controller.settle();
-      return await mutations.completeCapture(capture);
+      return await mutations.completeCapture(capture as never);
     } finally {
-      captureWatches.delete(capture?.captureId);
+      if (captureId) captureWatches.delete(captureId);
       tracked?.subscription.close();
     }
   };
 
-  const journalMutation = async (request, purpose, operation) => {
-    let writer;
+  const journalMutation = async (
+    request: JournalMutationRequest,
+    purpose: string,
+    operation: () => Promise<{ status: string }>,
+  ) => {
+    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       const workspaceId = request.workspaceId ?? request.token?.workspaceId;
       assertTokenWorkspace(request.token, workspaceId);
@@ -556,8 +777,8 @@ export const createDocumentAuthority = (options) => {
       if (result.status === 'written' || result.status === 'deleted') await writer.markMutated();
       return result;
     } catch (error) {
-      if (error?.code === 'stale-epoch') {
-        return { status: 'stale-epoch', currentEpoch: error.currentEpoch };
+      if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
+        return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
       fail(error);
     } finally {
@@ -565,15 +786,16 @@ export const createDocumentAuthority = (options) => {
     }
   };
 
-  const dirtyBufferKey = (ownerId, workspaceId) => `${ownerId}\0${workspaceId}`;
-  const publicDirtyBufferRecord = ({ publicationRevision: _publicationRevision, ...record }) => (
-    structuredClone(record)
-  );
+  const dirtyBufferKey = (ownerId: string, workspaceId: string): string => `${ownerId}\0${workspaceId}`;
+  const publicDirtyBufferRecord = (record: DirtyBufferRecord): DirtyBufferPublication => {
+    const { publicationRevision: _publicationRevision, ...rest } = record;
+    return structuredClone(rest) as DirtyBufferPublication;
+  };
 
-  const releaseDirtyBarrier = (barrier, error) => {
+  const releaseDirtyBarrier = (barrier: DirtyBarrier, error?: unknown): void => {
     if (!barrier || barrier.released) return;
     barrier.released = true;
-    clearTimeout(barrier.timer);
+    if (barrier.timer) clearTimeout(barrier.timer);
     dirtyBarriers.delete(barrier.barrierId);
     for (const surfaceKey of barrier.surfaceKeys) {
       const surface = dirtySurfaces.get(surfaceKey);
@@ -599,13 +821,13 @@ export const createDocumentAuthority = (options) => {
     barrier.waiters.clear();
   };
 
-  const dirtyBarrierFailure = (message) => new DocumentAuthorityError(message, {
+  const dirtyBarrierFailure = (message: string): DocumentAuthorityError => new DocumentAuthorityError(message, {
     code: 'failed',
     statusCode: 503,
   });
 
-  const armDirtyBarrierDeadline = (barrier) => {
-    clearTimeout(barrier.timer);
+  const armDirtyBarrierDeadline = (barrier: DirtyBarrier): void => {
+    if (barrier.timer) clearTimeout(barrier.timer);
     if (barrier.pending.size === 0 || barrier.released) {
       barrier.timer = null;
       return;
@@ -616,23 +838,23 @@ export const createDocumentAuthority = (options) => {
     barrier.timer.unref?.();
   };
 
-  const settleDirtyBarrier = (barrier) => {
+  const settleDirtyBarrier = (barrier: DirtyBarrier): Promise<void> => {
     if (barrier.released) {
       return Promise.reject(dirtyBarrierFailure('Dirty-state barrier was released before it settled'));
     }
     if (barrier.pending.size === 0) return Promise.resolve();
-    return new Promise((resolve, reject) => barrier.waiters.add({ reject, resolve }));
+    return new Promise<void>((resolve, reject) => barrier.waiters.add({ reject, resolve }));
   };
 
-  const resolveDirtyBarrierWaiters = (barrier) => {
+  const resolveDirtyBarrierWaiters = (barrier: DirtyBarrier): void => {
     if (barrier.pending.size > 0 || barrier.released) return;
-    clearTimeout(barrier.timer);
+    if (barrier.timer) clearTimeout(barrier.timer);
     barrier.timer = null;
     for (const waiter of barrier.waiters) waiter.resolve();
     barrier.waiters.clear();
   };
 
-  const registerDirtySurface = (request, listener) => {
+  const registerDirtySurface = (request: DirtySurfaceRequest, listener: (event: unknown) => void): DirtySurfaceSubscription => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', { code: 'failed', statusCode: 500 });
     }
@@ -643,7 +865,7 @@ export const createDocumentAuthority = (options) => {
       throw new DocumentAuthorityError('Dirty surface registration is malformed', { code: 'failed', statusCode: 400 });
     }
     const key = dirtyBufferKey(request.ownerId, request.workspaceId);
-    const record = { ...request, key, listener, registrationId: randomUUID() };
+    const record: DirtySurfaceRecord = { ...request, key, listener, registrationId: randomUUID() };
     dirtySurfaces.set(key, record);
     for (const barrier of dirtyBarriers.values()) {
       if (barrier.workspaceId !== request.workspaceId || barrier.released) continue;
@@ -677,7 +899,11 @@ export const createDocumentAuthority = (options) => {
     };
   };
 
-  const beginDirtyStateBarrier = async (workspaceId, paths, options = {}) => {
+  const beginDirtyStateBarrier = async (
+    workspaceId: string,
+    paths: unknown,
+    options: BeginDirtyStateBarrierOptions = {},
+  ): Promise<DirtyStateBarrierHandle> => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', { code: 'failed', statusCode: 500 });
     }
@@ -693,10 +919,10 @@ export const createDocumentAuthority = (options) => {
     }
     const barrierId = randomUUID();
     const surfaces = [...dirtySurfaces.values()].filter((surface) => surface.workspaceId === workspaceId);
-    const barrier = {
+    const barrier: DirtyBarrier = {
       barrierId,
       caseSensitive: options.caseSensitive ?? platform !== 'win32',
-      paths: [...new Set(paths)].sort(),
+      paths: [...new Set(paths as string[])].sort(),
       pending: new Set(surfaces.map((surface) => surface.key)),
       requiredPublications: new Map(surfaces.map((surface) => [surface.key, dirtyPublicationRevision + 1])),
       released: false,
@@ -705,8 +931,6 @@ export const createDocumentAuthority = (options) => {
       waiters: new Set(),
       workspaceId,
     };
-    // A frozen renderer with a still-open transport must not deadlock recovery.
-    // The deadline is configurable and defaults to one SSE heartbeat interval.
     armDirtyBarrierDeadline(barrier);
     dirtyBarriers.set(barrierId, barrier);
     for (const surface of surfaces) {
@@ -734,7 +958,7 @@ export const createDocumentAuthority = (options) => {
     };
   };
 
-  const acknowledgeDirtyStateBarrier = async (request) => {
+  const acknowledgeDirtyStateBarrier = async (request: DirtyStateBarrierAckRequest): Promise<{ acknowledged: boolean }> => {
     if (!request || typeof request.barrierId !== 'string' || !request.barrierId
       || typeof request.ownerId !== 'string' || !request.ownerId
       || typeof request.workspaceId !== 'string' || !request.workspaceId
@@ -759,7 +983,7 @@ export const createDocumentAuthority = (options) => {
     return { acknowledged: true };
   };
 
-  const publishDirtyBuffers = async (request) => {
+  const publishDirtyBuffers = async (request: PublishDirtyBuffersRequest): Promise<DirtyBufferPublication> => {
     if (!request || typeof request.ownerId !== 'string' || !request.ownerId
       || typeof request.workspaceId !== 'string' || !request.workspaceId
       || !Number.isSafeInteger(request.generation) || request.generation < 0
@@ -777,19 +1001,22 @@ export const createDocumentAuthority = (options) => {
     }
     const resources = request.resources.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-        || !entry.resource || entry.resource.workspaceId !== request.workspaceId
-        || typeof entry.resource.resourceId !== 'string' || !entry.resource.resourceId
-        || (entry.baseRevision !== null && typeof entry.baseRevision !== 'string')
-        || !Number.isSafeInteger(entry.localEditRevision) || entry.localEditRevision < 0) {
+        || !(entry as Record<string, unknown>).resource
+        || ((entry as Record<string, unknown>).resource as Record<string, unknown>).workspaceId !== request.workspaceId
+        || typeof ((entry as Record<string, unknown>).resource as Record<string, unknown>).resourceId !== 'string'
+        || !((entry as Record<string, unknown>).resource as Record<string, unknown>).resourceId
+        || ((entry as Record<string, unknown>).baseRevision !== null && typeof (entry as Record<string, unknown>).baseRevision !== 'string')
+        || !Number.isSafeInteger((entry as Record<string, unknown>).localEditRevision)
+        || ((entry as Record<string, unknown>).localEditRevision as number) < 0) {
         throw new DocumentAuthorityError('Dirty buffer resource is malformed', { code: 'failed', statusCode: 400 });
       }
       return {
-        baseRevision: entry.baseRevision,
-        localEditRevision: entry.localEditRevision,
-        resource: { ...entry.resource },
+        baseRevision: (entry as Record<string, unknown>).baseRevision as string | null,
+        localEditRevision: (entry as Record<string, unknown>).localEditRevision as number,
+        resource: { ...((entry as Record<string, unknown>).resource as DocumentResource) },
       };
     });
-    const record = {
+    const record: DirtyBufferRecord = {
       generation: request.generation,
       ownerId: request.ownerId,
       publicationRevision: ++dirtyPublicationRevision,
@@ -801,7 +1028,7 @@ export const createDocumentAuthority = (options) => {
     return publicDirtyBufferRecord(record);
   };
 
-  const clearDirtyBuffers = async (request) => {
+  const clearDirtyBuffers = async (request: ClearDirtyBuffersRequest): Promise<{ cleared: boolean }> => {
     if (!request || typeof request.ownerId !== 'string' || !request.ownerId
       || typeof request.workspaceId !== 'string' || !request.workspaceId
       || !Number.isSafeInteger(request.generation) || request.generation < 0) {
@@ -818,7 +1045,7 @@ export const createDocumentAuthority = (options) => {
     return { cleared: dirtyBuffersByOwner.delete(key) };
   };
 
-  const inspectDirtyBuffers = async (workspaceId) => {
+  const inspectDirtyBuffers = async (workspaceId: string): Promise<DirtyBufferPublication[]> => {
     await loadWorkspace(workspaceId);
     return [...dirtyBuffersByOwner.values()]
       .filter((record) => record.workspaceId === workspaceId)
@@ -826,7 +1053,7 @@ export const createDocumentAuthority = (options) => {
       .sort((left, right) => left.ownerId.localeCompare(right.ownerId));
   };
 
-  const dispose = () => {
+  const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
     const records = [...watchers.values()];
@@ -845,8 +1072,6 @@ export const createDocumentAuthority = (options) => {
     }
     dirtySurfaces.clear();
     dirtyBuffersByOwner.clear();
-    // Mutation disposal flips its admission gate synchronously, before an
-    // asynchronously starting watcher can register more mutation work.
     const mutationDisposal = mutations.dispose();
     disposePromise = (async () => {
       await Promise.allSettled(records.map((record) => record.ready));
@@ -859,14 +1084,16 @@ export const createDocumentAuthority = (options) => {
     hostId,
     resolveWorkspace,
     listWorkspaceRegistrations: () => registry.list(),
-    inspectWorkspace: async (workspaceId) => {
+    inspectWorkspace: async (workspaceId: string) => {
       try {
         const workspace = await loadWorkspace(workspaceId);
+        const mutationState = await mutations.inspect(workspaceId);
+        const { workspaceId: _wsId, ...rest } = mutationState as Record<string, unknown>;
         return {
           workspaceId: workspace.workspaceId,
           hostId,
           root: workspace.root,
-          ...(await mutations.inspect(workspaceId)),
+          ...rest,
         };
       } catch (error) {
         fail(error);
@@ -884,23 +1111,23 @@ export const createDocumentAuthority = (options) => {
     move,
     delete: remove,
     watch,
-    listRecoveryJournals: (request) => journals.list(request),
-    readRecoveryJournal: (journalId) => journals.read(journalId),
+    listRecoveryJournals: (request: unknown) => journals.list(request as never),
+    readRecoveryJournal: (journalId: string) => journals.read(journalId),
     publishDirtyBuffers,
     clearDirtyBuffers,
     inspectDirtyBuffers,
     registerDirtySurface,
     beginDirtyStateBarrier,
     acknowledgeDirtyStateBarrier,
-    writeRecoveryJournal: (request) => journalMutation(
+    writeRecoveryJournal: (request: JournalMutationRequest) => journalMutation(
       request,
       'document-recovery-journal-write',
-      () => journals.write(request),
+      () => journals.write(request as never),
     ),
-    deleteRecoveryJournal: (request) => journalMutation(
+    deleteRecoveryJournal: (request: JournalMutationRequest) => journalMutation(
       request,
       'document-recovery-journal-delete',
-      () => journals.delete(request),
+      () => journals.delete(request as never),
     ),
     mutationAuthority: mutations,
     inspectMutation: mutations.inspect,
@@ -910,14 +1137,14 @@ export const createDocumentAuthority = (options) => {
     advanceEpoch: mutations.advanceEpoch,
     setMaintenance: mutations.setMaintenance,
     registerWriter: mutations.registerWriter,
-    emitWatchOverflow: (workspaceId) => {
+    emitWatchOverflow: (workspaceId: string) => {
       const controller = watcherController(workspaceId);
       if (!controller) return false;
       controller.overflow();
       return true;
     },
-    reconnectWatch: (workspaceId) => watcherController(workspaceId)?.reconnect(),
-    emitAuthorityChanged: (workspaceId) => watcherController(workspaceId)?.authorityChanged(),
-    hasWatch: (workspaceId) => Boolean(watcherController(workspaceId)),
+    reconnectWatch: (workspaceId: string) => watcherController(workspaceId)?.reconnect(),
+    emitAuthorityChanged: (workspaceId: string) => watcherController(workspaceId)?.authorityChanged(),
+    hasWatch: (workspaceId: string) => Boolean(watcherController(workspaceId)),
   };
 };
