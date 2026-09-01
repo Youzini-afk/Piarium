@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "rootDir": "application-host",
+    "outDir": ".application-host-build",
+    "types": ["node"],
+    "sourceMap": true,
+    "declaration": false,
+    "noEmit": false,
+    "lib": ["ES2023"],
+    "paths": {
+      "@piarium/extension-contract": ["./node_modules/@piarium/extension-contract/dist/index.d.ts"],
+      "@piarium/extension-contract/*": ["./node_modules/@piarium/extension-contract/*"],
+      "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
+      "@piarium/application-client": ["./node_modules/@piarium/application-client/dist/index.d.ts"],
+      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
+      "@piarium/runtime-broker": ["./node_modules/@piarium/runtime-broker/dist/index.d.ts"],
+      "@piarium/extension-host": ["./node_modules/@piarium/extension-host/dist/index.d.ts"],
+      "@piarium/extension-loader": ["./node_modules/@piarium/extension-loader/dist/index.d.ts"],
+      "@piarium/extension-builtins": ["./node_modules/@piarium/extension-builtins/dist/index.d.ts"]
+    }
+  },
+  "include": ["application-host/**/*.ts", "application-host/**/*.js"],
+  "exclude": ["application-host/**/*.test.ts", "application-host/**/*.test.js"]
+}

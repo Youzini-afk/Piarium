@@ -17,16 +17,18 @@
   },
   "scripts": {
     "dev": "bun run build:watch",
-    "dev:server": "bun run prepare:pi-runtime && node server/index.js",
-    "dev:server:watch": "bun run prepare:pi-runtime && nodemon --exitcrash --watch server --ext js --exec \"node server/index.js\"",
-    "build": "bun run --cwd ../extension-builtins build && vite build",
+    "dev:server": "bun run build:application-host && bun run prepare:pi-runtime && node server/index.js",
+    "dev:server:watch": "bun run build:application-host && bun run prepare:pi-runtime && nodemon --exitcrash --watch application-host --ext js,ts --exec \"node server/index.js\"",
+    "build:application-host": "node scripts/build-application-host.mjs",
+    "build": "bun run build:application-host && bun run --cwd ../extension-builtins build && vite build",
     "build:monaco-smoke": "cross-env PIARIUM_MONACO_SMOKE=1 PIARIUM_MONACO_BUNDLE_AUDIT=1 bun run build && node scripts/verify-monaco-bundle.mjs",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
+    "type-check:application-host": "tsc --noEmit -p tsconfig.application-host.json",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
     "prepare:pi-runtime": "bun run --cwd ../settings-store build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
-    "start": "bun run prepare:pi-runtime && node bin/cli.js serve"
+    "start": "bun run build:application-host && bun run prepare:pi-runtime && node bin/cli.js serve"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",

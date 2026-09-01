@@ -1,0 +1,90 @@
+import type { ExtensionStateSnapshot, ExtensionUiRequest, JsonValue, ProjectTrustRequest, PiConfigWatchChangeReason, PiConfigWatchTarget, ProtocolErrorData, RecoveryStatus, RuntimeDescriptor, SessionSnapshot } from "./types.js";
+import type { ProviderAuthEvent, ProviderAuthPromptRequest } from "./auth.js";
+import type { PiAgentEvent } from "./session.js";
+import type { ProviderConfigDeleteScope } from "./provider.js";
+interface WorkspaceMutationRequestBase {
+    path: string;
+    requestId: string;
+    sessionId: string;
+    toolCallId: string;
+    toolName: "write" | "edit";
+}
+export type WorkspaceMutationRequest = WorkspaceMutationRequestBase & ({
+    phase: "before";
+    succeeded?: never;
+} | {
+    phase: "after";
+    succeeded: boolean;
+});
+export interface HostEventMap {
+    "agent.event": {
+        event: PiAgentEvent;
+        sessionId: string;
+    };
+    "config.changed": {
+        reason: PiConfigWatchChangeReason;
+        target: PiConfigWatchTarget;
+        watchId: string;
+    };
+    "extension.ui.dismiss": {
+        requestId: string;
+        sessionId: string;
+    };
+    "extension.ui.request": ExtensionUiRequest;
+    "extension.state": ExtensionStateSnapshot;
+    "host.error": ProtocolErrorData;
+    "host.log": {
+        fields?: JsonValue;
+        level: "debug" | "info" | "warn" | "error";
+        message: string;
+    };
+    "host.ready": {
+        runtime: RuntimeDescriptor;
+    };
+    "project.trust.request": ProjectTrustRequest;
+    "provider.auth.dismiss": {
+        providerId: string;
+        requestId: string;
+        sessionId: string;
+    };
+    "provider.auth.event": {
+        event: ProviderAuthEvent;
+        providerId: string;
+        sessionId: string;
+    };
+    "provider.auth.prompt": ProviderAuthPromptRequest;
+    "provider.config.changed": {
+        providerId: string;
+        scope: ProviderConfigDeleteScope;
+        sessionId: string;
+    };
+    "recovery.changed": {
+        sessionId: string;
+    };
+    "recovery.status": RecoveryStatus & {
+        sessionId: string;
+    };
+    "package.progress": {
+        message: string;
+        operation: "install" | "remove" | "update";
+        percent?: number;
+        source?: string;
+    };
+    "session.closed": {
+        sessionId: string;
+    };
+    "session.snapshot": SessionSnapshot;
+    "session.worker.exited": {
+        code: number | null;
+        expected: boolean;
+        sessionId: string;
+        signal: string | null;
+    };
+    "workspace.mutation.request": WorkspaceMutationRequest;
+}
+export declare const HOST_EVENTS: readonly ["agent.event", "config.changed", "extension.ui.dismiss", "extension.ui.request", "extension.state", "host.error", "host.log", "host.ready", "package.progress", "project.trust.request", "provider.auth.dismiss", "provider.auth.event", "provider.auth.prompt", "provider.config.changed", "recovery.changed", "recovery.status", "session.closed", "session.snapshot", "session.worker.exited", "workspace.mutation.request"];
+export type HostEvent = keyof HostEventMap;
+export type HostEventData<E extends HostEvent> = HostEventMap[E];
+export declare function isHostEvent(value: unknown): value is HostEvent;
+export {};
+//# sourceMappingURL=events.d.ts.map
