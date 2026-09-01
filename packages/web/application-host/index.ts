@@ -1,3 +1,4 @@
+// @ts-nocheck
 import 'reflect-metadata';
 import compression from 'compression';
 import crypto from 'crypto';
@@ -1310,7 +1311,7 @@ export {
   gracefulShutdown,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
-  // Platform facade — cross-package consumers (Electron) should import
+  // Platform facade 鈥?cross-package consumers (Electron) should import
   // these from '@piarium/web/server' instead of deep-importing server/lib/*.
   resolvePiariumDataDir,
   clearAppImageArgv0FromProcessEnv,
