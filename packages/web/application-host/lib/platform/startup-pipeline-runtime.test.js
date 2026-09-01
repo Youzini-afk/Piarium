@@ -36,7 +36,7 @@ describe('startup pipeline runtime', () => {
   });
 
   it('has no OpenCode lifecycle or proxy dependency', () => {
-    const source = readFileSync(new URL('./startup-pipeline-runtime.js', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('./startup-pipeline-runtime.ts', import.meta.url), 'utf8');
     expect(source).not.toContain('OpenCode');
     expect(source).not.toContain('setupProxy');
     expect(source).not.toContain('messageStream');
