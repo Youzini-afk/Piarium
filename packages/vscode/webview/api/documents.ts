@@ -1,13 +1,13 @@
 import type {
   DocumentsAPI,
   PiariumDocumentDeleteResult,
+  PiariumDocumentWatchEvent,
   PiariumDocumentMoveResult,
   PiariumDocumentReadResult,
   PiariumDocumentRecoveryJournalSummary,
   PiariumDocumentRecoveryReadResult,
   PiariumDocumentRecoveryWriteResult,
   PiariumDocumentWriteResult,
-  PiariumWorkspaceFileEvent,
   PiariumWorkspaceIdentity,
   Subscription,
 } from '@piarium/application-client';
@@ -48,6 +48,7 @@ const call = async <T>(type: string, payload?: unknown): Promise<T> => {
 };
 
 export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
+  ackDirtyStateBarrier: (request) => call<{ acknowledged: boolean }>('api:documents:dirty:barrier:ack', request),
   clearDirtyBuffers: (request) => call<{ cleared: boolean }>('api:documents:dirty:clear', request),
   resolveWorkspace: (input) => call<PiariumWorkspaceIdentity>('api:documents:resolveWorkspace', input),
   read: (resource) => call<PiariumDocumentReadResult>('api:documents:read', { resource }),
@@ -60,11 +61,12 @@ export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
     const generation = getRuntimeEndpointGeneration();
     let watchId: string | null = null;
     let closed = false;
-    const onEvent = (event: MessageEvent<{ type?: string; watchId?: string; event?: PiariumWorkspaceFileEvent }>) => {
+    const onEvent = (event: MessageEvent<{ type?: string; watchId?: string; event?: PiariumDocumentWatchEvent }>) => {
       if (event.data?.type !== 'api:documents:watch:event') return;
       if (event.data.watchId !== watchId || !event.data.event) return;
       if (JSON.stringify(event.data.event).includes('"content":')) return;
-      tracker.accept(event.data.event);
+      if (event.data.event.kind === 'dirty-state-barrier') listener(event.data.event);
+      else tracker.accept(event.data.event);
     };
     window.addEventListener('message', onEvent);
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
@@ -81,7 +83,10 @@ export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
       closed = true;
       if (watchId) void sendBridgeMessage('api:documents:watch:stop', { watchId });
     }, { once: true });
-    void call<{ watchId: string }>('api:documents:watch:start', { workspaceId }).then((result) => {
+    void call<{ watchId: string }>('api:documents:watch:start', {
+      workspaceId,
+      ...(options?.dirtyOwner ?? {}),
+    }).then((result) => {
       if (closed || generation !== getRuntimeEndpointGeneration()) {
         void sendBridgeMessage('api:documents:watch:stop', { watchId: result.watchId });
         return;

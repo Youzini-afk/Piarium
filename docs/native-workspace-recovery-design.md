@@ -135,7 +135,12 @@ Storage location resolution remains:
 
 Project choice overrides the global default. Verified transfer switches the registry only after the
 destination catalog and objects are readable. Cleanup walks object references and removes unreachable
-content. Deleting workspace history remains an explicit destructive action.
+content. Optional per-workspace retention limits cover automatic checkpoint count, completed-operation
+count, logical history bytes, and age. No guessed limit is enabled by default; when configured, the rule
+runs after settled turns. Named checkpoints, pending checkpoints, unfinished operations, and
+`needs-attention` evidence are protected. Deleting workspace history remains an explicit destructive
+action. Status reports the oldest protected operation so an unresolved record cannot become an invisible
+permanent pin.
 
 ## Restore algorithm
 
@@ -144,9 +149,13 @@ For every affected path, preparation folds chronological turn changes into:
 - `target`: the earliest before-state;
 - `expected`: the latest after-state.
 
-Preparation hashes only those current paths and reports content or dirty-buffer conflicts. Apply
-rechecks each path immediately before mutation, stores its safety state, atomically replaces the path,
-and verifies the target identity. The operation record advances after each path.
+Preparation hashes only those current paths and reports content or dirty-buffer conflicts. Before either
+preparation or apply inspects files, the Host asks every connected document surface to fence the affected
+paths, wait for in-flight saves, publish its latest dirty-buffer revision, and acknowledge the barrier.
+Apply holds that barrier while it rechecks each path, stores its safety state, atomically replaces the
+path, and verifies the target identity. A disconnected or unresponsive surface produces the retryable
+`dirty-state-unavailable` result rather than an empty dirty set. The acknowledgement deadline defaults to
+one document-watch heartbeat and can be changed with `PIARIUM_DIRTY_BARRIER_TIMEOUT_MS`.
 
 If a later path fails, or Pi rejects the expected conversation leaf, Piarium restores already-applied
 paths from the safety set when their current identity still matches the attempted target. A concurrent
@@ -155,6 +164,12 @@ exact path. No global workspace maintenance bit survives a crash.
 
 On Host startup, a planned operation stays inert. An interrupted file operation is compensated from its
 recorded affected-path safety set before new recovery work is accepted.
+
+Every content-object/journal write takes a shared durable workspace lease. Restore, compensation,
+retention, deletion, storage transfer, and crash reconciliation take an exclusive lease for the complete
+logical operation. The lease is a sidecar of the selected storage root, so independent Hosts that share a
+workspace-local catalog coordinate across processes. Only a confirmed-dead PID is reclaimed; permission
+or platform liveness uncertainty keeps the fence.
 
 ## External and shell boundary
 
@@ -170,8 +185,8 @@ full turn-start scan is not an acceptable fallback.
 
 ## Replaceability
 
-The service contract is version 4. A replacement provider implements the same checkpoint, mutation,
-combined recovery, operation, and storage-management methods. Fixed Host code owns workspace identity,
+The service contract is version 5. A replacement provider implements the same checkpoint, mutation,
+combined recovery, operation, retention, and storage-management methods. Fixed Host code owns workspace identity,
 path containment, the negotiated Pi tool boundary, and Pi conversation navigation. Provider code owns
 the catalog, content objects, change-set folding, conflict policy, and UI contributions.
 
@@ -182,6 +197,12 @@ to abort or compensate, confirmed-conflict-only `overwrite-confirmed` policy, sc
 deletion via row-level SQL instead of removing the storage root, and a read-only
 `inspectRecoveryJournalCatalog` path for status and inspection that never runs migrations or schema
 writes.
+
+Version 5 adds the cross-surface dirty-state barrier, shared/exclusive process-owned workspace leases,
+configurable retention with protected record classes, and workspace-scoped `object_references` that are
+maintained in the same database transactions as checkpoints and operations. Catalog v4 activates through
+a transactional v5 migration that rebuilds those references; read-only status inspection still does not
+activate or migrate a catalog.
 
 Provider selection remains revisioned and scope-aware. Disabling a provider removes file recovery but
 never removes Pi-native conversation rollback.
@@ -201,3 +222,7 @@ Required evidence is based on affected paths, not synthetic full-workspace archi
 - Windows replacement, Unicode/case paths, symlinks, read-only files, and locked paths retain explicit
   tested outcomes;
 - storage migration verifies before switching and cleanup never removes a referenced object.
+- two Hosts sharing workspace-local storage cannot overlap an exclusive restore with journal/object work;
+- dirty revisions from all connected surfaces are acknowledged before file inspection and remain fenced
+  through apply;
+- retention removes oldest eligible records while preserving named and nonterminal recovery evidence.

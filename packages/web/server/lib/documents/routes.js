@@ -79,10 +79,28 @@ export const registerDocumentRoutes = (app, {
     }
   });
 
+  app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req, res) => {
+    try {
+      return res.json(await documents.acknowledgeDirtyStateBarrier(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
   app.get('/api/documents/watch', requireAuth, async (req, res) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!workspaceId) {
       return res.status(400).json({ error: 'workspaceId is required', reason: 'failed' });
+    }
+    const dirtyOwnerId = typeof req.query?.dirtyOwnerId === 'string' ? req.query.dirtyOwnerId : '';
+    const dirtyOwnerGenerationRaw = typeof req.query?.dirtyOwnerGeneration === 'string'
+      ? req.query.dirtyOwnerGeneration
+      : '';
+    const dirtyOwnerGeneration = dirtyOwnerGenerationRaw === '' ? null : Number(dirtyOwnerGenerationRaw);
+    if ((dirtyOwnerId && dirtyOwnerGeneration === null)
+      || (!dirtyOwnerId && dirtyOwnerGeneration !== null)
+      || (dirtyOwnerGeneration !== null && (!Number.isSafeInteger(dirtyOwnerGeneration) || dirtyOwnerGeneration < 0))) {
+      return res.status(400).json({ error: 'Dirty owner identity is malformed', reason: 'failed' });
     }
 
     try {
@@ -108,7 +126,7 @@ export const registerDocumentRoutes = (app, {
       }
     }, 15000);
 
-    const subscription = documents.watch(workspaceId, (event) => {
+    const sendEvent = (event) => {
       if (closed) return;
       try {
         const payload = JSON.stringify(event);
@@ -118,13 +136,22 @@ export const registerDocumentRoutes = (app, {
       } catch {
         closed = true;
       }
-    });
+    };
+    const subscription = documents.watch(workspaceId, sendEvent);
+    const dirtySubscription = dirtyOwnerId
+      ? documents.registerDirtySurface({
+          generation: dirtyOwnerGeneration,
+          ownerId: dirtyOwnerId,
+          workspaceId,
+        }, sendEvent)
+      : null;
 
     const cleanup = () => {
       if (closed) return;
       closed = true;
       clearInterval(heartbeat);
       subscription.close();
+      dirtySubscription?.close();
     };
 
     req.on('close', cleanup);

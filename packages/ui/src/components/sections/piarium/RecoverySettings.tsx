@@ -4,6 +4,7 @@ import type {
   RecoveryStorageMode,
   RecoveryStorageStatus,
   RecoveryStorageWorkspaceSummary,
+  RecoveryRetentionPolicy,
   WorkspaceRecoveryStatus,
 } from '@piarium/extension-contract';
 import type { RecoveryPreference } from '@piarium/protocol';
@@ -60,6 +61,41 @@ const STORAGE_MODES: Array<{ labelKey: I18nKey; mode: RecoveryStorageMode }> = [
 
 type StorageEditorMode = RecoveryStorageMode | 'inherit';
 type StoragePickerTarget = 'global' | 'workspace';
+type RetentionDraft = {
+  maxAgeDays: string;
+  maxByteLengthMiB: string;
+  maxCheckpointCount: string;
+  maxOperationCount: string;
+};
+
+const retentionDraft = (policy?: RecoveryRetentionPolicy): RetentionDraft => ({
+  maxAgeDays: policy?.maxAgeDays === null || policy?.maxAgeDays === undefined ? '' : String(policy.maxAgeDays),
+  maxByteLengthMiB: policy?.maxByteLength === null || policy?.maxByteLength === undefined
+    ? ''
+    : String(policy.maxByteLength / 1_048_576),
+  maxCheckpointCount: policy?.maxCheckpointCount === null || policy?.maxCheckpointCount === undefined
+    ? ''
+    : String(policy.maxCheckpointCount),
+  maxOperationCount: policy?.maxOperationCount === null || policy?.maxOperationCount === undefined
+    ? ''
+    : String(policy.maxOperationCount),
+});
+
+const parseRetentionCount = (value: string, errorMessage: string): number | null => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(errorMessage);
+  return parsed;
+};
+
+const parseRetentionMiB = (value: string, errorMessage: string): number | null => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(errorMessage);
+  const bytes = Math.round(parsed * 1_048_576);
+  if (!Number.isSafeInteger(bytes)) throw new Error(errorMessage);
+  return bytes;
+};
 
 const storageLocation = (mode: RecoveryStorageMode, customRoot: string): RecoveryStorageLocation => (
   mode === 'custom' ? { customRoot: customRoot.trim(), mode } : { mode }
@@ -85,7 +121,7 @@ export const RecoverySettings: React.FC = () => {
   const [storageWorkspaces, setStorageWorkspaces] = React.useState<RecoveryStorageWorkspaceSummary[]>([]);
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [busy, setBusy] = React.useState<'cleanup' | 'delete' | 'global' | 'move' | null>(null);
+  const [busy, setBusy] = React.useState<'cleanup' | 'delete' | 'global' | 'move' | 'retention' | null>(null);
   const [globalError, setGlobalError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [globalStorageMode, setGlobalStorageMode] = React.useState<RecoveryStorageMode>('application-data');
@@ -95,6 +131,7 @@ export const RecoverySettings: React.FC = () => {
   const [pickerTarget, setPickerTarget] = React.useState<StoragePickerTarget | null>(null);
   const [maintenanceBusy, setMaintenanceBusy] = React.useState<string | null>(null);
   const [maintenanceError, setMaintenanceError] = React.useState<string | null>(null);
+  const [retention, setRetention] = React.useState<RetentionDraft>(() => retentionDraft());
 
   const changePreference = React.useCallback((next: RecoveryPreference) => {
     setPreference(next);
@@ -128,6 +165,7 @@ export const RecoverySettings: React.FC = () => {
         const next = workspaceResult.value;
         setStatus(next);
         if (next) {
+          setRetention(retentionDraft(next.retention.policy));
           setStorageMode(next.storage.locationSource === 'workspace' ? next.storage.location.mode : 'inherit');
           setCustomRoot(
             next.storage.locationSource === 'workspace' && next.storage.location.mode === 'custom'
@@ -135,11 +173,13 @@ export const RecoverySettings: React.FC = () => {
               : '',
           );
         } else {
+          setRetention(retentionDraft());
           setStorageMode('inherit');
           setCustomRoot('');
         }
       } else {
         setStatus(null);
+        setRetention(retentionDraft());
         setError(workspaceResult.reason instanceof Error ? workspaceResult.reason.message : String(workspaceResult.reason));
       }
       if (inventoryResult.status === 'fulfilled') {
@@ -333,6 +373,30 @@ export const RecoverySettings: React.FC = () => {
     }
   }, [refresh, t, workspaceId]);
 
+  const saveRetention = React.useCallback(async () => {
+    if (!workspaceId) return;
+    setBusy('retention');
+    try {
+      const invalidRetention = t('settings.piarium.recovery.retention.invalid');
+      const maxByteLength = parseRetentionMiB(retention.maxByteLengthMiB, invalidRetention);
+      requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().setRetentionPolicy({
+        policy: {
+          maxAgeDays: parseRetentionCount(retention.maxAgeDays, invalidRetention),
+          maxByteLength,
+          maxCheckpointCount: parseRetentionCount(retention.maxCheckpointCount, invalidRetention),
+          maxOperationCount: parseRetentionCount(retention.maxOperationCount, invalidRetention),
+        },
+        workspaceId,
+      }));
+      toast.success(t('settings.piarium.recovery.retention.saved'));
+      await refresh();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh, retention, t, workspaceId]);
+
   const visibleStorageWorkspaces = React.useMemo(() => storageWorkspaces.filter((workspace) => (
     workspace.checkpointCount > 0
     || workspace.objectCount > 0
@@ -362,6 +426,9 @@ export const RecoverySettings: React.FC = () => {
         || selectedLocation.mode !== storageMode
         || (storageMode === 'custom' && selectedLocation.mode === 'custom'
           && selectedLocation.customRoot !== customRoot.trim())
+    : false;
+  const retentionChanged = status
+    ? JSON.stringify(retention) !== JSON.stringify(retentionDraft(status.retention.policy))
     : false;
 
   return (
@@ -624,6 +691,100 @@ export const RecoverySettings: React.FC = () => {
                   {formatWorkspaceArchiveBytes(status.storage.byteLength)}
                 </p>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {status ? (
+          <div className="space-y-3 rounded-xl border border-border/60 p-3">
+            <div>
+              <h4 className="typography-ui-label font-medium text-foreground">
+                {t('settings.piarium.recovery.retention.title')}
+              </h4>
+              <p className="mt-1 typography-meta text-muted-foreground">
+                {t('settings.piarium.recovery.retention.description')}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1 typography-meta text-muted-foreground">
+                <span>{t('settings.piarium.recovery.retention.maxCheckpoints')}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={retention.maxCheckpointCount}
+                  placeholder={t('settings.piarium.recovery.retention.unlimited')}
+                  onChange={(event) => setRetention((current) => ({ ...current, maxCheckpointCount: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 typography-meta text-muted-foreground">
+                <span>{t('settings.piarium.recovery.retention.maxOperations')}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={retention.maxOperationCount}
+                  placeholder={t('settings.piarium.recovery.retention.unlimited')}
+                  onChange={(event) => setRetention((current) => ({ ...current, maxOperationCount: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 typography-meta text-muted-foreground">
+                <span>{t('settings.piarium.recovery.retention.maxAgeDays')}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={retention.maxAgeDays}
+                  placeholder={t('settings.piarium.recovery.retention.unlimited')}
+                  onChange={(event) => setRetention((current) => ({ ...current, maxAgeDays: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 typography-meta text-muted-foreground">
+                <span>{t('settings.piarium.recovery.retention.maxMiB')}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={retention.maxByteLengthMiB}
+                  placeholder={t('settings.piarium.recovery.retention.unlimited')}
+                  onChange={(event) => setRetention((current) => ({ ...current, maxByteLengthMiB: event.target.value }))}
+                />
+              </label>
+            </div>
+            <p className="typography-micro text-muted-foreground">
+              {t('settings.piarium.recovery.retention.summary', {
+                eligible: status.retention.eligibleCheckpointCount,
+                protected: status.retention.protectedCheckpointCount + status.retention.protectedOperationCount,
+              })}
+            </p>
+            {status.retention.oldestProtectedOperationAt ? (
+              <p className="typography-micro text-[var(--status-warning)]">
+                {t('settings.piarium.recovery.retention.protectedSince', {
+                  time: new Date(status.retention.oldestProtectedOperationAt).toLocaleString(),
+                })}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!retentionChanged || busy !== null}
+                onClick={() => void saveRetention()}
+              >
+                {busy === 'retention'
+                  ? t('settings.piarium.recovery.retention.saving')
+                  : t('settings.piarium.recovery.retention.save')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => setRetention(retentionDraft())}
+              >
+                {t('settings.piarium.recovery.retention.clearLimits')}
+              </Button>
             </div>
           </div>
         ) : null}

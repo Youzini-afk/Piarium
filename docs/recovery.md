@@ -18,6 +18,14 @@ can be undone. Recovery storage can use the application data directory, a worksp
 sibling directory, or a custom root. Project selection overrides the global default; Settings also owns
 verified migration, unreachable-object cleanup, and explicit workspace-history deletion.
 
+Settings can also configure independent limits for automatic checkpoints, completed recovery operations,
+logical history size, and age. Empty fields mean no limit; Piarium does not impose a guessed default.
+Named checkpoints and unfinished or attention-required recovery evidence are never removed by retention.
+Pruning an automatic checkpoint removes that older file-rollback point; pruning a completed recovery
+operation removes its undo evidence. Neither action removes Pi conversation history.
+Connected editors publish and fence their latest unsaved state before affected files are inspected or
+restored.
+
 Pi remains the conversation authority. `pi-workspace-history` and `pi-wtf` are optional Pi packages and
 are not installed or invoked by native Piarium recovery.
 

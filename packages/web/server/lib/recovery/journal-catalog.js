@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { RecoveryPrimitiveError } from './errors.js';
 
-export const RECOVERY_JOURNAL_SCHEMA_VERSION = 4;
+export const RECOVERY_JOURNAL_SCHEMA_VERSION = 5;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS metadata (
@@ -79,6 +79,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS operations_workspace_time
     ON operations(workspace_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS object_references (
+    workspace_id TEXT NOT NULL,
     owner_kind TEXT NOT NULL,
     owner_id TEXT NOT NULL,
     slot TEXT NOT NULL,
@@ -87,6 +88,8 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS object_references_hash
     ON object_references(object_hash);
+  CREATE INDEX IF NOT EXISTS object_references_workspace
+    ON object_references(workspace_id);
   CREATE TABLE IF NOT EXISTS operation_files (
     operation_id TEXT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
@@ -112,6 +115,7 @@ const V3_TABLES = [
 ];
 
 const V4_TABLES = [...V3_TABLES, 'object_references', 'operation_files'];
+const V5_TABLES = V4_TABLES;
 
 const KNOWN_METADATALESS_LEGACY_TABLES = new Set([
   'snapshot_entries',
@@ -208,11 +212,11 @@ const classifyCatalog = (root) => {
       throw storageMalformed('Recovery catalog migration metadata is malformed');
     }
     if (version === RECOVERY_JOURNAL_SCHEMA_VERSION) {
-      requireTables(tableNames, V4_TABLES, version);
+      requireTables(tableNames, V5_TABLES, version);
       return { kind: 'current', migratedFrom };
     }
-    if (version === 3) {
-      requireTables(tableNames, V3_TABLES, version);
+    if (version === 3 || version === 4) {
+      requireTables(tableNames, version === 3 ? V3_TABLES : V4_TABLES, version);
       return { kind: 'migrate', version };
     }
     return { kind: 'retire', version };
@@ -286,35 +290,41 @@ const normalizedReferences = (references) => {
   return [...bySlot].map(([slot, objectHash]) => ({ objectHash, slot }));
 };
 
-export const deleteObjectReferences = (database, ownerKind, ownerId) => {
-  database.prepare('DELETE FROM object_references WHERE owner_kind = ? AND owner_id = ?')
-    .run(ownerKind, ownerId);
+export const deleteObjectReferences = (database, workspaceId, ownerKind, ownerId) => {
+  database.prepare(`
+    DELETE FROM object_references
+    WHERE workspace_id = ? AND owner_kind = ? AND owner_id = ?
+  `).run(workspaceId, ownerKind, ownerId);
 };
 
-export const replaceObjectReferences = (database, ownerKind, ownerId, references) => {
-  if (typeof ownerKind !== 'string' || typeof ownerId !== 'string') {
-    throw new TypeError('Object reference ownerKind and ownerId must be strings');
+export const replaceObjectReferences = (database, workspaceId, ownerKind, ownerId, references) => {
+  if (typeof workspaceId !== 'string' || !workspaceId
+    || typeof ownerKind !== 'string' || typeof ownerId !== 'string') {
+    throw new TypeError('Object reference workspaceId, ownerKind, and ownerId must be strings');
   }
   const normalized = normalizedReferences(references);
-  deleteObjectReferences(database, ownerKind, ownerId);
+  deleteObjectReferences(database, workspaceId, ownerKind, ownerId);
   const insert = database.prepare(`
-    INSERT INTO object_references(owner_kind, owner_id, slot, object_hash)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO object_references(workspace_id, owner_kind, owner_id, slot, object_hash)
+    VALUES (?, ?, ?, ?, ?)
   `);
   for (const reference of normalized) {
-    insert.run(ownerKind, ownerId, reference.slot, reference.objectHash);
+    insert.run(workspaceId, ownerKind, ownerId, reference.slot, reference.objectHash);
   }
 };
 
 const rebuildObjectReferencesInTransaction = (database) => {
   database.prepare('DELETE FROM object_references').run();
   for (const row of database.prepare(`
-    SELECT checkpoint_id, path, before_json, after_json FROM checkpoint_changes
+    SELECT c.workspace_id, cc.checkpoint_id, cc.path, cc.before_json, cc.after_json
+    FROM checkpoint_changes cc
+    JOIN checkpoints c ON c.id = cc.checkpoint_id
   `).all()) {
     const before = parseJson(row.before_json, `Before state for ${row.path}`);
     const after = row.after_json ? parseJson(row.after_json, `After state for ${row.path}`) : null;
     replaceObjectReferences(
       database,
+      row.workspace_id,
       'checkpoint-change',
       JSON.stringify([row.checkpoint_id, row.path]),
       [
@@ -323,12 +333,29 @@ const rebuildObjectReferencesInTransaction = (database) => {
       ],
     );
   }
-  for (const row of database.prepare('SELECT id, data_json FROM operations').all()) {
+  for (const row of database.prepare('SELECT id, workspace_id, data_json FROM operations').all()) {
     const operation = parseJson(row.data_json, `Recovery operation ${row.id}`);
-    replaceObjectReferences(database, 'operation', row.id, [
+    replaceObjectReferences(database, row.workspace_id, 'operation', row.id, [
       ...referencesFromOperationCollection('targets', operation.targets),
       ...referencesFromOperationCollection('safety', operation.safety),
     ]);
+  }
+  for (const row of database.prepare(`
+    SELECT o.workspace_id, f.operation_id, f.path, f.expected_json, f.target_json, f.safety_json
+    FROM operation_files f
+    JOIN operations o ON o.id = f.operation_id
+  `).all()) {
+    replaceObjectReferences(
+      database,
+      row.workspace_id,
+      'operation-file',
+      JSON.stringify([row.operation_id, row.path]),
+      [
+        ...stateReference('expected', row.expected_json ? parseJson(row.expected_json, `Expected state for ${row.path}`) : null),
+        ...stateReference('target', row.target_json ? parseJson(row.target_json, `Target state for ${row.path}`) : null),
+        ...stateReference('safety', row.safety_json ? parseJson(row.safety_json, `Safety state for ${row.path}`) : null),
+      ],
+    );
   }
 };
 
@@ -340,6 +367,7 @@ const migrateV3Catalog = (database) => {
   database.transaction(() => {
     database.exec(`
       CREATE TABLE object_references (
+        workspace_id TEXT NOT NULL,
         owner_kind TEXT NOT NULL,
         owner_id TEXT NOT NULL,
         slot TEXT NOT NULL,
@@ -347,6 +375,7 @@ const migrateV3Catalog = (database) => {
         PRIMARY KEY(owner_kind, owner_id, slot)
       );
       CREATE INDEX object_references_hash ON object_references(object_hash);
+      CREATE INDEX object_references_workspace ON object_references(workspace_id);
       CREATE TABLE operation_files (
         operation_id TEXT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
         ordinal INTEGER NOT NULL,
@@ -362,7 +391,6 @@ const migrateV3Catalog = (database) => {
       CREATE INDEX operation_files_path
         ON operation_files(operation_id, path);
     `);
-    rebuildObjectReferencesInTransaction(database);
     // Backfill operation_files for existing operations from their data_json.
     // Operations that were in-progress (planned, applying-files, etc.) cannot
     // have their per-file phase reliably reconstructed from v3 data, so they
@@ -395,10 +423,40 @@ const migrateV3Catalog = (database) => {
         ordinal += 1;
       }
     }
+    rebuildObjectReferencesInTransaction(database);
     database.prepare('UPDATE metadata SET value = ? WHERE key = ?')
       .run(String(RECOVERY_JOURNAL_SCHEMA_VERSION), 'schema_version');
-    database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
-      .run('migrated_from', '3');
+    database.prepare(`
+      INSERT INTO metadata(key, value) VALUES ('migrated_from', '3')
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run();
+  })();
+};
+
+const migrateV4Catalog = (database) => {
+  database.transaction(() => {
+    database.exec(`
+      DROP INDEX IF EXISTS object_references_hash;
+      ALTER TABLE object_references RENAME TO object_references_v4;
+      CREATE TABLE object_references (
+        workspace_id TEXT NOT NULL,
+        owner_kind TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        object_hash TEXT NOT NULL,
+        PRIMARY KEY(owner_kind, owner_id, slot)
+      );
+      CREATE INDEX object_references_hash ON object_references(object_hash);
+      CREATE INDEX object_references_workspace ON object_references(workspace_id);
+    `);
+    rebuildObjectReferencesInTransaction(database);
+    database.exec('DROP TABLE object_references_v4');
+    database.prepare('UPDATE metadata SET value = ? WHERE key = ?')
+      .run(String(RECOVERY_JOURNAL_SCHEMA_VERSION), 'schema_version');
+    database.prepare(`
+      INSERT INTO metadata(key, value) VALUES ('migrated_from', '4')
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run();
   })();
 };
 
@@ -528,7 +586,7 @@ const retireCatalogRoot = async (root, version, fsPromises) => {
  * This is the read-only classification path. It never migrates, retires,
  * creates, or writes metadata. It returns:
  *   - null if the catalog root or catalog file does not exist
- *   - { database, status } for a current or already-migrated v4 catalog
+ *   - { database, status } for a current or already-migrated v5 catalog
  *     (database is opened readonly)
  *   - { database: null, status, classification } for a catalog that needs
  *     activation (migration, retirement, initialization) or is
@@ -596,7 +654,7 @@ export const inspectRecoveryJournalCatalog = async (root, options = {}) => {
     classification,
     database: null,
     status: {
-      currentSchemaVersion: classification.kind === 'migrate' ? 3
+      currentSchemaVersion: classification.kind === 'migrate' ? classification.version
         : classification.kind === 'retire' && typeof classification.version === 'number' ? classification.version
         : 0,
       retiredCatalogCount: retired.retiredCatalogCount,
@@ -681,13 +739,16 @@ export const openRecoveryJournalCatalog = async (root, options = {}) => {
     if (create) await ensureRecoveryJournalLayout(root, fsPromises);
     database = new Database(databasePath(root), { fileMustExist: true });
     configureWritableCatalog(database);
-    if (classification.kind === 'migrate') migrateV3Catalog(database);
+    if (classification.kind === 'migrate') {
+      if (classification.version === 3) migrateV3Catalog(database);
+      else migrateV4Catalog(database);
+    }
     else database.exec(SCHEMA);
     if (create) await finishCreatedCatalog(root, fsPromises);
     return await attachCatalogStatus(
       database,
       root,
-      classification.kind === 'migrate' ? 3 : classification.migratedFrom,
+      classification.kind === 'migrate' ? classification.version : classification.migratedFrom,
       fsPromises,
     );
   } catch (error) {
@@ -765,22 +826,28 @@ export const operationFromRow = (row) => ({
 });
 
 export const writeOperationRow = (database, operation) => {
-  database.prepare(`
-    INSERT INTO operations(id, workspace_id, kind, state, data_json, created_at, updated_at)
-    VALUES (@id, @workspaceId, @kind, @state, @dataJson, @createdAt, @updatedAt)
-    ON CONFLICT(id) DO UPDATE SET
-      state = excluded.state,
-      data_json = excluded.data_json,
-      updated_at = excluded.updated_at
-  `).run({
-    createdAt: operation.createdAt,
-    dataJson: JSON.stringify(operation.data),
-    id: operation.id,
-    kind: operation.kind,
-    state: operation.state,
-    updatedAt: operation.updatedAt,
-    workspaceId: operation.workspaceId,
-  });
+  database.transaction(() => {
+    database.prepare(`
+      INSERT INTO operations(id, workspace_id, kind, state, data_json, created_at, updated_at)
+      VALUES (@id, @workspaceId, @kind, @state, @dataJson, @createdAt, @updatedAt)
+      ON CONFLICT(id) DO UPDATE SET
+        state = excluded.state,
+        data_json = excluded.data_json,
+        updated_at = excluded.updated_at
+    `).run({
+      createdAt: operation.createdAt,
+      dataJson: JSON.stringify(operation.data),
+      id: operation.id,
+      kind: operation.kind,
+      state: operation.state,
+      updatedAt: operation.updatedAt,
+      workspaceId: operation.workspaceId,
+    });
+    replaceObjectReferences(database, operation.workspaceId, 'operation', operation.id, [
+      ...referencesFromOperationCollection('targets', operation.data.targets),
+      ...referencesFromOperationCollection('safety', operation.data.safety),
+    ]);
+  })();
 };
 
 const OPERATION_FILE_PHASES = [
@@ -789,6 +856,18 @@ const OPERATION_FILE_PHASES = [
 ];
 
 export const initOperationFiles = (database, operationId, targets) => {
+  const previousPaths = database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
+    .all(operationId).map((row) => row.path);
+  const operation = database.prepare('SELECT workspace_id FROM operations WHERE id = ?').get(operationId);
+  if (!operation) throw storageMalformed(`Recovery operation ${operationId} is missing`);
+  for (const previousPath of previousPaths) {
+    deleteObjectReferences(
+      database,
+      operation.workspace_id,
+      'operation-file',
+      JSON.stringify([operationId, previousPath]),
+    );
+  }
   database.prepare('DELETE FROM operation_files WHERE operation_id = ?').run(operationId);
   const insert = database.prepare(`
     INSERT INTO operation_files(operation_id, ordinal, path, expected_json, target_json, phase, updated_at)
@@ -805,6 +884,16 @@ export const initOperationFiles = (database, operationId, targets) => {
       states.expected ? JSON.stringify(states.expected) : null,
       states.target ? JSON.stringify(states.target) : null,
       now,
+    );
+    replaceObjectReferences(
+      database,
+      operation.workspace_id,
+      'operation-file',
+      JSON.stringify([operationId, relativePath]),
+      [
+        ...stateReference('expected', states.expected),
+        ...stateReference('target', states.target),
+      ],
     );
     ordinal += 1;
   }
@@ -828,6 +917,24 @@ export const updateOperationFilePhase = (database, operationId, path, phase, opt
       WHERE operation_id = ? AND path = ?
     `).run(phase, options.observedFingerprint ?? null, now, operationId, path);
   }
+  const row = database.prepare(`
+    SELECT o.workspace_id, f.expected_json, f.target_json, f.safety_json
+    FROM operation_files f
+    JOIN operations o ON o.id = f.operation_id
+    WHERE f.operation_id = ? AND f.path = ?
+  `).get(operationId, path);
+  if (!row) throw storageMalformed(`Recovery operation file ${operationId}:${path} is missing`);
+  replaceObjectReferences(
+    database,
+    row.workspace_id,
+    'operation-file',
+    JSON.stringify([operationId, path]),
+    [
+      ...stateReference('expected', row.expected_json ? parseJson(row.expected_json, `Expected state for ${path}`) : null),
+      ...stateReference('target', row.target_json ? parseJson(row.target_json, `Target state for ${path}`) : null),
+      ...stateReference('safety', row.safety_json ? parseJson(row.safety_json, `Safety state for ${path}`) : null),
+    ],
+  );
 };
 
 export const operationFileRows = (database, operationId) => (

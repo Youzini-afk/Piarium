@@ -4,7 +4,7 @@ import {
 } from "./services.js";
 import type { JsonObject, JsonValue, PiariumExtensionServiceInvocationRequest } from "./types.js";
 
-export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 4 as const;
+export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 5 as const;
 
 export type WorkspaceRecoveryFailureCode =
   | "invalid-request" | "workspace-not-found" | "workspace-untrusted"
@@ -250,6 +250,30 @@ export interface RecoveryStorageCleanupResult {
   workspaceId: string;
 }
 
+export interface RecoveryRetentionPolicy {
+  maxAgeDays: number | null;
+  maxByteLength: number | null;
+  maxCheckpointCount: number | null;
+  maxOperationCount: number | null;
+}
+
+export interface RecoveryRetentionPolicyInput {
+  policy: RecoveryRetentionPolicy;
+  workspaceId: string;
+}
+
+export interface RecoveryRetentionStatus {
+  eligibleCheckpointCount: number;
+  lastRunAt: string | null;
+  oldestProtectedOperationAt: string | null;
+  policy: RecoveryRetentionPolicy;
+  protectedCheckpointCount: number;
+  protectedOperationCount: number;
+  retainedByteLength: number;
+  terminalOperationCount: number;
+  workspaceId: string;
+}
+
 export interface WorkspaceRecoveryStatus {
   capabilities: {
     bindings: boolean;
@@ -266,6 +290,7 @@ export interface WorkspaceRecoveryStatus {
   };
   failures: WorkspaceRecoveryFailure[];
   identity: WorkspaceRecoveryIdentity;
+  retention: RecoveryRetentionStatus;
   status: "ready";
   storage: RecoveryStorageStatus;
 }
@@ -283,6 +308,7 @@ export type RecoveryStorageStatusResult = { status: "ready"; storage: RecoverySt
 export type RecoveryStorageMoveResult = { operation: RecoveryStorageMoveOperation; status: "ready" } | WorkspaceRecoveryFailedResult;
 export type RecoveryStorageCleanupOperationResult = { result: RecoveryStorageCleanupResult; status: "ready" } | WorkspaceRecoveryFailedResult;
 export type RecoveryStorageWorkspaceListResult = { status: "ready"; workspaces: RecoveryStorageWorkspaceSummary[] } | WorkspaceRecoveryFailedResult;
+export type RecoveryRetentionStatusResult = { retention: RecoveryRetentionStatus; status: "ready" } | WorkspaceRecoveryFailedResult;
 
 export class WorkspaceRecoveryContractError extends Error {
   constructor(message: string) { super(message); this.name = "WorkspaceRecoveryContractError" }
@@ -301,6 +327,9 @@ const count = (value: unknown, label: string): number => {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new WorkspaceRecoveryContractError(`${label} must be a non-negative safe integer`);
   return value as number;
 };
+const nullableCount = (value: unknown, label: string): number | null => (
+  value === null ? null : count(value, label)
+);
 const positive = (value: unknown, label: string): number => {
   const parsed = count(value, label); if (parsed === 0) throw new WorkspaceRecoveryContractError(`${label} must be positive`); return parsed;
 };
@@ -487,6 +516,42 @@ export const parseSetRecoveryStorageLocationInput = (value: unknown): SetRecover
 export const parseRecoveryStorageCleanupInput = (value: unknown): RecoveryStorageCleanupInput => {
   const raw = record(value, "Recovery storage cleanup input"); return { workspaceId: text(raw.workspaceId, "cleanup.workspaceId") };
 };
+export const parseRecoveryRetentionPolicy = (value: unknown): RecoveryRetentionPolicy => {
+  const raw = record(value, "Recovery retention policy");
+  const policy = {
+    maxAgeDays: nullableCount(raw.maxAgeDays, "retention.maxAgeDays"),
+    maxByteLength: nullableCount(raw.maxByteLength, "retention.maxByteLength"),
+    maxCheckpointCount: nullableCount(raw.maxCheckpointCount, "retention.maxCheckpointCount"),
+    maxOperationCount: nullableCount(raw.maxOperationCount, "retention.maxOperationCount"),
+  };
+  if (policy.maxAgeDays !== null && !Number.isSafeInteger(policy.maxAgeDays * 86_400_000)) {
+    throw new WorkspaceRecoveryContractError("retention.maxAgeDays exceeds the supported timestamp range");
+  }
+  return policy;
+};
+export const parseRecoveryRetentionPolicyInput = (value: unknown): RecoveryRetentionPolicyInput => {
+  const raw = record(value, "Recovery retention policy input");
+  return {
+    policy: parseRecoveryRetentionPolicy(raw.policy),
+    workspaceId: text(raw.workspaceId, "retention.workspaceId"),
+  };
+};
+export const parseRecoveryRetentionStatus = (value: unknown): RecoveryRetentionStatus => {
+  const raw = record(value, "Recovery retention status");
+  return {
+    eligibleCheckpointCount: count(raw.eligibleCheckpointCount, "retention.eligibleCheckpointCount"),
+    lastRunAt: raw.lastRunAt === null ? null : isoTimestamp(raw.lastRunAt, "retention.lastRunAt"),
+    oldestProtectedOperationAt: raw.oldestProtectedOperationAt === null
+      ? null
+      : isoTimestamp(raw.oldestProtectedOperationAt, "retention.oldestProtectedOperationAt"),
+    policy: parseRecoveryRetentionPolicy(raw.policy),
+    protectedCheckpointCount: count(raw.protectedCheckpointCount, "retention.protectedCheckpointCount"),
+    protectedOperationCount: count(raw.protectedOperationCount, "retention.protectedOperationCount"),
+    retainedByteLength: count(raw.retainedByteLength, "retention.retainedByteLength"),
+    terminalOperationCount: count(raw.terminalOperationCount, "retention.terminalOperationCount"),
+    workspaceId: text(raw.workspaceId, "retention.workspaceId"),
+  };
+};
 export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatus => {
   const raw = record(value, "Recovery storage status"); const encryption = record(raw.encryption, "storage.encryption");
   return {
@@ -552,7 +617,14 @@ export const parseWorkspaceCombinedRecoveryListResult = (value: unknown): Worksp
 };
 export const parseWorkspaceRecoveryStatusResult = (value: unknown): WorkspaceRecoveryStatusResult => {
   const raw = record(value, "Workspace recovery status result"); if (raw.status === "failed") return failed(raw); const capabilities = record(raw.capabilities, "status.capabilities"); if (!Array.isArray(raw.failures)) throw new WorkspaceRecoveryContractError("status.failures must be an array");
-  return { capabilities: { bindings: bool(capabilities.bindings, "status.capabilities.bindings"), catalogLifecycle: bool(capabilities.catalogLifecycle, "status.capabilities.catalogLifecycle"), checkpoints: bool(capabilities.checkpoints, "status.capabilities.checkpoints"), combined: bool(capabilities.combined, "status.capabilities.combined"), conflictConfirmation: bool(capabilities.conflictConfirmation, "status.capabilities.conflictConfirmation"), dirtyStateBarrier: bool(capabilities.dirtyStateBarrier, "status.capabilities.dirtyStateBarrier"), journal: bool(capabilities.journal, "status.capabilities.journal"), redo: bool(capabilities.redo, "status.capabilities.redo"), retention: bool(capabilities.retention, "status.capabilities.retention"), storageManagement: bool(capabilities.storageManagement, "status.capabilities.storageManagement"), workspaceLease: bool(capabilities.workspaceLease, "status.capabilities.workspaceLease") }, failures: raw.failures.map(parseWorkspaceRecoveryFailure), identity: parseWorkspaceRecoveryIdentity(raw.identity), status: oneOf(raw.status, ["ready"] as const, "status.status"), storage: parseRecoveryStorageStatus(raw.storage) };
+  return {
+    capabilities: { bindings: bool(capabilities.bindings, "status.capabilities.bindings"), catalogLifecycle: bool(capabilities.catalogLifecycle, "status.capabilities.catalogLifecycle"), checkpoints: bool(capabilities.checkpoints, "status.capabilities.checkpoints"), combined: bool(capabilities.combined, "status.capabilities.combined"), conflictConfirmation: bool(capabilities.conflictConfirmation, "status.capabilities.conflictConfirmation"), dirtyStateBarrier: bool(capabilities.dirtyStateBarrier, "status.capabilities.dirtyStateBarrier"), journal: bool(capabilities.journal, "status.capabilities.journal"), redo: bool(capabilities.redo, "status.capabilities.redo"), retention: bool(capabilities.retention, "status.capabilities.retention"), storageManagement: bool(capabilities.storageManagement, "status.capabilities.storageManagement"), workspaceLease: bool(capabilities.workspaceLease, "status.capabilities.workspaceLease") },
+    failures: raw.failures.map(parseWorkspaceRecoveryFailure),
+    identity: parseWorkspaceRecoveryIdentity(raw.identity),
+    retention: parseRecoveryRetentionStatus(raw.retention),
+    status: oneOf(raw.status, ["ready"] as const, "status.status"),
+    storage: parseRecoveryStorageStatus(raw.storage),
+  };
 };
 export const parseRecoveryStorageStatusResult = (value: unknown): RecoveryStorageStatusResult => {
   const raw = record(value, "Recovery storage result"); return raw.status === "failed" ? failed(raw) : { status: oneOf(raw.status, ["ready"] as const, "storage result.status"), storage: parseRecoveryStorageStatus(raw.storage) };
@@ -566,6 +638,15 @@ export const parseRecoveryStorageCleanupOperationResult = (value: unknown): Reco
 export const parseRecoveryStorageWorkspaceListResult = (value: unknown): RecoveryStorageWorkspaceListResult => {
   const raw = record(value, "Recovery storage workspace list"); if (raw.status === "failed") return failed(raw); if (!Array.isArray(raw.workspaces)) throw new WorkspaceRecoveryContractError("Recovery storage workspaces must be an array");
   return { status: oneOf(raw.status, ["ready"] as const, "workspace list.status"), workspaces: raw.workspaces.map(parseRecoveryStorageWorkspaceSummary) };
+};
+export const parseRecoveryRetentionStatusResult = (value: unknown): RecoveryRetentionStatusResult => {
+  const raw = record(value, "Recovery retention result");
+  return raw.status === "failed"
+    ? failed(raw)
+    : {
+        retention: parseRecoveryRetentionStatus(raw.retention),
+        status: oneOf(raw.status, ["ready"] as const, "retention result.status"),
+      };
 };
 
 export interface WorkspaceRecoveryAPI {
@@ -586,8 +667,10 @@ export interface WorkspaceRecoveryAPI {
   recordMutationBefore(input: WorkspaceRecoveryMutationBeforeInput): Promise<WorkspaceRecoveryMutationResult>;
   recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBindingResult>;
   recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBindingResult>;
+  retentionStatus(workspaceId: string): Promise<RecoveryRetentionStatusResult>;
   resolveEntry(input: WorkspaceRecoveryEntryTarget): Promise<WorkspaceRecoveryEntryBindingResult>;
   setDefaultStorageLocation(location: RecoveryStorageLocation): Promise<RecoveryStorageStatusResult>;
+  setRetentionPolicy(input: RecoveryRetentionPolicyInput): Promise<RecoveryRetentionStatusResult>;
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveResult>;
   status(workspaceId: string): Promise<WorkspaceRecoveryStatusResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
@@ -614,8 +697,10 @@ export const createWorkspaceRecoveryAPI = (invokeService: WorkspaceRecoveryServi
     recordMutationBefore: async (input) => parseWorkspaceRecoveryMutationResult(await call("recordMutationBefore", [parseWorkspaceRecoveryMutationBeforeInput(input) as unknown as JsonValue])),
     recordTurnSettled: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnSettled", [parseWorkspaceRecoveryTurnSettledInput(input) as unknown as JsonValue])),
     recordTurnStart: async (input) => parseWorkspaceRecoveryTurnBindingResult(await call("recordTurnStart", [parseWorkspaceRecoveryTurnStartInput(input) as unknown as JsonValue])),
+    retentionStatus: async (id) => parseRecoveryRetentionStatusResult(await call("retentionStatus", [text(id, "workspaceId")])),
     resolveEntry: async (input) => parseWorkspaceRecoveryEntryBindingResult(await call("resolveEntry", [parseWorkspaceRecoveryEntryTarget(input) as unknown as JsonValue])),
     setDefaultStorageLocation: async (location) => parseRecoveryStorageStatusResult(await call("setDefaultStorageLocation", [parseRecoveryStorageLocation(location) as unknown as JsonValue])),
+    setRetentionPolicy: async (input) => parseRecoveryRetentionStatusResult(await call("setRetentionPolicy", [parseRecoveryRetentionPolicyInput(input) as unknown as JsonValue])),
     setStorageLocation: async (input) => parseRecoveryStorageMoveResult(await call("setStorageLocation", [parseSetRecoveryStorageLocationInput(input) as unknown as JsonValue])),
     status: async (id) => parseWorkspaceRecoveryStatusResult(await call("status", [text(id, "workspaceId")])),
     storageStatus: async (id) => parseRecoveryStorageStatusResult(await call("storageStatus", [id === undefined ? null : text(id, "workspaceId")])),

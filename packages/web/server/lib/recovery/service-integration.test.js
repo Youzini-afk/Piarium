@@ -70,12 +70,12 @@ describe('Web Application Host workspace recovery service', () => {
         checkpoints: true,
         combined: true,
         conflictConfirmation: true,
-        dirtyStateBarrier: false,
+        dirtyStateBarrier: true,
         journal: true,
         redo: true,
-        retention: false,
+        retention: true,
         storageManagement: true,
-        workspaceLease: false,
+        workspaceLease: true,
       },
     });
     const turn = await api.recordTurnStart({
@@ -124,6 +124,20 @@ describe('Web Application Host workspace recovery service', () => {
     expect(checkpoint).toMatchObject({ status: 'ready', checkpoint: { label: 'Service checkpoint' } });
     expect(await api.listCheckpoints({ workspaceId: harness.identity.workspaceId }))
       .toMatchObject({ status: 'ready', page: { checkpoints: expect.any(Array) } });
+    expect(await api.setRetentionPolicy({
+      policy: {
+        maxAgeDays: null,
+        maxByteLength: null,
+        maxCheckpointCount: 10,
+        maxOperationCount: 10,
+      },
+      workspaceId: harness.identity.workspaceId,
+    })).toMatchObject({
+      status: 'ready',
+      retention: { policy: { maxCheckpointCount: 10, maxOperationCount: 10 } },
+    });
+    expect(await api.retentionStatus(harness.identity.workspaceId))
+      .toMatchObject({ status: 'ready', retention: { workspaceId: harness.identity.workspaceId } });
     const combined = await api.prepareCombinedRecovery({
       entryId: 'service-user-1',
       sessionId: 'service-session-1',

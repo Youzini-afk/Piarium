@@ -57,8 +57,28 @@ const createV3 = (root) => {
   return database;
 };
 
+const createV4 = (root) => {
+  const database = createV3(root);
+  database.exec(`
+    UPDATE metadata SET value = '4' WHERE key = 'schema_version';
+    CREATE TABLE object_references (
+      owner_kind TEXT NOT NULL, owner_id TEXT NOT NULL, slot TEXT NOT NULL,
+      object_hash TEXT NOT NULL, PRIMARY KEY(owner_kind, owner_id, slot)
+    );
+    CREATE INDEX object_references_hash ON object_references(object_hash);
+    CREATE TABLE operation_files (
+      operation_id TEXT NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL, path TEXT NOT NULL, expected_json TEXT, target_json TEXT,
+      safety_json TEXT, phase TEXT NOT NULL DEFAULT 'pending', observed_fingerprint TEXT,
+      updated_at TEXT NOT NULL, PRIMARY KEY(operation_id, ordinal)
+    );
+    CREATE INDEX operation_files_path ON operation_files(operation_id, path);
+  `);
+  return database;
+};
+
 describe('recovery journal catalog', () => {
-  it('initializes a new v4 catalog and reports a stable ready lifecycle', async () => {
+  it('initializes a new v5 catalog and reports a stable ready lifecycle', async () => {
     const root = await makeRoot();
     try {
       const database = await openRecoveryJournalCatalog(root, { create: true });
@@ -68,7 +88,7 @@ describe('recovery journal catalog', () => {
         expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'object_references'").get())
           .toEqual({ name: 'object_references' });
         expect(recoveryCatalogStatus(database)).toEqual({
-          currentSchemaVersion: 4,
+          currentSchemaVersion: 5,
           retiredCatalogCount: 0,
           state: 'ready',
         });
@@ -88,7 +108,7 @@ describe('recovery journal catalog', () => {
       const database = await openRecoveryJournalCatalog(root, { create: true });
       try {
         expect(database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get())
-          .toEqual({ value: '4' });
+          .toEqual({ value: '5' });
         expect(recoveryCatalogStatus(database)).toMatchObject({
           retiredCatalogCount: 0,
           state: 'ready',
@@ -109,7 +129,7 @@ describe('recovery journal catalog', () => {
     const future = new Database(catalog);
     future.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '6');
       CREATE TABLE future_records(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       INSERT INTO future_records(id, payload) VALUES ('future', 'preserve-me');
     `);
@@ -125,7 +145,7 @@ describe('recovery journal catalog', () => {
       const preserved = new Database(catalog, { readonly: true });
       try {
         expect(preserved.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get())
-          .toEqual({ value: '5' });
+          .toEqual({ value: '6' });
         expect(preserved.prepare('SELECT * FROM future_records').all())
           .toEqual([{ id: 'future', payload: 'preserve-me' }]);
       } finally {
@@ -212,7 +232,7 @@ describe('recovery journal catalog', () => {
       const database = await openRecoveryJournalCatalog(root, { create: true });
       try {
         expect(database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get())
-          .toEqual({ value: '4' });
+          .toEqual({ value: '5' });
         expect(database.prepare("SELECT value FROM metadata WHERE key = 'migrated_from'").get())
           .toEqual({ value: '3' });
         expect(database.prepare('SELECT id, sequence, changed_path_count FROM checkpoints').all())
@@ -230,9 +250,11 @@ describe('recovery journal catalog', () => {
           { object_hash: safetyHash, owner_id: 'operation-1', owner_kind: 'operation', slot: '["safety","src/file.js","value"]' },
           { object_hash: afterHash, owner_id: 'operation-1', owner_kind: 'operation', slot: '["targets","src/file.js","expected"]' },
           { object_hash: beforeHash, owner_id: 'operation-1', owner_kind: 'operation', slot: '["targets","src/file.js","target"]' },
+          { object_hash: afterHash, owner_id: '["operation-1","src/file.js"]', owner_kind: 'operation-file', slot: 'expected' },
+          { object_hash: beforeHash, owner_id: '["operation-1","src/file.js"]', owner_kind: 'operation-file', slot: 'target' },
         ]);
         expect(recoveryCatalogStatus(database)).toEqual({
-          currentSchemaVersion: 4,
+          currentSchemaVersion: 5,
           migratedFrom: 3,
           retiredCatalogCount: 0,
           state: 'migrated',
@@ -285,6 +307,49 @@ describe('recovery journal catalog', () => {
     }
   });
 
+  it('migrates v4 object references to workspace-scoped v5 rows', async () => {
+    const root = await makeRoot();
+    const v4 = createV4(root);
+    const beforeHash = objectHash('5');
+    v4.prepare(`
+      INSERT INTO checkpoints(id, workspace_id, sequence, source, state, created_at)
+      VALUES ('checkpoint-v4', 'workspace-v4', 1, 'turn', 'ready', '2026-01-01T00:00:00.000Z')
+    `).run();
+    v4.prepare(`
+      INSERT INTO checkpoint_changes(
+        checkpoint_id, path, tool_name, mutation_id, before_json, created_at, updated_at
+      ) VALUES ('checkpoint-v4', 'note.txt', 'write', 'mutation-v4', ?,
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z')
+    `).run(JSON.stringify({ objectHash: beforeHash }));
+    v4.prepare(`
+      INSERT INTO object_references(owner_kind, owner_id, slot, object_hash)
+      VALUES ('stale', 'stale', 'stale', ?)
+    `).run(objectHash('6'));
+    v4.close();
+    try {
+      const database = await openRecoveryJournalCatalog(root, { create: true });
+      try {
+        expect(database.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get())
+          .toEqual({ value: '5' });
+        expect(database.prepare("SELECT value FROM metadata WHERE key = 'migrated_from'").get())
+          .toEqual({ value: '4' });
+        expect(database.prepare(`
+          SELECT workspace_id, owner_kind, owner_id, slot, object_hash FROM object_references
+        `).all()).toEqual([{
+          object_hash: beforeHash,
+          owner_id: '["checkpoint-v4","note.txt"]',
+          owner_kind: 'checkpoint-change',
+          slot: 'before',
+          workspace_id: 'workspace-v4',
+        }]);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await fs.promises.rm(root, { force: true, recursive: true });
+    }
+  });
+
   it('retires an older root intact and restores retired-history status on reopen', async () => {
     const parent = await makeRoot();
     const root = path.join(parent, 'journal');
@@ -302,7 +367,7 @@ describe('recovery journal catalog', () => {
       const database = await openRecoveryJournalCatalog(root, { create: true });
       try {
         expect(recoveryCatalogStatus(database)).toMatchObject({
-          currentSchemaVersion: 4,
+          currentSchemaVersion: 5,
           retiredCatalogCount: 1,
           state: 'retired-history',
         });
@@ -407,7 +472,7 @@ describe('recovery journal catalog', () => {
     try {
       const database = await openRecoveryJournalCatalog(root, { create: true });
       try {
-        replaceObjectReferences(database, 'operation', 'manual', [
+        replaceObjectReferences(database, 'workspace-1', 'operation', 'manual', [
           { objectHash: objectHash('4'), slot: 'one' },
         ]);
         expect(database.prepare('SELECT object_hash FROM object_references').all())
@@ -443,7 +508,7 @@ describe('recovery journal catalog', () => {
     }
   });
 
-  it('inspects a current v4 catalog and returns a readonly database', async () => {
+  it('inspects a current v5 catalog and returns a readonly database', async () => {
     const root = await makeRoot();
     try {
       const created = await openRecoveryJournalCatalog(root, { create: true });
@@ -452,7 +517,7 @@ describe('recovery journal catalog', () => {
       expect(inspected.classification.kind).toBe('current');
       expect(inspected.database).not.toBeNull();
       expect(inspected.status).toEqual({
-        currentSchemaVersion: 4,
+        currentSchemaVersion: 5,
         retiredCatalogCount: 0,
         state: 'ready',
       });

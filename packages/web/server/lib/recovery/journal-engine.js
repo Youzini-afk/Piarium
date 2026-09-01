@@ -5,6 +5,7 @@ import {
   bindingFromRow,
   changeFromRow,
   checkpointFromRow,
+  deleteObjectReferences,
   initOperationFiles,
   inspectRecoveryJournalCatalog,
   objectPath,
@@ -14,6 +15,7 @@ import {
   operationFromRow,
   recoveryCatalogStatus,
   rebuildObjectReferences,
+  replaceObjectReferences,
   updateOperationFilePhase,
   verifyRecoveryJournalStore,
   writeOperationRow,
@@ -31,9 +33,19 @@ import {
   readRecoveryJsonAtomic,
   writeRecoveryJsonAtomic,
 } from './locations.js';
+import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
 
 const IGNORED_WATCH_PATH = /\.piarium-(?:tmp|restore|recovery)-/;
 const TERMINAL_STATES = new Set(['complete', 'aborted', 'compensated', 'needs-attention']);
+const PRUNABLE_OPERATION_STATES = new Set(['complete', 'aborted', 'compensated']);
+const DEFAULT_RETENTION_POLICY = Object.freeze({
+  maxAgeDays: null,
+  maxByteLength: null,
+  maxCheckpointCount: null,
+  maxOperationCount: null,
+});
+const retentionPolicyKey = (workspaceId) => `retention_policy:${workspaceId}`;
+const retentionRunKey = (workspaceId) => `retention_last_run:${workspaceId}`;
 
 const operationRevision = (value) => `sha256-${createHash('sha256')
   .update(JSON.stringify(value))
@@ -120,12 +132,58 @@ export const createWorkspaceRecoveryEngine = (options) => {
     storageOwnerId,
   });
   const fileStore = fileStoreOverride ?? createRecoveryFileStore({ fsModule, fsPromises, pathModule });
+  const leases = createRecoveryWorkspaceLeaseManager({ fsModule, fsPromises, pathModule });
   const queues = new Map();
   const startupFailures = new Map();
+  let disposed = false;
 
-  const runWorkspace = (workspaceId, operation) => {
+  const rememberFailure = (workspaceId, error, fallbackCode = 'internal') => {
+    const failures = startupFailures.get(workspaceId) ?? [];
+    failures.push(recoveryFailure(error, fallbackCode));
+    startupFailures.set(workspaceId, failures);
+  };
+  const rememberLeaseReleaseFailure = (workspaceId, error) => rememberFailure(
+    workspaceId,
+    new RecoveryPrimitiveError('lease-unavailable', 'Recovery workspace lease could not be released', {
+      cause: error,
+      origin: 'concurrency',
+      retryable: true,
+    }),
+  );
+
+  const runWorkspace = (workspaceId, operation, leaseOptions = null) => {
     const previous = queues.get(workspaceId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
+    const current = previous.catch(() => undefined).then(async () => {
+      if (disposed) {
+        throw new RecoveryPrimitiveError('unavailable', 'Workspace recovery engine is disposed', {
+          origin: 'internal',
+          retryable: true,
+        });
+      }
+      if (!leaseOptions) return operation();
+      const { identity } = await inspectStorageIdentity(workspaceId);
+      const storage = await storageFor(identity, true);
+      const lease = await leases.acquire({
+        root: storage.root,
+        workspaceId,
+        mode: leaseOptions.mode,
+        purpose: leaseOptions.purpose,
+      });
+      try {
+        return await operation();
+      } finally {
+        try {
+          await lease.release();
+        } catch (error) {
+          // The logical operation has already committed or failed. A lease
+          // metadata cleanup error must not turn a committed restore into a
+          // false rollback result or hide the original operation failure.
+          rememberLeaseReleaseFailure(workspaceId, error);
+          // The retained durable owner continues fencing later operations;
+          // status() exposes the failure and dispose() retries cleanup.
+        }
+      }
+    });
     queues.set(workspaceId, current);
     void current.finally(() => {
       if (queues.get(workspaceId) === current) queues.delete(workspaceId);
@@ -298,23 +356,34 @@ export const createWorkspaceRecoveryEngine = (options) => {
       const existing = database.prepare(`
         SELECT 1 FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?
       `).get(binding.checkpointId, captured.path);
-      if (!existing) {
-        const now = new Date().toISOString();
-        database.prepare(`
-          INSERT INTO checkpoint_changes(
-            checkpoint_id, path, tool_name, mutation_id, before_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          binding.checkpointId,
-          captured.path,
-          input.toolName,
-          input.mutationId,
-          JSON.stringify(captured.state),
-          now,
-          now,
-        );
-      }
-      addJournaledPath(database, input.executionId, captured.path);
+      runImmediateTransaction(database, 'Recovery before-image record', () => {
+        if (!existing) {
+          const now = new Date().toISOString();
+          database.prepare(`
+            INSERT INTO checkpoint_changes(
+              checkpoint_id, path, tool_name, mutation_id, before_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            binding.checkpointId,
+            captured.path,
+            input.toolName,
+            input.mutationId,
+            JSON.stringify(captured.state),
+            now,
+            now,
+          );
+          replaceObjectReferences(
+            database,
+            input.workspaceId,
+            'checkpoint-change',
+            JSON.stringify([binding.checkpointId, captured.path]),
+            captured.state?.objectHash
+              ? [{ objectHash: captured.state.objectHash, slot: 'before' }]
+              : [],
+          );
+        }
+        addJournaledPath(database, input.executionId, captured.path);
+      });
       return true;
     } catch (error) {
       const binding = bindingFor(database, input.executionId);
@@ -347,24 +416,32 @@ export const createWorkspaceRecoveryEngine = (options) => {
       }
       const change = changeFromRow(row);
       const changed = !sameState(change.before, captured.state);
-      if (changed) {
-        database.prepare(`
-          UPDATE checkpoint_changes
-          SET after_json = ?, mutation_id = ?, tool_name = ?, updated_at = ?
-          WHERE checkpoint_id = ? AND path = ?
-        `).run(
-          JSON.stringify(captured.state),
-          input.mutationId,
-          input.toolName,
-          new Date().toISOString(),
-          binding.checkpointId,
-          captured.path,
-        );
-      } else {
-        database.prepare('DELETE FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?')
-          .run(binding.checkpointId, captured.path);
-      }
-      updateCheckpointStats(database, binding.checkpointId);
+      runImmediateTransaction(database, 'Recovery after-image record', () => {
+        const ownerId = JSON.stringify([binding.checkpointId, captured.path]);
+        if (changed) {
+          database.prepare(`
+            UPDATE checkpoint_changes
+            SET after_json = ?, mutation_id = ?, tool_name = ?, updated_at = ?
+            WHERE checkpoint_id = ? AND path = ?
+          `).run(
+            JSON.stringify(captured.state),
+            input.mutationId,
+            input.toolName,
+            new Date().toISOString(),
+            binding.checkpointId,
+            captured.path,
+          );
+          replaceObjectReferences(database, input.workspaceId, 'checkpoint-change', ownerId, [
+            ...(change.before?.objectHash ? [{ objectHash: change.before.objectHash, slot: 'before' }] : []),
+            ...(captured.state?.objectHash ? [{ objectHash: captured.state.objectHash, slot: 'after' }] : []),
+          ]);
+        } else {
+          database.prepare('DELETE FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?')
+            .run(binding.checkpointId, captured.path);
+          deleteObjectReferences(database, input.workspaceId, 'checkpoint-change', ownerId);
+        }
+        updateCheckpointStats(database, binding.checkpointId);
+      });
       return changed;
     } finally {
       database.close();
@@ -581,6 +658,27 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return { conflicts, currentStates };
   };
 
+  const beginDirtyBarrier = async (identity, paths) => {
+    if (paths.length === 0) return { release: async () => undefined, settle: async () => undefined };
+    if (typeof documents.beginDirtyStateBarrier !== 'function') {
+      throw new RecoveryPrimitiveError('dirty-state-unavailable', 'Document surfaces do not support a dirty-state barrier', {
+        origin: 'conflict',
+        retryable: true,
+      });
+    }
+    try {
+      return await documents.beginDirtyStateBarrier(identity.workspaceId, paths, {
+        caseSensitive: !identity.filesystemProfile.startsWith('windows'),
+      });
+    } catch (error) {
+      throw new RecoveryPrimitiveError('dirty-state-unavailable', 'Unsaved editor state could not be synchronized', {
+        cause: error,
+        origin: 'conflict',
+        retryable: true,
+      });
+    }
+  };
+
   const buildConflicts = async (identity, root, targets) => (
     await inspectTargetConflicts(identity, root, targets)
   ).conflicts;
@@ -694,7 +792,13 @@ export const createWorkspaceRecoveryEngine = (options) => {
       const loaded = changesForEntries(database, input.sessionId, removedEntryIds);
       const merged = mergeInverseTargets(loaded.changes);
       const targets = Object.fromEntries(merged.byPath);
-      const conflicts = await buildConflicts(identity, storage.root, targets);
+      const dirtyBarrier = await beginDirtyBarrier(identity, Object.keys(targets));
+      let conflicts;
+      try {
+        conflicts = await buildConflicts(identity, storage.root, targets);
+      } finally {
+        await dirtyBarrier.release();
+      }
       for (const relativePath of merged.chainConflicts) {
         conflicts.push({
           fingerprint: conflictFingerprint({ kind: 'chain-conflict', path: relativePath }),
@@ -803,6 +907,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     const { identity, root } = located;
     const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${input.operationId}`);
+    let dirtyBarrier;
     try {
       const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'").get(input.operationId);
       if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${input.operationId}`);
@@ -819,6 +924,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
           origin: 'coverage',
         });
       }
+      dirtyBarrier = await beginDirtyBarrier(identity, record.plan.affectedPaths);
       // Re-check conflicts with fingerprints (TOCTOU protection).
       // The plan's conflicts were captured at prepare time; apply must verify
       // they haven't appeared, disappeared, or changed fingerprint since then.
@@ -835,6 +941,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         record.state = 'applying-files';
         persistOperation(database, record);
       }
+      await dirtyBarrier.settle();
       try {
         const fileRows = operationFileRows(database, record.id);
         for (const row of fileRows) {
@@ -856,6 +963,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
           if (row.phase === 'safety-observed') continue;
           // Only apply-intent and pending files should be processed.
           if (row.phase !== 'apply-intent' && row.phase !== 'pending') continue;
+          await dirtyBarrier.settle();
           // Always check current state equals safety, not just expected under abort.
           // This catches any change between safety capture and apply, regardless of
           // conflict policy. Under overwrite-confirmed the user authorized the
@@ -943,6 +1051,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       persistOperation(database, record);
       return publicOperation(record);
     } finally {
+      await dirtyBarrier?.release();
       database.close();
     }
   };
@@ -989,12 +1098,19 @@ export const createWorkspaceRecoveryEngine = (options) => {
       }
       const id = randomUUID();
       const createdAt = new Date().toISOString();
+      const dirtyBarrier = await beginDirtyBarrier(located.identity, Object.keys(targets));
+      let conflicts;
+      try {
+        conflicts = await buildConflicts(located.identity, located.root, targets);
+      } finally {
+        await dirtyBarrier.release();
+      }
       const draft = {
         affectedPaths: Object.keys(targets).sort(),
         changedBytes: Object.values(targets).reduce((total, states) => (
           total + Math.max(states.expected.byteLength ?? 0, states.target.byteLength ?? 0)
         ), 0),
-        conflicts: await buildConflicts(located.identity, located.root, targets),
+        conflicts,
         coverage: 'ready',
         createdAt,
         entryId: original.plan.entryId,
@@ -1036,10 +1152,12 @@ export const createWorkspaceRecoveryEngine = (options) => {
     const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
     try {
       const id = randomUUID();
-      database.prepare(`
-        INSERT INTO checkpoints(id, workspace_id, sequence, source, state, created_at, label)
-        VALUES (?, ?, ?, 'named', 'ready', ?, ?)
-      `).run(id, input.workspaceId, nextSequence(database, input.workspaceId), new Date().toISOString(), input.name);
+      runImmediateTransaction(database, 'Named checkpoint creation', () => {
+        database.prepare(`
+          INSERT INTO checkpoints(id, workspace_id, sequence, source, state, created_at, label)
+          VALUES (?, ?, ?, 'named', 'ready', ?, ?)
+        `).run(id, input.workspaceId, nextSequence(database, input.workspaceId), new Date().toISOString(), input.name);
+      });
       return checkpointFor(database, id);
     } finally {
       database.close();
@@ -1115,7 +1233,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     let catalog = { currentSchemaVersion: 0, retiredCatalogCount: 0, state: 'missing' };
     // Use the read-only inspect path for status queries — this never
     // migrates, retires, or creates a catalog. It only classifies and,
-    // for current v4 catalogs, opens a readonly handle to count rows.
+    // for current v5 catalogs, opens a readonly handle to count rows.
     const inspected = await inspectRecoveryJournalCatalog(root, { fsPromises }).catch((error) => {
       if (error?.code === 'storage-schema-newer') {
         state = 'corrupt';
@@ -1311,59 +1429,246 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return results.sort((left, right) => String(right.lastActivityAt ?? '').localeCompare(String(left.lastActivityAt ?? '')));
   };
 
-  const referencedObjects = (database) => {
-    const refs = new Set();
-    const add = (state) => {
-      if (state && typeof state.objectHash === 'string') refs.add(state.objectHash);
-    };
-    for (const row of database.prepare('SELECT before_json, after_json FROM checkpoint_changes').iterate()) {
-      add(JSON.parse(row.before_json));
-      if (row.after_json) add(JSON.parse(row.after_json));
+  const retentionPolicyFor = (database, workspaceId) => {
+    const row = database.prepare('SELECT value FROM metadata WHERE key = ?').get(retentionPolicyKey(workspaceId));
+    if (!row) return { ...DEFAULT_RETENTION_POLICY };
+    let value;
+    try {
+      value = JSON.parse(row.value);
+    } catch (error) {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
+        cause: error,
+        origin: 'storage',
+      });
     }
-    for (const row of database.prepare("SELECT data_json FROM operations WHERE kind = 'combined'").iterate()) {
-      const operation = JSON.parse(row.data_json);
-      for (const states of Object.values(operation.targets ?? {})) {
-        add(states.expected);
-        add(states.target);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
+        origin: 'storage',
+      });
+    }
+    for (const key of Object.keys(DEFAULT_RETENTION_POLICY)) {
+      if (value[key] !== null && (!Number.isSafeInteger(value[key]) || value[key] < 0)) {
+        throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
+          origin: 'storage',
+        });
       }
-      for (const state of Object.values(operation.safety ?? {})) add(state);
     }
-    return refs;
+    return Object.fromEntries(Object.keys(DEFAULT_RETENTION_POLICY).map((key) => [key, value[key]]));
   };
 
-  const cleanupStorageInternal = async (workspaceId) => {
+  const retentionStatusFor = (database, workspaceId) => {
+    const checkpoint = database.prepare(`
+      SELECT
+        SUM(CASE WHEN source = 'turn' AND state != 'pending' THEN 1 ELSE 0 END) AS eligible,
+        SUM(CASE WHEN source != 'turn' OR state = 'pending' THEN 1 ELSE 0 END) AS protected,
+        COALESCE(SUM(byte_length), 0) AS bytes
+      FROM checkpoints WHERE workspace_id = ?
+    `).get(workspaceId);
+    const operation = database.prepare(`
+      SELECT
+        SUM(CASE WHEN state IN ('complete', 'aborted', 'compensated') THEN 1 ELSE 0 END) AS terminal,
+        SUM(CASE WHEN state NOT IN ('complete', 'aborted', 'compensated') THEN 1 ELSE 0 END) AS protected,
+        MIN(CASE WHEN state NOT IN ('complete', 'aborted', 'compensated') THEN created_at END) AS oldest_protected
+      FROM operations WHERE workspace_id = ? AND kind = 'combined'
+    `).get(workspaceId);
+    const lastRun = database.prepare('SELECT value FROM metadata WHERE key = ?').get(retentionRunKey(workspaceId));
+    return {
+      eligibleCheckpointCount: checkpoint.eligible ?? 0,
+      lastRunAt: lastRun?.value ?? null,
+      oldestProtectedOperationAt: operation.oldest_protected ?? null,
+      policy: retentionPolicyFor(database, workspaceId),
+      protectedCheckpointCount: checkpoint.protected ?? 0,
+      protectedOperationCount: operation.protected ?? 0,
+      retainedByteLength: checkpoint.bytes ?? 0,
+      terminalOperationCount: operation.terminal ?? 0,
+      workspaceId,
+    };
+  };
+
+  const retentionEnabled = (policy) => Object.values(policy).some((value) => value !== null);
+
+  const pruneRetentionRecords = (database, workspaceId) => {
+    const policy = retentionPolicyFor(database, workspaceId);
+    if (!retentionEnabled(policy)) return { recordsDeleted: 0, policy };
+    const checkpoints = database.prepare(`
+      SELECT id, created_at, byte_length
+      FROM checkpoints
+      WHERE workspace_id = ? AND source = 'turn' AND state != 'pending'
+      ORDER BY sequence ASC
+    `).all(workspaceId);
+    const operations = database.prepare(`
+      SELECT id, updated_at, state
+      FROM operations
+      WHERE workspace_id = ? AND kind = 'combined'
+      ORDER BY updated_at ASC, id ASC
+    `).all(workspaceId);
+    const checkpointIds = new Set();
+    const operationIds = new Set();
+    let cutoff = null;
+    if (policy.maxAgeDays !== null) {
+      const ageMilliseconds = policy.maxAgeDays * 86_400_000;
+      if (!Number.isSafeInteger(ageMilliseconds)) {
+        throw new RecoveryPrimitiveError('invalid-request', 'Recovery retention age exceeds the supported timestamp range');
+      }
+      cutoff = new Date(Date.now() - ageMilliseconds).toISOString();
+      for (const checkpoint of checkpoints) {
+        if (checkpoint.created_at < cutoff) checkpointIds.add(checkpoint.id);
+      }
+      for (const operation of operations) {
+        if (PRUNABLE_OPERATION_STATES.has(operation.state) && operation.updated_at < cutoff) {
+          operationIds.add(operation.id);
+        }
+      }
+    }
+    if (policy.maxCheckpointCount !== null) {
+      const excess = Math.max(0, checkpoints.length - policy.maxCheckpointCount);
+      for (const checkpoint of checkpoints.slice(0, excess)) checkpointIds.add(checkpoint.id);
+    }
+    if (policy.maxByteLength !== null) {
+      let retainedBytes = checkpoints.reduce((total, checkpoint) => total + checkpoint.byte_length, 0);
+      for (const checkpoint of checkpoints) {
+        if (retainedBytes <= policy.maxByteLength) break;
+        checkpointIds.add(checkpoint.id);
+        retainedBytes -= checkpoint.byte_length;
+      }
+    }
+    if (policy.maxOperationCount !== null) {
+      const prunable = operations.filter((operation) => PRUNABLE_OPERATION_STATES.has(operation.state));
+      const excess = Math.max(0, prunable.length - policy.maxOperationCount);
+      for (const operation of prunable.slice(0, excess)) operationIds.add(operation.id);
+    }
+    let recordsDeleted = 0;
+    runImmediateTransaction(database, 'Recovery retention pruning', () => {
+      for (const checkpointId of checkpointIds) {
+        const changes = database.prepare('SELECT path FROM checkpoint_changes WHERE checkpoint_id = ?')
+          .all(checkpointId);
+        for (const change of changes) {
+          deleteObjectReferences(
+            database,
+            workspaceId,
+            'checkpoint-change',
+            JSON.stringify([checkpointId, change.path]),
+          );
+        }
+        recordsDeleted += database.prepare('DELETE FROM checkpoints WHERE id = ? AND workspace_id = ?')
+          .run(checkpointId, workspaceId).changes;
+      }
+      for (const operationId of operationIds) {
+        const files = database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
+          .all(operationId);
+        for (const file of files) {
+          deleteObjectReferences(
+            database,
+            workspaceId,
+            'operation-file',
+            JSON.stringify([operationId, file.path]),
+          );
+        }
+        deleteObjectReferences(database, workspaceId, 'operation', operationId);
+        recordsDeleted += database.prepare(`
+          DELETE FROM operations
+          WHERE id = ? AND workspace_id = ? AND state IN ('complete', 'aborted', 'compensated')
+        `).run(operationId, workspaceId).changes;
+      }
+      const lastRunAt = new Date().toISOString();
+      database.prepare(`
+        INSERT INTO metadata(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(retentionRunKey(workspaceId), lastRunAt);
+    });
+    return { recordsDeleted, policy };
+  };
+
+  const referencedObjects = (database) => new Set(
+    database.prepare('SELECT DISTINCT object_hash FROM object_references')
+      .all().map((row) => row.object_hash),
+  );
+
+  const collectUnreachableObjects = async (root, database) => {
+    const refs = referencedObjects(database);
+    const objectsRoot = pathModule.join(root, 'objects');
+    let byteLengthReclaimed = 0;
+    let objectsDeleted = 0;
+    const walk = async (directory) => {
+      let entries;
+      try {
+        entries = await fsPromises.readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if (error?.code === 'ENOENT') return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const target = pathModule.join(directory, entry.name);
+        if (entry.isDirectory()) await walk(target);
+        else if (entry.isFile()) {
+          const relative = pathModule.relative(objectsRoot, target).replace(/[\\/]/g, '');
+          if (refs.has(`sha256-${relative}`)) continue;
+          byteLengthReclaimed += (await fsPromises.stat(target)).size;
+          await fsPromises.rm(target, { force: true });
+          objectsDeleted += 1;
+        }
+      }
+    };
+    await walk(objectsRoot);
+    return { byteLengthReclaimed, objectsDeleted };
+  };
+
+  const retentionStatusInternal = async (workspaceId) => {
+    const { identity } = await inspectStorageIdentity(workspaceId);
+    const storage = await storageFor(identity, false);
+    const inspected = await inspectRecoveryJournalCatalog(storage.root, { fsPromises });
+    if (!inspected?.database) {
+      return {
+        eligibleCheckpointCount: 0,
+        lastRunAt: null,
+        oldestProtectedOperationAt: null,
+        policy: { ...DEFAULT_RETENTION_POLICY },
+        protectedCheckpointCount: 0,
+        protectedOperationCount: 0,
+        retainedByteLength: 0,
+        terminalOperationCount: 0,
+        workspaceId,
+      };
+    }
+    const database = inspected.database;
+    try {
+      return retentionStatusFor(database, workspaceId);
+    } finally {
+      database.close();
+    }
+  };
+
+  const setRetentionPolicyInternal = async (input) => {
+    const { identity } = await inspectStorageIdentity(input.workspaceId);
+    const storage = await storageFor(identity, true);
+    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    try {
+      runImmediateTransaction(database, 'Recovery retention policy update', () => {
+        database.prepare(`
+          INSERT INTO metadata(key, value) VALUES (?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `).run(retentionPolicyKey(input.workspaceId), JSON.stringify(input.policy));
+      });
+      pruneRetentionRecords(database, input.workspaceId);
+      await collectUnreachableObjects(storage.root, database);
+      return retentionStatusFor(database, input.workspaceId);
+    } finally {
+      database.close();
+    }
+  };
+
+  const cleanupStorageInternal = async (workspaceId, options = {}) => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
     const operationId = randomUUID();
     if (!database) return { byteLengthReclaimed: 0, failures: [], objectsDeleted: 0, operationId, recordsDeleted: 0, status: 'complete', workspaceId };
     try {
-      const refs = referencedObjects(database);
-      const objectsRoot = pathModule.join(storage.root, 'objects');
-      let byteLengthReclaimed = 0;
-      let objectsDeleted = 0;
-      const walk = async (directory) => {
-        let entries;
-        try {
-          entries = await fsPromises.readdir(directory, { withFileTypes: true });
-        } catch (error) {
-          if (error?.code === 'ENOENT') return;
-          throw error;
-        }
-        for (const entry of entries) {
-          const target = pathModule.join(directory, entry.name);
-          if (entry.isDirectory()) await walk(target);
-          else if (entry.isFile()) {
-            const relative = pathModule.relative(objectsRoot, target).replace(/[\\/]/g, '');
-            if (refs.has(`sha256-${relative}`)) continue;
-            byteLengthReclaimed += (await fsPromises.stat(target)).size;
-            await fsPromises.rm(target, { force: true });
-            objectsDeleted += 1;
-          }
-        }
-      };
-      await walk(objectsRoot);
-      return { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted: 0, status: 'complete', workspaceId };
+      const { recordsDeleted } = pruneRetentionRecords(database, workspaceId);
+      const { byteLengthReclaimed, objectsDeleted } = recordsDeleted > 0 || options.scanUnchangedObjects !== false
+        ? await collectUnreachableObjects(storage.root, database)
+        : { byteLengthReclaimed: 0, objectsDeleted: 0 };
+      return { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
     } finally {
       database.close();
     }
@@ -1378,8 +1683,6 @@ export const createWorkspaceRecoveryEngine = (options) => {
       return { byteLengthReclaimed: 0, failures: [], objectsDeleted: 0, operationId, recordsDeleted: 0, status: 'complete', workspaceId };
     }
     try {
-      const stats = await statTree(pathModule.join(storage.root, 'objects'), fsPromises, pathModule)
-        .catch(() => ({ byteLength: 0, objectCount: 0 }));
       let recordsDeleted = 0;
       runImmediateTransaction(database, 'Workspace history deletion', () => {
         // Delete only this workspace's rows. Other workspaces sharing the same
@@ -1403,6 +1706,9 @@ export const createWorkspaceRecoveryEngine = (options) => {
         // Delete operations for this workspace.
         const operationsResult = database.prepare("DELETE FROM operations WHERE workspace_id = ? AND kind = 'combined'").run(workspaceId);
         recordsDeleted += operationsResult.changes;
+        database.prepare('DELETE FROM object_references WHERE workspace_id = ?').run(workspaceId);
+        database.prepare('DELETE FROM metadata WHERE key IN (?, ?)')
+          .run(retentionPolicyKey(workspaceId), retentionRunKey(workspaceId));
         // Rebuild object_references from remaining source rows so refs owned by
         // deleted checkpoints/operations are removed cleanly without LIKE matching.
         // better-sqlite3 uses SAVEPOINTs for nested transactions, so this is safe
@@ -1410,31 +1716,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         rebuildObjectReferences(database);
       });
       // GC unreachable objects after row deletion.
-      const refs = referencedObjects(database);
-      const objectsRoot = pathModule.join(storage.root, 'objects');
-      let byteLengthReclaimed = 0;
-      let objectsDeleted = 0;
-      const walk = async (directory) => {
-        let entries;
-        try {
-          entries = await fsPromises.readdir(directory, { withFileTypes: true });
-        } catch (error) {
-          if (error?.code === 'ENOENT') return;
-          throw error;
-        }
-        for (const entry of entries) {
-          const target = pathModule.join(directory, entry.name);
-          if (entry.isDirectory()) await walk(target);
-          else if (entry.isFile()) {
-            const relative = pathModule.relative(objectsRoot, target).replace(/[\\/]/g, '');
-            if (refs.has(`sha256-${relative}`)) continue;
-            byteLengthReclaimed += (await fsPromises.stat(target)).size;
-            await fsPromises.rm(target, { force: true });
-            objectsDeleted += 1;
-          }
-        }
-      };
-      await walk(objectsRoot);
+      const { byteLengthReclaimed, objectsDeleted } = await collectUnreachableObjects(storage.root, database);
       return { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
     } finally {
       database.close();
@@ -1504,13 +1786,30 @@ export const createWorkspaceRecoveryEngine = (options) => {
       if (!identity) continue;
       const storage = await storageFor(identity, false).catch(() => null);
       if (!storage) continue;
+      let workspaceLease;
+      try {
+        workspaceLease = await leases.acquire({
+          root: storage.root,
+          workspaceId,
+          mode: 'exclusive',
+          purpose: 'recovery-crash-reconciliation',
+        });
+      } catch (error) {
+        const failures = startupFailures.get(workspaceId) ?? [];
+        failures.push(recoveryFailure(error, 'lease-unavailable'));
+        startupFailures.set(workspaceId, failures);
+        continue;
+      }
       const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises }).catch((error) => {
         const failures = startupFailures.get(workspaceId) ?? [];
         failures.push(recoveryFailure(error, 'storage-malformed'));
         startupFailures.set(workspaceId, failures);
         return null;
       });
-      if (!database) continue;
+      if (!database) {
+        await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));
+        continue;
+      }
       try {
         const rows = database.prepare(`
           SELECT * FROM operations WHERE kind = 'combined'
@@ -1578,12 +1877,29 @@ export const createWorkspaceRecoveryEngine = (options) => {
         }
       } finally {
         database.close();
+        await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));
       }
     }
     return resolved;
   };
 
   const safe = (operation, fallbackCode) => operation().catch((error) => failedRecoveryResult(error, fallbackCode));
+
+  const scheduleAutomaticRetention = (workspaceId) => {
+    void retentionStatusInternal(workspaceId).then((retention) => {
+      if (!retentionEnabled(retention.policy) || disposed) return;
+      return runWorkspace(
+        workspaceId,
+        () => cleanupStorageInternal(workspaceId, { scanUnchangedObjects: false }),
+        { mode: 'exclusive', purpose: 'recovery-retention-automatic' },
+      );
+    }).catch((error) => {
+      if (error?.code === 'lease-unavailable') return;
+      const failures = startupFailures.get(workspaceId) ?? [];
+      failures.push(recoveryFailure(error, 'internal'));
+      startupFailures.set(workspaceId, failures);
+    });
+  };
 
   return {
     locations,
@@ -1592,30 +1908,34 @@ export const createWorkspaceRecoveryEngine = (options) => {
       return {
         operation: await runWorkspace(located.identity.workspaceId, async () => (
           applyLocatedOperation(await locateOperation(input.operationId), input)
-        )),
+        ), { mode: 'exclusive', purpose: 'combined-recovery-apply' }),
         status: 'ready',
       };
     }),
     cancelCombinedOperation: (operationId) => safe(async () => {
       const located = await locateOperation(operationId);
       return {
-        operation: await runWorkspace(located.identity.workspaceId, () => cancelOperationInternal(operationId)),
+        operation: await runWorkspace(
+          located.identity.workspaceId,
+          () => cancelOperationInternal(operationId),
+          { mode: 'shared', purpose: 'combined-recovery-cancel' },
+        ),
         status: 'ready',
       };
     }),
     clearStorageLocationOverride: (workspaceId) => safe(() => runWorkspace(workspaceId, async () => {
       const global = await locations.globalSelection();
       return { operation: await moveStorageInternal(workspaceId, global.location, 'global'), status: 'ready' };
-    })),
+    }, { mode: 'exclusive', purpose: 'recovery-storage-move' })),
     cleanupStorage: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
       result: await cleanupStorageInternal(input.workspaceId),
       status: 'ready',
-    }))),
+    }), { mode: 'exclusive', purpose: 'recovery-retention-cleanup' })),
     createCheckpoint: (input) => safe(async () => ({ checkpoint: await runWorkspace(input.workspaceId, () => createCheckpointInternal(input)), status: 'ready' })),
     deleteWorkspaceHistory: (workspaceId) => safe(() => runWorkspace(workspaceId, async () => ({
       result: await deleteWorkspaceHistoryInternal(workspaceId),
       status: 'ready',
-    }))),
+    }), { mode: 'exclusive', purpose: 'recovery-history-delete' })),
     fenceUnfinishedOperations: resumeUnfinished,
     getCombinedOperation: (operationId) => safe(async () => ({ operation: await getOperationInternal(operationId), status: 'ready' })),
     getStorageMove: (operationId) => safe(async () => ({
@@ -1625,18 +1945,51 @@ export const createWorkspaceRecoveryEngine = (options) => {
     listCheckpoints: (input) => safe(async () => ({ page: await listCheckpointsInternal(input), status: 'ready' })),
     listCombinedOperations: (workspaceId) => safe(async () => ({ operations: await listOperationsInternal(workspaceId), status: 'ready' })),
     listStorageWorkspaces: () => safe(async () => ({ status: 'ready', workspaces: await listStorageWorkspacesInternal() })),
-    prepareCombinedRecovery: (input) => safe(async () => ({ plan: await runWorkspace(input.workspaceId, () => prepareCombinedInternal(input)), status: 'ready' })),
+    prepareCombinedRecovery: (input) => safe(async () => ({
+      plan: await runWorkspace(
+        input.workspaceId,
+        () => prepareCombinedInternal(input),
+        { mode: 'shared', purpose: 'combined-recovery-prepare' },
+      ),
+      status: 'ready',
+    })),
     prepareCombinedUndo: (operationId) => safe(async () => {
       const located = await locateOperation(operationId);
       return {
-        plan: await runWorkspace(located.identity.workspaceId, () => prepareUndoInternal(operationId)),
+        plan: await runWorkspace(
+          located.identity.workspaceId,
+          () => prepareUndoInternal(operationId),
+          { mode: 'shared', purpose: 'combined-recovery-undo-prepare' },
+        ),
         status: 'ready',
       };
     }),
-    recordMutationAfter: (input) => safe(async () => ({ recorded: await runWorkspace(input.workspaceId, () => recordMutationAfterInternal(input)), status: 'ready' })),
-    recordMutationBefore: (input) => safe(async () => ({ recorded: await runWorkspace(input.workspaceId, () => recordMutationBeforeInternal(input)), status: 'ready' })),
-    recordTurnSettled: (input) => safe(async () => ({ binding: await runWorkspace(input.workspaceId, () => recordTurnSettledInternal(input)), status: 'ready' })),
+    recordMutationAfter: (input) => safe(async () => ({
+      recorded: await runWorkspace(
+        input.workspaceId,
+        () => recordMutationAfterInternal(input),
+        { mode: 'shared', purpose: 'recovery-journal-after-image' },
+      ),
+      status: 'ready',
+    })),
+    recordMutationBefore: (input) => safe(async () => ({
+      recorded: await runWorkspace(
+        input.workspaceId,
+        () => recordMutationBeforeInternal(input),
+        { mode: 'shared', purpose: 'recovery-journal-before-image' },
+      ),
+      status: 'ready',
+    })),
+    recordTurnSettled: (input) => safe(async () => {
+      const binding = await runWorkspace(input.workspaceId, () => recordTurnSettledInternal(input));
+      scheduleAutomaticRetention(input.workspaceId);
+      return { binding, status: 'ready' };
+    }),
     recordTurnStart: (input) => safe(async () => ({ binding: await runWorkspace(input.workspaceId, () => recordTurnStartInternal(input)), status: 'ready' })),
+    retentionStatus: (workspaceId) => safe(async () => ({
+      retention: await retentionStatusInternal(workspaceId),
+      status: 'ready',
+    })),
     resolveEntry: (input) => safe(() => resolveEntryInternal(input)),
     resumeCombinedOperations: resumeUnfinished,
     resumeWorkspaceOperations: async () => [],
@@ -1644,12 +1997,19 @@ export const createWorkspaceRecoveryEngine = (options) => {
       await locations.setDefault(await locations.validateLocation(location));
       return { status: 'ready', storage: await storageStatusInternal() };
     }),
+    setRetentionPolicy: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
+      retention: await setRetentionPolicyInternal(input),
+      status: 'ready',
+    }), { mode: 'exclusive', purpose: 'recovery-retention-policy' })),
     setStorageLocation: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
       operation: await moveStorageInternal(input.workspaceId, input.location, 'workspace'),
       status: 'ready',
-    }))),
+    }), { mode: 'exclusive', purpose: 'recovery-storage-move' })),
     status: (workspaceId) => safe(async () => {
-      const storage = await storageStatusInternal(workspaceId);
+      const [storage, retention] = await Promise.all([
+        storageStatusInternal(workspaceId),
+        retentionStatusInternal(workspaceId),
+      ]);
       return {
         capabilities: {
           bindings: true,
@@ -1657,19 +2017,26 @@ export const createWorkspaceRecoveryEngine = (options) => {
           checkpoints: true,
           combined: true,
           conflictConfirmation: true,
-          dirtyStateBarrier: false,
+          dirtyStateBarrier: typeof documents.beginDirtyStateBarrier === 'function',
           journal: true,
           redo: true,
-          retention: false,
+          retention: true,
           storageManagement: true,
-          workspaceLease: false,
+          workspaceLease: true,
         },
         failures: startupFailures.get(workspaceId) ?? [],
         identity: await inspectIdentity(workspaceId),
+        retention,
         status: 'ready',
         storage,
       };
     }),
     storageStatus: (workspaceId) => safe(async () => ({ status: 'ready', storage: await storageStatusInternal(workspaceId) })),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      await Promise.allSettled([...queues.values()]);
+      await leases.dispose();
+    },
   };
 };

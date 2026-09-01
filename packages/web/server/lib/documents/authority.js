@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
@@ -58,6 +59,7 @@ export const createDocumentAuthority = (options) => {
     onWorkspaceResolved = () => undefined,
     maxReadBytes = Number.POSITIVE_INFINITY,
     overflowLimit,
+    dirtyBarrierTimeoutMs = 15_000,
   } = options;
 
   const registry = createWorkspaceRegistry({
@@ -76,6 +78,9 @@ export const createDocumentAuthority = (options) => {
   const watchers = new Map();
   const captureWatches = new Map();
   const dirtyBuffersByOwner = new Map();
+  const dirtySurfaces = new Map();
+  const dirtyBarriers = new Map();
+  let dirtyPublicationRevision = 0;
   let disposed = false;
   let disposePromise = null;
   const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
@@ -561,6 +566,198 @@ export const createDocumentAuthority = (options) => {
   };
 
   const dirtyBufferKey = (ownerId, workspaceId) => `${ownerId}\0${workspaceId}`;
+  const publicDirtyBufferRecord = ({ publicationRevision: _publicationRevision, ...record }) => (
+    structuredClone(record)
+  );
+
+  const releaseDirtyBarrier = (barrier, error) => {
+    if (!barrier || barrier.released) return;
+    barrier.released = true;
+    clearTimeout(barrier.timer);
+    dirtyBarriers.delete(barrier.barrierId);
+    for (const surfaceKey of barrier.surfaceKeys) {
+      const surface = dirtySurfaces.get(surfaceKey);
+      if (!surface) continue;
+      try {
+        surface.listener({
+          action: 'release',
+          barrierId: barrier.barrierId,
+          caseSensitive: barrier.caseSensitive,
+          kind: 'dirty-state-barrier',
+          paths: barrier.paths,
+          workspaceId: barrier.workspaceId,
+        });
+      } catch {
+        // Releasing every other surface and settling waiters is more important
+        // than propagating an already-disconnected listener failure.
+      }
+    }
+    for (const waiter of barrier.waiters) {
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+    barrier.waiters.clear();
+  };
+
+  const dirtyBarrierFailure = (message) => new DocumentAuthorityError(message, {
+    code: 'failed',
+    statusCode: 503,
+  });
+
+  const armDirtyBarrierDeadline = (barrier) => {
+    clearTimeout(barrier.timer);
+    if (barrier.pending.size === 0 || barrier.released) {
+      barrier.timer = null;
+      return;
+    }
+    barrier.timer = setTimeout(() => {
+      releaseDirtyBarrier(barrier, dirtyBarrierFailure('Document surfaces did not publish dirty state before the barrier deadline'));
+    }, dirtyBarrierTimeoutMs);
+    barrier.timer.unref?.();
+  };
+
+  const settleDirtyBarrier = (barrier) => {
+    if (barrier.released) {
+      return Promise.reject(dirtyBarrierFailure('Dirty-state barrier was released before it settled'));
+    }
+    if (barrier.pending.size === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => barrier.waiters.add({ reject, resolve }));
+  };
+
+  const resolveDirtyBarrierWaiters = (barrier) => {
+    if (barrier.pending.size > 0 || barrier.released) return;
+    clearTimeout(barrier.timer);
+    barrier.timer = null;
+    for (const waiter of barrier.waiters) waiter.resolve();
+    barrier.waiters.clear();
+  };
+
+  const registerDirtySurface = (request, listener) => {
+    if (disposed) {
+      throw new DocumentAuthorityError('Document authority is disposed', { code: 'failed', statusCode: 500 });
+    }
+    if (!request || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0
+      || typeof listener !== 'function') {
+      throw new DocumentAuthorityError('Dirty surface registration is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const record = { ...request, key, listener, registrationId: randomUUID() };
+    dirtySurfaces.set(key, record);
+    for (const barrier of dirtyBarriers.values()) {
+      if (barrier.workspaceId !== request.workspaceId || barrier.released) continue;
+      barrier.surfaceKeys.add(key);
+      barrier.pending.add(key);
+      barrier.requiredPublications.set(key, dirtyPublicationRevision + 1);
+      armDirtyBarrierDeadline(barrier);
+      try {
+        listener({
+          action: 'acquire',
+          barrierId: barrier.barrierId,
+          caseSensitive: barrier.caseSensitive,
+          kind: 'dirty-state-barrier',
+          paths: barrier.paths,
+          workspaceId: barrier.workspaceId,
+        });
+      } catch {
+        releaseDirtyBarrier(barrier, dirtyBarrierFailure('A document surface could not receive the dirty-state barrier'));
+      }
+    }
+    return {
+      close() {
+        if (dirtySurfaces.get(key)?.registrationId !== record.registrationId) return;
+        dirtySurfaces.delete(key);
+        dirtyBuffersByOwner.delete(key);
+        for (const barrier of dirtyBarriers.values()) {
+          if (!barrier.surfaceKeys.has(key) || barrier.released) continue;
+          releaseDirtyBarrier(barrier, dirtyBarrierFailure('A document surface disconnected while the dirty-state barrier was held'));
+        }
+      },
+    };
+  };
+
+  const beginDirtyStateBarrier = async (workspaceId, paths, options = {}) => {
+    if (disposed) {
+      throw new DocumentAuthorityError('Document authority is disposed', { code: 'failed', statusCode: 500 });
+    }
+    await loadWorkspace(workspaceId);
+    if (!Array.isArray(paths) || paths.some((entry) => typeof entry !== 'string' || !entry)) {
+      throw new DocumentAuthorityError('Dirty-state barrier paths are malformed', { code: 'failed', statusCode: 400 });
+    }
+    if (options.caseSensitive !== undefined && typeof options.caseSensitive !== 'boolean') {
+      throw new DocumentAuthorityError('Dirty-state barrier path comparison is malformed', { code: 'failed', statusCode: 400 });
+    }
+    if (!Number.isSafeInteger(dirtyBarrierTimeoutMs) || dirtyBarrierTimeoutMs <= 0) {
+      throw new DocumentAuthorityError('Dirty-state barrier timeout is malformed', { code: 'failed', statusCode: 500 });
+    }
+    const barrierId = randomUUID();
+    const surfaces = [...dirtySurfaces.values()].filter((surface) => surface.workspaceId === workspaceId);
+    const barrier = {
+      barrierId,
+      caseSensitive: options.caseSensitive ?? platform !== 'win32',
+      paths: [...new Set(paths)].sort(),
+      pending: new Set(surfaces.map((surface) => surface.key)),
+      requiredPublications: new Map(surfaces.map((surface) => [surface.key, dirtyPublicationRevision + 1])),
+      released: false,
+      surfaceKeys: new Set(surfaces.map((surface) => surface.key)),
+      timer: null,
+      waiters: new Set(),
+      workspaceId,
+    };
+    // A frozen renderer with a still-open transport must not deadlock recovery.
+    // The deadline is configurable and defaults to one SSE heartbeat interval.
+    armDirtyBarrierDeadline(barrier);
+    dirtyBarriers.set(barrierId, barrier);
+    for (const surface of surfaces) {
+      if (barrier.released) break;
+      try {
+        surface.listener({
+          action: 'acquire',
+          barrierId,
+          caseSensitive: barrier.caseSensitive,
+          kind: 'dirty-state-barrier',
+          paths: barrier.paths,
+          workspaceId,
+        });
+      } catch {
+        releaseDirtyBarrier(barrier, dirtyBarrierFailure('A document surface could not receive the dirty-state barrier'));
+      }
+    }
+    await settleDirtyBarrier(barrier);
+    return {
+      barrierId,
+      async release() {
+        releaseDirtyBarrier(barrier);
+      },
+      settle: () => settleDirtyBarrier(barrier),
+    };
+  };
+
+  const acknowledgeDirtyStateBarrier = async (request) => {
+    if (!request || typeof request.barrierId !== 'string' || !request.barrierId
+      || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0) {
+      throw new DocumentAuthorityError('Dirty-state barrier acknowledgement is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const barrier = dirtyBarriers.get(request.barrierId);
+    if (!barrier || barrier.released || barrier.workspaceId !== request.workspaceId) {
+      return { acknowledged: false };
+    }
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const surface = dirtySurfaces.get(key);
+    const publication = dirtyBuffersByOwner.get(key);
+    const requiredPublication = barrier.requiredPublications.get(key) ?? Number.POSITIVE_INFINITY;
+    if (!surface || surface.generation !== request.generation || !barrier.pending.has(key)
+      || publication?.generation !== request.generation
+      || publication.publicationRevision < requiredPublication) {
+      return { acknowledged: false };
+    }
+    barrier.pending.delete(key);
+    resolveDirtyBarrierWaiters(barrier);
+    return { acknowledged: true };
+  };
 
   const publishDirtyBuffers = async (request) => {
     if (!request || typeof request.ownerId !== 'string' || !request.ownerId
@@ -595,12 +792,13 @@ export const createDocumentAuthority = (options) => {
     const record = {
       generation: request.generation,
       ownerId: request.ownerId,
+      publicationRevision: ++dirtyPublicationRevision,
       resources,
       updatedAt: new Date().toISOString(),
       workspaceId: request.workspaceId,
     };
     dirtyBuffersByOwner.set(key, record);
-    return structuredClone(record);
+    return publicDirtyBufferRecord(record);
   };
 
   const clearDirtyBuffers = async (request) => {
@@ -624,7 +822,7 @@ export const createDocumentAuthority = (options) => {
     await loadWorkspace(workspaceId);
     return [...dirtyBuffersByOwner.values()]
       .filter((record) => record.workspaceId === workspaceId)
-      .map((record) => structuredClone(record))
+      .map(publicDirtyBufferRecord)
       .sort((left, right) => left.ownerId.localeCompare(right.ownerId));
   };
 
@@ -642,6 +840,10 @@ export const createDocumentAuthority = (options) => {
       tracked.controller.close();
     }
     captureWatches.clear();
+    for (const barrier of [...dirtyBarriers.values()]) {
+      releaseDirtyBarrier(barrier, dirtyBarrierFailure('Document authority was disposed during a dirty-state barrier'));
+    }
+    dirtySurfaces.clear();
     dirtyBuffersByOwner.clear();
     // Mutation disposal flips its admission gate synchronously, before an
     // asynchronously starting watcher can register more mutation work.
@@ -687,6 +889,9 @@ export const createDocumentAuthority = (options) => {
     publishDirtyBuffers,
     clearDirtyBuffers,
     inspectDirtyBuffers,
+    registerDirtySurface,
+    beginDirtyStateBarrier,
+    acknowledgeDirtyStateBarrier,
     writeRecoveryJournal: (request) => journalMutation(
       request,
       'document-recovery-journal-write',

@@ -1,6 +1,7 @@
 import {
   parseRecoveryStorageLocation,
   parseRecoveryStorageCleanupInput,
+  parseRecoveryRetentionPolicyInput,
   parseSetRecoveryStorageLocationInput,
   parseWorkspaceCombinedRecoveryApplyInput,
   parseWorkspaceCombinedRecoveryPrepareInput,
@@ -87,6 +88,13 @@ export const createWorkspaceRecoveryCapabilityHandler = (engineOrResolver) => as
   }
   if (method === 'cleanupStorage') {
     return engine.cleanupStorage(parseRecoveryStorageCleanupInput(params));
+  }
+  if (method === 'retentionStatus') {
+    const input = asRecord(params, 'workspace.recovery-primitives.retentionStatus');
+    return engine.retentionStatus(requiredText(input.workspaceId, 'workspaceId'));
+  }
+  if (method === 'setRetentionPolicy') {
+    return engine.setRetentionPolicy(parseRecoveryRetentionPolicyInput(params));
   }
   if (method === 'deleteWorkspaceHistory') {
     const input = asRecord(params, 'workspace.recovery-primitives.deleteWorkspaceHistory');

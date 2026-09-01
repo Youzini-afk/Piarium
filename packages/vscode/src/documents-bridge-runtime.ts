@@ -14,6 +14,11 @@ type DocumentAuthority = {
   move: (request: unknown) => Promise<unknown>;
   delete: (request: unknown) => Promise<unknown>;
   watch: (workspaceId: string, listener: (event: unknown) => void) => { close: () => void };
+  registerDirtySurface: (
+    request: { generation: number; ownerId: string; workspaceId: string },
+    listener: (event: unknown) => void,
+  ) => { close: () => void };
+  acknowledgeDirtyStateBarrier: (request: unknown) => Promise<unknown>;
   listRecoveryJournals: (request: unknown) => Promise<unknown>;
   readRecoveryJournal: (journalId: string) => Promise<unknown>;
   writeRecoveryJournal: (request: unknown) => Promise<unknown>;
@@ -72,6 +77,8 @@ export const handleDocumentsBridgeMessage = async (
         return { id, type, success: true, data: await deps.documents.publishDirtyBuffers(body) };
       case 'api:documents:dirty:clear':
         return { id, type, success: true, data: await deps.documents.clearDirtyBuffers(body) };
+      case 'api:documents:dirty:barrier:ack':
+        return { id, type, success: true, data: await deps.documents.acknowledgeDirtyStateBarrier(body) };
       case 'api:documents:recovery:list':
         return { id, type, success: true, data: { journals: await deps.documents.listRecoveryJournals(body) } };
       case 'api:documents:recovery:read':
@@ -86,12 +93,23 @@ export const handleDocumentsBridgeMessage = async (
           return { id, type, success: false, error: 'workspaceId is required', reason: 'failed', status: 400 };
         }
         const watchId = `watch_${++watchSeq}`;
-        const subscription = deps.documents.watch(workspaceId, (event) => {
+        const sendEvent = (event: unknown) => {
           const serialized = JSON.stringify(event);
           if (serialized.includes('"content":')) return;
           void deps.webview?.postMessage({ type: 'api:documents:watch:event', watchId, event });
+        };
+        const subscription = deps.documents.watch(workspaceId, sendEvent);
+        const ownerId = typeof body.ownerId === 'string' ? body.ownerId : '';
+        const generation = Number(body.generation);
+        const dirtySubscription = ownerId && Number.isSafeInteger(generation) && generation >= 0
+          ? deps.documents.registerDirtySurface({ generation, ownerId, workspaceId }, sendEvent)
+          : null;
+        watches.set(watchId, {
+          close() {
+            subscription.close();
+            dirtySubscription?.close();
+          },
         });
-        watches.set(watchId, subscription);
         return { id, type, success: true, data: { watchId } };
       }
       case 'api:documents:watch:stop': {

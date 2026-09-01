@@ -3,8 +3,8 @@ import type {
   DocumentsAPI,
   PiariumDocumentReadResult,
   PiariumDocumentRecoveryJournalSummary,
+  PiariumDocumentWatchEvent,
   PiariumResourceReference,
-  PiariumWorkspaceFileEvent,
 } from '@piarium/application-client';
 import { DocumentRegistry } from './registry';
 import { documentKey } from './types';
@@ -30,18 +30,23 @@ const createMemoryDocuments = () => {
     revision: number;
     baseRevision: string | null;
   }>();
-  const listeners = new Set<(event: PiariumWorkspaceFileEvent) => void>();
+  const listeners = new Set<(event: PiariumDocumentWatchEvent) => void>();
   const dirtyPublications: Array<Parameters<DocumentsAPI['publishDirtyBuffers']>[0]> = [];
+  const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
   let revisionSeq = 1;
   let workspaceEpoch = 1;
   let watchSequence = 0;
   const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   const nextRevision = () => `d1_${revisionSeq++}`;
-  const emit = (event: PiariumWorkspaceFileEvent) => {
+  const emit = (event: PiariumDocumentWatchEvent) => {
     for (const listener of listeners) listener(event);
   };
 
   const api: DocumentsAPI = {
+    ackDirtyStateBarrier: async (request) => {
+      barrierAcknowledgements.push(request);
+      return { acknowledged: true };
+    },
     clearDirtyBuffers: async () => ({ cleared: true }),
     publishDirtyBuffers: async (request) => {
       dirtyPublications.push(request);
@@ -188,7 +193,15 @@ const createMemoryDocuments = () => {
     },
   };
 
-  return { api, dirtyPublications, files, journals, emit, setEpoch: (epoch: number) => { workspaceEpoch = epoch; } };
+  return {
+    api,
+    barrierAcknowledgements,
+    dirtyPublications,
+    files,
+    journals,
+    emit,
+    setEpoch: (epoch: number) => { workspaceEpoch = epoch; },
+  };
 };
 
 describe('DocumentRegistry', () => {
@@ -472,6 +485,51 @@ describe('DocumentRegistry', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(dirtyPublications.at(-1)?.resources).toEqual([]);
     unsubscribe();
+    registry.dispose();
+  });
+
+  test('publishes every dirty revision and fences affected edits during a Host barrier', async () => {
+    const { api, barrierAcknowledgements, dirtyPublications, emit } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(identity);
+    registry.applyTransaction(identity, 'first edit', { origin: 'editor' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dirtyPublications.at(-1)?.resources[0]?.localEditRevision).toBe(1);
+    registry.applyTransaction(identity, 'second edit', { origin: 'editor' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(dirtyPublications.at(-1)?.resources[0]?.localEditRevision).toBe(2);
+
+    emit({
+      action: 'acquire',
+      barrierId: 'barrier-1',
+      caseSensitive: true,
+      kind: 'dirty-state-barrier',
+      paths: ['note.txt'],
+      workspaceId: identity.workspaceId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(barrierAcknowledgements).toHaveLength(1);
+    expect(barrierAcknowledgements[0]).toEqual({
+      barrierId: 'barrier-1',
+      generation: 1,
+      ownerId: barrierAcknowledgements[0]?.ownerId,
+      workspaceId: identity.workspaceId,
+    });
+    expect(barrierAcknowledgements[0]?.ownerId.startsWith('document-surface:session:')).toBe(true);
+    expect(() => registry.applyTransaction(identity, 'blocked', { origin: 'editor' }))
+      .toThrow('temporarily fenced');
+
+    emit({
+      action: 'release',
+      barrierId: 'barrier-1',
+      caseSensitive: true,
+      kind: 'dirty-state-barrier',
+      paths: ['note.txt'],
+      workspaceId: identity.workspaceId,
+    });
+    expect(registry.applyTransaction(identity, 'allowed', { origin: 'editor' }).buffer).toBe('allowed');
     registry.dispose();
   });
 

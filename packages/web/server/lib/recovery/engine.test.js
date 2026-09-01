@@ -8,9 +8,12 @@ import { createWorkspaceRecoveryEngine } from './engine.js';
 const harnesses = new Set();
 
 const createHarness = async (options = {}) => {
-  const harness = await createDocumentAuthorityHarness();
+  const { documentAuthority, ...engineOptions } = options;
+  const harness = await createDocumentAuthorityHarness(
+    documentAuthority ? { authority: documentAuthority } : undefined,
+  );
   harnesses.add(harness);
-  const navigation = options.sessionNavigation ?? {
+  const navigation = engineOptions.sessionNavigation ?? {
     commit: vi.fn(async () => ({ markerId: 'marker-1' })),
     commitLeaf: vi.fn(async () => ({ markerId: 'marker-undo' })),
     prepare: vi.fn(async (input) => ({
@@ -30,7 +33,7 @@ const createHarness = async (options = {}) => {
     dataDir: harness.dataDir,
     documents: harness.authority,
     sessionNavigation: navigation,
-    ...options,
+    ...engineOptions,
   });
   return { engine, harness, navigation };
 };
@@ -129,6 +132,83 @@ describe('affected-file workspace recovery journal', () => {
     });
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
     expect(navigation.commit).toHaveBeenCalledOnce();
+  });
+
+  it('waits for connected document surfaces before inspecting and applying recovery', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+    const events = [];
+    const surface = harness.authority.registerDirtySurface({
+      generation: 1,
+      ownerId: 'surface-1',
+      workspaceId: harness.identity.workspaceId,
+    }, (event) => {
+      events.push(event);
+      if (event.action !== 'acquire') return;
+      void (async () => {
+        await harness.authority.publishDirtyBuffers({
+          generation: 1,
+          ownerId: 'surface-1',
+          resources: [],
+          workspaceId: harness.identity.workspaceId,
+        });
+        await harness.authority.acknowledgeDirtyStateBarrier({
+          barrierId: event.barrierId,
+          generation: 1,
+          ownerId: 'surface-1',
+          workspaceId: harness.identity.workspaceId,
+        });
+      })();
+    });
+    try {
+      const prepared = await engine.prepareCombinedRecovery({
+        entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      });
+      expect(prepared).toMatchObject({ status: 'ready', plan: { conflicts: [] } });
+      const applied = await engine.applyCombinedRecovery({
+        confirmedConflicts: [],
+        conflictPolicy: 'abort',
+        expectedRevision: prepared.plan.revision,
+        operationId: prepared.plan.id,
+      });
+      expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+      expect(events.filter((event) => event.action === 'acquire')).toHaveLength(2);
+      expect(events.filter((event) => event.action === 'release')).toHaveLength(2);
+    } finally {
+      surface.close();
+    }
+  });
+
+  it('fails retryably instead of treating an unresponsive dirty surface as clean', async () => {
+    const { engine, harness } = await createHarness({
+      documentAuthority: { dirtyBarrierTimeoutMs: 20 },
+    });
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+    const events = [];
+    const surface = harness.authority.registerDirtySurface({
+      generation: 1,
+      ownerId: 'unresponsive-surface',
+      workspaceId: harness.identity.workspaceId,
+    }, (event) => events.push(event));
+    try {
+      expect(await engine.prepareCombinedRecovery({
+        entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+      })).toMatchObject({
+        status: 'failed',
+        failure: { code: 'dirty-state-unavailable', retryable: true },
+      });
+      expect(events).toContainEqual(expect.objectContaining({ action: 'release' }));
+    } finally {
+      surface.close();
+    }
   });
 
   it('keeps the first before-image and last after-image across repeated writes in one turn', async () => {
@@ -327,6 +407,32 @@ describe('affected-file workspace recovery journal', () => {
     expect(navigation.commitLeaf).toHaveBeenCalledOnce();
   });
 
+  it('keeps newly referenced objects reachable during cleanup', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await settleTurn(engine, harness);
+
+    const cleaned = await engine.cleanupStorage({ workspaceId: harness.identity.workspaceId });
+    expect(cleaned).toMatchObject({
+      status: 'ready',
+      result: { objectsDeleted: 0, recordsDeleted: 0, status: 'complete' },
+    });
+    const prepared = await engine.prepareCombinedRecovery({
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    const applied = await engine.applyCombinedRecovery({
+      confirmedConflicts: [],
+      conflictPolicy: 'abort',
+      expectedRevision: prepared.plan.revision,
+      operationId: prepared.plan.id,
+    });
+    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
+  });
+
   it('compensates only the affected paths when Pi rejects conversation navigation', async () => {
     const navigation = {
       commit: vi.fn(async () => { throw new Error('leaf changed'); }),
@@ -408,7 +514,7 @@ describe('affected-file workspace recovery journal', () => {
     });
   });
 
-  it('reports v4 capabilities with unimplemented features as false', async () => {
+  it('reports v5 recovery lifecycle capabilities as implemented', async () => {
     const { engine, harness } = await createHarness();
     const status = await engine.status(harness.identity.workspaceId);
     expect(status).toMatchObject({
@@ -419,14 +525,89 @@ describe('affected-file workspace recovery journal', () => {
         checkpoints: true,
         combined: true,
         conflictConfirmation: true,
-        dirtyStateBarrier: false,
+        dirtyStateBarrier: true,
         journal: true,
         redo: true,
-        retention: false,
+        retention: true,
         storageManagement: true,
-        workspaceLease: false,
+        workspaceLease: true,
       },
       failures: [],
+    });
+  });
+
+  it('applies configurable retention while preserving named checkpoints', async () => {
+    const { engine, harness } = await createHarness();
+    await startTurn(engine, harness, '1');
+    await settleTurn(engine, harness, {
+      assistantEntryId: 'assistant-1',
+      executionId: 'execution-1',
+      mutationObserved: false,
+      observationComplete: false,
+      observedResourceIds: [],
+    });
+    await startTurn(engine, harness, '2');
+    await settleTurn(engine, harness, {
+      assistantEntryId: 'assistant-2',
+      executionId: 'execution-2',
+      mutationObserved: false,
+      observationComplete: false,
+      observedResourceIds: [],
+    });
+    await engine.createCheckpoint({ name: 'Keep this marker', workspaceId: harness.identity.workspaceId });
+
+    const updated = await engine.setRetentionPolicy({
+      policy: {
+        maxAgeDays: null,
+        maxByteLength: null,
+        maxCheckpointCount: 1,
+        maxOperationCount: null,
+      },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(updated).toMatchObject({
+      status: 'ready',
+      retention: {
+        eligibleCheckpointCount: 1,
+        policy: { maxCheckpointCount: 1 },
+        protectedCheckpointCount: 1,
+      },
+    });
+    const listed = await engine.listCheckpoints({ workspaceId: harness.identity.workspaceId });
+    expect(listed.page.checkpoints.map((checkpoint) => checkpoint.source).sort())
+      .toEqual(['named', 'turn']);
+    expect(listed.page.checkpoints.find((checkpoint) => checkpoint.source === 'named')?.label)
+      .toBe('Keep this marker');
+  });
+
+  it('runs configured retention after a turn settles', async () => {
+    const { engine, harness } = await createHarness();
+    await engine.setRetentionPolicy({
+      policy: {
+        maxAgeDays: null,
+        maxByteLength: null,
+        maxCheckpointCount: 1,
+        maxOperationCount: null,
+      },
+      workspaceId: harness.identity.workspaceId,
+    });
+    for (const suffix of ['1', '2']) {
+      await startTurn(engine, harness, suffix);
+      await settleTurn(engine, harness, {
+        assistantEntryId: `assistant-${suffix}`,
+        executionId: `execution-${suffix}`,
+        mutationObserved: false,
+        observationComplete: false,
+        observedResourceIds: [],
+      });
+    }
+    await vi.waitFor(async () => {
+      const listed = await engine.listCheckpoints({ workspaceId: harness.identity.workspaceId });
+      expect(listed.page.checkpoints).toHaveLength(1);
+    });
+    expect(await engine.retentionStatus(harness.identity.workspaceId)).toMatchObject({
+      status: 'ready',
+      retention: { eligibleCheckpointCount: 1, lastRunAt: expect.any(String) },
     });
   });
 
@@ -459,7 +640,7 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(target, 'utf8')).toBe('user-later-v2');
   });
 
-  it('rejects overwrite-confirmed for dirty-buffer conflicts until the barrier is implemented', async () => {
+  it('rejects overwrite-confirmed for an acknowledged dirty-buffer conflict', async () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');

@@ -1,5 +1,6 @@
 import type {
   DocumentsAPI,
+  PiariumDirtyStateBarrierEvent,
   PiariumDocumentReadResult,
   PiariumResourceReference,
   PiariumWorkspaceFileEvent,
@@ -73,6 +74,16 @@ type WorkspaceEditUndoGroup = {
     appliedBuffer: string;
     appliedRevision: number;
   }>;
+};
+
+type DirtyBarrierHold = {
+  active: boolean;
+  barrierId: string;
+  caseSensitive: boolean;
+  paths: Set<string>;
+  release: () => void;
+  released: Promise<void>;
+  workspaceId: string;
 };
 
 const offsetAtPosition = (buffer: string, position: DocumentTextPosition): number | null => {
@@ -299,6 +310,7 @@ export class DocumentRegistry {
   private readonly journalOperations = new Map<string, Promise<void>>();
   private readonly preparedWorkspaceEdits = new Map<string, PreparedWorkspaceEdit>();
   private readonly workspaceEditUndoGroups = new Map<string, WorkspaceEditUndoGroup>();
+  private readonly dirtyBarriers = new Map<string, DirtyBarrierHold>();
   private disposed = false;
 
   constructor(options: RegistryOptions) {
@@ -359,6 +371,26 @@ export class DocumentRegistry {
 
   dirtyResourceIds(workspaceId: string): ReadonlySet<string> {
     return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
+  }
+
+  private barrierPath(value: string, caseSensitive: boolean): string {
+    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    return caseSensitive ? normalized : normalized.toLowerCase();
+  }
+
+  private isDirtyBarrierHeld(identity: DocumentIdentity): boolean {
+    return [...this.dirtyBarriers.values()].some((barrier) => (
+      barrier.active
+      && barrier.workspaceId === identity.workspaceId
+      && barrier.paths.has(this.barrierPath(identity.resourceId, barrier.caseSensitive))
+    ));
+  }
+
+  private assertDirtyBarrierAllowsEdit(identity: DocumentIdentity): void {
+    if (!this.isDirtyBarrierHeld(identity)) return;
+    throw new DocumentsError('Document is temporarily fenced while workspace recovery is applied', {
+      reason: 'failed',
+    });
   }
 
   open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
@@ -444,6 +476,7 @@ export class DocumentRegistry {
     options: { origin: string; changes?: DocumentChange[] } ,
   ): DocumentRecord {
     this.assertActive();
+    this.assertDirtyBarrierAllowsEdit(identity);
     const current = this.records.get(documentKey(identity))
       ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
@@ -681,6 +714,15 @@ export class DocumentRegistry {
       };
     }
     const failures: DocumentWorkspaceEditFailure[] = [];
+    for (const document of prepared.documents) {
+      if (this.isDirtyBarrierHeld(document.before.identity)) {
+        failures.push({
+          identity: document.before.identity,
+          reason: 'stale-plan',
+          message: 'Document is temporarily fenced while workspace recovery is applied',
+        });
+      }
+    }
     if (prepared.generation !== this.getGeneration()) {
       failures.push({ reason: 'stale-plan', message: 'Application Host changed after the workspace edit was previewed' });
     }
@@ -769,6 +811,14 @@ export class DocumentRegistry {
     if (!group) return { status: 'unavailable', groupId };
     const failures: DocumentWorkspaceEditFailure[] = [];
     for (const document of group.documents) {
+      if (this.isDirtyBarrierHeld(document.identity)) {
+        failures.push({
+          identity: document.identity,
+          reason: 'stale-plan',
+          message: 'Document is temporarily fenced while workspace recovery is applied',
+        });
+        continue;
+      }
       const current = this.records.get(documentKey(document.identity));
       if (!current
         || current.localEditRevision !== document.appliedRevision
@@ -810,6 +860,7 @@ export class DocumentRegistry {
     options: { overwriteConflict?: boolean; recreateDeleted?: boolean } = {},
   ): Promise<DocumentRecord> {
     this.assertActive();
+    this.assertDirtyBarrierAllowsEdit(identity);
     const generation = this.getGeneration();
     const current = this.records.get(documentKey(identity));
     if (!current) throw new DocumentsError('Document is not open', { reason: 'failed' });
@@ -918,6 +969,7 @@ export class DocumentRegistry {
 
   async create(identity: DocumentIdentity, content = ''): Promise<DocumentRecord> {
     this.assertActive();
+    this.assertDirtyBarrierAllowsEdit(identity);
     const generation = this.getGeneration();
     const current = this.records.get(documentKey(identity));
     const snapshot = current ?? applyRead(
@@ -952,6 +1004,7 @@ export class DocumentRegistry {
   }
 
   discard(identity: DocumentIdentity): DocumentRecord | undefined {
+    this.assertDirtyBarrierAllowsEdit(identity);
     const current = this.records.get(documentKey(identity));
     if (!current) return undefined;
     const next: DocumentRecord = {
@@ -971,6 +1024,77 @@ export class DocumentRegistry {
   async applyMerged(identity: DocumentIdentity, merged: string): Promise<DocumentRecord> {
     this.applyTransaction(identity, merged, { origin: 'merge' });
     return this.save(identity, { overwriteConflict: true });
+  }
+
+  private async waitForDirtyBarrierSaves(barrier: DirtyBarrierHold): Promise<boolean> {
+    const affected = () => [...this.records.values()].filter((record) => (
+      record.identity.workspaceId === barrier.workspaceId
+      && barrier.paths.has(this.barrierPath(record.identity.resourceId, barrier.caseSensitive))
+    ));
+    if (!affected().some((record) => record.saving)) return true;
+    return new Promise((resolve) => {
+      let settled = false;
+      const unsubscribers: Array<() => void> = [];
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        for (const unsubscribe of unsubscribers) unsubscribe();
+        resolve(ready);
+      };
+      const check = () => {
+        if (!barrier.active) finish(false);
+        else if (!affected().some((record) => record.saving)) finish(true);
+      };
+      for (const record of affected()) unsubscribers.push(this.subscribe(record.identity, check));
+      void barrier.released.then(() => finish(false));
+      check();
+    });
+  }
+
+  private async handleDirtyStateBarrier(event: PiariumDirtyStateBarrierEvent): Promise<void> {
+    const existing = this.dirtyBarriers.get(event.barrierId);
+    if (event.action === 'release') {
+      if (existing) {
+        existing.active = false;
+        existing.release();
+        this.dirtyBarriers.delete(event.barrierId);
+      }
+      return;
+    }
+    if (existing?.active) return;
+    let release: () => void = () => undefined;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const barrier: DirtyBarrierHold = {
+      active: true,
+      barrierId: event.barrierId,
+      caseSensitive: event.caseSensitive,
+      paths: new Set(event.paths.map((entry) => this.barrierPath(entry, event.caseSensitive))),
+      release,
+      released,
+      workspaceId: event.workspaceId,
+    };
+    this.dirtyBarriers.set(event.barrierId, barrier);
+    try {
+      if (!await this.waitForDirtyBarrierSaves(barrier) || !barrier.active) return;
+      await this.publishDirtyWorkspace(event.workspaceId);
+      if (!barrier.active) return;
+      const result = await this.documents.ackDirtyStateBarrier?.({
+        barrierId: event.barrierId,
+        generation: this.getGeneration(),
+        ownerId: this.dirtyOwnerId,
+        workspaceId: event.workspaceId,
+      });
+      if (!result?.acknowledged) {
+        barrier.active = false;
+        barrier.release();
+        this.dirtyBarriers.delete(event.barrierId);
+      }
+    } catch (error) {
+      barrier.active = false;
+      barrier.release();
+      this.dirtyBarriers.delete(event.barrierId);
+      this.reportJournalFailure(error);
+    }
   }
 
   handleWatchEvent(event: PiariumWorkspaceFileEvent, resetWorkspaceId?: string): void {
@@ -1071,6 +1195,11 @@ export class DocumentRegistry {
     this.workspaceVersions.clear();
     this.preparedWorkspaceEdits.clear();
     this.workspaceEditUndoGroups.clear();
+    for (const barrier of this.dirtyBarriers.values()) {
+      barrier.active = false;
+      barrier.release();
+    }
+    this.dirtyBarriers.clear();
     for (const workspaceId of dirtyWorkspaces) {
       const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
       const generation = this.getGeneration();
@@ -1099,6 +1228,8 @@ export class DocumentRegistry {
       this.updateDirtyIndex(record.identity, record.dirty);
     } else if (!previous && record.dirty) {
       this.updateDirtyIndex(record.identity, true);
+    } else if (record.dirty && previous?.localEditRevision !== record.localEditRevision) {
+      void this.publishDirtyWorkspace(record.identity.workspaceId);
     }
     const set = this.listeners.get(key);
     if (set) {
@@ -1132,15 +1263,15 @@ export class DocumentRegistry {
     else next.delete(identity.resourceId);
     if (previous.size === next.size && [...previous].every((resourceId) => next.has(resourceId))) return;
     this.dirtyIdsByWorkspace.set(identity.workspaceId, next);
-    this.publishDirtyWorkspace(identity.workspaceId);
+    void this.publishDirtyWorkspace(identity.workspaceId);
     const listeners = this.dirtyListenersByWorkspace.get(identity.workspaceId);
     if (listeners) {
       for (const listener of listeners) listener();
     }
   }
 
-  private publishDirtyWorkspace(workspaceId: string): void {
-    if (this.disposed) return;
+  private publishDirtyWorkspace(workspaceId: string): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     const resources = [...this.records.values()]
       .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
       .map((record) => ({
@@ -1164,6 +1295,7 @@ export class DocumentRegistry {
         this.dirtyPublicationTails.delete(workspaceId);
       }
     });
+    return current;
   }
 
   private commitAtomic(records: DocumentRecord[], workspaceId: string): void {
@@ -1177,7 +1309,9 @@ export class DocumentRegistry {
       else nextDirty.delete(record.identity.resourceId);
     }
     this.dirtyIdsByWorkspace.set(workspaceId, nextDirty);
-    if (!sameResourceSet(previousDirty, nextDirty)) this.publishDirtyWorkspace(workspaceId);
+    if (!sameResourceSet(previousDirty, nextDirty) || records.some((record) => record.dirty)) {
+      void this.publishDirtyWorkspace(workspaceId);
+    }
     this.workspaceVersions.set(workspaceId, (this.workspaceVersions.get(workspaceId) ?? 0) + 1);
     this.ensureWatch(workspaceId);
     for (const record of records) {
@@ -1213,7 +1347,13 @@ export class DocumentRegistry {
   private ensureWatch(workspaceId: string): void {
     if (this.watches.has(workspaceId)) return;
     const subscription = this.documents.watch(workspaceId, (event) => {
-      this.handleWatchEvent(event, workspaceId);
+      if (event.kind === 'dirty-state-barrier') {
+        void this.handleDirtyStateBarrier(event);
+      } else {
+        this.handleWatchEvent(event, workspaceId);
+      }
+    }, {
+      dirtyOwner: { generation: this.getGeneration(), ownerId: this.dirtyOwnerId },
     });
     this.watches.set(workspaceId, subscription);
   }

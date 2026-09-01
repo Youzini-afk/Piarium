@@ -836,6 +836,9 @@ async function main(options = {}) {
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
+    dirtyBarrierTimeoutMs: /^\d+$/.test(process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '')
+      ? Number(process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS)
+      : undefined,
   });
   activeDocumentsAuthority = documentsAuthority;
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
@@ -1278,6 +1281,8 @@ async function main(options = {}) {
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
+      await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
+      workspaceRecoveryEngines.clear();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();

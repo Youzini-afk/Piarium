@@ -3,6 +3,7 @@ import type {
   PiariumDirtyBufferPublication,
   PiariumDocumentDeleteRequest,
   PiariumDocumentDeleteResult,
+  PiariumDocumentWatchEvent,
   PiariumDocumentMoveRequest,
   PiariumDocumentMoveResult,
   PiariumDocumentReadResult,
@@ -99,6 +100,23 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
   return event as PiariumWorkspaceFileEvent;
 };
 
+const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEvent => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const event = value as Record<string, unknown>;
+    if (event.kind === 'dirty-state-barrier') {
+      if (!['acquire', 'release'].includes(String(event.action))
+        || typeof event.barrierId !== 'string' || !event.barrierId
+        || typeof event.caseSensitive !== 'boolean'
+        || typeof event.workspaceId !== 'string' || !event.workspaceId
+        || !Array.isArray(event.paths) || event.paths.some((entry) => typeof entry !== 'string' || !entry)) {
+        throw new DocumentsError('Document watch returned an invalid dirty-state barrier', { reason: 'failed' });
+      }
+      return event as PiariumDocumentWatchEvent;
+    }
+  }
+  return parseWorkspaceFileEvent(value);
+};
+
 const waitForReconnect = (signal: AbortSignal, delayMs: number): Promise<void> => new Promise((resolve) => {
   if (signal.aborted) {
     resolve();
@@ -113,7 +131,7 @@ const waitForReconnect = (signal: AbortSignal, delayMs: number): Promise<void> =
 
 const readSseEvents = async (
   response: Response,
-  listener: (event: PiariumWorkspaceFileEvent) => void,
+  listener: (event: PiariumDocumentWatchEvent) => void,
   signal: AbortSignal,
 ): Promise<void> => {
   const reader = response.body?.getReader();
@@ -129,7 +147,7 @@ const readSseEvents = async (
     for (const chunk of chunks) {
       const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
       if (!line) continue;
-      const event = parseWorkspaceFileEvent(JSON.parse(line.slice(6)));
+      const event = parseDocumentWatchEvent(JSON.parse(line.slice(6)));
       listener(event);
     }
   }
@@ -140,6 +158,7 @@ const readSseEvents = async (
  * Application Host. This module never uses a Capacitor filesystem plugin.
  */
 export const createWebDocumentsAPI = (): DocumentsAPI => ({
+  ackDirtyStateBarrier: (request) => postJson('/api/documents/dirty/barrier/ack', request) as Promise<{ acknowledged: boolean }>,
   clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<PiariumWorkspaceIdentity>,
   read: (resource: PiariumResourceReference) => postJson('/api/documents/read', { resource }) as Promise<PiariumDocumentReadResult>,
@@ -147,7 +166,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   move: (request: PiariumDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<PiariumDocumentMoveResult>,
   publishDirtyBuffers: (request) => postJson('/api/documents/dirty/publish', request) as Promise<PiariumDirtyBufferPublication>,
   delete: (request: PiariumDocumentDeleteRequest) => postJson('/api/documents/delete', request) as Promise<PiariumDocumentDeleteResult>,
-  watch(workspaceId: string, listener: (event: PiariumWorkspaceFileEvent) => void, options): Subscription {
+  watch(workspaceId: string, listener: (event: PiariumDocumentWatchEvent) => void, options): Subscription {
     const tracker = createDocumentWatchEventTracker(listener);
     const generation = getRuntimeEndpointGeneration();
     const controller = new AbortController();
@@ -167,7 +186,13 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
           assertGeneration(generation);
           const response = await runtimeFetch('/api/documents/watch', {
             headers: { Accept: 'text/event-stream' },
-            query: { workspaceId },
+            query: {
+              workspaceId,
+              ...(options?.dirtyOwner ? {
+                dirtyOwnerId: options.dirtyOwner.ownerId,
+                dirtyOwnerGeneration: String(options.dirtyOwner.generation),
+              } : {}),
+            },
             signal: controller.signal,
           });
           assertGeneration(generation);
@@ -182,7 +207,10 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
             reconnecting = false;
           }
           reconnectDelayMs = 250;
-          await readSseEvents(response, (event) => tracker.accept(event), controller.signal);
+          await readSseEvents(response, (event) => {
+            if (event.kind === 'dirty-state-barrier') listener(event);
+            else tracker.accept(event);
+          }, controller.signal);
           if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });
         } catch (error) {
           if (controller.signal.aborted) break;

@@ -261,6 +261,61 @@ it('allows only an explicit restore capture to validate under maintenance', asyn
   }
 });
 
+it('coordinates a dirty-state barrier with every connected document surface', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const events = [];
+  const surface = harness.authority.registerDirtySurface({
+    generation: 7,
+    ownerId: 'surface-1',
+    workspaceId: harness.identity.workspaceId,
+  }, (event) => events.push(event));
+  try {
+    const pending = harness.authority.beginDirtyStateBarrier(
+      harness.identity.workspaceId,
+      ['note.txt'],
+    );
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+      action: 'acquire',
+      kind: 'dirty-state-barrier',
+      paths: ['note.txt'],
+    })));
+    const acquire = events.find((event) => event.action === 'acquire');
+    expect(await harness.authority.acknowledgeDirtyStateBarrier({
+      barrierId: acquire.barrierId,
+      generation: 7,
+      ownerId: 'surface-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toEqual({ acknowledged: false });
+    await harness.authority.publishDirtyBuffers({
+      generation: 7,
+      ownerId: 'surface-1',
+      resources: [{
+        baseRevision: null,
+        localEditRevision: 3,
+        resource: harness.resource('note.txt'),
+      }],
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(await harness.authority.acknowledgeDirtyStateBarrier({
+      barrierId: acquire.barrierId,
+      generation: 7,
+      ownerId: 'surface-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toEqual({ acknowledged: true });
+    const barrier = await pending;
+    expect(await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))
+      .toMatchObject([{ ownerId: 'surface-1', resources: [{ localEditRevision: 3 }] }]);
+    await barrier.release();
+    expect(events).toContainEqual(expect.objectContaining({
+      action: 'release',
+      barrierId: acquire.barrierId,
+    }));
+  } finally {
+    surface.close();
+    await harness.cleanup();
+  }
+});
+
 it('closes an asynchronously started obsolete watcher after close and reopen', async () => {
   let gate = false;
   const releases = [];

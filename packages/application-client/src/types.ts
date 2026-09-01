@@ -1691,6 +1691,17 @@ export type PiariumWorkspaceFileEvent = PiariumWorkspaceFileEventPosition & (
   | { kind: 'reset'; reason: 'overflow' | 'reconnected' | 'authority-changed' | 'gap' }
 );
 
+export type PiariumDirtyStateBarrierEvent = {
+  action: 'acquire' | 'release';
+  barrierId: string;
+  caseSensitive: boolean;
+  kind: 'dirty-state-barrier';
+  paths: string[];
+  workspaceId: string;
+};
+
+export type PiariumDocumentWatchEvent = PiariumWorkspaceFileEvent | PiariumDirtyStateBarrierEvent;
+
 export interface PiariumDocumentRecoveryJournalSummary {
   journalId: string;
   resource: PiariumResourceReference;
@@ -1745,6 +1756,12 @@ export type PiariumDocumentRecoveryWriteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 export interface DocumentsAPI {
+  ackDirtyStateBarrier?(request: {
+    barrierId: string;
+    generation: number;
+    ownerId: string;
+    workspaceId: string;
+  }): Promise<{ acknowledged: boolean }>;
   clearDirtyBuffers(request: {
     generation: number;
     ownerId: string;
@@ -1757,8 +1774,11 @@ export interface DocumentsAPI {
   delete(request: PiariumDocumentDeleteRequest): Promise<PiariumDocumentDeleteResult>;
   watch(
     workspaceId: string,
-    listener: (event: PiariumWorkspaceFileEvent) => void,
-    options?: { signal?: AbortSignal },
+    listener: (event: PiariumDocumentWatchEvent) => void,
+    options?: {
+      dirtyOwner?: { generation: number; ownerId: string };
+      signal?: AbortSignal;
+    },
   ): Subscription;
   listRecoveryJournals(request: {
     workspaceId: string;

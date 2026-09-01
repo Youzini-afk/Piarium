@@ -93,15 +93,58 @@ describe('createWebDocumentsAPI', () => {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
     }));
-    const subscription = api.watch('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', () => undefined);
+    const subscription = api.watch('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', () => undefined, {
+      dirtyOwner: { generation: 3, ownerId: 'surface-1' },
+    });
     await vi.waitFor(() => expect(runtimeFetchMock).toHaveBeenCalled());
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/documents/watch', expect.objectContaining({
       headers: { Accept: 'text/event-stream' },
-      query: { workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      query: {
+        dirtyOwnerGeneration: '3',
+        dirtyOwnerId: 'surface-1',
+        workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      },
     }));
     const query = runtimeFetchMock.mock.calls.at(-1)?.[1]?.query as { workspaceId?: string };
     expect(JSON.stringify(query)).not.toMatch(/token|bearer|password/i);
     subscription.close();
+  });
+
+  it('delivers dirty-state barrier controls outside file-event sequencing', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const control = {
+      action: 'acquire',
+      barrierId: 'barrier-1',
+      caseSensitive: true,
+      kind: 'dirty-state-barrier',
+      paths: ['note.txt'],
+      workspaceId,
+    } as const;
+    const encoder = new TextEncoder();
+    runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(control)}\n\n`));
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+    const events: unknown[] = [];
+    const subscription = api.watch(workspaceId, (event) => events.push(event), {
+      dirtyOwner: { generation: 3, ownerId: 'surface-1' },
+    });
+    await vi.waitFor(() => expect(events).toContainEqual(control));
+    subscription.close();
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ acknowledged: true }));
+    await expect(api.ackDirtyStateBarrier?.({
+      barrierId: 'barrier-1',
+      generation: 3,
+      ownerId: 'surface-1',
+      workspaceId,
+    })).resolves.toEqual({ acknowledged: true });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/documents/dirty/barrier/ack', expect.objectContaining({
+      method: 'POST',
+    }));
   });
 
   it('reconnects an ended watch and tells consumers to resynchronize', async () => {
