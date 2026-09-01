@@ -4,16 +4,93 @@ import { createSerialQueues } from './serialize.js';
 
 const SCHEMA_VERSION = 2;
 
-const journalFileName = (journalId) => `${journalId}.json`;
+interface DocumentResource {
+  workspaceId: string;
+  resourceId: string;
+}
 
-const assertPathSegment = (value, label) => {
+interface JournalRecord {
+  schemaVersion: number;
+  journalId: string;
+  hostId: string;
+  workspaceId: string;
+  recoverySessionId: string;
+  resource: DocumentResource;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  baseRevision: string | null;
+  epoch: number;
+  revision: number;
+  updatedAt: string;
+}
+
+interface JournalSummary {
+  journalId: string;
+  resource: DocumentResource;
+  revision: number;
+  baseRevision: string | null;
+  epoch: number;
+  updatedAt: string;
+  byteLength: number;
+}
+
+interface MutationToken {
+  workspaceId: string;
+  epoch: number;
+}
+
+interface WriteRequest {
+  workspaceId: string;
+  recoverySessionId: string;
+  resource: DocumentResource;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  baseRevision: string | null;
+  expectedRevision: number | null;
+  token: MutationToken;
+}
+
+interface DeleteRequest {
+  journalId: string;
+  expectedRevision: number;
+  token: MutationToken;
+}
+
+interface ListRequest {
+  workspaceId: string;
+  recoverySessionId?: string;
+}
+
+type ParsedRecord =
+  | { status: 'malformed'; journalId: string }
+  | { status: 'missing'; journalId: string }
+  | { status: 'ready'; record: JournalRecord };
+
+interface FoundJournal {
+  filePath: string;
+  parsed: ParsedRecord;
+  workspaceId: string;
+  recoverySessionId: string;
+}
+
+interface ExpectedMatch {
+  hostId?: string;
+  workspaceId?: string;
+  recoverySessionId?: string;
+}
+
+const journalFileName = (journalId: string): string => `${journalId}.json`;
+
+const assertPathSegment = (value: unknown, label: string): string => {
   if (typeof value !== 'string' || !value || value === '.' || value === '..' || /[\\/\0]/.test(value)) {
     throw new TypeError(`${label} is malformed`);
   }
   return value;
 };
 
-const summarize = (record) => ({
+const summarize = (record: JournalRecord): JournalSummary => ({
   journalId: record.journalId,
   resource: record.resource,
   revision: record.revision,
@@ -23,63 +100,74 @@ const summarize = (record) => ({
   byteLength: Buffer.byteLength(record.content, 'utf8'),
 });
 
-const parseRecord = (raw, journalId, expected) => {
-  if (!raw || raw.schemaVersion !== SCHEMA_VERSION) return { status: 'malformed', journalId };
-  if (typeof raw.journalId !== 'string' || raw.journalId !== journalId) return { status: 'malformed', journalId };
-  if (!raw.resource || typeof raw.resource.workspaceId !== 'string' || typeof raw.resource.resourceId !== 'string') {
+const parseRecord = (raw: unknown, journalId: string, expected: ExpectedMatch): ParsedRecord => {
+  if (!raw || typeof raw !== 'object' || (raw as { schemaVersion?: unknown }).schemaVersion !== SCHEMA_VERSION) {
     return { status: 'malformed', journalId };
   }
-  if (typeof raw.content !== 'string' || typeof raw.encoding !== 'string' || typeof raw.bom !== 'boolean') {
+  const r = raw as Record<string, unknown>;
+  if (typeof r.journalId !== 'string' || r.journalId !== journalId) return { status: 'malformed', journalId };
+  const resource = r.resource as Record<string, unknown> | undefined;
+  if (!resource || typeof resource.workspaceId !== 'string' || typeof resource.resourceId !== 'string') {
     return { status: 'malformed', journalId };
   }
-  if (!Number.isSafeInteger(raw.revision) || raw.revision < 1) return { status: 'malformed', journalId };
-  if (!Number.isSafeInteger(raw.epoch) || raw.epoch < 1) return { status: 'malformed', journalId };
-  if (raw.baseRevision !== null && typeof raw.baseRevision !== 'string') return { status: 'malformed', journalId };
-  if (typeof raw.updatedAt !== 'string' || typeof raw.recoverySessionId !== 'string') {
+  if (typeof r.content !== 'string' || typeof r.encoding !== 'string' || typeof r.bom !== 'boolean') {
     return { status: 'malformed', journalId };
   }
-  if (raw.hostId !== expected.hostId
-    || (expected.workspaceId && raw.workspaceId !== expected.workspaceId)
-    || (expected.recoverySessionId && raw.recoverySessionId !== expected.recoverySessionId)
-    || raw.resource.workspaceId !== raw.workspaceId) {
+  if (!Number.isSafeInteger(r.revision) || (r.revision as number) < 1) return { status: 'malformed', journalId };
+  if (!Number.isSafeInteger(r.epoch) || (r.epoch as number) < 1) return { status: 'malformed', journalId };
+  if (r.baseRevision !== null && typeof r.baseRevision !== 'string') return { status: 'malformed', journalId };
+  if (typeof r.updatedAt !== 'string' || typeof r.recoverySessionId !== 'string') {
     return { status: 'malformed', journalId };
   }
-  return { status: 'ready', record: raw };
+  if (r.hostId !== expected.hostId
+    || (expected.workspaceId && r.workspaceId !== expected.workspaceId)
+    || (expected.recoverySessionId && r.recoverySessionId !== expected.recoverySessionId)
+    || (resource as { workspaceId: string }).workspaceId !== r.workspaceId) {
+    return { status: 'malformed', journalId };
+  }
+  return { status: 'ready', record: r as unknown as JournalRecord };
 };
+
+export interface RecoveryJournalStoreOptions {
+  rootDir: string;
+  hostId: string;
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'readFile' | 'readdir' | 'rename' | 'unlink' | 'writeFile'>;
+  pathModule?: typeof path;
+}
 
 export const createRecoveryJournalStore = ({
   rootDir,
   hostId,
   fsPromises,
   pathModule = path,
-}) => {
+}: RecoveryJournalStoreOptions) => {
   const queues = createSerialQueues();
-  const directoryFor = (workspaceId, recoverySessionId) => pathModule.join(
+  const directoryFor = (workspaceId: string, recoverySessionId: string): string => pathModule.join(
     rootDir,
     assertPathSegment(hostId, 'hostId'),
     assertPathSegment(workspaceId, 'workspaceId'),
     assertPathSegment(recoverySessionId, 'recoverySessionId'),
   );
 
-  const readFile = async (filePath, journalId, expected = {}) => {
+  const readFile = async (filePath: string, journalId: string, expected: ExpectedMatch = {}): Promise<ParsedRecord> => {
     try {
       const raw = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
       return parseRecord(raw, journalId, { hostId, ...expected });
     } catch (error) {
-      if (error?.code === 'ENOENT') return { status: 'missing', journalId };
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { status: 'missing', journalId };
       if (error instanceof SyntaxError) return { status: 'malformed', journalId };
       throw error;
     }
   };
 
-  const findJournal = async (journalId, requestedWorkspaceId) => {
+  const findJournal = async (journalId: string, requestedWorkspaceId?: string): Promise<FoundJournal | null> => {
     assertPathSegment(journalId, 'journalId');
     const hostDir = pathModule.join(rootDir, assertPathSegment(hostId, 'hostId'));
-    let workspaces = [];
+    let workspaces: import('node:fs').Dirent[];
     try {
       workspaces = await fsPromises.readdir(hostDir, { withFileTypes: true });
     } catch (error) {
-      if (error?.code === 'ENOENT') return null;
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
       throw error;
     }
     for (const workspaceEntry of workspaces) {
@@ -100,7 +188,7 @@ export const createRecoveryJournalStore = ({
     return null;
   };
 
-  const atomicWrite = async (filePath, record) => {
+  const atomicWrite = async (filePath: string, record: JournalRecord): Promise<void> => {
     await fsPromises.mkdir(pathModule.dirname(filePath), { recursive: true, mode: 0o700 });
     const tmp = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
     try {
@@ -113,20 +201,20 @@ export const createRecoveryJournalStore = ({
   };
 
   return {
-    async list({ workspaceId, recoverySessionId }) {
+    async list({ workspaceId, recoverySessionId }: ListRequest): Promise<JournalSummary[]> {
       assertPathSegment(workspaceId, 'workspaceId');
       if (recoverySessionId !== undefined) assertPathSegment(recoverySessionId, 'recoverySessionId');
-      const summaries = [];
-      const base = recoverySessionId
+      const summaries: JournalSummary[] = [];
+      const base: string[] = recoverySessionId
         ? [directoryFor(workspaceId, recoverySessionId)]
         : [];
       if (!recoverySessionId) {
         const workspaceDir = pathModule.join(rootDir, hostId, workspaceId);
-        let sessions = [];
+        let sessions: import('node:fs').Dirent[];
         try {
           sessions = await fsPromises.readdir(workspaceDir, { withFileTypes: true });
         } catch (error) {
-          if (error?.code === 'ENOENT') return [];
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return [];
           throw error;
         }
         for (const entry of sessions) {
@@ -135,11 +223,11 @@ export const createRecoveryJournalStore = ({
       }
 
       for (const directory of base) {
-        let files = [];
+        let files: string[];
         try {
           files = await fsPromises.readdir(directory);
         } catch (error) {
-          if (error?.code === 'ENOENT') continue;
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
           throw error;
         }
         for (const name of files) {
@@ -156,7 +244,11 @@ export const createRecoveryJournalStore = ({
       return summaries;
     },
 
-    async read(journalId) {
+    async read(journalId: string): Promise<
+      | { status: 'malformed'; journalId: string }
+      | { status: 'missing'; journalId: string }
+      | { status: 'ready'; journal: JournalSummary; content: string; encoding: string; bom: boolean }
+    > {
       const found = await findJournal(journalId);
       if (!found) return { status: 'missing', journalId };
       const { parsed } = found;
@@ -170,7 +262,11 @@ export const createRecoveryJournalStore = ({
       };
     },
 
-    async write(request) {
+    async write(request: WriteRequest): Promise<
+      | { status: 'conflict'; journal: JournalSummary }
+      | { status: 'missing'; journalId: string }
+      | { status: 'written'; journal: JournalSummary }
+    > {
       assertPathSegment(request.workspaceId, 'workspaceId');
       assertPathSegment(request.recoverySessionId, 'recoverySessionId');
       if (!request.resource || request.resource.workspaceId !== request.workspaceId
@@ -182,10 +278,10 @@ export const createRecoveryJournalStore = ({
         const directory = directoryFor(request.workspaceId, request.recoverySessionId);
         await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
         const existingNames = await fsPromises.readdir(directory).catch((error) => {
-          if (error?.code === 'ENOENT') return [];
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return [] as string[];
           throw error;
         });
-        let existing = null;
+        let existing: JournalRecord | null = null;
         for (const name of existingNames) {
           if (!name.endsWith('.json')) continue;
           const parsed = await readFile(pathModule.join(directory, name), name.slice(0, -'.json'.length), {
@@ -207,7 +303,7 @@ export const createRecoveryJournalStore = ({
           if (request.expectedRevision !== existing.revision) {
             return { status: 'conflict', journal: summarize(existing) };
           }
-          const record = {
+          const record: JournalRecord = {
             ...existing,
             content: request.content,
             encoding: request.encoding,
@@ -224,7 +320,7 @@ export const createRecoveryJournalStore = ({
           return { status: 'missing', journalId: '' };
         }
 
-        const record = {
+        const record: JournalRecord = {
           schemaVersion: SCHEMA_VERSION,
           journalId: randomUUID(),
           hostId,
@@ -244,7 +340,11 @@ export const createRecoveryJournalStore = ({
       });
     },
 
-    async delete({ journalId, expectedRevision, token }) {
+    async delete({ journalId, expectedRevision, token }: DeleteRequest): Promise<
+      | { status: 'missing' }
+      | { status: 'conflict'; journal: JournalSummary }
+      | { status: 'deleted' }
+    > {
       const workspaceId = assertPathSegment(token?.workspaceId, 'workspaceId');
       const found = await findJournal(journalId, workspaceId);
       if (!found || found.parsed.status !== 'ready') return { status: 'missing' };

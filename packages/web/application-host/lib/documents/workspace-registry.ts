@@ -5,17 +5,48 @@ import { DocumentPathError } from './errors.js';
 
 const SCHEMA_VERSION = 1;
 
-const normalizeComparePath = (value, pathModule) => {
+interface WorkspaceEntry {
+  workspaceId: string;
+  canonicalPath: string;
+  createdAt?: string;
+}
+
+interface RegistryDocument {
+  schemaVersion: number;
+  hostId: string;
+  workspaces: WorkspaceEntry[];
+}
+
+export interface WorkspaceMapping {
+  workspaceId: string;
+  canonicalPath: string;
+  hostId: string;
+}
+
+export interface WorkspaceRegistryResolveInput {
+  canonicalPath?: string;
+  workspaceId?: string;
+  create?: boolean;
+}
+
+export interface WorkspaceRegistryOptions {
+  hostId: string;
+  filePath: string;
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'readFile' | 'rename' | 'unlink' | 'writeFile'>;
+  pathModule?: typeof path;
+}
+
+const normalizeComparePath = (value: string, pathModule: typeof path): string => {
   return normalizePathIdentity(value, { pathModule });
 };
 
 const canonicalWorkspaceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const looksLikeCanonicalWorkspaceId = (value) => (
+export const looksLikeCanonicalWorkspaceId = (value: unknown): value is string => (
   typeof value === 'string' && canonicalWorkspaceIdPattern.test(value)
 );
 
-export const looksLikeFilesystemWorkspaceScopeId = (value) => (
+export const looksLikeFilesystemWorkspaceScopeId = (value: unknown): boolean => (
   typeof value === 'string' && (/[\\/]/.test(value) || /^[A-Za-z]:/.test(value))
 );
 
@@ -24,20 +55,20 @@ export const createWorkspaceRegistry = ({
   filePath,
   fsPromises,
   pathModule = path,
-}) => {
-  let queue = Promise.resolve();
-  let document = null;
+}: WorkspaceRegistryOptions) => {
+  let queue: Promise<unknown> = Promise.resolve();
+  let document: RegistryDocument | null = null;
 
-  const empty = () => ({
+  const empty = (): RegistryDocument => ({
     schemaVersion: SCHEMA_VERSION,
     hostId,
     workspaces: [],
   });
 
-  const read = async () => {
+  const read = async (): Promise<RegistryDocument> => {
     if (document) return document;
     try {
-      const raw = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+      const raw = JSON.parse(await fsPromises.readFile(filePath, 'utf8')) as Record<string, unknown>;
       if (!raw || raw.hostId !== hostId || raw.schemaVersion !== SCHEMA_VERSION || !Array.isArray(raw.workspaces)) {
         document = empty();
         return document;
@@ -45,22 +76,22 @@ export const createWorkspaceRegistry = ({
       document = {
         schemaVersion: SCHEMA_VERSION,
         hostId,
-        workspaces: raw.workspaces.filter((entry) => (
-          entry
-          && looksLikeCanonicalWorkspaceId(entry.workspaceId)
-          && typeof entry.canonicalPath === 'string'
-          && entry.canonicalPath.length > 0
+        workspaces: (raw.workspaces as unknown[]).filter((entry): entry is WorkspaceEntry => (
+          entry !== null && typeof entry === 'object'
+          && looksLikeCanonicalWorkspaceId((entry as WorkspaceEntry).workspaceId)
+          && typeof (entry as WorkspaceEntry).canonicalPath === 'string'
+          && (entry as WorkspaceEntry).canonicalPath.length > 0
         )),
       };
       return document;
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       document = empty();
       return document;
     }
   };
 
-  const persist = async (next) => {
+  const persist = async (next: RegistryDocument): Promise<void> => {
     await fsPromises.mkdir(pathModule.dirname(filePath), { recursive: true, mode: 0o700 });
     const tmp = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
     const payload = JSON.stringify(next);
@@ -74,7 +105,7 @@ export const createWorkspaceRegistry = ({
     }
   };
 
-  const mutate = (work) => {
+  const mutate = <Result>(work: (current: RegistryDocument) => Result | Promise<Result>): Promise<Result> => {
     const next = queue.then(async () => {
       const current = structuredClone(await read());
       const result = await work(current);
@@ -85,12 +116,12 @@ export const createWorkspaceRegistry = ({
     return next;
   };
 
-  const findByPath = (current, canonicalPath) => {
+  const findByPath = (current: RegistryDocument, canonicalPath: string): WorkspaceEntry | undefined => {
     const needle = normalizeComparePath(canonicalPath, pathModule);
     return current.workspaces.find((entry) => normalizeComparePath(entry.canonicalPath, pathModule) === needle);
   };
 
-  const findContainingPath = (current, canonicalPath) => {
+  const findContainingPath = (current: RegistryDocument, canonicalPath: string): WorkspaceEntry | null => {
     const needle = normalizeComparePath(canonicalPath, pathModule);
     return current.workspaces
       .filter((entry) => {
@@ -100,57 +131,59 @@ export const createWorkspaceRegistry = ({
       .sort((left, right) => right.canonicalPath.length - left.canonicalPath.length)[0] ?? null;
   };
 
+  const toMapping = (entry: WorkspaceEntry): WorkspaceMapping => ({
+    workspaceId: entry.workspaceId,
+    canonicalPath: entry.canonicalPath,
+    hostId,
+  });
+
   return {
-    async resolve({ canonicalPath, workspaceId, create }) {
+    async resolve({ canonicalPath, workspaceId, create }: WorkspaceRegistryResolveInput): Promise<WorkspaceMapping | null> {
       if (workspaceId) {
         const current = await read();
         const existing = current.workspaces.find((entry) => entry.workspaceId === workspaceId);
         if (!existing) return null;
-        return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+        return toMapping(existing);
       }
       if (!canonicalPath) throw new DocumentPathError('Workspace path is required', 400);
       const current = await read();
       const existing = findByPath(current, canonicalPath);
       if (existing) {
-        return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+        return toMapping(existing);
       }
       if (!create) return null;
       return mutate((current) => {
         const currentExisting = findByPath(current, canonicalPath);
         if (currentExisting) {
-          return { workspaceId: currentExisting.workspaceId, canonicalPath: currentExisting.canonicalPath, hostId };
+          return toMapping(currentExisting);
         }
-        const created = {
+        const created: WorkspaceEntry = {
           workspaceId: randomUUID(),
           canonicalPath,
           createdAt: new Date().toISOString(),
         };
         current.workspaces.push(created);
-        return { workspaceId: created.workspaceId, canonicalPath: created.canonicalPath, hostId };
+        return toMapping(created);
       });
     },
 
-    async get(workspaceId) {
+    async get(workspaceId: string): Promise<WorkspaceMapping | null> {
       const current = await read();
       const existing = current.workspaces.find((entry) => entry.workspaceId === workspaceId);
       if (!existing) return null;
-      return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+      return toMapping(existing);
     },
 
-    async list() {
+    async list(): Promise<WorkspaceMapping[]> {
       const current = await read();
-      return current.workspaces.map((entry) => ({
-        workspaceId: entry.workspaceId,
-        canonicalPath: entry.canonicalPath,
-        hostId,
-      }));
+      return current.workspaces.map(toMapping);
     },
 
-    async findContaining(canonicalPath) {
+    async findContaining(canonicalPath: string): Promise<WorkspaceMapping | null> {
       const current = await read();
       const existing = findContainingPath(current, canonicalPath);
       if (!existing) return null;
-      return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
+      return toMapping(existing);
     },
   };
 };

@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto';
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
-export const revisionFromBytes = (bytes) => (
+export const revisionFromBytes = (bytes: Buffer | Uint8Array): string => (
   `d1_${createHash('sha256').update(bytes).digest('base64url')}`
 );
 
-export const inspectDocumentBytes = (input) => {
+export type InspectedDocument =
+  | { kind: 'binary'; byteLength: number }
+  | { kind: 'unsupported-encoding'; byteLength: number; candidates: string[] }
+  | { kind: 'text'; encoding: string; bom: boolean; content: string; byteLength: number };
+
+export const inspectDocumentBytes = (input: Buffer | Uint8Array): InspectedDocument => {
   const bytes = Buffer.isBuffer(input) ? input : Buffer.from(input);
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
     return { kind: 'unsupported-encoding', byteLength: bytes.length, candidates: ['utf-16le'] };
@@ -16,7 +21,7 @@ export const inspectDocumentBytes = (input) => {
   }
 
   let bom = false;
-  let payload = bytes;
+  let payload: Buffer = bytes;
   if (bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM)) {
     bom = true;
     payload = bytes.subarray(3);
@@ -34,7 +39,13 @@ export const inspectDocumentBytes = (input) => {
   }
 };
 
-export const encodeDocumentText = ({ content, encoding, bom }) => {
+export interface EncodeDocumentTextOptions {
+  content: unknown;
+  encoding: string;
+  bom: boolean;
+}
+
+export const encodeDocumentText = ({ content, encoding, bom }: EncodeDocumentTextOptions): Buffer => {
   if (encoding !== 'utf-8') {
     throw new Error('Unsupported document encoding');
   }

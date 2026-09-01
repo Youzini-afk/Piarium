@@ -1,11 +1,57 @@
 import { randomUUID } from 'node:crypto';
+import type { WatchOptions } from 'node:fs';
+import type fs from 'node:fs';
+import type fsPromises from 'node:fs/promises';
+import type path from 'node:path';
 
-const toResource = (workspaceId, relativePath) => ({
+interface DocumentResource {
+  workspaceId: string;
+  resourceId: string;
+}
+
+export interface WatchEvent {
+  sourceId: string;
+  generation: number;
+  kind: string;
+  sequence: number;
+  resource?: DocumentResource;
+  reason?: string;
+}
+
+export interface WatchPosition {
+  sourceId: string;
+  generation: number;
+  sequence: number;
+}
+
+export interface WorkspaceWatcher {
+  readonly sourceId: string;
+  readonly generation: number;
+  readonly position: WatchPosition;
+  overflow(): void;
+  reconnect(): void;
+  authorityChanged(): void;
+  settle(): Promise<void>;
+  close(): void;
+}
+
+export interface WorkspaceWatcherOptions {
+  workspaceId: string;
+  rootPath: string;
+  fsModule: Pick<typeof fs, 'watch'>;
+  fsPromises: Pick<typeof fsPromises, 'stat'>;
+  pathModule: typeof path;
+  overflowLimit?: number;
+  onEvent: (event: WatchEvent) => void;
+  sourceId?: string;
+}
+
+const toResource = (workspaceId: string, relativePath: string): DocumentResource => ({
   workspaceId,
   resourceId: relativePath.replace(/\\/g, '/'),
 });
 
-const mergeEventType = (previous, next) => (
+const mergeEventType = (previous: string, next: string): string => (
   previous === 'rename' || next === 'rename' ? 'rename' : 'change'
 );
 
@@ -24,22 +70,22 @@ export const createWorkspaceWatcher = ({
   overflowLimit,
   onEvent,
   sourceId = randomUUID(),
-}) => {
+}: WorkspaceWatcherOptions): WorkspaceWatcher => {
   let sequence = 0;
   let generation = 1;
   let closed = false;
-  let watcher = null;
+  let watcher: ReturnType<typeof fsModule.watch> | null = null;
   let reconnectScheduled = false;
-  let batch = new Map();
-  let batchTimer = null;
-  let flushChain = Promise.resolve();
+  let batch = new Map<string, string>();
+  let batchTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushChain: Promise<unknown> = Promise.resolve();
 
-  const nextSequence = () => {
+  const nextSequence = (): number => {
     sequence += 1;
     return sequence;
   };
 
-  const relativeFrom = (absolutePath) => {
+  const relativeFrom = (absolutePath: string): string | null => {
     const relative = pathModule.relative(rootPath, absolutePath).replace(/\\/g, '/');
     if (!relative || relative === '.' || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
       return null;
@@ -47,19 +93,19 @@ export const createWorkspaceWatcher = ({
     return relative;
   };
 
-  const emit = (event) => {
+  const emit = (event: Omit<WatchEvent, 'sourceId' | 'generation'>): void => {
     if (closed) return;
     onEvent({ sourceId, generation, ...event });
   };
 
-  const reset = (reason) => {
+  const reset = (reason: string): void => {
     batch.clear();
     generation += 1;
     sequence = 0;
     emit({ kind: 'reset', sequence: nextSequence(), reason });
   };
 
-  const flushBatch = async () => {
+  const flushBatch = async (): Promise<void> => {
     const current = batch;
     const capturedGeneration = generation;
     batch = new Map();
@@ -69,11 +115,11 @@ export const createWorkspaceWatcher = ({
       const resourceId = relativeFrom(absolutePath);
       if (!resourceId) continue;
       const resource = toResource(workspaceId, resourceId);
-      let stat = null;
+      let stat: import('node:fs').Stats | null = null;
       try {
         stat = await fsPromises.stat(absolutePath);
       } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       }
       if (closed || capturedGeneration !== generation) return;
 
@@ -89,12 +135,12 @@ export const createWorkspaceWatcher = ({
     }
   };
 
-  const reportBatchFailure = () => {
+  const reportBatchFailure = (): void => {
     if (closed) return;
     reset('authority-changed');
   };
 
-  const scheduleFlush = () => {
+  const scheduleFlush = (): void => {
     if (batchTimer || closed) return;
     batchTimer = setTimeout(() => {
       batchTimer = null;
@@ -102,7 +148,7 @@ export const createWorkspaceWatcher = ({
     }, 20);
   };
 
-  const settle = async () => {
+  const settle = async (): Promise<void> => {
     if (closed) return;
     if (batchTimer) clearTimeout(batchTimer);
     batchTimer = null;
@@ -110,7 +156,7 @@ export const createWorkspaceWatcher = ({
     await flushChain;
   };
 
-  const queuePath = (eventType, filename) => {
+  const queuePath = (eventType: string, filename: string): void => {
     if (closed) return;
     if (!filename) {
       reset('authority-changed');
@@ -119,15 +165,15 @@ export const createWorkspaceWatcher = ({
     const absolutePath = pathModule.resolve(rootPath, filename);
     const previous = batch.get(absolutePath);
     batch.set(absolutePath, previous ? mergeEventType(previous, eventType) : eventType);
-    if (Number.isSafeInteger(overflowLimit) && overflowLimit > 0 && batch.size > overflowLimit) {
+    if (overflowLimit !== undefined && Number.isSafeInteger(overflowLimit) && overflowLimit > 0 && batch.size > overflowLimit) {
       reset('overflow');
       return;
     }
     scheduleFlush();
   };
 
-  const start = () => {
-    watcher = fsModule.watch(rootPath, { recursive: true, persistent: false }, (eventType, filename) => {
+  const start = (): void => {
+    watcher = fsModule.watch(rootPath, { recursive: true, persistent: false } as WatchOptions, (eventType, filename) => {
       queuePath(eventType === 'rename' ? 'rename' : 'change', typeof filename === 'string' ? filename : '');
     });
     watcher.on('error', () => {
