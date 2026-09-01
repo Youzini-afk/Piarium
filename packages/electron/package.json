@@ -40,7 +40,7 @@
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
-    "prepare:pi-runtime": "bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
+    "prepare:pi-runtime": "bun run --cwd ../settings-store build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
     "verify:linux-appimage": "node ./scripts/verify-linux-appimage.mjs",
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",

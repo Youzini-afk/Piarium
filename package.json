@@ -32,7 +32,7 @@
     "build:monaco-smoke": "bun run --cwd packages/web build:monaco-smoke",
     "build:electron": "bun run --cwd packages/electron build",
     "build:mobile": "bun run --cwd packages/mobile build",
-    "build:type-dependencies": "bun run --cwd packages/runtime-broker build && bun run --cwd packages/runtime-client build && bun run --cwd packages/extension-contract build && bun run --cwd packages/application-client build && bun run --cwd packages/extension-host build && bun run --cwd packages/extension-loader build",
+    "build:type-dependencies": "bun run --cwd packages/settings-store build && bun run --cwd packages/runtime-broker build && bun run --cwd packages/runtime-client build && bun run --cwd packages/extension-contract build && bun run --cwd packages/application-client build && bun run --cwd packages/extension-host build && bun run --cwd packages/extension-loader build",
     "type-check": "bun run build:type-dependencies && bun run --filter '*' type-check",
     "type-check:web": "bun run --cwd packages/web type-check",
     "type-check:ui": "bun run --cwd packages/ui type-check",

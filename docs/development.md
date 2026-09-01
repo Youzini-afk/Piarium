@@ -33,6 +33,7 @@ or implementation in the same coherent change.
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
 | Electron ownership, packaging, signing, smoke checks | [packages/electron/README.md](../packages/electron/README.md) |
 | Web CLI commands and output modes | [packages/web/bin/lib/DOCUMENTATION.md](../packages/web/bin/lib/DOCUMENTATION.md) |
+| Application Host, CLI, settings-store, and Electron TypeScript migration | [application-host-typescript-migration-plan.md](application-host-typescript-migration-plan.md) |
 | Relay transport and wire compatibility | [packages/web/server/lib/relay/DOCUMENTATION.md](../packages/web/server/lib/relay/DOCUMENTATION.md) |
 | Mobile builds and iOS Simulator scripts | [packages/mobile/README.md](../packages/mobile/README.md) |
 | Cloud deployment and container contract | [cloud-deployment.md](cloud-deployment.md) |

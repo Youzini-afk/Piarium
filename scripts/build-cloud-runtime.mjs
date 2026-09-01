@@ -96,7 +96,7 @@ const packageFiles = Object.freeze({
     optional: [],
   },
   'settings-store': {
-    required: ['package.json', 'src'],
+    required: ['package.json', 'dist'],
     optional: [],
   },
   web: {

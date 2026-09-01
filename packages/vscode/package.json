@@ -213,7 +213,7 @@
   "scripts": {
     "vscode:prepublish": "bun run build",
     "build": "bun run prepare:pi-runtime && bun run prepare:extension-host && bun run build:extension && bun run build:webview",
-    "prepare:pi-runtime": "bun run --cwd ../runtime-broker build && node scripts/prepare-pi-runtime.mjs",
+    "prepare:pi-runtime": "bun run --cwd ../settings-store build && bun run --cwd ../runtime-broker build && node scripts/prepare-pi-runtime.mjs",
     "prepare:extension-host": "bun run --cwd ../extension-host build && bun run --cwd ../extension-loader build && node scripts/prepare-extension-host.mjs",
     "test:pi-runtime": "node scripts/test-pi-runtime.mjs",
     "verify:pi-runtime": "bun run prepare:pi-runtime && bun run test:pi-runtime",

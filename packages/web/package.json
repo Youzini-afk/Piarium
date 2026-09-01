@@ -25,7 +25,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
-    "prepare:pi-runtime": "bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
+    "prepare:pi-runtime": "bun run --cwd ../settings-store build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
     "start": "bun run prepare:pi-runtime && node bin/cli.js serve"
   },
   "dependencies": {

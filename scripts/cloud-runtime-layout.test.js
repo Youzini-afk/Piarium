@@ -85,7 +85,7 @@ const createFixture = () => {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
     }
-    if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'src'), { recursive: true });
+    if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
   }
   return root;
 };

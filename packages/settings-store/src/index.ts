@@ -3,23 +3,76 @@ import fs from 'node:fs';
 import fsPromisesDefault from 'node:fs/promises';
 import pathDefault from 'node:path';
 
-const mutationQueues = new Map();
+// ── Public types ─────────────────────────────────────────────────────────
+
+export type PiariumSettingsDocument = Record<string, unknown>;
+
+export interface SettingsFileTransaction<Result> {
+  document?: PiariumSettingsDocument;
+  result: Result;
+  write?: boolean;
+}
+
+export interface SettingsFileStore {
+  readonly filePath: string;
+  read(): Promise<PiariumSettingsDocument>;
+  readSync(): PiariumSettingsDocument;
+  replace(settings: PiariumSettingsDocument): Promise<PiariumSettingsDocument>;
+  transact<Result>(
+    mutator: (
+      current: PiariumSettingsDocument,
+    ) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+  ): Promise<Result>;
+  update(
+    mutator: (
+      current: PiariumSettingsDocument,
+    ) => PiariumSettingsDocument | void | Promise<PiariumSettingsDocument | void>,
+  ): Promise<PiariumSettingsDocument>;
+}
+
+export interface SettingsFileStoreOptions {
+  filePath: string;
+  defaultValue?: PiariumSettingsDocument;
+  fsModule?: Pick<typeof fs, 'readFileSync'>;
+  fsPromises?: Pick<
+    typeof fsPromisesDefault,
+    'chmod' | 'mkdir' | 'open' | 'readFile' | 'rename' | 'rm' | 'stat' | 'writeFile'
+  >;
+  pathModule?: Pick<typeof pathDefault, 'dirname' | 'resolve'>;
+  processLike?: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>;
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────
+
+interface LockOwner {
+  pid?: unknown;
+  token?: string;
+}
+
+type ReleaseLock = () => Promise<void>;
+
+const mutationQueues = new Map<string, Promise<unknown>>();
 const LOCK_RETRY_MS = 25;
 
-const errorCode = (error) => (
-  error && typeof error === 'object' && typeof error.code === 'string' ? error.code : undefined
+const errorCode = (error: unknown): string | undefined => (
+  error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
 );
 
-const assertObject = (value) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+const assertObject = (value: unknown): PiariumSettingsDocument => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Settings file is malformed (non-object payload)');
   }
-  return value;
+  return value as PiariumSettingsDocument;
 };
 
-const parseSettings = (raw) => assertObject(JSON.parse(raw));
+const parseSettings = (raw: string): PiariumSettingsDocument => assertObject(JSON.parse(raw));
 
-const processIsAlive = (processLike, pid) => {
+const processIsAlive = (
+  processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>,
+  pid: number,
+): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0 || typeof processLike.kill !== 'function') return false;
   try {
     processLike.kill(pid, 0);
@@ -29,7 +82,7 @@ const processIsAlive = (processLike, pid) => {
   }
 };
 
-const enqueueMutation = (key, operation) => {
+const enqueueMutation = <Result>(key: string, operation: () => Promise<Result>): Promise<Result> => {
   const previous = mutationQueues.get(key) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(operation);
   const settled = current.catch(() => undefined).finally(() => {
@@ -39,6 +92,8 @@ const enqueueMutation = (key, operation) => {
   return current;
 };
 
+// ── Store factory ─────────────────────────────────────────────────────────
+
 export const createSettingsFileStore = ({
   filePath,
   defaultValue = {},
@@ -46,14 +101,14 @@ export const createSettingsFileStore = ({
   fsPromises = fsPromisesDefault,
   pathModule = pathDefault,
   processLike = process,
-}) => {
-  const readDefault = () => structuredClone(assertObject(defaultValue));
+}: SettingsFileStoreOptions): SettingsFileStore => {
+  const readDefault = (): PiariumSettingsDocument => structuredClone(assertObject(defaultValue));
   const resolvedPath = pathModule.resolve(filePath);
   const lockPath = `${resolvedPath}.lock`;
   const previousPath = `${resolvedPath}.previous`;
   const directory = pathModule.dirname(resolvedPath);
 
-  const read = async () => {
+  const read = async (): Promise<PiariumSettingsDocument> => {
     try {
       return parseSettings(await fsPromises.readFile(resolvedPath, 'utf8'));
     } catch (error) {
@@ -69,7 +124,7 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const readSync = () => {
+  const readSync = (): PiariumSettingsDocument => {
     try {
       return parseSettings(fsModule.readFileSync(resolvedPath, 'utf8'));
     } catch (error) {
@@ -85,10 +140,10 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const acquireLock = async () => {
+  const acquireLock = async (): Promise<ReleaseLock> => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     for (;;) {
-      let handle;
+      let handle: import('node:fs/promises').FileHandle | undefined;
       try {
         handle = await fsPromises.open(lockPath, 'wx', 0o600);
       } catch (error) {
@@ -104,10 +159,11 @@ export const createSettingsFileStore = ({
           await fsPromises.rm(lockPath, { force: true }).catch(() => undefined);
           throw error;
         }
+        const acquiredHandle = handle;
         return async () => {
-          await handle.close();
+          await acquiredHandle.close();
           try {
-            const owner = JSON.parse(await fsPromises.readFile(lockPath, 'utf8'));
+            const owner = JSON.parse(await fsPromises.readFile(lockPath, 'utf8')) as LockOwner;
             if (owner?.token === token) await fsPromises.rm(lockPath, { force: true });
           } catch (error) {
             if (errorCode(error) !== 'ENOENT') throw error;
@@ -117,7 +173,7 @@ export const createSettingsFileStore = ({
 
       let abandoned = false;
       try {
-        const owner = JSON.parse(await fsPromises.readFile(lockPath, 'utf8'));
+        const owner = JSON.parse(await fsPromises.readFile(lockPath, 'utf8')) as LockOwner;
         abandoned = !processIsAlive(processLike, Number(owner?.pid));
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;
@@ -144,12 +200,13 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const replaceFile = async (temporaryPath) => {
+  const replaceFile = async (temporaryPath: string): Promise<void> => {
     try {
       await fsPromises.rename(temporaryPath, resolvedPath);
       return;
     } catch (error) {
-      if (processLike.platform !== 'win32' || !['EPERM', 'EACCES', 'EEXIST'].includes(errorCode(error))) {
+      const code = errorCode(error);
+      if (processLike.platform !== 'win32' || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EEXIST')) {
         throw error;
       }
     }
@@ -172,7 +229,7 @@ export const createSettingsFileStore = ({
     if (movedCurrent) await fsPromises.rm(previousPath, { force: true });
   };
 
-  const writeUnlocked = async (settings) => {
+  const writeUnlocked = async (settings: PiariumSettingsDocument): Promise<void> => {
     assertObject(settings);
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (processLike.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
@@ -187,7 +244,7 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const withMutationLock = (operation) => enqueueMutation(resolvedPath, async () => {
+  const withMutationLock = <Result>(operation: () => Promise<Result>): Promise<Result> => enqueueMutation(resolvedPath, async () => {
     const release = await acquireLock();
     try {
       return await operation();
@@ -196,15 +253,17 @@ export const createSettingsFileStore = ({
     }
   });
 
-  const replace = (settings) => withMutationLock(async () => {
+  const replace = (settings: PiariumSettingsDocument): Promise<PiariumSettingsDocument> => withMutationLock(async () => {
     await writeUnlocked(settings);
     return settings;
   });
 
-  const transact = (mutator) => withMutationLock(async () => {
+  const transact = <Result>(
+    mutator: (current: PiariumSettingsDocument) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+  ): Promise<Result> => withMutationLock(async () => {
     const current = await read();
     const transaction = await mutator(structuredClone(current));
-    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+    if (transaction === null || typeof transaction !== 'object' || Array.isArray(transaction)) {
       throw new Error('Settings transaction must return an object');
     }
     const next = assertObject(transaction.document ?? current);
@@ -212,7 +271,9 @@ export const createSettingsFileStore = ({
     return transaction.result;
   });
 
-  const update = (mutator) => transact(async (current) => {
+  const update = (
+    mutator: (current: PiariumSettingsDocument) => PiariumSettingsDocument | void | Promise<PiariumSettingsDocument | void>,
+  ): Promise<PiariumSettingsDocument> => transact(async (current) => {
     const next = assertObject((await mutator(current)) ?? current);
     return { document: next, result: next };
   });

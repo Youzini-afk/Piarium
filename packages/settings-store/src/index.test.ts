@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createSettingsFileStore } from './index.js';
 
-const roots = [];
+const roots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fsPromises.rm(root, { force: true, recursive: true })));
@@ -38,7 +38,7 @@ describe('settings file store', () => {
     const store = createSettingsFileStore({ filePath, defaultValue });
 
     const first = await store.read();
-    first.entries.changed = true;
+    (first.entries as Record<string, unknown>).changed = true;
     assert.deepEqual(await store.read(), defaultValue);
 
     await fsPromises.writeFile(filePath, '{}', 'utf8');

@@ -2,7 +2,7 @@
 
 Status: delivered; cross-platform and external-writer coverage continue to harden
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## Decision
 
