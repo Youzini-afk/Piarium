@@ -2,7 +2,7 @@
 
 Status: integration contract, not a per-release certification
 
-Last updated: 2026-08-27
+Last updated: 2026-09-02
 
 ## What this document is
 
@@ -63,7 +63,7 @@ source checkouts used for the audit were fast-forwarded to their tracked upstrea
 | `pi-rtk-optimizer` | npm/source `0.9.0` | Native JSON and `rtk` command contract are unchanged; the narrower upstream peer range remains metadata, not a Piarium compatibility layer. |
 | `@piarium/pi-mcp-adapter` | upstream `2.29.0`; maintained fork `16123de`; npm `2.29.0-piarium.1` | Merged upstream runtime snapshots, progress, cache and raw-tool fixes without dropping `configCatalog/v1`. New Piarium installs use the public scoped npm package; the previous maintained Git source and upstream package name remain identity aliases, so existing installations are adopted rather than duplicated or replaced. |
 | `pi-web-access` | npm/source `0.24.2` | Added the complete provider list, OpenAI auth-provider priority, summary/inline limits, image/PDF controls, new credentials and API gateway fields. |
-| `pi-workspace-history` | npm/source `0.2.2` | Recovery hooks, commands, and settings authority are unchanged; no adapter change. |
+| `pi-workspace-history` | npm/source `0.2.2` | Its commands and native settings remain independently available; Piarium native recovery neither installs nor invokes it. |
 | `pi-wtf` | npm/source `0.2.4` | Commands and `wtf.json` contract are unchanged; no adapter change. |
 
 ## Integration surface per extension
@@ -73,7 +73,7 @@ Each row is the public contract Piarium consumes. Piarium owns none of these fil
 | Extension | Piarium consumes | Native authority |
 | --- | --- | --- |
 | `pi-wtf` | Registered prompt-repair commands | Plugin-owned `wtf.json` |
-| `pi-workspace-history` | `session_before_tree` hook plus registered undo/redo/checkpoint commands | Plugin-owned history store |
+| `pi-workspace-history` | Focused native configuration plus ordinary registered commands, independent of Piarium recovery | Plugin-owned history store |
 | `pi-subagents` | Public `subagents:rpc:v1` with advertised `fleetStatus: { version: 1 }`; provider-owned agent management tool | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
 | `pi-background-tasks` | Public EventBus v1 `request`/`response`/`terminal` for Fleet run, bounded logs, kill | Plugin-owned task store |
 | `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Adapter-reported JSON/JSONC sources (six in normal mode, one in exclusive mode) |
@@ -90,8 +90,10 @@ Each row is the public contract Piarium consumes. Piarium owns none of these fil
 
 ## Ownership rules the adapters keep
 
-- **Recovery** discovers the current `pi-workspace-history` and `pi-wtf` capabilities, delegates to
-  them, and accepts richer capabilities through recovery bridge v1 without reading private state.
+- **Recovery** resolves the selected `piarium.workspace-recovery@5` Host service. The official
+  `piarium.builtin.recovery` provider owns affected-file checkpoints, restore, undo, retention, and
+  crash reconciliation. `pi-workspace-history` and `pi-wtf` remain optional Pi packages whose own
+  commands and settings never satisfy or replace that service.
 - **Fleet** is a registry of Host adapters keyed by `providerId + key`. One degraded provider does
   not hide another. The public DTO carries kind, state, name, and advertised actions only; private
   paths, PIDs, output files, and plugin kill messages never reach the renderer, and Piarium does not

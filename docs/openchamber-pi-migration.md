@@ -58,11 +58,11 @@ There is one runtime boundary between trusted application services and isolated 
 is no OpenCode-shaped compatibility server layered on top of another Pi adapter.
 
 Recovery attaches directly to Pi timeline entries. A user-message rollback targets the stable Pi
-entry ID, restores that prompt into the Piarium composer, and delegates file restoration through
-the versioned recovery bridge. The default policy is conversation only, conversation + files, or
-always ask; detailed recovery management lives in the right sidebar and settings. Piarium ships
-recommended controls for `pi-workspace-history` and `pi-wtf`, while accepting any package source
-and displaying any provider that implements the bridge contract.
+entry ID, restores that prompt into the Piarium composer, and coordinates file restoration through
+the selected `piarium.workspace-recovery@5` Host service. The default policy is conversation only,
+conversation + files, or always ask; detailed native recovery management lives in the right sidebar
+and settings. `pi-workspace-history` and `pi-wtf` remain optional Pi packages with independent
+commands and native configuration; they are not installed or invoked by this recovery path.
 
 The primary Web/Desktop layout now reads the Pi catalog and Pi branch entries directly. Its
 session tree, search, project grouping, streaming assistant state, tool executions, image prompts,

@@ -569,7 +569,8 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 - tool diff、timeline changed files 和 editor diff 可以互相导航；
 - Patch review 支持逐文件/逐 hunk 接受、拒绝或手工合并，但最终写入仍走 DocumentsAPI revision precondition。
 
-恢复插件仍拥有会话/工作区历史能力；Document conflict 不复制 `pi-workspace-history` 私有状态。
+选中的 `piarium.workspace-recovery@5` Host 服务拥有受影响文件日志和联合恢复；Document conflict
+不复制其日志，也不读取可选 `pi-workspace-history` 包的私有状态。
 
 ## 13. Runtime 与 Surface 行为矩阵
 

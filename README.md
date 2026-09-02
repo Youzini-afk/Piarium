@@ -70,9 +70,9 @@ phone-sized screen.
   notification, and UI handling.
 - **First-class plugin configuration:** maintained plugins get focused GUI surfaces while their own
   native JSON/JSONC files, commands, databases, and migration logic remain authoritative.
-- **Plugin-backed recovery:** conversation rollback follows Pi's append-only session tree;
-  conversation-plus-files recovery, checkpoints, undo/redo, and prompt repair delegate to the
-  plugins that own that history.
+- **Native affected-file recovery:** conversation rollback follows Pi's append-only session tree;
+  the replaceable `piarium.workspace-recovery@5` Host service owns combined rollback, checkpoints,
+  undo/redo, retention, and crash recovery without scanning the whole workspace.
 - **Custom providers:** configure Pi-native provider layers, authentication, model discovery, and
   custom endpoints without mirroring credentials into renderer storage.
 - **A recomposable workbench:** pick the Agent or IDE profile, or build your own. Replace the whole
@@ -100,7 +100,7 @@ advance independently.
 | --- | --- |
 | `pi-subagents` | Fleet/task projections and controls through the extension's public RPC and commands |
 | `@cortexkit/pi-magic-context` | Native user/project JSONC configuration, registered commands, status, and public entries |
-| `pi-workspace-history` | Combined conversation/workspace restore, undo, redo, and named checkpoints |
+| `pi-workspace-history` | Optional independent workspace-history commands and native settings; it is not used by Piarium recovery |
 | `pi-wtf` | Prompt repair actions and extension-owned `wtf.json` configuration |
 | `@piarium/pi-mcp-adapter` | Adapter-owned effective server catalog, public status/actions, and revisioned native-source editing |
 | `pi-web-access` | Native `web-search.json`, Curator and account actions, and stored-result navigation |

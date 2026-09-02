@@ -76,10 +76,10 @@ le compositeur sur un écran de téléphone.
 - **Configuration de plugins de première classe :** les plugins maintenus disposent d'interfaces
   dédiées, tandis que leurs propres fichiers JSON/JSONC natifs, commandes, bases de données et
   logiques de migration restent la référence.
-- **Restauration déléguée aux plugins :** le retour en arrière d'une conversation suit l'arbre de
-  sessions en ajout seul de Pi ; la restauration conversation + fichiers, les points de contrôle,
-  l'annulation/rétablissement et la réparation de prompt sont délégués aux plugins qui détiennent
-  réellement cet historique.
+- **Restauration native limitée aux fichiers modifiés :** le retour en arrière d'une conversation suit
+  l'arbre de sessions en ajout seul de Pi ; le service Host remplaçable
+  `piarium.workspace-recovery@5` gère la restauration conversation + fichiers, les points de contrôle,
+  l'annulation/rétablissement, la rétention et la reprise après incident sans analyser tout l'espace de travail.
 - **Fournisseurs personnalisés :** configurez les couches de fournisseurs Pi-natives,
   l'authentification, la découverte de modèles et les points de terminaison personnalisés sans
   recopier les identifiants dans le stockage du moteur de rendu.
@@ -110,7 +110,7 @@ permet à ces paquets de continuer à évoluer de leur côté.
 | --- | --- |
 | `pi-subagents` | Projections et contrôles Fleet/tâches via le RPC public et les commandes de l'extension |
 | `@cortexkit/pi-magic-context` | Configuration JSONC natives utilisateur/projet, commandes enregistrées, état et entrées publiques |
-| `pi-workspace-history` | Restauration conjointe conversation/espace de travail, annulation, rétablissement et points de contrôle nommés |
+| `pi-workspace-history` | Commandes et réglages natifs facultatifs et indépendants pour l'historique ; la restauration Piarium ne l'utilise pas |
 | `pi-wtf` | Actions de réparation de prompt et configuration `wtf.json` détenue par l'extension |
 | `@piarium/pi-mcp-adapter` | Catalogue de serveurs effectif détenu par l'adaptateur, état et actions publics, édition versionnée de la source native |
 | `pi-web-access` | `web-search.json` natif, actions Curator et compte, navigation dans les résultats enregistrés |

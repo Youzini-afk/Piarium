@@ -68,12 +68,13 @@ the retained Electron boundary, not as the current desktop specification.
 
 - The prototype validated conversation-only, files-only, combined restore, checkpoint, undo/redo,
   transaction, and crash-safety semantics.
-- The duplicate shadow-Git implementation was removed after ownership review. Maintained
-  `pi-workspace-history` and `pi-wtf` now remain authoritative, avoiding a permanent fork and
-  allowing their package updates to flow into Piarium.
+- Its complete-workspace and shadow-Git implementation was removed rather than kept as a second
+  recovery authority. Production recovery now uses the selected `piarium.workspace-recovery@5`
+  Host service and its affected-file journal; optional Pi recovery packages retain only their own
+  independent commands, configuration, and history.
 
 Acceptance: the prototype evidence informed the retained UX and safety contract; production
-acceptance is now the plugin-backed Phase 6 contract below.
+acceptance is owned by [native-workspace-recovery-design.md](native-workspace-recovery-design.md).
 
 ## Phase 4 — OpenChamber fork product base (complete)
 
@@ -109,11 +110,12 @@ record, kept at full detail because each one names an ownership decision that is
   real runtime/queue state, model thinking selection, native rename, atomic archive/restore metadata,
   and safe deletion. Product-level queue, transport-frame, gateway concurrency, and discovery ceilings
   are absent by default; deployment budgets are opt-in.
-- Implemented protocol v1 recovery capability discovery, unrestricted scoped plugin settings,
-  extension-owned JSON/JSONC configuration documents, and Pi custom-component snapshots. Pi-native conversation rollback preserves
-  text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
-  repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel
-  `@piarium/recovery` shadow-Git engine was deleted.
+- Implemented unrestricted scoped plugin settings, extension-owned JSON/JSONC configuration
+  documents, and Pi custom-component snapshots. Pi-native conversation rollback preserves
+  text/images. Combined rollback, checkpoints, undo/redo, retention, and crash reconciliation now
+  use the selected `piarium.workspace-recovery@5` Host service and affected-file journal. The
+  full-workspace shadow-Git prototype and the interim plugin-delegated recovery bridge are not in the
+  production authority path; `pi-workspace-history` and `pi-wtf` remain optional independent Pi packages.
 - Implemented Pi-native desktop first-launch and local recovery readiness. Both negotiate the real
   runtime WebSocket handshake and show Pi/host/Node/source versions; the former OpenCode installer,
   binary-path picker, and `/health` polling are removed while remote connection selection remains.
@@ -212,24 +214,24 @@ any plugin. Current native-ownership and adapter boundaries live in
 [extension-compatibility.md](extension-compatibility.md).
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
-  application settings; manage `pi-workspace-history` and `pi-wtf` through Pi's native package
-  operations with truthful configured-versus-active status.
+  application settings. Optional `pi-workspace-history` and `pi-wtf` packages remain manageable
+  through Pi's native package operations without being installed, invoked, or reported as Piarium's
+  recovery authority.
 - Implemented: replace the imported OpenCode plugin registry/file editor with a single Pi-native
   package manager. It lists configured sources, updates one or all packages, removes packages, and
   passes arbitrary npm, Git, local-path, or future Pi sources directly to `PackageManager`. The
   recommended integration cards are convenience entries, not an allowlist.
-- Implemented: provision the maintained MCP adapter, permission system, workspace history, and WTF
-  as global foundational Pi packages without turning them into Piarium extensions. Startup remains
-  non-blocking; user disable/removal is respected; broken configured artifacts are reported rather
-  than repaired; explicit restore and the future-manifest policy are available in Pi Packages.
+- Implemented: provision only the packages that remain application foundations, such as the
+  maintained MCP adapter and permission system. Recovery packages are ordinary optional Pi packages;
+  startup never repairs, reinstalls, or activates them on behalf of native recovery.
 - Implemented: connect timeline recovery to the selected policy with Pi entry IDs. Conversation
-  navigation remains Pi-native; combined/files recovery, checkpoint, undo/redo, and repair are
-  delegated to the installed `pi-workspace-history` / `pi-wtf` providers through their public
-  bridge and commands, so package updates remain authoritative.
-- Implemented: put provider status/checkpoint/history management in the right sidebar/settings while retaining
-  the Pi timeline's normal rollback flow, undo/redo, and branch UX. Enable files-only/preview
-  controls only when a plugin advertises them through recovery bridge v1; no detached legacy
-  reverted-message dock is retained.
+  navigation remains Pi-native; combined file recovery uses affected-path checkpoints from
+  `piarium.builtin.recovery`, with cross-surface dirty-buffer fencing, operation-level workspace
+  leases, confirmed-conflict fingerprints, crash compensation, and configurable retention.
+- Implemented: put native recovery status, checkpoint/history storage, retention, undo/redo, and
+  attention-required operations in the right sidebar/settings while retaining the Pi timeline's
+  normal rollback and branch UX. `pi-wtf` prompt-repair commands and any
+  `pi-workspace-history` history stay independent of this path.
 
 - Implemented: native package installation/update and unrestricted configuration documents for
   `pi-subagents` and Magic Context. Subagent tree controls and Magic Context memory/session
@@ -438,10 +440,9 @@ Web, Electron, VS Code, hosted-mobile, Capacitor, and headless behavior; the rec
 always enter safe mode with non-kernel extensions disabled.
 ## Phase 10 — Composable workbench and IDE Workbench (delivered)
 
-The complete target architecture, product decisions, and per-slice acceptance contract are specified
-in [composable-workbench.md](composable-workbench.md). That plan uses
-its own internal slice numbering 1–11; the numbering below matches it so the two documents can be
-read together.
+The current architecture, product decisions, and ownership contract are specified in
+[composable-workbench.md](composable-workbench.md). Historical delivery slices remain in this
+roadmap only; the architecture document intentionally does not preserve their numbering.
 
 This phase turned Piarium from a fixed agent workspace into a workspace platform whose entire UI can
 be recomposed or replaced by Piarium extensions, and delivered two first-party working shapes on top

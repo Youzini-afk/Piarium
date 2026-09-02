@@ -2,7 +2,7 @@
 
 Status: implemented; this is the ownership contract adapters are held to
 
-Last updated: 2026-08-27
+Last updated: 2026-09-02
 
 ## 1. Purpose
 
@@ -453,23 +453,26 @@ Acceptance:
 - high-risk remote configuration is explicit and still configurable;
 - search/fetch tools and results continue through the generic Pi extension bridge.
 
-### 5.5 pi-workspace-history and pi-wtf
+### 5.5 Native recovery, pi-workspace-history, and pi-wtf
 
 Authority and detailed semantics are defined in [recovery.md](recovery.md). The normal rollback
-entry point remains attached to a user message. The right sidebar adds current-session recovery
-health, undo, redo, checkpoint, and repair actions. Settings contains policy and plugin-specific
-configuration, not a second history browser.
+entry point remains attached to a user message. The right sidebar reports current-session native
+recovery health and operations. Settings owns policy, storage location, retention, cleanup, and
+workspace-history deletion without becoming a second file or conversation authority.
 
-`pi-workspace-history` owns snapshot lifecycle and dirty-workspace safeguards. `pi-wtf` owns prompt
-repair and command-word behavior. Piarium reports only advertised modes: `both` is not presented as
-a `pi-wtf` capability, and `files` remains hidden until a provider explicitly advertises it.
+The selected `piarium.workspace-recovery@5` Host service owns affected-file checkpoints, dirty-buffer
+fencing, combined restore, undo/redo, retention, and crash reconciliation. The official provider is
+the replaceable `piarium.builtin.recovery` extension. `pi-workspace-history` keeps its own optional
+history and configuration, and `pi-wtf` keeps prompt-repair and command-word behavior; neither is
+installed, invoked, or treated as an authority by native Piarium recovery.
 
 Acceptance:
 
 - the `conversation`, `both`, and `ask` policy is honored at every message rollback;
-- a default `both` rollback is capability-gated just like the ask dialog;
-- sidebar actions invoke public provider commands/bridge operations and refresh authoritative state;
-- cancellation, unknown command-only outcomes, and provider failures remain distinguishable.
+- combined rollback is available only through the selected versioned Host service;
+- sidebar and settings actions refresh that service's authoritative state;
+- optional Pi package presence, native-recovery readiness, cancellation, and provider failures remain
+  distinguishable.
 
 ### 5.6 pi-lens
 
