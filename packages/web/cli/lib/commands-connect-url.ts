@@ -13,11 +13,11 @@ import {
 import { discoverRunningInstances } from './cli-lifecycle.js';
 import { getDataDir } from './cli-paths.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
-import { createRemoteClientAuthRuntime } from '../../server/lib/client-auth/remote-clients.js';
-import { createClientPairingRuntime } from '../../server/lib/client-auth/pairing.js';
-import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
-import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
-import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
+import { createRemoteClientAuthRuntime } from '#application-host/lib/client-auth/remote-clients.js';
+import { createClientPairingRuntime } from '#application-host/lib/client-auth/pairing.js';
+import { createRelayIdentityRuntime } from '#application-host/lib/relay/identity.js';
+import { DEFAULT_RELAY_URL } from '#application-host/lib/relay/service.js';
+import { bytesToBase64Url } from '#application-host/lib/relay/e2ee.js';
 import { createSettingsFileStore } from '@piarium/settings-store';
 import {
   intro as clackIntro,

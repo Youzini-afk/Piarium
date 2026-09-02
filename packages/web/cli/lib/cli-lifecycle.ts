@@ -16,7 +16,7 @@ import {
   hasPiariumRuntimeInfo,
 } from './cli-process.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './cli-tunnel-capabilities.js';
-import type { TunnelProviderCapabilities } from '../../server/lib/tunnels/types.js';
+import type { TunnelProviderCapabilities } from '#application-host/lib/tunnels/types.js';
 import type { FetchLike, SystemInfo } from './cli-http.js';
 import type { CliOptions } from './cli-types.js';
 import type { PiariumProcessState } from './cli-process.js';

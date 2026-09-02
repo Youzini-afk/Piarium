@@ -9,7 +9,7 @@ import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverPiariumInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
-import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { isNetworkExposedBindHost } from '#application-host/lib/security/bind-host.js';
 import {
   intro as clackIntro,
   outro as clackOutro,

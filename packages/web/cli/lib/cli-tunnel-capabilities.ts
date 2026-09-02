@@ -1,5 +1,5 @@
-import { cloudflareTunnelProviderCapabilities } from '../../server/lib/tunnels/providers/cloudflare.js';
-import { ngrokTunnelProviderCapabilities } from '../../server/lib/tunnels/providers/ngrok.js';
+import { cloudflareTunnelProviderCapabilities } from '#application-host/lib/tunnels/providers/cloudflare.js';
+import { ngrokTunnelProviderCapabilities } from '#application-host/lib/tunnels/providers/ngrok.js';
 
 const DEFAULT_TUNNEL_PROVIDER_CAPABILITIES = [
   cloudflareTunnelProviderCapabilities,

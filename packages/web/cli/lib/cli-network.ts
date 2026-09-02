@@ -9,7 +9,7 @@ import {
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
   normalizeBindHost,
-} from '../../server/lib/security/bind-host.js';
+} from '#application-host/lib/security/bind-host.js';
 
 // Browser-unsafe ports (Fetch/Chromium restricted ports).
 const UNSAFE_BROWSER_PORTS = new Set([

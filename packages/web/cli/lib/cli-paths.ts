@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { resolvePiariumDataDir } from '../../server/lib/platform/data-paths.js';
+import { resolvePiariumDataDir } from '#application-host/lib/platform/data-paths.js';
 import { recordOf } from './cli-types.js';
 
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';

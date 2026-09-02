@@ -9,6 +9,9 @@
   "bin": {
     "piarium": "./bin/cli.js"
   },
+  "imports": {
+    "#application-host/*": "./server/*"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -29,9 +32,8 @@
     "build:monaco-smoke": "cross-env PIARIUM_MONACO_SMOKE=1 PIARIUM_MONACO_BUNDLE_AUDIT=1 bun run build && node scripts/verify-monaco-bundle.mjs",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit && bun run type-check:application-host && bun run type-check:cli:raw",
-    "type-check:application-host:source": "tsc --noEmit -p tsconfig.application-host.json",
     "type-check:application-host:tests": "tsc --noEmit -p tsconfig.application-host.tests.json",
-    "type-check:application-host:raw": "bun run type-check:application-host:source && bun run type-check:application-host:tests",
+    "type-check:application-host:raw": "bun run build:application-host:types && bun run type-check:application-host:tests",
     "type-check:application-host": "bun run prepare:application-host && bun run type-check:application-host:raw",
     "type-check:cli:source": "tsc --noEmit -p tsconfig.cli.json",
     "type-check:cli:tests": "tsc --noEmit -p tsconfig.cli.tests.json",

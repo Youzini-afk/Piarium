@@ -34,7 +34,7 @@ import {
   resolveTunnelTtlOverrides,
 } from './cli-tunnel-utils.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './cli-tunnel-capabilities.js';
-import type { TunnelModeDescriptor, TunnelProviderCapabilities } from '../../server/lib/tunnels/types.js';
+import type { TunnelModeDescriptor, TunnelProviderCapabilities } from '#application-host/lib/tunnels/types.js';
 import { assertSafeBrowserPort, buildLocalUrl, isUnsafeBrowserPort } from './cli-network.js';
 import {
   readLastManagedLocalConfigPath,

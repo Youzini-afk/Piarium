@@ -27,7 +27,7 @@ import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilit
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
-} from '../server/lib/tunnels/types.js';
+} from '#application-host/lib/tunnels/types.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,

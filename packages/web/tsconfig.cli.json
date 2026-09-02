@@ -11,7 +11,11 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "paths": {
       "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
-      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"]
+      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
+      "#application-host/*": [
+        "./packages/web/.application-host-types/*",
+        "./packages/web/server/*"
+      ]
     }
   },
   "include": ["cli/**/*.ts"],
