@@ -1,12 +1,11 @@
-# Piarium 可组合工作台与 IDE 约定
+# Piarium 可组合工作台与 IDE 架构
 
-Status: 十一个切片已交付；本文是工作台的基础架构与归属约定
+Status: current architecture and ownership contract
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
-这份文档规定 Piarium 工作台的目标架构、已固定的产品决策,以及文档、编辑器、Profile、语言服务和
-调试各自的归属边界。它按十一个切片组织,因为实现是按这个顺序落地的;交付进度见
-[roadmap.md](roadmap.md) 的 Phase 10。切片编号只用于两份文档对读,不代表尚未完成的工作。
+这份文档规定 Piarium 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
+调试各自的归属边界。实现进度与历史阶段不在这里保存；当前行为以代码、契约测试和模块文档为准。
 
 正文为中文。英文读者可先看 [architecture.md](architecture.md) 第 4 节的工作台概述。
 跨 Shell 动画、首帧启动投影和不规定页面元素的 Motion 边界见
@@ -18,7 +17,7 @@ Profile 或 Host ownership。
 
 ## 1. 目标
 
-把 Piarium 建成一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，同时交付两套高质量官方工作形态：
+Piarium 是一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，并提供两套官方工作形态：
 
 - **Agent Workspace**：会话、任务、Fleet、上下文与恢复工作流居中；
 - **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板。
@@ -31,7 +30,7 @@ Profile 或 Host ownership。
 - 混合使用官方与社区贡献，例如 IDE 中央编辑器、社区 Explorer、官方 Agent 右栏；
 - 动态启用、停用和更新这些扩展，而不刷新文档、不重启 Pi Runtime、不丢失共享工作状态。
 
-Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent；后者扩展 Piarium 产品、Surface 与 Application Host。不得把本计划实现成 Pi 插件配置的另一种表现层。
+Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent；后者扩展 Piarium 产品、Surface 与 Application Host。不得把这套架构实现成 Pi 插件配置的另一种表现层。
 
 ## 2. 已确定的产品决策
 
@@ -52,66 +51,22 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 | 移动端 | 官方移动端继续以 Agent Profile 为主；完整官方 IDE 初始只声明 desktop/web 支持 |
 | VS Code | 暂时保留；自有 IDE 达到验收后收敛成 Companion，不继续建设第二套完整工作台 |
 | Pi 插件 | Pi Packages、Plugin Settings 及其原生数据权威不并入 Piarium 扩展生命周期 |
-| 发布 | 各 Phase commit/push；不自动创建 GitHub Release、npm tag 或发布公共 SDK，除非用户另行批准 |
+| 发布 | 代码交付与 GitHub Release、npm tag、公共 SDK 发布是分别授权的动作 |
 
-## 3. 当前基线与缺口
+## 3. 当前实现
 
-### 3.1 可以直接复用的扩展平台
+当前仓库以一套共享内核承载多种工作台形态：
 
-当前仓库已经具备：
+- `@piarium/extension-contract` 定义 manifest、Profile、replacement、slot、context key 和服务契约；
+- `@piarium/extension-surface`、`extension-loader` 和 SDK 负责 owner/generation、候选激活、原子切换与清理；
+- `piarium.builtin.agent-workspace` 与 `piarium.builtin.ide-workbench` 是普通 built-in Shell contribution；
+- Agent Shell 的 `MainLayout.tsx` 是第一方内部组合，不是 Core fallback；IDE 的六个结构区域是真实 replacement host；
+- Application Host 的 revisioned Documents authority、客户端 Document Registry 和 Editor Workbench Kernel 是唯一共享文档路径；
+- desktop/Web 官方编辑器使用 Monaco，mobile/embedded 使用 CodeMirror adapter，VS Code 保留宿主编辑器；
+- Search、Language、Run、Debug 和 Tests 由 Host provider/service 管理，renderer 不启动特权进程；
+- 固定 Recovery Shell 只负责修复扩展/Profile，不是第三套日常工作台。
 
-- `@piarium/extension-contract`：manifest、catalog、Profile、布局和服务路由契约；
-- `@piarium/extension-surface`：owner/generation 归属、原子激活、撤销、replacement 和 provider 选择；
-- `@piarium/extension-loader`：declarative、managed、isolated、trusted-native Surface 生命周期；
-- `@piarium/extension-host`：安装、desired/actual state、能力授权、artifact、Host entrypoint 和存储；
-- `@piarium/extension-sdk` / `extension-react` / `extension-cli`：公开作者工具和测试工具；
-- Workbench Profile 的 application/user/workspace 选择、显式扩展集和 revision 写入；
-- `workbench.shell`、sessions、timeline、composer、agents、MCP、explorer、settings 等 replacement target；
-- 固定 Recovery path 和候选版本失败回滚。
-
-因此不得新增第二个插件管理器、第二个 contribution registry、IDE 专属 loader 或 Cordis 运行时。Cordis 只作为动态生命周期的设计参考，不成为依赖。
-
-### 3.2 Shell ownership 已迁移，内部组合仍按真实区域演进
-
-Core 日常 fallback 已收敛为 Recovery Shell；Agent 与 IDE 都由普通 built-in Shell contribution
-提供。`MainLayout.tsx` 仍是 Agent Shell 的第一方内部组合实现，而不是 Core fallback。官方 Shell
-通过按 Surface 声明的 seam contract 公开自己真实承载的 replacement targets/slots；IDE 的 Activity、
-Primary Sidebar、Editor、Secondary Sidebar、Panel 与 Status 均保留 Shell 几何并替换区域内容。
-
-后续拆分 `MainLayout.tsx`、`ContextPanel.tsx` 或 `SettingsView.tsx` 必须服务于明确的 ownership、性能或
-复用问题，不能为了形式把每个内部组件注册成 contribution，也不能恢复第二个硬编码 Shell owner。
-
-### 3.3 当前文件编辑不是 IDE 文档内核
-
-当前 `FilesView.tsx` 同时承担文件树、标签、预览、CodeMirror、搜索、创建、重命名、删除、保存和外部变化轮询。主要缺口是：
-
-- 只有当前选中文件拥有一份活动草稿；
-- `useFilesViewTabsStore` 只保存路径、选中项和树展开状态；
-- 没有每个文档独立的 dirty、saving、conflict、deleted、cursor、selection 和 view state；
-- `FilesAPI.writeFile(path, content)` 没有 expected revision；
-- `WorkspaceAPI.writeFile` 使用可碰撞的 `mtimeMs`，与 Files editor 又形成两个写入 owner；
-- 外部变化只针对当前文件轮询，dirty 时忽略，后续保存可能覆盖 Agent 或其他程序的新内容；
-- `CodeMirrorEditor` 是整段字符串受控组件，不能作为多个 editor view 共享的 Document Model。
-
-必须先建立共享文档权威，再建设 IDE Shell。禁止先画 IDE 外壳、之后再补文件一致性。
-
-### 3.4 当前 Workbench Profile 的正确边界
-
-现有 Profile 文档已经存储：
-
-- Profile ID、label 和显式 extension ID 集；
-- application/user/workspace 选择；
-- Surface-specific replacement selection；
-- contribution reference 的 region、order、size 和 visibility。
-
-不应把所有 Shell 的布局强制成一个通用树。完整自定义 Shell 可能没有活动栏、侧栏或编辑器组。布局边界调整为：
-
-- Core Profile 继续保存跨 Shell 可理解的 contribution reference 和 replacement selection；
-- 每个 Shell 通过 `workbench.layout` service 在 profile-scoped extension storage 中维护自己的 versioned layout document；
-- 共享 editor group/document state 独立于 Shell layout，因此切换 Profile 不卸载文档；
-- Shell layout 缺失、空、malformed、read failure 分开处理，失败保留上次有效布局。
-
-这避免把官方 IDE 的布局结构变成第三方 Shell 的限制。
+后续拆分大型第一方组件必须服务于明确的 ownership、性能或复用问题，不能为了形式把每个内部组件注册成 contribution，也不能恢复第二个硬编码 Shell 或文档 owner。编辑器细节见 [unified-file-editor-platform.md](unified-file-editor-platform.md)。
 
 ## 4. 最终 ownership
 
@@ -216,7 +171,7 @@ workspace.explorer
 settings.workbench
 ```
 
-新增官方可组合工作台 targets：
+标准可组合工作台 targets：
 
 ```text
 workbench.activity
@@ -227,7 +182,7 @@ workbench.panel
 workbench.status
 ```
 
-新增官方 slots：
+标准 slots：
 
 ```text
 workbench.activity.items
@@ -242,7 +197,7 @@ workbench.status.items
 
 ### 6.2 Contribution kinds
 
-现有 `command`、`keybinding`、`menu-item`、`page`、`panel`、`sidebar`、`shell`、renderer 等继续有效。新增：
+公开 contribution kinds 包括 `command`、`keybinding`、`menu-item`、`page`、`panel`、`sidebar`、`shell`、renderer，以及：
 
 ```text
 view
@@ -259,7 +214,7 @@ Manifest schema、parser、JSON schema、CLI check/build/test 和 SDK 类型必�
 ### 6.3 Profile 语义
 
 - `default` 是官方 Agent Profile 的稳定 ID，不新增 alias。持久化 `label` 是稳定 fallback；官方 Surface 通过第一方 locale metadata 显示本地化名称；
-- `piarium.ide` 在 IDE 扩展真正可用的同一 Phase 加入；
+- `piarium.ide` 与可用的 IDE 扩展、contributions 同时维护；
 - Profile selection 是 user/workspace layout choice；
 - `extensionIds` 是显式 desired-set 模板，只有用户执行 Apply set 才改变 enablement；
 - 选择 Profile 时若其 Shell extension 未启用，显示“启用并切换”和“只检查配置”动作，不能静默启用；
@@ -269,7 +224,7 @@ Manifest schema、parser、JSON schema、CLI check/build/test 和 SDK 类型必�
 
 ### 6.4 Shell 切换事务
 
-当前 persisted selection 不能在新 Shell 尚未证明可 mount 时先提交。新增 Surface-side transition controller：
+persisted selection 不能在新 Shell 尚未证明可 mount 时先提交。Surface transition controller 按以下顺序工作：
 
 1. 根据指定 Profile 解析 candidate layout，但不更改当前选择；
 2. 触发 candidate Shell `contribution-visible` activation；
@@ -284,7 +239,7 @@ Manifest schema、parser、JSON schema、CLI check/build/test 和 SDK 类型必�
 
 ### 6.5 Versioned service IDs
 
-以下服务 ID 是计划中的 canonical owner。实现时若发现已有同语义公共 ID，迁移到已有 owner，而不是保留两个别名：
+以下服务 ID 是 canonical owner；不得为同一语义再保留第二个别名：
 
 | Service ID | Owner / routing |
 | --- | --- |
@@ -304,18 +259,18 @@ Core services 不通过 renderer global 暴露。官方 UI 使用 `RuntimeAPIs`/
 
 ### 7.1 单一权威
 
-新增共享 `DocumentsAPI`。所有文本编辑、预览和扩展 resource editor 最终都通过它访问内容。
+共享 `DocumentsAPI` 是所有文本编辑、预览和扩展 resource editor 的内容访问权威。
 
-迁移完成后：
+当前边界：
 
 - `FilesAPI` 只保留目录浏览、文件搜索和非内容型 workspace 操作；
 - `WorkspaceAPI` 可保留项目/归档/Git 管理，但不再拥有另一套文本 read/write；
-- 删除 `FilesAPI.readFile/statFile/writeFile` 与 `WorkspaceAPI.readFile/writeFile` 的重复编辑路径；
-- 不保留长期 compatibility wrapper；同一 Phase 内完成消费者迁移和旧接口删除。
+- 不存在 `FilesAPI.readFile/statFile/writeFile` 与 `WorkspaceAPI.readFile/writeFile` 的重复编辑路径；
+- 不保留长期 compatibility wrapper；消费者迁移和旧接口删除属于同一项变更。
 
-### 7.2 建议 DTO
+### 7.2 DTO 核心语义
 
-最终 spelling 可遵循仓库风格，但语义必须完整：
+具体 spelling 以 `@piarium/application-client` 为准，语义必须完整：
 
 ```ts
 type PiariumDocumentReadResult =
@@ -494,14 +449,14 @@ Record 至少包含：
 
 ### 9.4 统一文件编辑器层
 
-原 Phase 3 先交付了 document-bound CodeMirror adapter，用来证明 Document Registry 与 editor view
-分离。新的产品决定在不改变文档权威的前提下继续收敛：
+早期 document-bound CodeMirror adapter 用来证明 Document Registry 与 editor view 分离；当前实现
+在不改变文档权威的前提下按 Surface 分工：
 
 - desktop/web 的 Agent 与 IDE 官方文件编辑共用 Monaco model/runtime；
 - mobile Agent 与 embedded editors 保留用途明确的 CodeMirror adapter；
 - editor transaction 进入 Document Registry，任何引擎都不能成为 dirty/save/conflict 权威；
 - language、diagnostics、completion 和 decorations 通过同一 typed LanguageServicesAPI 接入；
-- 历史 `MAX_OPEN_FILE_LINES=5000` 产品边界已经退休并由 focused test 防止复活；统一编辑器 Phase 1 继续测量代表性大文件，再做 feature 分级或自适应治理，不复制猜测数字；
+- 历史 `MAX_OPEN_FILE_LINES=5000` 产品边界已经退休并由 focused test 防止复活；后续性能工作继续测量代表性大文件，再做 feature 分级或自适应治理，不复制猜测数字；
 - 具体 identity、同步、worker、扩展和迁移约定见
   [unified-file-editor-platform.md](unified-file-editor-platform.md)。
 
@@ -566,7 +521,7 @@ interface PiariumIdeLayoutDocument {
 
 ### 11.2 Language service
 
-新增 versioned Host service，例如 `piarium.language-server`，由现有多 provider 路由选择具体实现。职责：
+versioned Host service `piarium.language` 由多 provider 路由选择具体实现。职责：
 
 - workspace/language/provider generation 维度启动和停止 LSP；
 - JSON-RPC transport、restart、diagnostics 和 progress；
@@ -661,357 +616,23 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 
 ## 16. 验证强度按风险分配
 
-每个切片独立成一个可回退的提交。验证跟着风险走，不靠重复次数堆证据：
+每项变更保持可审查、可回退。验证跟着风险走，不靠重复次数堆证据：
 
 1. 迭代时只跑直接受影响的 focused tests；
-2. 切片完成时跑归属包的 type-check、lint 和契约测试；
+2. 功能完成时跑归属包的 type-check、lint 和契约测试；
 3. 改公共 contract/export 时跑其消费者的 build/type-check，并跑一次 `bun run dead-code`；
-4. 只有改 UI Shell 的切片才跑 production Web build；
+4. 只有改 UI Shell 时才跑 production Web build；
 5. 只有 Electron startup/package 边界变化时才跑 bundled dev/package smoke；
-6. 完整 workspace suite、Windows installer、Docker 和 CI 留到最终收敛；
-7. 每个切片跑一次 `git diff --check`；
+6. 完整 workspace suite、Windows installer、Docker 和 CI 留给真正跨边界或发布前的收敛；
+7. 提交前跑一次 `git diff --check`；
 8. 准确记录哪些检查跑了、哪些没跑。
 
-公共 npm tooling 在契约稳定前使用 workspace source，等整套工作台切片收敛后再准备协调版本。
+公共 npm tooling 通过真实 tarball conformance 验证，并按相互兼容的版本协调发布。
 
-## 17. Phase 1 — Workbench composition foundation
+## 17. 跨领域行为要求
 
-### 17.1 目标
-
-让现有扩展平台具备公开、可测试的标准 Workbench seams 和“先 stage、后提交”的 Profile 切换，不实现 IDE UI。
-
-### 17.2 写入边界
-
-- `packages/extension-contract`：公开 target/slot 常量、`view`/`editor` kinds、显式 profile resolution helper；
-- `packages/extension-surface` / `extension-loader`：仅补充 stage/ready/owner lifecycle 所需能力；
-- `packages/ui/src/lib/extensions`：transition controller、Profile bridge 和 Recovery Shell 接入；
-- `packages/extension-host`：只在需要的 Profile revision/diagnostic 边界修改；
-- Extensions Settings：显示 active profile、selected shell、missing/disabled/failed diagnostics 和明确 Apply set。
-
-不要修改文档编辑、FilesView、MainLayout 产品结构。
-
-### 17.3 验收
-
-- 公共 schema 能验证新增 kinds/slots；CLI 与 SDK 同步；
-- target 常量只有 `extension-contract` 一个 owner；
-- 切换到同步、异步 managed、isolated Shell 都在 ready 后提交；
-- candidate activation/mount/render/revision conflict 保留旧 Shell；
-- active Shell 被 disable 后进入 Recovery Shell，能够重新启用或选择其他 Profile；
-- Profile selection 不修改 desired extension set；
-- application-host endpoint switch 拒绝旧 candidate completion；
-- 多窗口 actual state 分开。
-
-## 18. Phase 2 — Workspace identity and DocumentsAPI
-
-### 18.1 目标
-
-在不改现有 Files UI 的前提下建立 workspace/resource/revision/watch authority，并实现 Web/Electron/VS Code 明确 parity。
-
-### 18.2 写入边界
-
-- `packages/application-client/src/types.ts`：Workspace identity、resource DTO、DocumentsAPI；
-- `packages/web/src/api` 与 server routes/services：resource mapping、read/write、watch、recovery storage；
-- `packages/vscode` bridge：workspace FS 和 watcher 实现；
-- `packages/extension-host` / SDK capability：resource-scoped document access；
-- Electron 只复用 Web，不新增通用文件 IPC；
-- mobile 声明远端/unsupported 行为。
-
-同一 Phase 将 `WorkbenchProfileBridge` 的 workspace scope 从裸 `currentDirectory` 迁移为 application-host 提供的 workspace ID。对当前持久化 raw-path selection 做一次原子迁移：只在同一 Host 能明确解析该路径时迁移，成功后写回 canonical ID，不保留永久双查找，也不让另一台 Host 的同名路径继承选择。
-
-### 18.3 必测边界
-
-- missing、empty、binary、read failure；
-- create with expected missing；
-- stale revision conflict；
-- same-mtime content change；
-- mutation during read/write；
-- watch created/changed/moved/deleted/reset；
-- overflow/reconnect 不推断删除；
-- symlink、path escape、untrusted project；
-- application-host endpoint switch stale completion；
-- recovery journal missing/malformed/write failure。
-
-### 18.4 验收
-
-- API 具备单一 Host authority 和 opaque revision；
-- Web 与 VS Code 行为通过相同 contract fixtures；
-- Electron 仍只使用 in-process Web Host；
-- file content 不出现在日志/event；
-- 现有 FilesView 尚未迁移也不受行为回归。
-
-## 19. Phase 3 — Document Registry and current editor migration
-
-### 19.1 目标
-
-建立 per-document external store、并发保存与恢复模型，把当前 Files/Workspace 文本编辑迁入唯一 DocumentsAPI，界面外观尽量不变。
-
-### 19.2 写入边界
-
-- 新增 Document Registry、document hooks、recovery client 和 focused model tests；
-- 新增当时的 document-bound CodeMirror adapter；该 desktop/web renderer 后续按统一文件编辑器计划替换，Document Registry 不变；
-- 迁移 `FilesView`、preview、inline editor、Workspace file editor 和 open-file helpers；
-- 删除重复 `FilesAPI` / `WorkspaceAPI` text read/write shape 及所有 runtime 实现；
-- `useFilesViewTabsStore` 暂时只保留 tree/tab navigation，正文不进入该 store。
-
-### 19.3 验收场景
-
-- 同时打开并修改多个文件，切换 tab 不要求先保存；
-- clean external/Agent edit 自动刷新；
-- dirty external/Agent edit 进入三方 conflict；
-- save in flight 时继续输入，返回后保留后续 dirty edits；
-- rename/delete dirty file 不丢 buffer；
-- read/save failure 保留旧权威和 dirty 状态；
-- Profile/Settings/context surface remount 不丢文档；
-- crash 后恢复草稿但不自动写磁盘；
-- 同一文档两 view 内容同步，selection 独立；
-- 高速输入不触发全局 store/persistence 每键重写。
-
-## 20. Phase 4 — Editor Workbench Kernel
-
-### 20.1 目标
-
-把文件树、文档、编辑器组和资源编辑器从大 FilesView 拆成可被任意 Shell 挂载的共享 Kernel。
-
-### 20.2 交付
-
-- Editor Group split tree、tab、preview/pinned、active group；
-- per-view cursor/selection/scroll/fold restore；
-- Explorer view 与 Document/Editor 分离；
-- text、diff、Markdown、image、JSON、PDF、Drawio/HTML providers；
-- editor provider registry、selector、用户关联和歧义选择；
-- commands/context keys/menu projection；
-- terminal/problems/output container model 与现有 store/service 对接；
-- workspace-scoped workbench snapshot，Profile-independent；
-- current Files surface 作为对新 Kernel 的适配器，旧大组件被删除或收敛为组合层。
-
-### 20.3 验收
-
-- 分屏、移动 tab、同文档多 view、关闭/恢复；
-- resource provider enable/disable/update 时 editor 局部 fallback；
-- disabled/hidden editor contribution 无后台工作；
-- workbench restore 区分 missing、empty、malformed、failure；
-- workspace/runtime switch 不串 tab、路径或 buffer；
-- no broad selector per keystroke；
-- 当前 Agent 产品文件、diff、terminal、Git 工作流不回归。
-
-## 21. Phase 5 — Agent Workspace as a built-in extension
-
-### 21.1 目标
-
-证明现有完整 Piarium 产品可以运行在 Piarium 扩展平台上，而不是依赖 Core 的硬编码 MainLayout。
-
-### 21.2 交付
-
-- `piarium.builtin.agent-workspace` manifest 与 Surface implementation；
-- `piarium.builtin.agent-workspace.shell` contribution；
-- `default` Profile 使用稳定 `Agent` fallback label，官方 locale metadata 显示本地化名称，并引用该 Shell；
-- MainLayout、session navigator、chat timeline、composer、context rail、settings 等通过 contributions/slots 组合；
-- desktop/web 和 mobile 各自受支持的 Agent Shell contribution；
-- `App.tsx` 的日常 fallback 改为 Recovery Shell；
-- 现有功能只有在完整 contribution owner 存在后才删除 hard-coded switch；
-- disabled Agent extension 不删除 session/document/layout state。
-
-### 21.3 验收
-
-- 新安装默认进入 Agent Profile；
-- active Agent extension disable 无 reload，进入 Recovery；re-enable 恢复；
-- 社区 shell replacement 可以完全替代 Agent；
-- navigator/timeline/composer/Agents/MCP/Settings 可分别替换；
-- Agent Shell failure 不导致空白页或 React root 崩溃；
-- desktop/web/mobile 原有核心 journey 可用；
-- application startup 只激活当前可见贡献。
-
-这一 Phase 跑一次 production Web build；若 App root/startup 改变，再跑 bundled Electron smoke，而不是整个安装包矩阵。
-
-## 22. Phase 6 — Official IDE Workbench extension
-
-### 22.1 目标
-
-交付第一方但可停用、可替换的 IDE Workbench，以及 `piarium.ide` Profile。IDE 不获得任何独立文档、终端或 Git owner。
-
-### 22.2 官方布局
-
-- Activity：Explorer、Search、Git、Run/Test、Extensions；
-- Primary sidebar：选中的 workspace view；
-- Center：共享 Editor Groups；
-- Secondary sidebar：Agent、Context、Fleet、Recovery 等可停靠 views；
-- Bottom panel：Terminal、Problems、Output、Tasks；
-- Status：workspace、branch、language、diagnostics、Runtime/Agent 状态；
-- Command Palette 与统一 keybinding/context keys；
-- Shell layout 存于 `piarium.builtin.ide-workbench` 的 profile-scoped storage。
-
-### 22.3 Profile 和生命周期
-
-- 同一 commit 新增 IDE extension、contributions 和 `piarium.ide` Profile；
-- 官方分发可预装 Agent 与 IDE，代码按 contribution-visible lazy activation；
-- Profile 选择不强制启用用户已停用的 IDE extension；
-- 提供明确“启用并切换”组合动作，并分别展示 enable 与 selection 结果；
-- Agent/IDE 热切换保留 documents、editor groups、terminals、sessions、Git 和 Agent state；
-- 自定义 Shell 可以只消费部分标准 slots，或完全自绘。
-
-### 22.4 验收
-
-- Agent -> IDE -> Agent 无 reload、无文档/终端/会话丢失；
-- workspace-specific Profile 选择不污染其他 workspace/host；
-- IDE layout 独立保存，切回后恢复；
-- extension update/disable 中 active view 局部 fallback；
-- IDE Shell 异步 mount 失败继续显示旧 Shell；
-- 没有 LSP 时基础编辑、搜索、Git、终端和 Agent 仍可用，不显示伪造健康；
-- desktop/web production build 和一次真实浏览器交互检查通过。
-
-## 23. Phase 7 — Search and language-service infrastructure
-
-### 23.1 目标
-
-把 IDE 从“多面板文本编辑器”推进到具备标准语言智能的工作台，同时保持 provider 可插拔。
-
-### 23.2 交付
-
-- cancellable workspace file/content search service；
-- Problems/diagnostic registry；
-- Host-side LSP supervisor 和 versioned service contract；
-- Document incremental sync；
-- completion、hover、definition、references、symbols、rename、code actions；
-- language provider routing、workspace trust、restart/diagnostics；
-- 当时的 CodeMirror language/client adapter；后续由 Monaco bridge 接管 desktop/web，mobile 消费同一 typed DTO；
-- 一个受控 fixture server 契约测试和至少一个真实 TypeScript LSP smoke；
-- Python/Rust 等通过相同 provider contract 接入，不硬编码到 Core。
-
-### 23.3 验收
-
-- provider absent、starting、ready、degraded、failed 分开；
-- stale diagnostics/completion 不进入新 document version；
-- provider crash 只影响自己的 workspace/language；
-- hidden editor/search view 不重复启动服务；
-- remote Web server 执行 LSP，renderer 不 spawn；
-- untrusted workspace 不执行项目提供的 server command；
-- application-host endpoint/workspace switch 回收旧进程和 listeners；
-- search failure 不显示“0 results”。
-
-## 24. Phase 8 — Agent/editor transactions
-
-### 24.1 目标
-
-让 Agent 与 IDE 在同一文档/version 模型上协作，解决 unsaved context、Agent 磁盘修改、冲突和 Patch review。
-
-### 24.2 交付
-
-- active editor/selection/diagnostic/diff attachment；
-- saved 与 unsaved-buffer 的明确来源；
-- unsaved text prompt projection；
-- Agent tool changed-file hints 与 authoritative watcher reconciliation；
-- dirty conflict UI、三方 diff/merge；
-- patch/hunk accept/reject/edit；
-- session timeline/file editor 双向跳转；
-- changed files view 与 Document revisions 关联；
-- composer、Agent panel 和 IDE command 共用一套 attachment service。
-
-### 24.3 验收
-
-- Agent 修改 clean/dirty/open/closed/moved/deleted 文件；
-- user 保存与 Agent write 并发；
-- unsaved attachment 的 Pi 可见内容和磁盘不可见事实均准确；
-- reject/accept 使用 expected revision，冲突不覆盖；
-- session/runtime switch 不把 attachment 发到错误 Agent；
-- 不复制 workspace-history、WTF 或其他 Pi 插件私有数据。
-
-## 25. Phase 9 — Public Workbench SDK and ecosystem handoff
-
-### 25.1 目标
-
-把经过官方 Agent/IDE 验证的 contracts 交给社区，而不是先发布未经真实产品使用的抽象。
-
-### 25.2 交付
-
-- public manifest/schema/SDK 的 `view`、`editor`、targets、slots、document clients、context keys；
-- framework-neutral Shell、view、editor mount APIs；
-- React adapter；
-- Host language-provider API；
-- conformance fixtures：enable/disable、async mount、candidate rollback、profile switch、resource conflict、runtime switch；
-- 示例扩展：完整 Shell、自定义 editor、侧栏 view、language provider；
-- Extension Inspector 显示 contribution placement、active Shell、document/language service owners 和 cleanup；
-- authoring docs 与 CLI init template；
-- coordinated npm tooling next version preparation。
-
-### 25.3 验收
-
-- monorepo 外的 disposable project 可以 build/test/install 示例；
-- 任意框架 Shell 不 import Piarium React/private UI；
-- isolated extension 通过 MessagePort capability 编辑 resource；
-- disable physically destroys isolated realm 并保留 document/layout；
-- managed extension disposer、object URL、styles、commands、services 全部清理；
-- malformed/unknown contract 明确失败；
-- npm pack 内容和 public exports 与文档一致。
-
-发布公共版本是独立决定，不随这一切片自动发生。
-
-## 26. Phase 10 — Run, debug and test workbench
-
-### 26.1 目标
-
-补齐 IDE 的运行、调试和测试闭环，并继续使用 provider/service 架构。
-
-### 26.2 交付
-
-- workspace tasks/run configurations；
-- Host-side DAP supervisor；
-- breakpoints、threads、stack、variables、watch、debug console；
-- test discovery、tree、run/debug、results 和 output；
-- command/context/menu integration；
-- extension-contributed debug adapters 和 test providers；
-- Agent 可以引用测试失败/stack/diagnostics，但不会取得未授权进程能力。
-
-### 26.3 验收
-
-- 至少一个真实语言完成 run/debug/test；
-- provider/process crash 可恢复且不拖垮 Shell；
-- workspace switch 停止旧 debug/test owner；
-- disable provider 清理 process/listener/view；
-- hidden views 没有持续刷新；
-- 远程 Web 与 Electron 复用 Host，renderer 不启动调试器。
-
-## 27. Phase 11 — VS Code Companion transition and convergence
-
-### 27.1 进入门槛
-
-只有满足以下条件才缩减 VS Code：
-
-- IDE Profile 已覆盖文件、搜索、Git、终端、语言、Agent context、run/test/debug 的目标路径；
-- Agent Profile 与 IDE Profile 在 Web/Electron 稳定；
-- 用户数据/深链接/会话打开路径有迁移说明；
-- VS Code 当前特有能力有明确保留、迁移或拒绝结论。
-
-### 27.2 Companion 目标
-
-VS Code 扩展保留：
-
-- 打开/聚焦 Piarium；
-- 将文件、selection、diagnostic 发送到 Piarium；
-- 查看/切换当前 Agent session；
-- deep link 和状态；
-- 必要的 workspace bridge。
-
-不再维护完整平行的 Settings、Agent manager、session editor 和第二套 Runtime UI。删除能力前完成真实使用路径迁移，不保留永久双实现。
-
-### 27.3 最终 convergence
-
-这一 Phase 才运行：
-
-- full workspace type-check/lint；
-- public package build/pack/conformance；
-- production Web build；
-- Electron bundled dev、Windows x64 package/smoke，适用时 ARM64 CI；
-- hosted Web/cloud smoke；
-- mobile Agent Profile build/smoke；
-- VS Code Companion build/package；
-- high-value GitHub CI；
-- `bun run dead-code` 和 docs validation。
-
-## 28. 跨切片的行为要求
-
-下面是整套工作台必须同时成立的性质，跨切片有效。它们的权威证据是代码里的测试，不是这份文档里的
-勾选状态——本节曾经是一张逐项打勾的验收表，但打勾从未回填，所以那张表既不能证明完成、也不能证明
-未完成。要看某一条现在由什么守着，去对应包的测试和 `DOCUMENTATION.md`。
+下面是整套工作台必须同时成立的性质。它们的权威证据是代码里的测试和对应包的
+`DOCUMENTATION.md`，本文只记录跨领域不变量。
 
 ### Profile 与扩展
 
@@ -1056,23 +677,23 @@ VS Code 扩展保留：
 - 远程运行时保持一致行为；
 - 不复制任何 Pi 插件的私有状态。
 
-## 29. 主要风险与处理
+## 18. 主要风险与处理
 
 | 风险 | 处理 |
 | --- | --- |
-| 先做 IDE UI 导致后补文档一致性 | Phase 2–4 是 Phase 6 前置门槛 |
+| IDE UI 绕过文档一致性 | IDE Shell 只能组合共享 Documents 与 Editor Kernel |
 | MainLayout 迁移时出现两套 Shell owner | 每个 seam 完整迁移后删除 hard-coded branch；不保留永久 wrapper |
 | Profile 切换先持久化导致白屏 | staging mount ready 后再 revision commit |
 | 外部/Agent 修改覆盖 dirty buffer | expected revision + watch + explicit conflict |
 | 每按键全局 rerender/persist | per-document external store，正文不进 broad Zustand |
 | 通用布局限制第三方 Shell | Profile 只存通用 refs；Shell layout 属于 profile-scoped service/storage |
-| 公共 SDK 过早冻结错误抽象 | 官方 Agent、IDE、editor、LSP 先消费；Phase 9 才发布 |
+| 公共 SDK 过早冻结错误抽象 | 官方 Agent、IDE、editor、LSP 先消费，再按真实使用结果演进公共契约 |
 | LSP/DAP 子进程失控 | Application Host supervisor、owner generation、workspace trust、shutdown cleanup |
 | Electron 重复后端 | Electron 继续复用 Web/Application Host |
-| VS Code 永久双实现 | Phase 11 有进入门槛，达到后删除重复产品 UI |
+| VS Code 永久双实现 | VS Code 保持 Companion 边界，不继续建设第二套完整工作台 |
 | 为大文件/仓库随意加小上限 | 先测量真实 scale，使用警告、按需加载、索引、背压或可配置策略 |
 
-## 30. 最高风险的边界
+## 19. 最高风险的边界
 
 复核这套工作台时，按风险排序看下面这些边界，而不是机械重跑全部命令：
 

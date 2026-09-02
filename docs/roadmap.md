@@ -207,10 +207,8 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 ## Phase 6 — Recovery UX and ecosystem integrations (complete)
 
 This phase built the recovery interaction model and the first-class plugin adapters without forking
-any plugin. Implementation follows the native-ownership and per-adapter acceptance contract in
-[plugin-gui-design.md](plugin-gui-design.md); the per-adapter delivery contract is
-[community-extension-adaptation-execution-plan.md](community-extension-adaptation-execution-plan.md);
-the integration surface each adapter consumes is recorded in
+any plugin. Current native-ownership and adapter boundaries live in
+[plugin-gui-design.md](plugin-gui-design.md), [architecture.md](architecture.md), and
 [extension-compatibility.md](extension-compatibility.md).
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
@@ -441,7 +439,7 @@ always enter safe mode with non-kernel extensions disabled.
 ## Phase 10 — Composable workbench and IDE Workbench (delivered)
 
 The complete target architecture, product decisions, and per-slice acceptance contract are specified
-in [composable-workbench-execution-plan.md](composable-workbench-execution-plan.md). That plan uses
+in [composable-workbench.md](composable-workbench.md). That plan uses
 its own internal slice numbering 1–11; the numbering below matches it so the two documents can be
 read together.
 
@@ -601,7 +599,7 @@ filesystem, process, or extension-lifecycle authority. The final verification ev
 environment-specific omissions are recorded in that design document rather than inferred from this
 ledger.
 
-The ongoing UI dependency-boundary and extension-contract governance work — including loader-level
-incompatibility blocking, schema/runtime alignment, context-expression lifecycle, and
-application-client transport migration — is tracked in
-[ui-boundary-and-extension-contract-execution-plan.md](ui-boundary-and-extension-contract-execution-plan.md).
+UI dependency-boundary and extension-contract governance is complete. Current ownership is recorded in
+[architecture.md](architecture.md), [piarium-extension-authoring.md](piarium-extension-authoring.md),
+and the [`@piarium/application-client` README](../packages/application-client/README.md); executable
+conformance remains in the package tests and architecture checks.

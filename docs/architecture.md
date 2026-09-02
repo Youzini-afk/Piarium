@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ## 1. Context
 
@@ -362,7 +362,7 @@ sends editor context, and bridges the workspace; run, debug, and test stay truth
 `absent`/`unsupported` there and the official IDE chrome is not loaded into its webview. See
 [vscode-companion.md](vscode-companion.md). The full workbench contract, performance requirements,
 and per-slice acceptance criteria are in
-[composable-workbench-execution-plan.md](composable-workbench-execution-plan.md).
+[composable-workbench.md](composable-workbench.md).
 
 ## 5. Versioned host protocol
 

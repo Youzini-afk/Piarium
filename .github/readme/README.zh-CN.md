@@ -286,7 +286,7 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 - [工程开发与知识导航](../../docs/development.md)
 - [架构](../../docs/architecture.md)
 - [路线图](../../docs/roadmap.md)
-- [可组合工作台与 IDE 约定](../../docs/composable-workbench-execution-plan.md)
+- [可组合工作台与 IDE 约定](../../docs/composable-workbench.md)
 - [统一文件编辑器平台](../../docs/unified-file-editor-platform.md)
 - [Piarium 扩展平台](../../docs/piarium-extension-platform.md)
 - [VS Code 伴侧迁移](../../docs/vscode-companion.md)

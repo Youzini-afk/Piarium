@@ -339,7 +339,7 @@ dépôt dans [AGENTS.md](../../AGENTS.md).
 
 - [Architecture](../../docs/architecture.md)
 - [Feuille de route](../../docs/roadmap.md)
-- [Contrat du workbench composable et de l'IDE](../../docs/composable-workbench-execution-plan.md) (en chinois simplifié)
+- [Contrat du workbench composable et de l'IDE](../../docs/composable-workbench.md) (en chinois simplifié)
 - [Plateforme d'extensions Piarium](../../docs/piarium-extension-platform.md)
 - [Migration vers le compagnon VS Code](../../docs/vscode-companion.md)
 - [Contrat de migration d'OpenChamber vers Pi](../../docs/openchamber-pi-migration.md)

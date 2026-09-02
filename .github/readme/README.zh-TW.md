@@ -285,7 +285,7 @@ CI 固定為三條職責不同的門檻：Ubuntu 原始碼品質、Windows 執�
 
 - [架構](../../docs/architecture.md)
 - [藍圖](../../docs/roadmap.md)
-- [可組合工作台與 IDE 約定](../../docs/composable-workbench-execution-plan.md)（簡體中文）
+- [可組合工作台與 IDE 約定](../../docs/composable-workbench.md)（簡體中文）
 - [Piarium 擴充平台](../../docs/piarium-extension-platform.md)
 - [VS Code 伴隨遷移](../../docs/vscode-companion.md)
 - [從 OpenChamber 遷移到 Pi 的約定](../../docs/openchamber-pi-migration.md)

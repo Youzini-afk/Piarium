@@ -313,7 +313,7 @@ Docker ワークフローがコンテナ契約を検証し、対になるスリ�
 
 - [アーキテクチャ](../../docs/architecture.md)
 - [ロードマップ](../../docs/roadmap.md)
-- [構成可能なワークベンチと IDE の契約](../../docs/composable-workbench-execution-plan.md)（簡体中国語）
+- [構成可能なワークベンチと IDE の契約](../../docs/composable-workbench.md)（簡体中国語）
 - [Piarium 拡張プラットフォーム](../../docs/piarium-extension-platform.md)
 - [VS Code コンパニオンへの移行](../../docs/vscode-companion.md)
 - [OpenChamber から Pi への移行契約](../../docs/openchamber-pi-migration.md)

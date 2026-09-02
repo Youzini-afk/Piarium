@@ -1,12 +1,12 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: 全部八个实施 Phase 已完成；本文是统一文件编辑器的现行架构与验收记录
+Status: current unified editor architecture and acceptance contract
 
-Last updated: 2026-08-26
+Last updated: 2026-09-02
 
 本文规定 Piarium 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
 集成方式、语言智能契约、扩展边界、性能约束和实施顺序。它取代
-[composable-workbench-execution-plan.md](composable-workbench-execution-plan.md) 中“所有 Surface
+[composable-workbench.md](composable-workbench.md) 中“所有 Surface
 统一使用 CodeMirror 6”的旧引擎决定，但不推翻该文档已经交付的 Document Registry、Editor
 Workbench Kernel、Profile、Piarium 扩展和 Host ownership。
 

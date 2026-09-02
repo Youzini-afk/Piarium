@@ -25,7 +25,7 @@ or implementation in the same coherent change.
 | --- | --- |
 | Product/process/data architecture | [architecture.md](architecture.md) |
 | OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](openchamber-pi-migration.md) |
-| Workbench profiles and extension composition | [composable-workbench-execution-plan.md](composable-workbench-execution-plan.md) |
+| Workbench profiles and extension composition | [composable-workbench.md](composable-workbench.md) |
 | Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
 | Piarium extension platform | [piarium-extension-platform.md](piarium-extension-platform.md) and [piarium-extension-authoring.md](piarium-extension-authoring.md) |
 | Shared UI, themes, localization, settings, interactions | [packages/ui/DOCUMENTATION.md](../packages/ui/DOCUMENTATION.md) |
@@ -33,7 +33,6 @@ or implementation in the same coherent change.
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
 | Electron ownership, packaging, signing, smoke checks | [packages/electron/README.md](../packages/electron/README.md) |
 | Web CLI commands and output modes | [packages/web/cli/lib/DOCUMENTATION.md](../packages/web/cli/lib/DOCUMENTATION.md) |
-| Application Host, CLI, settings-store, and Electron TypeScript migration | [application-host-typescript-migration-plan.md](application-host-typescript-migration-plan.md) |
 | Relay transport and wire compatibility | [packages/web/application-host/lib/relay/DOCUMENTATION.md](../packages/web/application-host/lib/relay/DOCUMENTATION.md) |
 | Mobile builds and iOS Simulator scripts | [packages/mobile/README.md](../packages/mobile/README.md) |
 | Cloud deployment and container contract | [cloud-deployment.md](cloud-deployment.md) |

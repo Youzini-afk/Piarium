@@ -1,11 +1,11 @@
 # Piarium Motion 与可替换过渡场景
 
-Status: Phase 1–3 已交付；Bootstrap Projection 与通用 Motion service 待实施
+Status: current motion architecture; Bootstrap Projection and the generic Motion service remain future work
 
-Last updated: 2026-08-25
+Last updated: 2026-09-02
 
 本文规定 Piarium 动画与界面交接的产品边界、公共契约和实施顺序。它建立在
-[可组合工作台约定](composable-workbench-execution-plan.md) 之上，不新增第二套扩展系统，也不把
+[可组合工作台约定](composable-workbench.md) 之上，不新增第二套扩展系统，也不把
 官方 Agent Workspace、IDE Workbench 或当前立方体动画变成 Core 中不可替换的产品结构。
 
 ## 1. 目标
