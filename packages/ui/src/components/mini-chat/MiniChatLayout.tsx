@@ -95,7 +95,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
 
   React.useEffect(() => {
     if (!isElectronShell()) return;
-    void invokeDesktop<{ pinned?: boolean }>('desktop_get_window_pinned').then((result) => {
+    void invokeDesktop('desktop_get_window_pinned').then((result) => {
       if (typeof result?.pinned === 'boolean') setPinned(result.pinned);
     });
   }, []);
@@ -121,8 +121,8 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const handleOpenMainApp = React.useCallback(() => {
     const payload = currentSessionId
       ? { sessionId: currentSessionId, directory: openDirectory }
-      : { mode: 'draft', directory: openDirectory, projectId: project?.id ?? null };
-    void invokeDesktop<{ focused?: boolean }>('desktop_focus_main_window', payload)
+      : { mode: 'draft', directory: openDirectory, projectId: project?.id };
+    void invokeDesktop('desktop_focus_main_window', payload)
       .then((result) => result?.focused === true
         ? invokeDesktop('desktop_close_current_window')
         : null);

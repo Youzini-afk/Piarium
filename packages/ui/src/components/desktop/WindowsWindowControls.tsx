@@ -91,7 +91,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
     }
 
     let disposed = false;
-    void invokeDesktop<{ maximized?: boolean }>('desktop_get_current_window_state')
+    void invokeDesktop('desktop_get_current_window_state')
       .then((state) => {
         if (!disposed) {
           setIsMaximized(Boolean(state?.maximized));
@@ -129,7 +129,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       void invokeDesktop('desktop_minimize_current_window');
       return;
     }
-    void invokeDesktop<{ maximized?: boolean }>('desktop_toggle_current_window_maximized')
+    void invokeDesktop('desktop_toggle_current_window_maximized')
       .then((state) => setIsMaximized(Boolean(state?.maximized)))
       .catch(() => {});
   };
@@ -193,7 +193,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
           data-window-control="maximize"
           className={buttonClassName}
           onClick={() => {
-            void invokeDesktop<{ maximized?: boolean }>('desktop_toggle_current_window_maximized')
+            void invokeDesktop('desktop_toggle_current_window_maximized')
               .then((state) => setIsMaximized(Boolean(state?.maximized)))
               .catch(() => {});
           }}

@@ -1,22 +1,16 @@
 import { recordOf } from './runtime-types.js';
+import {
+  PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS,
+  type PiariumDesktopCommand,
+  type PreloadBootstrapPayload,
+  type PreloadBootstrapShared,
+} from '@piarium/application-client/desktop';
 
 const asTrimmedString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
-export const REMOTE_SAFE_DESKTOP_COMMANDS = new Set<string>([
-  'desktop_new_window',
-  'desktop_new_window_at_url',
-  'desktop_new_window_for_host',
-  'desktop_set_window_title',
-  'desktop_set_window_theme',
-  'desktop_is_window_fullscreen',
-  'desktop_start_window_drag',
-  'desktop_minimize_current_window',
-  'desktop_toggle_current_window_maximized',
-  'desktop_close_current_window',
-  'desktop_get_current_window_state',
-  'desktop_get_app_version',
-  'desktop_capture_page_rect',
-]);
+export const REMOTE_SAFE_DESKTOP_COMMANDS: ReadonlySet<PiariumDesktopCommand> = new Set(
+  PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS,
+);
 
 export const normalizeExternalHttpUrl = (raw: unknown): string | null => {
   const value = asTrimmedString(raw);
@@ -55,6 +49,7 @@ export const isTrustedLocalRendererUrl = (raw: unknown, options: RendererTrustOp
       try {
         if (new URL(local).origin === url.origin) return true;
       } catch {
+        /* invalid localOrigin entry; skip malformed configured origin */
       }
     }
     return false;
@@ -76,25 +71,31 @@ export interface PreloadBootstrapInput extends RendererTrustOptions {
   trayEnabled?: unknown;
 }
 
-export const createPreloadBootstrapPayload = (input: PreloadBootstrapInput = {}) => {
+// Re-export the bootstrap payload types from the shared desktop contract so
+// consumers import from a single owner. The implementation below still
+// constructs the discriminated union; the types live in application-client.
+export type { PreloadBootstrapPayload, PreloadBootstrapShared };
+
+export const createPreloadBootstrapPayload = (input: PreloadBootstrapInput = {}): PreloadBootstrapPayload => {
   const localPage = isTrustedLocalRendererUrl(input.senderUrl, {
     uiProtocol: input.uiProtocol,
     developmentUiOrigin: input.developmentUiOrigin,
     localOrigins: input.localOrigins,
   });
-  const shared = {
+  const shared: PreloadBootstrapShared = {
     localPage,
     localOrigin: asTrimmedString(input.localOrigin),
     apiBaseUrl: asTrimmedString(input.apiBaseUrl),
-    macosMajor: Number.isFinite(input.macosMajor) ? input.macosMajor : 0,
+    macosMajor: typeof input.macosMajor === 'number' && Number.isFinite(input.macosMajor) ? input.macosMajor : 0,
     macVibrancy: input.macVibrancy !== false,
     trayEnabled: input.trayEnabled !== false,
   };
-  if (!localPage) return shared;
+  if (!localPage) return { ...shared, localPage: false as const };
 
   const requestHeaders = recordOf(input.requestHeaders);
   return {
     ...shared,
+    localPage: true,
     clientToken: asTrimmedString(input.clientToken),
     requestHeaders,
     homeDirectory: asTrimmedString(input.homeDirectory),

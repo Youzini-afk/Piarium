@@ -2095,9 +2095,10 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
         if (wcId === null || wcId === undefined) return;
 
-        const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>(
+        const capture = await invokeDesktopCommand(
           'desktop_browser_capture_page', { webContentsId: wcId }
         );
+        if (!capture) throw new Error('Desktop screenshot capture is not available');
 
         const cssViewport = await webview.executeJavaScript?.(
           '({ width: window.innerWidth, height: window.innerHeight })', true

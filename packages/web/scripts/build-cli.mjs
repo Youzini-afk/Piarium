@@ -10,11 +10,25 @@ const outputDir = path.join(webRoot, 'bin');
 const stagingDir = path.join(webRoot, `.cli-staging-${process.pid}`);
 const backupDir = path.join(webRoot, `.cli-backup-${process.pid}`);
 
+const cleanOnly = process.argv.includes('--clean');
+
 const clean = (target) => {
   if (path.dirname(target) !== webRoot) throw new Error(`Refusing to clean outside Web package: ${target}`);
   fs.rmSync(target, { recursive: true, force: true });
 };
 const log = (message) => process.stdout.write(`[build:cli] ${message}\n`);
+
+// --clean: remove generated CLI output and any stale staging/backup dirs, then exit.
+if (cleanOnly) {
+  clean(outputDir);
+  for (const entry of fs.readdirSync(webRoot)) {
+    if (entry.startsWith('.cli-staging-') || entry.startsWith('.cli-backup-')) {
+      clean(path.join(webRoot, entry));
+    }
+  }
+  log('Clean complete.');
+  process.exit(0);
+}
 
 try {
   clean(stagingDir);

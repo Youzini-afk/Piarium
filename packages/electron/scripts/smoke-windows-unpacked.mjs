@@ -63,6 +63,7 @@ const describeSmokeFailure = (reason, extras = {}) => {
     diagnostics: extras.diagnostics ?? lastState?.diagnostics ?? null,
     lastState,
     rendererConsole: extras.consoleMessages ?? [],
+    runtimeManager: extras.runtimeManager ?? null,
     runtimeExceptions: extras.exceptions ?? [],
   };
   return new Error(`${reason}\n${JSON.stringify(payload, null, 2)}`);
@@ -644,9 +645,15 @@ try {
     );
   }
   if (renderer.mode === 'runtime-setup') {
+    const runtimeManager = await fetch(`${baseUrl}/api/piarium/runtime-manager`, {
+      signal: AbortSignal.timeout(10_000),
+    }).then((response) => response.json()).catch((error) => ({
+      status: 'diagnostic-request-failed',
+      message: error instanceof Error ? error.message : String(error),
+    }));
     throw describeSmokeFailure(
       'Packaged Windows application did not activate the seeded Pi runtime through its external Host.',
-      renderer,
+      { ...renderer, runtimeManager },
     );
   }
   if (!layout.closeControl) {

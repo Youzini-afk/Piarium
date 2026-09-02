@@ -1474,7 +1474,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const syncFullscreenState = async () => {
       try {
-        const fullscreen = await invokeDesktop<boolean>('desktop_is_window_fullscreen');
+        const fullscreen = await invokeDesktop('desktop_is_window_fullscreen');
         if (!disposed) {
           setIsDesktopWindowFullscreen(fullscreen === true);
         }

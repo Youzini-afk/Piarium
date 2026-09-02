@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-// @ts-expect-error Application-host document authority is a JS module shared with Web.
 import { createDocumentAuthority } from '../../web/server/lib/documents/authority.js';
-// @ts-expect-error Host capability adapter is a JS module shared with Web.
 import { createDocumentsCapabilityHandler } from '../../web/server/lib/documents/capability.js';
 
 type VSCodeWorkspaceLike = {
@@ -24,17 +22,17 @@ type MutationOptions = {
 };
 
 type MutationAuthorityLike = {
-  runMutationForScope?: <T>(
+  runMutationForScope?<T>(
     scopeId: string,
     owner: MutationOwner,
-    operation: () => PromiseLike<T> | T,
+    operation: () => Promise<T>,
     options?: MutationOptions,
-  ) => Promise<T>;
-  registerWriterForScope?: (
+  ): Promise<T>;
+  registerWriterForScope?(
     scopeId: string,
     owner: MutationOwner,
     options?: MutationOptions,
-  ) => Promise<{
+  ): Promise<{
     markMutated: () => Promise<void>;
     close: () => Promise<void>;
   } | null>;
@@ -111,7 +109,7 @@ export const runVSCodeMutation = async <T>(options: {
   )).filter((scope): scope is string => Boolean(scope)))];
   if (scopes.length === 0) return operation();
   if (scopes.length === 1 || typeof documents.registerWriterForScope !== 'function') {
-    return documents.runMutationForScope(scopes[0]!, owner, operation, mutation);
+    return documents.runMutationForScope(scopes[0]!, owner, async () => await operation(), mutation);
   }
   const writers: Array<Awaited<ReturnType<NonNullable<MutationAuthorityLike['registerWriterForScope']>>>> = [];
   try {

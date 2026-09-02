@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-
 export type UpdaterFeed = {
   owner: string;
   provider: 'github';

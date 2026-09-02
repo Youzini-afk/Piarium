@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
 import type { Writable, Readable } from 'node:stream';
 import { createSettingsFileStore } from '@piarium/settings-store';
+import type { DesktopSshInstanceStatus, DesktopSshPhase } from '@piarium/application-client/desktop';
 import { recordOf } from './runtime-types.js';
 
 const LOCAL_HOST_ID = 'local';
@@ -72,12 +73,12 @@ export interface SshInstance {
   sshParsed: ParsedSshCommand;
 }
 
-interface SshStatus {
+interface SshStatus extends DesktopSshInstanceStatus {
   detail: string | null;
   id: string;
   localPort: number | null;
   localUrl: string | null;
-  phase: string;
+  phase: DesktopSshPhase;
   remotePort: number | null;
   requiresUserAction: boolean;
   retryAttempt: number;
@@ -166,8 +167,6 @@ const expandSshIncludeToken = (token: unknown, baseDir: string): string[] => {
     return [];
   }
 };
-
-const defaultTrue = (): boolean => true;
 
 const sanitizeBindHost = (raw: unknown): string => {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
@@ -368,9 +367,16 @@ const windowsAskpassWrapperContent = (): string => `@echo off\r
 "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0askpass.ps1"\r
 `;
 
+const CONTROL_CHARS_TO_STRIP = new Set(
+  Array.from({ length: 32 }, (_, i) => i) // 0x00-0x1f
+    .filter((code) => code !== 0x09 && code !== 0x0a && code !== 0x0d) // keep tab, LF, CR
+    .concat(0x7f), // DEL
+);
+
 const sanitizeProcessDiagnostic = (value: unknown, secret?: string | null): string => {
-  let sanitized = String(value || '')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+  let sanitized = Array.from(String(value || ''))
+    .filter((char) => !CONTROL_CHARS_TO_STRIP.has(char.charCodeAt(0)))
+    .join('')
     .trim();
   if (secret) sanitized = sanitized.split(secret).join('[redacted]');
   if (sanitized.length > MAX_PROCESS_ERROR_CHARS) {
@@ -435,6 +441,7 @@ const waitLocalForwardReady = async (localPort: number): Promise<void> => {
         return;
       }
     } catch {
+      /* forward not ready yet; keep polling until deadline */
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
     pollMs = Math.min(pollMs * 2, 2000);
@@ -467,7 +474,7 @@ export class ElectronSshManager {
   readonly settingsFilePath: string;
   readonly settingsStore: SettingsStore;
   readonly appVersion: string;
-  readonly emit: (event: string, detail: unknown) => void;
+  readonly emit: (event: 'piarium:ssh-instance-status', detail: DesktopSshInstanceStatus) => void;
   readonly platform: NodeJS.Platform;
   readonly spawnProcess: SpawnSsh;
   readonly logs: Map<string, string[]>;
@@ -481,7 +488,7 @@ export class ElectronSshManager {
 
   constructor(options: {
     appVersion: string;
-    emit(event: string, detail: unknown): void;
+    emit(event: 'piarium:ssh-instance-status', detail: DesktopSshInstanceStatus): void;
     platform?: NodeJS.Platform;
     settingsFilePath: string;
     settingsStore?: SettingsStore;
@@ -637,6 +644,7 @@ export class ElectronSshManager {
     try {
       await this.controlMasterOperation(parsed, controlPath, 'exit');
     } catch {
+      /* best-effort control master shutdown; connection may already be gone */
     }
   }
 
@@ -698,7 +706,7 @@ export class ElectronSshManager {
 
   setStatus(
     id: string,
-    phase: string,
+    phase: DesktopSshPhase,
     detail: string | null = null,
     localUrl: string | null = null,
     localPort: number | null = null,
@@ -1225,6 +1233,7 @@ export class ElectronSshManager {
         `if command -v curl >/dev/null 2>&1; then curl -fsS -X POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; elif command -v wget >/dev/null 2>&1; then wget -qO- --method=POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; fi`,
       );
     } catch {
+      /* best-effort remote shutdown; server may already be stopped or unreachable */
     }
   }
 
@@ -1334,16 +1343,19 @@ export class ElectronSshManager {
         try {
           child.kill('SIGTERM');
         } catch {
+          /* best-effort kill; process may already be dead */
         }
       }
       try {
         await fsp.rm(session.controlPath, { force: true });
       } catch {
+        /* best-effort cleanup; control socket may already be removed */
       }
       for (const askpassFilePath of session.askpassCleanupPaths) {
         try {
           await fsp.rm(askpassFilePath, { force: true });
         } catch {
+          /* best-effort cleanup; askpass file may already be removed */
         }
       }
       this.sshAuth.delete(session.parsed);
@@ -1364,7 +1376,7 @@ export class ElectronSshManager {
     this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
     const sessionDir = this.ensureSessionDir(id);
     const controlPath = this.controlPathForInstance(id);
-    try { await fsp.rm(controlPath, { force: true }); } catch {}
+    try { await fsp.rm(controlPath, { force: true }); } catch { /* best-effort cleanup; stale socket may not exist */ }
     const { askpassPath, cleanupPaths: askpassCleanupPaths } = await this.writeAskpassFiles(sessionDir);
     const sshPassword = instance.auth?.sshPassword?.enabled ? instance.auth.sshPassword.value?.trim() ?? null : null;
     this.sshAuth.set(parsed, { askpassPath, sshPassword, children: new Set() });

@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ExpectStatic } from 'vitest';
 import {
   createDocumentAuthority,
   type DocumentAuthority,
@@ -127,12 +126,37 @@ export const createDocumentAuthorityHarness = async (
   };
 };
 
+interface ContractNegatedMatchers {
+  toBe(expected: unknown): void;
+  toContain(expected: unknown): void;
+}
+
+interface ContractRejectedMatchers {
+  toBeInstanceOf(expected: new (...args: never[]) => unknown): Promise<void>;
+  toMatchObject(expected: Record<string, unknown>): Promise<void>;
+  toThrow(expected: RegExp): Promise<void>;
+}
+
+interface ContractMatchers {
+  readonly not: ContractNegatedMatchers;
+  readonly rejects: ContractRejectedMatchers;
+  toBe(expected: unknown): void;
+  toBeGreaterThan(expected: number): void;
+  toBeGreaterThanOrEqual(expected: number): void;
+  toBeInstanceOf(expected: new (...args: never[]) => unknown): void;
+  toBeUndefined(): void;
+  toContain(expected: unknown): void;
+  toEqual(expected: unknown): void;
+  toHaveLength(expected: number): void;
+  toMatchObject(expected: Record<string, unknown>): void;
+}
+
 interface DocumentAuthorityContractContext {
-  describe: typeof import('vitest').describe;
-  it: typeof import('vitest').it;
-  expect: ExpectStatic;
-  beforeEach: typeof import('vitest').beforeEach;
-  afterEach: typeof import('vitest').afterEach;
+  describe(name: string, body: () => void): unknown;
+  it(name: string, body: () => void | Promise<void>): unknown;
+  expect(value: unknown): ContractMatchers;
+  beforeEach(body: () => void | Promise<void>): unknown;
+  afterEach(body: () => void | Promise<void>): unknown;
 }
 
 const requireStatus = <T extends { status: string }, S extends T['status']>(

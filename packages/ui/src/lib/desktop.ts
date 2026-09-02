@@ -1,4 +1,13 @@
 import type { ProjectEntry, TerminalShell } from '@piarium/application-client';
+import type {
+  PiariumDesktopBridge,
+  PiariumDesktopCommand,
+  PiariumDesktopCommandInvocation,
+  PiariumDesktopCommandResult,
+  DesktopKeepAwakeStatus,
+  DesktopLaunchAtLoginStatus,
+  DesktopMinimizeToTrayStatus,
+} from '@piarium/application-client';
 import type { RecoveryPreference } from '@piarium/protocol';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -219,16 +228,11 @@ export type DesktopSettings = {
   draftStartersVisible?: boolean;
 };
 
-type DesktopBridgeGlobal = {
-  invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-  openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
-  grantFileAccess?: (path: string) => Promise<unknown>;
-  openExternal?: (url: string) => Promise<unknown>;
-  listen?: (
-    event: string,
-    handler: (evt: { payload?: unknown }) => void,
-  ) => Promise<() => void>;
-};
+// The desktop bridge type is owned by @piarium/application-client so that
+// preload, main, and UI share a single typed contract for all 58 commands.
+// The exposed bridge is structurally compatible with PiariumDesktopBridge;
+// we keep a local alias for ergonomics and backward-compatible imports.
+type DesktopBridgeGlobal = Partial<PiariumDesktopBridge>;
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
@@ -300,35 +304,22 @@ export const hasDesktopInvoke = (): boolean => {
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
 
-export const invokeDesktop = async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T | null> => {
+export const invokeDesktop = async <K extends PiariumDesktopCommand>(
+  command: K,
+  ...invocation: PiariumDesktopCommandInvocation<K>
+): Promise<PiariumDesktopCommandResult<K> | null> => {
   const bridge = getDesktopBridge();
   if (typeof bridge?.invoke !== 'function') return null;
-  return bridge.invoke(command, args ?? {}) as Promise<T>;
+  return bridge.invoke(command, ...invocation);
 };
 
-type LaunchAtLoginStatus = {
-  supported: boolean;
-  enabled: boolean;
-};
-
-type KeepAwakeStatus = {
-  supported: boolean;
-  enabled: boolean;
-  active: boolean;
-};
-
-type MinimizeToTrayStatus = {
-  supported: boolean;
-  enabled: boolean;
-};
-
-export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
+export const getDesktopLaunchAtLogin = async (): Promise<DesktopLaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<LaunchAtLoginStatus>('desktop_get_launch_at_login');
+    const result = await invokeDesktop('desktop_get_launch_at_login');
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
       return null;
     }
@@ -339,13 +330,13 @@ export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | n
   }
 };
 
-export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchAtLoginStatus | null> => {
+export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<DesktopLaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<LaunchAtLoginStatus>('desktop_set_launch_at_login', { enabled });
+    const result = await invokeDesktop('desktop_set_launch_at_login', { enabled });
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
       return null;
     }
@@ -356,13 +347,13 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
   }
 };
 
-export const getDesktopMinimizeToTray = async (): Promise<MinimizeToTrayStatus | null> => {
+export const getDesktopMinimizeToTray = async (): Promise<DesktopMinimizeToTrayStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_get_minimize_to_tray');
+    const result = await invokeDesktop('desktop_get_minimize_to_tray');
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
       return null;
     }
@@ -373,13 +364,13 @@ export const getDesktopMinimizeToTray = async (): Promise<MinimizeToTrayStatus |
   }
 };
 
-export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<MinimizeToTrayStatus | null> => {
+export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<DesktopMinimizeToTrayStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_set_minimize_to_tray', { enabled });
+    const result = await invokeDesktop('desktop_set_minimize_to_tray', { enabled });
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
       return null;
     }
@@ -390,13 +381,13 @@ export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<Minimi
   }
 };
 
-export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
+export const getDesktopKeepAwake = async (): Promise<DesktopKeepAwakeStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<KeepAwakeStatus>('desktop_get_keep_awake');
+    const result = await invokeDesktop('desktop_get_keep_awake');
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
       return null;
     }
@@ -407,13 +398,13 @@ export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => 
   }
 };
 
-export const setDesktopKeepAwake = async (enabled: boolean): Promise<KeepAwakeStatus | null> => {
+export const setDesktopKeepAwake = async (enabled: boolean): Promise<DesktopKeepAwakeStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
   try {
-    const result = await invokeDesktop<KeepAwakeStatus>('desktop_set_keep_awake', { enabled });
+    const result = await invokeDesktop('desktop_set_keep_awake', { enabled });
     if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
       return null;
     }
@@ -698,8 +689,15 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
   // Propagate updater capability / feed errors so the UI can show actionable
   // messages (missing AppImage, read-only path, network failure). Missing
   // latest-linux*.yml is already normalized to available:false in main.
-  const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
-  return info as UpdateInfo;
+  const result = await invokeDesktop('desktop_check_for_updates');
+  if (!result) return null;
+  return {
+    available: result.available,
+    currentVersion: result.currentVersion,
+    ...(result.version === null ? {} : { version: result.version }),
+    ...(result.body === null ? {} : { body: result.body }),
+    ...(result.date === null ? {} : { date: result.date }),
+  };
 };
 
 export const downloadDesktopUpdate = async (
@@ -792,7 +790,7 @@ export const getDesktopLanAddress = async (): Promise<string | null> => {
   }
 
   try {
-    const result = await invokeDesktop<string>('desktop_get_lan_address');
+    const result = await invokeDesktop('desktop_get_lan_address');
     return typeof result === 'string' && result.trim().length > 0 ? result.trim() : null;
   } catch (error) {
     console.warn('Failed to get desktop LAN address', error);
@@ -856,7 +854,7 @@ export const saveDesktopMarkdownFile = async (
   }
 
   try {
-    const result = await invokeDesktop<string>('desktop_save_markdown_file', {
+    const result = await invokeDesktop('desktop_save_markdown_file', {
       defaultFileName: trimmedFileName,
       content,
     });
@@ -953,7 +951,7 @@ export const fetchDesktopInstalledApps = async (
   }
 
   try {
-    const result = await invokeDesktop<unknown>('desktop_get_installed_apps', {
+    const result = await invokeDesktop('desktop_get_installed_apps', {
       apps: candidate,
       force: force === true ? true : undefined,
     });

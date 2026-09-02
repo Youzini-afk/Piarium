@@ -25,9 +25,18 @@ const outputDir = path.join(webRoot, 'server');
 const log = (message) => process.stdout.write(`[build:application-host] ${message}\n`);
 
 const removeGeneratedOutputs = () => {
-  const targets = [outputDir, path.join(webRoot, '.application-host-build')];
+  const targets = [
+    outputDir,
+    path.join(webRoot, '.application-host-build'),
+    path.join(webRoot, '.application-host-types'),
+  ];
   for (const entry of fs.readdirSync(webRoot, { withFileTypes: true })) {
-    if (entry.name.startsWith('.application-host-staging-') || entry.name.startsWith('.server-backup-')) {
+    if (
+      entry.name.startsWith('.application-host-staging-')
+      || entry.name.startsWith('.application-host-types-staging-')
+      || entry.name.startsWith('.application-host-types-backup-')
+      || entry.name.startsWith('.server-backup-')
+    ) {
       targets.push(path.join(webRoot, entry.name));
     }
   }

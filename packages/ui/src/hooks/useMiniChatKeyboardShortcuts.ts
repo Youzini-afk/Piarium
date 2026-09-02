@@ -28,7 +28,7 @@ export const useMiniChatKeyboardShortcuts = () => {
         event.preventDefault();
         void invokeDesktop('desktop_open_draft_mini_chat_window', {
           directory: currentDirectory || activeProject?.path || '',
-          projectId: activeProject?.id ?? null,
+          projectId: activeProject?.id ?? undefined,
         })?.catch((error) => {
           console.warn('[mini-chat-shortcuts] failed to open draft mini chat window', error);
         });

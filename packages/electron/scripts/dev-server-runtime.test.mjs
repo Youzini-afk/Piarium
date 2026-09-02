@@ -12,6 +12,8 @@ test('runs the long-lived development API on Node and propagates crashes', async
   assert.match(direct, /(?:^|&&\s*)node server\/index\.js(?:\s|$)/);
   assert.doesNotMatch(direct, /bun server\/index\.js/);
   assert.match(watched, /nodemon\s+--exitcrash\b/);
-  assert.match(watched, /--exec\s+"node server\/index\.js"/);
+  // The watched exec may include a build prefix before `node server/index.js`;
+  // the key invariant is that the server itself runs under Node, not Bun.
+  assert.match(watched, /--exec\s+".*node server\/index\.js"/);
   assert.doesNotMatch(watched, /bun server\/index\.js/);
 });

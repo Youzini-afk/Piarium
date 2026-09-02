@@ -3,10 +3,10 @@ import { test } from 'vitest';
 
 import { checkForDesktopUpdate } from './updater-check.js';
 
-const compareVersions = (left, right) => left.localeCompare(right, undefined, { numeric: true });
+const compareVersions = (left: string, right: string): number => left.localeCompare(right, undefined, { numeric: true });
 
 test('signals failed checks without replacing an existing pending update', async () => {
-  const pendingUpdate = { version: '2.0.0', electronUpdate: { id: 'existing' } };
+  const pendingUpdate = { version: '2.0.0', electronUpdate: { updateInfo: { version: '2.0.0' } } };
   await assert.rejects(
     checkForDesktopUpdate({
       autoUpdater: { checkForUpdates: async () => { throw new Error('feed unavailable'); } },
@@ -16,7 +16,7 @@ test('signals failed checks without replacing an existing pending update', async
     }),
     /Unable to check for updates: feed unavailable.*network connection/,
   );
-  assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { id: 'existing' } });
+  assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { updateInfo: { version: '2.0.0' } } });
 });
 
 test('treats missing update feed (404) as no update available', async () => {

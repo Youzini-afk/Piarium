@@ -8,23 +8,23 @@ type BridgeMessageInput = {
 };
 
 type DocumentAuthority = {
-  resolveWorkspace: (input: unknown) => Promise<unknown>;
-  read: (resource: unknown) => Promise<unknown>;
-  write: (request: unknown) => Promise<unknown>;
-  move: (request: unknown) => Promise<unknown>;
-  delete: (request: unknown) => Promise<unknown>;
-  watch: (workspaceId: string, listener: (event: unknown) => void) => { close: () => void };
-  registerDirtySurface: (
+  resolveWorkspace(input: unknown): Promise<unknown>;
+  read(resource: unknown): Promise<unknown>;
+  write(request: unknown): Promise<unknown>;
+  move(request: unknown): Promise<unknown>;
+  delete(request: unknown): Promise<unknown>;
+  watch(workspaceId: string, listener: (event: unknown) => void): { close: () => void };
+  registerDirtySurface(
     request: { generation: number; ownerId: string; workspaceId: string },
     listener: (event: unknown) => void,
-  ) => { close: () => void };
-  acknowledgeDirtyStateBarrier: (request: unknown) => Promise<unknown>;
-  listRecoveryJournals: (request: unknown) => Promise<unknown>;
-  readRecoveryJournal: (journalId: string) => Promise<unknown>;
-  writeRecoveryJournal: (request: unknown) => Promise<unknown>;
-  deleteRecoveryJournal: (request: unknown) => Promise<unknown>;
-  publishDirtyBuffers: (request: unknown) => Promise<unknown>;
-  clearDirtyBuffers: (request: unknown) => Promise<unknown>;
+  ): { close: () => void };
+  acknowledgeDirtyStateBarrier(request: unknown): Promise<unknown>;
+  listRecoveryJournals(request: unknown): Promise<unknown>;
+  readRecoveryJournal(journalId: string): Promise<unknown>;
+  writeRecoveryJournal(request: unknown): Promise<unknown>;
+  deleteRecoveryJournal(request: unknown): Promise<unknown>;
+  publishDirtyBuffers(request: unknown): Promise<unknown>;
+  clearDirtyBuffers(request: unknown): Promise<unknown>;
 };
 
 const watches = new Map<string, { close: () => void }>();

@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { commitWebAssetGeneration } from './commit-web-asset-generation.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,8 +85,39 @@ run(bunExe, ['run', 'build:web'], repoRoot);
 console.log('[electron] staging packaged resources...');
 await fs.mkdir(resourcesDir, { recursive: true });
 const stagedWebDistDir = await fs.mkdtemp(path.join(resourcesDir, 'web-dist-staging-'));
-await copyDir(webDistDir, stagedWebDistDir);
-await removeDir(resourcesWebDistDir);
-await fs.rename(stagedWebDistDir, resourcesWebDistDir);
+const backupWebDistDir = path.join(resourcesDir, `web-dist-backup-${process.pid}`);
+
+try {
+  await copyDir(webDistDir, stagedWebDistDir);
+  await removeDir(backupWebDistDir);
+  // Never delete the active resource generation before the candidate commits.
+  // On Windows a running bundled-dev window may hold this directory open; in
+  // that case rename fails while the complete previous generation remains live.
+  const result = await commitWebAssetGeneration({
+    activeDir: resourcesWebDistDir,
+    candidateDir: stagedWebDistDir,
+    backupDir: backupWebDistDir,
+    rename: (src, dest) => fs.rename(src, dest),
+    removeDir,
+    exists: (target) => fsSync.existsSync(target),
+  });
+
+  if (!result.ok) {
+    if (result.recoveryError) {
+      throw new AggregateError(
+        [result.error, result.recoveryError],
+        `${result.error.message}; ${result.recoveryError.message}`,
+      );
+    }
+    throw result.error;
+  }
+
+  if (result.backupCleanupWarning) {
+    console.warn(`[electron] ${result.backupCleanupWarning}`);
+  }
+} catch (error) {
+  await removeDir(stagedWebDistDir).catch(() => undefined);
+  throw error;
+}
 
 console.log(`[electron] web assets ready: ${resourcesWebDistDir}`);

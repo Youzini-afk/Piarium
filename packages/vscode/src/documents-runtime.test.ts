@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-// @ts-expect-error Shared Web/VS Code contract fixtures are a JS module.
 import { createDocumentAuthorityHarness, defineDocumentAuthorityContract } from '../../web/server/lib/documents/contract-fixtures.js';
 import { runVSCodeMutation, runVSCodeProcessMutation } from './documents-runtime';
 

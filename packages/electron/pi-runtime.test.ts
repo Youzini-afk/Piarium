@@ -6,12 +6,13 @@ import path from 'node:path';
 import { test } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { PIARIUM_PROTOCOL_VERSION } from '@piarium/protocol';
+import type { PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
 import {
   createDesktopPiRuntimeBroker,
   resolveElectronPiHostEntry,
 } from './pi-runtime.js';
 
-const source = (relativePath) => fs.readFile(
+const source = (relativePath: string): Promise<string> => fs.readFile(
   fileURLToPath(new URL(relativePath, import.meta.url)),
   'utf8',
 );
@@ -63,7 +64,7 @@ test('resolves the unpacked Pi host entry in packaged apps', async () => {
 });
 
 test('fails closed when the packaged Pi host is absent', () => {
-  let error;
+  let error: unknown;
   assert.throws(
     () => {
       try {
@@ -79,7 +80,7 @@ test('fails closed when the packaged Pi host is absent', () => {
     },
     /Piarium installation files required to start Pi are missing/,
   );
-  assert.equal(error.code, 'host-entry-unavailable');
+  assert.equal((error as { code?: string }).code, 'host-entry-unavailable');
 });
 
 test('never returns an app.asar entry to an external Node process', async () => {
@@ -88,7 +89,7 @@ test('never returns an app.asar entry to an external Node process', async () => 
   await fs.mkdir(path.dirname(asarEntry), { recursive: true });
   await fs.writeFile(asarEntry, 'export {};\n');
   try {
-    let error;
+    let error: unknown;
     assert.throws(
       () => {
         try {
@@ -104,8 +105,9 @@ test('never returns an app.asar entry to an external Node process', async () => 
       },
       /Piarium installation files required to start Pi are missing/,
     );
-    assert.equal(error.code, 'host-entry-unavailable');
-    assert.ok(error.candidates.every((candidate) => !candidate.includes(`${path.sep}app.asar${path.sep}`)));
+    const err = error as { code?: string; candidates?: string[] };
+    assert.equal(err.code, 'host-entry-unavailable');
+    assert.ok((err.candidates ?? []).every((candidate: string) => !candidate.includes(`${path.sep}app.asar${path.sep}`)));
   } finally {
     await fs.rm(root, { force: true, recursive: true });
   }
@@ -130,7 +132,7 @@ test('repairs an ASAR-derived entry even when packaged detection is unavailable'
 
 test('desktop broker handshakes with the compiled Pi host', async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-broker-'));
-  const events = [];
+  const events: PiRuntimeBrokerEvent[] = [];
   const broker = createDesktopPiRuntimeBroker({
     agentDir,
     clientVersion: '0.1.0-test',

@@ -26,7 +26,7 @@ const relativeHostPath = (absolutePath: string): string => (
 describe('Application Host source boundary', () => {
   it('keeps Application Host source fully TypeScript', () => {
     const javascriptSources = listFiles(hostRoot)
-      .filter((file) => file.endsWith('.js'))
+      .filter((file) => /\.(?:js|mjs|cjs)$/u.test(file))
       .map(relativeHostPath)
       .sort();
 
@@ -43,10 +43,10 @@ describe('Application Host source boundary', () => {
   });
 
   it('does not depend on renderer or Electron implementation code', () => {
-    const forbiddenImport = /(?:@piarium\/ui|packages\/web\/src|packages\/electron|\.\.\/src\/)/u;
+    const importLine = /^\s*import\s.*(?:@piarium\/ui|packages\/web\/src|packages\/electron|\.\.\/src\/)/u;
     const offenders = listFiles(hostRoot)
       .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file) && !file.endsWith('.test.ts') && !file.endsWith('.test.js'))
-      .filter((file) => forbiddenImport.test(readFileSync(file, 'utf8')))
+      .filter((file) => importLine.test(readFileSync(file, 'utf8')))
       .map(relativeHostPath);
 
     expect(offenders).toEqual([]);

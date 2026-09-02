@@ -99,7 +99,7 @@ export const renderPreviewScreenshot = async (
   if (typeof window !== 'undefined') {
     try {
       const rect = iframe.getBoundingClientRect();
-      const capture = await invokeDesktop<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
+      const capture = await invokeDesktop('desktop_capture_page_rect', {
         x: rect.left,
         y: rect.top,
         width: rect.width,

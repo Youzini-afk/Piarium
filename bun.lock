@@ -47,6 +47,7 @@
       "name": "@piarium/electron",
       "version": "0.9.9",
       "dependencies": {
+        "@piarium/application-client": "workspace:*",
         "@piarium/pi-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",

@@ -36,6 +36,15 @@ import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
 import type { HostHandshakeResult } from '@piarium/protocol';
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+import {
+  isPiariumDesktopCommand,
+  type DesktopHostsConfig as DesktopHostsContract,
+  type DesktopUpdateProgressEvent,
+  type PiariumDesktopCommand,
+  type PiariumDesktopCommandResult,
+  type PiariumDesktopEvent,
+  type PiariumDesktopEventArguments,
+} from '@piarium/application-client/desktop';
 import type { WebUiServerController } from '@piarium/web/server/index.js';
 import { ElectronSshManager } from './ssh-manager.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
@@ -169,6 +178,7 @@ if (!app.requestSingleInstanceLock()) {
 try {
   process.chdir(os.homedir());
 } catch {
+  /* best-effort cwd change; homedir may be unavailable in some sandboxed environments */
 }
 
 log.initialize();
@@ -228,9 +238,11 @@ try {
         fs.unlinkSync(candidate);
       }
     } catch {
+      /* best-effort log rotation; skip unreadable or already-removed log files */
     }
   }
 } catch {
+  /* best-effort log rotation; log dir may not exist yet on first launch */
 }
 
 try {
@@ -256,6 +268,7 @@ const readAppMetadata = () => {
         return { name: parsed.name, version: parsed.version };
       }
     } catch {
+      /* best-effort metadata read; try next candidate package.json */
     }
   }
   return { name: '@piarium/electron', version: app.getVersion() };
@@ -634,6 +647,7 @@ const prepareForQuit = async ({ installingUpdate = false }: { installingUpdate?:
     try {
       state.trayController.destroy();
     } catch {
+      /* best-effort cleanup; tray controller may already be destroyed */
     }
     state.trayController = null;
   }
@@ -641,6 +655,7 @@ const prepareForQuit = async ({ installingUpdate = false }: { installingUpdate?:
     try {
       state.tray.destroy();
     } catch {
+      /* best-effort cleanup; tray may already be destroyed */
     }
     state.tray = null;
   }
@@ -653,6 +668,7 @@ const prepareForQuit = async ({ installingUpdate = false }: { installingUpdate?:
     try {
       debounceWindowStatePersist(state.mainWindow, true);
     } catch {
+      /* best-effort window state persist; window may be destroyed during quit */
     }
   }
 
@@ -755,6 +771,7 @@ const refreshQuitRiskFlags = async () => {
       quitRisk.hasActiveTunnel = Boolean(status?.tunnel?.active);
       return;
     } catch {
+      /* best-effort quit-risk probe; sidecar may be unreachable during shutdown */
     }
   }
 
@@ -935,19 +952,19 @@ const isLocalRuntimeUrl = (targetUrl: unknown): boolean => {
 // { relayUrl (ws/wss), serverId, hostEncPubJwk } descriptor. The relay grant is a
 // one-time pairing artifact and is never persisted.
 interface StoredHostRelay {
-  hostEncPubJwk: Record<string, unknown>;
+  hostEncPubJwk: JsonWebKey;
   relayUrl: string;
   serverId: string;
 }
 
 interface StoredDesktopHost {
-  apiUrl?: string | null | undefined;
-  clientToken?: string | undefined;
+  apiUrl?: string;
+  clientToken?: string;
   id: string;
   label: string;
-  password?: string | undefined;
-  relay?: StoredHostRelay | undefined;
-  requestHeaders?: Record<string, string> | undefined;
+  password?: string;
+  relay?: StoredHostRelay;
+  requestHeaders?: Record<string, string>;
   url: string;
 }
 
@@ -973,7 +990,7 @@ const sanitizeHostRelayForStorage = (value: unknown): StoredHostRelay | null => 
   } catch {
     return null;
   }
-  return { relayUrl, serverId, hostEncPubJwk: jwk };
+  return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
 };
 
 // Shared storage shape for a persisted host. A host may carry a direct HTTP
@@ -994,9 +1011,9 @@ const buildStoredHostEntry = (entry: unknown): StoredDesktopHost | null => {
   const relay = sanitizeHostRelayForStorage(candidate.relay);
   const relayField = relay ? { relay } : {};
   const directUrl = sanitizeHostUrlForStorage(candidate.url);
-  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(candidate.apiUrl) || directUrl) : null;
 
   if (directUrl) {
+    const apiUrl = sanitizeHostUrlForStorage(candidate.apiUrl) || directUrl;
     return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
   }
   if (relay) {
@@ -1318,6 +1335,7 @@ const waitForHealth = async (url: string, timeoutMs = 20_000, initialPollMs = 25
         return true;
       }
     } catch {
+      /* server not ready yet; keep polling until deadline */
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
     pollMs = Math.min(pollMs * 2, maxPollMs);
@@ -1344,7 +1362,7 @@ const isPortFree = async (port: unknown, host = '127.0.0.1'): Promise<boolean> =
   return await new Promise<boolean>((resolve) => {
     const test = net.createServer();
     const done = (value: boolean): void => {
-      try { test.close(); } catch {}
+      try { test.close(); } catch { /* best-effort close; socket may already be closed */ }
       resolve(value);
     };
     test.once('error', () => done(false));
@@ -1361,7 +1379,7 @@ const detectLanIPv4Address = async (): Promise<string | null> => {
   const ip = await new Promise<string | null>((resolve) => {
     const socket = dgram.createSocket('udp4');
     const finish = (value: string | null): void => {
-      try { socket.close(); } catch {}
+      try { socket.close(); } catch { /* best-effort close; socket may already be closed */ }
       resolve(value);
     };
     socket.once('error', () => finish(null));
@@ -1438,6 +1456,7 @@ const registerPackagedUiProtocol = () => {
         return electronNet.fetch(pathToFileURL(filePath).toString());
       }
     } catch {
+      /* file missing or not a regular file; fall through to index.html fallback */
     }
     const indexPath = path.join(distPath, 'index.html');
     const html = await fsp.readFile(indexPath, 'utf8');
@@ -1566,10 +1585,7 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
   notification.show();
 };
 
-const mapUpdaterProgressEvent = (payload: { data: unknown; event: string }) => ({
-  event: payload.event,
-  data: payload.data,
-});
+const mapUpdaterProgressEvent = (payload: DesktopUpdateProgressEvent): DesktopUpdateProgressEvent => payload;
 
 const SHELL_ENV_TIMEOUT_MS = 5_000;
 let cachedShellEnv: Record<string, string> | null = null;
@@ -2124,14 +2140,22 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
   return token ? { ok: true, token } : { ok: false, status: 500 };
 };
 
-const emitToWindow = (browserWindow: BrowserWindow | null | undefined, event: string, detail?: unknown): void => {
+const emitToWindow = <E extends PiariumDesktopEvent>(
+  browserWindow: BrowserWindow | null | undefined,
+  event: E,
+  ...eventArguments: PiariumDesktopEventArguments<E>
+): void => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
+  const detail = eventArguments[0];
   browserWindow.webContents.send('piarium:emit', { event, detail });
 };
 
-const emitToAllWindows = (event: string, detail?: unknown): void => {
+const emitToAllWindows = <E extends PiariumDesktopEvent>(
+  event: E,
+  ...eventArguments: PiariumDesktopEventArguments<E>
+): void => {
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    emitToWindow(browserWindow, event, detail);
+    emitToWindow(browserWindow, event, ...eventArguments);
   }
 };
 
@@ -2146,7 +2170,7 @@ const applyMacVibrancy = (browserWindow: BrowserWindow | null | undefined): void
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
   try {
     browserWindow.setVibrancy('sidebar');
-  } catch {}
+  } catch { /* best-effort vibrancy; platform may reject the material */ }
 };
 
 const setMacVibrancyReady = (browserWindow: BrowserWindow | null | undefined, ready: boolean): void => {
@@ -2331,6 +2355,7 @@ const selectPairingCandidateUrl = async (payload: PairingPayload): Promise<strin
       const health = await requestJsonWithTimeout(`${candidate.url.replace(/\/+$/g, '')}/health`, { method: 'GET' }, 3500);
       if (health.ok) return candidate.url.replace(/\/+$/g, '');
     } catch {
+      /* candidate unreachable; try next pairing candidate */
     }
   }
   return null;
@@ -2696,7 +2721,7 @@ const createBrowserWindow = ({
       try {
         browserWindow.setWindowButtonVisibility(true);
         browserWindow.setTrafficLightPosition?.({ x: 16, y: 17 });
-      } catch {}
+      } catch { /* best-effort traffic-light reset; window may be destroyed mid-animation */ }
     };
     browserWindow.on('minimize', () => {
       refreshTrafficLights();
@@ -2790,17 +2815,20 @@ const createBrowserWindow = ({
       try {
         if (new URL(browserWindow.webContents.getURL()).origin === url.origin) return true;
       } catch {
+        /* invalid current page URL; skip same-origin reload check */
       }
       if (state.localOrigin) {
         try {
           if (new URL(state.localOrigin).origin === url.origin) return true;
         } catch {
+          /* invalid localOrigin; skip this allowed-origin check */
         }
       }
       if (state.sidecarUrl) {
         try {
           if (new URL(state.sidecarUrl).origin === url.origin) return true;
         } catch {
+          /* invalid sidecarUrl; skip this allowed-origin check */
         }
       }
       const hosts = readDesktopHostsConfig()?.hosts || [];
@@ -2809,6 +2837,7 @@ const createBrowserWindow = ({
         try {
           if (new URL(entry.url).origin === url.origin) return true;
         } catch {
+          /* invalid configured host entry; skip malformed allowed-origin */
         }
       }
       return false;
@@ -3116,7 +3145,7 @@ const createMiniChatWindow = async ({
       try {
         browserWindow.setWindowButtonVisibility(true);
         browserWindow.setTrafficLightPosition?.({ x: 16, y: 17 });
-      } catch {}
+      } catch { /* best-effort traffic-light reset; window may be destroyed mid-animation */ }
     };
     // Suppress vibrancy only around minimize/restore, never on a plain show.
     browserWindow.on('show', refreshTrafficLights);
@@ -3605,49 +3634,6 @@ const runLinuxSpecChain = async (specs: LinuxOpenSpec[], appName: string): Promi
   throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
-const parseSshConfigImports = (): Array<{ host: string; pattern: boolean; source: string; sshCommand: string }> => {
-  const sshConfigPath = path.join(os.homedir(), '.ssh', 'config');
-  if (!fs.existsSync(sshConfigPath)) return [];
-  const lines = fs.readFileSync(sshConfigPath, 'utf8').split(/\r?\n/);
-  const results: Array<{ host: string; pattern: boolean; source: string; sshCommand: string }> = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || !trimmed.toLowerCase().startsWith('host ')) {
-      continue;
-    }
-    const hosts = trimmed.slice(5).trim().split(/\s+/).filter(Boolean);
-    for (const host of hosts) {
-      results.push({
-        host,
-        pattern: /[*?]/.test(host),
-        source: sshConfigPath,
-        sshCommand: `ssh ${host}`,
-      });
-    }
-  }
-  return results;
-};
-
-const readDesktopSshInstances = () => {
-  const root = readSettingsRoot();
-  return { instances: Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [] };
-};
-
-const writeDesktopSshInstances = async (config: Record<string, unknown>) => {
-  const nextInstances = Array.isArray(config?.instances) ? config.instances : [];
-  await mutateSettingsRoot((root) => {
-    root.desktopSshInstances = nextInstances;
-  });
-  return { instances: nextInstances };
-};
-
-const updateHostUrlForSshInstance = async (id: string, label: string, localUrl: string): Promise<void> => {
-  const config = readDesktopHostsConfig();
-  const nextHosts = config.hosts.filter((entry) => entry.id !== id);
-  nextHosts.push({ id, label, url: localUrl });
-  await writeDesktopHostsConfig({ hosts: nextHosts, defaultHostId: config.defaultHostId });
-};
-
 const JETBRAINS_APP_IDS = new Set([
   'pycharm',
   'intellij',
@@ -4079,9 +4065,9 @@ const finiteNumber = (value: unknown): number | null => (
 
 const handleInvoke = async (
   browserWindow: BrowserWindow | null,
-  command: string,
+  command: PiariumDesktopCommand,
   args: Record<string, unknown> = {},
-): Promise<unknown> => {
+): Promise<PiariumDesktopCommandResult<PiariumDesktopCommand>> => {
   switch (command) {
     case 'desktop_start_window_drag':
       return null;
@@ -4442,7 +4428,7 @@ const handleInvoke = async (
       const results = await Promise.all(
         args.apps.map(async (appName) => (await isAppBundleInstalled(String(appName))) ? String(appName) : null)
       );
-      return results.filter(Boolean);
+      return results.filter((result): result is string => typeof result === 'string');
     }
 
     case 'desktop_fetch_app_icons': {
@@ -4484,6 +4470,7 @@ const handleInvoke = async (
       try {
         cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
       } catch {
+        /* cache missing or corrupt; treat as no cache and refresh */
       }
       const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
       const hasCache = Boolean(cache);
@@ -4503,11 +4490,13 @@ const handleInvoke = async (
       return { apps: cachedApps, hasCache, isCacheStale };
     }
 
-    case 'desktop_hosts_get':
-      return {
+    case 'desktop_hosts_get': {
+      const result: DesktopHostsContract & { localOrigin: string | null } = {
         ...readDesktopHostsConfig(),
         localOrigin: state.localOrigin || state.sidecarUrl || null,
       };
+      return result;
+    }
 
     case 'desktop_hosts_set': {
       const nextConfigInput = recordOf(args.input || args.config);
@@ -4601,7 +4590,7 @@ const handleInvoke = async (
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+      const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
@@ -4698,6 +4687,7 @@ const handleInvoke = async (
           try {
             debounceWindowStatePersist(state.mainWindow, true);
           } catch {
+            /* best-effort window state persist; window may be destroyed during update quit */
           }
         }
       }
@@ -4930,6 +4920,7 @@ const handleInvoke = async (
       return null;
 
     default:
+      command satisfies never;
       throw new Error(`Unknown desktop command: ${command}`);
   }
 };
@@ -5222,13 +5213,13 @@ ipcMain.on('piarium:bootstrap', (event) => {
 });
 
 ipcMain.handle('piarium:invoke', async (event: IpcMainInvokeEvent, rawCommand: unknown, rawArgs: unknown) => {
-  const command = typeof rawCommand === 'string' ? rawCommand : '';
-  if (!command) throw new Error('Desktop command is required');
+  const command = isPiariumDesktopCommand(rawCommand) ? rawCommand : null;
   const args = recordOf(rawArgs);
-  if (!isLocalSender(event) && !REMOTE_SAFE_DESKTOP_COMMANDS.has(command)) {
-    log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+  if (!isLocalSender(event) && (!command || !REMOTE_SAFE_DESKTOP_COMMANDS.has(command))) {
+    log.warn(`[ipc] rejected ${typeof rawCommand === 'string' ? rawCommand : '(invalid command)'} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }
+  if (!command) throw new Error('Unknown desktop command');
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   return handleInvoke(browserWindow, command, args);
 });

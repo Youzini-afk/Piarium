@@ -1,15 +1,18 @@
 import { hasDesktopInvoke, invokeDesktop, isDesktopShell } from '@/lib/desktop';
+import type {
+  PiariumDesktopCommand,
+  PiariumDesktopCommandInvocation,
+  PiariumDesktopCommandResult,
+} from '@piarium/application-client';
 
-type InvokeArgs = Record<string, unknown>;
-
-export const invokeDesktopCommand = async <TValue = unknown>(
-  command: string,
-  args?: InvokeArgs,
-): Promise<TValue> => {
+export const invokeDesktopCommand = async <K extends PiariumDesktopCommand>(
+  command: K,
+  ...invocation: PiariumDesktopCommandInvocation<K>
+): Promise<PiariumDesktopCommandResult<K> | null> => {
   if (!hasDesktopInvoke()) {
     throw new Error('Desktop runtime is not available');
   }
-  return invokeDesktop<TValue>(command, args) as Promise<TValue>;
+  return invokeDesktop(command, ...invocation);
 };
 
 export const startDesktopWindowDrag = async (): Promise<void> => {

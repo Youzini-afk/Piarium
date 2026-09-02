@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { validateLocalPath, unsupportedAppSpecificOpenError } from '../path-open-utils.mjs';
+import { validateLocalPath, unsupportedAppSpecificOpenError } from '../path-open-utils.ts';
 
 const assert = (condition, message) => {
   if (!condition) {
@@ -45,16 +45,18 @@ try {
   );
   const inaccessiblePath = path.join(tempRoot, 'inaccessible');
   await fs.mkdir(inaccessiblePath, { mode: 0o700 });
-  await fs.chmod(inaccessiblePath, 0o000);
-  let inaccessibleMessage = '';
-  try {
-    inaccessibleMessage = await expectRejects(
-      'inaccessible path',
-      () => validateLocalPath(inaccessiblePath),
-      'is not accessible',
-    );
-  } finally {
-    await fs.chmod(inaccessiblePath, 0o700).catch(() => {});
+  let inaccessibleMessage = 'not exercised on Windows: chmod does not remove read access';
+  if (process.platform !== 'win32') {
+    await fs.chmod(inaccessiblePath, 0o000);
+    try {
+      inaccessibleMessage = await expectRejects(
+        'inaccessible path',
+        () => validateLocalPath(inaccessiblePath),
+        'is not accessible',
+      );
+    } finally {
+      await fs.chmod(inaccessiblePath, 0o700).catch(() => {});
+    }
   }
 
   const unsupported = unsupportedAppSpecificOpenError('projects', 'linux');

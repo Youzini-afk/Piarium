@@ -1,8 +1,26 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import type {
+  DesktopHost,
+  DesktopHostRelay,
+  DesktopHostsConfig,
+  DesktopHostsConfigInput,
+  PiariumDesktopCommand,
+  PiariumDesktopCommandInvocation,
+  PiariumDesktopCommandResult,
+} from '@piarium/application-client';
+export type {
+  DesktopHost,
+  DesktopHostRelay,
+  DesktopHostsConfig,
+  DesktopHostsConfigInput,
+} from '@piarium/application-client';
 
-type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+type DesktopInvoke = <K extends PiariumDesktopCommand>(
+  cmd: K,
+  ...invocation: PiariumDesktopCommandInvocation<K>
+) => Promise<PiariumDesktopCommandResult<K> | null>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
@@ -32,27 +50,6 @@ const sanitizeRequestHeaders = (headers: unknown): Record<string, string> | unde
  * intentionally NOT persisted — steady-state relay connections route by
  * `serverId` alone.
  */
-export type DesktopHostRelay = {
-  relayUrl: string;
-  serverId: string;
-  hostEncPubJwk: JsonWebKey;
-};
-
-export type DesktopHost = {
-  id: string;
-  label: string;
-  /** Legacy/UI URL. During migration this may equal apiUrl. For relay hosts this is a display-only `relay://<serverId>` pseudo-URL. */
-  url: string;
-  /** API endpoint used by packaged Electron UI for this instance. Absent for relay-only hosts. */
-  apiUrl?: string;
-  /** Remote client bearer token for packaged-client API access. */
-  clientToken?: string;
-  /** Extra headers for desktop runtime API requests. */
-  requestHeaders?: Record<string, string>;
-  /** When set, this host is reached over the private relay tunnel. */
-  relay?: DesktopHostRelay;
-};
-
 /** Display-only pseudo-URL for a relay host (never fetched). */
 export const relayHostDisplayUrl = (serverId: string): string => `relay://${serverId}`;
 
@@ -63,21 +60,6 @@ const parseHostRelay = (value: unknown): DesktopHostRelay | null => {
   const jwk = value.hostEncPubJwk ?? value.host_enc_pub_jwk;
   if (!relayUrl || !serverId || !isRecord(jwk)) return null;
   return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
-};
-
-export type DesktopHostsConfig = {
-  hosts: DesktopHost[];
-  defaultHostId: string | null;
-  initialHostChoiceCompleted: boolean;
-  localOrigin?: string | null;
-};
-
-/** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
-export type DesktopHostsConfigInput = {
-  hosts: DesktopHost[];
-  defaultHostId: string | null;
-  initialHostChoiceCompleted?: boolean;
-  localClientToken?: string | null;
 };
 
 const desktopPlatformName = (): string | undefined => {
@@ -340,7 +322,7 @@ export const getDesktopHostApiUrl = (host: DesktopHost): string => {
 
 const getInvoke = (): DesktopInvoke | null => {
   if (!hasDesktopInvoke()) return null;
-  return (command, args) => invokeDesktop(command, args) as Promise<unknown>;
+  return (command, ...invocation) => invokeDesktop(command, ...invocation);
 };
 
 export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
@@ -349,10 +331,11 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
     return { hosts: [], defaultHostId: 'local', initialHostChoiceCompleted: false };
   }
 
-  const raw = await invoke('desktop_hosts_get');
-  if (!isRecord(raw)) {
+  const result: unknown = await invoke('desktop_hosts_get');
+  if (!isRecord(result)) {
     return { hosts: [], defaultHostId: null, initialHostChoiceCompleted: false };
   }
+  const raw = result;
 
   const hostsRaw = raw.hosts;
   const hosts = Array.isArray(hostsRaw)
@@ -374,14 +357,16 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
 export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
-  const input: Record<string, unknown> = {
+  const input: DesktopHostsConfigInput = {
     hosts: config.hosts,
     defaultHostId: config.defaultHostId,
-    initialHostChoiceCompleted: config.initialHostChoiceCompleted,
+    ...(config.initialHostChoiceCompleted === undefined
+      ? {}
+      : { initialHostChoiceCompleted: config.initialHostChoiceCompleted }),
+    ...(config.localClientToken === undefined
+      ? {}
+      : { localClientToken: config.localClientToken }),
   };
-  if (config.localClientToken !== undefined) {
-    input.localClientToken = config.localClientToken;
-  }
   await invoke('desktop_hosts_set', {
     input,
   });

@@ -181,8 +181,7 @@ export class NotificationListener {
         },
         rejectUnauthorized: false,
       }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk.toString(); });
+        res.on('data', () => { /* drain response body */ });
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 204) {
             const setCookie = res.headers['set-cookie'];

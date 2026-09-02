@@ -10,9 +10,12 @@
     "noEmit": true,
     "types": ["node", "electron"],
     "paths": {
+      "@piarium/application-client": ["./node_modules/@piarium/application-client/dist/index.d.ts"],
+      "@piarium/application-client/desktop": ["./node_modules/@piarium/application-client/dist/desktop.d.ts"],
       "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
       "@piarium/runtime-broker": ["./node_modules/@piarium/runtime-broker/dist/index.d.ts"],
       "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
+      "@piarium/web/server/index.js": ["./packages/web/.application-host-types/index.d.ts"],
       "@piarium/web": ["./node_modules/@piarium/web/server/index.d.ts"],
       "@piarium/web/*": ["./node_modules/@piarium/web/*"]
     }

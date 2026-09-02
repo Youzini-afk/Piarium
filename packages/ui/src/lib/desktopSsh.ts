@@ -1,101 +1,41 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
+import type {
+  DesktopSshImportCandidate,
+  DesktopSshInstance,
+  DesktopSshInstancesConfig,
+  DesktopSshInstanceStatus,
+  DesktopSshPortForward,
+  DesktopSshPortForwardType,
+  DesktopSshPhase,
+  DesktopSshRemoteMode,
+  DesktopSshInstallMethod,
+  DesktopSshSecretStore,
+  DesktopSshStoredSecret,
+  PiariumDesktopBridge,
+  PiariumDesktopCommand,
+  PiariumDesktopCommandInvocation,
+  PiariumDesktopCommandResult,
+} from '@piarium/application-client';
+export type {
+  DesktopSshImportCandidate,
+  DesktopSshInstance,
+  DesktopSshInstancesConfig,
+  DesktopSshInstanceStatus,
+  DesktopSshPortForward,
+  DesktopSshPortForwardType,
+  DesktopSshPhase,
+  DesktopSshRemoteMode,
+  DesktopSshInstallMethod,
+  DesktopSshSecretStore,
+  DesktopSshStoredSecret,
+} from '@piarium/application-client';
 
-type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+type DesktopInvoke = <K extends PiariumDesktopCommand>(
+  cmd: K,
+  ...invocation: PiariumDesktopCommandInvocation<K>
+) => Promise<PiariumDesktopCommandResult<K> | null>;
 
-type DesktopBridgeGlobal = {
-  listen?: (
-    event: string,
-    handler: (evt: { payload?: unknown }) => void,
-  ) => Promise<() => void>;
-};
-
-type DesktopSshRemoteMode = 'managed' | 'external';
-type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
-type DesktopSshSecretStore = 'never' | 'settings';
-
-type DesktopSshStoredSecret = {
-  enabled: boolean;
-  value?: string;
-  store: DesktopSshSecretStore;
-};
-
-export type DesktopSshPortForwardType = 'local' | 'remote' | 'dynamic';
-
-export type DesktopSshPortForward = {
-  id: string;
-  enabled: boolean;
-  type: DesktopSshPortForwardType;
-  localHost?: string;
-  localPort?: number;
-  remoteHost?: string;
-  remotePort?: number;
-};
-
-export type DesktopSshInstance = {
-  id: string;
-  nickname?: string;
-  sshCommand: string;
-  sshParsed?: {
-    destination: string;
-    args: string[];
-  };
-  connectionTimeoutSec: number;
-  remotePiarium: {
-    mode: DesktopSshRemoteMode;
-    keepRunning: boolean;
-    preferredPort?: number;
-    installMethod: DesktopSshInstallMethod;
-    uploadBundleOverSsh: boolean;
-  };
-  localForward: {
-    preferredLocalPort?: number;
-    bindHost: '127.0.0.1' | 'localhost' | '0.0.0.0';
-  };
-  auth: {
-    sshPassword?: DesktopSshStoredSecret;
-    piariumPassword?: DesktopSshStoredSecret;
-  };
-  portForwards: DesktopSshPortForward[];
-};
-
-export type DesktopSshInstancesConfig = {
-  instances: DesktopSshInstance[];
-};
-
-type DesktopSshPhase =
-  | 'idle'
-  | 'config_resolved'
-  | 'auth_check'
-  | 'master_connecting'
-  | 'remote_probe'
-  | 'installing'
-  | 'updating'
-  | 'server_detecting'
-  | 'server_starting'
-  | 'forwarding'
-  | 'ready'
-  | 'degraded'
-  | 'error';
-
-export type DesktopSshInstanceStatus = {
-  id: string;
-  phase: DesktopSshPhase;
-  detail?: string;
-  localUrl?: string;
-  localPort?: number;
-  remotePort?: number;
-  startedByUs: boolean;
-  retryAttempt: number;
-  requiresUserAction: boolean;
-  updatedAtMs: number;
-};
-
-export type DesktopSshImportCandidate = {
-  host: string;
-  pattern: boolean;
-  source: string;
-  sshCommand: string;
-};
+type DesktopBridgeGlobal = Partial<Pick<PiariumDesktopBridge, 'listen'>>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
@@ -123,7 +63,7 @@ const asStringArray = (value: unknown): string[] => {
 
 const getInvoke = (): DesktopInvoke | null => {
   if (!hasDesktopInvoke()) return null;
-  return (command, args) => invokeDesktop(command, args) as Promise<unknown>;
+  return (command, ...invocation) => invokeDesktop(command, ...invocation);
 };
 
 const parseStoredSecret = (value: unknown): DesktopSshStoredSecret | undefined => {
@@ -340,10 +280,11 @@ export const desktopSshInstancesGet = async (): Promise<DesktopSshInstancesConfi
     return { instances: [] };
   }
 
-  const raw = await invoke('desktop_ssh_instances_get');
-  if (!isRecord(raw)) {
+  const result: unknown = await invoke('desktop_ssh_instances_get');
+  if (!isRecord(result)) {
     return { instances: [] };
   }
+  const raw = result;
 
   const listRaw = Array.isArray(raw.instances)
     ? raw.instances

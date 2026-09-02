@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import http from 'node:http';
+import type { Server } from 'node:http';
+import type { IncomingHttpHeaders } from 'node:http';
 
 import { NotificationListener } from './notification-listener.js';
 
-const servers = [];
-const listeners = [];
+const servers: Server[] = [];
+const listeners: NotificationListener[] = [];
 
 const noopLogger = {
   info() {},
@@ -12,8 +14,8 @@ const noopLogger = {
   error() {},
 };
 
-const listen = async (server) => {
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const listen = async (server: Server): Promise<string> => {
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   servers.push(server);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
@@ -23,17 +25,24 @@ const listen = async (server) => {
 afterEach(async () => {
   while (listeners.length > 0) {
     const listener = listeners.pop();
-    try { listener.stop(); } catch {}
+    if (!listener) continue;
+    try { listener.stop(); } catch { /* best-effort cleanup; test result already determined */ }
   }
   while (servers.length > 0) {
     const server = servers.pop();
-    await new Promise((resolve) => server.close(() => resolve()));
+    if (!server) continue;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 
 describe('NotificationListener', () => {
+  const requireHeaders = (headers: IncomingHttpHeaders | null): IncomingHttpHeaders => {
+    if (!headers) throw new Error('Expected request headers to be observed');
+    return headers;
+  };
+
   test('forwards sanitized custom requestHeaders to /auth/session', async () => {
-    let observedAuthHeaders = null;
+    let observedAuthHeaders: IncomingHttpHeaders | null = null;
     const server = http.createServer((req, res) => {
       if (req.url === '/auth/session') {
         observedAuthHeaders = req.headers;
@@ -78,16 +87,17 @@ describe('NotificationListener', () => {
     listener.stop();
 
     expect(observedAuthHeaders).not.toBeNull();
-    expect(observedAuthHeaders['cf-access-client-id']).toBe('client-id');
-    expect(observedAuthHeaders['x-custom-header']).toBe('value');
+    const authHeaders = requireHeaders(observedAuthHeaders);
+    expect(authHeaders['cf-access-client-id']).toBe('client-id');
+    expect(authHeaders['x-custom-header']).toBe('value');
     // Reserved headers dropped from custom set; listener's own values win.
-    expect(observedAuthHeaders['content-type']).toBe('application/json');
-    expect(observedAuthHeaders['authorization']).toBeUndefined();
-    expect(observedAuthHeaders['cookie']).toBeUndefined();
+    expect(authHeaders['content-type']).toBe('application/json');
+    expect(authHeaders['authorization']).toBeUndefined();
+    expect(authHeaders['cookie']).toBeUndefined();
   });
 
   test('forwards sanitized custom requestHeaders to /api/notifications/stream and preserves auth', async () => {
-    let observedStreamHeaders = null;
+    let observedStreamHeaders: IncomingHttpHeaders | null = null;
     const server = http.createServer((req, res) => {
       if (req.url === '/auth/session') {
         res.writeHead(401);
@@ -127,14 +137,15 @@ describe('NotificationListener', () => {
     listener.stop();
 
     expect(observedStreamHeaders).not.toBeNull();
-    expect(observedStreamHeaders['x-forwarded-host']).toBe('example.com');
-    expect(observedStreamHeaders['authorization']).toBe('Bearer token-abc');
-    expect(observedStreamHeaders['accept']).toBe('text/event-stream');
-    expect(observedStreamHeaders['cache-control']).toBe('no-cache');
+    const streamHeaders = requireHeaders(observedStreamHeaders);
+    expect(streamHeaders['x-forwarded-host']).toBe('example.com');
+    expect(streamHeaders['authorization']).toBe('Bearer token-abc');
+    expect(streamHeaders['accept']).toBe('text/event-stream');
+    expect(streamHeaders['cache-control']).toBe('no-cache');
   });
 
   test('updateAuth replaces requestHeaders and re-sanitizes reserved names', async () => {
-    let observedStreamHeaders = null;
+    let observedStreamHeaders: IncomingHttpHeaders | null = null;
     const server = http.createServer((req, res) => {
       if (req.url === '/api/notifications/stream') {
         observedStreamHeaders = req.headers;
@@ -167,9 +178,10 @@ describe('NotificationListener', () => {
     listener.stop();
 
     expect(observedStreamHeaders).not.toBeNull();
-    expect(observedStreamHeaders['x-new']).toBe('new');
-    expect(observedStreamHeaders['x-old']).toBeUndefined();
-    expect(observedStreamHeaders['authorization']).toBe('Bearer tok');
-    expect(observedStreamHeaders['cookie']).toBeUndefined();
+    const updateHeaders = requireHeaders(observedStreamHeaders);
+    expect(updateHeaders['x-new']).toBe('new');
+    expect(updateHeaders['x-old']).toBeUndefined();
+    expect(updateHeaders['authorization']).toBe('Bearer tok');
+    expect(updateHeaders['cookie']).toBeUndefined();
   });
 });

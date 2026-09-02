@@ -25,7 +25,6 @@ export interface DesktopPendingUpdate<Result = DesktopUpdateResult> {
 export const checkForDesktopUpdate = async <Result extends DesktopUpdateResult>({
   autoUpdater,
   currentVersion,
-  pendingUpdate: _pendingUpdate,
   compareVersions,
 }: {
   autoUpdater: { checkForUpdates(): Promise<Result | null> };

@@ -76,7 +76,7 @@ const normalizeComparable = (value: unknown): string => String(value || '')
 const normalizeCompactComparable = (value: unknown): string => normalizeComparable(value).replace(/\s+/g, '');
 
 export const stripDesktopExecFieldCodes = (execValue: unknown): string => String(execValue || '')
-  .replace(/%%/g, '\^@')
+  .replace(/%%/g, '^@')
   .replace(/%[fFuUdDnNickvm]/g, '')
   .replace(/%./g, '')
   .replace(/\^@/g, '%')
@@ -88,7 +88,7 @@ export const linuxApplicationDirs = ({ env = process.env, homeDir = os.homedir()
     ? env.XDG_DATA_HOME.trim()
     : path.join(homeDir || os.homedir(), '.local', 'share');
   const dataDirs = typeof env.XDG_DATA_DIRS === 'string' && env.XDG_DATA_DIRS.trim()
-    ? env.XDG_DATA_DIRS.split(':').filter(Boolean)
+    ? env.XDG_DATA_DIRS.split(path.delimiter).filter(Boolean)
     : DEFAULT_XDG_DATA_DIRS;
   return uniqueStrings([
     path.join(dataHome, 'applications'),
@@ -169,6 +169,7 @@ export const readLinuxDesktopEntries = async (options: LinuxDiscoveryOptions = {
       seen.add(parsed.id);
       entries.push(parsed);
     } catch {
+      /* best-effort discovery; skip unreadable or malformed .desktop entries */
     }
   }
   return entries.sort((left, right) => left.name.localeCompare(right.name));
@@ -259,6 +260,7 @@ const commandExists = (program: string, env: NodeJS.ProcessEnv = process.env): b
       fs.accessSync(path.join(dir, program), fs.constants.X_OK);
       return true;
     } catch {
+      /* program not executable in this PATH dir; continue searching */
     }
   }
   return false;
@@ -375,7 +377,7 @@ export const linuxIconThemeDirs = ({ env = process.env, homeDir = os.homedir() }
     ? env.XDG_DATA_HOME.trim()
     : path.join(homeDir || os.homedir(), '.local', 'share');
   const dataDirs = typeof env.XDG_DATA_DIRS === 'string' && env.XDG_DATA_DIRS.trim()
-    ? env.XDG_DATA_DIRS.split(':').filter(Boolean)
+    ? env.XDG_DATA_DIRS.split(path.delimiter).filter(Boolean)
     : DEFAULT_XDG_DATA_DIRS;
   return uniqueStrings([
     path.join(dataHome, 'icons'),
@@ -442,7 +444,7 @@ export const resolveLinuxIconFile = (iconName: unknown, options: LinuxDiscoveryO
     ? options.env.XDG_DATA_HOME.trim()
     : path.join(options.homeDir || os.homedir(), '.local', 'share');
   const dataDirs = typeof options.env?.XDG_DATA_DIRS === 'string' && options.env.XDG_DATA_DIRS.trim()
-    ? options.env.XDG_DATA_DIRS.split(':').filter(Boolean)
+    ? options.env.XDG_DATA_DIRS.split(path.delimiter).filter(Boolean)
     : DEFAULT_XDG_DATA_DIRS;
   for (const pixmapsDir of uniqueStrings([
     path.join(dataHome, 'pixmaps'),

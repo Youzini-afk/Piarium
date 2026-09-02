@@ -13,7 +13,7 @@ import {
   parseDesktopEntry,
   readLinuxDesktopEntries,
   resolveLinuxIconFile,
-} from '../linux-app-discovery.mjs';
+} from '../linux-app-discovery.ts';
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);

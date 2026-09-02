@@ -1,8 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { recordOf } from './runtime-types.js';
+import {
+  isPiariumDesktopEvent,
+  type PiariumDesktopBridge,
+  type PiariumDesktopCommand,
+  type PiariumDesktopCommandInvocation,
+  type PiariumDesktopCommandResult,
+  type PiariumDesktopEvent,
+  type PiariumDesktopEventMap,
+} from '@piarium/application-client/desktop';
 
-type NativeEventHandler = (event: { payload: unknown }) => void;
-const eventListeners = new Map<string, Set<NativeEventHandler>>();
+type NativeEventHandler = (payload: unknown) => void;
+const eventListeners = new Map<PiariumDesktopEvent, Set<NativeEventHandler>>();
 
 const bootstrap = (() => {
   try {
@@ -94,9 +103,15 @@ contextBridge.exposeInMainWorld('__PIARIUM_PLATFORM__', process.platform);
 // exposed globals are read-only, which blocks that update — rely solely on
 // the main-process initScript injection (dispatched on did-finish-load).
 
-const addListener = (event: string, handler: NativeEventHandler): (() => void) => {
+const addListener = <E extends PiariumDesktopEvent>(
+  event: E,
+  handler: (event: { payload: PiariumDesktopEventMap[E] }) => void,
+): (() => void) => {
   const listeners = eventListeners.get(event) || new Set<NativeEventHandler>();
-  listeners.add(handler);
+  const wrapped: NativeEventHandler = (payload) => {
+    handler({ payload: payload as PiariumDesktopEventMap[E] });
+  };
+  listeners.add(wrapped);
   eventListeners.set(event, listeners);
 
   return () => {
@@ -104,19 +119,19 @@ const addListener = (event: string, handler: NativeEventHandler): (() => void) =
     if (!current) {
       return;
     }
-    current.delete(handler);
+    current.delete(wrapped);
     if (current.size === 0) {
       eventListeners.delete(event);
     }
   };
 };
 
-const dispatchNativeEvent = (event: string, detail: unknown): void => {
+const dispatchNativeEvent = (event: PiariumDesktopEvent, detail: unknown): void => {
   const listeners = eventListeners.get(event);
   if (listeners) {
     for (const listener of listeners) {
       try {
-        listener({ payload: detail });
+        listener(detail);
       } catch (error) {
         console.error(`[electron:preload] listener failed for ${event}:`, error);
       }
@@ -142,6 +157,7 @@ const setVibrancyReady = (ready: unknown): void => {
   try {
     document.documentElement.toggleAttribute('data-piarium-vibrancy-ready', ready === true);
   } catch {
+    /* documentElement may not exist yet at document-start; vibrancy defaults to ready in renderer */
   }
 };
 
@@ -152,7 +168,7 @@ ipcRenderer.on('piarium:emit', (_evt, payload) => {
   const message = recordOf(payload);
 
   const event = typeof message.event === 'string' ? message.event : '';
-  if (!event) {
+  if (!isPiariumDesktopEvent(event)) {
     return;
   }
 
@@ -166,11 +182,17 @@ ipcRenderer.on('piarium:emit', (_evt, payload) => {
 // The desktop bridge is exposed on all pages; the main-process gate in
 // ipcMain.handle('piarium:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
-// no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__PIARIUM_DESKTOP__', {
-  invoke: (cmd: string, args?: Record<string, unknown>) => ipcRenderer.invoke('piarium:invoke', cmd, args || {}),
-  openDialog: (options?: Record<string, unknown>) => ipcRenderer.invoke('piarium:dialog:open', options || {}),
-  grantFileAccess: (filePath: string) => ipcRenderer.invoke('piarium:file:grant-existing', filePath),
-  openExternal: (url: string) => ipcRenderer.invoke('piarium:invoke', 'desktop_open_external_url', { url }),
-  listen: async (event: string, handler: NativeEventHandler) => addListener(event, handler),
-});
+// no). See REMOTE_SAFE_DESKTOP_COMMANDS in renderer-security-policy.ts.
+const desktopBridge: PiariumDesktopBridge = {
+  invoke: async <K extends PiariumDesktopCommand>(
+    cmd: K,
+    ...invocation: PiariumDesktopCommandInvocation<K>
+  ): Promise<PiariumDesktopCommandResult<K>> => {
+    return await ipcRenderer.invoke('piarium:invoke', cmd, invocation[0] ?? {});
+  },
+  openDialog: (options) => ipcRenderer.invoke('piarium:dialog:open', options || {}),
+  grantFileAccess: (filePath) => ipcRenderer.invoke('piarium:file:grant-existing', filePath),
+  openExternal: (url) => ipcRenderer.invoke('piarium:invoke', 'desktop_open_external_url', { url }),
+  listen: async (event, handler) => addListener(event, handler),
+};
+contextBridge.exposeInMainWorld('__PIARIUM_DESKTOP__', desktopBridge);

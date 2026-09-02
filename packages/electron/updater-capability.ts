@@ -6,13 +6,13 @@ export const assertUpdaterCapability = ({
   packaged,
   appImagePath = process.env.APPIMAGE,
   access = fs.accessSync,
-  stat = fs.statSync,
+  stat = ((p: string) => fs.statSync(p)) as (path: string) => { isFile(): boolean },
 }: {
   access?: typeof fs.accessSync;
   appImagePath?: string | undefined;
   packaged?: boolean | undefined;
   platform?: NodeJS.Platform | undefined;
-  stat?: typeof fs.statSync;
+  stat?: (path: string) => { isFile(): boolean };
 } = {}): void => {
   if (platform !== 'linux' || !packaged) return;
 

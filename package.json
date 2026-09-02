@@ -36,7 +36,7 @@
     "type-check": "bun run build:type-dependencies && bun run --filter '*' type-check",
     "type-check:web": "bun run --cwd packages/web type-check",
     "type-check:ui": "bun run --cwd packages/ui type-check",
-    "type-check:electron": "bun run --cwd packages/electron type-check",
+    "type-check:electron": "bun run --cwd packages/electron prepare:type-check && bun run --cwd packages/electron type-check",
     "type-check:mobile": "bun run --cwd packages/mobile type-check",
     "lint": "bun run --filter '*' lint",
     "lint:web": "bun run --cwd packages/web lint",
