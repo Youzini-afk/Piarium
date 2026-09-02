@@ -145,10 +145,21 @@ deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `RuntimeAPIs` aggregate interface, all 24 API interfaces (Terminal, Git, Files, Documents, Settings,
 Permissions, Notifications, Extensions, Language, Tasks, Debug, Tests, etc.), typed failures
 (DocumentsError, FilesystemError, LanguageServicesError, RunServicesError, WorkspaceSearchError),
-and pure DTO types (WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch). It has no React,
-Zustand, or UI component dependencies — only `@piarium/protocol` and `@piarium/extension-contract`.
-Web, VS Code, and UI non-render code import from it directly rather than reaching into
-`@piarium/ui/lib/api`.
+pure DTO types (WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch), and the single desktop
+IPC contract (`desktop.ts`, exported as `@piarium/application-client/desktop`): the
+`PiariumDesktopCommandMap` for all 58 `desktop_*` commands, the `PiariumDesktopBridge` interface, the
+`PreloadBootstrapPayload` discriminated union, exhaustive runtime command/event catalogs, and the
+remote-safe command catalog. It has no React, Zustand, or UI component dependencies —
+only `@piarium/protocol` and `@piarium/extension-contract`. Web, VS Code, Electron main/preload, and
+UI non-render code import from it directly rather than reaching into `@piarium/ui/lib/api`.
+
+Privileged runtime source and deployable artifacts are intentionally separate. Application Host source
+lives in `packages/web/application-host` and emits the stable `packages/web/server` Node ESM runtime;
+CLI source lives in `packages/web/cli` and emits the published `packages/web/bin/cli.js`; Electron's
+package-root TypeScript modules emit `dist-bundle/main.mjs` and `preload.mjs`. The generated directories
+are not tracked, and production does not load TypeScript through `tsx`, `ts-node`, or a loader hook.
+Electron type-checking consumes a freshly emitted, type-only Application Host declaration tree so it
+does not have to replace a `server/` generation that a running development process may be using.
 
 Desktop first-launch and local recovery use this same authenticated connection and require a
 successful Pi host handshake. The surface shows the negotiated Pi, host, Node, and runtime-source

@@ -1,8 +1,16 @@
 # Piarium Application Host TypeScript 迁移执行计划
 
-Status: proposed; execution-ready
+Status: delivered; retained as the decision and migration record
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
+
+Delivery note: the migration landed through `64cbf5b0`, with final Electron contract/build governance in
+the commits that follow it. Application Host source now lives in `packages/web/application-host`, CLI
+source in `packages/web/cli`, and Electron product runtime source at `packages/electron/*.ts`.
+`packages/web/server`, `packages/web/bin`, `packages/web/.application-host-types`, and
+`packages/electron/dist-bundle` are generated outputs. Sections describing the former JS counts and
+shallow checks are the pre-migration baseline, not current repository state. The detailed final execution
+and acceptance record is [typescript-runtime-migration-completion-plan.md](typescript-runtime-migration-completion-plan.md).
 
 ## 1. 结论与目标
 
@@ -104,7 +112,7 @@ Application Host 继续由 `@piarium/web` 拥有。新增独立 workspace/npm �
 packages/web/
   application-host/       # Application Host 源码，迁移过程中允许剩余 legacy JS
   server/                 # 生成的 Node ESM 运行产物，不提交 Git
-  cli-src/                # CLI 源码（CLI Phase 建立）
+  cli/                # CLI 源码（CLI Phase 建立）
   bin/                    # 生成的 CLI ESM 运行产物，不提交 Git
   src/                    # 浏览器/Web Surface，保持现状
   dist/                   # Vite 浏览器产物
@@ -669,7 +677,7 @@ factory，但不得借机重写启动顺序或创建新的 service locator。
 建立：
 
 ```text
-packages/web/cli-src  # TypeScript source/tests/docs
+packages/web/cli  # TypeScript source/tests/docs
 packages/web/bin      # generated runtime, package bin path unchanged
 ```
 
@@ -701,7 +709,7 @@ packages/web/bin      # generated runtime, package bin path unchanged
 
 - `package.json#bin` 仍指向 `./bin/cli.js`；
 - cloud/deploy scripts 仍检查该路径；
-- `bin` 不提交，`cli-src` 无 production JS；
+- `bin` 不提交，`cli` 无 production JS；
 - CLI help、plain/quiet/json、foreground/background、status/stop/restart 和代表性 session/schedule/tunnel tests 通过。
 
 ## 17. Phase 11 — Electron 运行时 TypeScript
@@ -716,11 +724,14 @@ renderer security、path open、Linux discovery/autostart。
 
 ### 17.2 目标布局
 
+The delivered layout keeps the existing package-root module organization rather than adding cosmetic
+`src/` and `test/` wrappers:
+
 ```text
-packages/electron/src/main.ts
-packages/electron/src/preload.ts
-packages/electron/src/runtime/*.ts
-packages/electron/test/*.test.ts
+packages/electron/main.ts
+packages/electron/preload.ts
+packages/electron/*.ts                       # native runtime modules and direct tests
+packages/electron/scripts/*.{mjs,cjs}        # build/package/smoke tooling
 packages/electron/dist-bundle/main.mjs       # generated
 packages/electron/dist-bundle/preload.mjs    # generated
 ```
@@ -764,7 +775,7 @@ packages/electron/dist-bundle/preload.mjs    # generated
 - `main/types/files/bin` 指向生成产物；
 - build 生成 Host、CLI、Web UI；
 - start/dev/watch/pack 在 clean checkout 不依赖旧产物；
-- package tarball 不包含 `application-host`/`cli-src` 源码或测试；
+- package tarball 不包含 `application-host`/`cli` 源码或测试；
 - package tarball 包含 server/bin 的实际运行文件和 source map/declaration 策略允许的文件。
 
 ### Cloud runtime
@@ -893,22 +904,22 @@ artifact 大小和模块加载路径。不得凭空制定百分比硬门槛；�
 
 ## 23. 最终验收清单
 
-- [ ] `settings-store` 为 TS source + generated dist/declarations。
-- [ ] `application-host` 无未解释的 JS production/test source。
-- [ ] `server` 是未跟踪的纯生成运行目录。
-- [ ] Host public declaration由实现生成，旧 `server/index.d.ts` 删除。
-- [ ] Application Host 不反向依赖 Web browser source、UI 或 Electron。
-- [ ] 跨包 Host 消费只经过 typed `server/index` facade，不再新增 `server/lib/*` deep import。
-- [ ] Application Host 没有吸收未来 execution-kernel 的 tool/context/environment/turn 职责。
-- [ ] Web tsconfig/lint 真正覆盖 Application Host。
-- [ ] Documents/Recovery/LSP/DAP/auth/persistence 无 `any` authority。
-- [ ] `cli-src` 为 TS，`bin` 为生成 JS，CLI 路径和输出契约不变。
-- [ ] Electron main/preload/runtime 为 TS source，packaged output 为预编译 MJS。
-- [ ] Electron scripts 中保留的 MJS 都是明确工具链而非产品 runtime。
-- [ ] Web/CLI/Electron/Cloud clean-checkout 构建不依赖本地 stale artifact。
-- [ ] 生产产物不包含 TS loader，不重复携带 source/runtime tree。
-- [ ] 原生模块仍按当前 external/unpacked 策略工作。
-- [ ] Web full tests、cloud tests、CLI tests、Electron tests和可用原生 smoke 通过。
-- [ ] 路由、服务、持久化 schema、错误码、默认值和产品能力无意外变化。
-- [ ] 文档、源码链接、开发命令和包 ownership 与最终目录一致。
-- [ ] 没有新增 OpenCode compatibility facade 或无依据限制。
+- [x] `settings-store` 为 TS source + generated dist/declarations。
+- [x] `application-host` 无未解释的 JS production/test source。
+- [x] `server` 是未跟踪的纯生成运行目录。
+- [x] Host public declaration由实现生成，旧 `server/index.d.ts` 删除。
+- [x] Application Host 不反向依赖 Web browser source、UI 或 Electron。
+- [x] 跨包 Host 消费只经过 typed `server/index` facade，不再新增 `server/lib/*` deep import。
+- [x] Application Host 没有吸收未来 execution-kernel 的 tool/context/environment/turn 职责。
+- [x] Web tsconfig/lint 真正覆盖 Application Host。
+- [x] Documents/Recovery/LSP/DAP/auth/persistence 无 `any` authority。
+- [x] `cli` 为 TS，`bin` 为生成 JS，CLI 路径和输出契约不变。
+- [x] Electron main/preload/runtime 为 TS source，packaged output 为预编译 MJS。
+- [x] Electron scripts 中保留的 MJS 都是明确工具链而非产品 runtime。
+- [x] Web/CLI/Electron/Cloud clean-checkout 构建不依赖本地 stale artifact。
+- [x] 生产产物不包含 TS loader，不重复携带 source/runtime tree。
+- [x] 原生模块仍按当前 external/unpacked 策略工作。
+- [x] Web full tests、cloud tests、CLI tests、Electron tests和可用原生 smoke 通过。
+- [x] 路由、服务、持久化 schema、错误码、默认值和产品能力无意外变化。
+- [x] 文档、源码链接、开发命令和包 ownership 与最终目录一致。
+- [x] 没有新增 OpenCode compatibility facade 或无依据限制。

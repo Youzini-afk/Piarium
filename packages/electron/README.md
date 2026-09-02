@@ -8,27 +8,46 @@ This package owns the native shell: windows, menus, deep links, native notificat
 
 Desktop starts the Piarium web server in the same Electron main process. There is no separate sidecar subprocess for the Piarium server.
 
-`main.mjs` imports `@piarium/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
+The `main.ts` source imports `@piarium/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
-The preload bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
+The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
 
 ## Main Files
 
 | File | Purpose |
 |------|---------|
-| `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
-| `startup-url-selection.mjs` | Pure bundled/HMR startup probe policy used by main-process URL resolution |
-| `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
-| `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
+| `main.ts` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
+| `startup-url-selection.ts` | Pure bundled/HMR startup probe policy used by main-process URL resolution |
+| `preload.ts` | Safe bridge from the rendered UI to Electron IPC |
+| `ssh-manager.ts` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
+| `renderer-security-policy.ts` | Trusted-origin policy and remote-safe command gate for the preload bridge |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
-| `pi-runtime.mjs` | Resolves and starts the packaged Pi host through Electron's Node mode |
+| `pi-runtime.ts` | Resolves and starts the packaged Pi host through Electron's Node mode |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
+
+The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. The `files` config in `package.json` ships only those two bundled entries — no `.ts` source, test, or loader reaches the packaged app.
+
+## Desktop IPC Contract
+
+All 58 `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@piarium/application-client/desktop` subpath.
+
+The contract exports:
+
+- `PiariumDesktopCommandMap` — a map from command name to `{ args, result }` for all 58 commands
+- `PiariumDesktopBridge` — the typed bridge interface implemented by preload and consumed by the UI
+- `PIARIUM_DESKTOP_COMMAND_LIST` — the canonical command catalog (used by architecture tests)
+- `PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS` — the subset allowed for non-local renderers
+- `PreloadBootstrapPayload` — a discriminated union that carries credentials only for local pages
+
+The preload bridge (`preload.ts`) implements `PiariumDesktopBridge` and accepts only the exhaustive event catalog shared with the typed main-process emit helpers. The main process validates raw command names with the shared runtime catalog, exhaustively handles the resulting command union, and gates remote-unsafe commands through `REMOTE_SAFE_DESKTOP_COMMANDS`.
+
+The `desktop-contract.test.ts` suite verifies command and event catalog completeness, remote-safe subset equality, unknown-name rejection, argument/result type fixtures, and bootstrap credential isolation.
 
 ## Development
 
@@ -39,7 +58,7 @@ bun install
 bun run electron:dev
 ```
 
-`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`.
+`bun run electron:dev` builds the Electron sources, starts the web dev server with HMR, then launches `packages/electron/dist-bundle/main.mjs`.
 It waits until both the HMR UI and API are listening before opening the window, and launches the
 verified installed Electron binary directly rather than passing through `npx` or npm.
 
@@ -223,14 +242,15 @@ supported interface languages.
 
 ## IPC Pattern
 
-Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
+Renderer code should call the desktop bridge exposed by `preload.ts`. Do not import Electron from shared UI code.
 
 Add new native capabilities in this order:
 
-1. Add or update the `preload.mjs` bridge only if a new renderer-facing shape is needed.
-2. Add the real command handling in `main.mjs` under `piarium:invoke`.
-3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities.
-4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
+1. Add the command, arguments, result, and any event payload to the shared contract in `packages/application-client/src/desktop.ts`.
+2. Add or update the `preload.ts` bridge only if a new renderer-facing shape is needed.
+3. Add the real command handling in `main.ts` under `piarium:invoke`; its exhaustive command check must continue to compile.
+4. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities.
+5. Keep server/runtime APIs in `packages/web` when the behavior is not inherently native.
 
 ## Logs And Data
 

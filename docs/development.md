@@ -32,7 +32,7 @@ or implementation in the same coherent change.
 | Shared runtime APIs, authenticated URLs, runtime switching | [packages/application-client/README.md](../packages/application-client/README.md) and [packages/ui/src/lib/api/DOCUMENTATION.md](../packages/ui/src/lib/api/DOCUMENTATION.md) |
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
 | Electron ownership, packaging, signing, smoke checks | [packages/electron/README.md](../packages/electron/README.md) |
-| Web CLI commands and output modes | [packages/web/bin/lib/DOCUMENTATION.md](../packages/web/bin/lib/DOCUMENTATION.md) |
+| Web CLI commands and output modes | [packages/web/cli/lib/DOCUMENTATION.md](../packages/web/cli/lib/DOCUMENTATION.md) |
 | Application Host, CLI, settings-store, and Electron TypeScript migration | [application-host-typescript-migration-plan.md](application-host-typescript-migration-plan.md) |
 | Relay transport and wire compatibility | [packages/web/application-host/lib/relay/DOCUMENTATION.md](../packages/web/application-host/lib/relay/DOCUMENTATION.md) |
 | Mobile builds and iOS Simulator scripts | [packages/mobile/README.md](../packages/mobile/README.md) |
@@ -71,8 +71,16 @@ coverage gaps instead of converting them into a false pass.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
 - `@piarium/ui` runs under Vitest as part of `bun run test:pi`.
-- Electron's package `type-check` and `lint` are intentionally shallow. Desktop startup, preload,
-  process, native-module, and packaging claims require Electron tests or an actual smoke.
+- Electron's `type-check` covers both `tsconfig.json` (product) and `tsconfig.tests.json` (tests).
+  `bun run type-check:electron` prepares workspace type dependencies and emits current Application Host
+  declarations into a type-only generated directory; it does not replace a running/locked `server/` runtime.
+  `bun run lint:electron` checks all `./packages/electron/*.ts` against the shared ESLint config
+  with zero expected errors. Desktop startup, preload, process, native-module, and packaging claims
+  still require Electron tests or an actual smoke.
+- The 58 `desktop_*` IPC commands, preload bootstrap payload, desktop events, and shared DTOs are
+  typed in `packages/application-client/src/desktop.ts` — the single framework-neutral contract
+  consumed by Electron main, preload, and the UI. `desktop-contract.test.ts` and
+  `architecture.test.ts` guard the catalog, remote-safe subset, and source boundaries.
 - Engineering docs are checked by `bun run test:docs`; public docs-site content is checked by
   `bun run docs:validate`.
 - Adding or removing source/export shapes may warrant `bun run dead-code`, but its output is diagnostic:
