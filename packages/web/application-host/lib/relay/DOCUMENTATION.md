@@ -8,7 +8,7 @@ instance dials **outbound** to the configured relay; nothing needs to be exposed
 
 Traffic is **end-to-end encrypted between the two endpoints** (client and host instance). The relay infrastructure forwards opaque ciphertext and cannot read application traffic — it is an untrusted transport, not a trusted middlebox.
 
-This module (`packages/web/server/lib/relay/`) is the **host side**: it runs inside the Piarium Web
+This module (`packages/web/application-host/lib/relay/`) is the **host side**: it runs inside the Piarium Web
 server, so it works for Electron desktop, headless server, and CLI installs alike. The **client side**
 lives in `packages/ui/src/lib/relay/`. The relay service is deployed separately and only brokers
 connections; the public code repository does not contain or implicitly trust that service.
@@ -26,8 +26,8 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 
 ## Entrypoints and structure
 
-Host side (`packages/web/server/lib/relay/`):
-- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/piarium/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. `PIARIUM_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Piarium-owned endpoint before it is presented as a public production service.
+Host side (`packages/web/application-host/lib/relay/`):
+- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/piarium/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/application-host/index.js` only when the user has explicitly enabled the relay. `PIARIUM_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Piarium-owned endpoint before it is presented as a public production service.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
 - `signing-key.js` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.

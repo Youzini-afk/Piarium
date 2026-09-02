@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Host side of the tunnel mux (Layer 3): consumes decrypted tunnel frames for
 // ONE relay connection and dispatches them to the local loopback origin.
 // HTTP streams -> fetch http://127.0.0.1:<port> with streamed duplex bodies;
@@ -8,6 +7,7 @@
 // Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
 
 import { WebSocket } from 'ws';
+import type { RawData } from 'ws';
 
 import {
   MAX_TUNNEL_PAYLOAD_BYTES,
@@ -21,8 +21,62 @@ import {
   encodeTunnelFrame,
 } from './tunnel-codec.js';
 
+interface HttpRequestPayload {
+  hasBody?: boolean;
+  headers: Record<string, string>;
+  method: string;
+  path: string;
+  query: string;
+}
+
+interface WsOpenPayload {
+  path: string;
+  protocols?: string[];
+  query: string;
+}
+
+interface WsClosePayload {
+  code?: number;
+  reason?: string;
+}
+
+interface HttpBodySink {
+  close(): void;
+  enqueue(payload: Uint8Array): void;
+  error(error: Error): void;
+}
+
+interface HttpTunnelStream {
+  abort: AbortController;
+  body: HttpBodySink | null;
+  kind: 'http';
+  noBody: boolean;
+}
+
+interface WsTunnelStream {
+  kind: 'ws';
+  opened: boolean;
+  socket: WebSocket;
+}
+
+type TunnelStream = HttpTunnelStream | WsTunnelStream;
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+
+const rawDataBytes = (data: RawData): Uint8Array => {
+  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+};
+
 // Path allowlists (defense in depth; same families realtime-proxy.js allows).
-const isAllowedHttpPath = (pathname) =>
+const isAllowedHttpPath = (pathname: string): boolean =>
   pathname === '/health'
   || pathname === '/api'
   || pathname.startsWith('/api/')
@@ -35,7 +89,7 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/dictation/ws',
 ]);
 
-export const isRelayWebSocketPathAllowed = (pathname) => ALLOWED_WS_PATHS.has(pathname);
+export const isRelayWebSocketPathAllowed = (pathname: string): boolean => ALLOWED_WS_PATHS.has(pathname);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
@@ -70,22 +124,29 @@ const BACKPRESSURE_POLL_MS = 20;
 const BODY_BUFFER_MAX_BYTES = 512 * 1024;
 const BODY_DELIVERY_TIMEOUT_MS = 15_000;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const isHttpRequestPayload = (parsed) =>
-  Boolean(parsed && typeof parsed === 'object'
-    && typeof parsed.method === 'string'
-    && typeof parsed.path === 'string'
-    && typeof parsed.query === 'string'
-    && parsed.headers && typeof parsed.headers === 'object');
+const isHttpRequestPayload = (parsed: unknown): parsed is HttpRequestPayload => {
+  const record = asRecord(parsed);
+  const headers = asRecord(record?.headers);
+  return Boolean(record
+    && typeof record.method === 'string'
+    && typeof record.path === 'string'
+    && typeof record.query === 'string'
+    && headers
+    && Object.values(headers).every((value) => typeof value === 'string'));
+};
 
-const isWsOpenPayload = (parsed) =>
-  Boolean(parsed && typeof parsed === 'object'
-    && typeof parsed.path === 'string'
-    && typeof parsed.query === 'string'
-    && (parsed.protocols === undefined || Array.isArray(parsed.protocols)));
+const isWsOpenPayload = (parsed: unknown): parsed is WsOpenPayload => {
+  const record = asRecord(parsed);
+  return Boolean(record
+    && typeof record.path === 'string'
+    && typeof record.query === 'string'
+    && (record.protocols === undefined
+      || (Array.isArray(record.protocols) && record.protocols.every((value) => typeof value === 'string'))));
+};
 
-const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object');
+const isWsClosePayload = (parsed: unknown): parsed is WsClosePayload => Boolean(asRecord(parsed));
 
 /**
  * @param {{
@@ -96,30 +157,36 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   bodyDeliveryTimeoutMs?: number,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS }) => {
+export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS }: {
+  bodyDeliveryTimeoutMs?: number;
+  connectionId: string;
+  getBufferedAmount: () => number;
+  getLocalPort: () => number;
+  sendFrame: (plaintextFrame: Uint8Array) => Promise<void> | void;
+}) => {
   /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
-  const streams = new Map();
+  const streams = new Map<number, TunnelStream>();
   const assembler = createFragmentAssembler();
   let closed = false;
 
-  const send = async (frame) => {
+  const send = async (frame: Uint8Array): Promise<void> => {
     if (closed) return;
     await sendFrame(frame);
   };
 
-  const sendJson = (frameType, streamId, payload) =>
+  const sendJson = (frameType: number, streamId: number, payload: unknown) =>
     send(encodeTunnelFrame(frameType, streamId, encodeJsonPayload(payload)));
 
-  const sendAbort = async (streamId, reason) => {
+  const sendAbort = async (streamId: number, reason: unknown): Promise<void> => {
     await sendJson(TunnelFrameType.StreamAbort, streamId, { reason: String(reason ?? 'stream error') });
   };
 
-  const dropStream = (streamId) => {
+  const dropStream = (streamId: number): void => {
     streams.delete(streamId);
     assembler.dropStream(streamId);
   };
 
-  const abortLocalStream = (streamId, reason) => {
+  const abortLocalStream = (streamId: number, reason: unknown): void => {
     const stream = streams.get(streamId);
     if (!stream) return;
     dropStream(streamId);
@@ -139,7 +206,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const waitForBackpressure = async (signal) => {
+  const waitForBackpressure = async (signal: AbortSignal | null): Promise<void> => {
     while (!closed && getBufferedAmount() > BACKPRESSURE_LIMIT_BYTES) {
       if (signal?.aborted) return;
       await sleep(BACKPRESSURE_POLL_MS);
@@ -150,8 +217,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   // HTTP
   // -------------------------------------------------------------------------
 
-  const buildRequestHeaders = (rawHeaders, loopbackOrigin) => {
-    const headers = {};
+  const buildRequestHeaders = (rawHeaders: Record<string, string>, loopbackOrigin: string): Record<string, string> => {
+    const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(rawHeaders)) {
       if (typeof name !== 'string' || typeof value !== 'string') continue;
       const lower = name.toLowerCase();
@@ -168,7 +235,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
   // Synthetic responses never ship an empty body: `reason` states explicitly
   // that the relay host (not the upstream server) produced this response.
-  const syntheticResponse = async (streamId, status, message) => {
+  const syntheticResponse = async (streamId: number, status: number, message: string): Promise<void> => {
     await sendJson(TunnelFrameType.HttpResponse, streamId, {
       status,
       headers: { 'content-type': 'application/json' },
@@ -177,25 +244,33 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
-  const forwardRequest = async (streamId, stream, url, method, request, body, loopbackOrigin) => {
-    let response;
+  const forwardRequest = async (
+    streamId: number,
+    stream: HttpTunnelStream,
+    url: string,
+    method: string,
+    request: HttpRequestPayload,
+    body: Buffer | ReadableStream<Uint8Array> | null,
+    loopbackOrigin: string,
+  ): Promise<void> => {
+    let response: Response;
     try {
-      response = await fetch(url, {
+      const init: RequestInit & { duplex?: 'half' } = {
         method,
         headers: buildRequestHeaders(request.headers, loopbackOrigin),
-        body,
-        duplex: body ? 'half' : undefined,
         signal: stream.abort.signal,
-      });
+        ...(body ? { body, duplex: 'half' } : {}),
+      };
+      response = await fetch(url, init);
     } catch (error) {
       if (streams.get(streamId) === stream) {
         dropStream(streamId);
-        await sendAbort(streamId, error?.message ?? 'loopback request failed');
+        await sendAbort(streamId, errorMessage(error, 'loopback request failed'));
       }
       return;
     }
 
-    const responseHeaders = {};
+    const responseHeaders: Record<string, string> = {};
     for (const [name, value] of response.headers.entries()) {
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
@@ -221,12 +296,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     } catch (error) {
       if (streams.get(streamId) === stream) {
         dropStream(streamId);
-        await sendAbort(streamId, error?.message ?? 'loopback response failed');
+        await sendAbort(streamId, errorMessage(error, 'loopback response failed'));
       }
     }
   };
 
-  const runHttpStream = async (streamId, request) => {
+  const runHttpStream = async (streamId: number, request: HttpRequestPayload): Promise<void> => {
     const method = request.method.toUpperCase();
     if (!isAllowedHttpPath(request.path)) {
       dropStream(streamId);
@@ -246,17 +321,17 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       return;
     }
 
-    const buffered = [];
+    const buffered: Uint8Array[] = [];
     let bufferedBytes = 0;
     let bodyFrameCount = 0;
-    let liveStream = null;
-    let liveController = null;
+    let liveStream: ReadableStream<Uint8Array> | null = null;
+    let liveController: ReadableStreamDefaultController<Uint8Array> | null = null;
     let completed = false;
-    let bodyFailure = null;
-    let resolveBodyEnd;
-    const bodyEnded = new Promise((resolve) => { resolveBodyEnd = resolve; });
+    let bodyFailure: Error | null = null;
+    let resolveBodyEnd: () => void = () => undefined;
+    const bodyEnded = new Promise<void>((resolve) => { resolveBodyEnd = resolve; });
 
-    const finishBody = (error) => {
+    const finishBody = (error: Error | null): void => {
       if (completed) return;
       completed = true;
       bodyFailure = error ?? null;
@@ -271,16 +346,18 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       resolveBodyEnd();
     };
 
-    let deliveryDeadline = null;
-    const switchToLive = () => {
-      liveStream = new ReadableStream({
-        start(controller) {
+    let deliveryDeadline: ReturnType<typeof setTimeout> | null = null;
+    const switchToLive = (): void => {
+      liveStream = new ReadableStream<Uint8Array>({
+        start(controller: ReadableStreamDefaultController<Uint8Array>) {
           liveController = controller;
           stream.body = controller;
         },
       });
+      const controller = liveController;
+      if (!controller) throw new Error('request body stream did not initialize');
       for (const chunk of buffered) {
-        try { liveController.enqueue(chunk); } catch { break; }
+        try { controller.enqueue(chunk); } catch { break; }
       }
       buffered.length = 0;
       if (deliveryDeadline) clearTimeout(deliveryDeadline);
@@ -322,9 +399,10 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await bodyEnded;
     if (deliveryDeadline) clearTimeout(deliveryDeadline);
     if (streams.get(streamId) !== stream) return;
-    if (bodyFailure) {
+    const failure = bodyFailure as Error | null;
+    if (failure) {
       dropStream(streamId);
-      await sendAbort(streamId, bodyFailure.message ?? 'tunnel request body failed');
+      await sendAbort(streamId, failure.message || 'tunnel request body failed');
       return;
     }
     if (liveStream) return;
@@ -339,7 +417,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await forwardRequest(streamId, stream, url, method, request, Buffer.concat(buffered), loopbackOrigin);
   };
 
-  const handleHttpRequest = (streamId, payload) => {
+  const handleHttpRequest = (streamId: number, payload: Uint8Array): void => {
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -349,15 +427,15 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       request = decodeJsonPayload(payload, isHttpRequestPayload);
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'malformed request');
+      void sendAbort(streamId, errorMessage(error, 'malformed request'));
       return;
     }
-    const stream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
+    const stream: HttpTunnelStream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
     streams.set(streamId, stream);
     void runHttpStream(streamId, request);
   };
 
-  const handleHttpBody = (streamId, payload) => {
+  const handleHttpBody = (streamId: number, payload: Uint8Array): void => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http' || stream.noBody) return;
     // The buffering sink attaches synchronously before body frames arrive.
@@ -368,7 +446,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const handleStreamEnd = (streamId) => {
+  const handleStreamEnd = (streamId: number): void => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http') return;
     try {
@@ -383,7 +461,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   // WebSocket
   // -------------------------------------------------------------------------
 
-  const handleWsOpen = (streamId, payload) => {
+  const handleWsOpen = (streamId: number, payload: Uint8Array): void => {
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -393,7 +471,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       open = decodeJsonPayload(payload, isWsOpenPayload);
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'malformed ws open');
+      void sendAbort(streamId, errorMessage(error, 'malformed ws open'));
       return;
     }
     if (!isRelayWebSocketPathAllowed(open.path)) {
@@ -407,22 +485,22 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     // so the WS origin check passes reliably for every client platform. We do NOT
     // use the client's window.location.origin: it's unreliable in WKWebView (empty
     // or "null" for custom schemes), and the `ws` client sends no Origin at all
-    // otherwise 鈥?a no-origin upgrade is rejected 403. The request itself is still
+    // otherwise — a no-origin upgrade is rejected 403. The request itself is still
     // authenticated by the tunneled Piarium URL token, not by this origin.
     const dialHeaders = {
       'x-piarium-relay-connection': connectionId,
       origin: `http://127.0.0.1:${getLocalPort()}`,
     };
-    let socket;
+    let socket: WebSocket;
     try {
-      socket = new WebSocket(url, open.protocols, {
+      socket = new WebSocket(url, open.protocols ?? [], {
         headers: dialHeaders,
       });
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'ws dial failed');
+      void sendAbort(streamId, errorMessage(error, 'ws dial failed'));
       return;
     }
-    const stream = { kind: 'ws', socket, opened: false };
+    const stream: WsTunnelStream = { kind: 'ws', socket, opened: false };
     streams.set(streamId, stream);
 
     socket.on('open', () => {
@@ -432,7 +510,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     });
     socket.on('message', (data, isBinary) => {
       if (streams.get(streamId) !== stream || closed) return;
-      const bytes = Buffer.isBuffer(data) ? new Uint8Array(data) : new Uint8Array(Buffer.concat(data));
+      const bytes = rawDataBytes(data);
       const frameType = isBinary ? TunnelFrameType.WsBinary : TunnelFrameType.WsText;
       void (async () => {
         for (const frame of encodeFragmentedMessage(frameType, streamId, bytes)) {
@@ -461,13 +539,13 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         } catch {
           // already gone
         }
-        void sendAbort(streamId, error?.message ?? 'upstream ws error');
+        void sendAbort(streamId, errorMessage(error, 'upstream ws error'));
       }
       // Post-open errors are followed by 'close', handled above.
     });
   };
 
-  const handleWsMessage = (streamId, frameType, message) => {
+  const handleWsMessage = (streamId: number, frameType: number, message: Uint8Array): void => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws' || stream.socket.readyState !== WebSocket.OPEN) return;
     if (frameType === TunnelFrameType.WsText) {
@@ -477,17 +555,22 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const handleWsClose = (streamId, payload) => {
+  const handleWsClose = (streamId: number, payload: Uint8Array): void => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws') return;
     dropStream(streamId);
-    let close = { code: 1000, reason: '' };
+    let close: WsClosePayload = { code: 1000, reason: '' };
     try {
       close = decodeJsonPayload(payload, isWsClosePayload);
     } catch {
       // fall through with defaults
     }
-    const code = Number.isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
+    const code = typeof close.code === 'number'
+      && Number.isInteger(close.code)
+      && close.code >= 1000
+      && close.code <= 4999
+      ? close.code
+      : 1000;
     try {
       stream.socket.close(code, typeof close.reason === 'string' ? close.reason : '');
     } catch {
@@ -500,7 +583,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   // -------------------------------------------------------------------------
 
   /** @param {Uint8Array} plaintextFrame one decrypted tunnel frame */
-  const handleFrame = async (plaintextFrame) => {
+  const handleFrame = async (plaintextFrame: Uint8Array): Promise<void> => {
     if (closed) return;
     const frame = decodeTunnelFrame(plaintextFrame);
 
@@ -542,7 +625,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const close = () => {
+  const close = (): void => {
     if (closed) return;
     closed = true;
     for (const streamId of [...streams.keys()]) {

@@ -1,6 +1,20 @@
-// @ts-nocheck
 import { getOctokitOrNull } from '../github/octokit.js';
 import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
+import type { PullRequestDiff } from './types.js';
+
+interface PullRequestClient {
+  request(route: string, parameters: Record<string, unknown>): Promise<{ data: unknown }>;
+}
+
+interface ResolvedRepository {
+  repo: { owner: string; repo: string } | null;
+  remoteUrl?: string | null;
+}
+
+export interface PullRequestDependencies {
+  getOctokitOrNull?: () => PullRequestClient | null;
+  resolveGitHubRepoFromDirectory?: (directory: string) => Promise<ResolvedRepository>;
+}
 
 /**
  * Raw unified diff for a pull request.
@@ -9,7 +23,11 @@ import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
  * three-dot semantics used for local branch reviews: work merged in from the
  * base branch is not part of it.
  */
-export async function getPullRequestDiff(directory, number, deps = {}) {
+export async function getPullRequestDiff(
+  directory: string,
+  number: number,
+  deps: PullRequestDependencies = {},
+): Promise<PullRequestDiff> {
   const resolveOctokit = deps.getOctokitOrNull ?? getOctokitOrNull;
   const resolveRepository = deps.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const octokit = resolveOctokit();

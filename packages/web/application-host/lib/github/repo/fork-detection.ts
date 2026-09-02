@@ -1,11 +1,16 @@
-// @ts-nocheck
 import { resolveGitHubRepoFromDirectory } from './index.js';
+import type { Octokit } from '@octokit/rest';
+import type { GitHubRepoRef } from '../types.js';
+
+type RepoMetadata = Awaited<ReturnType<Octokit['rest']['repos']['get']>>['data'];
+interface RepoMetadataCacheEntry { data: RepoMetadata | null; fetchedAt: number }
+export interface RepoNetworkEntry extends GitHubRepoRef { source: 'origin' | 'upstream' }
 
 const REPO_METADATA_TTL_MS = 5 * 60_000;
 const REPO_METADATA_CACHE_MAX_ENTRIES = 200;
-const repoMetadataCache = new Map();
+const repoMetadataCache = new Map<string, RepoMetadataCacheEntry>();
 
-const setRepoMetadataCache = (repoKey, data) => {
+const setRepoMetadataCache = (repoKey: string, data: RepoMetadata | null): void => {
   if (repoMetadataCache.size >= REPO_METADATA_CACHE_MAX_ENTRIES && !repoMetadataCache.has(repoKey)) {
     const oldest = repoMetadataCache.entries().next().value;
     if (oldest) {
@@ -15,14 +20,14 @@ const setRepoMetadataCache = (repoKey, data) => {
   repoMetadataCache.set(repoKey, { data, fetchedAt: Date.now() });
 };
 
-const normalizeRepoKey = (owner, repo) => {
+const normalizeRepoKey = (owner: unknown, repo: unknown): string => {
   const o = typeof owner === 'string' ? owner.trim().toLowerCase() : '';
   const r = typeof repo === 'string' ? repo.trim().toLowerCase() : '';
   if (!o || !r) return '';
   return `${o}/${r}`;
 };
 
-const getRepoMetadata = async (octokit, repo) => {
+const getRepoMetadata = async (octokit: Octokit, repo: GitHubRepoRef): Promise<RepoMetadata | null> => {
   const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
   if (!repoKey) return null;
 
@@ -40,7 +45,8 @@ const getRepoMetadata = async (octokit, repo) => {
     setRepoMetadataCache(repoKey, data);
     return data;
   } catch (error) {
-    if (error?.status === 403 || error?.status === 404) {
+    const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+    if (status === 403 || status === 404) {
       setRepoMetadataCache(repoKey, null);
       return null;
     }
@@ -58,14 +64,18 @@ const getRepoMetadata = async (octokit, repo) => {
  * @returns {Promise<Array<{ owner: string, repo: string, url: string, source: string }> | null>}
  *   Array of repos to query (origin first, then upstream), or null if not a fork.
  */
-export async function resolveRepoNetwork(octokit, directory, remoteName = 'origin') {
+export async function resolveRepoNetwork(
+  octokit: Octokit,
+  directory: string,
+  remoteName = 'origin',
+): Promise<RepoNetworkEntry[] | null> {
   const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName).catch(() => ({ repo: null }));
   if (!repo) return null;
 
   const metadata = await getRepoMetadata(octokit, repo);
   if (!metadata) return [{ ...repo, source: 'origin' }];
 
-  const result = [{ ...repo, source: 'origin' }];
+  const result: RepoNetworkEntry[] = [{ ...repo, source: 'origin' }];
   const seenKeys = new Set([normalizeRepoKey(repo.owner, repo.repo)]);
 
   const parent = metadata?.parent;

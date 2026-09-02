@@ -2,7 +2,13 @@ import fs from 'fs';
 import path from 'path';
 
 type PathModule = typeof import('path');
-type FsPromises = typeof fs.promises;
+export interface RealpathFsPromises {
+  realpath(targetPath: string): Promise<string>;
+}
+
+export interface PathSafetyFsPromises extends RealpathFsPromises {
+  stat(targetPath: string): Promise<Pick<import('node:fs').Stats, 'isDirectory'>>;
+}
 
 export interface NormalizePathIdentityOptions {
   pathModule?: PathModule | undefined;
@@ -11,7 +17,7 @@ export interface NormalizePathIdentityOptions {
 
 export interface CanonicalizePathIdentityOptions {
   allowMissing?: boolean | undefined;
-  fsPromises?: FsPromises | undefined;
+  fsPromises?: RealpathFsPromises | undefined;
   pathModule?: PathModule | undefined;
 }
 
@@ -21,7 +27,7 @@ export interface IsPathWithinRootOptions {
 
 export interface ResolveWorkspacePathOptions {
   root: string;
-  fsPromises?: FsPromises | undefined;
+  fsPromises?: PathSafetyFsPromises | undefined;
   pathModule?: PathModule | undefined;
   allowMissing?: boolean | undefined;
 }
@@ -144,7 +150,7 @@ export const normalizeWorkspaceRelativePath = (value: unknown): string => {
 
 const realpathOrResolved = async (
   targetPath: string,
-  fsPromises: FsPromises,
+  fsPromises: RealpathFsPromises,
   pathModule: PathModule,
 ): Promise<string> => {
   try {
@@ -157,7 +163,7 @@ const realpathOrResolved = async (
 const findNearestExistingParent = async (
   absolutePath: string,
   rootPath: string,
-  fsPromises: FsPromises,
+  fsPromises: PathSafetyFsPromises,
   pathModule: PathModule,
 ): Promise<string> => {
   let current = absolutePath;
@@ -183,7 +189,7 @@ const findNearestExistingParent = async (
 const assertRealPathInsideRoot = async (
   candidatePath: string,
   rootRealPath: string,
-  fsPromises: FsPromises,
+  fsPromises: PathSafetyFsPromises,
   pathModule: PathModule,
 ): Promise<string> => {
   const candidateRealPath = await fsPromises.realpath(candidatePath);

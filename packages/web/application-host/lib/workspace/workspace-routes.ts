@@ -1,4 +1,5 @@
 import fs from 'fs';
+import type { Express, Request, Response } from 'express';
 import multer from 'multer';
 import os from 'os';
 import path from 'path';
@@ -41,31 +42,8 @@ import {
   workspaceGitRemotes,
 } from './git.js';
 
-// ── Minimal Express-like types ───────────────────────────────────────────
-
-interface WorkspaceRequest {
-  query?: Record<string, string | undefined> | undefined;
-  body?: Record<string, unknown> | undefined;
-  files?: MultipartUploadFile[] | undefined;
-  is(type: string): boolean;
-}
-
-interface WorkspaceResponse extends NodeJS.WritableStream {
-  headersSent: boolean;
-  status(code: number): WorkspaceResponse;
-  json(data: unknown): void;
-  download(path: string, filename: string, options: Record<string, unknown>): void;
-  attachment(filename: string): WorkspaceResponse;
-  type(type: string): WorkspaceResponse;
-  destroy(error?: unknown): void;
-}
-
-interface WorkspaceApp {
-  get(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
-  post(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
-  patch(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
-  delete(path: string, handler: (req: WorkspaceRequest, res: WorkspaceResponse) => void | Promise<void>): void;
-}
+type WorkspaceRequest = Request;
+type WorkspaceResponse = Response;
 
 // ── Domain types ──────────────────────────────────────────────────────────
 
@@ -85,12 +63,12 @@ interface WorkspaceSettings {
 }
 
 interface DocumentsAPI {
-  runMutationForScope: (
+  runMutationForScope: <T>(
     root: string,
     scope: { kind: string; id: string },
-    operation: () => unknown,
+    operation: () => Promise<T>,
     options: Record<string, unknown>,
-  ) => unknown;
+  ) => Promise<T>;
 }
 
 interface RouteContext {
@@ -110,13 +88,13 @@ interface RouteDependencies extends WorkspaceDependencies {
   documents?: DocumentsAPI | undefined;
   readSettingsFromDisk?: (() => Promise<WorkspaceSettings>) | undefined;
   persistSettings?: ((changes: Partial<WorkspaceSettings>) => Promise<WorkspaceSettings>) | undefined;
-  sanitizeProjects?: ((value: unknown) => ProjectEntry[]) | undefined;
+  sanitizeProjects?: ((value: unknown) => ProjectEntry[] | undefined) | undefined;
 }
 
 interface OpenProjectDependencies {
   readSettingsFromDisk?: (() => Promise<WorkspaceSettings>) | undefined;
   persistSettings?: ((changes: Partial<WorkspaceSettings>) => Promise<WorkspaceSettings>) | undefined;
-  sanitizeProjects?: ((value: unknown) => ProjectEntry[]) | undefined;
+  sanitizeProjects?: ((value: unknown) => ProjectEntry[] | undefined) | undefined;
 }
 
 interface OpenProjectResult {
@@ -151,7 +129,7 @@ const getRequestPath = (req: WorkspaceRequest): string => {
   return candidate;
 };
 
-const DOWNLOAD_OPTIONS: Record<string, unknown> = { dotfiles: 'allow' };
+const DOWNLOAD_OPTIONS = { dotfiles: 'allow' } as const;
 
 const toErrorStatus = (error: unknown): number => {
   if (error && typeof error === 'object') {
@@ -165,7 +143,7 @@ const toErrorStatus = (error: unknown): number => {
   return 500;
 };
 
-const sendError = (res: WorkspaceResponse, error: unknown): void => {
+const sendError = (res: WorkspaceResponse, error: unknown): WorkspaceResponse => {
   const status = toErrorStatus(error);
   if (status >= 500) {
     console.error('[workspace] request failed:', error);
@@ -259,7 +237,7 @@ const openWorkspaceProject = async (
   }
 
   const settings = await readSettingsFromDisk();
-  const projects = sanitizeProjects(settings?.projects || []);
+  const projects = sanitizeProjects(settings?.projects || []) ?? [];
   const projectId = createProjectIdFromPath(resolved.absolutePath);
   const now = Date.now();
   const existing = projects.find((project) => project.id === projectId || project.path === resolved.absolutePath);
@@ -292,7 +270,7 @@ const openWorkspaceProject = async (
 
 // ── Route registration ────────────────────────────────────────────────────
 
-export const registerWorkspaceRoutes = (app: WorkspaceApp, dependencies: RouteDependencies = {}): void => {
+export const registerWorkspaceRoutes = (app: Express, dependencies: RouteDependencies = {}): void => {
   const context = createRouteContext(dependencies);
   const multipartUpload = multer({
     storage: multer.memoryStorage(),
@@ -306,12 +284,12 @@ export const registerWorkspaceRoutes = (app: WorkspaceApp, dependencies: RouteDe
 
   const parseMultipartUpload = (req: WorkspaceRequest, res: WorkspaceResponse): Promise<MultipartUploadFile[]> =>
     new Promise<MultipartUploadFile[]>((resolve, reject) => {
-      multipartUpload.array('files')(req, res, (error?: Error) => {
+      multipartUpload.array('files')(req, res, (error?: unknown) => {
         if (error) {
           reject(error);
           return;
         }
-        resolve(req.files || []);
+        resolve(Array.isArray(req.files) ? req.files : []);
       });
     });
 
@@ -472,9 +450,9 @@ export const registerWorkspaceRoutes = (app: WorkspaceApp, dependencies: RouteDe
           sendError(res, error);
           return;
         }
-        res.destroy(error);
+        res.destroy(error instanceof Error ? error : new Error('Workspace archive stream failed'));
       });
-      download.stream!.pipe(res as NodeJS.WritableStream);
+      download.stream!.pipe(res);
       return;
     } catch (error) {
       return sendError(res, error);

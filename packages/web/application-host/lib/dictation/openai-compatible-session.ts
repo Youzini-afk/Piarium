@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Pseudo-streaming transcription session for OpenAI-compatible Whisper
  * endpoints (faster-whisper, whisper.cpp, OpenAI, ...).
@@ -19,11 +18,26 @@ import { pcm16ToWav } from './audio.js';
 
 const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
+export interface OpenAICompatibleSessionConfig {
+  apiKey?: string;
+  baseURL: string;
+  language?: string;
+  model: string;
+  prompt?: string;
+}
+
 export class OpenAICompatibleTranscriptionSession extends EventEmitter {
+  readonly config: OpenAICompatibleSessionConfig;
+  readonly requiredSampleRate: number;
+  private connected: boolean;
+  private segmentId: string;
+  private previousSegmentId: string | null;
+  private pcm16: Buffer;
+
   /**
    * @param {{ baseURL: string, model: string, apiKey?: string, language?: string, prompt?: string }} config
    */
-  constructor(config) {
+  constructor(config: OpenAICompatibleSessionConfig) {
     super();
     this.config = config;
     this.requiredSampleRate = OPENAI_COMPATIBLE_SAMPLE_RATE;
@@ -33,7 +47,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     this.pcm16 = Buffer.alloc(0);
   }
 
-  async connect() {
+  async connect(): Promise<void> {
     if (!this.config.baseURL) {
       throw new Error('Custom STT server URL is not configured');
     }
@@ -43,7 +57,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     this.connected = true;
   }
 
-  appendPcm16(chunk) {
+  appendPcm16(chunk: Buffer): void {
     if (!this.connected) {
       this.emit('error', new Error('STT session not connected'));
       return;
@@ -51,7 +65,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     this.pcm16 = this.pcm16.length === 0 ? chunk : Buffer.concat([this.pcm16, chunk]);
   }
 
-  commit() {
+  commit(): void {
     if (!this.connected) {
       this.emit('error', new Error('STT session not connected'));
       return;
@@ -73,8 +87,8 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           mimeType: 'audio/wav',
           model: this.config.model,
           baseURL: this.config.baseURL,
-          apiKey: this.config.apiKey,
-          language: this.config.language,
+          ...(this.config.apiKey ? { apiKey: this.config.apiKey } : {}),
+          ...(this.config.language ? { language: this.config.language } : {}),
         });
         this.emit('transcript', {
           segmentId: committedId,
@@ -87,12 +101,12 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     })();
   }
 
-  clear() {
+  clear(): void {
     this.pcm16 = Buffer.alloc(0);
     this.segmentId = randomUUID();
   }
 
-  close() {
+  close(): void {
     this.connected = false;
     this.pcm16 = Buffer.alloc(0);
   }

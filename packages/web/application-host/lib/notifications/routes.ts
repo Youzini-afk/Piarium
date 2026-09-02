@@ -1,8 +1,62 @@
-// @ts-nocheck
-const parsePushSubscribeBody = (body) => {
-  if (!body || typeof body !== 'object') return null;
-  const endpoint = body.endpoint;
-  const keys = body.keys;
+import type { Express, Request, Response } from 'express';
+import type { createApnsRuntime } from './apns-runtime.js';
+import type { createPiSessionRuntime } from './pi-session-runtime.js';
+import type { createPushRuntime } from './push-runtime.js';
+
+interface PushSubscribeBody {
+  endpoint: string;
+  keys: { auth: string; p256dh: string };
+}
+
+interface NotificationRouteDependencies
+  extends Pick<ReturnType<typeof createPushRuntime>,
+    | 'addOrUpdatePushSubscription'
+    | 'ensurePushInitialized'
+    | 'getOrCreateVapidKeys'
+    | 'isUiVisible'
+    | 'removePushSubscription'
+    | 'setPushInitialized'
+    | 'updateUiVisibility'>,
+  Pick<ReturnType<typeof createApnsRuntime>, 'addOrUpdateApnsToken' | 'removeApnsToken'>,
+  Pick<ReturnType<typeof createPiSessionRuntime>,
+    | 'getSessionActivitySnapshot'
+    | 'getSessionAttentionSnapshot'
+    | 'getSessionAttentionState'
+    | 'getSessionState'
+    | 'getSessionStateSnapshot'
+    | 'markSessionUnviewed'
+    | 'markSessionViewed'
+    | 'markUserMessageSent'> {
+  clearPendingPushBadge?: () => void;
+  getUiNotificationClients: () => Set<Response>;
+  getUiSessionTokenFromRequest: (req: Request) => string | null;
+  readSettingsFromDisk: () => Promise<Record<string, unknown>>;
+  uiAuthController?: {
+    ensureSessionToken(req: Request, res: Response): Promise<string | null>;
+  };
+  updateSettingsOnDisk: (
+    mutate: (settings: Record<string, unknown>) => Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const routeParam = (value: string | string[] | undefined): string => (
+  typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? '' : ''
+);
+
+const headerValue = (value: string | string[] | undefined): string | null => (
+  typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? null : null
+);
+
+const parsePushSubscribeBody = (body: unknown): PushSubscribeBody | null => {
+  const record = asRecord(body);
+  if (!record) return null;
+  const endpoint = record.endpoint;
+  const keys = asRecord(record.keys);
   const p256dh = keys?.p256dh;
   const auth = keys?.auth;
 
@@ -16,16 +70,85 @@ const parsePushSubscribeBody = (body) => {
   };
 };
 
-const parsePushUnsubscribeBody = (body) => {
-  if (!body || typeof body !== 'object') return null;
-  const endpoint = body.endpoint;
+const parsePushUnsubscribeBody = (body: unknown): { endpoint: string } | null => {
+  const endpoint = asRecord(body)?.endpoint;
   if (typeof endpoint !== 'string' || endpoint.trim().length === 0) return null;
   return { endpoint: endpoint.trim() };
 };
 
 export const NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
-export const registerNotificationRoutes = (app, dependencies) => {
+export interface NotificationStreamRouteDependencies {
+  getUiNotificationClients: () => Set<Response>;
+  getUiSessionTokenFromRequest: (req: Request) => string | null;
+  uiAuthController?: {
+    ensureSessionToken(req: Request, res: Response): Promise<string | null>;
+  };
+  writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
+}
+
+export const registerNotificationStreamRoute = (
+  app: Express,
+  {
+    getUiNotificationClients,
+    getUiSessionTokenFromRequest,
+    uiAuthController,
+    writeSseEvent,
+  }: NotificationStreamRouteDependencies,
+): void => {
+  app.get('/api/notifications/stream', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) return;
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const clients = getUiNotificationClients();
+    clients.add(res);
+    let closed = false;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+    const cleanup = (): void => {
+      if (closed) return;
+      closed = true;
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+      clients.delete(res);
+    };
+    req.on('close', cleanup);
+    res.on('error', cleanup);
+
+    const flushSse = (): void => {
+      (res as Response & { flush?: () => void }).flush?.();
+    };
+    heartbeatTimer = setInterval(() => {
+      if (closed || res.writableEnded || res.destroyed) return cleanup();
+      try {
+        res.write(':heartbeat\n\n');
+        flushSse();
+      } catch {
+        cleanup();
+      }
+    }, NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
+
+    try {
+      writeSseEvent(res, {
+        type: 'piarium:notification-stream-ready',
+        properties: { uiToken },
+      });
+      flushSse();
+    } catch {
+      cleanup();
+    }
+  });
+};
+
+export const registerNotificationRoutes = (app: Express, dependencies: NotificationRouteDependencies): void => {
   const {
     uiAuthController,
     ensurePushInitialized,
@@ -94,6 +217,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
           setPushInitialized(false);
         }
       } catch {
+        // Origin persistence is opportunistic; subscription registration still succeeds.
       }
     }
 
@@ -150,7 +274,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
     const platform = req.body?.platform === 'android' ? 'android' : 'ios';
     // APNs environment the token belongs to: Xcode/dev-signed installs report 'sandbox',
-    // TestFlight/App Store report 'production'. Absent (older clients, Android) 鈫?production.
+    // TestFlight/App Store report 'production'. Absent (older clients, Android) → production.
     const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
     if (typeof addOrUpdateApnsToken === 'function') {
       await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment);
@@ -185,7 +309,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(401).json({ error: 'UI session missing' });
     }
 
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const body = asRecord(req.body) ?? {};
     const platform = typeof body.platform === 'string' ? body.platform : undefined;
     updateUiVisibility(uiToken, body.visible === true, platform);
     return res.json({ ok: true });
@@ -203,68 +327,11 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/notifications/stream', async (req, res) => {
-
-    const uiToken = uiAuthController?.ensureSessionToken
-      ? await uiAuthController.ensureSessionToken(req, res)
-      : getUiSessionTokenFromRequest(req);
-    if (!uiToken) {
-      return;
-    }
-
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-
-    const clients = getUiNotificationClients();
-    clients.add(res);
-
-    let closed = false;
-    let heartbeatTimer = null;
-
-    const cleanup = () => {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-      clients.delete(res);
-    };
-
-    req.on('close', cleanup);
-    res.on('error', cleanup);
-
-    const flushSse = () => {
-      res.flush?.();
-    };
-
-    heartbeatTimer = setInterval(() => {
-      if (closed || res.writableEnded || res.destroyed) {
-        cleanup();
-        return;
-      }
-      try {
-        res.write(':heartbeat\n\n');
-        flushSse();
-      } catch {
-        cleanup();
-      }
-    }, NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
-
-    try {
-      writeSseEvent(res, {
-        type: 'piarium:notification-stream-ready',
-        properties: { uiToken },
-      });
-      flushSse();
-    } catch {
-      cleanup();
-    }
+  registerNotificationStreamRoute(app, {
+    getUiNotificationClients,
+    getUiSessionTokenFromRequest,
+    writeSseEvent,
+    ...(uiAuthController ? { uiAuthController } : {}),
   });
 
   app.get('/api/session-activity', (_req, res) => {
@@ -288,7 +355,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/:id/status', async (req, res) => {
-    const sessionId = req.params.id;
+    const sessionId = routeParam(req.params.id);
     const state = getSessionState(sessionId);
 
     if (!state) {
@@ -313,7 +380,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/:id/attention', async (req, res) => {
-    const sessionId = req.params.id;
+    const sessionId = routeParam(req.params.id);
     const state = getSessionAttentionState(sessionId);
 
     if (!state) {
@@ -330,12 +397,12 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.post('/api/sessions/:id/view', (req, res) => {
-    const sessionId = req.params.id;
-    const clientId = req.headers['x-client-id'] || req.ip || 'anonymous';
+    const sessionId = routeParam(req.params.id);
+    const clientId = headerValue(req.headers['x-client-id']) || req.ip || 'anonymous';
 
     markSessionViewed(sessionId, clientId);
     // The user is engaging with the app, so the native push badge no longer
-    // applies 鈥?reset it here too (not only on the visibility beacon), since
+    // applies — reset it here too (not only on the visibility beacon), since
     // opening the app reliably marks the opened session viewed.
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
 
@@ -347,8 +414,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.post('/api/sessions/:id/unview', (req, res) => {
-    const sessionId = req.params.id;
-    const clientId = req.headers['x-client-id'] || req.ip || 'anonymous';
+    const sessionId = routeParam(req.params.id);
+    const clientId = headerValue(req.headers['x-client-id']) || req.ip || 'anonymous';
 
     markSessionUnviewed(sessionId, clientId);
 
@@ -360,7 +427,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.post('/api/sessions/:id/message-sent', (req, res) => {
-    const sessionId = req.params.id;
+    const sessionId = routeParam(req.params.id);
 
     markUserMessageSent(sessionId);
     // Sending a message means the user is active in the app; reset the native

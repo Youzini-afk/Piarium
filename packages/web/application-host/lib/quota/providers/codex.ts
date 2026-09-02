@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -8,8 +7,10 @@ import {
   toNumber,
   toTimestamp,
   resolveWindowLabel,
-  formatMoney
+  formatMoney,
+  asObject,
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/index.js';
 
 export const providerId = 'codex';
 export const providerName = 'Codex';
@@ -25,7 +26,7 @@ export const fetchQuota = async () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const accessToken = entry?.access ?? entry?.token;
-  const accountId = entry?.accountId;
+  const accountId = typeof entry?.accountId === 'string' ? entry.accountId : null;
 
   if (!accessToken) {
     return buildResult({
@@ -60,12 +61,13 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const primary = payload?.rate_limit?.primary_window ?? null;
-    const secondary = payload?.rate_limit?.secondary_window ?? null;
-    const credits = payload?.credits ?? null;
+    const payload = asObject(await response.json()) ?? {};
+    const rateLimit = asObject(payload.rate_limit) ?? {};
+    const primary = asObject(rateLimit.primary_window);
+    const secondary = asObject(rateLimit.secondary_window);
+    const credits = asObject(payload.credits);
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
@@ -101,8 +103,9 @@ export const fetchQuota = async () => {
     // Business/enterprise accounts expose a dollar spend cap under
     // `spend_control.individual_limit`. Surface it as an additive `credits`
     // window so existing consumers keep working.
-    if (payload?.spend_control?.individual_limit) {
-      const spendLimit = payload.spend_control.individual_limit;
+    const spendControl = asObject(payload.spend_control);
+    const spendLimit = asObject(spendControl?.individual_limit);
+    if (spendLimit) {
       const used = toNumber(spendLimit.used);
       const limit = toNumber(spendLimit.limit);
       const valueLabel = used !== null && limit !== null

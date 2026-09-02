@@ -32,7 +32,7 @@ delivery.
 Run the focused notification and SSE tests with:
 
 ```sh
-bun test packages/web/server/lib/notifications/*.test.js packages/web/server/sse-routes.test.js
+bun test packages/web/application-host/lib/notifications/*.test.js packages/web/server/sse-routes.test.js
 ```
 
 Before release, also run the full Web tests, typecheck, lint, and production build.

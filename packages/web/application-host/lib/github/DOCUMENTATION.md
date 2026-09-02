@@ -7,14 +7,14 @@
 
 ## Entrypoints and structure
 
-- `packages/web/server/lib/github/index.js`: public server entrypoint.
-- `packages/web/server/lib/github/routes.js`: Express route registration for `/api/github/*` endpoints.
-- `packages/web/server/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
-- `packages/web/server/lib/github/device-flow.js`: OAuth device flow.
-- `packages/web/server/lib/github/octokit.js`: Octokit factory for the current auth.
-- `packages/web/server/lib/github/repo/index.js`: remote URL parsing and directory-to-repo resolution.
-- `packages/web/server/lib/github/pr-status.js`: PR lookup across remotes, forks, and upstreams.
-- `packages/web/server/index.js`: API route layer that calls this module.
+- `packages/web/application-host/lib/github/index.js`: public server entrypoint.
+- `packages/web/application-host/lib/github/routes.js`: Express route registration for `/api/github/*` endpoints.
+- `packages/web/application-host/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
+- `packages/web/application-host/lib/github/device-flow.js`: OAuth device flow.
+- `packages/web/application-host/lib/github/octokit.js`: Octokit factory for the current auth.
+- `packages/web/application-host/lib/github/repo/index.js`: remote URL parsing and directory-to-repo resolution.
+- `packages/web/application-host/lib/github/pr-status.js`: PR lookup across remotes, forks, and upstreams.
+- `packages/web/application-host/index.js`: API route layer that calls this module.
 - `packages/web/src/api/github.ts`: web client wrapper for GitHub endpoints.
 
 ## Public exports
@@ -55,8 +55,8 @@
 ## PR integration overview
 
 - The UI asks `github.prStatus(directory, branch, remote?)` from `packages/web/src/api/github.ts`.
-- That hits `GET /api/github/pr/status` in `packages/web/server/index.js`.
-- The route calls `resolveGitHubPrStatus(...)` in `packages/web/server/lib/github/pr-status.js`.
+- That hits `GET /api/github/pr/status` in `packages/web/application-host/index.js`.
+- The route calls `resolveGitHubPrStatus(...)` in `packages/web/application-host/lib/github/pr-status.js`.
 - The resolver finds the most likely repo and PR for a local branch.
 - The route then enriches that result with checks, mergeability, and permission-related fields.
 - The client caches and shares the result between sidebar and Git view.

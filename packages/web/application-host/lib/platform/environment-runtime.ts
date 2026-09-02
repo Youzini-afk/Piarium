@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,15 +5,17 @@ import path from 'node:path';
 import { augmentPathWithBundledRipgrep } from './bundled-tools.js';
 import { mergePathValues, pathLooksUserConfigured } from './path-utils.js';
 
-const normalizeEnvironmentPath = (environment) => {
+type Environment = Record<string, string | undefined>;
+
+const normalizeEnvironmentPath = (environment: Environment): string => {
   if (typeof environment.PATH === 'string') return environment.PATH;
   const entry = Object.entries(environment).find(([key]) => key.toLowerCase() === 'path');
   return typeof entry?.[1] === 'string' ? entry[1] : '';
 };
 
-const parseNullSeparatedEnvironment = (raw) => {
+const parseNullSeparatedEnvironment = (raw: unknown): Environment | null => {
   if (typeof raw !== 'string' || raw.length === 0) return null;
-  const environment = {};
+  const environment: Environment = {};
   for (const entry of raw.split('\0')) {
     const separator = entry.indexOf('=');
     if (separator <= 0) continue;
@@ -26,16 +27,22 @@ const parseNullSeparatedEnvironment = (raw) => {
   return environment;
 };
 
-export const createPlatformEnvironmentRuntime = (options = {}) => {
+export const createPlatformEnvironmentRuntime = (options: {
+  fsModule?: typeof fs;
+  osModule?: typeof os;
+  pathModule?: typeof path;
+  processLike?: NodeJS.Process;
+  spawnSyncFn?: typeof spawnSync;
+} = {}) => {
   const processLike = options.processLike ?? process;
   const fsModule = options.fsModule ?? fs;
   const osModule = options.osModule ?? os;
   const pathModule = options.pathModule ?? path;
   const runSpawnSync = options.spawnSyncFn ?? spawnSync;
-  let cachedShellEnvironment;
-  let resolvedGitBinary = null;
+  let cachedShellEnvironment: Environment | null | undefined;
+  let resolvedGitBinary: string | null = null;
 
-  const isExecutable = (filePath) => {
+  const isExecutable = (filePath: unknown): filePath is string => {
     if (typeof filePath !== 'string' || !filePath.trim()) return false;
     try {
       const stat = fsModule.statSync(filePath);
@@ -48,7 +55,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     }
   };
 
-  const executableNames = (name) => {
+  const executableNames = (name: string): string[] => {
     if (processLike.platform !== 'win32' || pathModule.extname(name)) return [name];
     const extensions = String(processLike.env.PATHEXT || processLike.env.PathExt || '.COM;.EXE;.BAT;.CMD')
       .split(';')
@@ -57,7 +64,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     return [...extensions.map((extension) => `${name}${extension.startsWith('.') ? extension : `.${extension}`}`), name];
   };
 
-  const searchPathFor = (binaryName, searchPath = normalizeEnvironmentPath(processLike.env)) => {
+  const searchPathFor = (binaryName: unknown, searchPath = normalizeEnvironmentPath(processLike.env)): string | null => {
     const name = typeof binaryName === 'string' ? binaryName.trim() : '';
     if (!name) return null;
     for (const directory of String(searchPath || '').split(pathModule.delimiter).filter(Boolean)) {
@@ -69,7 +76,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     return null;
   };
 
-  const getWindowsShellEnvironment = () => {
+  const getWindowsShellEnvironment = (): Environment | null => {
     const script = [
       '$entries = [ordered]@{}',
       'Get-ChildItem Env: | ForEach-Object { $entries[$_.Name] = $_.Value }',
@@ -100,7 +107,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     return null;
   };
 
-  const getLoginShellEnvSnapshot = () => {
+  const getLoginShellEnvSnapshot = (): Environment | null => {
     if (cachedShellEnvironment !== undefined) return cachedShellEnvironment;
     if (processLike.platform === 'win32') {
       cachedShellEnvironment = getWindowsShellEnvironment();
@@ -130,7 +137,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     return cachedShellEnvironment;
   };
 
-  const applyLoginShellEnvSnapshot = () => {
+  const applyLoginShellEnvSnapshot = (): void => {
     const snapshot = getLoginShellEnvSnapshot();
     if (!snapshot) return;
     for (const [key, value] of Object.entries(snapshot)) {
@@ -144,7 +151,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     if (shellPath) processLike.env.PATH = mergePathValues(shellPath, currentPath, pathModule.delimiter);
   };
 
-  const buildAugmentedPath = () => {
+  const buildAugmentedPath = (): string => {
     const currentPath = normalizeEnvironmentPath(processLike.env);
     const shellPath = normalizeEnvironmentPath(getLoginShellEnvSnapshot() ?? {});
     const currentIsUserConfigured = pathLooksUserConfigured(currentPath, osModule.homedir(), pathModule.delimiter);
@@ -155,7 +162,7 @@ export const createPlatformEnvironmentRuntime = (options = {}) => {
     return environment.PATH || '';
   };
 
-  const resolveGitBinaryForSpawn = () => {
+  const resolveGitBinaryForSpawn = (): string => {
     if (processLike.platform !== 'win32') return 'git';
     if (resolvedGitBinary) return resolvedGitBinary;
     const explicit = [processLike.env.GIT_BINARY, processLike.env.PIARIUM_GIT_BINARY]

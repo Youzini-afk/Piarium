@@ -16,9 +16,19 @@ import {
 } from './errors.js';
 import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './inspect.js';
 import { createWorkspaceMutationAuthority } from './mutation-authority.js';
-import { createRecoveryJournalStore } from './recovery-journal.js';
+import {
+  createRecoveryJournalStore,
+  type RecoveryJournalDeleteRequest,
+  type RecoveryJournalListRequest,
+  type RecoveryJournalWriteRequest,
+} from './recovery-journal.js';
 import { createSerialQueues } from './serialize.js';
-import { createWorkspaceWatcher, type WorkspaceWatcher } from './watch.js';
+import {
+  createWorkspaceWatcher,
+  type WatchEvent,
+  type WorkspaceWatcher,
+  type WorkspaceWatchFs,
+} from './watch.js';
 import {
   createWorkspaceRegistry,
   looksLikeCanonicalWorkspaceId,
@@ -28,21 +38,21 @@ import {
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-interface DocumentResource {
+export interface DocumentResource {
   workspaceId: string;
   resourceId: string;
 }
 
-interface MutationToken {
+export interface MutationToken {
   workspaceId: string;
   epoch: number;
   owner: unknown;
 }
 
-interface MutationOwner {
+export interface MutationOwner {
   kind: string;
   id: string;
-  generation?: number;
+  generation?: number | undefined;
 }
 
 interface ResolvedWorkspacePath {
@@ -69,7 +79,7 @@ type SnapshotWithEpoch = SnapshotResult & { epoch: number };
 
 type WithoutContentResult =
   | { status: 'ready'; epoch: number; resource: DocumentResource; revision: string; encoding: string; bom: boolean; byteLength: number; modifiedAt?: string }
-  | SnapshotResult;
+  | Exclude<SnapshotWithEpoch, { status: 'ready' }>;
 
 interface WriteRequest {
   resource: DocumentResource;
@@ -78,6 +88,7 @@ interface WriteRequest {
   encoding: string;
   bom: boolean;
   expectedRevision: string | null;
+  operationId?: string | undefined;
 }
 
 interface MoveRequest {
@@ -85,12 +96,14 @@ interface MoveRequest {
   to: DocumentResource;
   token: MutationToken;
   expectedRevision: string;
+  operationId?: string | undefined;
 }
 
 interface DeleteRequest {
   resource: DocumentResource;
   token: MutationToken;
   expectedRevision: string;
+  operationId?: string | undefined;
 }
 
 interface ResolveWorkspaceInput {
@@ -98,7 +111,7 @@ interface ResolveWorkspaceInput {
   path?: string;
 }
 
-interface ResolveWorkspaceResult {
+export interface ResolveWorkspaceResult {
   workspaceId: string;
   hostId: string;
   epoch: number;
@@ -111,7 +124,7 @@ interface WatchSubscription {
 }
 
 interface WatcherRecord {
-  listeners: Set<(event: unknown) => void>;
+  listeners: Set<(event: WatchEvent) => void>;
   controller: WorkspaceWatcher | null;
   ready: Promise<WorkspaceWatcher | null> | null;
 }
@@ -137,7 +150,7 @@ interface DirtySurfaceSubscription {
   close: () => void;
 }
 
-interface DirtyBufferResource {
+export interface DirtyBufferResource {
   baseRevision: string | null;
   localEditRevision: number;
   resource: DocumentResource;
@@ -152,7 +165,7 @@ interface DirtyBufferRecord {
   workspaceId: string;
 }
 
-interface DirtyBufferPublication {
+export interface DirtyBufferPublication {
   generation: number;
   ownerId: string;
   resources: DirtyBufferResource[];
@@ -178,7 +191,7 @@ interface DirtyBarrier {
   workspaceId: string;
 }
 
-interface DirtyStateBarrierHandle {
+export interface DirtyStateBarrierHandle {
   barrierId: string;
   release: () => Promise<void>;
   settle: () => Promise<void>;
@@ -213,11 +226,30 @@ interface JournalMutationRequest {
   token?: MutationToken;
 }
 
-interface DocumentAuthorityOptions {
+type StaleEpochResult = { status: 'stale-epoch'; currentEpoch: number | undefined };
+
+export type DocumentReadResult = SnapshotWithEpoch;
+export type DocumentWriteResult =
+  | { status: 'written'; revision: string; byteLength: number; modifiedAt?: string | undefined }
+  | { status: 'conflict'; current: WithoutContentResult }
+  | StaleEpochResult;
+export type DocumentMoveResult =
+  | { status: 'moved'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt?: string | undefined }
+  | { status: 'missing'; resource: DocumentResource }
+  | { status: 'target-exists'; resource: DocumentResource }
+  | { status: 'conflict'; current: WithoutContentResult }
+  | StaleEpochResult;
+export type DocumentDeleteResult =
+  | { status: 'deleted'; resource: DocumentResource }
+  | { status: 'missing'; resource: DocumentResource }
+  | { status: 'conflict'; current: WithoutContentResult }
+  | StaleEpochResult;
+
+export interface DocumentAuthorityOptions {
   hostId: string;
   dataDir: string;
-  fsPromises?: typeof fs.promises;
-  fsModule?: typeof fs;
+  fsPromises?: DocumentFsPromises;
+  fsModule?: WorkspaceWatchFs;
   pathModule?: typeof path;
   processLike?: Pick<NodeJS.Process, 'pid' | 'platform' | 'kill'>;
   isTrusted?: (root: string) => Promise<boolean>;
@@ -227,6 +259,8 @@ interface DocumentAuthorityOptions {
   overflowLimit?: number;
   dirtyBarrierTimeoutMs?: number;
 }
+
+export type DocumentFsPromises = typeof fs.promises;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -351,7 +385,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       });
       return { workspace, resolved };
     } catch (error) {
-      fail(error);
+      return fail(error);
     }
     throw new DocumentPathError('Path is outside workspace');
   };
@@ -485,7 +519,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       });
       return resolved;
     } catch (error) {
-      fail(error);
+      return fail(error);
     }
     throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
   };
@@ -544,17 +578,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const read = (resource: DocumentResource) => queues.run(resourceKey(resource), async () => {
+  const read = (resource: DocumentResource): Promise<DocumentReadResult> => queues.run(resourceKey(resource), async () => {
     try {
       const mutation = await mutations.inspect(resource.workspaceId);
       const { resolved } = await resolveResourcePath(resource, true);
       return { ...(await snapshotFile(resource, resolved.absolutePath)), epoch: mutation.epoch };
     } catch (error) {
-      fail(error);
+      return fail(error);
     }
   });
 
-  const write = (request: WriteRequest) => queues.run(resourceKey(request.resource), async () => {
+  const write = (request: WriteRequest): Promise<DocumentWriteResult> => queues.run(resourceKey(request.resource), async () => {
     let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
@@ -598,13 +632,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
         return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
-      fail(error);
+      return fail(error);
     } finally {
       await writer?.close();
     }
   });
 
-  const move = (request: MoveRequest) => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
+  const move = (request: MoveRequest): Promise<DocumentMoveResult> => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
     let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       if (request.from.workspaceId !== request.to.workspaceId) {
@@ -646,13 +680,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
         return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
-      fail(error);
+      return fail(error);
     } finally {
       await writer?.close();
     }
   });
 
-  const remove = (request: DeleteRequest) => queues.run(resourceKey(request.resource), async () => {
+  const remove = (request: DeleteRequest): Promise<DocumentDeleteResult> => queues.run(resourceKey(request.resource), async () => {
     let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
@@ -673,13 +707,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
         return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
-      fail(error);
+      return fail(error);
     } finally {
       await writer?.close();
     }
   });
 
-  const watch = (workspaceId: string, listener: (event: unknown) => void): WatchSubscription => {
+  const watch = (workspaceId: string, listener: (event: WatchEvent) => void): WatchSubscription => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', {
         code: 'failed',
@@ -698,7 +732,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           fsPromises,
           pathModule,
           ...(overflowLimit !== undefined ? { overflowLimit } : {}),
-          onEvent: (event: unknown) => {
+          onEvent: (event) => {
             void mutations.observeWatchEvent(workspaceId, event).catch(() => undefined);
             for (const current of newRecord.listeners) current(event);
           },
@@ -763,11 +797,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const journalMutation = async (
+  const journalMutation = async <T extends { status: string }>(
     request: JournalMutationRequest,
     purpose: string,
-    operation: () => Promise<{ status: string }>,
-  ) => {
+    operation: () => Promise<T>,
+  ): Promise<T | StaleEpochResult> => {
     let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
     try {
       const workspaceId = request.workspaceId ?? request.token?.workspaceId;
@@ -780,7 +814,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
         return { status: 'stale-epoch', currentEpoch: (error as NodeJS.ErrnoException & { currentEpoch?: number }).currentEpoch };
       }
-      fail(error);
+      return fail(error);
     } finally {
       await writer?.close();
     }
@@ -788,8 +822,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
 
   const dirtyBufferKey = (ownerId: string, workspaceId: string): string => `${ownerId}\0${workspaceId}`;
   const publicDirtyBufferRecord = (record: DirtyBufferRecord): DirtyBufferPublication => {
-    const { publicationRevision: _publicationRevision, ...rest } = record;
-    return structuredClone(rest) as DirtyBufferPublication;
+    const result = structuredClone(record);
+    delete (result as Partial<DirtyBufferRecord>).publicationRevision;
+    return result;
   };
 
   const releaseDirtyBarrier = (barrier: DirtyBarrier, error?: unknown): void => {
@@ -1087,21 +1122,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     inspectWorkspace: async (workspaceId: string) => {
       try {
         const workspace = await loadWorkspace(workspaceId);
-        const mutationState = await mutations.inspect(workspaceId);
-        const { workspaceId: _wsId, ...rest } = mutationState as Record<string, unknown>;
+        const rest = { ...await mutations.inspect(workspaceId) } as Record<string, unknown>;
+        delete rest.workspaceId;
         return {
+          ...rest,
           workspaceId: workspace.workspaceId,
           hostId,
           root: workspace.root,
-          ...rest,
         };
       } catch (error) {
-        fail(error);
+        return fail(error);
       }
-      throw new DocumentAuthorityError('Workspace is not registered on this application host', {
-        code: 'failed',
-        statusCode: 404,
-      });
     },
     resolveScopeId,
     registerWriterForScope,
@@ -1111,7 +1142,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     move,
     delete: remove,
     watch,
-    listRecoveryJournals: (request: unknown) => journals.list(request as never),
+    listRecoveryJournals: (request: RecoveryJournalListRequest) => journals.list(request),
     readRecoveryJournal: (journalId: string) => journals.read(journalId),
     publishDirtyBuffers,
     clearDirtyBuffers,
@@ -1119,15 +1150,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     registerDirtySurface,
     beginDirtyStateBarrier,
     acknowledgeDirtyStateBarrier,
-    writeRecoveryJournal: (request: JournalMutationRequest) => journalMutation(
+    writeRecoveryJournal: (request: RecoveryJournalWriteRequest) => journalMutation(
       request,
       'document-recovery-journal-write',
-      () => journals.write(request as never),
+      () => journals.write(request),
     ),
-    deleteRecoveryJournal: (request: JournalMutationRequest) => journalMutation(
+    deleteRecoveryJournal: (request: RecoveryJournalDeleteRequest) => journalMutation(
       request,
       'document-recovery-journal-delete',
-      () => journals.delete(request as never),
+      () => journals.delete(request),
     ),
     mutationAuthority: mutations,
     inspectMutation: mutations.inspect,
@@ -1148,3 +1179,5 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     hasWatch: (workspaceId: string) => Boolean(watcherController(workspaceId)),
   };
 };
+
+export type DocumentAuthority = ReturnType<typeof createDocumentAuthority>;

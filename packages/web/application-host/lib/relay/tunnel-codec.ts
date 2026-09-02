@@ -1,7 +1,6 @@
-// @ts-nocheck
 // Tunnel mux frame codec (Layer 3 of the protocol spec). Pure functions, no I/O.
 // JS mirror of packages/ui/src/lib/relay/tunnel-codec.ts (+ the Layer 3
-// constants from protocol.ts) 鈥?MUST stay byte-compatible with those modules.
+// constants from protocol.ts) — MUST stay byte-compatible with those modules.
 // Frame layout: [1 byte frameType (high bit = fragment-continues)][4 byte BE streamId][payload].
 // Client-initiated streams use odd streamIds starting at 1; even ids are reserved.
 // Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
@@ -35,17 +34,24 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
-};
+} as const;
 
-const TUNNEL_FRAME_TYPE_VALUES = new Set(Object.values(TunnelFrameType));
+export interface TunnelFrame {
+  frameType: number;
+  hasMoreFragments: boolean;
+  payload: Uint8Array;
+  streamId: number;
+}
+
+const TUNNEL_FRAME_TYPE_VALUES = new Set<number>(Object.values(TunnelFrameType));
 
 /** @param {number} value */
-export const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
+export const isTunnelFrameType = (value: number): boolean => TUNNEL_FRAME_TYPE_VALUES.has(value);
 
 const MAX_STREAM_ID = 0xffffffff;
 
 export class TunnelCodecError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'TunnelCodecError';
   }
@@ -57,7 +63,7 @@ export class TunnelCodecError extends Error {
  * @param {Uint8Array} payload
  * @param {boolean} [hasMoreFragments]
  */
-export const encodeTunnelFrame = (frameType, streamId, payload, hasMoreFragments = false) => {
+export const encodeTunnelFrame = (frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments = false): Uint8Array => {
   if (!Number.isInteger(streamId) || streamId < 0 || streamId > MAX_STREAM_ID) {
     throw new TunnelCodecError('invalid stream id');
   }
@@ -78,17 +84,17 @@ export const encodeTunnelFrame = (frameType, streamId, payload, hasMoreFragments
  * @param {Uint8Array} frame
  * @returns {{ frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments: boolean }}
  */
-export const decodeTunnelFrame = (frame) => {
+export const decodeTunnelFrame = (frame: Uint8Array): TunnelFrame => {
   if (frame.length < TUNNEL_FRAME_HEADER_BYTES) {
     throw new TunnelCodecError('tunnel frame too short');
   }
   const rawType = frame[0];
-  const hasMoreFragments = (rawType & TUNNEL_FRAGMENT_FLAG) !== 0;
-  const frameType = rawType & ~TUNNEL_FRAGMENT_FLAG;
+  const hasMoreFragments = ((rawType ?? 0) & TUNNEL_FRAGMENT_FLAG) !== 0;
+  const frameType = (rawType ?? 0) & ~TUNNEL_FRAGMENT_FLAG;
   if (!isTunnelFrameType(frameType)) {
     throw new TunnelCodecError(`unknown tunnel frame type ${frameType}`);
   }
-  const streamId = ((frame[1] << 24) | (frame[2] << 16) | (frame[3] << 8) | frame[4]) >>> 0;
+  const streamId = (((frame[1] ?? 0) << 24) | ((frame[2] ?? 0) << 16) | ((frame[3] ?? 0) << 8) | (frame[4] ?? 0)) >>> 0;
   return {
     frameType,
     streamId,
@@ -101,14 +107,17 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /** @param {unknown} value */
-export const encodeJsonPayload = (value) => textEncoder.encode(JSON.stringify(value));
+export const encodeJsonPayload = (value: unknown): Uint8Array => textEncoder.encode(JSON.stringify(value));
 
 /**
  * @param {Uint8Array} payload
  * @param {(parsed: unknown) => boolean} validate
  */
-export const decodeJsonPayload = (payload, validate) => {
-  let parsed;
+export const decodeJsonPayload = <Value>(
+  payload: Uint8Array,
+  validate: (parsed: unknown) => parsed is Value,
+): Value => {
+  let parsed: unknown;
   try {
     parsed = JSON.parse(textDecoder.decode(payload));
   } catch {
@@ -125,12 +134,12 @@ export const decodeJsonPayload = (payload, validate) => {
  * @param {Uint8Array} bytes
  * @param {number} [chunkSize]
  */
-export const chunkPayload = (bytes, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES) => {
+export const chunkPayload = (bytes: Uint8Array, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES): Uint8Array[] => {
   if (chunkSize <= 0 || chunkSize > MAX_TUNNEL_PAYLOAD_BYTES) {
     throw new TunnelCodecError('invalid chunk size');
   }
   if (bytes.length === 0) return [new Uint8Array(0)];
-  const chunks = [];
+  const chunks: Uint8Array[] = [];
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     chunks.push(bytes.slice(offset, offset + chunkSize));
   }
@@ -144,7 +153,7 @@ export const chunkPayload = (bytes, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES) => {
  * @param {number} streamId
  * @param {Uint8Array} payload
  */
-export const encodeFragmentedMessage = (frameType, streamId, payload) => {
+export const encodeFragmentedMessage = (frameType: number, streamId: number, payload: Uint8Array): Uint8Array[] => {
   const chunks = chunkPayload(payload);
   return chunks.map((chunk, index) => encodeTunnelFrame(frameType, streamId, chunk, index < chunks.length - 1));
 };
@@ -154,14 +163,14 @@ export const encodeFragmentedMessage = (frameType, streamId, payload) => {
  * @param {number} [maxMessageBytes]
  */
 export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
-  const pending = new Map();
+  const pending = new Map<string, { chunks: Uint8Array[]; totalBytes: number }>();
   return {
     /**
      * Returns the complete message payload once all fragments arrived, or null
      * while more fragments are expected.
      * @param {{ frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments: boolean }} frame
      */
-    push(frame) {
+    push(frame: TunnelFrame): Uint8Array | null {
       const key = `${frame.streamId}:${frame.frameType}`;
       const entry = pending.get(key);
       if (!frame.hasMoreFragments && !entry) {
@@ -188,7 +197,7 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
       return message;
     },
     /** @param {number} streamId */
-    dropStream(streamId) {
+    dropStream(streamId: number): void {
       for (const key of pending.keys()) {
         if (key.startsWith(`${streamId}:`)) pending.delete(key);
       }
@@ -199,16 +208,17 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
 /**
  * Batch envelope encoder (mirror of tunnel-codec.ts encodeFrameBatch). Only used
  * when both peers negotiated `batch`. One encrypted WS message still equals one
- * encrypt() call 鈥?this only changes how many tunnel frames it carries.
+ * encrypt() call — this only changes how many tunnel frames it carries.
  * @param {Uint8Array[]} frames
  * @returns {Uint8Array}
  */
-export const encodeFrameBatch = (frames) => {
+export const encodeFrameBatch = (frames: Uint8Array[]): Uint8Array => {
   if (frames.length === 0) {
     throw new TunnelCodecError('cannot encode an empty frame batch');
   }
   if (frames.length === 1) {
     const frame = frames[0];
+    if (!frame) throw new TunnelCodecError('cannot encode an empty frame batch');
     const out = new Uint8Array(1 + frame.length);
     out[0] = BATCH_CONTAINER_TAG_SINGLE;
     out.set(frame, 1);
@@ -242,7 +252,7 @@ export const encodeFrameBatch = (frames) => {
  * @param {Uint8Array} plaintext
  * @returns {Uint8Array[]}
  */
-export const decodeFrameBatch = (plaintext) => {
+export const decodeFrameBatch = (plaintext: Uint8Array): Uint8Array[] => {
   if (plaintext.length < 1) {
     throw new TunnelCodecError('empty batch plaintext');
   }
@@ -253,17 +263,17 @@ export const decodeFrameBatch = (plaintext) => {
   if (tag !== BATCH_CONTAINER_TAG_BATCH) {
     throw new TunnelCodecError(`unknown batch container tag ${tag}`);
   }
-  const frames = [];
+  const frames: Uint8Array[] = [];
   let offset = 1;
   while (offset < plaintext.length) {
     if (offset + BATCH_FRAME_LENGTH_BYTES > plaintext.length) {
       throw new TunnelCodecError('truncated batch frame length');
     }
     const length =
-      ((plaintext[offset] << 24)
-        | (plaintext[offset + 1] << 16)
-        | (plaintext[offset + 2] << 8)
-        | plaintext[offset + 3]) >>> 0;
+      (((plaintext[offset] ?? 0) << 24)
+        | ((plaintext[offset + 1] ?? 0) << 16)
+        | ((plaintext[offset + 2] ?? 0) << 8)
+        | (plaintext[offset + 3] ?? 0)) >>> 0;
     offset += BATCH_FRAME_LENGTH_BYTES;
     if (offset + length > plaintext.length) {
       throw new TunnelCodecError('truncated batch frame body');
@@ -279,7 +289,7 @@ export const decodeFrameBatch = (plaintext) => {
 
 // Only high-volume body/stream data is buffered; setup/teardown/keepalive frames
 // flush immediately so TTFT, terminal echo, and liveness stay snappy.
-const BUFFERED_FRAME_TYPES = new Set([
+const BUFFERED_FRAME_TYPES = new Set<number>([
   TunnelFrameType.HttpBody,
   TunnelFrameType.WsText,
   TunnelFrameType.WsBinary,
@@ -303,28 +313,36 @@ export const DEFAULT_BATCH_MAX_FRAMES = 32;
  *   clearTimer?: (handle: any) => void,
  * }} options
  */
-export const createOutboundFrameBatcher = (options) => {
+export const createOutboundFrameBatcher = (options: {
+  clearTimer?: (handle: unknown) => void;
+  maxBatchBytes?: number;
+  maxBatchFrames?: number;
+  now?: () => number;
+  sendBatch: (plaintext: Uint8Array) => void;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  windowMs?: number;
+}) => {
   const windowMs = options.windowMs ?? DEFAULT_BATCH_WINDOW_MS;
   const maxBatchBytes = options.maxBatchBytes ?? DEFAULT_BATCH_MAX_BYTES;
   const maxBatchFrames = options.maxBatchFrames ?? DEFAULT_BATCH_MAX_FRAMES;
   const now = options.now ?? (() => Date.now());
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-  const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
+  const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 
-  let buffer = [];
+  let buffer: Uint8Array[] = [];
   let bufferedBytes = 0;
-  let timer = null;
+  let timer: unknown = null;
   let lastFlushAt = 0;
   let disposed = false;
 
-  const clearPendingTimer = () => {
+  const clearPendingTimer = (): void => {
     if (timer !== null) {
       clearTimer(timer);
       timer = null;
     }
   };
 
-  const flush = () => {
+  const flush = (): void => {
     clearPendingTimer();
     if (buffer.length === 0) return;
     const frames = buffer;
@@ -334,9 +352,9 @@ export const createOutboundFrameBatcher = (options) => {
     options.sendBatch(encodeFrameBatch(frames));
   };
 
-  const enqueue = (frame) => {
+  const enqueue = (frame: Uint8Array): void => {
     if (disposed) return;
-    const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
+    const frameType = (frame[0] ?? 0) & ~TUNNEL_FRAGMENT_FLAG;
     if (!BUFFERED_FRAME_TYPES.has(frameType)) {
       buffer.push(frame);
       flush();

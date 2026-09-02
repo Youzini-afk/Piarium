@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -8,8 +7,10 @@ import {
   toNumber,
   toTimestamp,
   resolveWindowLabel,
-  asNonEmptyString
+  asNonEmptyString,
+  asObject,
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/index.js';
 
 export const providerId = 'wafer';
 export const providerName = 'Wafer.ai';
@@ -61,14 +62,14 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const remaining = toNumber(payload?.remaining_included_requests);
-    const limit = toNumber(payload?.included_request_limit);
-    const overage = toNumber(payload?.overage_request_count);
-    const usedPercentRaw = toNumber(payload?.current_period_used_percent);
-    const windowStart = toTimestamp(payload?.window_start);
-    const windowEnd = toTimestamp(payload?.window_end);
-    const planTier = asNonEmptyString(payload?.plan_tier);
+    const payload = asObject(await response.json()) ?? {};
+    const remaining = toNumber(payload.remaining_included_requests);
+    const limit = toNumber(payload.included_request_limit);
+    const overage = toNumber(payload.overage_request_count);
+    const usedPercentRaw = toNumber(payload.current_period_used_percent);
+    const windowStart = toTimestamp(payload.window_start);
+    const windowEnd = toTimestamp(payload.window_end);
+    const planTier = asNonEmptyString(payload.plan_tier);
 
     if (remaining === null && limit === null && overage === null && usedPercentRaw === null) {
       return buildResult({
@@ -96,10 +97,10 @@ export const fetchQuota = async () => {
       if (planTier) parts.push(planTier);
       parts.push(`${remaining} / ${limit} left`);
       if (hasOverage) parts.push(`+${overage} overage`);
-      valueLabel = parts.join(' 路 ');
+      valueLabel = parts.join(' · ');
     }
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
     windows[windowLabel] = toUsageWindow({
       usedPercent,
       windowSeconds,

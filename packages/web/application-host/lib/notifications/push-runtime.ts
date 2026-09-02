@@ -1,11 +1,55 @@
-// @ts-nocheck
 import { createSettingsFileStore } from '@piarium/settings-store';
+import type { SettingsFileStore } from '@piarium/settings-store';
 
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
-const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const isLoopbackHttpOrigin = (value) => {
+interface PushSubscriptionRecord {
+  auth: string;
+  createdAt: number | null;
+  endpoint: string;
+  p256dh: string;
+  platform?: string | undefined;
+}
+
+interface PushSubscriptionInput {
+  auth: string;
+  endpoint: string;
+  p256dh: string;
+}
+
+interface PushSubscriptionStore extends Record<string, unknown> {
+  subscriptionsBySession: Record<string, unknown>;
+  version: number;
+}
+
+interface WebPushLike {
+  generateVAPIDKeys(): { privateKey: string; publicKey: string };
+  sendNotification(subscription: {
+    endpoint: string;
+    keys: { auth: string; p256dh: string };
+  }, payload: string): Promise<unknown>;
+  setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
+}
+
+interface PushRuntimeDependencies {
+  PUSH_SUBSCRIPTIONS_FILE_PATH: string;
+  pushSubscriptionsStore?: Pick<SettingsFileStore, 'read' | 'update'>;
+  readSettingsFromDisk: () => Promise<Record<string, unknown>>;
+  updateSettingsOnDisk: (
+    mutate: (settings: Record<string, unknown>) => Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  webPush: WebPushLike;
+}
+
+interface VisibilityState {
+  platform?: string | undefined;
+  updatedAt: number;
+  visible: boolean;
+}
+
+const isLoopbackHttpOrigin = (value: unknown): boolean => {
   if (typeof value !== 'string') {
     return false;
   }
@@ -15,7 +59,7 @@ const isLoopbackHttpOrigin = (value) => {
     || value.startsWith('http://[::1]');
 };
 
-export const createPushRuntime = (deps) => {
+export const createPushRuntime = (deps: PushRuntimeDependencies) => {
   const {
     webPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
@@ -23,7 +67,7 @@ export const createPushRuntime = (deps) => {
     updateSettingsOnDisk,
   } = deps;
 
-  const emptyPushSubscriptions = () => ({
+  const emptyPushSubscriptions = (): PushSubscriptionStore => ({
     version: PUSH_SUBSCRIPTIONS_VERSION,
     subscriptionsBySession: {},
   });
@@ -33,8 +77,8 @@ export const createPushRuntime = (deps) => {
   });
   let pushInitialized = false;
 
-  const uiVisibilityByToken = new Map();
-  const pruneUiVisibility = (now = Date.now()) => {
+  const uiVisibilityByToken = new Map<string, VisibilityState>();
+  const pruneUiVisibility = (now = Date.now()): void => {
     for (const [token, state] of uiVisibilityByToken) {
       if (!state || now - state.updatedAt > UI_VISIBILITY_TTL_MS) {
         uiVisibilityByToken.delete(token);
@@ -42,7 +86,7 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const readPushSubscriptionsFromDisk = async () => {
+  const readPushSubscriptionsFromDisk = async (): Promise<PushSubscriptionStore> => {
     try {
       const parsed = await pushSubscriptionsStore.read();
       if (!isRecord(parsed)) {
@@ -63,7 +107,9 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const persistPushSubscriptionUpdate = async (mutate) => {
+  const persistPushSubscriptionUpdate = async (
+    mutate: (current: PushSubscriptionStore) => PushSubscriptionStore,
+  ): Promise<Record<string, unknown>> => {
     return pushSubscriptionsStore.update((stored) => {
       if (stored.version !== PUSH_SUBSCRIPTIONS_VERSION) {
         throw new Error(`Unsupported push subscriptions version: ${String(stored.version)}`);
@@ -81,14 +127,14 @@ export const createPushRuntime = (deps) => {
 
   const getOrCreateVapidKeys = async () => {
     const settings = await readSettingsFromDisk();
-    const existing = settings?.vapidKeys;
+    const existing = isRecord(settings.vapidKeys) ? settings.vapidKeys : null;
     if (existing && typeof existing.publicKey === 'string' && typeof existing.privateKey === 'string') {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
     }
 
     const generated = webPush.generateVAPIDKeys();
     const updated = await updateSettingsOnDisk((current) => {
-      const currentKeys = current?.vapidKeys;
+      const currentKeys = isRecord(current.vapidKeys) ? current.vapidKeys : null;
       if (currentKeys && typeof currentKeys.publicKey === 'string' && typeof currentKeys.privateKey === 'string') {
         return current;
       }
@@ -100,14 +146,19 @@ export const createPushRuntime = (deps) => {
         },
       };
     });
-    return updated.vapidKeys;
+    const keys = isRecord(updated.vapidKeys) ? updated.vapidKeys : null;
+    if (!keys || typeof keys.publicKey !== 'string' || typeof keys.privateKey !== 'string') {
+      throw new Error('VAPID key persistence returned an invalid keypair');
+    }
+    return { publicKey: keys.publicKey, privateKey: keys.privateKey };
   };
 
-  const normalizePushSubscriptions = (record) => {
+  const normalizePushSubscriptions = (record: unknown): PushSubscriptionRecord[] => {
     if (!Array.isArray(record)) return [];
     return record
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null;
+      .map((value): PushSubscriptionRecord | null => {
+        const entry = isRecord(value) ? value : null;
+        if (!entry) return null;
         const endpoint = entry.endpoint;
         const p256dh = entry.p256dh;
         const auth = entry.auth;
@@ -122,10 +173,15 @@ export const createPushRuntime = (deps) => {
           platform: typeof entry.platform === 'string' ? entry.platform : undefined,
         };
       })
-      .filter(Boolean);
+      .filter((entry): entry is PushSubscriptionRecord => Boolean(entry));
   };
 
-  const addOrUpdatePushSubscription = async (uiSessionToken, subscription, userAgent, platform) => {
+  const addOrUpdatePushSubscription = async (
+    uiSessionToken: string,
+    subscription: PushSubscriptionInput,
+    userAgent?: string,
+    platform?: string,
+  ): Promise<void> => {
     if (!uiSessionToken) {
       return;
     }
@@ -163,7 +219,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const removePushSubscription = async (uiSessionToken, endpoint) => {
+  const removePushSubscription = async (uiSessionToken: string, endpoint: string): Promise<void> => {
     if (!uiSessionToken || !endpoint) return;
 
     await ensurePushInitialized();
@@ -181,7 +237,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const removePushSubscriptionFromAllSessions = async (endpoint) => {
+  const removePushSubscriptionFromAllSessions = async (endpoint: string): Promise<void> => {
     if (!endpoint) return;
 
     await ensurePushInitialized();
@@ -201,7 +257,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const sendPushToSubscription = async (sub, payload) => {
+  const sendPushToSubscription = async (sub: PushSubscriptionRecord, payload: unknown): Promise<void> => {
     await ensurePushInitialized();
     const body = JSON.stringify(payload);
 
@@ -216,7 +272,7 @@ export const createPushRuntime = (deps) => {
     try {
       await webPush.sendNotification(pushSubscription, body);
     } catch (error) {
-      const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : null;
+      const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null;
       if (statusCode === 410 || statusCode === 404) {
         await removePushSubscriptionFromAllSessions(sub.endpoint);
         return;
@@ -225,11 +281,11 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const sendPushToAllUiSessions = async (payload, options = {}) => {
+  const sendPushToAllUiSessions = async (payload: unknown, options: { requireNoSse?: boolean } = {}): Promise<void> => {
     const requireNoSse = options.requireNoSse === true;
     const store = await readPushSubscriptionsFromDisk();
     const sessions = store.subscriptionsBySession || {};
-    const subscriptionsByEndpoint = new Map();
+    const subscriptionsByEndpoint = new Map<string, PushSubscriptionRecord>();
 
     for (const record of Object.values(sessions)) {
       const subscriptions = normalizePushSubscriptions(record);
@@ -256,12 +312,12 @@ export const createPushRuntime = (deps) => {
   };
 
   // A client is "mobile" if it reports a native mobile platform. Anything else (web, desktop,
-  // vscode, or an older client that doesn't report a platform) is treated as interactive 鈥?i.e.
+  // vscode, or an older client that doesn't report a platform) is treated as interactive — i.e.
   // a surface where the user would actually see the in-app notification.
   const MOBILE_PLATFORMS = new Set(['ios', 'android']);
-  const isMobilePlatform = (platform) => typeof platform === 'string' && MOBILE_PLATFORMS.has(platform);
+  const isMobilePlatform = (platform: unknown): boolean => typeof platform === 'string' && MOBILE_PLATFORMS.has(platform);
 
-  const updateUiVisibility = (token, visible, platform) => {
+  const updateUiVisibility = (token: string, visible: unknown, platform?: string): void => {
     if (!token) return;
     const now = Date.now();
     const nextVisible = Boolean(visible);
@@ -271,7 +327,7 @@ export const createPushRuntime = (deps) => {
     uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now, platform: nextPlatform });
   };
 
-  const isAnyUiVisible = () => {
+  const isAnyUiVisible = (): boolean => {
     const now = Date.now();
     pruneUiVisibility(now);
     for (const state of uiVisibilityByToken.values()) {
@@ -286,7 +342,7 @@ export const createPushRuntime = (deps) => {
   // suppress native push to the phone: an active desktop already shows the notification, so the
   // phone doesn't need it. Deliberately based on the desktop's visibility (reliable), never the
   // phone's own (a backgrounded WKWebView can't report "hidden" before iOS suspends it).
-  const isAnyInteractiveClientVisible = () => {
+  const isAnyInteractiveClientVisible = (): boolean => {
     const now = Date.now();
     pruneUiVisibility(now);
     for (const state of uiVisibilityByToken.values()) {
@@ -301,14 +357,14 @@ export const createPushRuntime = (deps) => {
     return false;
   };
 
-  const isUiVisible = (token) => {
+  const isUiVisible = (token: string): boolean => {
     const now = Date.now();
     pruneUiVisibility(now);
     const state = uiVisibilityByToken.get(token);
     return state?.visible === true && now - state.updatedAt <= UI_VISIBILITY_TTL_MS;
   };
 
-  const resolveVapidSubject = async () => {
+  const resolveVapidSubject = async (): Promise<string> => {
     const configured = process.env.PIARIUM_VAPID_SUBJECT;
     if (typeof configured === 'string' && configured.trim().length > 0) {
       return configured.trim();
@@ -334,12 +390,13 @@ export const createPushRuntime = (deps) => {
         return trimmed;
       }
     } catch {
+      // Settings are optional; fall back to the local mailto subject.
     }
 
     return 'mailto:piarium@localhost';
   };
 
-  const ensurePushInitialized = async () => {
+  const ensurePushInitialized = async (): Promise<void> => {
     if (pushInitialized) return;
     const keys = await getOrCreateVapidKeys();
     const subject = await resolveVapidSubject();
@@ -352,7 +409,7 @@ export const createPushRuntime = (deps) => {
     pushInitialized = true;
   };
 
-  const setPushInitialized = (value) => {
+  const setPushInitialized = (value: unknown): void => {
     pushInitialized = value === true;
   };
 

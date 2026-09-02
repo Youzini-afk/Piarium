@@ -1,8 +1,30 @@
-// @ts-nocheck
-export const createSettingsHelpers = (dependencies) => {
+export type SettingsRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is SettingsRecord => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+export interface SettingsHelpersDependencies {
+  normalizePathForPersistence(value: unknown): unknown;
+  normalizeDirectoryPath?: ((value: unknown) => unknown) | undefined;
+  normalizeTunnelBootstrapTtlMs(value: number): number | null;
+  normalizeTunnelSessionTtlMs(value: number): number;
+  normalizeTunnelProvider(value: string): unknown;
+  normalizeTunnelMode(value: string): unknown;
+  normalizeOptionalPath(value: string): unknown;
+  normalizeManagedRemoteTunnelHostname(value: unknown): unknown;
+  normalizeManagedRemoteTunnelPresets(value: unknown): unknown;
+  normalizeManagedRemoteTunnelPresetTokens(value: unknown): unknown;
+  sanitizeTypographySizesPartial(value: unknown): unknown;
+  normalizeStringArray(value: unknown): string[];
+  sanitizeModelRefs(value: unknown, limit: number): unknown;
+  sanitizeSkillCatalogs(value: unknown): unknown;
+  sanitizeProjects(value: unknown): unknown;
+}
+
+export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies) => {
   const {
     normalizePathForPersistence,
-    normalizeDirectoryPath,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
     normalizeTunnelProvider,
@@ -31,11 +53,11 @@ export const createSettingsHelpers = (dependencies) => {
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
 
-  const sanitizeShortcutOverrides = (value) => {
+  const sanitizeShortcutOverrides = (value: unknown): Record<string, string> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
     }
-    const result = {};
+    const result: Record<string, string> = {};
     for (const [rawKey, rawValue] of Object.entries(value)) {
       const key = typeof rawKey === 'string' ? rawKey.trim() : '';
       const combo = typeof rawValue === 'string' ? rawValue.trim() : '';
@@ -45,19 +67,19 @@ export const createSettingsHelpers = (dependencies) => {
     return result;
   };
 
-  const sanitizeRecentEfforts = (value) => {
+  const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
     }
-    const result = {};
-    const seenKeys = new Set();
+    const result: Record<string, string[]> = {};
+    const seenKeys = new Set<string>();
     let count = 0;
     for (const [rawKey, rawVariants] of Object.entries(value)) {
       const key = typeof rawKey === 'string' ? rawKey.trim() : '';
       if (!key || seenKeys.has(key)) continue;
       if (!Array.isArray(rawVariants)) continue;
-      const variants = [];
-      const seenVariants = new Set();
+      const variants: string[] = [];
+      const seenVariants = new Set<string>();
       for (const rawVariant of rawVariants) {
         const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
         if (!variant || seenVariants.has(variant)) continue;
@@ -74,7 +96,10 @@ export const createSettingsHelpers = (dependencies) => {
     return count > 0 ? result : null;
   };
 
-  const normalizePwaAppName = (value, fallback = '') => {
+  const normalizePwaAppName = (
+    value: unknown,
+    fallback: string | undefined = '',
+  ): string | undefined => {
     if (typeof value !== 'string') {
       return fallback;
     }
@@ -85,7 +110,10 @@ export const createSettingsHelpers = (dependencies) => {
     return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
   };
 
-  const normalizePwaOrientation = (value, fallback = 'system') => {
+  const normalizePwaOrientation = (
+    value: unknown,
+    fallback: string | undefined = 'system',
+  ): string | undefined => {
     if (typeof value !== 'string') {
       return fallback;
     }
@@ -96,7 +124,10 @@ export const createSettingsHelpers = (dependencies) => {
     return fallback;
   };
 
-  const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+  const normalizeMobileKeyboardMode = (
+    value: unknown,
+    fallback: string | null | undefined = 'native',
+  ): string | null | undefined => {
     if (typeof value !== 'string') {
       return fallback;
     }
@@ -107,21 +138,13 @@ export const createSettingsHelpers = (dependencies) => {
     return fallback;
   };
 
-  const sanitizeMobileKeyboardMode = (value) => {
-    if (typeof value !== 'string') {
-      return undefined;
-    }
-    const normalized = value.trim();
-    return MOBILE_KEYBOARD_MODE_VALUES.has(normalized) ? normalized : undefined;
-  };
-
-  const sanitizeSettingsUpdate = (payload) => {
+  const sanitizeSettingsUpdate = (payload: unknown): SettingsRecord => {
     if (!payload || typeof payload !== 'object') {
       return {};
     }
 
-    const candidate = payload;
-    const result = {};
+    const candidate = payload as SettingsRecord;
+    const result: SettingsRecord = {};
 
     if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
       result.themeId = candidate.themeId;
@@ -190,8 +213,9 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
     if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
-      const sessions = {};
-      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      const permissionAutoAccept = candidate.permissionAutoAccept as SettingsRecord;
+      const sessions: Record<string, boolean> = {};
+      const sourceSessions = permissionAutoAccept.sessions;
       if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
         for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
           if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
@@ -199,9 +223,9 @@ export const createSettingsHelpers = (dependencies) => {
       }
       result.permissionAutoAccept = {
         sessions,
-        revision: Number.isSafeInteger(candidate.permissionAutoAccept.revision)
-          && candidate.permissionAutoAccept.revision >= 0
-          ? candidate.permissionAutoAccept.revision
+        revision: Number.isSafeInteger(permissionAutoAccept.revision)
+          && (permissionAutoAccept.revision as number) >= 0
+          ? permissionAutoAccept.revision
           : 0,
       };
     }
@@ -645,7 +669,7 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
-    // Message limit 鈥?single setting for fetch / trim / Load More chunk
+    // Message limit — single setting for fetch / trim / Load More chunk
     if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {
       result.messageLimit = Math.max(10, Math.min(500, Math.round(candidate.messageLimit)));
     }
@@ -657,7 +681,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     // Usage model selections - which models appear in dropdown
     if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {
-      const sanitized = {};
+      const sanitized: Record<string, string[]> = {};
       for (const [providerId, models] of Object.entries(candidate.usageSelectedModels)) {
         if (typeof providerId === 'string' && Array.isArray(models)) {
           const validModels = models.filter((m) => typeof m === 'string' && m.length > 0);
@@ -673,7 +697,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     // Usage page collapsed families - for "Other Models" section
     if (candidate.usageCollapsedFamilies && typeof candidate.usageCollapsedFamilies === 'object') {
-      const sanitized = {};
+      const sanitized: Record<string, string[]> = {};
       for (const [providerId, families] of Object.entries(candidate.usageCollapsedFamilies)) {
         if (typeof providerId === 'string' && Array.isArray(families)) {
           const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
@@ -689,7 +713,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     // Header dropdown expanded families (inverted - stores EXPANDED, default all collapsed)
     if (candidate.usageExpandedFamilies && typeof candidate.usageExpandedFamilies === 'object') {
-      const sanitized = {};
+      const sanitized: Record<string, string[]> = {};
       for (const [providerId, families] of Object.entries(candidate.usageExpandedFamilies)) {
         if (typeof providerId === 'string' && Array.isArray(families)) {
           const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
@@ -705,21 +729,22 @@ export const createSettingsHelpers = (dependencies) => {
 
     // Custom model groups configuration
     if (candidate.usageModelGroups && typeof candidate.usageModelGroups === 'object') {
-      const sanitized = {};
+      const sanitized: Record<string, SettingsRecord> = {};
       for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
-        if (typeof providerId !== 'string') continue;
+        if (typeof providerId !== 'string' || !isRecord(config)) continue;
 
-        const providerConfig = {};
+        const providerConfig: SettingsRecord = {};
 
         // customGroups: array of {id, label, models, order}
         if (Array.isArray(config.customGroups)) {
           const validGroups = config.customGroups
-            .filter((g) => g && typeof g.id === 'string' && typeof g.label === 'string')
+            .filter((group): group is SettingsRecord => isRecord(group)
+              && typeof group.id === 'string' && typeof group.label === 'string')
             .map((g) => ({
-              id: g.id.slice(0, 64),
-              label: g.label.slice(0, 128),
+              id: (g.id as string).slice(0, 64),
+              label: (g.label as string).slice(0, 128),
               models: Array.isArray(g.models)
-                ? g.models.filter((m) => typeof m === 'string').slice(0, 500)
+                ? g.models.filter((model): model is string => typeof model === 'string').slice(0, 500)
                 : [],
               order: typeof g.order === 'number' ? g.order : 0,
             }));
@@ -730,7 +755,7 @@ export const createSettingsHelpers = (dependencies) => {
 
         // modelAssignments: Record<modelName, groupId>
         if (config.modelAssignments && typeof config.modelAssignments === 'object') {
-          const assignments = {};
+          const assignments: Record<string, string> = {};
           for (const [model, groupId] of Object.entries(config.modelAssignments)) {
             if (typeof model === 'string' && typeof groupId === 'string') {
               assignments[model] = groupId;
@@ -743,7 +768,7 @@ export const createSettingsHelpers = (dependencies) => {
 
         // renamedGroups: Record<groupId, label>
         if (config.renamedGroups && typeof config.renamedGroups === 'object') {
-          const renamed = {};
+          const renamed: Record<string, string> = {};
           for (const [groupId, label] of Object.entries(config.renamedGroups)) {
             if (typeof groupId === 'string' && typeof label === 'string') {
               renamed[groupId] = label.slice(0, 128);
@@ -838,7 +863,7 @@ export const createSettingsHelpers = (dependencies) => {
     return result;
   };
 
-  const mergePersistedSettings = (current, changes) => {
+  const mergePersistedSettings = (current: SettingsRecord, changes: SettingsRecord): SettingsRecord => {
     const baseBookmarks = Array.isArray(changes.securityScopedBookmarks)
       ? changes.securityScopedBookmarks
       : Array.isArray(current.securityScopedBookmarks)
@@ -847,8 +872,8 @@ export const createSettingsHelpers = (dependencies) => {
 
     const nextTypographySizes = changes.typographySizes
       ? {
-          ...(current.typographySizes || {}),
-          ...changes.typographySizes
+          ...(isRecord(current.typographySizes) ? current.typographySizes : {}),
+          ...(isRecord(changes.typographySizes) ? changes.typographySizes : {}),
         }
       : current.typographySizes;
 
@@ -857,7 +882,7 @@ export const createSettingsHelpers = (dependencies) => {
       ...changes,
       securityScopedBookmarks: Array.from(
         new Set(
-          baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
+          baseBookmarks.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
         )
       ),
       typographySizes: nextTypographySizes
@@ -866,7 +891,7 @@ export const createSettingsHelpers = (dependencies) => {
     return next;
   };
 
-  const formatSettingsResponse = (settings) => {
+  const formatSettingsResponse = (settings: SettingsRecord): SettingsRecord => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);

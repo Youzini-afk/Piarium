@@ -1,8 +1,8 @@
-// @ts-nocheck
 import fs from 'fs';
 import path from 'path';
 import { resolvePiariumDataDir } from '../platform/data-paths.js';
 import { createSettingsFileStore } from '@piarium/settings-store';
+import type { GitHubAuthEntry, GitHubUser, SetGitHubAuthInput } from './types.js';
 
 const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
 
@@ -15,13 +15,13 @@ const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
 export const GH_CLI_ACCOUNT_ID = 'gh-cli';
 
-function ensureStorageDir() {
+function ensureStorageDir(): void {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
   }
 }
 
-function readJsonFile() {
+function readJsonFile(): unknown {
   ensureStorageDir();
   if (!fs.existsSync(STORAGE_FILE)) {
     return null;
@@ -32,7 +32,7 @@ function readJsonFile() {
     if (!trimmed) {
       return null;
     }
-    const parsed = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(trimmed);
     if (!parsed || typeof parsed !== 'object') {
       return null;
     }
@@ -43,7 +43,7 @@ function readJsonFile() {
   }
 }
 
-function writeJsonFile(payload) {
+function writeJsonFile(payload: unknown): void {
   ensureStorageDir();
 
   // Atomic write so multiple Piarium instances can safely share the same file.
@@ -63,7 +63,11 @@ function writeJsonFile(payload) {
   }
 }
 
-function resolveAccountId({ user, accessToken, accountId }) {
+function resolveAccountId({ user, accessToken, accountId }: {
+  accessToken?: string;
+  accountId?: string;
+  user?: GitHubUser | null;
+}): string {
   if (typeof accountId === 'string' && accountId.trim()) {
     return accountId.trim();
   }
@@ -79,41 +83,45 @@ function resolveAccountId({ user, accessToken, accountId }) {
   return '';
 }
 
-function normalizeAuthEntry(entry) {
-  if (!entry || typeof entry !== 'object') return null;
-  const accessToken = typeof entry.accessToken === 'string' ? entry.accessToken : '';
+function normalizeAuthEntry(entry: unknown): GitHubAuthEntry | null {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  const value = entry as Record<string, unknown>;
+  const accessToken = typeof value.accessToken === 'string' ? value.accessToken : '';
   if (!accessToken) return null;
-  const user = entry.user && typeof entry.user === 'object'
+  const rawUser = value.user && typeof value.user === 'object' && !Array.isArray(value.user)
+    ? value.user as Record<string, unknown>
+    : null;
+  const user: GitHubUser | null = rawUser
     ? {
-      login: typeof entry.user.login === 'string' ? entry.user.login : null,
-      avatarUrl: typeof entry.user.avatarUrl === 'string' ? entry.user.avatarUrl : null,
-      id: typeof entry.user.id === 'number' ? entry.user.id : null,
-      name: typeof entry.user.name === 'string' ? entry.user.name : null,
-      email: typeof entry.user.email === 'string' ? entry.user.email : null,
+      login: typeof rawUser.login === 'string' ? rawUser.login : null,
+      avatarUrl: typeof rawUser.avatarUrl === 'string' ? rawUser.avatarUrl : null,
+      id: typeof rawUser.id === 'number' ? rawUser.id : null,
+      name: typeof rawUser.name === 'string' ? rawUser.name : null,
+      email: typeof rawUser.email === 'string' ? rawUser.email : null,
     }
     : null;
 
   const accountId = resolveAccountId({
     user,
     accessToken,
-    accountId: typeof entry.accountId === 'string' ? entry.accountId : '',
+    accountId: typeof value.accountId === 'string' ? value.accountId : '',
   });
 
   return {
     accessToken,
-    scope: typeof entry.scope === 'string' ? entry.scope : '',
-    tokenType: typeof entry.tokenType === 'string' ? entry.tokenType : 'bearer',
-    createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
+    scope: typeof value.scope === 'string' ? value.scope : '',
+    tokenType: typeof value.tokenType === 'string' ? value.tokenType : 'bearer',
+    createdAt: typeof value.createdAt === 'number' ? value.createdAt : null,
     user,
-    current: Boolean(entry.current),
+    current: Boolean(value.current),
     accountId,
   };
 }
 
-function normalizeAuthList(raw) {
+function normalizeAuthList(raw: unknown): { changed: boolean; list: GitHubAuthEntry[] } {
   const list = (Array.isArray(raw) ? raw : [raw])
     .map((entry) => normalizeAuthEntry(entry))
-    .filter(Boolean);
+    .filter((entry): entry is GitHubAuthEntry => entry !== null);
 
   if (!list.length) {
     return { list: [], changed: false };
@@ -145,7 +153,7 @@ function normalizeAuthList(raw) {
   return { list, changed };
 }
 
-function readAuthList() {
+function readAuthList(): GitHubAuthEntry[] {
   const data = readJsonFile();
   if (!data) {
     return [];
@@ -157,11 +165,11 @@ function readAuthList() {
   return list;
 }
 
-function writeAuthList(list) {
+function writeAuthList(list: GitHubAuthEntry[]): void {
   writeJsonFile(list);
 }
 
-export function getGitHubAuth() {
+export function getGitHubAuth(): GitHubAuthEntry | null {
   const list = readAuthList();
   if (!list.length) {
     return null;
@@ -185,29 +193,29 @@ export function getGitHubAuthAccounts() {
     }));
 }
 
-export function setGitHubAuth({ accessToken, scope, tokenType, user, accountId }) {
+export function setGitHubAuth({ accessToken, scope, tokenType, user, accountId }: SetGitHubAuthInput): GitHubAuthEntry {
   if (!accessToken || typeof accessToken !== 'string') {
     throw new Error('accessToken is required');
   }
-  const normalizedUser = user && typeof user === 'object'
+  const normalizedUser: GitHubUser | undefined = user && typeof user === 'object'
     ? {
-      login: typeof user.login === 'string' ? user.login : undefined,
-      avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : undefined,
-      id: typeof user.id === 'number' ? user.id : undefined,
-      name: typeof user.name === 'string' ? user.name : undefined,
-      email: typeof user.email === 'string' ? user.email : undefined,
+      login: typeof user.login === 'string' ? user.login : null,
+      avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : null,
+      id: typeof user.id === 'number' ? user.id : null,
+      name: typeof user.name === 'string' ? user.name : null,
+      email: typeof user.email === 'string' ? user.email : null,
     }
     : undefined;
 
   const resolvedAccountId = resolveAccountId({
-    user: normalizedUser,
     accessToken,
-    accountId,
+    ...(normalizedUser ? { user: normalizedUser } : {}),
+    ...(accountId ? { accountId } : {}),
   });
 
   const list = readAuthList();
   const existingIndex = list.findIndex((entry) => entry.accountId === resolvedAccountId);
-  const nextEntry = {
+  const nextEntry: GitHubAuthEntry = {
     accessToken,
     scope: typeof scope === 'string' ? scope : '',
     tokenType: typeof tokenType === 'string' ? tokenType : 'bearer',
@@ -230,7 +238,7 @@ export function setGitHubAuth({ accessToken, scope, tokenType, user, accountId }
   return nextEntry;
 }
 
-export async function activateGitHubAuth(accountId) {
+export async function activateGitHubAuth(accountId: unknown): Promise<boolean> {
   if (typeof accountId !== 'string' || !accountId.trim()) {
     return false;
   }
@@ -247,7 +255,7 @@ export async function activateGitHubAuth(accountId) {
   return true;
 }
 
-export function clearGitHubAuth() {
+export function clearGitHubAuth(): boolean {
   try {
     const list = readAuthList();
     if (!list.length) {
@@ -271,7 +279,11 @@ export function clearGitHubAuth() {
   }
 }
 
-export function getGitHubClientId() {
+const isMissingFileError = (error: unknown): boolean => (
+  Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
+);
+
+export function getGitHubClientId(): string {
   const raw = process.env.PIARIUM_GITHUB_CLIENT_ID;
   const clientId = typeof raw === 'string' ? raw.trim() : '';
   if (clientId) return clientId;
@@ -280,13 +292,13 @@ export function getGitHubClientId() {
     const stored = settingsStore.readSync().githubClientId;
     if (typeof stored === 'string' && stored.trim()) return stored.trim();
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if (!isMissingFileError(error)) throw error;
   }
 
   return DEFAULT_GITHUB_CLIENT_ID;
 }
 
-export function getGitHubScopes() {
+export function getGitHubScopes(): string {
   const raw = process.env.PIARIUM_GITHUB_SCOPES;
   const fromEnv = typeof raw === 'string' ? raw.trim() : '';
   if (fromEnv) return fromEnv;
@@ -295,7 +307,7 @@ export function getGitHubScopes() {
     const stored = settingsStore.readSync().githubScopes;
     if (typeof stored === 'string' && stored.trim()) return stored.trim();
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if (!isMissingFileError(error)) throw error;
   }
 
   return DEFAULT_GITHUB_SCOPES;
@@ -303,11 +315,11 @@ export function getGitHubScopes() {
 
 export const GITHUB_AUTH_FILE = STORAGE_FILE;
 
-export function isGhCliDisabled() {
+export function isGhCliDisabled(): boolean {
   return Boolean(settingsStore.readSync().ghCliDisabled);
 }
 
-export async function setGhCliDisabled(disabled) {
+export async function setGhCliDisabled(disabled: unknown): Promise<void> {
   await settingsStore.update((settings) => {
     settings.ghCliDisabled = Boolean(disabled);
     if (settings.ghCliDisabled) settings.ghCliActive = false;
@@ -315,12 +327,12 @@ export async function setGhCliDisabled(disabled) {
   });
 }
 
-export function isGhCliActive() {
+export function isGhCliActive(): boolean {
   const settings = settingsStore.readSync();
   return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
 }
 
-export async function setGhCliActive(active) {
+export async function setGhCliActive(active: unknown): Promise<void> {
   await settingsStore.update((settings) => {
     settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
     return settings;

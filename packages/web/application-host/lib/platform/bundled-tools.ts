@@ -1,13 +1,12 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
-const resolveRipgrepPackageJsonCandidates = () => {
+const resolveRipgrepPackageJsonCandidates = (): string[] => {
   const packageNames = ['@vscode/ripgrep', 'ripgrep'];
-  const candidates = [];
+  const candidates: string[] = [];
   for (const packageName of packageNames) {
     try {
       candidates.push(require.resolve(`${packageName}/package.json`));
@@ -19,13 +18,13 @@ const resolveRipgrepPackageJsonCandidates = () => {
   return candidates;
 };
 
-const getBinaryNames = (platform = process.platform) => (
+const getBinaryNames = (platform: NodeJS.Platform = process.platform): string[] => (
   platform === 'win32'
     ? ['rg.exe', 'rg.cmd', 'rg.bat', 'rg.ps1', 'rg']
     : ['rg']
 );
 
-const resolveNodeModulesBinDir = (packageRoot) => {
+const resolveNodeModulesBinDir = (packageRoot: string): string | null => {
   let current = packageRoot;
   while (current && current !== path.dirname(current)) {
     if (path.basename(current) === 'node_modules') {
@@ -37,15 +36,25 @@ const resolveNodeModulesBinDir = (packageRoot) => {
   return null;
 };
 
-const readPackageJson = (packageJsonPath) => {
+interface RipgrepPackageJson {
+  bin?: string | Record<string, string> | undefined;
+}
+
+const readPackageJson = (packageJsonPath: string): RipgrepPackageJson | null => {
   try {
-    return JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    const value = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const bin = (value as { bin?: unknown }).bin;
+    if (bin !== undefined && typeof bin !== 'string'
+      && (!bin || typeof bin !== 'object' || Array.isArray(bin)
+        || Object.values(bin).some((entry) => typeof entry !== 'string'))) return null;
+    return { ...(bin === undefined ? {} : { bin: bin as string | Record<string, string> }) };
   } catch {
     return null;
   }
 };
 
-const isExecutableFile = (filePath, platform = process.platform) => {
+const isExecutableFile = (filePath: string, platform: NodeJS.Platform = process.platform): boolean => {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) return false;
@@ -57,10 +66,15 @@ const isExecutableFile = (filePath, platform = process.platform) => {
   }
 };
 
+export interface ResolveBundledRipgrepOptions {
+  packageJsonPath?: string | undefined;
+  platform?: NodeJS.Platform | undefined;
+}
+
 export const resolveBundledRipgrepBinDir = ({
   packageJsonPath = resolveRipgrepPackageJsonCandidates()[0],
   platform = process.platform,
-} = {}) => {
+}: ResolveBundledRipgrepOptions = {}): string | null => {
   if (typeof packageJsonPath !== 'string' || packageJsonPath.trim().length === 0) {
     return null;
   }
@@ -82,7 +96,7 @@ export const resolveBundledRipgrepBinDir = ({
       .map((target) => path.resolve(packageRoot, String(target)))
       .filter((target) => binaryNames.includes(path.basename(target)))
       .map((target) => path.dirname(target)),
-  ].filter(Boolean);
+  ].filter((entry): entry is string => Boolean(entry));
 
   for (const candidateDir of candidateDirs) {
     for (const binaryName of binaryNames) {
@@ -96,13 +110,21 @@ export const resolveBundledRipgrepBinDir = ({
   return null;
 };
 
+export interface AugmentBundledRipgrepOptions {
+  delimiter?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  platform?: NodeJS.Platform | undefined;
+  resolvePackageJson?: (() => string | string[] | null | undefined) | undefined;
+}
+
 export const augmentPathWithBundledRipgrep = ({
   env = process.env,
   resolvePackageJson = resolveRipgrepPackageJsonCandidates,
   platform = process.platform,
   delimiter = path.delimiter,
-} = {}) => {
-  const packageJsonPaths = [resolvePackageJson()].flat().filter(Boolean);
+}: AugmentBundledRipgrepOptions = {}): { added: boolean; binDir: string | null } => {
+  const packageJsonPaths = [resolvePackageJson()].flat()
+    .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
   const binDir = packageJsonPaths
     .map((packageJsonPath) => resolveBundledRipgrepBinDir({ packageJsonPath, platform }))
     .find(Boolean) || null;

@@ -1,6 +1,6 @@
-// @ts-nocheck
 // Shape of the walkthrough the model must produce, plus normalization of what
-// it actually produced. The model is only ever trusted for prose and grouping 鈥?// every anchor it returns is re-resolved against the digest here, and anything
+// it actually produced. The model is only ever trusted for prose and grouping —
+// every anchor it returns is re-resolved against the digest here, and anything
 // that does not resolve is dropped rather than rendered as a broken stop.
 
 export const WALKTHROUGH_VERSION = 1;
@@ -10,8 +10,8 @@ export const WALKTHROUGH_VERSION = 1;
 // what the current code would say.
 export const PROMPT_VERSION = 3;
 
-const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
-const STOP_IMPORTANCE = ['critical', 'normal', 'context'];
+const CHAPTER_ICONS: WalkthroughChapterIcon[] = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
+const STOP_IMPORTANCE: WalkthroughStopImportance[] = ['critical', 'normal', 'context'];
 
 export const responseSchema = {
   type: 'object',
@@ -50,7 +50,7 @@ export const responseSchema = {
   additionalProperties: false,
 };
 
-const asString = (value) => {
+const asString = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   return value.trim();
 };
@@ -59,27 +59,36 @@ const asString = (value) => {
  * Turn a raw model response into a walkthrough anchored to real hunk ids.
  *
  * @param {object} raw parsed model JSON
- * @param {Map<string,string>} idByAlias alias 鈫?real hunk id, from the digest
+ * @param {Map<string,string>} idByAlias alias → real hunk id, from the digest
  * @returns {{title: string, focus: string, chapters: Array<object>, droppedAnchors: number}}
  */
-export function normalizeWalkthrough(raw, idByAlias) {
-  if (!raw || typeof raw !== 'object') {
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+export function normalizeWalkthrough(raw: unknown, idByAlias: Map<string, string>): Walkthrough {
+  const root = asRecord(raw);
+  if (!root) {
     throw Object.assign(new Error('Model returned no walkthrough object'), { code: 'invalid-walkthrough' });
   }
 
-  const usedIds = new Set();
+  const usedIds = new Set<string>();
   let droppedAnchors = 0;
   let stopCount = 0;
 
-  const chapters = [];
-  for (const [chapterIndex, rawChapter] of (Array.isArray(raw.chapters) ? raw.chapters : []).entries()) {
-    if (!rawChapter || typeof rawChapter !== 'object') continue;
+  const chapters: WalkthroughChapter[] = [];
+  for (const [chapterIndex, chapterValue] of (Array.isArray(root.chapters) ? root.chapters : []).entries()) {
+    const rawChapter = asRecord(chapterValue);
+    if (!rawChapter) continue;
 
-    const stops = [];
-    for (const rawStop of Array.isArray(rawChapter.stops) ? rawChapter.stops : []) {
-      if (!rawStop || typeof rawStop !== 'object') continue;
+    const stops: WalkthroughStop[] = [];
+    for (const stopValue of Array.isArray(rawChapter.stops) ? rawChapter.stops : []) {
+      const rawStop = asRecord(stopValue);
+      if (!rawStop) continue;
 
-      const hunkIds = [];
+      const hunkIds: string[] = [];
       for (const alias of Array.isArray(rawStop.hunks) ? rawStop.hunks : []) {
         const id = idByAlias.get(typeof alias === 'string' ? alias.trim() : '');
         if (!id) {
@@ -101,7 +110,10 @@ export function normalizeWalkthrough(raw, idByAlias) {
         id: `stop-${chapterIndex + 1}-${stops.length + 1}`,
         title: asString(rawStop.title) || `Step ${stopCount}`,
         hunkIds,
-        importance: STOP_IMPORTANCE.includes(rawStop.importance) ? rawStop.importance : 'normal',
+        importance: typeof rawStop.importance === 'string'
+          && STOP_IMPORTANCE.includes(rawStop.importance as WalkthroughStopImportance)
+          ? rawStop.importance as WalkthroughStopImportance
+          : 'normal',
         prose,
       });
     }
@@ -111,7 +123,10 @@ export function normalizeWalkthrough(raw, idByAlias) {
     chapters.push({
       id: `chapter-${chapters.length + 1}`,
       title: asString(rawChapter.title) || `Part ${chapters.length + 1}`,
-      icon: CHAPTER_ICONS.includes(rawChapter.icon) ? rawChapter.icon : 'doc',
+      icon: typeof rawChapter.icon === 'string'
+        && CHAPTER_ICONS.includes(rawChapter.icon as WalkthroughChapterIcon)
+        ? rawChapter.icon as WalkthroughChapterIcon
+        : 'doc',
       blurb: asString(rawChapter.blurb),
       stops,
     });
@@ -125,8 +140,8 @@ export function normalizeWalkthrough(raw, idByAlias) {
   }
 
   return {
-    title: asString(raw.title) || 'Change walkthrough',
-    focus: asString(raw.focus),
+    title: asString(root.title) || 'Change walkthrough',
+    focus: asString(root.focus),
     chapters,
     droppedAnchors,
   };
@@ -134,9 +149,9 @@ export function normalizeWalkthrough(raw, idByAlias) {
 
 /**
  * Extract a JSON object from a model response that may or may not honour the
- * schema 鈥?some providers wrap it in prose or a fenced block.
+ * schema — some providers wrap it in prose or a fenced block.
  */
-export function parseModelJson(text) {
+export function parseModelJson(text: unknown): unknown {
   if (typeof text !== 'string' || !text.trim()) {
     throw Object.assign(new Error('Model returned an empty response'), { code: 'invalid-walkthrough' });
   }
@@ -164,3 +179,10 @@ export function parseModelJson(text) {
 
   throw Object.assign(new Error('Model response was not valid JSON'), { code: 'invalid-walkthrough' });
 }
+import type {
+  Walkthrough,
+  WalkthroughChapter,
+  WalkthroughChapterIcon,
+  WalkthroughStop,
+  WalkthroughStopImportance,
+} from './types.js';

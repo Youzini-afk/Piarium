@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -11,7 +10,7 @@ export const ANTIGRAVITY_ACCOUNTS_PATHS = [
   path.join(OPENCODE_DATA_DIR, 'antigravity-accounts.json')
 ];
 
-export const readJsonFile = (filePath) => {
+export const readJsonFile = (filePath: string): unknown => {
   if (!fs.existsSync(filePath)) {
     return null;
   }
@@ -19,14 +18,14 @@ export const readJsonFile = (filePath) => {
     const raw = fs.readFileSync(filePath, 'utf8');
     const trimmed = raw.trim();
     if (!trimmed) return null;
-    return JSON.parse(trimmed);
+    return JSON.parse(trimmed) as unknown;
   } catch (error) {
     console.warn(`Failed to read JSON file: ${filePath}`, error);
     return null;
   }
 };
 
-export const getAuthEntry = (auth, aliases) => {
+export const getAuthEntry = (auth: Record<string, unknown>, aliases: string[]): unknown => {
   for (const alias of aliases) {
     if (auth[alias]) {
       return auth[alias];
@@ -35,13 +34,13 @@ export const getAuthEntry = (auth, aliases) => {
   return null;
 };
 
-export const normalizeAuthEntry = (entry) => {
+export const normalizeAuthEntry = (entry: unknown): Record<string, unknown> | null => {
   if (!entry) return null;
   if (typeof entry === 'string') {
     return { token: entry };
   }
   if (typeof entry === 'object') {
-    return entry;
+    return entry as Record<string, unknown>;
   }
   return null;
 };

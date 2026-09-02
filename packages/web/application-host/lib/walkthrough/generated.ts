@@ -1,7 +1,6 @@
-// @ts-nocheck
 // Files that are produced by a tool rather than written by a person. Their
 // diffs are enormous, carry no intent, and are exactly the kind of content a
-// reviewer scrolls past 鈥?but they are still part of the change, so they are
+// reviewer scrolls past — but they are still part of the change, so they are
 // never hidden: they are kept out of the model's input and shown in the
 // uncovered tail instead.
 
@@ -51,7 +50,7 @@ const GENERATED_PATTERNS = [
  * the review, which is the failure this whole feature exists to prevent. Only
  * unambiguous, conventional names qualify.
  */
-export function isGeneratedArtifact(filePath) {
+export function isGeneratedArtifact(filePath: unknown): boolean {
   if (typeof filePath !== 'string' || !filePath) return false;
   const name = filePath.split('/').pop() || '';
   if (LOCKFILES.has(name)) return true;

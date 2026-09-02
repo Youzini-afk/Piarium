@@ -1,18 +1,45 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createJsonRpcClient } from '../lsp/jsonrpc.js';
 import { walkWorkspaceTestFiles } from './walk.js';
+import type { ChildProcess } from 'node:child_process';
+import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
+import type {
+  ExtensionRunOwner,
+  InspectedRunWorkspace,
+  PiariumTestDiscoverResult,
+  PiariumTestEvent,
+  PiariumTestItem,
+  PiariumTestRunStatus,
+  ProcessWriter,
+  ProviderProcess,
+  RegisteredTestProvider,
+  TestProviderDescriptor,
+  TestRunRecord,
+  TestSupervisorOptions,
+} from './types.js';
 
-const ownerScopeKey = (owner) => owner
+type MessageRecord = Record<string, unknown>;
+type TestRunEventPayload =
+  | { kind: 'test'; test: PiariumTestItem }
+  | { channel: string; kind: 'output'; text: string }
+  | { kind: 'finished'; results?: PiariumTestItem[] };
+
+const asRecord = (value: unknown): MessageRecord => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as MessageRecord
+    : {}
+);
+
+const ownerScopeKey = (owner?: ExtensionRunOwner) => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
   : 'piarium.host';
-const exactOwnerKey = (owner) => owner
+const exactOwnerKey = (owner?: ExtensionRunOwner) => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
   : 'piarium.host\0host';
 
-const waitForChildExit = (child) => new Promise((resolve) => {
+const waitForChildExit = (child: ChildProcess | null): Promise<void> => new Promise((resolve) => {
   if (!child || child.exitCode !== null || child.signalCode) {
     resolve();
     return;
@@ -29,12 +56,16 @@ const waitForChildExit = (child) => new Promise((resolve) => {
   child.once('close', finish);
 });
 
-const registerProcessWriter = async (documents, scopeId, owner, purpose) => {
-  if (typeof documents?.registerWriterForScope !== 'function') return null;
+const registerProcessWriter = async (
+  documents: DocumentAuthority,
+  scopeId: string,
+  owner: MutationOwner,
+  purpose: string,
+): Promise<ProcessWriter | null> => {
   return documents.registerWriterForScope(scopeId, owner, { mode: 'process', purpose });
 };
 
-const releaseProcessWriter = async (writer, mutated = true) => {
+const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true): Promise<void> => {
   if (!writer) return;
   if (mutated) {
     try { await writer.markMutated(); } catch { /* authority may already be gone */ }
@@ -42,8 +73,8 @@ const releaseProcessWriter = async (writer, mutated = true) => {
   try { await writer.close(); } catch { /* authority may already be gone */ }
 };
 
-const parseTap = (text, resourceId) => {
-  const results = [];
+const parseTap = (text: string, resourceId: string): PiariumTestItem[] => {
+  const results: PiariumTestItem[] = [];
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
     const ok = /^ok\s+\d+\s+-?\s*(.*)$/.exec(line);
@@ -68,9 +99,9 @@ const parseTap = (text, resourceId) => {
   return results;
 };
 
-const workspaceIdOf = (value) => {
+const workspaceIdOf = (value: unknown): string => {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object' && typeof value.workspaceId === 'string') return value.workspaceId;
+  if (value && typeof value === 'object' && 'workspaceId' in value && typeof value.workspaceId === 'string') return value.workspaceId;
   return '';
 };
 
@@ -82,20 +113,20 @@ export const createTestSupervisor = ({
   isTrusted = async () => false,
   execPath = process.execPath,
   fsPromises = fs.promises,
-}) => {
-  const providers = [];
-  const sessions = new Map();
-  const trees = new Map();
-  const workspaceListeners = new Map();
-  const pendingExits = new Set();
-  const generations = new Map();
-  const discoveryGenerations = new Map();
+}: TestSupervisorOptions) => {
+  const providers: RegisteredTestProvider[] = [];
+  const sessions = new Map<string, TestRunRecord>();
+  const trees = new Map<string, PiariumTestItem[]>();
+  const workspaceListeners = new Map<string, Set<(event: PiariumTestEvent) => void>>();
+  const pendingExits = new Set<Promise<void>>();
+  const generations = new Map<string, number>();
+  const discoveryGenerations = new Map<string, number>();
 
-  const acquireWriter = (scopeId, owner, purpose) => {
+  const acquireWriter = (scopeId: string, owner: MutationOwner, purpose: string): Promise<ProcessWriter | null> => {
     return registerProcessWriter(documents, scopeId, owner, purpose);
   };
 
-  const releaseRecordWriter = async (record, mutated = true) => {
+  const releaseRecordWriter = async (record: TestRunRecord, mutated = true): Promise<void> => {
     if (!record?.writer || record.writerReleased) return;
     record.writerReleased = true;
     const writer = record.writer;
@@ -103,21 +134,20 @@ export const createTestSupervisor = ({
     await releaseProcessWriter(writer, mutated);
   };
 
-  const nextGeneration = (workspaceId) => {
+  const nextGeneration = (workspaceId: string): number => {
     const next = (generations.get(workspaceId) ?? 0) + 1;
     generations.set(workspaceId, next);
     return next;
   };
 
-  const emit = (workspaceId, event) => {
+  const emit = (workspaceId: string, event: PiariumTestEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record) => {
-    if (!record) return null;
-    const snapshot = {
+  const snapshotFor = (record: TestRunRecord): PiariumTestRunStatus => {
+    const snapshot: PiariumTestRunStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       runId: record.runId,
@@ -128,27 +158,31 @@ export const createTestSupervisor = ({
     return snapshot;
   };
 
-  const emitRunEvent = (record, event) => emit(record.workspaceId, {
+  const emitRunEvent = (
+    record: TestRunRecord,
+    event: TestRunEventPayload,
+  ): void => emit(record.workspaceId, {
     ...event,
     runId: record.runId,
     generation: record.generation,
   });
 
-  const findProvider = (workspaceId, providerId) => {
+  const findProvider = (workspaceId: string, providerId?: unknown): RegisteredTestProvider | null => {
     if (providerId) return providers.find((item) => item.providerId === providerId) ?? null;
     return providers.find((item) => (
       item.source === 'builtin' && (!item.workspaceId || item.workspaceId === workspaceId)
     )) ?? providers.find((item) => !item.workspaceId || item.workspaceId === workspaceId) ?? null;
   };
 
-  const disposeChild = (record) => {
-    if (record) record.cancelled = true;
-    if (!record?.child) {
-      if (!record?.pendingTermination) void releaseRecordWriter(record);
+  const disposeChild = (record: TestRunRecord | null | undefined): void => {
+    if (!record) return;
+    record.cancelled = true;
+    if (!record.child) {
+      if (!record.pendingTermination) void releaseRecordWriter(record);
       return;
     }
     try {
-      record.rpc?.notify('cancel');
+      record.rpc?.notify('cancel', {});
     } catch {
       // Provider may already have exited.
     }
@@ -171,7 +205,7 @@ export const createTestSupervisor = ({
     record.child = null;
   };
 
-  const discoverBuiltin = async (workspace) => {
+  const discoverBuiltin = async (workspace: InspectedRunWorkspace): Promise<PiariumTestItem[]> => {
     const files = await walkWorkspaceTestFiles({
       root: workspace.root,
       fsPromises,
@@ -184,21 +218,23 @@ export const createTestSupervisor = ({
     }));
   };
 
-  const startProviderProcess = async (provider, workspace, {
+  const startProviderProcess = async (provider: RegisteredTestProvider, workspace: InspectedRunWorkspace, {
     owner,
     purpose = 'test-provider-process',
     canSpawn = () => true,
-  } = {}) => {
+  }: {
+    canSpawn?: () => boolean;
+    owner: MutationOwner;
+    purpose?: string;
+  }): Promise<ProviderProcess> => {
     let writer = await acquireWriter(workspace.workspaceId, owner, purpose);
-    let child = null;
-    let rpc = null;
+    let child: ChildProcess | null = null;
+    let rpc: ReturnType<typeof createJsonRpcClient> | null = null;
     try {
       if (!canSpawn()) {
         await releaseProcessWriter(writer, false);
         writer = null;
-        const error = new Error('Test run was cancelled');
-        error.code = 'cancelled';
-        throw error;
+        throw Object.assign(new Error('Test run was cancelled'), { code: 'cancelled' as const });
       }
       child = spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
@@ -206,24 +242,29 @@ export const createTestSupervisor = ({
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      if (!child.stdout || !child.stdin) {
+        throw new Error('Test provider did not expose protocol streams');
+      }
       rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
-      child.stderr?.on('data', () => {});
-      const exited = new Promise((_, reject) => {
-        child.once('exit', (code) => {
-          rpc.rejectAll(new Error('Test provider exited'));
+      const processChild = child;
+      const processRpc = rpc;
+      processChild.stderr?.on('data', () => {});
+      const exited = new Promise<never>((_, reject) => {
+        processChild.once('exit', (code) => {
+          processRpc.rejectAll(new Error('Test provider exited'));
           reject(new Error(`Test provider exited${code === null ? '' : ` with code ${code}`}`));
         });
       });
       exited.catch(() => {});
       await Promise.race([
         (async () => {
-          await rpc.request('initialize', {});
-          rpc.notify('initialized');
+          await processRpc.request('initialize', {});
+          processRpc.notify('initialized', {});
           await new Promise((resolve) => setTimeout(resolve, 30));
         })(),
         exited,
       ]);
-      return { child, rpc, writer };
+      return { child: processChild, rpc: processRpc, writer };
     } catch (error) {
       rpc?.dispose();
       try { child?.kill(); } catch { /* already gone */ }
@@ -233,11 +274,15 @@ export const createTestSupervisor = ({
     }
   };
 
-  const discover = async (request) => {
-    const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : request;
+  const discover = async (
+    request: { providerId?: unknown; workspaceId?: unknown } | string,
+  ): Promise<PiariumTestDiscoverResult> => {
+    const workspaceId = typeof request === 'string'
+      ? request
+      : (typeof request.workspaceId === 'string' ? request.workspaceId : '');
     const discoveryGeneration = (discoveryGenerations.get(workspaceId) ?? 0) + 1;
     discoveryGenerations.set(workspaceId, discoveryGeneration);
-    const provider = findProvider(workspaceId, request?.providerId);
+    const provider = findProvider(workspaceId, typeof request === 'object' ? request.providerId : undefined);
     if (!provider) {
       return { status: 'absent', workspaceId, tests: [] };
     }
@@ -295,14 +340,15 @@ export const createTestSupervisor = ({
           tests: [],
         };
       }
-      const raw = await processPair.rpc.request('discover');
-      const tests = Array.isArray(raw?.tests) ? raw.tests.map((item) => {
-        const mapped = {
-          id: typeof item?.id === 'string' ? item.id : '',
-          label: typeof item?.label === 'string' ? item.label : '',
+      const raw = asRecord(await processPair.rpc.request('discover', {}));
+      const tests: PiariumTestItem[] = Array.isArray(raw.tests) ? raw.tests.map((item) => {
+        const value = asRecord(item);
+        const mapped: PiariumTestItem = {
+          id: typeof value.id === 'string' ? value.id : '',
+          label: typeof value.label === 'string' ? value.label : '',
         };
-        if (typeof item?.resourceId === 'string') mapped.resourceId = item.resourceId;
-        if (Number.isFinite(item?.line)) mapped.line = item.line;
+        if (typeof value.resourceId === 'string') mapped.resourceId = value.resourceId;
+        if (typeof value.line === 'number' && Number.isFinite(value.line)) mapped.line = value.line;
         return mapped;
       }).filter((item) => item.id) : [];
       if (discoveryGenerations.get(workspaceId) !== discoveryGeneration) {
@@ -319,7 +365,7 @@ export const createTestSupervisor = ({
       };
     } finally {
       try {
-        processPair.rpc.notify('shutdown');
+        processPair.rpc.notify('shutdown', {});
       } catch {
         // Ignore.
       }
@@ -334,19 +380,25 @@ export const createTestSupervisor = ({
     }
   };
 
-  const runNodeTests = async (record, workspace, testIds) => {
+  const runNodeTests = async (
+    record: TestRunRecord,
+    workspace: InspectedRunWorkspace,
+    testIds: string[],
+  ): Promise<PiariumTestRunStatus> => {
     const discovered = trees.get(record.workspaceId) ?? await discoverBuiltin(workspace);
     trees.set(record.workspaceId, discovered);
     const selected = testIds.length > 0
-      ? discovered.filter((item) => testIds.includes(item.id) || testIds.includes(item.resourceId))
+      ? discovered.filter((item) => testIds.includes(item.id) || (item.resourceId ? testIds.includes(item.resourceId) : false))
       : discovered;
-    const results = [];
+    const results: PiariumTestItem[] = [];
     for (const item of selected) {
       if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
+      if (!item.resourceId) continue;
+      const resourceId = item.resourceId;
       emitRunEvent(record, { kind: 'test', test: { ...item, status: 'running' } });
-      const filePath = pathModule.join(workspace.root, item.resourceId);
-      const chunks = [];
-      let child = null;
+      const filePath = pathModule.join(workspace.root, resourceId);
+      const chunks: string[] = [];
+      let child: ChildProcess | null = null;
       let spawned = false;
       const writer = await acquireWriter(record.workspaceId, {
         kind: 'test',
@@ -366,21 +418,22 @@ export const createTestSupervisor = ({
         });
         spawned = true;
         record.child = child;
-        child.stdout?.on('data', (chunk) => {
+        const processChild = child;
+        processChild.stdout?.on('data', (chunk) => {
           chunks.push(chunk.toString('utf8'));
           emitRunEvent(record, { kind: 'output', channel: 'test', text: chunk.toString('utf8') });
         });
-        child.stderr?.on('data', (chunk) => {
+        processChild.stderr?.on('data', (chunk) => {
           emitRunEvent(record, { kind: 'output', channel: 'test', text: chunk.toString('utf8') });
         });
-        const code = await new Promise((resolve) => {
-          child.once('exit', (exitCode) => resolve(exitCode ?? 1));
+        const code = await new Promise<number>((resolve) => {
+          processChild.once('exit', (exitCode) => resolve(exitCode ?? 1));
         });
         record.child = null;
         if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
-        const parsed = parseTap(chunks.join(''), item.resourceId);
+        const parsed = parseTap(chunks.join(''), resourceId);
         if (parsed.length === 0) {
-          const fallback = {
+          const fallback: PiariumTestItem = {
             ...item,
             status: code === 0 ? 'passed' : 'failed',
             ...(code === 0 ? {} : { message: `Test process exited with code ${code}` }),
@@ -405,7 +458,12 @@ export const createTestSupervisor = ({
     return snapshotFor(record);
   };
 
-  const runProvider = async (record, provider, workspace, testIds) => {
+  const runProvider = async (
+    record: TestRunRecord,
+    provider: RegisteredTestProvider,
+    workspace: InspectedRunWorkspace,
+    testIds: string[],
+  ): Promise<PiariumTestRunStatus> => {
     const processPair = await startProviderProcess(provider, workspace, {
       owner: {
         kind: 'test',
@@ -442,26 +500,27 @@ export const createTestSupervisor = ({
         || record.child !== processPair.child
         || record.rpc !== processPair.rpc
       ) return;
-      if (method === 'test/started' && params?.id) {
-        emitRunEvent(record, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'running' } });
+      const notification = asRecord(params);
+      if (method === 'test/started' && typeof notification.id === 'string') {
+        emitRunEvent(record, { kind: 'test', test: { id: notification.id, label: typeof notification.label === 'string' ? notification.label : notification.id, status: 'running' } });
       }
-      if (method === 'test/passed' && params?.id) {
-        emitRunEvent(record, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'passed' } });
+      if (method === 'test/passed' && typeof notification.id === 'string') {
+        emitRunEvent(record, { kind: 'test', test: { id: notification.id, label: typeof notification.label === 'string' ? notification.label : notification.id, status: 'passed' } });
       }
-      if (method === 'test/failed' && params?.id) {
-        const test = {
-          id: params.id,
-          label: typeof params.label === 'string' ? params.label : params.id,
+      if (method === 'test/failed' && typeof notification.id === 'string') {
+        const test: PiariumTestItem = {
+          id: notification.id,
+          label: typeof notification.label === 'string' ? notification.label : notification.id,
           status: 'failed',
         };
-        if (typeof params.resourceId === 'string') test.resourceId = params.resourceId;
-        if (Number.isFinite(params.line)) test.line = params.line;
-        if (typeof params.message === 'string') test.message = params.message;
-        if (typeof params.stack === 'string') test.stack = params.stack;
+        if (typeof notification.resourceId === 'string') test.resourceId = notification.resourceId;
+        if (typeof notification.line === 'number' && Number.isFinite(notification.line)) test.line = notification.line;
+        if (typeof notification.message === 'string') test.message = notification.message;
+        if (typeof notification.stack === 'string') test.stack = notification.stack;
         emitRunEvent(record, { kind: 'test', test });
       }
       if (method === 'test/finished') {
-        record.status = params?.status === 'failed' ? 'failed' : 'stopped';
+        record.status = notification.status === 'failed' ? 'failed' : 'stopped';
         emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
         emitRunEvent(record, { kind: 'finished' });
       }
@@ -470,7 +529,9 @@ export const createTestSupervisor = ({
     return snapshotFor(record);
   };
 
-  const run = async (request) => {
+  const run = async (
+    request: { providerId?: unknown; testIds?: unknown; workspaceId?: unknown },
+  ): Promise<PiariumTestRunStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const provider = findProvider(workspaceId, request?.providerId);
     if (!provider) return { status: 'absent', workspaceId };
@@ -496,7 +557,7 @@ export const createTestSupervisor = ({
       disposeChild(existing);
       sessions.delete(workspaceId);
     }
-    const record = {
+    const record: TestRunRecord = {
       workspaceId,
       runId: randomUUID(),
       providerId: provider.providerId,
@@ -513,7 +574,7 @@ export const createTestSupervisor = ({
     };
     sessions.set(workspaceId, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-    const testIds = Array.isArray(request?.testIds) ? request.testIds.filter((id) => typeof id === 'string') : [];
+    const testIds = Array.isArray(request?.testIds) ? request.testIds.filter((id): id is string => typeof id === 'string') : [];
     try {
       if (provider.kind === 'node-test') return await runNodeTests(record, workspace, testIds);
       return await runProvider(record, provider, workspace, testIds);
@@ -527,9 +588,9 @@ export const createTestSupervisor = ({
   };
 
   return {
-    registerProvider(descriptor, owner) {
+    registerProvider(descriptor: TestProviderDescriptor, owner?: ExtensionRunOwner) {
       if (!descriptor?.providerId) throw new Error('Test provider requires providerId');
-      const next = {
+      const next: RegisteredTestProvider = {
         providerId: descriptor.providerId,
         kind: descriptor.kind === 'node-test' ? 'node-test' : 'adapter',
         command: typeof descriptor.command === 'string' ? descriptor.command : '',
@@ -566,7 +627,7 @@ export const createTestSupervisor = ({
       }
       return { status: 'registered', providerId: next.providerId };
     },
-    async unregisterProvider(providerId, owner) {
+    async unregisterProvider(providerId: string, owner?: ExtensionRunOwner) {
       const index = providers.findIndex((item) => (
         item.providerId === providerId && item.ownerKey === exactOwnerKey(owner)
       ));
@@ -586,7 +647,7 @@ export const createTestSupervisor = ({
     },
     discover,
     run,
-    cancel(request) {
+    cancel(request: unknown): PiariumTestRunStatus {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (!record) return { status: 'absent', workspaceId };
@@ -596,7 +657,7 @@ export const createTestSupervisor = ({
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       return snapshotFor(record);
     },
-    getStatus(request) {
+    getStatus(request: unknown): PiariumTestRunStatus {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (record) return snapshotFor(record);
@@ -604,7 +665,7 @@ export const createTestSupervisor = ({
       if (tests) return { status: tests.length > 0 ? 'idle' : 'empty', workspaceId };
       return { status: 'absent', workspaceId };
     },
-    subscribe(workspaceId, listener) {
+    subscribe(workspaceId: string, listener: (event: PiariumTestEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);
@@ -615,7 +676,7 @@ export const createTestSupervisor = ({
         },
       };
     },
-    async disposeWorkspace(request) {
+    async disposeWorkspace(request: unknown): Promise<void> {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (record) {
@@ -627,7 +688,7 @@ export const createTestSupervisor = ({
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
-    async dispose() {
+    async dispose(): Promise<void> {
       for (const record of sessions.values()) disposeChild(record);
       sessions.clear();
       providers.length = 0;

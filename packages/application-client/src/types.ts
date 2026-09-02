@@ -2313,7 +2313,7 @@ export type PiariumTestItem = {
 };
 
 export type PiariumTestDiscoverResult =
-  | { status: 'ready' | 'empty' | 'absent'; workspaceId: string; tests: PiariumTestItem[] }
+  | { status: 'ready' | 'empty' | 'absent' | 'cancelled'; workspaceId: string; tests: PiariumTestItem[] }
   | { status: 'failure'; workspaceId: string; message: string; tests: [] };
 
 export type PiariumTestRunStatus =

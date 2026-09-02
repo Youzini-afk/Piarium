@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -6,7 +5,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  asObject,
 } from '../utils/index.js';
 
 export const providerId = 'claude';
@@ -53,12 +53,12 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const windows = {};
-    const fiveHour = payload?.five_hour ?? null;
-    const sevenDay = payload?.seven_day ?? null;
-    const sevenDaySonnet = payload?.seven_day_sonnet ?? null;
-    const sevenDayOpus = payload?.seven_day_opus ?? null;
+    const payload = asObject(await response.json()) ?? {};
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
+    const fiveHour = asObject(payload.five_hour);
+    const sevenDay = asObject(payload.seven_day);
+    const sevenDaySonnet = asObject(payload.seven_day_sonnet);
+    const sevenDayOpus = asObject(payload.seven_day_opus);
 
     if (fiveHour) {
       windows['5h'] = toUsageWindow({

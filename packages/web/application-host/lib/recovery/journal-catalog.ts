@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import BetterSqlite3 from 'better-sqlite3';
 import { RecoveryPrimitiveError } from './errors.js';
+
+export type SqliteDatabase = BetterSqlite3.Database;
 
 export const RECOVERY_JOURNAL_SCHEMA_VERSION = 5;
 
@@ -138,7 +140,7 @@ interface CatalogStatus {
   retiredCatalogCount: number;
 }
 
-const catalogStatuses = new WeakMap<Database, Readonly<CatalogStatus>>();
+const catalogStatuses = new WeakMap<SqliteDatabase, Readonly<CatalogStatus>>();
 
 type FsPromises = typeof import('node:fs/promises');
 
@@ -170,7 +172,7 @@ interface CheckpointChangeRow {
   after_json: string | null;
 }
 
-interface OperationRow {
+export interface OperationRow {
   id: string;
   workspace_id: string;
   data_json: string;
@@ -186,19 +188,19 @@ interface OperationFileJoinRow {
   safety_json: string | null;
 }
 
-interface OperationFileRow {
+export interface OperationFileRow {
   operation_id: string;
   ordinal: number;
   path: string;
   expected_json: string | null;
   target_json: string | null;
   safety_json: string | null;
-  phase: string;
+  phase: OperationFilePhase;
   observed_fingerprint: string | null;
   updated_at: string;
 }
 
-interface CheckpointRow {
+export interface CheckpointRow {
   id: string;
   workspace_id: string;
   sequence: number;
@@ -213,7 +215,7 @@ interface CheckpointRow {
   byte_length: number;
 }
 
-interface ChangeRow {
+export interface ChangeRow {
   checkpoint_id: string;
   path: string;
   tool_name: string;
@@ -222,7 +224,7 @@ interface ChangeRow {
   after_json: string | null;
 }
 
-interface BindingRow {
+export interface BindingRow {
   execution_id: string;
   runtime_key: string;
   runtime_generation: number;
@@ -241,14 +243,14 @@ interface BindingRow {
   settled_at: string | null;
 }
 
-interface OperationData {
+export interface OperationData {
   targets?: Record<string, unknown> | undefined;
   safety?: Record<string, unknown> | undefined;
   plan?: { affectedPaths?: string[] | undefined } | undefined;
   [key: string]: unknown;
 }
 
-interface OperationInput {
+export interface OperationInput {
   id: string;
   workspaceId: string;
   kind: string;
@@ -279,14 +281,11 @@ type CatalogClassification =
   | { kind: 'current'; migratedFrom: number | undefined }
   | { kind: 'migrate'; version: number };
 
-type RetiredCatalogsResult = {
+export interface RetiredCatalogsResult {
   retiredCatalogCount: number;
   retiredCatalogs: string[];
   state: 'retired-history' | 'ready';
-} | {
-  retiredCatalogCount: number;
-  state: 'ready';
-};
+}
 
 const catalogPath = (root: string): string => path.join(root, 'catalog.sqlite');
 
@@ -331,9 +330,9 @@ const requireTables = (tableNames: Set<string>, required: readonly string[], ver
 };
 
 const classifyCatalog = (root: string): CatalogClassification => {
-  let database: Database | undefined;
+  let database: SqliteDatabase | undefined;
   try {
-    database = new Database(databasePath(root), { fileMustExist: true, readonly: true });
+    database = new BetterSqlite3(databasePath(root), { fileMustExist: true, readonly: true });
     const schemaObjects = database.prepare(`
       SELECT type, name FROM sqlite_master
       WHERE name NOT LIKE 'sqlite_%'
@@ -400,13 +399,13 @@ export const ensureRecoveryJournalLayout = async (root: string, fsPromises: FsPr
   }
 };
 
-const configureWritableCatalog = (database: Database): void => {
+const configureWritableCatalog = (database: SqliteDatabase): void => {
   database.pragma('journal_mode = WAL');
   database.pragma('synchronous = FULL');
   database.pragma('foreign_keys = ON');
 };
 
-const initializeEmptyCatalog = (database: Database): void => {
+const initializeEmptyCatalog = (database: SqliteDatabase): void => {
   database.transaction(() => {
     database.exec(SCHEMA);
     database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)')
@@ -448,14 +447,14 @@ const normalizedReferences = (references: unknown): ObjectReference[] => {
   return [...bySlot].map(([slot, objectHash]) => ({ objectHash, slot }));
 };
 
-export const deleteObjectReferences = (database: Database, workspaceId: string, ownerKind: string, ownerId: string): void => {
+export const deleteObjectReferences = (database: SqliteDatabase, workspaceId: string, ownerKind: string, ownerId: string): void => {
   database.prepare(`
     DELETE FROM object_references
     WHERE workspace_id = ? AND owner_kind = ? AND owner_id = ?
   `).run(workspaceId, ownerKind, ownerId);
 };
 
-export const replaceObjectReferences = (database: Database, workspaceId: string, ownerKind: string, ownerId: string, references: unknown): void => {
+export const replaceObjectReferences = (database: SqliteDatabase, workspaceId: string, ownerKind: string, ownerId: string, references: unknown): void => {
   if (typeof workspaceId !== 'string' || !workspaceId
     || typeof ownerKind !== 'string' || typeof ownerId !== 'string') {
     throw new TypeError('Object reference workspaceId, ownerKind, and ownerId must be strings');
@@ -471,7 +470,7 @@ export const replaceObjectReferences = (database: Database, workspaceId: string,
   }
 };
 
-const rebuildObjectReferencesInTransaction = (database: Database): void => {
+const rebuildObjectReferencesInTransaction = (database: SqliteDatabase): void => {
   database.prepare('DELETE FROM object_references').run();
   for (const row of database.prepare(`
     SELECT c.workspace_id, cc.checkpoint_id, cc.path, cc.before_json, cc.after_json
@@ -517,11 +516,11 @@ const rebuildObjectReferencesInTransaction = (database: Database): void => {
   }
 };
 
-export const rebuildObjectReferences = (database: Database): void => {
+export const rebuildObjectReferences = (database: SqliteDatabase): void => {
   database.transaction(() => rebuildObjectReferencesInTransaction(database))();
 };
 
-const migrateV3Catalog = (database: Database): void => {
+const migrateV3Catalog = (database: SqliteDatabase): void => {
   database.transaction(() => {
     database.exec(`
       CREATE TABLE object_references (
@@ -591,7 +590,7 @@ const migrateV3Catalog = (database: Database): void => {
   })();
 };
 
-const migrateV4Catalog = (database: Database): void => {
+const migrateV4Catalog = (database: SqliteDatabase): void => {
   database.transaction(() => {
     database.exec(`
       DROP INDEX IF EXISTS object_references_hash;
@@ -628,7 +627,7 @@ export const inspectRetiredRecoveryCatalogs = async (root: string, options: { fs
     entries = await fsPromises.readdir(parent, { withFileTypes: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      return { retiredCatalogCount: 0, state: 'ready' };
+      return { retiredCatalogCount: 0, retiredCatalogs: [], state: 'ready' };
     }
     throw storageMalformed('Recovery catalog history cannot be inspected', error);
   }
@@ -644,7 +643,7 @@ export const inspectRetiredRecoveryCatalogs = async (root: string, options: { fs
   };
 };
 
-const attachCatalogStatus = async (database: Database, root: string, migratedFrom: number | undefined, fsPromises: FsPromises): Promise<Database> => {
+const attachCatalogStatus = async (database: SqliteDatabase, root: string, migratedFrom: number | undefined, fsPromises: FsPromises): Promise<SqliteDatabase> => {
   const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
   const status = Object.freeze({
     currentSchemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
@@ -658,7 +657,7 @@ const attachCatalogStatus = async (database: Database, root: string, migratedFro
   return database;
 };
 
-export const recoveryCatalogStatus = (database: Database): Readonly<CatalogStatus> | null => {
+export const recoveryCatalogStatus = (database: SqliteDatabase): Readonly<CatalogStatus> | null => {
   const status = catalogStatuses.get(database);
   return status ? { ...status } : null;
 };
@@ -668,11 +667,11 @@ const finishCreatedCatalog = async (root: string, fsPromises: FsPromises): Promi
   await syncDirectory(root, fsPromises);
 };
 
-const createFreshCatalog = async (root: string, fsPromises: FsPromises): Promise<Database> => {
+const createFreshCatalog = async (root: string, fsPromises: FsPromises): Promise<SqliteDatabase> => {
   await ensureRecoveryJournalLayout(root, fsPromises);
-  let database: Database | undefined;
+  let database: SqliteDatabase | undefined;
   try {
-    database = new Database(databasePath(root));
+    database = new BetterSqlite3(databasePath(root));
     configureWritableCatalog(database);
     initializeEmptyCatalog(database);
     await finishCreatedCatalog(root, fsPromises);
@@ -706,7 +705,7 @@ const retireCatalogRoot = async (root: string, version: number | 'metadata-less'
     parent,
     `${retiredCatalogPrefix(root)}${version}-${Date.now()}-${nonce}`,
   );
-  let replacement: Database | null = null;
+  let replacement: SqliteDatabase | null = null;
   try {
     replacement = await createFreshCatalog(replacementRoot, fsPromises);
     replacement.close();
@@ -746,7 +745,7 @@ export type InspectRecoveryJournalCatalogResult =
   | null
   | {
       classification: CatalogClassification;
-      database: Database;
+      database: SqliteDatabase;
       status: Readonly<CatalogStatus>;
     }
   | {
@@ -769,7 +768,7 @@ export type InspectRecoveryJournalCatalogResult =
  *     (database is opened readonly)
  *   - { database: null, status, classification } for a catalog that needs
  *     activation (migration, retirement, initialization) or is
- *     future/malformed �?the caller can report status without touching disk
+ *     future/malformed — the caller can report status without touching disk
  *
  * Callers that need to write must use openRecoveryJournalCatalog (activate).
  */
@@ -809,7 +808,7 @@ export const inspectRecoveryJournalCatalog = async (root: string, options: Inspe
   const classification = classifyCatalog(root);
   const retired = await inspectRetiredRecoveryCatalogs(root, { fsPromises });
   if (classification.kind === 'current') {
-    const database = new Database(databasePath(root), { readonly: true });
+    const database = new BetterSqlite3(databasePath(root), { readonly: true });
     configureReadableCatalog(database);
     const status = Object.freeze({
       currentSchemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
@@ -842,8 +841,8 @@ export const inspectRecoveryJournalCatalog = async (root: string, options: Inspe
   };
 };
 
-const configureReadableCatalog = (database: Database): void => {
-  // Do NOT set journal_mode on a readonly connection �?SQLite will reject
+const configureReadableCatalog = (database: SqliteDatabase): void => {
+  // Do NOT set journal_mode on a readonly connection — SQLite will reject
   // the implicit write with SQLITE_READONLY. Only enable foreign_keys,
   // which is a connection-level pragma that doesn't touch the database file.
   database.pragma('foreign_keys = ON');
@@ -854,7 +853,18 @@ export interface OpenRecoveryJournalCatalogOptions {
   fsPromises?: FsPromises | undefined;
 }
 
-export const openRecoveryJournalCatalog = async (root: string, options: OpenRecoveryJournalCatalogOptions = {}): Promise<Database | null> => {
+export function openRecoveryJournalCatalog(
+  root: string,
+  options: OpenRecoveryJournalCatalogOptions & { create: true },
+): Promise<SqliteDatabase>;
+export function openRecoveryJournalCatalog(
+  root: string,
+  options?: OpenRecoveryJournalCatalogOptions,
+): Promise<SqliteDatabase | null>;
+export async function openRecoveryJournalCatalog(
+  root: string,
+  options: OpenRecoveryJournalCatalogOptions = {},
+): Promise<SqliteDatabase | null> {
   const create = options.create === true;
   const fsPromises = options.fsPromises ?? fs.promises as FsPromises;
   let rootStat: import('node:fs').Stats | undefined;
@@ -880,7 +890,7 @@ export const openRecoveryJournalCatalog = async (root: string, options: OpenReco
   }
   if (!catalogStat) {
     if (!create) return null;
-    let database: Database | undefined;
+    let database: SqliteDatabase | undefined;
     try {
       database = await createFreshCatalog(root, fsPromises);
       return await attachCatalogStatus(database, root, undefined, fsPromises);
@@ -905,23 +915,23 @@ export const openRecoveryJournalCatalog = async (root: string, options: OpenReco
       );
     }
   }
-  let database: Database | undefined;
+  let database: SqliteDatabase | undefined;
   try {
     if (classification.kind === 'empty') {
       if (create) await ensureRecoveryJournalLayout(root, fsPromises);
-      database = new Database(databasePath(root), { fileMustExist: true });
+      database = new BetterSqlite3(databasePath(root), { fileMustExist: true });
       configureWritableCatalog(database);
       initializeEmptyCatalog(database);
       if (create) await finishCreatedCatalog(root, fsPromises);
       return await attachCatalogStatus(database, root, undefined, fsPromises);
     }
     if (classification.kind === 'retire') {
-      database = new Database(databasePath(root), { fileMustExist: true });
+      database = new BetterSqlite3(databasePath(root), { fileMustExist: true });
       configureWritableCatalog(database);
       return await attachCatalogStatus(database, root, undefined, fsPromises);
     }
     if (create) await ensureRecoveryJournalLayout(root, fsPromises);
-    database = new Database(databasePath(root), { fileMustExist: true });
+    database = new BetterSqlite3(databasePath(root), { fileMustExist: true });
     configureWritableCatalog(database);
     if (classification.kind === 'migrate') {
       if (classification.version === 3) migrateV3Catalog(database);
@@ -943,7 +953,7 @@ export const openRecoveryJournalCatalog = async (root: string, options: OpenReco
       error,
     );
   }
-};
+}
 
 export const objectPath = (root: string, objectHash: string): string => {
   const match = /^sha256-([0-9a-f]{64})$/.exec(objectHash);
@@ -1052,7 +1062,7 @@ export const operationFromRow = (row: Pick<OperationRow, 'id' | 'workspace_id' |
   workspaceId: row.workspace_id,
 });
 
-export const writeOperationRow = (database: Database, operation: OperationInput): void => {
+export const writeOperationRow = (database: SqliteDatabase, operation: OperationInput): void => {
   database.transaction(() => {
     database.prepare(`
       INSERT INTO operations(id, workspace_id, kind, state, data_json, created_at, updated_at)
@@ -1082,9 +1092,9 @@ const OPERATION_FILE_PHASES = [
   'compensate-intent', 'safety-observed', 'needs-attention',
 ] as const;
 
-type OperationFilePhase = typeof OPERATION_FILE_PHASES[number];
+export type OperationFilePhase = typeof OPERATION_FILE_PHASES[number];
 
-export const initOperationFiles = (database: Database, operationId: string, targets: OperationTargets): void => {
+export const initOperationFiles = (database: SqliteDatabase, operationId: string, targets: OperationTargets): void => {
   const previousPaths = (database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
     .all(operationId) as { path: string }[]).map((row) => row.path);
   const operation = database.prepare('SELECT workspace_id FROM operations WHERE id = ?').get(operationId) as { workspace_id: string } | undefined;
@@ -1129,7 +1139,7 @@ export const initOperationFiles = (database: Database, operationId: string, targ
   }
 };
 
-export const updateOperationFilePhase = (database: Database, operationId: string, path: string, phase: OperationFilePhase, options: UpdateOperationFilePhaseOptions = {}): void => {
+export const updateOperationFilePhase = (database: SqliteDatabase, operationId: string, path: string, phase: OperationFilePhase, options: UpdateOperationFilePhaseOptions = {}): void => {
   if (!OPERATION_FILE_PHASES.includes(phase)) {
     throw new TypeError(`Invalid operation file phase: ${phase}`);
   }
@@ -1167,14 +1177,14 @@ export const updateOperationFilePhase = (database: Database, operationId: string
   );
 };
 
-export const operationFileRows = (database: Database, operationId: string): OperationFileRow[] => (
+export const operationFileRows = (database: SqliteDatabase, operationId: string): OperationFileRow[] => (
   database.prepare(`
     SELECT * FROM operation_files WHERE operation_id = ?
     ORDER BY ordinal ASC
   `).all(operationId) as OperationFileRow[]
 );
 
-export const operationFileByPath = (database: Database, operationId: string, path: string): OperationFileRow | undefined => (
+export const operationFileByPath = (database: SqliteDatabase, operationId: string, path: string): OperationFileRow | undefined => (
   database.prepare(`
     SELECT * FROM operation_files WHERE operation_id = ? AND path = ?
   `).get(operationId, path) as OperationFileRow | undefined

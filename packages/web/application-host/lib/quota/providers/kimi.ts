@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -8,7 +7,8 @@ import {
   toNumber,
   toTimestamp,
   durationToLabel,
-  durationToSeconds
+  durationToSeconds,
+  asObject,
 } from '../utils/index.js';
 
 export const providerId = 'kimi-for-coding';
@@ -55,9 +55,9 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const windows = {};
-    const usage = payload?.usage ?? null;
+    const payload = asObject(await response.json()) ?? {};
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
+    const usage = asObject(payload.usage);
     if (usage) {
       const limit = toNumber(usage.limit);
       const remaining = toNumber(usage.remaining);
@@ -71,12 +71,15 @@ export const fetchQuota = async () => {
       });
     }
 
-    const limits = Array.isArray(payload?.limits) ? payload.limits : [];
-    for (const limit of limits) {
-      const window = limit?.window;
-      const detail = limit?.detail;
-      const rawLabel = durationToLabel(window?.duration, window?.timeUnit);
-      const windowSeconds = durationToSeconds(window?.duration, window?.timeUnit);
+    const limits = Array.isArray(payload.limits) ? payload.limits : [];
+    for (const rawLimit of limits) {
+      const limit = asObject(rawLimit) ?? {};
+      const window = asObject(limit.window);
+      const detail = asObject(limit.detail);
+      const duration = toNumber(window?.duration);
+      const timeUnit = typeof window?.timeUnit === 'string' ? window.timeUnit : null;
+      const rawLabel = durationToLabel(duration, timeUnit);
+      const windowSeconds = durationToSeconds(duration, timeUnit);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
       const remaining = toNumber(detail?.remaining);

@@ -1,5 +1,29 @@
-// @ts-nocheck
-export const createThemeRuntime = (dependencies) => {
+type ThemeRecord = Record<string, unknown>;
+
+export interface NormalizedTheme extends ThemeRecord {
+  metadata: ThemeRecord & {
+    description: string;
+    id: string;
+    name: string;
+    tags: string[];
+    variant: 'dark' | 'light';
+    version: string;
+  };
+}
+
+export interface ThemeRuntimeDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'readFile' | 'readdir' | 'stat'>;
+  logger: { warn(...values: unknown[]): void };
+  maxThemeJsonBytes: number;
+  path: Pick<typeof import('node:path'), 'join'>;
+  themesDir: string;
+}
+
+const isRecord = (value: unknown): value is ThemeRecord => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+export const createThemeRuntime = (dependencies: ThemeRuntimeDependencies) => {
   const {
     fsPromises,
     path,
@@ -8,16 +32,16 @@ export const createThemeRuntime = (dependencies) => {
     logger,
   } = dependencies;
 
-  const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
-  const isValidThemeColor = (value) => isNonEmptyString(value);
+  const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  const isValidThemeColor = (value: unknown): value is string => isNonEmptyString(value);
 
-  const normalizeThemeJson = (raw) => {
-    if (!raw || typeof raw !== 'object') {
+  const normalizeThemeJson = (raw: unknown): NormalizedTheme | null => {
+    if (!isRecord(raw)) {
       return null;
     }
 
-    const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : null;
-    const colors = raw.colors && typeof raw.colors === 'object' ? raw.colors : null;
+    const metadata = isRecord(raw.metadata) ? raw.metadata : null;
+    const colors = isRecord(raw.colors) ? raw.colors : null;
     if (!metadata || !colors) {
       return null;
     }
@@ -34,10 +58,12 @@ export const createThemeRuntime = (dependencies) => {
     const interactive = colors.interactive;
     const status = colors.status;
     const syntax = colors.syntax;
-    const syntaxBase = syntax && typeof syntax === 'object' ? syntax.base : null;
-    const syntaxHighlights = syntax && typeof syntax === 'object' ? syntax.highlights : null;
+    const syntaxRecord = isRecord(syntax) ? syntax : null;
+    const syntaxBase = syntaxRecord && isRecord(syntaxRecord.base) ? syntaxRecord.base : null;
+    const syntaxHighlights = syntaxRecord && isRecord(syntaxRecord.highlights) ? syntaxRecord.highlights : null;
 
-    if (!primary || !surface || !interactive || !status || !syntaxBase || !syntaxHighlights) {
+    if (!isRecord(primary) || !isRecord(surface) || !isRecord(interactive)
+      || !isRecord(status) || !syntaxBase || !syntaxHighlights) {
       return null;
     }
 
@@ -110,11 +136,11 @@ export const createThemeRuntime = (dependencies) => {
     };
   };
 
-  const readCustomThemesFromDisk = async () => {
+  const readCustomThemesFromDisk = async (): Promise<NormalizedTheme[]> => {
     try {
       const entries = await fsPromises.readdir(themesDir, { withFileTypes: true });
-      const themes = [];
-      const seen = new Set();
+      const themes: NormalizedTheme[] = [];
+      const seen = new Set<string>();
 
       for (const entry of entries) {
         if (!entry.isFile()) continue;
@@ -130,7 +156,7 @@ export const createThemeRuntime = (dependencies) => {
           }
 
           const rawText = await fsPromises.readFile(filePath, 'utf8');
-          const parsed = JSON.parse(rawText);
+          const parsed = JSON.parse(rawText) as unknown;
           const normalized = normalizeThemeJson(parsed);
           if (!normalized) {
             logger.warn(`[themes] Skip ${entry.name}: invalid theme JSON`);
@@ -153,7 +179,7 @@ export const createThemeRuntime = (dependencies) => {
       return themes;
     } catch (error) {
       // Missing dir is fine.
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT') {
         return [];
       }
       logger.warn('[themes] Failed to list custom themes dir:', error);

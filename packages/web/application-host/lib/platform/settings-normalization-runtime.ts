@@ -1,7 +1,32 @@
-// @ts-nocheck
 import { createProjectIdFromPath } from '../projects/project-id.js';
 
-export const createSettingsNormalizationRuntime = (dependencies) => {
+export interface SettingsPathModule {
+  dirname(value: string): string;
+  join(...segments: string[]): string;
+  posix: { isAbsolute(value: string): boolean };
+  resolve(...segments: string[]): string;
+  sep: string;
+}
+
+export interface SettingsNormalizationDependencies {
+  os: { homedir(): string };
+  path: SettingsPathModule;
+  processLike: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform };
+  realpathSync?: ((value: string) => string) | undefined;
+  tunnelBootstrapTtlDefaultMs: number;
+  tunnelBootstrapTtlMaxMs: number;
+  tunnelBootstrapTtlMinMs: number;
+  tunnelSessionTtlDefaultMs: number;
+  tunnelSessionTtlMaxMs: number;
+  tunnelSessionTtlMinMs: number;
+}
+
+export interface NormalizedProject extends Record<string, unknown> {
+  id: string;
+  path: string;
+}
+
+export const createSettingsNormalizationRuntime = (dependencies: SettingsNormalizationDependencies) => {
   const {
     os,
     path,
@@ -15,14 +40,14 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     tunnelSessionTtlMaxMs,
   } = dependencies;
 
-  const normalizeDirectoryPath = (value) => {
+  const normalizeDirectoryPath = <T>(value: T): T | string => {
     if (typeof value !== 'string') {
       return value;
     }
 
     let trimmed = value.trim();
     // Paths pasted from Windows "Copy as path" (or quoted shell snippets)
-    // arrive wrapped in quotes 鈥?a literal quote character can never be part
+    // arrive wrapped in quotes — a literal quote character can never be part
     // of a real path, and it breaks every fs.stat/executable check.
     if (trimmed.length >= 2
       && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
@@ -45,7 +70,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
   };
 
   // Resolve symlinks, falling back to the original value on failure.
-  const safeRealpathSync = (value) => {
+  const safeRealpathSync = <T>(value: T): T | string => {
     if (!realpathSync || typeof value !== 'string' || !value) {
       return value;
     }
@@ -56,7 +81,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     }
   };
 
-  const normalizePathForPersistence = (value, options = {}) => {
+  const normalizePathForPersistence = <T>(
+    value: T,
+    options: { resolveRealpath?: boolean | undefined } = {},
+  ): T | string => {
     if (typeof value !== 'string') {
       return value;
     }
@@ -75,14 +103,14 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     // case across all path representations on Windows. NTFS is case-insensitive
     // but case-preserving, so a path like "c:\\Users\\..." and "C:\\Users\\..."
     // would be stored differently in settings.json across sessions.
-    const uppercaseDriveLetter = (p) =>
-      p.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
+    const uppercaseDriveLetter = (value: string): string =>
+      value.replace(/^([a-z]):/, (_match: string, letter: string) => letter.toUpperCase() + ':');
 
     const isWindows = processLike.platform === 'win32';
     const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
     const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
 
-    // Re-normalize after realpath 鈥?safeRealpathSync may return a
+    // Re-normalize after realpath — safeRealpathSync may return a
     // lowercase drive letter on some Windows environments.
     const finalResolved = isWindows && typeof resolved === 'string'
       ? uppercaseDriveLetter(resolved)
@@ -95,7 +123,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return finalResolved.replace(/\//g, '\\');
   };
 
-  const areStringArraysEqual = (a, b) => {
+  const areStringArraysEqual = (a: unknown, b: unknown): boolean => {
     if (!Array.isArray(a) || !Array.isArray(b)) {
       return false;
     }
@@ -110,7 +138,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return true;
   };
 
-  const normalizeStringArray = (input) => {
+  const normalizeStringArray = (input: unknown): string[] => {
     if (!Array.isArray(input)) {
       return [];
     }
@@ -121,13 +149,13 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     );
   };
 
-  const sanitizeProjects = (input) => {
+  const sanitizeProjects = (input: unknown): NormalizedProject[] | undefined => {
     if (!Array.isArray(input)) {
       return undefined;
     }
 
     const hexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
-    const normalizeIconBackground = (value) => {
+    const normalizeIconBackground = (value: unknown): string | null => {
       if (typeof value !== 'string') {
         return null;
       }
@@ -138,29 +166,31 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return hexColorPattern.test(trimmed) ? trimmed.toLowerCase() : null;
     };
 
-    const result = [];
-    const seenIds = new Set();
-    const seenPaths = new Set();
+    const result: NormalizedProject[] = [];
+    const seenIds = new Set<string>();
+    const seenPaths = new Set<string>();
 
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
 
-      const candidate = entry;
+      const candidate = entry as Record<string, unknown>;
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
       const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const id = createProjectIdFromPath(normalizedPath);
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
-      const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
-        ? candidate.iconImage
+      const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object' && !Array.isArray(candidate.iconImage)
+        ? candidate.iconImage as Record<string, unknown>
         : null;
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
       const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
-      const addedAt = Number.isFinite(candidate.addedAt) ? Number(candidate.addedAt) : null;
-      const lastOpenedAt = Number.isFinite(candidate.lastOpenedAt)
-        ? Number(candidate.lastOpenedAt)
+      const addedAt = typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt)
+        ? candidate.addedAt
+        : null;
+      const lastOpenedAt = typeof candidate.lastOpenedAt === 'number' && Number.isFinite(candidate.lastOpenedAt)
+        ? candidate.lastOpenedAt
         : null;
 
       if (!id || !normalizedPath) continue;
@@ -170,7 +200,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       seenIds.add(id);
       seenPaths.add(normalizedPath);
 
-      const project = {
+      const project: NormalizedProject = {
         id,
         path: normalizedPath,
         ...(label ? { label } : {}),
@@ -178,8 +208,8 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(iconBackground ? { iconBackground } : {}),
         ...(color ? { color } : {}),
         ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
-        ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
-        ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
+        ...(addedAt !== null && addedAt >= 0 ? { addedAt } : {}),
+        ...(lastOpenedAt !== null && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };
 
       if (candidate.iconImage === null) {
@@ -211,8 +241,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return result;
   };
 
-  const normalizeSettingsPaths = (input) => {
-    const settings = input && typeof input === 'object' ? input : {};
+  const normalizeSettingsPaths = (input: unknown): { settings: Record<string, unknown>; changed: boolean } => {
+    const settings: Record<string, unknown> = input && typeof input === 'object' && !Array.isArray(input)
+      ? input as Record<string, unknown>
+      : {};
     let next = settings;
     let changed = false;
 
@@ -222,7 +254,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       }
     };
 
-    const normalizePathField = (key) => {
+    const normalizePathField = (key: string): void => {
       if (typeof settings[key] !== 'string' || settings[key].length === 0) {
         return;
       }
@@ -234,7 +266,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       }
     };
 
-    const normalizePathArrayField = (key) => {
+    const normalizePathArrayField = (key: string): void => {
       if (!Array.isArray(settings[key])) {
         return;
       }
@@ -268,26 +300,26 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return { settings: next, changed };
   };
 
-  const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
+  const clampNumber = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
 
-  const normalizeTunnelBootstrapTtlMs = (value) => {
+  const normalizeTunnelBootstrapTtlMs = (value: unknown): number | null => {
     if (value === null) {
       return null;
     }
-    if (!Number.isFinite(value)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
       return tunnelBootstrapTtlDefaultMs;
     }
     return clampNumber(Math.round(value), tunnelBootstrapTtlMinMs, tunnelBootstrapTtlMaxMs);
   };
 
-  const normalizeTunnelSessionTtlMs = (value) => {
-    if (!Number.isFinite(value)) {
+  const normalizeTunnelSessionTtlMs = (value: unknown): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
       return tunnelSessionTtlDefaultMs;
     }
     return clampNumber(Math.round(value), tunnelSessionTtlMinMs, tunnelSessionTtlMaxMs);
   };
 
-  const normalizeManagedRemoteTunnelHostname = (value) => {
+  const normalizeManagedRemoteTunnelHostname = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
       return undefined;
     }
@@ -314,7 +346,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return hostname;
   };
 
-  const normalizeManagedRemoteTunnelPresets = (value) => {
+  const normalizeManagedRemoteTunnelPresets = (value: unknown): Array<{ id: string; name: string; hostname: string }> | undefined => {
     if (!Array.isArray(value)) {
       return undefined;
     }
@@ -325,7 +357,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
 
     for (const entry of value) {
       if (!entry || typeof entry !== 'object') continue;
-      const candidate = entry;
+      const candidate = entry as Record<string, unknown>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
       const hostname = normalizeManagedRemoteTunnelHostname(candidate.hostname);
@@ -339,12 +371,12 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return result;
   };
 
-  const normalizeManagedRemoteTunnelPresetTokens = (value) => {
+  const normalizeManagedRemoteTunnelPresetTokens = (value: unknown): Record<string, string> | undefined => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return undefined;
     }
 
-    const result = {};
+    const result: Record<string, string> = {};
     for (const [rawId, rawToken] of Object.entries(value)) {
       const id = typeof rawId === 'string' ? rawId.trim() : '';
       const token = typeof rawToken === 'string' ? rawToken.trim() : '';
@@ -357,7 +389,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return Object.keys(result).length > 0 ? result : undefined;
   };
 
-  const isUnsafeSkillRelativePath = (value) => {
+  const isUnsafeSkillRelativePath = (value: unknown): boolean => {
     if (typeof value !== 'string' || value.length === 0) {
       return true;
     }
@@ -370,15 +402,15 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return normalized.split('/').some((segment) => segment === '..');
   };
 
-  const sanitizeTypographySizesPartial = (input) => {
+  const sanitizeTypographySizesPartial = (input: unknown): Record<string, string> | undefined => {
     if (!input || typeof input !== 'object') {
       return undefined;
     }
-    const candidate = input;
-    const result = {};
+    const candidate = input as Record<string, unknown>;
+    const result: Record<string, string> = {};
     let populated = false;
 
-    const assign = (key) => {
+    const assign = (key: string): void => {
       if (typeof candidate[key] === 'string' && candidate[key].length > 0) {
         result[key] = candidate[key];
         populated = true;
@@ -395,7 +427,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return populated ? result : undefined;
   };
 
-  const sanitizeModelRefs = (input, limit) => {
+  const sanitizeModelRefs = (
+    input: unknown,
+    limit: number,
+  ): Array<{ providerID: string; modelID: string }> | undefined => {
     if (!Array.isArray(input)) {
       return undefined;
     }
@@ -405,8 +440,9 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
 
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
-      const providerID = typeof entry.providerID === 'string' ? entry.providerID.trim() : '';
-      const modelID = typeof entry.modelID === 'string' ? entry.modelID.trim() : '';
+      const candidate = entry as Record<string, unknown>;
+      const providerID = typeof candidate.providerID === 'string' ? candidate.providerID.trim() : '';
+      const modelID = typeof candidate.modelID === 'string' ? candidate.modelID.trim() : '';
       if (!providerID || !modelID) continue;
       const key = `${providerID}/${modelID}`;
       if (seen.has(key)) continue;
@@ -418,7 +454,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return result;
   };
 
-  const sanitizeSkillCatalogs = (input) => {
+  const sanitizeSkillCatalogs = (input: unknown): Array<Record<string, string>> | undefined => {
     if (!Array.isArray(input)) {
       return undefined;
     }
@@ -429,11 +465,12 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
 
-      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-      const label = typeof entry.label === 'string' ? entry.label.trim() : '';
-      const source = typeof entry.source === 'string' ? entry.source.trim() : '';
-      const subpath = typeof entry.subpath === 'string' ? entry.subpath.trim() : '';
-      const gitIdentityId = typeof entry.gitIdentityId === 'string' ? entry.gitIdentityId.trim() : '';
+      const candidate = entry as Record<string, unknown>;
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+      const source = typeof candidate.source === 'string' ? candidate.source.trim() : '';
+      const subpath = typeof candidate.subpath === 'string' ? candidate.subpath.trim() : '';
+      const gitIdentityId = typeof candidate.gitIdentityId === 'string' ? candidate.gitIdentityId.trim() : '';
 
       if (!id || !label || !source) continue;
       if (seen.has(id)) continue;

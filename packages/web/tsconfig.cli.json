@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "rootDir": "cli",
+    "outDir": ".cli-build",
+    "types": ["node"],
+    "sourceMap": true,
+    "declaration": false,
+    "noEmit": false,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
+      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"]
+    }
+  },
+  "include": ["cli/**/*.ts"],
+  "exclude": ["cli/**/*.test.ts"]
+}

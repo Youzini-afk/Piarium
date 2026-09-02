@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -6,7 +5,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  asObject,
 } from '../utils/index.js';
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
@@ -55,12 +55,12 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const windows = {};
-    const period = payload?.period ?? null;
-    const daily = payload?.daily ?? null;
-    const monthly = payload?.monthly ?? null;
-    const state = payload?.state ?? 'active';
+    const payload = asObject(await response.json()) ?? {};
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
+    const period = asObject(payload.period);
+    const daily = asObject(payload.daily);
+    const monthly = asObject(payload.monthly);
+    const state = typeof payload.state === 'string' ? payload.state : 'active';
 
     if (daily) {
       let usedPercent = null;
@@ -69,7 +69,8 @@ export const fetchQuota = async () => {
         usedPercent = Math.max(0, Math.min(100, percentUsed * 100));
       } else {
         const used = toNumber(daily?.used);
-        const limit = toNumber(daily?.limit ?? daily?.limits?.daily);
+        const dailyLimits = asObject(daily.limits);
+        const limit = toNumber(daily.limit ?? dailyLimits?.daily);
         if (used !== null && limit !== null && limit > 0) {
           usedPercent = Math.max(0, Math.min(100, (used / limit) * 100));
         }
@@ -91,12 +92,13 @@ export const fetchQuota = async () => {
         usedPercent = Math.max(0, Math.min(100, percentUsed * 100));
       } else {
         const used = toNumber(monthly?.used);
-        const limit = toNumber(monthly?.limit ?? monthly?.limits?.monthly);
+        const monthlyLimits = asObject(monthly.limits);
+        const limit = toNumber(monthly.limit ?? monthlyLimits?.monthly);
         if (used !== null && limit !== null && limit > 0) {
           usedPercent = Math.max(0, Math.min(100, (used / limit) * 100));
         }
       }
-      const resetAt = toTimestamp(monthly?.resetAt ?? period?.currentPeriodEnd);
+      const resetAt = toTimestamp(monthly.resetAt ?? period?.currentPeriodEnd);
       const valueLabel = state !== 'active' ? `(${state})` : null;
       windows['monthly'] = toUsageWindow({
         usedPercent,

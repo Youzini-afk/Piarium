@@ -1,8 +1,9 @@
-// @ts-nocheck
 import os from 'node:os';
 import path from 'node:path';
 
-export const resolvePiariumDataDir = (processLike = process) => {
+export const resolvePiariumDataDir = (
+  processLike: Pick<NodeJS.Process, 'env' | 'platform'> = process,
+): string => {
   const configured = processLike.env?.PIARIUM_DATA_DIR;
   if (typeof configured === 'string' && configured.trim()) {
     return path.resolve(configured.trim());

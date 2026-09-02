@@ -2,7 +2,7 @@
 // Transport-agnostic: callers feed inbound frames in and deliver the returned
 // outbound frames; text frames are plaintext handshake JSON, binary frames are
 // encrypted traffic. Wire-up to actual WebSockets happens in the host client
-// (packages/web/server/lib/relay) and the tunnel client (Phase 3).
+// (packages/web/application-host/lib/relay) and the tunnel client (Phase 3).
 //
 // Client (initiator): sends `hello` with an ephemeral public key + nonce,
 // waits for `ready`. Host (responder): waits for `hello`, derives session

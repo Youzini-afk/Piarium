@@ -12,38 +12,10 @@ import {
   parseWorkspaceRecoveryMutationBeforeInput,
   parseWorkspaceRecoveryTurnSettledInput,
   parseWorkspaceRecoveryTurnStartInput,
+  type JsonValue,
 } from '@piarium/extension-contract';
-
-interface RecoveryEngine {
-  status(workspaceId: string): Promise<unknown>;
-  createCheckpoint(input: unknown): Promise<unknown>;
-  recordMutationBefore(input: unknown): Promise<unknown>;
-  recordMutationAfter(input: unknown): Promise<unknown>;
-  recordTurnStart(input: unknown): Promise<unknown>;
-  recordTurnSettled(input: unknown): Promise<unknown>;
-  resolveEntry(input: unknown): Promise<unknown>;
-  prepareCombinedRecovery(input: unknown): Promise<unknown>;
-  prepareCombinedUndo(operationId: string): Promise<unknown>;
-  applyCombinedRecovery(input: unknown): Promise<unknown>;
-  getCombinedOperation(operationId: string): Promise<unknown>;
-  cancelCombinedOperation(operationId: string): Promise<unknown>;
-  listCheckpoints(query: unknown): Promise<unknown>;
-  listCombinedOperations(workspaceId: string): Promise<unknown>;
-  listStorageWorkspaces(): Promise<unknown>;
-  storageStatus(workspaceId: string | undefined): Promise<unknown>;
-  setStorageLocation(input: unknown): Promise<unknown>;
-  setDefaultStorageLocation(input: unknown): Promise<unknown>;
-  clearStorageLocationOverride(workspaceId: string): Promise<unknown>;
-  getStorageMove(operationId: string): Promise<unknown>;
-  cleanupStorage(input: unknown): Promise<unknown>;
-  retentionStatus(workspaceId: string): Promise<unknown>;
-  setRetentionPolicy(input: unknown): Promise<unknown>;
-  deleteWorkspaceHistory(workspaceId: string): Promise<unknown>;
-}
-
-interface CapabilityContext {
-  [key: string]: unknown;
-}
+import type { HostCapabilityCallContext, HostCapabilityHandler } from '@piarium/extension-host';
+import type { WorkspaceRecoveryEngine } from './engine.js';
 
 const asRecord = (value: unknown, label: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} expects an object`);
@@ -55,12 +27,23 @@ const requiredText = (value: unknown, label: string): string => {
   return value;
 };
 
+const toJsonValue = (value: unknown): JsonValue => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map(toJsonValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toJsonValue(entry)]));
+  }
+  throw new TypeError('Workspace recovery capability returned a non-JSON value');
+};
+
 export const createWorkspaceRecoveryCapabilityHandler =
-  (engineOrResolver: RecoveryEngine | ((context: CapabilityContext) => Promise<RecoveryEngine>)) =>
-  async (method: string, params: unknown, context: CapabilityContext): Promise<unknown> => {
+  (engineOrResolver: WorkspaceRecoveryEngine | ((context: HostCapabilityCallContext) => WorkspaceRecoveryEngine | Promise<WorkspaceRecoveryEngine>)): HostCapabilityHandler =>
+  async (method, params, context): Promise<JsonValue> => {
     const engine = typeof engineOrResolver === 'function'
-      ? await (engineOrResolver as (context: CapabilityContext) => Promise<RecoveryEngine>)(context)
+      ? await engineOrResolver(context)
       : engineOrResolver;
+    const result = await (async (): Promise<unknown> => {
     if (method === 'status') {
       const input = asRecord(params, 'workspace.recovery-primitives.status');
       return engine.status(requiredText(input.workspaceId, 'workspaceId'));
@@ -133,5 +116,7 @@ export const createWorkspaceRecoveryCapabilityHandler =
       const input = asRecord(params, 'workspace.recovery-primitives.deleteWorkspaceHistory');
       return engine.deleteWorkspaceHistory(requiredText(input.workspaceId, 'workspaceId'));
     }
-    throw new Error(`workspace.recovery-primitives does not implement ${method}`);
+      throw new Error(`workspace.recovery-primitives does not implement ${method}`);
+    })();
+    return toJsonValue(result);
   };

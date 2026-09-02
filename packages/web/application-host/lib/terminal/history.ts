@@ -1,17 +1,16 @@
-// @ts-nocheck
-const isCsiFinalByte = (code) => code >= 0x40 && code <= 0x7e;
-const shouldStripCsi = (body, finalByte) =>
+const isCsiFinalByte = (code: number): boolean => code >= 0x40 && code <= 0x7e;
+const shouldStripCsi = (body: string, finalByte: string | undefined): boolean =>
   finalByte === 'n'
   || (finalByte === 'R' && /^[0-9;?]*$/.test(body))
   || (finalByte === 'c' && /^[>0-9;?]*$/.test(body))
   || ((finalByte === 'p' || finalByte === 'y') && /^\?2031(?:;[0-9]+)?\$$/.test(body))
   || ((finalByte === 'h' || finalByte === 'l') && body === '?2031');
-const shouldStripOsc = (content) => /^(10|11|12);(?:\?|rgb:)/.test(content);
-const stripTerminator = (value) => {
+const shouldStripOsc = (content: string): boolean => /^(10|11|12);(?:\?|rgb:)/.test(content);
+const stripTerminator = (value: string): string => {
   if (value.endsWith('\u001b\\')) return value.slice(0, -2);
   return value.endsWith('\u0007') || value.endsWith('\u009c') ? value.slice(0, -1) : value;
 };
-const findStringEnd = (input, start) => {
+const findStringEnd = (input: string, start: number): number | null => {
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
     if (code === 0x07 || code === 0x9c) return index + 1;
@@ -19,14 +18,17 @@ const findStringEnd = (input, start) => {
   }
   return null;
 };
-const findEscapeEnd = (input, start) => {
+const findEscapeEnd = (input: string, start: number): number | null => {
   let cursor = start;
   while (cursor < input.length && input.charCodeAt(cursor) >= 0x20 && input.charCodeAt(cursor) <= 0x2f) cursor += 1;
   if (cursor >= input.length) return null;
   return input.charCodeAt(cursor) >= 0x30 && input.charCodeAt(cursor) <= 0x7e ? cursor + 1 : start + 1;
 };
 
-export const sanitizeTerminalHistoryChunk = (pending, data) => {
+export const sanitizeTerminalHistoryChunk = (
+  pending: string,
+  data: string,
+): { pending: string; visible: string } => {
   const input = `${pending}${data}`;
   let visible = '';
   let index = 0;

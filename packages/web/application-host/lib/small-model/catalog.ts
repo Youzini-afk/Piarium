@@ -1,14 +1,18 @@
-// @ts-nocheck
-import { getModelsMetadata } from '../platform/models-metadata.js';
+import {
+  getModelsMetadata,
+  type ModelsMetadata,
+} from '../platform/models-metadata.js';
 
 // The models.dev catalog is shared with the /api/piarium/models-metadata
-// route through one in-process cache 鈥?no extra fetches, no cache files.
-export async function getModelCatalog() {
+// route through one in-process cache — no extra fetches, no cache files.
+export async function getModelCatalog(): Promise<ModelsMetadata> {
   const { metadata } = await getModelsMetadata();
   return metadata;
 }
 
-export function getCatalogProvider(catalog, providerID) {
+export function getCatalogProvider(catalog: ModelsMetadata | null | undefined, providerID: string): Record<string, unknown> | null {
   const entry = catalog?.[providerID];
-  return entry && typeof entry === 'object' ? entry : null;
+  return entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? entry as Record<string, unknown>
+    : null;
 }

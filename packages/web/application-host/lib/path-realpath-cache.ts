@@ -1,4 +1,25 @@
-// @ts-nocheck
+export interface RealpathCacheOptions {
+  realpath?: ((value: string) => Promise<string> | string) | undefined;
+  successTtlMs?: number | undefined;
+  failureTtlMs?: number | undefined;
+  maxEntries?: number | undefined;
+  fallbackOnError?: boolean | undefined;
+  now?: (() => number) | undefined;
+}
+
+interface CacheEntry {
+  error?: unknown;
+  expiresAt: number;
+  promise?: Promise<string> | undefined;
+  value: string;
+}
+
+export interface RealpathCache {
+  clear(): void;
+  resolve(value: string): Promise<string>;
+  size(): number;
+}
+
 export const createRealpathCache = ({
   realpath,
   successTtlMs = 600_000,
@@ -6,11 +27,11 @@ export const createRealpathCache = ({
   maxEntries = 256,
   fallbackOnError = false,
   now = () => Date.now(),
-} = {}) => {
-  const cache = new Map();
+}: RealpathCacheOptions = {}): RealpathCache => {
+  const cache = new Map<string, CacheEntry>();
   const resolveRealpath = typeof realpath === 'function' ? realpath : null;
 
-  const prune = () => {
+  const prune = (): void => {
     while (cache.size > maxEntries) {
       const oldestKey = cache.keys().next().value;
       if (oldestKey === undefined) {
@@ -20,7 +41,11 @@ export const createRealpathCache = ({
     }
   };
 
-  const remember = (key, entry, ttlMs) => {
+  const remember = (
+    key: string,
+    entry: Omit<CacheEntry, 'expiresAt'>,
+    ttlMs: number,
+  ): void => {
     if (!Number.isFinite(maxEntries) || maxEntries <= 0) {
       return;
     }
@@ -29,7 +54,7 @@ export const createRealpathCache = ({
     prune();
   };
 
-  const resolve = async (value) => {
+  const resolve = async (value: string): Promise<string> => {
     if (typeof value !== 'string' || value.length === 0 || !resolveRealpath) {
       return value;
     }

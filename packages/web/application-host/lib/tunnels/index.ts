@@ -1,12 +1,24 @@
-// @ts-nocheck
 import {
   TUNNEL_MODE_QUICK,
   TUNNEL_PROVIDER_CLOUDFLARE,
   TunnelServiceError,
   normalizeTunnelStartRequest,
   validateTunnelStartRequest,
+  type TunnelAvailability,
+  type TunnelController,
+  type TunnelMode,
+  type TunnelProviderId,
 } from './types.js';
 import { getTunnelDependencyInstallInfo } from './install-help.js';
+import type { TunnelProviderRegistry } from './registry.js';
+
+export interface TunnelServiceDependencies {
+  getActivePort(): number | null;
+  getController(): TunnelController | null;
+  onQuickTunnelWarning?: (() => void) | undefined;
+  registry: Pick<TunnelProviderRegistry, 'get'>;
+  setController(controller: TunnelController | null): void;
+}
 
 export function createTunnelService({
   registry,
@@ -14,28 +26,28 @@ export function createTunnelService({
   setController,
   getActivePort,
   onQuickTunnelWarning,
-}) {
+}: TunnelServiceDependencies) {
   if (!registry) {
     throw new Error('Tunnel service requires a provider registry');
   }
 
-  const resolveActiveMode = () => {
+  const resolveActiveMode = (): TunnelMode | null => {
     const controller = getController();
     if (!controller || typeof controller.mode !== 'string') {
       return null;
     }
-    return controller.mode;
+    return controller.mode as TunnelMode;
   };
 
-  const resolveActiveProvider = () => {
+  const resolveActiveProvider = (): TunnelProviderId | null => {
     const controller = getController();
     if (!controller || typeof controller.provider !== 'string') {
       return null;
     }
-    return controller.provider;
+    return controller.provider as TunnelProviderId;
   };
 
-  const stop = () => {
+  const stop = (): boolean => {
     const controller = getController();
     if (!controller) {
       return false;
@@ -52,7 +64,7 @@ export function createTunnelService({
     return true;
   };
 
-  const checkAvailability = async (providerId) => {
+  const checkAvailability = async (providerId: unknown): Promise<TunnelAvailability> => {
     const provider = registry.get(providerId);
     if (!provider) {
       throw new TunnelServiceError('provider_unsupported', `Unsupported tunnel provider: ${providerId}`);
@@ -62,11 +74,11 @@ export function createTunnelService({
   };
 
   // Mutex to prevent concurrent tunnel starts from orphaning child processes.
-  let startLock = Promise.resolve();
+  let startLock: Promise<void> = Promise.resolve();
 
-  const start = async (rawRequest, options = {}) => {
-    let releaseLock;
-    const lockPromise = new Promise((resolve) => { releaseLock = resolve; });
+  const start = async (rawRequest: Record<string, unknown>, options: Record<string, unknown> = {}) => {
+    let releaseLock: () => void = () => undefined;
+    const lockPromise = new Promise<void>((resolve) => { releaseLock = resolve; });
     const previousLock = startLock;
     startLock = lockPromise;
 
@@ -102,10 +114,11 @@ export function createTunnelService({
           throw new TunnelServiceError('missing_dependency', missingDependencyMessage);
         }
 
-        const activePort = Number.isFinite(getActivePort?.()) ? getActivePort() : null;
+        const observedPort = getActivePort();
+        const activePort = typeof observedPort === 'number' && Number.isFinite(observedPort) ? observedPort : null;
         const originUrl = activePort !== null ? `http://127.0.0.1:${activePort}` : undefined;
 
-        let controller;
+        let controller: TunnelController;
         try {
           controller = await provider.start(request, {
             activePort,
@@ -147,7 +160,7 @@ export function createTunnelService({
     }
   };
 
-  const getPublicUrl = () => {
+  const getPublicUrl = (): string | null => {
     const controller = getController();
     if (!controller) {
       return null;
@@ -159,7 +172,7 @@ export function createTunnelService({
     return provider.resolvePublicUrl(controller);
   };
 
-  const getProviderMetadata = () => {
+  const getProviderMetadata = (): unknown => {
     const controller = getController();
     if (!controller) {
       return null;

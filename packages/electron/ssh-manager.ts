@@ -1,0 +1,1615 @@
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import type { SpawnOptions } from 'node:child_process';
+import type { Writable, Readable } from 'node:stream';
+import { createSettingsFileStore } from '@piarium/settings-store';
+import { recordOf } from './runtime-types.js';
+
+const LOCAL_HOST_ID = 'local';
+const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
+const DEFAULT_LOCAL_BIND_HOST = '127.0.0.1';
+const DEFAULT_CONTROL_PERSIST_SEC = 300;
+const DEFAULT_READY_TIMEOUT_SEC = 30;
+const DEFAULT_RECONNECT_MAX_ATTEMPTS = 5;
+const MAX_LOG_LINES_PER_INSTANCE = 1200;
+
+const MONITOR_INITIAL_POLL_MS = 2000;
+const MONITOR_STEADY_POLL_MS = 10000;
+const MONITOR_STABILIZE_TICKS = 5;
+const SSH_STATUS_EVENT = 'piarium:ssh-instance-status';
+const MAX_PROCESS_ERROR_CHARS = 2000;
+const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
+export interface ParsedSshCommand {
+  args: string[];
+  destination: string;
+}
+
+export interface SshChildProcess {
+  exitCode: number | null;
+  kill(signal?: NodeJS.Signals): boolean;
+  on(event: 'close', listener: (code: number | null) => void): this;
+  on(event: 'error', listener: (error: Error) => void): this;
+  stderr?: Pick<Readable, 'on'> | null;
+  stdin?: Pick<Writable, 'write' | 'end'> | null;
+  stdout?: Pick<Readable, 'on'> | null;
+}
+
+interface StoredSecret {
+  enabled: boolean;
+  store: 'never' | 'settings';
+  value?: string | undefined;
+}
+
+export interface SshPortForward {
+  enabled: boolean;
+  id: string;
+  localHost?: string | undefined;
+  localPort?: number | undefined;
+  remoteHost?: string | undefined;
+  remotePort?: number | undefined;
+  type: 'dynamic' | 'local' | 'remote';
+}
+
+export interface SshInstance {
+  auth: { piariumPassword?: StoredSecret; sshPassword?: StoredSecret };
+  connectionTimeoutSec: number;
+  id: string;
+  localForward: { bindHost: string; preferredLocalPort?: number };
+  nickname?: string;
+  portForwards: SshPortForward[];
+  remotePiarium: {
+    installMethod: string;
+    keepRunning: boolean;
+    mode: 'external' | 'managed';
+    preferredPort?: number;
+    uploadBundleOverSsh: boolean;
+  };
+  sshCommand: string;
+  sshParsed: ParsedSshCommand;
+}
+
+interface SshStatus {
+  detail: string | null;
+  id: string;
+  localPort: number | null;
+  localUrl: string | null;
+  phase: string;
+  remotePort: number | null;
+  requiresUserAction: boolean;
+  retryAttempt: number;
+  startedByUs: boolean;
+  updatedAtMs: number;
+}
+
+interface SshSession {
+  askpassCleanupPaths: string[];
+  controlPath: string;
+  extraForwards: Array<{ child: SshChildProcess; id: string }>;
+  instance: SshInstance;
+  localPort: number | null;
+  mainForward: SshChildProcess | null;
+  mainForwardDetached: boolean;
+  master: SshChildProcess | null;
+  parsed: ParsedSshCommand;
+  remotePort: number | null;
+  sessionDir: string;
+  startedByUs: boolean;
+}
+
+interface SshAuthRecord {
+  askpassPath: string;
+  children: Set<SshChildProcess>;
+  sshPassword: string | null;
+}
+
+interface ProcessDiagnostics {
+  error: Error | null;
+  parsed: ParsedSshCommand;
+  stderr: string;
+}
+
+interface SshConfigCandidate {
+  host: string;
+  pattern: boolean;
+  source: string;
+  sshCommand: string;
+}
+
+type SpawnSsh = (command: string, args: string[], options: SpawnOptions) => SshChildProcess;
+type SettingsStore = ReturnType<typeof createSettingsFileStore>;
+
+const childProcessDiagnostics = new WeakMap<SshChildProcess, ProcessDiagnostics>();
+
+const nowMillis = (): number => Date.now();
+
+const shellQuote = (value: unknown): string => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+const hasGlobWildcard = (value: string): boolean => /[*?]/.test(value);
+
+const expandSshIncludeToken = (token: unknown, baseDir: string): string[] => {
+  const trimmed = String(token || '').trim();
+  if (!trimmed) return [];
+
+  const expandedHome = trimmed.startsWith('~/')
+    ? path.join(os.homedir(), trimmed.slice(2))
+    : (trimmed === '~' ? os.homedir() : trimmed);
+  const resolved = path.isAbsolute(expandedHome)
+    ? expandedHome
+    : path.resolve(baseDir, expandedHome);
+
+  if (!hasGlobWildcard(resolved)) {
+    return fs.existsSync(resolved) ? [resolved] : [];
+  }
+
+  const dir = path.dirname(resolved);
+  const namePattern = path.basename(resolved);
+  if (hasGlobWildcard(dir) || !fs.existsSync(dir)) {
+    return [];
+  }
+
+  const matcher = new RegExp(`^${namePattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')}$`);
+
+  try {
+    return fs.readdirSync(dir)
+      .filter((name) => matcher.test(name))
+      .map((name) => path.join(dir, name))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+};
+
+const defaultTrue = (): boolean => true;
+
+const sanitizeBindHost = (raw: unknown): string => {
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!trimmed) return DEFAULT_LOCAL_BIND_HOST;
+  return ['127.0.0.1', 'localhost', '0.0.0.0'].includes(trimmed) ? trimmed : DEFAULT_LOCAL_BIND_HOST;
+};
+
+const splitShellWords = (input: unknown): string[] => {
+  const tokens: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  const chars = [...String(input)];
+
+  for (let index = 0; index < chars.length; index += 1) {
+    const ch = chars[index]!;
+    if (ch === '\\' && !inSingle) {
+      index += 1;
+      if (index < chars.length) current += chars[index]!;
+      continue;
+    }
+    if (ch === '\'' && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (/\s/.test(ch) && !inSingle && !inDouble) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+
+  if (inSingle || inDouble) {
+    throw new Error('Unclosed quote in SSH command');
+  }
+  if (current) tokens.push(current);
+  return tokens;
+};
+
+const isDisallowedPrimaryFlag = (token: string): boolean => {
+  return ['-M', '-S', '-O', '-N', '-t', '-T', '-f', '-G', '-W', '-v', '-V', '-q', '-n', '-s', '-e', '-E', '-g'].includes(token);
+};
+
+const hasDisallowedOOption = (value: unknown): boolean => {
+  const lower = String(value).trim().toLowerCase();
+  return ['controlmaster', 'controlpath', 'controlpersist', 'batchmode', 'proxycommand'].some((prefix) => lower.startsWith(prefix));
+};
+
+const parseSshCommand = (raw: unknown): ParsedSshCommand => {
+  const tokens = splitShellWords(raw);
+  if (tokens.length === 0) {
+    throw new Error('SSH command is empty');
+  }
+
+  if (tokens[0] === 'ssh') {
+    tokens.shift();
+  }
+
+  if (tokens.length === 0) {
+    throw new Error('SSH command must include destination');
+  }
+
+  const allowedFlags = new Set(['-4', '-6', '-A', '-a', '-C', '-K', '-k', '-X', '-x', '-Y', '-y']);
+  const allowedWithValues = ['-B', '-b', '-c', '-D', '-F', '-I', '-i', '-J', '-l', '-m', '-o', '-P', '-p', '-R'];
+
+  const args: string[] = [];
+  let destination: string | null = null;
+  for (let index = 0; index < tokens.length;) {
+    const token = tokens[index]!;
+    if (destination) {
+      throw new Error(`SSH command has unsupported trailing argument: ${token}`);
+    }
+
+    if (!token.startsWith('-')) {
+      destination = token.trim();
+      index += 1;
+      continue;
+    }
+
+    if (isDisallowedPrimaryFlag(token)) {
+      throw new Error(`SSH option ${token} is not allowed`);
+    }
+
+    if (allowedFlags.has(token)) {
+      args.push(token);
+      index += 1;
+      continue;
+    }
+
+    let matched = false;
+    for (const option of allowedWithValues) {
+      if (token === option) {
+        const value = tokens[index + 1];
+        if (!value) {
+          throw new Error(`SSH option ${option} requires a value`);
+        }
+        if (option === '-o' && hasDisallowedOOption(value)) {
+          throw new Error(`SSH option -o ${value} is not allowed`);
+        }
+        args.push(token, value);
+        index += 2;
+        matched = true;
+        break;
+      }
+
+      if (token.startsWith(option) && token.length > option.length) {
+        const value = token.slice(option.length);
+        if (option === '-o' && hasDisallowedOOption(value)) {
+          throw new Error(`SSH option -o ${value} is not allowed`);
+        }
+        args.push(token);
+        index += 1;
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      throw new Error(`Unsupported SSH option: ${token}`);
+    }
+  }
+
+  if (!destination) {
+    throw new Error('SSH command must include destination');
+  }
+
+  return { destination, args };
+};
+
+const buildSshArgs = (parsed: ParsedSshCommand, preDestinationArgs: string[] = [], remoteCommand: string | null = null): string[] => {
+  const args = [...parsed.args, ...preDestinationArgs, parsed.destination];
+  if (remoteCommand) args.push(remoteCommand);
+  return args;
+};
+
+const askpassScriptContent = (): string => `#!/bin/bash
+PROMPT="$1"
+
+if [[ -n "$PIARIUM_SSH_ASKPASS_VALUE" ]]; then
+  if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
+    printf '%s\\n' "$PIARIUM_SSH_ASKPASS_VALUE"
+    exit 0
+  fi
+fi
+
+DEFAULT_ANSWER=""
+HIDDEN_INPUT="true"
+
+if [[ "$PROMPT" == *"yes/no"* ]]; then
+  DEFAULT_ANSWER="yes"
+  HIDDEN_INPUT="false"
+fi
+
+if command -v osascript >/dev/null 2>&1; then
+  /usr/bin/osascript <<'APPLESCRIPT' "$PROMPT" "$DEFAULT_ANSWER" "$HIDDEN_INPUT"
+on run argv
+  set promptText to item 1 of argv
+  set defaultAnswer to item 2 of argv
+  set hiddenInput to item 3 of argv
+
+  try
+    if hiddenInput is "true" then
+      set response to display dialog promptText default answer defaultAnswer with hidden answer buttons {"Cancel", "OK"} default button "OK"
+    else
+      set response to display dialog promptText default answer defaultAnswer buttons {"Cancel", "OK"} default button "OK"
+    end if
+    return text returned of response
+  on error
+    error number -128
+  end try
+end run
+APPLESCRIPT
+  exit $?
+fi
+
+printf '%s\\n' "$DEFAULT_ANSWER"
+`;
+
+const writeAskpassScript = async (scriptPath: string): Promise<void> => {
+  await fsp.writeFile(scriptPath, askpassScriptContent(), { mode: 0o700 });
+  await fsp.chmod(scriptPath, 0o700);
+};
+
+const windowsAskpassScriptContent = (): string => `$value = [Environment]::GetEnvironmentVariable('PIARIUM_SSH_ASKPASS_VALUE')
+if ($null -ne $value) {
+  [Console]::Out.WriteLine($value)
+}
+`;
+
+const windowsAskpassWrapperContent = (): string => `@echo off\r
+"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0askpass.ps1"\r
+`;
+
+const sanitizeProcessDiagnostic = (value: unknown, secret?: string | null): string => {
+  let sanitized = String(value || '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .trim();
+  if (secret) sanitized = sanitized.split(secret).join('[redacted]');
+  if (sanitized.length > MAX_PROCESS_ERROR_CHARS) {
+    sanitized = `${sanitized.slice(0, MAX_PROCESS_ERROR_CHARS - 3)}...`;
+  }
+  return sanitized;
+};
+
+const randomPortCandidate = (seed: string): number => {
+  let hash = 0;
+  const source = `${seed}:${Date.now()}`;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  const base = 20000;
+  const span = 30000;
+  return base + Math.abs(hash % span);
+};
+
+const pickUnusedLocalPort = async (): Promise<number> => {
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+    server.on('error', reject);
+  });
+};
+
+const isLocalPortAvailable = async (bindHost: string, port: number): Promise<boolean> => {
+  return await new Promise<boolean>((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, bindHost, () => {
+      server.close(() => resolve(true));
+    });
+  });
+};
+
+const isLocalTunnelReachable = async (localPort: number): Promise<boolean> => {
+  return await new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port: localPort });
+    const finish = (value: boolean): void => {
+      socket.destroy();
+      resolve(value);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(500, () => finish(false));
+  });
+};
+
+const waitLocalForwardReady = async (localPort: number): Promise<void> => {
+  const deadline = Date.now() + (DEFAULT_READY_TIMEOUT_SEC * 1000);
+  let pollMs = 250;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${localPort}/health`, { signal: AbortSignal.timeout(1000) });
+      if (response.ok || response.status === 401) {
+        return;
+      }
+    } catch {
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    pollMs = Math.min(pollMs * 2, 2000);
+  }
+  throw new Error('Timed out waiting for forwarded Piarium health');
+};
+
+const parseVersionToken = (raw: unknown): string | null => {
+  for (const token of String(raw).split(/\s+/)) {
+    let candidate = token.trim().replace(/^v/, '');
+    candidate = candidate.replace(/[,)]+$/g, '');
+    const parts = candidate.split('.');
+    if (parts.length >= 2 && parts.every((part) => /^\d+$/.test(part))) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const parseProbeStatusLine = (line: string | undefined, prefix: string): number | null => {
+  if (!line || !line.startsWith(prefix)) return null;
+  const value = Number.parseInt(line.slice(prefix.length).trim(), 10);
+  return Number.isFinite(value) ? value : null;
+};
+
+const isAuthHttpStatus = (status: number): boolean => status === 401 || status === 403;
+const isLivenessHttpStatus = (status: number): boolean => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
+
+export class ElectronSshManager {
+  readonly settingsFilePath: string;
+  readonly settingsStore: SettingsStore;
+  readonly appVersion: string;
+  readonly emit: (event: string, detail: unknown) => void;
+  readonly platform: NodeJS.Platform;
+  readonly spawnProcess: SpawnSsh;
+  readonly logs: Map<string, string[]>;
+  readonly statuses: Map<string, SshStatus>;
+  readonly sessions: Map<string, SshSession>;
+  readonly monitorTimers: Map<string, ReturnType<typeof setTimeout>>;
+  readonly reconnectAttempts: Map<string, number>;
+  readonly connectAttempts: Map<string, number>;
+  readonly connecting: Map<string, Promise<void>>;
+  readonly sshAuth: WeakMap<ParsedSshCommand, SshAuthRecord>;
+
+  constructor(options: {
+    appVersion: string;
+    emit(event: string, detail: unknown): void;
+    platform?: NodeJS.Platform;
+    settingsFilePath: string;
+    settingsStore?: SettingsStore;
+    spawn?: SpawnSsh;
+  }) {
+    this.settingsFilePath = options.settingsFilePath;
+    this.settingsStore = options.settingsStore ?? createSettingsFileStore({ filePath: this.settingsFilePath });
+    this.appVersion = options.appVersion;
+    this.emit = options.emit;
+    this.platform = options.platform || process.platform;
+    this.spawnProcess = options.spawn || spawn;
+    this.logs = new Map<string, string[]>();
+    this.statuses = new Map<string, SshStatus>();
+    this.sessions = new Map<string, SshSession>();
+    this.monitorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    this.reconnectAttempts = new Map<string, number>();
+    this.connectAttempts = new Map<string, number>();
+    this.connecting = new Map<string, Promise<void>>();
+    this.sshAuth = new WeakMap<ParsedSshCommand, SshAuthRecord>();
+  }
+
+  usesControlMaster(): boolean {
+    return this.platform !== 'win32';
+  }
+
+  hiddenSpawnOptions(): Pick<SpawnOptions, 'windowsHide'> {
+    return this.platform === 'win32' ? { windowsHide: true } : {};
+  }
+
+  authEnvironment(parsed: ParsedSshCommand): NodeJS.ProcessEnv {
+    const auth = this.sshAuth.get(parsed);
+    if (!auth) return process.env;
+    return {
+      ...process.env,
+      SSH_ASKPASS_REQUIRE: 'force',
+      SSH_ASKPASS: auth.askpassPath,
+      DISPLAY: '1',
+      ...(auth.sshPassword ? { PIARIUM_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
+    };
+  }
+
+  independentConnectionArgs(): string[] {
+    return [
+      '-o', 'ControlMaster=no',
+      '-o', 'ControlPath=none',
+      '-o', 'StrictHostKeyChecking=accept-new',
+    ];
+  }
+
+  trackSshProcess(child: SshChildProcess, parsed: ParsedSshCommand): SshChildProcess {
+    const diagnostics: ProcessDiagnostics = { stderr: '', error: null, parsed };
+    childProcessDiagnostics.set(child, diagnostics);
+    const auth = this.sshAuth.get(parsed);
+    auth?.children.add(child);
+    child.stderr?.on('data', (chunk) => {
+      diagnostics.stderr = `${diagnostics.stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+    });
+    child.on('error', (error) => {
+      diagnostics.error = error;
+    });
+    child.on('close', () => {
+      auth?.children.delete(child);
+    });
+    return child;
+  }
+
+  processErrorDetail(child: SshChildProcess, fallback: string): string {
+    const diagnostics = childProcessDiagnostics.get(child);
+    const auth = diagnostics ? this.sshAuth.get(diagnostics.parsed) : null;
+    const detail = sanitizeProcessDiagnostic(
+      diagnostics?.error instanceof Error ? diagnostics.error.message : diagnostics?.stderr,
+      auth?.sshPassword,
+    );
+    return detail || fallback;
+  }
+
+  spawnSsh(parsed: ParsedSshCommand, preDestinationArgs: string[], options: SpawnOptions, remoteCommand: string | null = null): SshChildProcess {
+    const child = this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
+      ...options,
+      ...this.hiddenSpawnOptions(),
+      env: this.authEnvironment(parsed),
+    });
+    return this.trackSshProcess(child, parsed);
+  }
+
+  async runSshOutput(parsed: ParsedSshCommand, preDestinationArgs: string[], remoteCommand: string | null = null): Promise<{
+    code: number;
+    stderr: string;
+    stdout: string;
+  }> {
+    return await new Promise((resolve, reject) => {
+      const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        ...this.hiddenSpawnOptions(),
+        env: this.authEnvironment(parsed),
+      }), parsed);
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr?.on('data', (chunk) => {
+        stderr = `${stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+      });
+      child.on('error', () => {
+        reject(new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
+      });
+      child.on('close', (code) => {
+        const auth = this.sshAuth.get(parsed);
+        resolve({
+          code: typeof code === 'number' ? code : -1,
+          stdout,
+          stderr: sanitizeProcessDiagnostic(stderr, auth?.sshPassword),
+        });
+      });
+    });
+  }
+
+  async runRemoteCommand(parsed: ParsedSshCommand, controlPath: string, script: string, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC): Promise<string> {
+    const connectionArgs = this.usesControlMaster()
+      ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
+      : this.independentConnectionArgs();
+    const { code, stdout, stderr } = await this.runSshOutput(parsed, [
+      ...connectionArgs,
+      '-o', `ConnectTimeout=${timeoutSec}`,
+      '-T',
+    ], `sh -lc ${shellQuote(script)}`);
+    if (code !== 0) {
+      const auth = this.sshAuth.get(parsed);
+      throw new Error(sanitizeProcessDiagnostic(stderr || stdout, auth?.sshPassword) || 'Remote command failed');
+    }
+    return stdout;
+  }
+
+  async controlMasterOperation(parsed: ParsedSshCommand, controlPath: string, op: string) {
+    return await this.runSshOutput(parsed, [
+      '-o', 'ControlMaster=no',
+      '-o', `ControlPath=${controlPath}`,
+      '-o', 'BatchMode=yes',
+      '-o', 'ConnectTimeout=3',
+      '-O', op,
+    ]);
+  }
+
+  async isControlMasterAlive(parsed: ParsedSshCommand, controlPath: string): Promise<boolean> {
+    const { code } = await this.controlMasterOperation(parsed, controlPath, 'check');
+    return code === 0;
+  }
+
+  async stopControlMasterBestEffort(parsed: ParsedSshCommand, controlPath: string): Promise<void> {
+    if (!this.usesControlMaster()) return;
+    try {
+      await this.controlMasterOperation(parsed, controlPath, 'exit');
+    } catch {
+    }
+  }
+
+  async writeAskpassFiles(sessionDir: string): Promise<{ askpassPath: string; cleanupPaths: string[] }> {
+    if (this.platform === 'win32') {
+      const scriptPath = path.join(sessionDir, 'askpass.ps1');
+      const wrapperPath = path.join(sessionDir, 'askpass.cmd');
+      try {
+        await fsp.writeFile(scriptPath, windowsAskpassScriptContent());
+        await fsp.writeFile(wrapperPath, windowsAskpassWrapperContent());
+      } catch (error) {
+        await Promise.allSettled([
+          fsp.rm(scriptPath, { force: true }),
+          fsp.rm(wrapperPath, { force: true }),
+        ]);
+        throw error;
+      }
+      return { askpassPath: wrapperPath, cleanupPaths: [wrapperPath, scriptPath] };
+    }
+
+    const askpassPath = path.join(sessionDir, 'askpass.sh');
+    await writeAskpassScript(askpassPath);
+    return { askpassPath, cleanupPaths: [askpassPath] };
+  }
+
+  appendLogWithLevel(id: string, level: string, message: string): void {
+    const line = `[${nowMillis()}] [${level}] ${message}`;
+    const current = this.logs.get(id) || [];
+    current.push(line);
+    if (current.length > MAX_LOG_LINES_PER_INSTANCE) {
+      current.splice(0, current.length - MAX_LOG_LINES_PER_INSTANCE);
+    }
+    this.logs.set(id, current);
+  }
+
+  appendLog(id: string, message: string): void {
+    this.appendLogWithLevel(id, 'INFO', message);
+  }
+
+  appendAttemptSeparator(id: string, connectAttempt: number, retryAttempt: number): void {
+    const scope = retryAttempt > 0 ? `retry ${retryAttempt}` : 'manual';
+    this.appendLogWithLevel(id, 'INFO', `---------------- attempt #${connectAttempt} (${scope}) ----------------`);
+  }
+
+  statusSnapshotForInstance(id: string): SshStatus {
+    return this.statuses.get(id) || {
+      id,
+      phase: 'idle',
+      detail: null,
+      localUrl: null,
+      localPort: null,
+      remotePort: null,
+      startedByUs: false,
+      retryAttempt: 0,
+      requiresUserAction: false,
+      updatedAtMs: nowMillis(),
+    };
+  }
+
+  setStatus(
+    id: string,
+    phase: string,
+    detail: string | null = null,
+    localUrl: string | null = null,
+    localPort: number | null = null,
+    remotePort: number | null = null,
+    startedByUs = false,
+    retryAttempt = 0,
+    requiresUserAction = false,
+  ): void {
+    const level = phase === 'error' ? 'ERROR' : (phase === 'degraded' ? 'WARN' : 'INFO');
+    this.appendLogWithLevel(
+      id,
+      level,
+      `phase=${JSON.stringify(phase)} detail=${detail || ''} retry=${retryAttempt} requires_user_action=${requiresUserAction}`,
+    );
+
+    const status = {
+      id,
+      phase,
+      detail,
+      localUrl,
+      localPort,
+      remotePort,
+      startedByUs,
+      retryAttempt,
+      requiresUserAction,
+      updatedAtMs: nowMillis(),
+    };
+    this.statuses.set(id, status);
+    this.emit(SSH_STATUS_EVENT, status);
+  }
+
+  clearRetryAttempt(id: string): void {
+    this.reconnectAttempts.delete(id);
+  }
+
+  nextRetryAttempt(id: string): number {
+    const next = (this.reconnectAttempts.get(id) || 0) + 1;
+    this.reconnectAttempts.set(id, next);
+    return next;
+  }
+
+  currentRetryAttempt(id: string): number {
+    return this.reconnectAttempts.get(id) || 0;
+  }
+
+  nextConnectAttempt(id: string): number {
+    const next = (this.connectAttempts.get(id) || 0) + 1;
+    this.connectAttempts.set(id, next);
+    return next;
+  }
+
+  logsForInstance(id: string, limit = 200): string[] {
+    const lines = [...(this.logs.get(id) || [])];
+    return limit > 0 && lines.length > limit ? lines.slice(-limit) : lines;
+  }
+
+  clearLogsForInstance(id: string): void {
+    this.logs.delete(id);
+  }
+
+  parseSshConfigCandidates(filePath: string, source: string, visited = new Set<string>()): SshConfigCandidate[] {
+    const resolvedPath = path.resolve(filePath);
+    if (visited.has(resolvedPath) || !fs.existsSync(resolvedPath)) return [];
+    visited.add(resolvedPath);
+
+    const content = fs.readFileSync(resolvedPath, 'utf8');
+    const candidates: SshConfigCandidate[] = [];
+    const baseDir = path.dirname(resolvedPath);
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = (line.split('#')[0] || '').trim();
+      if (!trimmed) continue;
+
+      if (/^include(?:\s|$)/i.test(trimmed)) {
+        const includeExpr = trimmed.replace(/^include\s+/i, '').trim();
+        if (!includeExpr) continue;
+        let includeTokens = [];
+        try {
+          includeTokens = splitShellWords(includeExpr);
+        } catch {
+          includeTokens = includeExpr.split(/\s+/).filter(Boolean);
+        }
+        for (const includeToken of includeTokens) {
+          const includePaths = expandSshIncludeToken(includeToken, baseDir);
+          for (const includePath of includePaths) {
+            candidates.push(...this.parseSshConfigCandidates(includePath, source, visited));
+          }
+        }
+        continue;
+      }
+
+      if (!/^host(?:\s|$)/i.test(trimmed)) continue;
+      const rest = trimmed.replace(/^host\s+/i, '').trim();
+      if (!rest) continue;
+      for (const token of rest.split(/\s+/)) {
+        const host = token.trim();
+        if (!host || host.startsWith('!') || host === '*') continue;
+        candidates.push({
+          host,
+          pattern: /[*?]/.test(host),
+          source,
+          sshCommand: `ssh ${host}`,
+        });
+      }
+    }
+    return candidates;
+  }
+
+  async importHosts(): Promise<SshConfigCandidate[]> {
+    const candidates = [
+      ...this.parseSshConfigCandidates(path.join(os.homedir(), '.ssh', 'config'), 'user'),
+      ...this.parseSshConfigCandidates('/etc/ssh/ssh_config', 'global'),
+    ];
+    const seen = new Set<string>();
+    return candidates
+      .filter((item) => !seen.has(item.host) && seen.add(item.host))
+      .sort((left, right) => left.host.localeCompare(right.host));
+  }
+
+  readInstances(): { instances: unknown[] } {
+    const root = this.settingsStore.readSync();
+    return { instances: Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [] };
+  }
+
+  async setInstances(config: unknown): Promise<void> {
+    const configRecord = recordOf(config);
+    const instances = Array.isArray(configRecord.instances) ? configRecord.instances.map((instance) => this.sanitizeInstance(instance)) : [];
+    await this.settingsStore.update((root) => {
+      const previousSshIds = new Set(
+        (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
+          .map((entry) => String(entry?.id || '').trim())
+          .filter((id) => id && id !== LOCAL_HOST_ID)
+      );
+      root.desktopSshInstances = instances;
+
+      const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts.filter(Boolean) : [];
+      const nextIds = new Set(instances.map((instance) => instance.id));
+      const filteredHosts = hosts.filter((entry) => {
+        const id = String(entry?.id || '').trim();
+        return id && id !== LOCAL_HOST_ID && !(previousSshIds.has(id) && !nextIds.has(id));
+      });
+
+      for (const instance of instances) {
+        const label = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
+        const existing = filteredHosts.find((entry) => entry?.id === instance.id);
+        if (existing) {
+          existing.label = label;
+          if (!existing.url || !String(existing.url).trim()) {
+            existing.url = 'http://127.0.0.1/';
+          }
+        } else {
+          filteredHosts.push({ id: instance.id, label, url: 'http://127.0.0.1/' });
+        }
+      }
+      root.desktopHosts = filteredHosts;
+      if (typeof root.desktopDefaultHostId === 'string' && previousSshIds.has(root.desktopDefaultHostId) && !nextIds.has(root.desktopDefaultHostId)) {
+        root.desktopDefaultHostId = LOCAL_HOST_ID;
+      }
+      return root;
+    });
+  }
+
+  sanitizeStoredSecret(secret: unknown): StoredSecret | undefined {
+    const value = recordOf(secret);
+    if (!secret || typeof secret !== 'object') return undefined;
+    return {
+      enabled: Boolean(value.enabled),
+      store: value.store === 'settings' ? 'settings' : 'never',
+      ...(typeof value.value === 'string' && value.value.trim() ? { value: value.value } : {}),
+    };
+  }
+
+  sanitizeForward(forward: unknown): SshPortForward | null {
+    const value = recordOf(forward);
+    const id = typeof value.id === 'string' ? value.id.trim() : '';
+    if (!id) return null;
+    const type: SshPortForward['type'] = value.type === 'remote' || value.type === 'dynamic' ? value.type : 'local';
+    const normalized = {
+      id,
+      enabled: value.enabled !== false,
+      type,
+      ...(value.localHost ? { localHost: sanitizeBindHost(value.localHost) } : {}),
+      ...(typeof value.localPort === 'number' && Number.isFinite(value.localPort) ? { localPort: value.localPort } : {}),
+      ...(value.remoteHost ? { remoteHost: String(value.remoteHost).trim() || '127.0.0.1' } : {}),
+      ...(typeof value.remotePort === 'number' && Number.isFinite(value.remotePort) ? { remotePort: value.remotePort } : {}),
+    };
+
+    if (type === 'local' || type === 'remote') {
+      if (!normalized.localPort || !normalized.remotePort) return null;
+      normalized.remoteHost = normalized.remoteHost || '127.0.0.1';
+      normalized.localHost = normalized.localHost || '127.0.0.1';
+    }
+    if (type === 'dynamic' && !normalized.localPort) {
+      return null;
+    }
+    return normalized;
+  }
+
+  sanitizeInstance(instance: unknown): SshInstance {
+    const value = recordOf(instance);
+    const id = typeof value.id === 'string' ? value.id.trim() : '';
+    const sshCommand = typeof value.sshCommand === 'string' ? value.sshCommand.trim() : '';
+    if (!id || id === LOCAL_HOST_ID) {
+      throw new Error('SSH instance id is required');
+    }
+    if (!sshCommand) {
+      throw new Error('SSH command is required');
+    }
+
+    const parsed = parseSshCommand(sshCommand);
+    const remotePiarium = recordOf(value.remotePiarium);
+    const localForward = recordOf(value.localForward);
+    const auth = recordOf(value.auth);
+    const seen = new Set<string>();
+    const portForwards = Array.isArray(value.portForwards)
+      ? value.portForwards
+          .map((forward) => this.sanitizeForward(forward))
+          .filter((forward): forward is SshPortForward => {
+            if (!forward || seen.has(forward.id)) return false;
+            seen.add(forward.id);
+            return true;
+          })
+      : [];
+    const sshPassword = this.sanitizeStoredSecret(auth.sshPassword);
+    const piariumPassword = this.sanitizeStoredSecret(auth.piariumPassword);
+
+    return {
+      id,
+      ...(typeof value.nickname === 'string' && value.nickname.trim() ? { nickname: value.nickname.trim() } : {}),
+      sshCommand,
+      sshParsed: parsed,
+      connectionTimeoutSec: typeof value.connectionTimeoutSec === 'number' && Number.isFinite(value.connectionTimeoutSec) && value.connectionTimeoutSec > 0
+        ? value.connectionTimeoutSec
+        : DEFAULT_CONNECTION_TIMEOUT_SEC,
+      remotePiarium: {
+        mode: remotePiarium.mode === 'external' ? 'external' : 'managed',
+        keepRunning: remotePiarium.keepRunning !== false,
+        ...(typeof remotePiarium.preferredPort === 'number' && Number.isFinite(remotePiarium.preferredPort) ? { preferredPort: remotePiarium.preferredPort } : {}),
+        installMethod: typeof remotePiarium.installMethod === 'string' && ['npm', 'bun', 'download_release', 'upload_bundle'].includes(remotePiarium.installMethod)
+          ? remotePiarium.installMethod
+          : 'bun',
+        uploadBundleOverSsh: Boolean(remotePiarium.uploadBundleOverSsh),
+      },
+      localForward: {
+        bindHost: sanitizeBindHost(localForward.bindHost),
+        ...(typeof localForward.preferredLocalPort === 'number' && Number.isFinite(localForward.preferredLocalPort) ? { preferredLocalPort: localForward.preferredLocalPort } : {}),
+      },
+      auth: {
+        ...(sshPassword ? { sshPassword } : {}),
+        ...(piariumPassword ? { piariumPassword } : {}),
+      },
+      portForwards,
+    };
+  }
+
+  async updateHostUrl(instanceId: string, label: string, localUrl: string): Promise<void> {
+    return this.updateHostRuntime(instanceId, label, localUrl, '');
+  }
+
+  async updateHostRuntime(instanceId: string, label: string, localUrl: string, clientToken = ''): Promise<void> {
+    const token = typeof clientToken === 'string' ? clientToken.trim() : '';
+    await this.settingsStore.update((root) => {
+      const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
+      const existing = hosts.find((entry) => entry?.id === instanceId);
+      if (existing) {
+        existing.label = label;
+        existing.url = localUrl;
+        existing.apiUrl = localUrl;
+        if (token) existing.clientToken = token;
+      } else {
+        hosts.push({ id: instanceId, label, url: localUrl, apiUrl: localUrl, ...(token ? { clientToken: token } : {}) });
+      }
+      root.desktopHosts = hosts;
+      return root;
+    });
+  }
+
+  async issueClientToken(localUrl: string, piariumPassword: string | null): Promise<string> {
+    const password = typeof piariumPassword === 'string' ? piariumPassword.trim() : '';
+    if (!password) return '';
+
+    const loginResponse = await fetch(new URL('/auth/session', `${localUrl}/`).toString(), {
+      method: 'POST',
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        password,
+        trustDevice: true,
+        issueClientToken: true,
+        clientLabel: 'Piarium Desktop SSH',
+      }),
+    });
+    if (!loginResponse.ok) {
+      throw new Error(`Configured Piarium UI password was rejected by forwarded server (status ${loginResponse.status})`);
+    }
+
+    const payload = await loginResponse.json().catch(() => null);
+    const token = typeof payload?.clientToken === 'string' ? payload.clientToken.trim() : '';
+    if (token) return token;
+
+    const cookie = this.extractCookieHeader(loginResponse);
+    if (!cookie) return '';
+
+    const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${localUrl}/`).toString(), {
+      method: 'POST',
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Cookie: cookie,
+      },
+      body: JSON.stringify({ label: 'Piarium Desktop SSH' }),
+    });
+    if (!tokenResponse.ok) return '';
+    const tokenPayload = await tokenResponse.json().catch(() => null);
+    return typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
+  }
+
+  extractCookieHeader(response: Response): string {
+    const getSetCookie = typeof response.headers?.getSetCookie === 'function'
+      ? response.headers.getSetCookie.bind(response.headers)
+      : null;
+    const cookies = getSetCookie ? getSetCookie() : [];
+    const rawCookies = cookies.length > 0
+      ? cookies
+      : String(response.headers?.get?.('set-cookie') || '').split(/,(?=\s*[^;,=]+=[^;,]+)/);
+    return rawCookies
+      .map((cookie) => String(cookie || '').split(';')[0]?.trim() || '')
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  async persistLocalPort(instanceId: string, localPort: number): Promise<void> {
+    await this.settingsStore.update((root) => {
+      const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
+      for (const instance of instances) {
+        if (instance?.id !== instanceId) continue;
+        instance.localForward = instance.localForward && typeof instance.localForward === 'object' ? instance.localForward : {};
+        instance.localForward.preferredLocalPort = localPort;
+      }
+      root.desktopSshInstances = instances;
+      return root;
+    });
+  }
+
+  async resolveSshConfig(parsed: ParsedSshCommand): Promise<Map<string, string>> {
+    const { code, stdout, stderr } = await this.runSshOutput(parsed, ['-G']);
+    if (code !== 0) {
+      throw new Error(stderr.trim() || 'Failed to resolve SSH config');
+    }
+    const map = new Map<string, string>();
+    for (const line of stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const [key, ...rest] = trimmed.split(' ');
+      if (!key || rest.length === 0) continue;
+      map.set(key.toLowerCase(), rest.join(' ').trim());
+    }
+    return map;
+  }
+
+  ensureSessionDir(id: string): string {
+    const base = path.join(path.dirname(this.settingsFilePath), 'ssh', id);
+    fs.mkdirSync(base, { recursive: true });
+    return base;
+  }
+
+  controlPathForInstance(id: string): string {
+    let hash = 0;
+    for (const char of id) {
+      hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+    }
+    return path.join(os.tmpdir(), `ocssh-${Math.abs(hash).toString(16)}.sock`);
+  }
+
+  async spawnMasterProcess(parsed: ParsedSshCommand, controlPath: string): Promise<SshChildProcess> {
+    return this.spawnSsh(parsed, [
+      '-o', 'ControlMaster=yes',
+      '-o', `ControlPath=${controlPath}`,
+      '-o', `ControlPersist=${DEFAULT_CONTROL_PERSIST_SEC}`,
+      '-N',
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  async waitForMasterReady(parsed: ParsedSshCommand, controlPath: string, timeoutSec: number, master: SshChildProcess): Promise<void> {
+    const deadline = Date.now() + (timeoutSec * 1000);
+    let pollMs = 250;
+    while (Date.now() < deadline) {
+      const { code } = await this.runSshOutput(parsed, [
+        '-o', 'ControlMaster=no',
+        '-o', `ControlPath=${controlPath}`,
+        '-O', 'check',
+      ]);
+      if (code === 0) return;
+
+      const exited = master.exitCode;
+      if (typeof exited === 'number') {
+        throw new Error(this.processErrorDetail(master, 'SSH master process exited before ready'));
+      }
+      const spawnError = childProcessDiagnostics.get(master)?.error;
+      if (spawnError) throw new Error(this.processErrorDetail(master, 'Failed to start SSH master process'));
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      pollMs = Math.min(pollMs * 2, 2000);
+    }
+    throw new Error('SSH ControlMaster connection timed out');
+  }
+
+  configuredPiariumPassword(instance: SshInstance): string | null {
+    const secret = instance?.auth?.piariumPassword;
+    return secret?.enabled && typeof secret.value === 'string' && secret.value.trim() ? secret.value.trim() : null;
+  }
+
+  async remoteCommandExists(parsed: ParsedSshCommand, controlPath: string, commandName: string): Promise<boolean> {
+    try {
+      const output = await this.runRemoteCommand(parsed, controlPath, `command -v ${commandName} >/dev/null 2>&1 && echo yes || echo no`);
+      return output.trim() === 'yes';
+    } catch {
+      return false;
+    }
+  }
+
+  async currentRemotePiariumVersion(parsed: ParsedSshCommand, controlPath: string): Promise<string | null> {
+    try {
+      const output = await this.runRemoteCommand(parsed, controlPath, 'piarium --version 2>/dev/null || true');
+      return parseVersionToken(output);
+    } catch {
+      return null;
+    }
+  }
+
+  async installPiariumManaged(parsed: ParsedSshCommand, controlPath: string, version: string, preferred: string): Promise<void> {
+    const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
+    const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
+    const commands = [];
+
+    if (preferred === 'bun') {
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+    } else if (preferred === 'npm') {
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+    } else {
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+    }
+
+    if (commands.length === 0) {
+      throw new Error('Remote host has neither bun nor npm available');
+    }
+
+    let lastError = null;
+    for (const command of commands) {
+      try {
+        await this.runRemoteCommand(parsed, controlPath, command);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('Failed to install Piarium on remote host');
+  }
+
+  async probeRemoteSystemInfo(parsed: ParsedSshCommand, controlPath: string, port: number, piariumPassword: string | null): Promise<Record<string, unknown>> {
+    const authPayload = piariumPassword ? JSON.stringify({ password: piariumPassword }) : '{}';
+    const authEnabled = piariumPassword ? '1' : '0';
+    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
+    const output = await this.runRemoteCommand(parsed, controlPath, script);
+    const lines = output.split(/\r?\n/);
+    const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;
+    const authStatus = parseProbeStatusLine(lines[1], 'AUTH_STATUS=') || 0;
+    const healthStatus = parseProbeStatusLine(lines[2], 'HEALTH_STATUS=') || 0;
+    const body = lines.slice(3).join('\n');
+
+    if (isLivenessHttpStatus(infoStatus)) {
+      if (isAuthHttpStatus(infoStatus)) {
+        if (piariumPassword && authStatus !== 200) {
+          throw new Error(`Remote Piarium requires UI authentication and configured password was rejected (auth status ${authStatus})`);
+        }
+        if (isLivenessHttpStatus(healthStatus)) return {};
+        throw new Error('Remote Piarium requires UI authentication on /api/system/info; configure Piarium UI password');
+      }
+    } else if (isLivenessHttpStatus(healthStatus)) {
+      return {};
+    } else {
+      throw new Error(`Remote Piarium probe failed (info status ${infoStatus}, health status ${healthStatus})`);
+    }
+
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+
+  async remoteServerRunning(parsed: ParsedSshCommand, controlPath: string, port: number, piariumPassword: string | null): Promise<boolean> {
+    try {
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, piariumPassword);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async startRemoteServerManaged(parsed: ParsedSshCommand, controlPath: string, instance: SshInstance, desiredPort: number): Promise<number> {
+    let envPrefix = 'PIARIUM_RUNTIME=ssh-remote';
+    const secret = this.configuredPiariumPassword(instance);
+    if (secret) {
+      envPrefix += ` PIARIUM_UI_PASSWORD=${shellQuote(secret)}`;
+    }
+    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} piarium serve --host 127.0.0.1 --port ${desiredPort}`);
+    const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
+    return port || desiredPort;
+  }
+
+  async stopRemoteServerBestEffort(parsed: ParsedSshCommand, controlPath: string, remotePort: number): Promise<void> {
+    try {
+      await this.runRemoteCommand(
+        parsed,
+        controlPath,
+        `if command -v curl >/dev/null 2>&1; then curl -fsS -X POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; elif command -v wget >/dev/null 2>&1; then wget -qO- --method=POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; fi`,
+      );
+    } catch {
+    }
+  }
+
+  async spawnMainForward(parsed: ParsedSshCommand, controlPath: string, bindHost: string, localPort: number, remotePort: number): Promise<SshChildProcess> {
+    const connectionArgs = this.usesControlMaster()
+      ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
+      : this.independentConnectionArgs();
+    return this.spawnSsh(parsed, [
+      ...connectionArgs,
+      '-o', 'ExitOnForwardFailure=yes',
+      '-N',
+      '-L', `${bindHost}:${localPort}:127.0.0.1:${remotePort}`,
+    ], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  }
+
+  async spawnExtraForward(parsed: ParsedSshCommand, controlPath: string, forward: SshPortForward): Promise<SshChildProcess | null> {
+    const args = this.usesControlMaster()
+      ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`, '-O', 'forward']
+      : [...this.independentConnectionArgs(), '-o', 'ExitOnForwardFailure=yes', '-N'];
+    if (forward.type === 'local') {
+      args.push('-L', `${forward.localHost || '127.0.0.1'}:${forward.localPort}:${forward.remoteHost || '127.0.0.1'}:${forward.remotePort}`);
+    } else if (forward.type === 'remote') {
+      args.push('-R', `${forward.remoteHost || '127.0.0.1'}:${forward.remotePort}:${forward.localHost || '127.0.0.1'}:${forward.localPort}`);
+    } else {
+      args.push('-D', `${forward.localHost || '127.0.0.1'}:${forward.localPort}`);
+    }
+    if (!this.usesControlMaster()) {
+      const child = this.spawnSsh(parsed, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (typeof child.exitCode === 'number' || childProcessDiagnostics.get(child)?.error) {
+        throw new Error(this.processErrorDetail(child, `Failed to configure extra SSH forward ${forward.id}`));
+      }
+      return child;
+    }
+
+    const { code, stdout, stderr } = await this.runSshOutput(parsed, args);
+    if (code !== 0) {
+      throw new Error((stderr || stdout || `Failed to configure extra SSH forward ${forward.id}`).trim());
+    }
+    return null;
+  }
+
+  async ensureRemoteServer(instance: SshInstance, parsed: ParsedSshCommand, controlPath: string): Promise<{ remotePort: number; startedByUs: boolean }> {
+    if (instance.remotePiarium.mode === 'external') {
+      if (!instance.remotePiarium.preferredPort) {
+        throw new Error('External mode requires a preferred remote Piarium port');
+      }
+      const port = instance.remotePiarium.preferredPort;
+      this.setStatus(instance.id, 'server_detecting', 'Probing external Piarium server', null, null, port, false, 0, false);
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredPiariumPassword(instance));
+      return { remotePort: port, startedByUs: false };
+    }
+
+    this.setStatus(instance.id, 'remote_probe', 'Checking remote Piarium installation');
+    const installedVersion = await this.currentRemotePiariumVersion(parsed, controlPath);
+    if (!installedVersion) {
+      this.setStatus(instance.id, 'installing', 'Installing Piarium on remote host');
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
+    } else if (installedVersion !== this.appVersion) {
+      this.setStatus(instance.id, 'updating', `Updating remote Piarium from ${installedVersion} to ${this.appVersion}`);
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
+    }
+
+    this.setStatus(instance.id, 'server_detecting', 'Detecting managed Piarium server');
+    let remotePort = instance.remotePiarium.preferredPort || null;
+    let startedByUs = false;
+    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
+      remotePort = null;
+    }
+    if (!remotePort) {
+      this.setStatus(instance.id, 'server_starting', 'Starting managed Piarium server');
+      const desiredPort = instance.remotePiarium.preferredPort || randomPortCandidate(instance.id);
+      remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
+      startedByUs = true;
+    }
+    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
+      throw new Error('Managed Piarium server failed to become reachable');
+    }
+    return { remotePort, startedByUs };
+  }
+
+  async disconnectInternal(id: string, reportIdle: boolean): Promise<void> {
+    const timer = this.monitorTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.monitorTimers.delete(id);
+    }
+
+    const session = this.sessions.get(id);
+    this.sessions.delete(id);
+
+    if (session) {
+      if (session.startedByUs && session.remotePort && session.instance.remotePiarium.mode === 'managed' && !session.instance.remotePiarium.keepRunning) {
+        await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort);
+      }
+      await this.stopControlMasterBestEffort(session.parsed, session.controlPath);
+      const auth = this.sshAuth.get(session.parsed);
+      const children = new Set<SshChildProcess>([
+        session.mainForward,
+        session.master,
+        ...session.extraForwards.map((entry) => entry.child),
+        ...(auth?.children || []),
+      ].filter((child): child is SshChildProcess => Boolean(child)));
+      for (const child of children) {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+        }
+      }
+      try {
+        await fsp.rm(session.controlPath, { force: true });
+      } catch {
+      }
+      for (const askpassFilePath of session.askpassCleanupPaths) {
+        try {
+          await fsp.rm(askpassFilePath, { force: true });
+        } catch {
+        }
+      }
+      this.sshAuth.delete(session.parsed);
+    }
+
+    this.clearRetryAttempt(id);
+    if (reportIdle) {
+      this.setStatus(id, 'idle', null, null, null, null, false, 0, false);
+    }
+  }
+
+  async connectBlocking(instance: SshInstance): Promise<void> {
+    const id = instance.id;
+    this.setStatus(id, 'config_resolved', 'Resolving SSH command');
+    const parsed = instance.sshParsed || parseSshCommand(instance.sshCommand);
+    await this.resolveSshConfig(parsed);
+
+    this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
+    const sessionDir = this.ensureSessionDir(id);
+    const controlPath = this.controlPathForInstance(id);
+    try { await fsp.rm(controlPath, { force: true }); } catch {}
+    const { askpassPath, cleanupPaths: askpassCleanupPaths } = await this.writeAskpassFiles(sessionDir);
+    const sshPassword = instance.auth?.sshPassword?.enabled ? instance.auth.sshPassword.value?.trim() ?? null : null;
+    this.sshAuth.set(parsed, { askpassPath, sshPassword, children: new Set() });
+    const session: SshSession = {
+      instance,
+      parsed,
+      sessionDir,
+      controlPath,
+      askpassCleanupPaths,
+      localPort: null,
+      remotePort: null,
+      startedByUs: false,
+      master: null,
+      mainForward: null,
+      mainForwardDetached: false,
+      extraForwards: [],
+    };
+    this.sessions.set(id, session);
+
+    this.setStatus(id, 'master_connecting', this.usesControlMaster() ? 'Establishing SSH ControlMaster' : 'Checking SSH connectivity');
+    if (this.usesControlMaster()) {
+      const master = await this.spawnMasterProcess(parsed, controlPath);
+      session.master = master;
+      await this.waitForMasterReady(parsed, controlPath, instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC, master);
+    }
+
+    this.setStatus(id, 'remote_probe', 'Probing remote platform');
+    const remoteOs = (await this.runRemoteCommand(parsed, controlPath, 'uname -s', instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC)).trim().toLowerCase();
+    if (!['linux', 'darwin'].includes(remoteOs)) {
+      throw new Error(`Unsupported remote OS: ${remoteOs}`);
+    }
+
+    const { remotePort, startedByUs } = await this.ensureRemoteServer(instance, parsed, controlPath);
+    session.remotePort = remotePort;
+    session.startedByUs = startedByUs;
+    this.setStatus(id, 'forwarding', 'Setting up port forwards', null, null, remotePort, startedByUs, 0, false);
+
+    const bindHost = sanitizeBindHost(instance.localForward?.bindHost);
+    let localPort = Number(instance.localForward?.preferredLocalPort) || 0;
+    if (!localPort) {
+      localPort = await pickUnusedLocalPort();
+    }
+    if (!(await isLocalPortAvailable(bindHost, localPort))) {
+      localPort = await pickUnusedLocalPort();
+    }
+
+    const mainForward = await this.spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort);
+    session.mainForward = mainForward;
+    let mainForwardDetached = false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (typeof mainForward.exitCode === 'number' || childProcessDiagnostics.get(mainForward)?.error) {
+      if (this.usesControlMaster() && mainForward.exitCode === 0) {
+        mainForwardDetached = true;
+        this.appendLogWithLevel(id, 'INFO', 'Main tunnel helper exited after ControlMaster handoff');
+      } else {
+        throw new Error(this.processErrorDetail(mainForward, `Failed to start main port forward (status: ${mainForward.exitCode ?? 'spawn error'})`));
+      }
+    }
+    session.mainForwardDetached = mainForwardDetached;
+
+    const extraErrors = [];
+    for (const forward of instance.portForwards.filter((item) => item.enabled)) {
+      try {
+        const extraForward = await this.spawnExtraForward(parsed, controlPath, forward);
+        if (extraForward) session.extraForwards.push({ id: forward.id, child: extraForward });
+        if (forward.type === 'local' && forward.localPort) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (!(await isLocalTunnelReachable(forward.localPort))) {
+            extraErrors.push(`${forward.id}: local listener 127.0.0.1:${forward.localPort} is not reachable`);
+          }
+        }
+      } catch (error) {
+        extraErrors.push(`${forward.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    await waitLocalForwardReady(localPort);
+
+    const localUrl = `http://127.0.0.1:${localPort}`;
+    const label = instance.nickname?.trim() || parsed.destination || id;
+    const clientToken = await this.issueClientToken(localUrl, this.configuredPiariumPassword(instance));
+    await this.updateHostRuntime(id, label, localUrl, clientToken);
+    if (instance.localForward?.preferredLocalPort !== localPort) {
+      await this.persistLocalPort(id, localPort);
+    }
+
+    session.localPort = localPort;
+
+    this.clearRetryAttempt(id);
+    this.setStatus(
+      id,
+      'ready',
+      extraErrors.length === 0 ? 'SSH instance is ready' : `SSH instance is ready with forward warnings: ${extraErrors.join('; ')}`,
+      localUrl,
+      localPort,
+      remotePort,
+      startedByUs,
+      0,
+      false,
+    );
+    this.spawnMonitor(id);
+  }
+
+  spawnMonitor(id: string): void {
+    const existing = this.monitorTimers.get(id);
+    if (existing) clearTimeout(existing);
+    let healthyTicks = 0;
+    const tick = async () => {
+      const session = this.sessions.get(id);
+      if (!session) {
+        this.monitorTimers.delete(id);
+        return;
+      }
+
+      let droppedReason = null;
+      let detachedNotice = null;
+      const mainForward = session.mainForward;
+
+      if (!session.mainForwardDetached) {
+        if (!mainForward) {
+          droppedReason = 'Main SSH forward is unavailable';
+        } else if (typeof mainForward.exitCode === 'number') {
+          if (this.usesControlMaster() && mainForward.exitCode === 0) {
+            session.mainForwardDetached = true;
+            detachedNotice = 'Main tunnel helper exited after ControlMaster handoff';
+          } else {
+            droppedReason = this.processErrorDetail(mainForward, `Main SSH forward exited (${mainForward.exitCode})`);
+          }
+        } else if (childProcessDiagnostics.get(mainForward)?.error) {
+          droppedReason = this.processErrorDetail(mainForward, 'Main SSH forward failed');
+        }
+      }
+
+      if (!droppedReason) {
+        const stoppedExtraForward = session.extraForwards.find(({ child }) => (
+          typeof child.exitCode === 'number' || childProcessDiagnostics.get(child)?.error
+        ));
+        if (stoppedExtraForward) {
+          droppedReason = this.processErrorDetail(
+            stoppedExtraForward.child,
+            `Extra SSH forward ${stoppedExtraForward.id} exited`,
+          );
+        }
+      }
+
+      if (!droppedReason) {
+        if (session.mainForwardDetached) {
+          // Fast path: cheap TCP probe before expensive SSH subprocess
+          if (typeof session.localPort === 'number' && await isLocalTunnelReachable(session.localPort)) {
+            // Tunnel alive — skip SSH check
+          } else if (!await this.isControlMasterAlive(session.parsed, session.controlPath)) {
+            droppedReason = 'SSH ControlMaster is not reachable';
+          } else {
+            detachedNotice = 'Local tunnel unreachable but ControlMaster is alive';
+          }
+        }
+      }
+
+      if (detachedNotice) {
+        this.appendLogWithLevel(id, 'INFO', detachedNotice);
+      }
+      if (!droppedReason) {
+        healthyTicks++;
+        const pollMs = healthyTicks >= MONITOR_STABILIZE_TICKS ? MONITOR_STEADY_POLL_MS : MONITOR_INITIAL_POLL_MS;
+        this.monitorTimers.set(id, setTimeout(tick, pollMs));
+        return;
+      }
+
+      this.appendLogWithLevel(id, 'WARN', droppedReason);
+      await this.disconnectInternal(id, false);
+      const attempt = this.nextRetryAttempt(id);
+      if (attempt > DEFAULT_RECONNECT_MAX_ATTEMPTS) {
+        this.setStatus(id, 'error', `${droppedReason}. Retry limit reached`, null, null, null, false, attempt, true);
+        return;
+      }
+
+      this.setStatus(id, 'degraded', `${droppedReason}. Reconnecting`, null, null, null, false, attempt, false);
+      const delayMs = Math.min((2 ** Math.max(attempt - 1, 0)) * 1000 + (nowMillis() % 700) + 100, 30000);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        await this.connect(id);
+      } catch (error) {
+        this.setStatus(id, 'error', error instanceof Error ? error.message : String(error), null, null, null, false, attempt, true);
+      }
+    };
+    this.monitorTimers.set(id, setTimeout(tick, MONITOR_INITIAL_POLL_MS));
+  }
+
+  async connect(id: unknown): Promise<void> {
+    const trimmed = String(id || '').trim();
+    if (!trimmed || trimmed === LOCAL_HOST_ID) {
+      throw new Error('SSH instance id is required');
+    }
+
+    if (this.connecting.has(trimmed)) {
+      this.appendLogWithLevel(trimmed, 'INFO', 'Connection already in progress');
+      return this.connecting.get(trimmed)!;
+    }
+
+    const instance = this.readInstances().instances.find((entry) => recordOf(entry).id === trimmed);
+    if (!instance) {
+      throw new Error('SSH instance not found');
+    }
+
+    const retryAttempt = this.currentRetryAttempt(trimmed);
+    const connectAttempt = this.nextConnectAttempt(trimmed);
+    this.appendAttemptSeparator(trimmed, connectAttempt, retryAttempt);
+    this.appendLog(trimmed, 'Starting SSH connection');
+    await this.disconnectInternal(trimmed, false);
+
+    const task = this.connectBlocking(this.sanitizeInstance(instance))
+      .catch(async (error) => {
+        this.setStatus(trimmed, 'error', error instanceof Error ? error.message : String(error), null, null, null, false, 0, true);
+        await this.disconnectInternal(trimmed, false);
+        throw error;
+      })
+      .finally(() => {
+        this.connecting.delete(trimmed);
+      });
+    this.connecting.set(trimmed, task);
+    return task;
+  }
+
+  async disconnect(id: unknown): Promise<void> {
+    const trimmed = String(id || '').trim();
+    if (!trimmed || trimmed === LOCAL_HOST_ID) {
+      throw new Error('SSH instance id is required');
+    }
+    await this.disconnectInternal(trimmed, true);
+  }
+
+  async statusesWithDefaults(id?: string): Promise<SshStatus[]> {
+    if (id) {
+      return [this.statusSnapshotForInstance(id)];
+    }
+    return this.readInstances().instances
+      .map((instance) => this.statusSnapshotForInstance(String(recordOf(instance).id || '')))
+      .filter((status) => Boolean(status.id))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async shutdownAll(): Promise<void> {
+    const ids = [...new Set([...this.sessions.keys(), ...this.connecting.keys(), ...this.monitorTimers.keys()])];
+    for (const id of ids) {
+      await this.disconnectInternal(id, false);
+    }
+  }
+}

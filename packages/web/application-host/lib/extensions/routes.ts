@@ -1,10 +1,15 @@
-// @ts-nocheck
 import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
   ExtensionStorageRevisionConflictError,
   ExtensionStorageError,
 } from '@piarium/extension-host';
+import type {
+  ApplicationExtensionCatalog,
+  ApplicationExtensionRuntime,
+  ExtensionPackageManager,
+} from '@piarium/extension-host';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import {
   PiariumExtensionContractError,
   parsePiariumExtensionActualState,
@@ -17,7 +22,21 @@ import {
 } from '@piarium/extension-contract';
 import { renderExtensionRecoveryPage } from './recovery-page.js';
 
-const catalogError = (error) => ({
+interface ExtensionRouteDependencies {
+  extensionCatalog: ApplicationExtensionCatalog;
+  extensionPackages: ExtensionPackageManager;
+  extensionRuntime?: ApplicationExtensionRuntime | null;
+  uiAuthController: {
+    requireAuth: RequestHandler;
+    requireSessionAuth: RequestHandler;
+  };
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const catalogError = (error: unknown) => ({
   supported: true,
   status: 'error',
   error: {
@@ -29,12 +48,37 @@ const catalogError = (error) => ({
   },
 });
 
-const expectedRevision = (body) => {
-  const value = body?.expectedRevision;
-  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+const expectedRevision = (body: unknown): number | null => {
+  const value = asRecord(body)?.expectedRevision;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 };
 
-const sendMutationError = (res, error) => {
+const routeParam = (value: string | string[] | undefined): string => (
+  typeof value === 'string' ? value : Array.isArray(value) ? value[0] ?? '' : ''
+);
+
+const withRequestSignal = async <Result>(
+  req: Request,
+  res: Response,
+  operation: (signal: AbortSignal) => Promise<Result>,
+): Promise<Result> => {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!res.writableEnded && !controller.signal.aborted) {
+      controller.abort(new Error('Extension request disconnected'));
+    }
+  };
+  req.once('aborted', abort);
+  res.once('close', abort);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    req.off('aborted', abort);
+    res.off('close', abort);
+  }
+};
+
+const sendMutationError = (res: Response, error: unknown) => {
   if (error instanceof ExtensionCatalogRevisionConflictError || error instanceof ExtensionStorageRevisionConflictError) {
     return res.status(409).json({
       error: {
@@ -88,12 +132,12 @@ const sendMutationError = (res, error) => {
   });
 };
 
-export const registerExtensionRoutes = (app, {
+export const registerExtensionRoutes = (app: Express, {
   extensionCatalog,
   extensionPackages,
   extensionRuntime,
   uiAuthController,
-}) => {
+}: ExtensionRouteDependencies): void => {
   app.get('/extensions/recovery', uiAuthController.requireSessionAuth, (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('html').send(renderExtensionRecoveryPage());
@@ -144,7 +188,7 @@ export const registerExtensionRoutes = (app, {
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
       try {
-        await extensionRuntime.activateExtension(req.params.extensionId);
+        await extensionRuntime.activateExtension(routeParam(req.params.extensionId));
         return res.status(204).end();
       } catch (error) {
         return sendMutationError(res, error);
@@ -316,9 +360,9 @@ export const registerExtensionRoutes = (app, {
       }
       try {
         const source = parsePiariumExtensionPackageSource(req.body?.source);
-        const snapshot = extensionRuntime
-          ? await extensionRuntime.installOrStage({ expectedRevision: revision, source }, req.signal)
-          : await extensionPackages.installOrStage(source, revision, req.signal);
+        const snapshot = await withRequestSignal(req, res, (signal) => extensionRuntime
+          ? extensionRuntime.installOrStage({ expectedRevision: revision, source }, signal)
+          : extensionPackages.installOrStage(source, revision, signal));
         return res.json({ snapshot });
       } catch (error) {
         return sendMutationError(res, error);
@@ -333,11 +377,11 @@ export const registerExtensionRoutes = (app, {
       try {
         const request = parsePiariumExtensionLocalSourceReloadRequest({
           ...req.body,
-          extensionId: req.params.extensionId,
+          extensionId: routeParam(req.params.extensionId),
         });
-        const result = extensionRuntime
-          ? await extensionRuntime.reloadLocalSource(request, req.signal)
-          : await extensionPackages.reloadLocalSource(request, req.signal);
+        const result = await withRequestSignal(req, res, (signal) => extensionRuntime
+          ? extensionRuntime.reloadLocalSource(request, signal)
+          : extensionPackages.reloadLocalSource(request, signal));
         return res.json(result);
       } catch (error) {
         return sendMutationError(res, error);
@@ -382,7 +426,9 @@ export const registerExtensionRoutes = (app, {
     },
   );
 
-  const serviceRoutingMutation = (method) => async (req, res) => {
+  const serviceRoutingMutation = (
+    method: 'removeServiceRoutingRule' | 'upsertServiceRoutingRule',
+  ): RequestHandler => async (req, res) => {
     if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
     try {
       return res.json(await extensionRuntime[method](req.body));
@@ -403,7 +449,9 @@ export const registerExtensionRoutes = (app, {
     serviceRoutingMutation('removeServiceRoutingRule'),
   );
 
-  const workbenchMutation = (method) => async (req, res) => {
+  const workbenchMutation = (
+    method: 'removeWorkbenchProfile' | 'selectWorkbenchProfile' | 'updateWorkbenchLayout' | 'upsertWorkbenchProfile',
+  ): RequestHandler => async (req, res) => {
     if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
     try {
       return res.json(await extensionRuntime[method](req.body));
@@ -459,8 +507,8 @@ export const registerExtensionRoutes = (app, {
       }
       try {
         const snapshot = extensionRuntime
-          ? await extensionRuntime.setEnabled(req.params.extensionId, req.body.enabled, revision)
-          : await extensionCatalog.setEnabled(req.params.extensionId, req.body.enabled, revision);
+          ? await extensionRuntime.setEnabled(routeParam(req.params.extensionId), req.body.enabled, revision)
+          : await extensionCatalog.setEnabled(routeParam(req.params.extensionId), req.body.enabled, revision);
         return res.json({ snapshot });
       } catch (error) {
         return sendMutationError(res, error);
@@ -476,7 +524,7 @@ export const registerExtensionRoutes = (app, {
       try {
         const request = parsePiariumExtensionRemoveRequest({
           ...req.body,
-          extensionId: req.params.extensionId,
+          extensionId: routeParam(req.params.extensionId),
         });
         return res.json({ snapshot: await extensionRuntime.removeExtension(request) });
       } catch (error) {

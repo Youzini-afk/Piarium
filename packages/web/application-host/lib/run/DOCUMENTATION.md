@@ -6,13 +6,13 @@ start a debugger, test runner, or task process.
 
 ## Entrypoints
 
-- `runtime.js`: `createRunRuntime({ documents, spawn, pathModule, env, isTrusted })`
-- `tasks.js`: `piarium.tasks.json` configurations; host-owned `node` scripts use `process.execPath`
-- `debug-supervisor.js`: DAP session per workspace, generation, breakpoints, watch
-- `test-supervisor.js`: discovery/run tree; builtin Node test runner plus extension adapters
-- `routes.js`: authenticated `/api/tasks/*`, `/api/debug/*`, `/api/tests/*` and SSE events
-- `capability.js`: `workspace.tasks`, `workspace.debug`, `workspace.test`
-- `fixture-adapter.js` / `fixture-tests.js` / `node-adapter.js`: test and builtin adapters
+- `runtime.ts`: `createRunRuntime({ documents, spawn, pathModule, env, isTrusted })`
+- `tasks.ts`: `piarium.tasks.tson` configurations; host-owned `node` scripts use `process.execPath`
+- `debug-supervisor.ts`: DAP session per workspace, generation, breakpoints, watch
+- `test-supervisor.ts`: discovery/run tree; builtin Node test runner plus extension adapters
+- `routes.ts`: authenticated `/api/tasks/*`, `/api/debug/*`, `/api/tests/*` and SSE events
+- `capability.ts`: `workspace.tasks`, `workspace.debug`, `workspace.test`
+- `fixture-adapter.ts` / `fixture-tests.ts` / `node-adapter.ts`: test and builtin adapters
 
 ## Status
 

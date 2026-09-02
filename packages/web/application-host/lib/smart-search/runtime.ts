@@ -1,18 +1,99 @@
-// @ts-nocheck
 import { createRequire } from 'node:module';
+import type { SpawnOptions } from 'node:child_process';
+import type pathModule from 'node:path';
 import { buildSmartSearchConfigResponse, normalizeSmartSearchPatch, redactSmartSearchPayload, redactSmartSearchSecrets, resolveSmartSearchBinary, resolveSmartSearchBinaryLabel } from './config.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
-const makeEndpointError = (message, status = 500, details = undefined) => {
-  const error = new Error(message);
+interface EndpointError extends Error {
+  details?: unknown;
+  status: number;
+}
+
+interface SmartSearchFsPromises {
+  access?(path: string): Promise<unknown>;
+  chmod?(path: string, mode: number): Promise<unknown>;
+  mkdir(path: string, options: { recursive: true }): Promise<unknown>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  rename(from: string, to: string): Promise<unknown>;
+  rm?(path: string, options: { force: true }): Promise<unknown>;
+  stat?(path: string): Promise<{ mode: number }>;
+  writeFile(path: string, data: string, options: { encoding: 'utf8'; mode: number }): Promise<unknown>;
+}
+
+interface SmartSearchChildProcess {
+  kill(signal?: NodeJS.Signals): boolean | void;
+  on(event: 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  pid?: number | undefined;
+  stderr?: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null | undefined;
+  stdout?: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null | undefined;
+}
+
+type SmartSearchSpawn = (command: string, args: string[], options: SpawnOptions) => SmartSearchChildProcess;
+
+interface SmartSearchRuntimeDependencies {
+  env?: NodeJS.ProcessEnv;
+  fsPromises?: SmartSearchFsPromises;
+  outputLimitBytes?: number;
+  path?: Pick<typeof pathModule, 'dirname' | 'join'>;
+  resolvePackageRoot?: () => string;
+  spawn?: SmartSearchSpawn;
+  timeoutMs?: number;
+}
+
+interface CliCandidate {
+  args: string[];
+  command: string;
+  env?: NodeJS.ProcessEnv;
+  label: string;
+}
+
+interface CliOptions {
+  allowNonZero?: boolean;
+  outputLimitBytes?: number;
+  timeoutMs?: number;
+}
+
+interface CliResult {
+  code: number | null;
+  label: string;
+  signal: NodeJS.Signals | null;
+  stderr: string;
+  stdout: string;
+}
+
+interface DoctorResult {
+  exitCode: number | null;
+  ok: boolean;
+  result: Record<string, unknown>;
+  signal: NodeJS.Signals | null;
+  stderr: string;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorCode = (error: unknown): string | null => (
+  error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : null
+);
+
+const errorText = (error: unknown, fallback = 'failed'): string => {
+  if (error instanceof Error && error.message) return error.message;
+  const record = asRecord(error);
+  return typeof record?.details === 'string' ? record.details : fallback;
+};
+
+const makeEndpointError = (message: string, status = 500, details?: unknown): EndpointError => {
+  const error = new Error(message) as EndpointError;
   error.status = status;
   if (details !== undefined) error.details = details;
   return error;
 };
 
-const appendWithLimit = (current, chunk, limitBytes) => {
+const appendWithLimit = (current: string, chunk: string, limitBytes: number) => {
   const next = current + chunk;
   if (Buffer.byteLength(next, 'utf8') <= limitBytes) {
     return { value: next, truncated: false };
@@ -21,7 +102,7 @@ const appendWithLimit = (current, chunk, limitBytes) => {
   return { value: buffer.toString('utf8'), truncated: true };
 };
 
-const parseJsonOutput = (stdout) => {
+const parseJsonOutput = (stdout: string): unknown => {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   try {
@@ -40,7 +121,7 @@ const parseJsonOutput = (stdout) => {
   }
 };
 
-export const createSmartSearchRuntime = (dependencies = {}) => {
+export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDependencies = {}) => {
   const {
     fsPromises,
     path,
@@ -55,10 +136,11 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     throw new Error('createSmartSearchRuntime requires fsPromises, path, and spawn dependencies.');
   }
 
-  let doctorInFlight = null;
+  let doctorInFlight: Promise<DoctorResult> | null = null;
   let writeQueue = Promise.resolve();
 
-  const hasFile = async (filePath) => {
+  const hasFile = async (filePath: string): Promise<boolean> => {
+    if (!fsPromises.access) return false;
     try {
       await fsPromises.access(filePath);
       return true;
@@ -67,7 +149,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     }
   };
 
-  const prependPathValue = (base, addition) => {
+  const prependPathValue = (base: string, addition: string): string => {
     if (!base) return addition;
     return `${addition}${process.platform === 'win32' ? ';' : ':'}${base}`;
   };
@@ -93,8 +175,8 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     return configured;
   };
 
-  const buildSmartSearchCandidates = async (args) => {
-    const candidates = [];
+  const buildSmartSearchCandidates = async (args: string[]): Promise<CliCandidate[]> => {
+    const candidates: CliCandidate[] = [];
 
     if (env.SMART_SEARCH_BIN) {
       const binary = resolveSmartSearchBinary(env);
@@ -132,7 +214,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     return candidates;
   };
 
-  const killProcessTree = (child) => {
+  const killProcessTree = (child: SmartSearchChildProcess): void => {
     if (!child?.pid) return;
     if (process.platform === 'win32') {
       const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
@@ -150,7 +232,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     }
   };
 
-  const runCliCandidate = (candidate, options = {}) => new Promise((resolve, reject) => {
+  const runCliCandidate = (candidate: CliCandidate, options: CliOptions = {}): Promise<CliResult> => new Promise((resolve, reject) => {
     const childEnv = {
       ...env,
       ...(candidate.env ?? {}),
@@ -178,13 +260,13 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
       reject(makeEndpointError('Smart Search command timed out.', 504));
     }, options.timeoutMs ?? timeoutMs);
 
-    child.stdout?.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       const result = appendWithLimit(stdout, chunk.toString('utf8'), limitBytes);
       stdout = result.value;
       stdoutTruncated = stdoutTruncated || result.truncated;
       if (stdoutTruncated) killProcessTree(child);
     });
-    child.stderr?.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       const result = appendWithLimit(stderr, chunk.toString('utf8'), limitBytes);
       stderr = result.value;
       stderrTruncated = stderrTruncated || result.truncated;
@@ -208,7 +290,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     });
   });
 
-  const runCli = async (args, options = {}) => {
+  const runCli = async (args: string[], options: CliOptions = {}): Promise<CliResult> => {
     const candidates = await buildSmartSearchCandidates(args);
     const failures = [];
     for (const candidate of candidates) {
@@ -219,7 +301,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
         }
         failures.push(`${candidate.label}: exit ${result.code}${result.stderr ? `, ${redactSmartSearchSecrets(result.stderr.trim())}` : ''}`);
       } catch (error) {
-        failures.push(`${candidate.label}: ${redactSmartSearchSecrets(error?.details || error?.message || 'failed')}`);
+        failures.push(`${candidate.label}: ${String(redactSmartSearchSecrets(errorText(error)))}`);
       }
     }
     throw makeEndpointError(
@@ -228,22 +310,21 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     );
   };
 
-  const getPathInfo = async () => {
+  const getPathInfo = async (): Promise<Record<string, unknown> & { config_file: string }> => {
     const result = await runCli(['config', 'path', '--format', 'json'], { timeoutMs: 20_000, outputLimitBytes: 256 * 1024 });
-    const parsed = parseJsonOutput(result.stdout);
-    if (!parsed || typeof parsed !== 'object' || !parsed.config_file) {
+    const parsed = asRecord(parseJsonOutput(result.stdout));
+    if (!parsed || typeof parsed.config_file !== 'string' || !parsed.config_file) {
       throw makeEndpointError('Smart Search config path response was invalid.', 502);
     }
-    return parsed;
+    return parsed as Record<string, unknown> & { config_file: string };
   };
 
-  const readRawConfig = async (configFile) => {
+  const readRawConfig = async (configFile: string): Promise<Record<string, unknown>> => {
     try {
       const raw = await fsPromises.readFile(configFile, 'utf8');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      return asRecord(JSON.parse(raw) as unknown) ?? {};
     } catch (error) {
-      if (error && error.code === 'ENOENT') return {};
+      if (errorCode(error) === 'ENOENT') return {};
       if (error instanceof SyntaxError) {
         throw makeEndpointError('Smart Search config file contains invalid JSON. Fix it before saving from Piarium.', 409);
       }
@@ -251,15 +332,15 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     }
   };
 
-  const writeRawConfig = async (configFile, data) => {
+  const writeRawConfig = async (configFile: string, data: Record<string, unknown>): Promise<void> => {
     await fsPromises.mkdir(path.dirname(configFile), { recursive: true });
     const tempFile = `${configFile}.piarium-${process.pid}-${Date.now()}.tmp`;
     let mode = 0o600;
     try {
-      const stat = await fsPromises.stat(configFile);
-      mode = stat.mode & 0o777;
+      const stat = fsPromises.stat ? await fsPromises.stat(configFile) : null;
+      if (stat) mode = stat.mode & 0o777;
     } catch (error) {
-      if (!error || error.code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
     }
     try {
       await fsPromises.writeFile(tempFile, `${JSON.stringify(data, null, 2)}\n`, { encoding: 'utf8', mode });
@@ -281,7 +362,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     return buildSmartSearchConfigResponse({ pathInfo, fileValues: raw, env });
   };
 
-  const patchConfig = async (payload) => {
+  const patchConfig = async (payload: unknown) => {
     const run = async () => {
       const patch = normalizeSmartSearchPatch(payload);
       const envControlled = [...Object.keys(patch.set), ...patch.unset].filter((key) => env[key] !== undefined);
@@ -299,8 +380,9 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
       await writeRawConfig(pathInfo.config_file, raw);
       return loadConfig();
     };
-    writeQueue = writeQueue.then(run, run);
-    return writeQueue;
+    const operation = writeQueue.then(run, run);
+    writeQueue = operation.then(() => undefined, () => undefined);
+    return operation;
   };
 
   const getStatus = async () => {
@@ -309,11 +391,13 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
         getPathInfo(),
         runCli(['--version'], { timeoutMs: 10_000, outputLimitBytes: 64 * 1024 }).catch((error) => ({ error })),
       ]);
-      const version = versionResult && !versionResult.error ? versionResult.stdout.trim() : '';
+      const version = 'stdout' in versionResult ? versionResult.stdout.trim() : '';
       return {
         ok: true,
         available: true,
-        binary: versionResult?.label || pathInfo?.binary || resolveSmartSearchBinaryLabel(env),
+        binary: ('label' in versionResult ? versionResult.label : null)
+          || (typeof pathInfo.binary === 'string' ? pathInfo.binary : null)
+          || resolveSmartSearchBinaryLabel(env),
         version,
         path: pathInfo,
       };
@@ -322,7 +406,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
         ok: false,
         available: false,
         binary: resolveSmartSearchBinaryLabel(env),
-        error: redactSmartSearchSecrets(error?.message || 'Smart Search is not available.'),
+        error: String(redactSmartSearchSecrets(errorText(error, 'Smart Search is not available.'))),
       };
     }
   };
@@ -331,13 +415,13 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     if (doctorInFlight) return doctorInFlight;
     doctorInFlight = (async () => {
       const result = await runCli(['doctor', '--format', 'json'], { timeoutMs, outputLimitBytes, allowNonZero: true });
-      const parsed = parseJsonOutput(result.stdout);
+      const parsed = asRecord(parseJsonOutput(result.stdout)) ?? {};
       return {
-        ok: Boolean(parsed?.ok),
+        ok: Boolean(parsed.ok),
         exitCode: result.code,
         signal: result.signal,
-        result: redactSmartSearchPayload(parsed),
-        stderr: result.stderr ? redactSmartSearchSecrets(result.stderr).slice(0, 4000) : '',
+        result: asRecord(redactSmartSearchPayload(parsed)) ?? {},
+        stderr: result.stderr ? String(redactSmartSearchSecrets(result.stderr)).slice(0, 4000) : '',
       };
     })().finally(() => {
       doctorInFlight = null;

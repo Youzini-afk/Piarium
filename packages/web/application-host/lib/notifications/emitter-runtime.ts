@@ -1,6 +1,18 @@
-// @ts-nocheck
-export const createGlobalUiEventBroadcaster = ({ sseClients, writeSseEvent }) => {
-  return (payload) => {
+export interface NotificationSseResponse {
+  write(value: string | Record<string, unknown>): unknown;
+}
+
+type NotificationPayload = Record<string, unknown>;
+type NotificationBroadcaster = (payload: NotificationPayload) => void;
+
+export const createGlobalUiEventBroadcaster = ({
+  sseClients,
+  writeSseEvent,
+}: {
+  sseClients: Set<NotificationSseResponse>;
+  writeSseEvent(response: NotificationSseResponse, payload: NotificationPayload): void;
+}): NotificationBroadcaster => {
+  return (payload: NotificationPayload): void => {
     for (const res of sseClients) {
       try {
         writeSseEvent(res, payload);
@@ -11,7 +23,16 @@ export const createGlobalUiEventBroadcaster = ({ sseClients, writeSseEvent }) =>
   };
 };
 
-export const createNotificationEmitterRuntime = (dependencies) => {
+export interface NotificationEmitterDependencies {
+  desktopNotifyPrefix: string;
+  getBroadcastGlobalUiEvent(): NotificationBroadcaster | null;
+  getDesktopNotifyEnabled(): boolean;
+  getUiNotificationClients(): Set<NotificationSseResponse>;
+  onDesktopNotification?: NotificationBroadcaster | undefined;
+  process: { stdout: { write(value: string): unknown } };
+}
+
+export const createNotificationEmitterRuntime = (dependencies: NotificationEmitterDependencies) => {
   const {
     process,
     getDesktopNotifyEnabled,
@@ -31,15 +52,15 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     ? initialOnDesktopNotification
     : null;
 
-  const setOnDesktopNotification = (cb) => {
-    onDesktopNotification = typeof cb === 'function' ? cb : null;
+  const setOnDesktopNotification = (cb: unknown): void => {
+    onDesktopNotification = typeof cb === 'function' ? cb as NotificationBroadcaster : null;
   };
 
-  const writeSseEvent = (res, payload) => {
+  const writeSseEvent = (res: NotificationSseResponse, payload: NotificationPayload): void => {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
 
-  const emitDesktopNotification = (payload) => {
+  const emitDesktopNotification = (payload: unknown): boolean => {
     const desktopNotifyEnabled = getDesktopNotifyEnabled();
     if (!desktopNotifyEnabled) {
       return false;
@@ -51,7 +72,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
 
     if (onDesktopNotification) {
       try {
-        onDesktopNotification(payload);
+        onDesktopNotification(payload as NotificationPayload);
         return true;
       } catch {
         // ignore host-side throw
@@ -70,7 +91,10 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     return false;
   };
 
-  const broadcastUiNotification = (payload, options = {}) => {
+  const broadcastUiNotification = (
+    payload: unknown,
+    options: { desktopNotificationDelivered?: boolean | undefined } = {},
+  ): void => {
     const desktopNotifyEnabled = getDesktopNotifyEnabled();
     if (!payload || typeof payload !== 'object') {
       return;
@@ -81,7 +105,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     const syntheticPayload = {
       type: 'piarium:notification',
       properties: {
-        ...payload,
+          ...(payload as NotificationPayload),
         // Tell local desktop UI whether a native channel already accepted this
         // notification. If so, the SSE/WS event is informational only and must
         // not create a second OS notification.

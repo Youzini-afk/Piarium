@@ -9,7 +9,7 @@ const WRITER_MODES = new Set<string>(['controlled', 'process', 'external']);
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-interface MutationOwner {
+export interface MutationOwner {
   kind: string;
   id: string;
   generation?: number;
@@ -47,19 +47,19 @@ interface MutationDocument {
   workspaces: Record<string, WorkspaceMutationEntry>;
 }
 
-interface MutationToken {
+export interface MutationToken {
   workspaceId: string;
   epoch: number;
   owner: unknown;
 }
 
-interface WatchPosition {
+export interface WatchPosition {
   sourceId: string;
   generation: number;
   sequence: number;
 }
 
-interface WatchEvent {
+export interface WatchEvent {
   sourceId: string;
   generation: number;
   sequence: number;
@@ -73,17 +73,17 @@ interface WorkspaceRuntime {
   lastDurableWitness: { epoch: number; maintenance: boolean; mutationRevision: number; writerRevision: number } | null;
 }
 
-interface RegisterWriterOptions {
+export interface RegisterWriterOptions {
   mode?: string;
   purpose?: string;
 }
 
-interface AdvanceEpochOptions {
+export interface AdvanceEpochOptions {
   expectedEpoch?: number;
   maintenance?: boolean;
 }
 
-interface CaptureToken {
+export interface CaptureToken {
   captureId: string;
   workspaceId: string;
   epoch: number;

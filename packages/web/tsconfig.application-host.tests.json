@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.application-host.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["application-host/**/*.ts"],
+  "exclude": []
+}

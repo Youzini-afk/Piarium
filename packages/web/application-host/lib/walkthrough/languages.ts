@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Language the walkthrough prose is written in.
 //
 // This is the server's own list rather than an import from the UI package: the
@@ -11,12 +10,12 @@
 // straight through. A tag we do not know resolves to English, which is exactly
 // what the feature did before the setting existed.
 
-export const DEFAULT_LANGUAGE = 'en';
+export const DEFAULT_LANGUAGE: WalkthroughLanguage = 'en';
 
 // Value is what the prompt says to write in. Naming the language in English
 // keeps the instruction in the same language as the rest of the system prompt,
 // which every model handles more reliably than a switch mid-sentence.
-const LANGUAGE_NAMES = {
+const LANGUAGE_NAMES: Record<WalkthroughLanguage, string> = {
   en: 'English',
   fr: 'French',
   'zh-CN': 'Simplified Chinese',
@@ -28,6 +27,7 @@ const LANGUAGE_NAMES = {
   pl: 'Polish',
   ja: 'Japanese',
 };
+const LANGUAGE_TAGS = Object.keys(LANGUAGE_NAMES) as WalkthroughLanguage[];
 
 /**
  * Coerce a caller-supplied tag to one we support.
@@ -36,27 +36,29 @@ const LANGUAGE_NAMES = {
  * the request: the language is a preference about prose, and refusing to
  * generate a walkthrough over one is a worse answer than writing it in English.
  */
-export function normalizeLanguage(value) {
+export function normalizeLanguage(value: unknown): WalkthroughLanguage {
   if (typeof value !== 'string' || !value) return DEFAULT_LANGUAGE;
-  if (Object.hasOwn(LANGUAGE_NAMES, value)) return value;
+  if (Object.hasOwn(LANGUAGE_NAMES, value)) return value as WalkthroughLanguage;
 
   // Tolerate case and separator drift (`uk-UA`, `pt_br`) so a runtime that
   // passes a platform locale does not silently fall back to English.
   const normalized = value.toLowerCase().replace(/_/g, '-');
-  const match = Object.keys(LANGUAGE_NAMES).find((tag) => {
+  const match = LANGUAGE_TAGS.find((tag) => {
     const lower = tag.toLowerCase();
     return lower === normalized || normalized.startsWith(`${lower}-`);
   });
   if (match) return match;
 
   const base = normalized.split('-')[0];
-  const baseMatch = Object.keys(LANGUAGE_NAMES).find((tag) => tag.toLowerCase() === base);
+  const baseMatch = LANGUAGE_TAGS.find((tag) => tag.toLowerCase() === base);
   return baseMatch ?? DEFAULT_LANGUAGE;
 }
 
 /** English name of a normalized tag, for the prompt. */
-export function languageName(language) {
-  return LANGUAGE_NAMES[language] ?? LANGUAGE_NAMES[DEFAULT_LANGUAGE];
+export function languageName(language: unknown): string {
+  return typeof language === 'string' && Object.hasOwn(LANGUAGE_NAMES, language)
+    ? LANGUAGE_NAMES[language as WalkthroughLanguage]
+    : LANGUAGE_NAMES[DEFAULT_LANGUAGE];
 }
 
 // The tags this list must agree with live in `packages/ui/src/lib/i18n`, which
@@ -64,3 +66,4 @@ export function languageName(language) {
 // that file, because a locale added on one side only fails silently: the picker
 // offers the language and the walkthrough comes back in English.
 export const __testing = { LANGUAGE_NAMES };
+import type { WalkthroughLanguage } from './types.js';

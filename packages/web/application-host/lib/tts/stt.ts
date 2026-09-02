@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Server-side Speech-to-Text Service
  *
@@ -21,7 +20,16 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
  * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }) {
+export interface TranscribeAudioOptions {
+  apiKey?: string | undefined;
+  audioBuffer: Buffer;
+  baseURL?: string | undefined;
+  language?: string | undefined;
+  mimeType: string;
+  model: string;
+}
+
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }: TranscribeAudioOptions): Promise<string> {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -32,7 +40,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     throw new Error('Custom server URL is required');
   }
 
-  const clientOpts = {
+  const clientOpts: ConstructorParameters<typeof OpenAI>[0] = {
     apiKey: apiKey || process.env.OPENAI_API_KEY || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
@@ -61,9 +69,9 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
  * @param {string} mimeType
  * @returns {string}
  */
-function mimeTypeToExt(mimeType) {
-  const type = (mimeType || '').split(';')[0].trim().toLowerCase();
-  const map = {
+function mimeTypeToExt(mimeType: string): string {
+  const type = (mimeType || '').split(';')[0]?.trim().toLowerCase() ?? '';
+  const map: Record<string, string> = {
     'audio/webm': 'webm',
     'audio/ogg': 'ogg',
     'audio/wav': 'wav',

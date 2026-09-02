@@ -1,19 +1,50 @@
-// @ts-nocheck
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { createDapClient } from './dap.js';
 import { resolveWorkspacePath } from '../workspace/path-safety.js';
+import type { ChildProcess } from 'node:child_process';
+import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
+import type {
+  DebugAdapterDescriptor,
+  DebugBreakpointMutationRequest,
+  DebugRequest,
+  DebugSessionRecord,
+  DebugStartRequest,
+  ExtensionRunOwner,
+  PiariumBreakpoint,
+  PiariumDebugBreakpointListResult,
+  PiariumDebugBreakpointsResult,
+  PiariumDebugEvent,
+  PiariumDebugFeatureResult,
+  PiariumDebugScope,
+  PiariumDebugSessionStatus,
+  PiariumDebugStackFrame,
+  PiariumDebugThread,
+  PiariumDebugVariable,
+  ProcessWriter,
+  RegisteredDebugAdapter,
+  RunPathModule,
+  RunSupervisorOptions,
+} from './types.js';
 
-const ownerScopeKey = (owner) => owner
+type MessageRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): MessageRecord => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as MessageRecord
+    : {}
+);
+
+const ownerScopeKey = (owner?: ExtensionRunOwner) => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
   : 'piarium.host';
-const exactOwnerKey = (owner) => owner
+const exactOwnerKey = (owner?: ExtensionRunOwner) => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
   : 'piarium.host\0host';
 
-const waitForChildExit = (child) => new Promise((resolve) => {
+const waitForChildExit = (child: ChildProcess | null): Promise<void> => new Promise((resolve) => {
   if (!child || child.exitCode !== null || child.signalCode) {
     resolve();
     return;
@@ -30,12 +61,16 @@ const waitForChildExit = (child) => new Promise((resolve) => {
   child.once('close', finish);
 });
 
-const registerProcessWriter = async (documents, scopeId, owner, purpose) => {
-  if (typeof documents?.registerWriterForScope !== 'function') return null;
+const registerProcessWriter = async (
+  documents: DocumentAuthority,
+  scopeId: string,
+  owner: MutationOwner,
+  purpose: string,
+): Promise<ProcessWriter | null> => {
   return documents.registerWriterForScope(scopeId, owner, { mode: 'process', purpose });
 };
 
-const releaseProcessWriter = async (writer, mutated = true) => {
+const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true): Promise<void> => {
   if (!writer) return;
   if (mutated) {
     try { await writer.markMutated(); } catch { /* authority may already be gone */ }
@@ -43,14 +78,15 @@ const releaseProcessWriter = async (writer, mutated = true) => {
   try { await writer.close(); } catch { /* authority may already be gone */ }
 };
 
-const relativeFromRoot = (root, absolutePath, pathModule) => {
+const relativeFromRoot = (root: string, absolutePath: string, pathModule: RunPathModule): string | null => {
   const relative = pathModule.relative(root, absolutePath);
   if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return null;
   return relative.split(pathModule.sep).join('/');
 };
 
-const resourceIdFromSource = (source, root, pathModule) => {
-  const raw = typeof source?.path === 'string' ? source.path : typeof source === 'string' ? source : '';
+const resourceIdFromSource = (source: unknown, root: string, pathModule: RunPathModule): string => {
+  const record = asRecord(source);
+  const raw = typeof record.path === 'string' ? record.path : typeof source === 'string' ? source : '';
   if (!raw) return '';
   if (!pathModule.isAbsolute(raw) && !raw.startsWith('file:')) return raw.replace(/\\/g, '/');
   try {
@@ -61,9 +97,9 @@ const resourceIdFromSource = (source, root, pathModule) => {
   }
 };
 
-const workspaceIdOf = (value) => {
+const workspaceIdOf = (value: unknown): string => {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object' && typeof value.workspaceId === 'string') return value.workspaceId;
+  if (value && typeof value === 'object' && 'workspaceId' in value && typeof value.workspaceId === 'string') return value.workspaceId;
   return '';
 };
 
@@ -73,20 +109,20 @@ export const createDebugSupervisor = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
-}) => {
-  const adapters = [];
-  const sessions = new Map();
-  const breakpoints = new Map();
-  const watches = new Map();
-  const workspaceListeners = new Map();
-  const generations = new Map();
-  const pendingExits = new Set();
+}: RunSupervisorOptions) => {
+  const adapters: RegisteredDebugAdapter[] = [];
+  const sessions = new Map<string, DebugSessionRecord>();
+  const breakpoints = new Map<string, PiariumBreakpoint[]>();
+  const watches = new Map<string, string[]>();
+  const workspaceListeners = new Map<string, Set<(event: PiariumDebugEvent) => void>>();
+  const generations = new Map<string, number>();
+  const pendingExits = new Set<Promise<void>>();
 
-  const acquireWriter = (scopeId, owner) => {
+  const acquireWriter = (scopeId: string, owner: MutationOwner): Promise<ProcessWriter | null> => {
     return registerProcessWriter(documents, scopeId, owner, 'debug-process');
   };
 
-  const releaseRecordWriter = async (record, mutated = true) => {
+  const releaseRecordWriter = async (record: DebugSessionRecord, mutated = true): Promise<void> => {
     if (!record?.writer || record.writerReleased) return;
     record.writerReleased = true;
     const writer = record.writer;
@@ -94,21 +130,20 @@ export const createDebugSupervisor = ({
     await releaseProcessWriter(writer, mutated);
   };
 
-  const nextGeneration = (workspaceId) => {
+  const nextGeneration = (workspaceId: string): number => {
     const next = (generations.get(workspaceId) ?? 0) + 1;
     generations.set(workspaceId, next);
     return next;
   };
 
-  const emit = (workspaceId, event) => {
+  const emit = (workspaceId: string, event: PiariumDebugEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record) => {
-    if (!record) return null;
-    const snapshot = {
+  const snapshotFor = (record: DebugSessionRecord): PiariumDebugSessionStatus => {
+    const snapshot: PiariumDebugSessionStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       sessionId: record.sessionId,
@@ -120,15 +155,15 @@ export const createDebugSupervisor = ({
     return snapshot;
   };
 
-  const findAdapter = (adapterId, languageId) => {
-    if (adapterId) return adapters.find((item) => item.adapterId === adapterId) ?? null;
-    if (languageId) {
+  const findAdapter = (adapterId?: unknown, languageId?: unknown): RegisteredDebugAdapter | null => {
+    if (typeof adapterId === 'string' && adapterId) return adapters.find((item) => item.adapterId === adapterId) ?? null;
+    if (typeof languageId === 'string' && languageId) {
       return adapters.find((item) => item.languageIds.includes(languageId)) ?? null;
     }
     return adapters.find((item) => item.source === 'builtin') ?? adapters[0] ?? null;
   };
 
-  const disposeRecord = (record, reason = 'Debug session stopped') => {
+  const disposeRecord = (record: DebugSessionRecord | null | undefined, reason = 'Debug session stopped'): void => {
     if (!record) return;
     try {
       void record.rpc?.request('disconnect', { terminateDebuggee: true }).catch(() => undefined);
@@ -162,31 +197,36 @@ export const createDebugSupervisor = ({
     }
   };
 
-  const setFailed = (record, message) => {
+  const setFailed = (record: DebugSessionRecord, message: string): void => {
     record.status = 'failed';
     record.message = message;
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
   };
 
-  const getStatus = (request) => {
+  const getStatus = (request: unknown): PiariumDebugSessionStatus => {
     const workspaceId = workspaceIdOf(request);
     const existing = sessions.get(workspaceId);
     if (existing) return snapshotFor(existing);
     return { status: 'absent', workspaceId };
   };
 
-  const listBreakpoints = (request) => (
+  const listBreakpoints = (request: unknown): PiariumBreakpoint[] => (
     breakpoints.get(workspaceIdOf(request)) ?? []
   );
 
-  const activeSession = (workspaceId) => {
+  const activeSession = (workspaceId: string): DebugSessionRecord | null => {
     const record = sessions.get(workspaceId);
     return record && (record.status === 'starting' || record.status === 'running' || record.status === 'paused')
       ? record
       : null;
   };
 
-  const breakpointResult = (workspaceId, status = 'ready') => {
+  function breakpointResult(workspaceId: string): PiariumDebugBreakpointListResult;
+  function breakpointResult(workspaceId: string, status: 'stale'): PiariumDebugBreakpointsResult;
+  function breakpointResult(
+    workspaceId: string,
+    status: 'ready' | 'stale' = 'ready',
+  ): PiariumDebugBreakpointsResult {
     const record = activeSession(workspaceId);
     return {
       status,
@@ -194,9 +234,9 @@ export const createDebugSupervisor = ({
       ...(record ? { sessionId: record.sessionId, generation: record.generation } : {}),
       breakpoints: listBreakpoints(workspaceId).map((item) => ({ ...item })),
     };
-  };
+  }
 
-  const setBreakpoints = (request) => {
+  const setBreakpoints = (request: DebugBreakpointMutationRequest): PiariumDebugBreakpointsResult => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const resourceId = typeof request?.resourceId === 'string' ? request.resourceId : '';
     const record = activeSession(workspaceId);
@@ -204,7 +244,8 @@ export const createDebugSupervisor = ({
       && request?.expectedGeneration === null;
     const expectsSession = typeof request?.expectedSessionId === 'string'
       && request.expectedSessionId.length > 0
-      && Number.isSafeInteger(request?.expectedGeneration)
+      && typeof request.expectedGeneration === 'number'
+      && Number.isSafeInteger(request.expectedGeneration)
       && request.expectedGeneration >= 1;
     if (!expectsNoSession && !expectsSession) {
       throw new Error('Breakpoint mutation requires an observed debug owner');
@@ -218,7 +259,7 @@ export const createDebugSupervisor = ({
       );
     if (ownerChanged) return breakpointResult(workspaceId, 'stale');
     const lines = Array.isArray(request?.lines)
-      ? [...new Set(request.lines.map((line) => Number(line)).filter((line) => Number.isFinite(line) && line >= 1))].sort((a, b) => a - b)
+      ? [...new Set(request.lines.map((line) => Number(line)).filter((line): line is number => Number.isFinite(line) && line >= 1))].sort((a, b) => a - b)
       : [];
     const current = breakpoints.get(workspaceId) ?? [];
     const next = current.filter((item) => item.resourceId !== resourceId);
@@ -237,7 +278,7 @@ export const createDebugSupervisor = ({
     return result;
   };
 
-  const start = async (request) => {
+  const start = async (request: DebugStartRequest): Promise<PiariumDebugSessionStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const existing = sessions.get(workspaceId);
     if (existing) disposeRecord(existing, 'Replaced by a new debug session');
@@ -282,7 +323,7 @@ export const createDebugSupervisor = ({
       }
     }
     const sessionId = randomUUID();
-    const record = {
+    const record: DebugSessionRecord = {
       workspaceId,
       sessionId,
       adapterId: adapter.adapterId,
@@ -299,7 +340,7 @@ export const createDebugSupervisor = ({
       program: programPath,
     };
     sessions.set(workspaceId, record);
-    let child;
+    let child: ChildProcess | null = null;
     try {
       record.writer = await acquireWriter(workspaceId, {
         kind: 'debug',
@@ -319,23 +360,29 @@ export const createDebugSupervisor = ({
       return snapshotFor(record);
     }
     record.child = child;
+    if (!child.stdout || !child.stdin) {
+      setFailed(record, 'Debug adapter did not expose protocol streams');
+      disposeRecord(record, record.message);
+      return snapshotFor(record);
+    }
     const rpc = createDapClient({ input: child.stdout, output: child.stdin });
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
       if (sessions.get(workspaceId) !== record || record.child !== child || record.rpc !== rpc) return;
+      const notification = asRecord(params);
       if (method === 'stopped') {
         record.status = 'paused';
-        if (typeof params?.reason === 'string') record.reason = params.reason;
+        if (typeof notification.reason === 'string') record.reason = notification.reason;
         emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
         return;
       }
       if (method === 'continued' || method === 'output' || method === 'exited' || method === 'terminated') {
-        if (method === 'output' && typeof params?.output === 'string') {
+        if (method === 'output' && typeof notification.output === 'string') {
           emit(workspaceId, {
             kind: 'output',
             sessionId,
             channel: 'debug-console',
-            text: params.output,
+            text: notification.output,
           });
         }
         if (method === 'terminated' || method === 'exited') {
@@ -364,20 +411,20 @@ export const createDebugSupervisor = ({
     });
     try {
       const initialized = rpc.waitForEvent('initialized');
-      const capabilities = await rpc.request('initialize', {
+      const capabilities = asRecord(await rpc.request('initialize', {
         adapterID: adapter.adapterId,
         clientID: 'piarium',
         clientName: 'Piarium',
         pathFormat: 'path',
         linesStartAt1: true,
         columnsStartAt1: true,
-      });
-      const launchParams = { cwd: workspace.root };
+      }));
+      const launchParams: MessageRecord = { cwd: workspace.root };
       if (programPath) launchParams.program = programPath;
       const launch = rpc.request('launch', launchParams);
       void launch.catch(() => undefined);
       await initialized;
-      const grouped = new Map();
+      const grouped = new Map<string, number[]>();
       for (const item of listBreakpoints(workspaceId)) {
         const lines = grouped.get(item.resourceId) ?? [];
         lines.push(item.line);
@@ -390,7 +437,7 @@ export const createDebugSupervisor = ({
         });
       }
       if (capabilities?.supportsConfigurationDoneRequest === true) {
-        await rpc.request('configurationDone');
+        await rpc.request('configurationDone', {});
       }
       await launch;
       if (sessions.get(workspaceId) !== record || !adapters.includes(adapter)) {
@@ -408,16 +455,20 @@ export const createDebugSupervisor = ({
     }
   };
 
-  const withSession = async (workspaceId, action) => {
+  const withSessionStatus = async (
+    workspaceId: string,
+    action: (record: DebugSessionRecord, rpc: NonNullable<DebugSessionRecord['rpc']>) => Promise<PiariumDebugSessionStatus>,
+  ): Promise<PiariumDebugSessionStatus> => {
     const record = sessions.get(workspaceId);
-    if (!record?.rpc) {
+    const rpc = record?.rpc;
+    if (!record || !rpc) {
       return { status: 'absent', workspaceId };
     }
     if (record.status === 'failed' || record.status === 'stopped') {
       return snapshotFor(record);
     }
     try {
-      return await action(record);
+      return await action(record, rpc);
     } catch (error) {
       if (record.rpc && (record.status === 'running' || record.status === 'paused')) {
         record.status = 'failed';
@@ -434,27 +485,65 @@ export const createDebugSupervisor = ({
     }
   };
 
-  const mapFrame = (frame, root) => {
-    const mapped = {
-      id: Number(frame?.id) || 0,
-      name: typeof frame?.name === 'string' ? frame.name : '(anonymous)',
-      line: Number(frame?.line) || 1,
-      column: Number(frame?.column) || 1,
+  const withSessionFeature = async <Value>(
+    workspaceId: string,
+    action: (
+      record: DebugSessionRecord,
+      rpc: NonNullable<DebugSessionRecord['rpc']>,
+    ) => Promise<PiariumDebugFeatureResult<Value>>,
+  ): Promise<PiariumDebugFeatureResult<Value>> => {
+    const record = sessions.get(workspaceId);
+    const rpc = record?.rpc;
+    if (!record || !rpc) return { status: 'absent', workspaceId };
+    if (record.status === 'failed' || record.status === 'stopped') {
+      return {
+        status: 'failed',
+        workspaceId,
+        sessionId: record.sessionId,
+        generation: record.generation,
+        message: record.message || 'Debug session is not active',
+      };
+    }
+    try {
+      return await action(record, rpc);
+    } catch (error) {
+      if (record.rpc && (record.status === 'running' || record.status === 'paused')) {
+        record.status = 'failed';
+        record.message = error instanceof Error ? error.message : 'Debug request failed';
+        emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+      }
+      return {
+        status: 'failed',
+        workspaceId,
+        sessionId: record.sessionId,
+        generation: record.generation,
+        message: error instanceof Error ? error.message : 'Debug request failed',
+      };
+    }
+  };
+
+  const mapFrame = (frame: unknown, root: string): PiariumDebugStackFrame => {
+    const value = asRecord(frame);
+    const mapped: PiariumDebugStackFrame = {
+      id: Number(value.id) || 0,
+      name: typeof value.name === 'string' ? value.name : '(anonymous)',
+      line: Number(value.line) || 1,
+      column: Number(value.column) || 1,
     };
-    const resourceId = resourceIdFromSource(frame?.source, root, pathModule);
+    const resourceId = resourceIdFromSource(value.source, root, pathModule);
     if (resourceId) mapped.resourceId = resourceId;
     return mapped;
   };
 
   return {
-    registerAdapter(descriptor, owner) {
+    registerAdapter(descriptor: DebugAdapterDescriptor, owner?: ExtensionRunOwner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
-        ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
+        ? descriptor.languageIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
         : [];
       if (!descriptor?.adapterId || !descriptor.command) {
         throw new Error('Debug adapter requires adapterId and command');
       }
-      const next = {
+      const next: RegisteredDebugAdapter = {
         adapterId: descriptor.adapterId,
         command: descriptor.command,
         args: Array.isArray(descriptor.args) ? descriptor.args : [],
@@ -487,7 +576,7 @@ export const createDebugSupervisor = ({
       }
       return { status: 'registered', adapterId: next.adapterId };
     },
-    async unregisterAdapter(adapterId, owner) {
+    async unregisterAdapter(adapterId: string, owner?: ExtensionRunOwner) {
       const index = adapters.findIndex((item) => (
         item.adapterId === adapterId && item.ownerKey === exactOwnerKey(owner)
       ));
@@ -502,20 +591,20 @@ export const createDebugSupervisor = ({
       return { status: 'unregistered', adapterId };
     },
     getStatus,
-    listBreakpoints: (request) => breakpointResult(workspaceIdOf(request)),
+    listBreakpoints: (request: unknown): PiariumDebugBreakpointListResult => breakpointResult(workspaceIdOf(request)),
     setBreakpoints,
     start,
-    async stop(request) {
-      const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : request;
+    async stop(request: unknown): Promise<PiariumDebugSessionStatus> {
+      const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (!record) return { status: 'absent', workspaceId };
       disposeRecord(record, 'Debug session stopped');
       sessions.delete(workspaceId);
       await Promise.all([...pendingExits]);
-      return snapshotFor(record) ?? { status: 'stopped', workspaceId };
+      return snapshotFor(record);
     },
-    continue: (request) => withSession(request?.workspaceId, async (record) => {
-      await record.rpc.request('continue', { threadId: 1 });
+    continue: (request: DebugRequest) => withSessionStatus(request.workspaceId, async (record, rpc) => {
+      await rpc.request('continue', { threadId: 1 });
       if (record.status === 'paused' || record.status === 'starting') {
         record.status = 'running';
         delete record.reason;
@@ -523,39 +612,42 @@ export const createDebugSupervisor = ({
       }
       return snapshotFor(record);
     }),
-    pause: (request) => withSession(request?.workspaceId, async (record) => {
-      await record.rpc.request('pause', { threadId: 1 });
+    pause: (request: DebugRequest) => withSessionStatus(request.workspaceId, async (record, rpc) => {
+      await rpc.request('pause', { threadId: 1 });
       return snapshotFor(record);
     }),
-    stepOver: (request) => withSession(request?.workspaceId, async (record) => {
-      await record.rpc.request('next', { threadId: 1 });
+    stepOver: (request: DebugRequest) => withSessionStatus(request.workspaceId, async (record, rpc) => {
+      await rpc.request('next', { threadId: 1 });
       return snapshotFor(record);
     }),
-    stepIn: (request) => withSession(request?.workspaceId, async (record) => {
-      await record.rpc.request('stepIn', { threadId: 1 });
+    stepIn: (request: DebugRequest) => withSessionStatus(request.workspaceId, async (record, rpc) => {
+      await rpc.request('stepIn', { threadId: 1 });
       return snapshotFor(record);
     }),
-    stepOut: (request) => withSession(request?.workspaceId, async (record) => {
-      await record.rpc.request('stepOut', { threadId: 1 });
+    stepOut: (request: DebugRequest) => withSessionStatus(request.workspaceId, async (record, rpc) => {
+      await rpc.request('stepOut', { threadId: 1 });
       return snapshotFor(record);
     }),
-    getThreads: (request) => withSession(request?.workspaceId ?? request, async (record) => {
-      const raw = await record.rpc.request('threads');
-      const threads = Array.isArray(raw?.threads) ? raw.threads : [];
+    getThreads: (request: DebugRequest) => withSessionFeature<PiariumDebugThread[]>(request.workspaceId, async (record, rpc) => {
+      const raw = asRecord(await rpc.request('threads', {}));
+      const threads = Array.isArray(raw.threads) ? raw.threads : [];
       return {
         status: 'ready',
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         generation: record.generation,
-        value: threads.map((thread) => ({
-          id: Number(thread?.id) || 0,
-          name: typeof thread?.name === 'string' ? thread.name : 'thread',
-        })),
+        value: threads.map((thread) => {
+          const value = asRecord(thread);
+          return {
+            id: Number(value.id) || 0,
+            name: typeof value.name === 'string' ? value.name : 'thread',
+          };
+        }),
       };
     }),
-    getStack: (request) => withSession(request?.workspaceId, async (record) => {
-      const raw = await record.rpc.request('stackTrace', { threadId: Number(request?.threadId) || 1 });
-      const frames = Array.isArray(raw?.stackFrames) ? raw.stackFrames : [];
+    getStack: (request: DebugRequest) => withSessionFeature<PiariumDebugStackFrame[]>(request.workspaceId, async (record, rpc) => {
+      const raw = asRecord(await rpc.request('stackTrace', { threadId: Number(request.threadId) || 1 }));
+      const frames = Array.isArray(raw.stackFrames) ? raw.stackFrames : [];
       return {
         status: 'ready',
         workspaceId: record.workspaceId,
@@ -564,60 +656,62 @@ export const createDebugSupervisor = ({
         value: frames.map((frame) => mapFrame(frame, record.root)),
       };
     }),
-    getScopes: (request) => withSession(request?.workspaceId, async (record) => {
-      const raw = await record.rpc.request('scopes', { frameId: Number(request?.frameId) || 1 });
-      const scopes = Array.isArray(raw?.scopes) ? raw.scopes : [];
+    getScopes: (request: DebugRequest) => withSessionFeature<PiariumDebugScope[]>(request.workspaceId, async (record, rpc) => {
+      const raw = asRecord(await rpc.request('scopes', { frameId: Number(request.frameId) || 1 }));
+      const scopes = Array.isArray(raw.scopes) ? raw.scopes : [];
       return {
         status: 'ready',
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         generation: record.generation,
         value: scopes.map((scope) => {
+          const value = asRecord(scope);
           const mapped = {
-            name: typeof scope?.name === 'string' ? scope.name : 'scope',
-            variablesReference: Number(scope?.variablesReference) || 0,
+            name: typeof value.name === 'string' ? value.name : 'scope',
+            variablesReference: Number(value.variablesReference) || 0,
           };
           return mapped;
         }),
       };
     }),
-    getVariables: (request) => withSession(request?.workspaceId, async (record) => {
-      const raw = await record.rpc.request('variables', {
-        variablesReference: Number(request?.variablesReference) || 0,
-      });
-      const variables = Array.isArray(raw?.variables) ? raw.variables : [];
+    getVariables: (request: DebugRequest) => withSessionFeature<PiariumDebugVariable[]>(request.workspaceId, async (record, rpc) => {
+      const raw = asRecord(await rpc.request('variables', {
+        variablesReference: Number(request.variablesReference) || 0,
+      }));
+      const variables = Array.isArray(raw.variables) ? raw.variables : [];
       return {
         status: 'ready',
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         generation: record.generation,
         value: variables.map((variable) => {
-          const mapped = {
-            name: typeof variable?.name === 'string' ? variable.name : '',
-            value: typeof variable?.value === 'string' ? variable.value : '',
-            variablesReference: Number(variable?.variablesReference) || 0,
+          const value = asRecord(variable);
+          const mapped: PiariumDebugVariable = {
+            name: typeof value.name === 'string' ? value.name : '',
+            value: typeof value.value === 'string' ? value.value : '',
+            variablesReference: Number(value.variablesReference) || 0,
           };
-          if (typeof variable?.type === 'string') mapped.type = variable.type;
+          if (typeof value.type === 'string') mapped.type = value.type;
           return mapped;
         }).filter((item) => item.name),
       };
     }),
-    evaluate: (request) => withSession(request?.workspaceId, async (record) => {
-      const expression = typeof request?.expression === 'string' ? request.expression : '';
-      const raw = await record.rpc.request('evaluate', {
+    evaluate: (request: DebugRequest) => withSessionFeature<string>(request.workspaceId, async (record, rpc) => {
+      const expression = typeof request.expression === 'string' ? request.expression : '';
+      const raw = asRecord(await rpc.request('evaluate', {
         expression,
-        frameId: Number(request?.frameId) || 1,
+        frameId: Number(request.frameId) || 1,
         context: 'repl',
-      });
+      }));
       return {
         status: 'ready',
         workspaceId: record.workspaceId,
         sessionId: record.sessionId,
         generation: record.generation,
-        value: typeof raw?.result === 'string' ? raw.result : 'undefined',
+        value: typeof raw.result === 'string' ? raw.result : 'undefined',
       };
     }),
-    listWatch: (request) => {
+    listWatch: (request: unknown) => {
       const workspaceId = workspaceIdOf(request);
       return {
         status: 'ready',
@@ -625,7 +719,7 @@ export const createDebugSupervisor = ({
         expressions: watches.get(workspaceId) ?? [],
       };
     },
-    addWatch(request) {
+    addWatch(request: { expression?: unknown; workspaceId?: unknown }) {
       const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
       const expression = typeof request?.expression === 'string' ? request.expression.trim() : '';
       if (!expression) return { status: 'failed', workspaceId, message: 'Watch expression is required' };
@@ -634,14 +728,14 @@ export const createDebugSupervisor = ({
       watches.set(workspaceId, current);
       return { status: 'ready', workspaceId, expressions: current };
     },
-    removeWatch(request) {
+    removeWatch(request: { expression?: unknown; workspaceId?: unknown }) {
       const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
       const expression = typeof request?.expression === 'string' ? request.expression : '';
       const current = (watches.get(workspaceId) ?? []).filter((item) => item !== expression);
       watches.set(workspaceId, current);
       return { status: 'ready', workspaceId, expressions: current };
     },
-    subscribe(workspaceId, listener) {
+    subscribe(workspaceId: string, listener: (event: PiariumDebugEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);
@@ -652,7 +746,7 @@ export const createDebugSupervisor = ({
         },
       };
     },
-    async disposeWorkspace(request) {
+    async disposeWorkspace(request: unknown): Promise<void> {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (record) {
@@ -664,7 +758,7 @@ export const createDebugSupervisor = ({
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
-    async dispose() {
+    async dispose(): Promise<void> {
       for (const record of sessions.values()) disposeRecord(record, 'Debug supervisor disposed');
       sessions.clear();
       adapters.length = 0;

@@ -1,5 +1,9 @@
-// @ts-nocheck
 import path from 'node:path';
+import type {
+  ChildProcessWithoutNullStreams,
+  SpawnOptionsWithStdioTuple,
+  StdioPipe,
+} from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
 import {
@@ -23,8 +27,155 @@ import {
   mapWorkspaceEdit,
   resourceFromUri,
 } from './mapping.js';
+import type { LanguageResource } from './mapping.js';
+import type { DocumentAuthority } from '../documents/authority.js';
 
-const sessionKey = (workspaceId, languageId) => `${workspaceId}\0${languageId}`;
+type JsonRpcClient = ReturnType<typeof createJsonRpcClient>;
+
+interface CapabilityObject extends Record<string, unknown> {
+  commands?: unknown;
+  firstTriggerCharacter?: unknown;
+  full?: unknown;
+  legend?: { tokenModifiers?: unknown; tokenTypes?: unknown };
+  moreTriggerCharacter?: unknown;
+  range?: unknown;
+  resolveProvider?: boolean;
+  retriggerCharacters?: unknown;
+  triggerCharacters?: unknown;
+}
+
+interface ServerCapabilities extends Record<string, unknown> {
+  codeActionProvider?: CapabilityObject;
+  completionProvider?: CapabilityObject;
+  documentOnTypeFormattingProvider?: CapabilityObject;
+  inlayHintProvider?: CapabilityObject;
+  documentLinkProvider?: CapabilityObject;
+  semanticTokensProvider?: CapabilityObject | true;
+  signatureHelpProvider?: CapabilityObject;
+}
+
+interface LanguageOwner {
+  entrypointId: string;
+  extensionId: string;
+  generation: number;
+}
+
+interface LanguageProvider {
+  args: string[];
+  command: string;
+  env?: NodeJS.ProcessEnv;
+  initializationOptions?: Record<string, unknown>;
+  languageIds: string[];
+  ownerKey: string;
+  ownerScopeKey: string;
+  providerId: string;
+  source: 'builtin' | 'extension' | 'host' | 'workspace';
+  workspaceId?: string;
+}
+
+interface OpenLanguageDocument {
+  content: string;
+  documentVersion: number;
+}
+
+type ResolveCollectionName =
+  | 'codeActionResolveItems'
+  | 'completionResolveItems'
+  | 'documentLinkResolveItems'
+  | 'inlayHintResolveItems';
+
+interface LanguageSessionRecord {
+  child: ChildProcessWithoutNullStreams | null;
+  codeActionResolveItems: Map<string, unknown>;
+  completionResolveItems: Map<string, unknown>;
+  documentLinkResolveItems: Map<string, unknown>;
+  documents: Map<string, OpenLanguageDocument>;
+  failureReason: string | null;
+  generation: number;
+  inlayHintResolveItems: Map<string, unknown>;
+  languageId: string;
+  message: string;
+  providerId: string;
+  providerOwnerKey: string;
+  resolveCounter: number;
+  root: string;
+  rpc: JsonRpcClient | null;
+  serverCapabilities: ServerCapabilities;
+  status: 'degraded' | 'failed' | 'ready' | 'starting';
+  workspaceId: string;
+}
+
+interface LanguageStatusSnapshot extends Record<string, unknown> {
+  features?: Record<string, unknown>;
+  generation?: number;
+  languageId: string;
+  message?: string;
+  providerId?: string;
+  status: string;
+  workspaceId: string;
+}
+
+interface LanguageRequest extends Record<string, unknown> {
+  arguments?: unknown[];
+  changes?: Array<{ from: number; insert: string; to: number }>;
+  code?: unknown;
+  color?: unknown;
+  command?: string;
+  content?: string;
+  diagnostics?: Array<Record<string, unknown>>;
+  documentVersion?: number;
+  formatting?: unknown;
+  languageId?: string;
+  newName?: string;
+  position?: unknown;
+  positions?: unknown[];
+  providerId?: string;
+  query?: string;
+  range?: unknown;
+  reason?: string;
+  resolveToken?: string;
+  resource?: LanguageResource;
+  source?: string;
+  triggerCharacter?: string;
+  triggerKind?: string;
+}
+
+type FeatureMapper = (raw: unknown, record: LanguageSessionRecord) => unknown;
+
+interface LanguageProviderDescriptor extends Record<string, unknown> {
+  args?: unknown;
+  command?: unknown;
+  env?: unknown;
+  initializationOptions?: unknown;
+  languageIds?: unknown;
+  providerId?: unknown;
+  source?: unknown;
+  workspaceId?: unknown;
+}
+
+interface LanguageSupervisorOptions {
+  activateProviders?: (request: { languageId: string; workspaceId: string }) => Promise<void>;
+  documents: Pick<DocumentAuthority, 'inspectWorkspace'>;
+  env?: NodeJS.ProcessEnv;
+  isTrusted?: (root: string) => Promise<boolean>;
+  pathModule?: typeof path;
+  spawn: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>,
+  ) => ChildProcessWithoutNullStreams;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const asCapabilities = (value: unknown): ServerCapabilities => {
+  const record = asRecord(value);
+  return record ? record as ServerCapabilities : {};
+};
+
+const sessionKey = (workspaceId: string, languageId: string): string => `${workspaceId}\0${languageId}`;
 
 const SEMANTIC_TOKEN_TYPES = [
   'namespace', 'type', 'class', 'enum', 'interface', 'struct', 'typeParameter', 'parameter',
@@ -40,13 +191,13 @@ const CODE_ACTION_KINDS = [
   'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll',
 ];
 
-const capabilityValue = (record, key) => record.serverCapabilities?.[key];
+const capabilityValue = (record: LanguageSessionRecord, key: string) => record.serverCapabilities[key];
 
-const supportsMethod = (record, method, request) => {
+const supportsMethod = (record: LanguageSessionRecord, method: string, request: Record<string, unknown>): boolean => {
   const capability = record.serverCapabilities ?? {};
   if (method === 'workspace/executeCommand') {
-    const commands = capability.executeCommandProvider?.commands;
-    return typeof request?.command === 'string' && Array.isArray(commands) && commands.includes(request.command);
+    const commands = asRecord(capability.executeCommandProvider)?.commands;
+    return typeof request.command === 'string' && Array.isArray(commands) && commands.includes(request.command);
   }
   if (method === 'completionItem/resolve') {
     return capability.completionProvider?.resolveProvider === true;
@@ -88,34 +239,34 @@ const supportsMethod = (record, method, request) => {
     'textDocument/documentLink': 'documentLinkProvider',
     'textDocument/documentColor': 'colorProvider',
     'textDocument/colorPresentation': 'colorProvider',
-  })[method];
+  } as Record<string, string>)[method];
   if (!key) return true;
   const value = capabilityValue(record, key);
   return value === true || typeof value === 'object';
 };
 
-const ownerScopeKey = (owner) => owner
+const ownerScopeKey = (owner?: LanguageOwner | null): string => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
   : 'piarium.host';
-const exactOwnerKey = (owner) => owner
+const exactOwnerKey = (owner?: LanguageOwner | null): string => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
   : 'piarium.host\0host';
 
-const toFileUri = (absolutePath) => pathToFileURL(absolutePath).href;
+const toFileUri = (absolutePath: string): string => pathToFileURL(absolutePath).href;
 
-const offsetToPosition = (text, offset) => {
+const offsetToPosition = (text: string, offset: number) => {
   const clamped = Math.max(0, Math.min(offset, text.length));
   const prefix = text.slice(0, clamped);
   const lines = prefix.split('\n');
   return { line: Math.max(0, lines.length - 1), character: lines[lines.length - 1]?.length ?? 0 };
 };
 
-const rangeFromOffsets = (text, from, to) => ({
+const rangeFromOffsets = (text: string, from: number, to: number) => ({
   start: offsetToPosition(text, from),
   end: offsetToPosition(text, to),
 });
 
-const lspSeverity = (value) => {
+const lspSeverity = (value: unknown): 'error' | 'hint' | 'info' | 'warning' => {
   if (value === 1) return 'error';
   if (value === 2) return 'warning';
   if (value === 4) return 'hint';
@@ -129,36 +280,36 @@ export const createLanguageSupervisor = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
-}) => {
-  const providers = [];
-  const sessions = new Map();
-  const desiredDocuments = new Map();
-  const generations = new Map();
-  const workspaceListeners = new Map();
-  const nextGeneration = (key, existing) => {
+}: LanguageSupervisorOptions) => {
+  const providers: LanguageProvider[] = [];
+  const sessions = new Map<string, LanguageSessionRecord>();
+  const desiredDocuments = new Map<string, Map<string, OpenLanguageDocument>>();
+  const generations = new Map<string, number>();
+  const workspaceListeners = new Map<string, Set<(event: unknown) => void>>();
+  const nextGeneration = (key: string, existing?: LanguageSessionRecord | null): number => {
     const next = (existing?.generation ?? generations.get(key) ?? 0) + 1;
     generations.set(key, next);
     return next;
   };
 
-  const emit = (workspaceId, event) => {
+  const emit = (workspaceId: string, event: unknown): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const findProvider = (workspaceId, languageId) => (
+  const findProvider = (workspaceId: string, languageId: string): LanguageProvider | null => (
     providers.find((provider) => (
       provider.languageIds.includes(languageId)
       && (!provider.workspaceId || provider.workspaceId === workspaceId)
     )) ?? null
   );
 
-  const inflight = new Map();
+  const inflight = new Map<string, Promise<LanguageSessionRecord | null>>();
 
-  const snapshotFor = (record) => {
+  const snapshotFor = (record: LanguageSessionRecord | null | undefined): LanguageStatusSnapshot | null => {
     if (!record) return null;
-    const snapshot = {
+    const snapshot: LanguageStatusSnapshot = {
       status: record.status,
       workspaceId: record.workspaceId,
       languageId: record.languageId,
@@ -170,7 +321,7 @@ export const createLanguageSupervisor = ({
       const completion = record.serverCapabilities?.completionProvider;
       const signature = record.serverCapabilities?.signatureHelpProvider;
       const onType = record.serverCapabilities?.documentOnTypeFormattingProvider;
-      const features = {};
+      const features: Record<string, unknown> = {};
       if (Array.isArray(completion?.triggerCharacters)) {
         features.completionTriggerCharacters = completion.triggerCharacters.filter((value) => typeof value === 'string');
       }
@@ -188,13 +339,13 @@ export const createLanguageSupervisor = ({
     return snapshot;
   };
 
-  const getStatus = (workspaceId, languageId) => {
+  const getStatus = (workspaceId: string, languageId: string): LanguageStatusSnapshot => {
     const existing = sessions.get(sessionKey(workspaceId, languageId));
-    if (existing) return snapshotFor(existing);
+    if (existing) return snapshotFor(existing) ?? { status: 'absent', workspaceId, languageId };
     return { status: 'absent', workspaceId, languageId };
   };
 
-  const waitForChildExit = (child) => new Promise((resolve) => {
+  const waitForChildExit = (child: ChildProcessWithoutNullStreams | null): Promise<void> => new Promise((resolve) => {
     if (!child || child.exitCode !== null || child.signalCode) {
       resolve();
       return;
@@ -211,9 +362,9 @@ export const createLanguageSupervisor = ({
     child.once('close', finish);
   });
 
-  const pendingExits = new Set();
+  const pendingExits = new Set<Promise<void>>();
 
-  const clearRecordDiagnostics = (record) => {
+  const clearRecordDiagnostics = (record: LanguageSessionRecord): void => {
     for (const [resourceId] of record.documents) {
       emit(record.workspaceId, {
         kind: 'diagnostics',
@@ -227,7 +378,7 @@ export const createLanguageSupervisor = ({
     }
   };
 
-  const disposeRecord = (record, reason = 'Language server stopped') => {
+  const disposeRecord = (record: LanguageSessionRecord | null | undefined, reason = 'Language server stopped'): void => {
     if (!record) return;
     clearRecordDiagnostics(record);
     emit(record.workspaceId, {
@@ -261,7 +412,7 @@ export const createLanguageSupervisor = ({
     record.documentLinkResolveItems?.clear();
   };
 
-  const setFailed = (record, message) => {
+  const setFailed = (record: LanguageSessionRecord, message: string): void => {
     record.status = 'failed';
     record.message = message;
     record.failureReason = record.failureReason ?? 'provider-failed';
@@ -269,9 +420,9 @@ export const createLanguageSupervisor = ({
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
   };
 
-  const ensureSession = async (workspaceId, languageId) => {
+  const ensureSession = async (workspaceId: string, languageId: string): Promise<LanguageSessionRecord | null> => {
     const key = sessionKey(workspaceId, languageId);
-    if (inflight.has(key)) return inflight.get(key);
+    if (inflight.has(key)) return inflight.get(key) ?? null;
     const existing = sessions.get(key);
     if (existing && (existing.status === 'ready' || existing.status === 'degraded')) {
       return existing;
@@ -281,7 +432,7 @@ export const createLanguageSupervisor = ({
       try {
         await activateProviders({ workspaceId, languageId });
       } catch (error) {
-        const failed = {
+        const failed: LanguageSessionRecord = {
           workspaceId,
           languageId,
           providerId: 'piarium.workspace-match',
@@ -290,15 +441,15 @@ export const createLanguageSupervisor = ({
           status: 'failed',
           message: error instanceof Error ? error.message : 'Language extension activation failed',
           failureReason: 'provider-failed',
-          documents: new Map(),
+          documents: new Map<string, OpenLanguageDocument>(),
           child: null,
           rpc: null,
           root: '',
           serverCapabilities: {},
-          completionResolveItems: new Map(),
-          codeActionResolveItems: new Map(),
-          inlayHintResolveItems: new Map(),
-          documentLinkResolveItems: new Map(),
+          completionResolveItems: new Map<string, unknown>(),
+          codeActionResolveItems: new Map<string, unknown>(),
+          inlayHintResolveItems: new Map<string, unknown>(),
+          documentLinkResolveItems: new Map<string, unknown>(),
           resolveCounter: 0,
         };
         sessions.set(key, failed);
@@ -318,14 +469,19 @@ export const createLanguageSupervisor = ({
     }
   };
 
-  const startSession = async (workspaceId, languageId, provider, existing) => {
+  const startSession = async (
+    workspaceId: string,
+    languageId: string,
+    provider: LanguageProvider,
+    existing?: LanguageSessionRecord | null,
+  ): Promise<LanguageSessionRecord> => {
     const key = sessionKey(workspaceId, languageId);
 
     let workspace;
     try {
       workspace = await documents.inspectWorkspace(workspaceId);
     } catch (error) {
-      const failed = {
+      const failed: LanguageSessionRecord = {
         workspaceId,
         languageId,
         providerId: provider.providerId,
@@ -334,15 +490,15 @@ export const createLanguageSupervisor = ({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
         failureReason: 'provider-failed',
-        documents: new Map(),
+        documents: new Map<string, OpenLanguageDocument>(),
         child: null,
         rpc: null,
         root: '',
         serverCapabilities: {},
-        completionResolveItems: new Map(),
-        codeActionResolveItems: new Map(),
-        inlayHintResolveItems: new Map(),
-        documentLinkResolveItems: new Map(),
+        completionResolveItems: new Map<string, unknown>(),
+        codeActionResolveItems: new Map<string, unknown>(),
+        inlayHintResolveItems: new Map<string, unknown>(),
+        documentLinkResolveItems: new Map<string, unknown>(),
         resolveCounter: 0,
       };
       sessions.set(key, failed);
@@ -351,7 +507,7 @@ export const createLanguageSupervisor = ({
     }
 
     if (provider.source === 'workspace' && !await isTrusted(workspace.root)) {
-      const failed = {
+      const failed: LanguageSessionRecord = {
         workspaceId,
         languageId,
         providerId: provider.providerId,
@@ -360,15 +516,15 @@ export const createLanguageSupervisor = ({
         status: 'failed',
         message: 'Untrusted workspace cannot execute project-provided language server commands',
         failureReason: 'untrusted',
-        documents: new Map(),
+        documents: new Map<string, OpenLanguageDocument>(),
         child: null,
         rpc: null,
         root: workspace.root,
         serverCapabilities: {},
-        completionResolveItems: new Map(),
-        codeActionResolveItems: new Map(),
-        inlayHintResolveItems: new Map(),
-        documentLinkResolveItems: new Map(),
+        completionResolveItems: new Map<string, unknown>(),
+        codeActionResolveItems: new Map<string, unknown>(),
+        inlayHintResolveItems: new Map<string, unknown>(),
+        documentLinkResolveItems: new Map<string, unknown>(),
         resolveCounter: 0,
       };
       sessions.set(key, failed);
@@ -376,7 +532,7 @@ export const createLanguageSupervisor = ({
       return failed;
     }
 
-    const record = {
+    const record: LanguageSessionRecord = {
       workspaceId,
       languageId,
       providerId: provider.providerId,
@@ -385,21 +541,21 @@ export const createLanguageSupervisor = ({
       status: 'starting',
       message: '',
       failureReason: null,
-      documents: new Map(),
+      documents: new Map<string, OpenLanguageDocument>(),
       child: null,
       rpc: null,
       root: workspace.root,
       serverCapabilities: {},
-      completionResolveItems: new Map(),
-      codeActionResolveItems: new Map(),
-      inlayHintResolveItems: new Map(),
-      documentLinkResolveItems: new Map(),
+      completionResolveItems: new Map<string, unknown>(),
+      codeActionResolveItems: new Map<string, unknown>(),
+      inlayHintResolveItems: new Map<string, unknown>(),
+      documentLinkResolveItems: new Map<string, unknown>(),
       resolveCounter: 0,
     };
     sessions.set(key, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
 
-    let child;
+    let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
@@ -424,19 +580,22 @@ export const createLanguageSupervisor = ({
     rpc.onNotification((method, params) => {
       if (sessions.get(key) !== record || record.rpc !== rpc) return;
       if (method !== 'textDocument/publishDiagnostics') return;
-      const uri = typeof params?.uri === 'string' ? params.uri : '';
+      const notification = asRecord(params) ?? {};
+      const uri = typeof notification.uri === 'string' ? notification.uri : '';
       const resource = resourceFromUri(uri, workspaceId, record.root, pathModule);
       if (!resource) return;
       const resourceId = resource.resourceId;
       const open = record.documents.get(resourceId);
-      const documentVersion = Number.isFinite(params?.version) ? params.version : open?.documentVersion;
+      const documentVersion = typeof notification.version === 'number' && Number.isFinite(notification.version)
+        ? notification.version
+        : open?.documentVersion;
       if (open && Number.isFinite(documentVersion) && documentVersion !== open.documentVersion) return;
-      const items = Array.isArray(params?.diagnostics) ? params.diagnostics.map((diagnostic) => mapDiagnostic(diagnostic, {
+      const items = Array.isArray(notification.diagnostics) ? notification.diagnostics.map((diagnostic) => mapDiagnostic(diagnostic, {
         workspaceId,
         root: record.root,
         pathModule,
         resource,
-        documentVersion: Number.isFinite(documentVersion) ? documentVersion : (open?.documentVersion ?? 0),
+        documentVersion: typeof documentVersion === 'number' && Number.isFinite(documentVersion) ? documentVersion : null,
         severity: lspSeverity,
         providerId: record.providerId,
         generation: record.generation,
@@ -465,7 +624,7 @@ export const createLanguageSupervisor = ({
     });
 
     try {
-      const initialized = await rpc.request('initialize', {
+      const initialized = asRecord(await rpc.request('initialize', {
         processId: null,
         rootUri: toFileUri(workspace.root),
         capabilities: {
@@ -535,10 +694,8 @@ export const createLanguageSupervisor = ({
         },
         workspaceFolders: [{ uri: toFileUri(workspace.root), name: pathModule.basename(workspace.root) }],
         ...(provider.initializationOptions ? { initializationOptions: provider.initializationOptions } : {}),
-      });
-      record.serverCapabilities = initialized?.capabilities && typeof initialized.capabilities === 'object'
-        ? initialized.capabilities
-        : {};
+      }));
+      record.serverCapabilities = asCapabilities(initialized?.capabilities);
       rpc.notify('initialized', {});
       if (sessions.get(key) !== record || !providers.includes(provider)) {
         disposeRecord(record, 'Language provider changed during startup');
@@ -569,13 +726,16 @@ export const createLanguageSupervisor = ({
     return record;
   };
 
-  const syncDocument = async (request) => {
+  const syncDocument = async (request: LanguageRequest) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
     if (!workspaceId || !resourceId || !languageId) {
       return { status: 'failed', message: 'Document identity is required' };
     }
+    const documentVersion = typeof request.documentVersion === 'number' && Number.isFinite(request.documentVersion)
+      ? request.documentVersion
+      : 0;
     let absolutePath;
     try {
       const inspected = await documents.inspectWorkspace(workspaceId);
@@ -590,7 +750,7 @@ export const createLanguageSupervisor = ({
     }
 
     const key = sessionKey(workspaceId, languageId);
-    const desired = desiredDocuments.get(key) ?? new Map();
+    const desired = desiredDocuments.get(key) ?? new Map<string, OpenLanguageDocument>();
     desiredDocuments.set(key, desired);
     const previousDesired = desired.get(resourceId);
     if (request.reason === 'close') {
@@ -610,7 +770,7 @@ export const createLanguageSupervisor = ({
       record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
       const result = {
         status: 'synced',
-        documentVersion: request.documentVersion,
+        documentVersion,
         providerId: record.providerId,
         generation: record.generation,
       };
@@ -621,7 +781,7 @@ export const createLanguageSupervisor = ({
       }
       return result;
     }
-    if (previousDesired && request.documentVersion < previousDesired.documentVersion) {
+    if (previousDesired && documentVersion < previousDesired.documentVersion) {
       return { status: 'stale', documentVersion: previousDesired.documentVersion };
     }
     const incrementalChanges = Array.isArray(request.changes)
@@ -634,7 +794,7 @@ export const createLanguageSupervisor = ({
             previousDesired.content,
           )
         : previousDesired?.content ?? '');
-    const nextDesired = { documentVersion: request.documentVersion, content: nextContent };
+    const nextDesired: OpenLanguageDocument = { documentVersion, content: nextContent };
     desired.set(resourceId, nextDesired);
 
     const record = await ensureSession(workspaceId, languageId);
@@ -647,15 +807,15 @@ export const createLanguageSupervisor = ({
     }
     const uri = toFileUri(absolutePath);
     const open = record.documents.get(resourceId);
-    if (open && request.documentVersion < open.documentVersion) {
+    if (open && documentVersion < open.documentVersion) {
       return { status: 'stale', documentVersion: open.documentVersion };
     }
     if (!open) {
       record.documents.set(resourceId, nextDesired);
       record.rpc.notify('textDocument/didOpen', {
-        textDocument: { uri, languageId, version: request.documentVersion, text: nextContent },
+        textDocument: { uri, languageId, version: documentVersion, text: nextContent },
       });
-    } else if (open.documentVersion !== request.documentVersion || open.content !== nextContent) {
+    } else if (open.documentVersion !== documentVersion || open.content !== nextContent) {
       const canUseIncremental = request.reason === 'change'
         && incrementalChanges.length > 0
         && previousDesired?.content === open.content;
@@ -667,7 +827,7 @@ export const createLanguageSupervisor = ({
         : [{ text: nextContent }];
       record.documents.set(resourceId, nextDesired);
       record.rpc.notify('textDocument/didChange', {
-        textDocument: { uri, version: request.documentVersion },
+        textDocument: { uri, version: documentVersion },
         contentChanges,
       });
     }
@@ -676,19 +836,19 @@ export const createLanguageSupervisor = ({
     }
     return {
       status: 'synced',
-      documentVersion: request.documentVersion,
+      documentVersion,
       providerId: record.providerId,
       generation: record.generation,
     };
   };
 
-  const completionTriggerKind = (value) => {
+  const completionTriggerKind = (value: unknown): number => {
     if (value === 'triggerCharacter') return 2;
     if (value === 'incomplete') return 3;
     return 1;
   };
 
-  const featureParams = (method, request, uri) => {
+  const featureParams = (method: string, request: LanguageRequest, uri?: string) => {
     if (method === 'workspace/symbol') return { query: request.query ?? '' };
     if (method === 'textDocument/completion') {
       return {
@@ -763,15 +923,20 @@ export const createLanguageSupervisor = ({
     };
   };
 
-  const featureFailure = (record, message, reason = 'request-failed') => ({
+  const featureFailure = (record: LanguageSessionRecord | null | undefined, message: string, reason = 'request-failed') => ({
     status: 'failed',
     message,
     reason,
     ...(record?.providerId ? { providerId: record.providerId } : {}),
-    ...(Number.isFinite(record?.generation) ? { generation: record.generation } : {}),
+    ...(typeof record?.generation === 'number' && Number.isFinite(record.generation) ? { generation: record.generation } : {}),
   });
 
-  const requestFeature = async (method, request, mapResult, options = {}) => {
+  const requestFeature = async (
+    method: string,
+    request: LanguageRequest,
+    mapResult: FeatureMapper,
+    options: { params?: unknown } = {},
+  ) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
@@ -841,18 +1006,23 @@ export const createLanguageSupervisor = ({
     }
   };
 
-  const storeResolveItem = (record, collection, raw) => {
+  const storeResolveItem = (record: LanguageSessionRecord, collection: Map<string, unknown>, raw: unknown): string => {
     record.resolveCounter += 1;
     const token = `${record.generation}:${record.resolveCounter}`;
     collection.set(token, raw);
     return token;
   };
 
-  const resolveFeature = async (method, request, collectionName, mapResult) => {
+  const resolveFeature = async (
+    method: string,
+    request: LanguageRequest,
+    collectionName: ResolveCollectionName,
+    mapResult: FeatureMapper,
+  ) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId)) : null;
-    const raw = record?.[collectionName]?.get(request.resolveToken);
+    const raw = request.resolveToken ? record?.[collectionName].get(request.resolveToken) : undefined;
     if (!record || !record.rpc || !raw) {
       return record
         ? featureFailure(record, 'Language resolve item is stale', 'unsupported')
@@ -861,17 +1031,17 @@ export const createLanguageSupervisor = ({
     return requestFeature(method, request, mapResult, { params: raw });
   };
 
-  const mappingContext = (record) => ({
+  const mappingContext = (record: LanguageSessionRecord) => ({
     workspaceId: record.workspaceId,
     root: record.root,
     pathModule,
   });
 
-  const codeActionMappingContext = (record, request) => ({
+  const codeActionMappingContext = (record: LanguageSessionRecord, request: LanguageRequest) => ({
     ...mappingContext(record),
     diagnosticContext: {
       ...mappingContext(record),
-      resource: request.resource,
+      resource: request.resource ?? { workspaceId: record.workspaceId, resourceId: '' },
       documentVersion: request.documentVersion ?? 0,
       severity: lspSeverity,
       providerId: record.providerId,
@@ -880,17 +1050,17 @@ export const createLanguageSupervisor = ({
   });
 
   return {
-    registerProvider(descriptor, owner) {
+    registerProvider(descriptor: LanguageProviderDescriptor, owner?: LanguageOwner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
         ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
         : [];
       if (!descriptor?.providerId || !descriptor.command || languageIds.length === 0) {
         throw new Error('Language provider requires providerId, command, and languageIds');
       }
-      const next = {
-        providerId: descriptor.providerId,
-        command: descriptor.command,
-        args: Array.isArray(descriptor.args) ? descriptor.args : [],
+      const next: LanguageProvider = {
+        providerId: descriptor.providerId as string,
+        command: descriptor.command as string,
+        args: Array.isArray(descriptor.args) ? descriptor.args.filter((value): value is string => typeof value === 'string') : [],
         languageIds,
         source: owner
           ? 'extension'
@@ -903,9 +1073,9 @@ export const createLanguageSupervisor = ({
       if (typeof descriptor.workspaceId === 'string' && descriptor.workspaceId) {
         next.workspaceId = descriptor.workspaceId;
       }
-      if (descriptor.env && typeof descriptor.env === 'object') next.env = descriptor.env;
+      if (descriptor.env && typeof descriptor.env === 'object') next.env = descriptor.env as NodeJS.ProcessEnv;
       if (descriptor.initializationOptions && typeof descriptor.initializationOptions === 'object' && !Array.isArray(descriptor.initializationOptions)) {
-        next.initializationOptions = structuredClone(descriptor.initializationOptions);
+        next.initializationOptions = structuredClone(descriptor.initializationOptions) as Record<string, unknown>;
       }
       const existingIndex = providers.findIndex((provider) => provider.providerId === next.providerId);
       const existing = existingIndex >= 0 ? providers[existingIndex] : null;
@@ -924,13 +1094,14 @@ export const createLanguageSupervisor = ({
       }
       return next;
     },
-    async unregisterProvider(providerId, owner) {
+    async unregisterProvider(providerId: unknown, owner?: LanguageOwner) {
       const index = providers.findIndex((provider) => (
         provider.providerId === providerId
         && provider.ownerKey === exactOwnerKey(owner)
       ));
       if (index < 0) return { status: 'not-owned', providerId };
       const [removed] = providers.splice(index, 1);
+      if (!removed) return { status: 'not-owned', providerId };
       for (const [key, record] of sessions) {
         if (record.providerId !== removed.providerId) continue;
         disposeRecord(record, 'Language provider disabled');
@@ -941,7 +1112,7 @@ export const createLanguageSupervisor = ({
       return { status: 'unregistered', providerId };
     },
     getStatus,
-    subscribe(workspaceId, listener) {
+    subscribe(workspaceId: string, listener: (event: unknown) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);
@@ -953,8 +1124,9 @@ export const createLanguageSupervisor = ({
       };
     },
     syncDocument,
-    completion: (request) => requestFeature('textDocument/completion', request, (raw, record) => {
-      const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
+    completion: (request: LanguageRequest) => requestFeature('textDocument/completion', request, (raw, record) => {
+      const rawRecord = asRecord(raw);
+      const items = Array.isArray(raw) ? raw : Array.isArray(rawRecord?.items) ? rawRecord.items : [];
       record.completionResolveItems.clear();
       const canResolve = record.serverCapabilities?.completionProvider?.resolveProvider === true;
       return items.map((item) => mapCompletionItem(
@@ -962,32 +1134,32 @@ export const createLanguageSupervisor = ({
         canResolve ? storeResolveItem(record, record.completionResolveItems, item) : undefined,
       )).filter(Boolean);
     }),
-    completionResolve: (request) => resolveFeature(
+    completionResolve: (request: LanguageRequest) => resolveFeature(
       'completionItem/resolve',
       request,
       'completionResolveItems',
       (raw) => mapCompletionItem(raw, request.resolveToken),
     ),
-    hover: (request) => requestFeature('textDocument/hover', request, mapHover),
-    signatureHelp: (request) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
-    definition: (request) => requestFeature('textDocument/definition', request, (raw, record) => {
+    hover: (request: LanguageRequest) => requestFeature('textDocument/hover', request, mapHover),
+    signatureHelp: (request: LanguageRequest) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
+    definition: (request: LanguageRequest) => requestFeature('textDocument/definition', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
       return values.map((value) => mapLocationLink(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
     }),
-    references: (request) => requestFeature('textDocument/references', request, (raw, record) => {
+    references: (request: LanguageRequest) => requestFeature('textDocument/references', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
     }),
-    documentSymbols: (request) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
+    documentSymbols: (request: LanguageRequest) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
     )),
-    workspaceSymbols: (request) => requestFeature('workspace/symbol', request, (raw, record) => (
+    workspaceSymbols: (request: LanguageRequest) => requestFeature('workspace/symbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
     )),
-    rename: (request) => requestFeature('textDocument/rename', request, (raw, record) => (
+    rename: (request: LanguageRequest) => requestFeature('textDocument/rename', request, (raw, record) => (
       mapWorkspaceEdit(raw, mappingContext(record))
     )),
-    codeActions: (request) => requestFeature('textDocument/codeAction', request, (raw, record) => {
+    codeActions: (request: LanguageRequest) => requestFeature('textDocument/codeAction', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       record.codeActionResolveItems.clear();
       const canResolve = record.serverCapabilities?.codeActionProvider?.resolveProvider === true;
@@ -997,30 +1169,31 @@ export const createLanguageSupervisor = ({
         canResolve ? storeResolveItem(record, record.codeActionResolveItems, value) : undefined,
       )).filter(Boolean);
     }),
-    codeActionResolve: (request) => resolveFeature(
+    codeActionResolve: (request: LanguageRequest) => resolveFeature(
       'codeAction/resolve',
       request,
       'codeActionResolveItems',
       (raw, record) => mapCodeAction(raw, codeActionMappingContext(record, request), request.resolveToken),
     ),
-    executeCommand: (request) => requestFeature(
+    executeCommand: (request: LanguageRequest) => requestFeature(
       'workspace/executeCommand',
       request,
       (raw) => raw ?? null,
     ),
-    documentFormatting: (request) => requestFeature('textDocument/formatting', request, mapTextEdits),
-    documentRangeFormatting: (request) => requestFeature('textDocument/rangeFormatting', request, mapTextEdits),
-    onTypeFormatting: (request) => requestFeature('textDocument/onTypeFormatting', request, mapTextEdits),
-    semanticTokens: (request) => requestFeature(
+    documentFormatting: (request: LanguageRequest) => requestFeature('textDocument/formatting', request, mapTextEdits),
+    documentRangeFormatting: (request: LanguageRequest) => requestFeature('textDocument/rangeFormatting', request, mapTextEdits),
+    onTypeFormatting: (request: LanguageRequest) => requestFeature('textDocument/onTypeFormatting', request, mapTextEdits),
+    semanticTokens: (request: LanguageRequest) => requestFeature(
       request.range ? 'textDocument/semanticTokens/range' : 'textDocument/semanticTokens/full',
       request,
       (raw, record) => {
-        if (!raw || !Array.isArray(raw.data)) return null;
+        const result = asRecord(raw);
+        if (!result || !Array.isArray(result.data)) return null;
         const provider = record.serverCapabilities?.semanticTokensProvider;
-        const legend = provider?.legend;
+        const legend = provider === true ? undefined : provider?.legend;
         return {
-          data: raw.data.filter((value) => Number.isInteger(value) && value >= 0),
-          ...(typeof raw.resultId === 'string' ? { resultId: raw.resultId } : {}),
+          data: result.data.filter((value): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0),
+          ...(typeof result.resultId === 'string' ? { resultId: result.resultId } : {}),
           legend: {
             tokenTypes: Array.isArray(legend?.tokenTypes) ? legend.tokenTypes.filter((value) => typeof value === 'string') : [],
             tokenModifiers: Array.isArray(legend?.tokenModifiers) ? legend.tokenModifiers.filter((value) => typeof value === 'string') : [],
@@ -1028,7 +1201,7 @@ export const createLanguageSupervisor = ({
         };
       },
     ),
-    inlayHints: (request) => requestFeature('textDocument/inlayHint', request, (raw, record) => {
+    inlayHints: (request: LanguageRequest) => requestFeature('textDocument/inlayHint', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       record.inlayHintResolveItems.clear();
       const canResolve = record.serverCapabilities?.inlayHintProvider?.resolveProvider === true;
@@ -1038,22 +1211,22 @@ export const createLanguageSupervisor = ({
         canResolve ? storeResolveItem(record, record.inlayHintResolveItems, value) : undefined,
       )).filter(Boolean);
     }),
-    inlayHintResolve: (request) => resolveFeature(
+    inlayHintResolve: (request: LanguageRequest) => resolveFeature(
       'inlayHint/resolve',
       request,
       'inlayHintResolveItems',
       (raw, record) => mapInlayHint(raw, mappingContext(record), request.resolveToken),
     ),
-    documentHighlights: (request) => requestFeature('textDocument/documentHighlight', request, (raw) => (
+    documentHighlights: (request: LanguageRequest) => requestFeature('textDocument/documentHighlight', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapDocumentHighlight).filter(Boolean)
     )),
-    foldingRanges: (request) => requestFeature('textDocument/foldingRange', request, (raw) => (
+    foldingRanges: (request: LanguageRequest) => requestFeature('textDocument/foldingRange', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapFoldingRange).filter(Boolean)
     )),
-    selectionRanges: (request) => requestFeature('textDocument/selectionRange', request, (raw) => (
+    selectionRanges: (request: LanguageRequest) => requestFeature('textDocument/selectionRange', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapSelectionRange).filter(Boolean)
     )),
-    documentLinks: (request) => requestFeature('textDocument/documentLink', request, (raw, record) => {
+    documentLinks: (request: LanguageRequest) => requestFeature('textDocument/documentLink', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       record.documentLinkResolveItems.clear();
       const canResolve = record.serverCapabilities?.documentLinkProvider?.resolveProvider === true;
@@ -1063,19 +1236,19 @@ export const createLanguageSupervisor = ({
         canResolve ? storeResolveItem(record, record.documentLinkResolveItems, value) : undefined,
       )).filter(Boolean);
     }),
-    documentLinkResolve: (request) => resolveFeature(
+    documentLinkResolve: (request: LanguageRequest) => resolveFeature(
       'documentLink/resolve',
       request,
       'documentLinkResolveItems',
       (raw, record) => mapDocumentLink(raw, mappingContext(record), request.resolveToken),
     ),
-    documentColors: (request) => requestFeature('textDocument/documentColor', request, (raw) => (
+    documentColors: (request: LanguageRequest) => requestFeature('textDocument/documentColor', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapColorInformation).filter(Boolean)
     )),
-    colorPresentations: (request) => requestFeature('textDocument/colorPresentation', request, (raw) => (
+    colorPresentations: (request: LanguageRequest) => requestFeature('textDocument/colorPresentation', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapColorPresentation).filter(Boolean)
     )),
-    async restart(workspaceId, languageId) {
+    async restart(workspaceId: string, languageId: string) {
       const key = sessionKey(workspaceId, languageId);
       const existing = sessions.get(key);
       disposeRecord(existing, 'Language server restart');
@@ -1084,7 +1257,7 @@ export const createLanguageSupervisor = ({
       const record = await ensureSession(workspaceId, languageId);
       return snapshotFor(record) ?? { status: 'absent', workspaceId, languageId };
     },
-    async disposeWorkspace(workspaceId, owner) {
+    async disposeWorkspace(workspaceId: string, owner?: LanguageOwner) {
       const ownerKey = owner ? exactOwnerKey(owner) : null;
       for (const [key, record] of sessions) {
         if (record.workspaceId !== workspaceId) continue;

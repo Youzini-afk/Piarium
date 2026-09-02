@@ -1,17 +1,39 @@
-// @ts-nocheck
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
-const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+import type { MobileDeviceStore } from './device-store.js';
 
-const chunkArray = (items, size) => {
-  const chunks = [];
+const normalizeString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const chunkArray = <T>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
 };
 
-export const createMobilePushRuntime = (deps) => {
+interface ExpoMessage {
+  body: string;
+  data: Record<string, unknown>;
+  deviceId: string;
+  sound: string;
+  title: string;
+  to: string;
+}
+
+interface ExpoReceipt {
+  details?: { error?: unknown } | undefined;
+  status?: unknown;
+}
+
+export interface MobilePushDependencies {
+  deviceStore: MobileDeviceStore;
+  expoAccessToken?: string | undefined;
+  expoPushEndpoint?: string | undefined;
+  fetchImpl?: typeof fetch | undefined;
+}
+
+export const createMobilePushRuntime = (deps: MobilePushDependencies) => {
   const {
     fetchImpl = fetch,
     deviceStore,
@@ -19,7 +41,7 @@ export const createMobilePushRuntime = (deps) => {
     expoAccessToken = process.env.EXPO_ACCESS_TOKEN || process.env.PIARIUM_EXPO_ACCESS_TOKEN || '',
   } = deps;
 
-  const sendExpoMessages = async (messages) => {
+  const sendExpoMessages = async (messages: ExpoMessage[]): Promise<{ failed: number; sent: number }> => {
     if (messages.length === 0) {
       return { sent: 0, failed: 0 };
     }
@@ -29,7 +51,7 @@ export const createMobilePushRuntime = (deps) => {
     const chunks = chunkArray(messages, 100);
     for (const chunk of chunks) {
       try {
-        const headers = {
+        const headers: Record<string, string> = {
           Accept: 'application/json',
           'Content-Type': 'application/json',
         };
@@ -41,51 +63,63 @@ export const createMobilePushRuntime = (deps) => {
           headers,
           body: JSON.stringify(chunk.length === 1 ? chunk[0] : chunk),
         });
-        const body = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null) as unknown;
         if (!response.ok) {
           failed += chunk.length;
           console.warn('[MobilePush] Expo push request failed:', response.status, body || response.statusText);
           continue;
         }
 
-        const receipts = Array.isArray(body?.data) ? body.data : [body?.data].filter(Boolean);
+        const bodyRecord = body && typeof body === 'object' && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        const receipts: unknown[] = Array.isArray(bodyRecord.data)
+          ? bodyRecord.data
+          : [bodyRecord.data].filter(Boolean);
         for (let index = 0; index < chunk.length; index += 1) {
           const message = chunk[index];
-          const receipt = receipts[index];
+          const receipt = receipts[index] && typeof receipts[index] === 'object' && !Array.isArray(receipts[index])
+            ? receipts[index] as ExpoReceipt
+            : null;
           if (receipt?.status === 'error') {
             failed += 1;
-            const detailsError = receipt?.details?.error;
+            const detailsError = receipt.details?.error;
             if (detailsError === 'DeviceNotRegistered') {
-              await deviceStore.disablePushToken(message.to);
+              await deviceStore.disablePushToken(message!.to);
             }
-            await deviceStore.markPushResult(message.deviceId, false);
+            await deviceStore.markPushResult(message!.deviceId, false);
             continue;
           }
           sent += 1;
-          await deviceStore.markPushResult(message.deviceId, true);
+          await deviceStore.markPushResult(message!.deviceId, true);
         }
       } catch (error) {
         failed += chunk.length;
-        console.warn('[MobilePush] Failed to send Expo push:', error?.message || error);
+        console.warn('[MobilePush] Failed to send Expo push:', error instanceof Error ? error.message : error);
       }
     }
     return { sent, failed };
   };
 
-  const sendMobilePushToAllDevices = async (payload) => {
+  const sendMobilePushToAllDevices = async (payload: unknown) => {
+    const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {};
     const targets = await deviceStore.listPushTargets();
     const messages = targets.map((target) => ({
       deviceId: target.id,
       to: target.pushToken,
       sound: 'default',
-      title: normalizeString(payload?.title) || 'Piarium',
-      body: normalizeString(payload?.body) || 'Piarium has an update.',
-      data: payload?.data && typeof payload.data === 'object' ? payload.data : {},
+      title: normalizeString(payloadRecord.title) || 'Piarium',
+      body: normalizeString(payloadRecord.body) || 'Piarium has an update.',
+      data: payloadRecord.data && typeof payloadRecord.data === 'object' && !Array.isArray(payloadRecord.data)
+        ? payloadRecord.data as Record<string, unknown>
+        : {},
     }));
     return sendExpoMessages(messages);
   };
 
-  const sendTestPush = async (deviceId) => {
+  const sendTestPush = async (deviceId: string) => {
     const targets = await deviceStore.listPushTargets();
     const target = targets.find((entry) => entry.id === deviceId);
     if (!target) {
@@ -107,3 +141,5 @@ export const createMobilePushRuntime = (deps) => {
     sendTestPush,
   };
 };
+
+export type MobilePushRuntime = ReturnType<typeof createMobilePushRuntime>;

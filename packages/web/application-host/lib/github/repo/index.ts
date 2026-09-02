@@ -1,7 +1,7 @@
-// @ts-nocheck
 import { getRemoteUrl } from '../../git/index.js';
+import type { GitHubRepoRef } from '../types.js';
 
-export const parseGitHubRemoteUrl = (raw) => {
+export const parseGitHubRemoteUrl = (raw: unknown): GitHubRepoRef | null => {
   if (typeof raw !== 'string') {
     return null;
   }
@@ -44,7 +44,10 @@ export const parseGitHubRemoteUrl = (raw) => {
   }
 };
 
-export async function resolveGitHubRepoFromDirectory(directory, remoteName = 'origin') {
+export async function resolveGitHubRepoFromDirectory(directory: string, remoteName = 'origin'): Promise<{
+  remoteUrl: string | null;
+  repo: GitHubRepoRef | null;
+}> {
   const remoteUrl = await getRemoteUrl(directory, remoteName).catch(() => null);
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };

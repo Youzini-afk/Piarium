@@ -8,7 +8,7 @@ import { useUIStore } from '@/stores/useUIStore';
  * Registers the native iOS APNs device token with the connected server so the app can
  * receive remote push even when suspended/closed. Delivery goes through the central relay
  * (server posts generic text → relay signs+sends) — see
- * `packages/web/server/lib/notifications/APNS.md`.
+ * `packages/web/application-host/lib/notifications/APNS.md`.
  *
  * Lazy-imports `@capacitor/push-notifications` (only present in the Capacitor shell),
  * mirroring the other `@capacitor/*` integrations in MobileApp. On `registration` the

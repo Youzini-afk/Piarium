@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Google Provider - API
  *
@@ -21,7 +20,15 @@ const GOOGLE_HEADERS = {
     '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}'
 };
 
-export const refreshGoogleAccessToken = async (refreshToken, clientId, clientSecret) => {
+const asObject = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+export const refreshGoogleAccessToken = async (
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string | null> => {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -37,11 +44,14 @@ export const refreshGoogleAccessToken = async (refreshToken, clientId, clientSec
     return null;
   }
 
-  const data = await response.json();
+  const data = asObject(await response.json());
   return typeof data?.access_token === 'string' ? data.access_token : null;
 };
 
-export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
+export const fetchGoogleQuotaBuckets = async (
+  accessToken: string,
+  projectId: string | null,
+): Promise<Record<string, unknown> | null> => {
   const body = projectId ? { project: projectId } : {};
 
   try {
@@ -59,13 +69,16 @@ export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
       return null;
     }
 
-    return await response.json();
+    return asObject(await response.json());
   } catch {
     return null;
   }
 };
 
-export const fetchGoogleModels = async (accessToken, projectId) => {
+export const fetchGoogleModels = async (
+  accessToken: string,
+  projectId: string | null,
+): Promise<Record<string, unknown> | null> => {
   const body = projectId ? { project: projectId } : {};
 
   for (const endpoint of GOOGLE_ENDPOINTS) {
@@ -82,7 +95,7 @@ export const fetchGoogleModels = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return asObject(await response.json());
       }
     } catch {
       continue;

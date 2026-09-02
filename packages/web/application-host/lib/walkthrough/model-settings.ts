@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -27,12 +26,13 @@ const SETTINGS_FILE = path.join(
  * disagree, and then clearing the picker would leave a setting that says "do
  * not use the small model" with nothing to use instead.
  */
-export function readWalkthroughModelOverride() {
+export function readWalkthroughModelOverride(): string | null {
   try {
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    if (!settings || typeof settings !== 'object') return null;
-    const override = typeof settings.walkthroughModelOverride === 'string'
-      ? settings.walkthroughModelOverride.trim()
+    const settings: unknown = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return null;
+    const record = settings as Record<string, unknown>;
+    const override = typeof record.walkthroughModelOverride === 'string'
+      ? record.walkthroughModelOverride.trim()
       : '';
     return override || null;
   } catch {

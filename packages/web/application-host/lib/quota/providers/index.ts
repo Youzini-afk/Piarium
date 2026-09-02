@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Quota Providers Registry
  *
@@ -7,6 +6,7 @@
  */
 
 import { buildResult } from '../utils/index.js';
+import type { QuotaProvider } from '../utils/index.js';
 
 import * as claude from './claude.js';
 import * as codex from './codex.js';
@@ -27,7 +27,7 @@ import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
 
-const registry = {
+const registry: Record<string, QuotaProvider> = {
   claude: {
     providerId: claude.providerId,
     providerName: claude.providerName,
@@ -154,7 +154,7 @@ export const listConfiguredQuotaProviders = () => {
   return configured;
 };
 
-export const fetchQuotaForProvider = async (providerId) => {
+export const fetchQuotaForProvider = async (providerId: string) => {
   const provider = registry[providerId];
 
   if (!provider) {
@@ -190,7 +190,6 @@ export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;
-const fetchZhipuaiCodingPlanQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchNanoGptQuota = nanogpt.fetchQuota;
 export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
 export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;

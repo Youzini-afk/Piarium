@@ -1,49 +1,53 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const resolvePiAgentDir = () => {
+type JsonObject = Record<string, unknown>;
+const isObject = (value: unknown): value is JsonObject => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+export const resolvePiAgentDir = (): string => {
   const configured = process.env.PIARIUM_AGENT_DIR || process.env.PI_CODING_AGENT_DIR;
   return typeof configured === 'string' && configured.trim()
     ? path.resolve(configured.trim())
     : path.join(os.homedir(), '.pi', 'agent');
 };
 
-export const getPiAuthFilePath = () => path.join(resolvePiAgentDir(), 'auth.json');
+export const getPiAuthFilePath = (): string => path.join(resolvePiAgentDir(), 'auth.json');
 
-const readJsonObject = (filePath) => {
+const readJsonObject = (filePath: string | null): JsonObject => {
   if (!filePath || !fs.existsSync(filePath)) return {};
   try {
     const raw = fs.readFileSync(filePath, 'utf8').trim();
     if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    const parsed = JSON.parse(raw) as unknown;
+    return isObject(parsed) ? parsed : {};
   } catch (error) {
     throw new Error(`Failed to read Pi configuration: ${filePath}`, { cause: error });
   }
 };
 
-const mergeObjects = (base, override) => {
-  if (!base || typeof base !== 'object' || Array.isArray(base)) return override;
-  if (!override || typeof override !== 'object' || Array.isArray(override)) return override;
+const mergeObjects = (base: JsonObject, override: JsonObject): JsonObject => {
   const result = { ...base };
   for (const [key, value] of Object.entries(override)) {
-    result[key] = key in result ? mergeObjects(result[key], value) : value;
+    result[key] = key in result && isObject(result[key]) && isObject(value)
+      ? mergeObjects(result[key], value)
+      : value;
   }
   return result;
 };
 
-export const readPiAuthFile = () => readJsonObject(getPiAuthFilePath());
+export const readPiAuthFile = (): JsonObject => readJsonObject(getPiAuthFilePath());
 
-export const writePiAuthFile = (auth) => {
+export const writePiAuthFile = (auth: JsonObject): void => {
   const authFile = getPiAuthFilePath();
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
   if (fs.existsSync(authFile)) fs.copyFileSync(authFile, `${authFile}.piarium.backup`);
   fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
 };
 
-export const savePiProviderAuth = (providerId, entry = {}) => {
+export const savePiProviderAuth = (providerId: unknown, entry: JsonObject = {}): unknown => {
   if (typeof providerId !== 'string' || !providerId.trim()) throw new Error('Provider ID is required');
   const key = typeof entry.key === 'string' ? entry.key.trim() : '';
   if (!key) throw new Error('API key is required');
@@ -53,7 +57,7 @@ export const savePiProviderAuth = (providerId, entry = {}) => {
   return auth[providerId.trim()];
 };
 
-export const removePiProviderAuth = (providerId) => {
+export const removePiProviderAuth = (providerId: unknown): boolean => {
   const id = typeof providerId === 'string' ? providerId.trim() : '';
   if (!id) throw new Error('Provider ID is required');
   const auth = readPiAuthFile();
@@ -63,7 +67,7 @@ export const removePiProviderAuth = (providerId) => {
   return true;
 };
 
-export const readPiConfigLayers = (workingDirectory) => {
+export const readPiConfigLayers = (workingDirectory: unknown) => {
   const agentDir = resolvePiAgentDir();
   const userSettingsPath = path.join(agentDir, 'settings.json');
   const userModelsPath = path.join(agentDir, 'models.json');
@@ -82,4 +86,4 @@ export const readPiConfigLayers = (workingDirectory) => {
   };
 };
 
-export const readPiConfiguration = (workingDirectory) => readPiConfigLayers(workingDirectory).mergedConfig;
+export const readPiConfiguration = (workingDirectory: unknown): JsonObject => readPiConfigLayers(workingDirectory).mergedConfig;

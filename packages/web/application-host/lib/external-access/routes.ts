@@ -1,4 +1,12 @@
-// @ts-nocheck
+import type { spawn as spawnFunction } from 'node:child_process';
+import type { Stats } from 'node:fs';
+import type fsPromisesModule from 'node:fs/promises';
+import type osModule from 'node:os';
+import type pathModule from 'node:path';
+import type { Express, Request, Response } from 'express';
+import type { DocumentAuthority } from '../documents/authority.js';
+import type { PiariumAuthenticatedClient } from '../client-auth/request-context.js';
+
 const FULL_CONTROL_PROFILES = new Set(['full-control', 'external-agent', 'rescue']);
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_LIST_ENTRIES = 5000;
@@ -14,26 +22,114 @@ const EXTERNAL_CAPABILITIES = Object.freeze([
   'external-audit.v1',
 ]);
 
-const toPosixPath = (value) => String(value || '').replace(/\\/g, '/');
+type FsPromises = typeof fsPromisesModule;
+type PathModule = typeof pathModule;
+type Spawn = typeof spawnFunction;
 
-const normalizeRootId = (value) => {
+interface ExternalRootDefinition {
+  id: string;
+  label: string;
+  path: string;
+  source: string;
+}
+
+type ExternalRootStatus = ExternalRootDefinition & (
+  | { error: string; exists: false; type: null }
+  | { exists: true; mtimeMs: number; type: 'directory' | 'file' | 'other' }
+);
+
+interface ResolvedRoot extends ExternalRootDefinition {
+  exists: true;
+  mtimeMs: number;
+  realPath: string;
+  type: 'directory';
+}
+
+interface ResolvedExternalPath {
+  absolutePath: string;
+  relativePath: string;
+  root: ResolvedRoot;
+}
+
+interface ExternalRootRuntimeOptions {
+  __dirname: string;
+  deploymentRoot?: string;
+  fsPromises: FsPromises;
+  os: typeof osModule;
+  path: PathModule;
+  piariumDataDir: string;
+  process: NodeJS.Process;
+  resolveProjectDirectory?: (req: Request) => Promise<{ directory?: string | null }>;
+}
+
+interface ExternalAccessDependencies extends ExternalRootRuntimeOptions {
+  buildAugmentedPath?: (basePath: string) => string;
+  documents?: Pick<DocumentAuthority, 'runMutationForScope'>;
+  piariumVersion: string;
+  remoteClientAuthRuntime?: { listAuditEvents(input: { limit?: unknown }): Promise<unknown[]> };
+  runtimeName?: string;
+  serverStartedAt?: string;
+  spawn: Spawn;
+}
+
+interface DirectoryEntry {
+  children?: DirectoryEntry[];
+  mtimeMs: number;
+  name: string;
+  path: string;
+  size: number;
+  type: 'directory' | 'file' | 'other' | 'symlink';
+}
+
+interface CommandResult {
+  error?: string;
+  exitCode: number | null;
+  signal?: NodeJS.Signals | null;
+  stderr: string;
+  stderrTruncated: boolean;
+  stdout: string;
+  stdoutTruncated: boolean;
+  success: boolean;
+  timedOut?: boolean;
+}
+
+const errorRecord = (error: unknown): Record<string, unknown> => (
+  error && typeof error === 'object' ? error as Record<string, unknown> : {}
+);
+
+const errorCode = (error: unknown): string | null => {
+  const code = errorRecord(error).code;
+  return typeof code === 'string' ? code : null;
+};
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+
+const httpError = (message: string, statusCode: number): Error & { statusCode: number } => (
+  Object.assign(new Error(message), { statusCode })
+);
+
+const toPosixPath = (value: unknown): string => String(value || '').replace(/\\/g, '/');
+
+const normalizeRootId = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   return value.trim().toLowerCase();
 };
 
-const normalizeRelativePath = (value, pathModule) => {
+const normalizeRelativePath = (value: unknown, pathModule: PathModule): string | null => {
   if (typeof value !== 'string' || value.trim().length === 0) return '.';
   const trimmed = value.trim();
   if (pathModule.isAbsolute(trimmed)) return null;
   return trimmed;
 };
 
-const isPathWithinRoot = (candidate, rootPath, pathModule) => {
+const isPathWithinRoot = (candidate: string, rootPath: string, pathModule: PathModule): boolean => {
   const relative = pathModule.relative(rootPath, candidate);
   return relative === '' || (!relative.startsWith('..') && !pathModule.isAbsolute(relative));
 };
 
-const accessOk = async (fsPromises, targetPath) => {
+const accessOk = async (fsPromises: FsPromises, targetPath: string): Promise<boolean> => {
   try {
     await fsPromises.access(targetPath);
     return true;
@@ -42,7 +138,7 @@ const accessOk = async (fsPromises, targetPath) => {
   }
 };
 
-const realpathOrResolve = async (fsPromises, pathModule, targetPath) => {
+const realpathOrResolve = async (fsPromises: FsPromises, pathModule: PathModule, targetPath: string): Promise<string> => {
   try {
     return await fsPromises.realpath(targetPath);
   } catch {
@@ -50,26 +146,28 @@ const realpathOrResolve = async (fsPromises, pathModule, targetPath) => {
   }
 };
 
-const resolveExistingAncestor = async (fsPromises, pathModule, targetPath) => {
+const resolveExistingAncestor = async (fsPromises: FsPromises, pathModule: PathModule, targetPath: string) => {
   let current = pathModule.resolve(targetPath);
   while (current) {
     try {
       const realPath = await fsPromises.realpath(current);
       return { path: current, realPath };
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
       const parent = pathModule.dirname(current);
       if (!parent || parent === current) throw error;
       current = parent;
     }
   }
-  const error = new Error('No existing parent directory found');
-  error.statusCode = 404;
-  throw error;
+  throw httpError('No existing parent directory found', 404);
 };
 
-const findDeploymentRoot = async ({ fsPromises, pathModule, startPaths }) => {
-  const seen = new Set();
+const findDeploymentRoot = async ({ fsPromises, pathModule, startPaths }: {
+  fsPromises: FsPromises;
+  pathModule: PathModule;
+  startPaths: string[];
+}): Promise<string | null> => {
+  const seen = new Set<string>();
   for (const startPath of startPaths) {
     if (typeof startPath !== 'string' || !startPath.trim()) continue;
     let current = pathModule.resolve(startPath);
@@ -102,7 +200,7 @@ const findDeploymentRoot = async ({ fsPromises, pathModule, startPaths }) => {
   return null;
 };
 
-const statRoot = async (fsPromises, root) => {
+const statRoot = async (fsPromises: FsPromises, root: ExternalRootDefinition): Promise<ExternalRootStatus> => {
   try {
     const stats = await fsPromises.stat(root.path);
     return {
@@ -116,15 +214,15 @@ const statRoot = async (fsPromises, root) => {
       ...root,
       exists: false,
       type: null,
-      error: error?.message || 'Root is unavailable',
+      error: errorMessage(error, 'Root is unavailable'),
     };
   }
 };
 
-const uniqueRoots = (roots, pathModule) => {
-  const byId = new Set();
-  const byPath = new Set();
-  const result = [];
+const uniqueRoots = (roots: ExternalRootDefinition[], pathModule: PathModule): ExternalRootDefinition[] => {
+  const byId = new Set<string>();
+  const byPath = new Set<string>();
+  const result: ExternalRootDefinition[] = [];
   for (const root of roots) {
     if (!root?.id || !root?.path) continue;
     const id = normalizeRootId(root.id);
@@ -138,15 +236,15 @@ const uniqueRoots = (roots, pathModule) => {
   return result;
 };
 
-const getClient = (req) => req.piariumAuth?.client || null;
+const getClient = (req: Request): PiariumAuthenticatedClient | null => req.piariumAuth?.client || null;
 
-const getClientCapabilities = (client) => new Set(
+const getClientCapabilities = (client: PiariumAuthenticatedClient | null): Set<string> => new Set(
   Array.isArray(client?.capabilities)
     ? client.capabilities.filter((entry) => typeof entry === 'string')
     : []
 );
 
-const hasCapability = (req, capability) => {
+const hasCapability = (req: Request, capability: string): boolean => {
   const context = req.piariumAuth;
   if (context?.type === 'session') return true;
   if (context?.type !== 'client') return false;
@@ -160,7 +258,7 @@ const hasCapability = (req, capability) => {
     capabilities.has(capability.replace(/:[^:]+$/, ':*'));
 };
 
-const requireCapability = (req, res, capability) => {
+const requireCapability = (req: Request, res: Response, capability: string): boolean => {
   if (!req.piariumAuth) {
     res.status(401).json({ error: 'Authentication required' });
     return false;
@@ -172,10 +270,11 @@ const requireCapability = (req, res, capability) => {
   return true;
 };
 
-const sendError = (res, error) => {
-  const code = error?.code;
-  const status = Number.isInteger(error?.statusCode)
-    ? error.statusCode
+const sendError = (res: Response, error: unknown) => {
+  const record = errorRecord(error);
+  const code = errorCode(error);
+  const status = typeof record.statusCode === 'number' && Number.isInteger(record.statusCode)
+    ? record.statusCode
     : code === 'ENOENT'
       ? 404
       : code === 'EACCES' || code === 'EPERM'
@@ -184,7 +283,7 @@ const sendError = (res, error) => {
   if (status >= 500) {
     console.error('[external-access] request failed:', error);
   }
-  return res.status(status).json({ error: error?.message || 'External access request failed' });
+  return res.status(status).json({ error: errorMessage(error, 'External access request failed') });
 };
 
 export const createExternalAccessRootRuntime = ({
@@ -196,8 +295,8 @@ export const createExternalAccessRootRuntime = ({
   piariumDataDir,
   resolveProjectDirectory,
   deploymentRoot,
-}) => {
-  const resolveRoots = async (req) => {
+}: ExternalRootRuntimeOptions) => {
+  const resolveRoots = async (req: Request): Promise<ExternalRootStatus[]> => {
     const envDeploymentRoot = typeof process.env.PIARIUM_DEPLOYMENT_ROOT === 'string'
       ? process.env.PIARIUM_DEPLOYMENT_ROOT.trim()
       : '';
@@ -216,7 +315,7 @@ export const createExternalAccessRootRuntime = ({
         ? process.env.PI_CODING_AGENT_DIR.trim()
         : path.join(os.homedir(), '.pi', 'agent');
 
-    const roots = [
+    const roots: ExternalRootDefinition[] = [
       { id: 'deployment', label: 'Piarium deployment', path: discoveredDeploymentRoot, source: 'deployment' },
       { id: 'server-package', label: 'Piarium web package', path: serverPackageRoot, source: 'server-package' },
       { id: 'process-cwd', label: 'Server working directory', path: process.cwd(), source: 'process' },
@@ -246,45 +345,40 @@ export const createExternalAccessRootRuntime = ({
     return Promise.all(uniqueRoots(roots, path).map((root) => statRoot(fsPromises, root)));
   };
 
-  const getRoot = async (req, rootId) => {
+  const getRoot = async (req: Request, rootId: unknown): Promise<ResolvedRoot> => {
     const id = normalizeRootId(rootId || 'deployment');
     const roots = await resolveRoots(req);
     const root = roots.find((entry) => entry.id === id);
     if (!root) {
-      const error = new Error(`Unknown external root: ${id || '<empty>'}`);
-      error.statusCode = 404;
-      throw error;
+      throw httpError(`Unknown external root: ${id || '<empty>'}`, 404);
     }
     if (!root.exists || root.type !== 'directory') {
-      const error = new Error(root.error || `External root is unavailable: ${id}`);
-      error.statusCode = 404;
-      throw error;
+      throw httpError('error' in root ? root.error : `External root is unavailable: ${id}`, 404);
     }
     const realPath = await realpathOrResolve(fsPromises, path, root.path);
-    return { ...root, realPath };
+    return { ...root, exists: true, type: 'directory', realPath };
   };
 
-  const resolvePath = async (req, { rootId, relativePath, mustExist = false, forWrite = false }) => {
+  const resolvePath = async (req: Request, { rootId, relativePath, mustExist = false, forWrite = false }: {
+    forWrite?: boolean;
+    mustExist?: boolean;
+    relativePath?: unknown;
+    rootId?: unknown;
+  }): Promise<ResolvedExternalPath> => {
     const root = await getRoot(req, rootId);
     const normalizedRelativePath = normalizeRelativePath(relativePath, path);
     if (normalizedRelativePath === null) {
-      const error = new Error('Path must be relative to the selected root');
-      error.statusCode = 400;
-      throw error;
+      throw httpError('Path must be relative to the selected root', 400);
     }
     const candidate = path.resolve(root.realPath, normalizedRelativePath);
     if (!isPathWithinRoot(candidate, root.realPath, path)) {
-      const error = new Error('Path is outside the selected root');
-      error.statusCode = 403;
-      throw error;
+      throw httpError('Path is outside the selected root', 403);
     }
 
     if (mustExist) {
       const canonical = await fsPromises.realpath(candidate);
       if (!isPathWithinRoot(canonical, root.realPath, path)) {
-        const error = new Error('Path resolves outside the selected root');
-        error.statusCode = 403;
-        throw error;
+        throw httpError('Path resolves outside the selected root', 403);
       }
       return { root, absolutePath: canonical, relativePath: toPosixPath(path.relative(root.realPath, canonical)) || '.' };
     }
@@ -292,16 +386,12 @@ export const createExternalAccessRootRuntime = ({
     if (forWrite) {
       const ancestor = await resolveExistingAncestor(fsPromises, path, candidate);
       if (!isPathWithinRoot(ancestor.realPath, root.realPath, path)) {
-        const error = new Error('Write target resolves outside the selected root');
-        error.statusCode = 403;
-        throw error;
+        throw httpError('Write target resolves outside the selected root', 403);
       }
       if (ancestor.path === candidate) {
         const targetRealPath = await fsPromises.realpath(candidate);
         if (!isPathWithinRoot(targetRealPath, root.realPath, path)) {
-          const error = new Error('Write target resolves outside the selected root');
-          error.statusCode = 403;
-          throw error;
+          throw httpError('Write target resolves outside the selected root', 403);
         }
       }
     }
@@ -315,7 +405,7 @@ export const createExternalAccessRootRuntime = ({
   };
 };
 
-const entryType = (stats) => stats.isDirectory()
+const entryType = (stats: Stats): DirectoryEntry['type'] => stats.isDirectory()
   ? 'directory'
   : stats.isFile()
     ? 'file'
@@ -323,10 +413,17 @@ const entryType = (stats) => stats.isDirectory()
       ? 'symlink'
       : 'other';
 
-const listDirectory = async ({ fsPromises, path, root, absolutePath, depth, state }) => {
+const listDirectory = async ({ fsPromises, path, root, absolutePath, depth, state }: {
+  absolutePath: string;
+  depth: number;
+  fsPromises: FsPromises;
+  path: PathModule;
+  root: ResolvedRoot;
+  state: { count: number };
+}): Promise<DirectoryEntry[]> => {
   if (state.count >= MAX_LIST_ENTRIES) return [];
   const dirents = await fsPromises.readdir(absolutePath, { withFileTypes: true });
-  const entries = [];
+  const entries: DirectoryEntry[] = [];
   for (const dirent of dirents) {
     if (state.count >= MAX_LIST_ENTRIES) break;
     const childPath = path.join(absolutePath, dirent.name);
@@ -338,7 +435,7 @@ const listDirectory = async ({ fsPromises, path, root, absolutePath, depth, stat
     }
     state.count += 1;
     const relative = toPosixPath(path.relative(root.realPath, childPath));
-    const entry = {
+    const entry: DirectoryEntry = {
       name: dirent.name,
       path: relative,
       type: entryType(stats),
@@ -360,12 +457,14 @@ const listDirectory = async ({ fsPromises, path, root, absolutePath, depth, stat
   return entries;
 };
 
-const readFileContent = async ({ fsPromises, absolutePath, encoding }) => {
+const readFileContent = async ({ fsPromises, absolutePath, encoding }: {
+  absolutePath: string;
+  encoding: 'base64' | 'utf8';
+  fsPromises: FsPromises;
+}) => {
   const buffer = await fsPromises.readFile(absolutePath);
   if (buffer.byteLength > MAX_READ_BYTES) {
-    const error = new Error(`File is too large to read through external access (${buffer.byteLength} bytes)`);
-    error.statusCode = 413;
-    throw error;
+    throw httpError(`File is too large to read through external access (${buffer.byteLength} bytes)`, 413);
   }
   if (encoding === 'base64') {
     return { encoding: 'base64', content: buffer.toString('base64') };
@@ -373,13 +472,13 @@ const readFileContent = async ({ fsPromises, absolutePath, encoding }) => {
   return { encoding: 'utf8', content: buffer.toString('utf8') };
 };
 
-const normalizeTimeoutMs = (value) => {
+const normalizeTimeoutMs = (value: unknown): number => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_COMMAND_TIMEOUT_MS;
   return Math.min(Math.max(parsed, 1000), MAX_COMMAND_TIMEOUT_MS);
 };
 
-const truncateOutput = (value) => {
+const truncateOutput = (value: string) => {
   if (Buffer.byteLength(value, 'utf8') <= MAX_COMMAND_BYTES) {
     return { value, truncated: false };
   }
@@ -389,7 +488,13 @@ const truncateOutput = (value) => {
   };
 };
 
-const runCommand = ({ spawn, command, cwd, timeoutMs, env }) => new Promise((resolve) => {
+const runCommand = ({ spawn, command, cwd, timeoutMs, env }: {
+  command: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  spawn: Spawn;
+  timeoutMs: number;
+}): Promise<CommandResult> => new Promise((resolve) => {
   const isWin = process.platform === 'win32';
   const shell = isWin ? (process.env.ComSpec || 'cmd.exe') : (process.env.SHELL || '/bin/sh');
   const args = isWin ? ['/d', '/s', '/c', command] : ['-lc', command];
@@ -409,17 +514,18 @@ const runCommand = ({ spawn, command, cwd, timeoutMs, env }) => new Promise((res
     try {
       child.kill('SIGKILL');
     } catch {
+      // The process may have exited between the timeout and the kill request.
     }
   }, timeoutMs);
 
-  child.stdout?.on('data', (chunk) => {
+  child.stdout?.on('data', (chunk: Buffer | string) => {
     if (stdoutTruncated) return;
     const next = stdout + chunk.toString();
     const truncated = truncateOutput(next);
     stdout = truncated.value;
     stdoutTruncated = truncated.truncated;
   });
-  child.stderr?.on('data', (chunk) => {
+  child.stderr?.on('data', (chunk: Buffer | string) => {
     if (stderrTruncated) return;
     const next = stderr + chunk.toString();
     const truncated = truncateOutput(next);
@@ -435,7 +541,7 @@ const runCommand = ({ spawn, command, cwd, timeoutMs, env }) => new Promise((res
       stderr,
       stdoutTruncated,
       stderrTruncated,
-      error: error?.message || 'Command failed to start',
+      error: errorMessage(error, 'Command failed to start'),
     });
   });
   child.on('close', (code, signal) => {
@@ -454,7 +560,7 @@ const runCommand = ({ spawn, command, cwd, timeoutMs, env }) => new Promise((res
   });
 });
 
-export const registerExternalAccessRoutes = (app, dependencies = {}) => {
+export const registerExternalAccessRoutes = (app: Express, dependencies: ExternalAccessDependencies): void => {
   const {
     fsPromises,
     path,
@@ -480,11 +586,16 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     process,
     __dirname,
     piariumDataDir,
-    resolveProjectDirectory,
-    deploymentRoot,
+    ...(resolveProjectDirectory ? { resolveProjectDirectory } : {}),
+    ...(deploymentRoot ? { deploymentRoot } : {}),
   });
 
-  const runWorkspaceMutation = (resolved, ownerId, operation, options = {}) => {
+  const runWorkspaceMutation = <Result>(
+    resolved: ResolvedExternalPath,
+    ownerId: string,
+    operation: () => Promise<Result>,
+    options: Record<string, unknown> = {},
+  ): Promise<Result> => {
     if (resolved?.root?.source !== 'workspace' || typeof documents?.runMutationForScope !== 'function') {
       return operation();
     }
@@ -637,7 +748,7 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
       }
       const candidate = await rootRuntime.resolvePath(req, { rootId, relativePath, mustExist: false });
       const resolved = await rootRuntime.resolvePath(req, { rootId, relativePath, mustExist: false, forWrite: true });
-      const result = await runWorkspaceMutation(resolved, 'external.fs.write', async () => {
+      const result = await runWorkspaceMutation<{ conflict: true } | { conflict: false; stats: Stats }>(resolved, 'external.fs.write', async () => {
         if (body.createParents !== false) {
           await fsPromises.mkdir(path.dirname(candidate.absolutePath), { recursive: true });
         }
@@ -649,7 +760,7 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
               return { conflict: true };
             }
           } catch (error) {
-            if (error?.code !== 'ENOENT') throw error;
+            if (errorCode(error) !== 'ENOENT') throw error;
           }
         }
         const buffer = body.encoding === 'base64'
@@ -657,9 +768,9 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
           : Buffer.from(body.content, 'utf8');
         await fsPromises.writeFile(resolved.absolutePath, buffer);
         const stats = await fsPromises.stat(resolved.absolutePath);
-        return { stats };
+        return { conflict: false, stats };
       }, { mode: 'external', purpose: 'external-fs-write' });
-      if (result?.conflict) {
+      if (result.conflict) {
         return res.status(409).json({ error: 'File was modified after it was read' });
       }
       const stats = result.stats;

@@ -1,38 +1,53 @@
-// @ts-nocheck
 import express from 'express';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
+import type { Express, Request, Response } from 'express';
+import type { ManagedCredential } from './credentials/providers.js';
+import type { ManagedQuotaProviderId } from './credentials/store.js';
 import { fetchOpenCodeGoUsage } from './providers/opencode-go.js';
 import { fetchOllamaCloudUsage } from './providers/ollama-cloud.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 
-const validators = {
+type CredentialValidator = (credential: ManagedCredential) => Promise<unknown>;
+
+const validators: Record<ManagedQuotaProviderId, CredentialValidator> = {
   'opencode-go': fetchOpenCodeGoUsage,
   'ollama-cloud': fetchOllamaCloudUsage,
   cursor: validateCursorCredential,
 };
 
-const getProvider = (req, res) => {
+const getProvider = (req: Request<{ providerId: string }>, res: Response): ManagedQuotaProviderId | null => {
   const providerId = req.params.providerId;
-  if (!normalizers[providerId]) {
+  if (!(providerId in normalizers)) {
     res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported credential provider' });
     return null;
   }
-  return providerId;
+  return providerId as ManagedQuotaProviderId;
 };
 
-const credentialError = (res, error) => res.status(400).json({
+const credentialError = (res: Response, error: unknown) => res.status(400).json({
   code: 'INVALID_CREDENTIAL',
   error: error instanceof Error ? error.message : 'Credential validation failed',
 });
 
-export function registerQuotaRoutes(app, { getQuotaProviders }) {
+interface QuotaRouteDependencies {
+  getQuotaProviders: () => Promise<{
+    fetchQuotaForProvider: (providerId: string) => Promise<unknown>;
+    listConfiguredQuotaProviders: () => string[];
+  }>;
+}
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+
+export function registerQuotaRoutes(app: Express, { getQuotaProviders }: QuotaRouteDependencies): void {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
       const { listConfiguredQuotaProviders } = await getQuotaProviders();
       res.json({ providers: listConfiguredQuotaProviders() });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
-      res.status(500).json({ error: error.message || 'Failed to list quota providers' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to list quota providers') });
     }
   });
 
@@ -93,7 +108,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       res.json(await fetchQuotaForProvider(providerId));
     } catch (error) {
       console.error('Failed to fetch quota:', error);
-      res.status(500).json({ error: error.message || 'Failed to fetch quota' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to fetch quota') });
     }
   });
 }

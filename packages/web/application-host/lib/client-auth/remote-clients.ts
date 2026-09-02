@@ -1,5 +1,8 @@
-// @ts-nocheck
 import { createSettingsFileStore } from '@piarium/settings-store';
+import type { SettingsFileStore } from '@piarium/settings-store';
+import type cryptoModule from 'node:crypto';
+import type fsPromisesModule from 'node:fs/promises';
+import type pathModule from 'node:path';
 
 const STORE_VERSION = 2;
 const TOKEN_PREFIX = 'piarium_client_';
@@ -18,6 +21,83 @@ export const REMOTE_CLIENT_PROFILE = Object.freeze({
   FULL_CONTROL: 'full-control',
   RESCUE: 'rescue',
 });
+
+type ClientTransport = 'direct' | 'relay';
+
+interface RemoteClientRecord {
+  allowedDirectories: string[];
+  appVersion: string | null;
+  authMethod: string | null;
+  capabilities: string[];
+  clientKind: string | null;
+  createdAt: string;
+  dedupeKey: string | null;
+  deviceModel: string | null;
+  deviceName: string | null;
+  devicePlatform: string | null;
+  expiresAt: string | null;
+  id: string;
+  label: string;
+  lastTransport: ClientTransport | null;
+  lastUsedAt: string | null;
+  pairingId: string | null;
+  profile: string;
+  revokedAt: string | null;
+  tokenHash: string;
+  usesRelay: boolean;
+}
+
+interface RemoteClientStore extends Record<string, unknown> {
+  clients: RemoteClientRecord[];
+  version: number;
+}
+
+interface RemoteClientRuntimeOptions {
+  clientStore?: SettingsFileStore;
+  crypto: typeof cryptoModule;
+  fsPromises: typeof fsPromisesModule;
+  path: typeof pathModule;
+  storePath: string;
+}
+
+interface ClientMutation<Result> {
+  result: Result;
+  write?: boolean;
+}
+
+interface CreateClientInput {
+  allowedDirectories?: unknown;
+  appVersion?: unknown;
+  authMethod?: unknown;
+  capabilities?: unknown;
+  clientKind?: unknown;
+  dedupeKey?: unknown;
+  deviceModel?: unknown;
+  deviceName?: unknown;
+  devicePlatform?: unknown;
+  expiresAt?: unknown;
+  label?: unknown;
+  pairingId?: unknown;
+  profile?: unknown;
+  usesRelay?: unknown;
+}
+
+interface RequestLike {
+  headers?: Record<string, string | string[] | undefined>;
+}
+
+type PublicRemoteClient = Omit<RemoteClientRecord, 'dedupeKey' | 'tokenHash'>;
+
+interface AuthenticatedClient {
+  client: PublicRemoteClient;
+  clientId: string;
+  ok: true;
+  sessionToken: string;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
 
 export const FULL_CONTROL_CAPABILITIES = Object.freeze([
   'instance:read',
@@ -50,14 +130,14 @@ const DEFAULT_CLIENT_CAPABILITIES = Object.freeze([
   'ui:access',
 ]);
 
-const normalizeLabel = (value) => {
+const normalizeLabel = (value: unknown): string => {
   if (typeof value !== 'string') return 'Remote client';
   const trimmed = value.trim();
   if (!trimmed) return 'Remote client';
   return trimmed.length > MAX_LABEL_LENGTH ? trimmed.slice(0, MAX_LABEL_LENGTH) : trimmed;
 };
 
-const normalizeTimestamp = (value) => {
+const normalizeTimestamp = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -65,24 +145,24 @@ const normalizeTimestamp = (value) => {
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 };
 
-const normalizeOptionalString = (value) => {
+const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const normalizeProfile = (value) => {
+const normalizeProfile = (value: unknown): string => {
   const raw = normalizeOptionalString(value);
   if (!raw) return REMOTE_CLIENT_PROFILE.CLIENT;
   const normalized = raw.toLowerCase().replace(/_/g, '-');
   if (normalized === 'agent' || normalized === 'external') return REMOTE_CLIENT_PROFILE.EXTERNAL_AGENT;
   if (normalized === 'full' || normalized === 'admin' || normalized === 'full-access') return REMOTE_CLIENT_PROFILE.FULL_CONTROL;
   if (normalized === 'read-only') return REMOTE_CLIENT_PROFILE.READONLY;
-  if (Object.values(REMOTE_CLIENT_PROFILE).includes(normalized)) return normalized;
+  if (new Set<string>(Object.values(REMOTE_CLIENT_PROFILE)).has(normalized)) return normalized;
   return normalized.replace(/[^a-z0-9:-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || REMOTE_CLIENT_PROFILE.CLIENT;
 };
 
-export const getCapabilitiesForProfile = (profile) => {
+export const getCapabilitiesForProfile = (profile: unknown): string[] => {
   const normalized = normalizeProfile(profile);
   if (
     normalized === REMOTE_CLIENT_PROFILE.FULL_CONTROL ||
@@ -97,7 +177,7 @@ export const getCapabilitiesForProfile = (profile) => {
   return [...DEFAULT_CLIENT_CAPABILITIES];
 };
 
-const normalizeCapabilities = (value, profile) => {
+const normalizeCapabilities = (value: unknown, profile: unknown): string[] => {
   const fallback = getCapabilitiesForProfile(profile);
   if (!Array.isArray(value)) return fallback;
   const normalized = Array.from(new Set(
@@ -109,7 +189,7 @@ const normalizeCapabilities = (value, profile) => {
   return normalized.length > 0 ? normalized : fallback;
 };
 
-const normalizeStringArray = (value) => {
+const normalizeStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(
     value
@@ -119,7 +199,7 @@ const normalizeStringArray = (value) => {
   ));
 };
 
-const normalizeMetadata = (client) => ({
+const normalizeMetadata = (client: Record<string, unknown>) => ({
   authMethod: normalizeOptionalString(client.authMethod),
   pairingId: normalizeOptionalString(client.pairingId),
   deviceName: normalizeOptionalString(client.deviceName),
@@ -128,7 +208,7 @@ const normalizeMetadata = (client) => ({
   appVersion: normalizeOptionalString(client.appVersion),
 });
 
-const safeJsonParse = (raw) => {
+const safeJsonParse = (raw: string): unknown => {
   try {
     return JSON.parse(raw);
   } catch {
@@ -136,7 +216,7 @@ const safeJsonParse = (raw) => {
   }
 };
 
-const constantTimeEqual = (left, right, crypto) => {
+const constantTimeEqual = (left: unknown, right: unknown, crypto: typeof cryptoModule): boolean => {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const leftBuffer = Buffer.from(left, 'hex');
   const rightBuffer = Buffer.from(right, 'hex');
@@ -144,27 +224,35 @@ const constantTimeEqual = (left, right, crypto) => {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath, clientStore: providedClientStore }) => {
-  const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+export const createRemoteClientAuthRuntime = ({
+  fsPromises,
+  path,
+  crypto,
+  storePath,
+  clientStore: providedClientStore,
+}: RemoteClientRuntimeOptions) => {
+  const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
   const nowIso = () => new Date().toISOString();
   const generateId = () => crypto.randomBytes(12).toString('hex');
   const generateToken = () => `${TOKEN_PREFIX}${crypto.randomBytes(TOKEN_BYTES).toString('base64url')}`;
   const auditPath = path.join(path.dirname(storePath), 'external-access-audit.jsonl');
-  const emptyStore = () => ({ version: STORE_VERSION, clients: [] });
+  const emptyStore = (): RemoteClientStore => ({ version: STORE_VERSION, clients: [] });
   const clientStore = providedClientStore ?? createSettingsFileStore({
     filePath: storePath,
     defaultValue: emptyStore(),
   });
 
-  const normalizeStore = (payload) => {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.version !== STORE_VERSION) {
+  const normalizeStore = (value: unknown): RemoteClientStore => {
+    const payload = asRecord(value);
+    if (!payload || payload.version !== STORE_VERSION) {
       throw new Error(`Unsupported remote clients version: ${String(payload?.version)}`);
     }
     if (!Array.isArray(payload.clients)) {
       throw new Error('Remote clients file has invalid clients');
     }
-    const clients = payload.clients.map((client) => {
-          if (!client || typeof client !== 'object' || Array.isArray(client)) {
+    const clients = payload.clients.map((value): RemoteClientRecord => {
+          const client = asRecord(value);
+          if (!client) {
             throw new Error('Remote clients file contains an invalid client');
           }
           const id = normalizeOptionalString(client.id);
@@ -196,7 +284,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
 
   const readStore = async () => normalizeStore(await clientStore.read());
 
-  const mutateStore = (mutator) => clientStore.transact(async (persisted) => {
+  const mutateStore = <Result>(mutator: (store: RemoteClientStore) => Promise<ClientMutation<Result>>): Promise<Result> => clientStore.transact(async (persisted) => {
     const store = normalizeStore(persisted);
     const transaction = await mutator(store);
     return {
@@ -206,7 +294,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     };
   });
 
-  const publicClient = (client) => ({
+  function publicClient(client: RemoteClientRecord): PublicRemoteClient {
+    return {
     id: client.id,
     label: client.label,
     createdAt: client.createdAt,
@@ -225,7 +314,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     appVersion: client.appVersion,
     usesRelay: client.usesRelay === true,
     lastTransport: client.lastTransport ?? null,
-  });
+    };
+  }
 
   const listClients = async () => {
     const store = await readStore();
@@ -260,7 +350,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     profile,
     capabilities,
     allowedDirectories,
-  } = {}) => {
+  }: CreateClientInput = {}) => {
     return mutateStore(async (store) => {
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const normalizedProfile = normalizeProfile(profile);
@@ -285,12 +375,13 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
         deviceModel: normalizeOptionalString(deviceModel),
         appVersion: normalizeOptionalString(appVersion),
         usesRelay: usesRelay === true,
+        lastTransport: null,
       };
       if (normalizedDedupeKey) {
         store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey);
         // Migrate pre-clientKind desktop tokens: a deduped, kind-tagged mint
         // supersedes legacy records with the same label that carry neither a
-        // kind nor a dedupe key 鈥?those tokens can no longer pass the
+        // kind nor a dedupe key — those tokens can no longer pass the
         // desktop-local client-create gate and would otherwise linger forever.
         if (client.clientKind) {
           store.clients = store.clients.filter((entry) =>
@@ -302,11 +393,11 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const revokeClient = async (id) => {
+  const revokeClient = async (id: unknown) => {
     if (typeof id !== 'string' || id.trim().length === 0) {
       return { revoked: false };
     }
-    return mutateStore(async (store) => {
+    return mutateStore<{ client?: PublicRemoteClient; revoked: boolean }>(async (store) => {
       const client = store.clients.find((entry) => entry.id === id);
       if (!client) return { result: { revoked: false }, write: false };
       if (client.revokedAt) return { result: { revoked: true, client: publicClient(client) }, write: false };
@@ -324,7 +415,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const authenticateBearerToken = async (token, req) => {
+  const authenticateBearerToken = async (token: unknown, req?: RequestLike): Promise<AuthenticatedClient | null> => {
     if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
@@ -332,7 +423,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     // forwarded request with x-piarium-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
     const transport = req?.headers?.['x-piarium-relay-connection'] ? 'relay' : 'direct';
-    return mutateStore(async (store) => {
+    return mutateStore<AuthenticatedClient | null>(async (store) => {
       const tokenHash = hashToken(token);
       const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));
       if (!client) return { result: null, write: false };
@@ -344,8 +435,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       // request does not make the remote path unnecessary.
       const healUsesRelay = transport === 'relay' && client.usesRelay !== true;
       if (healUsesRelay) client.usesRelay = true;
-      // Write on the throttle interval 鈥?or immediately when the transport
-      // changed, so a LAN鈬剅elay switch is visible right away, not a minute late.
+      // Write on the throttle interval — or immediately when the transport
+      // changed, so a LAN⇄relay switch is visible right away, not a minute late.
       const shouldWrite = healUsesRelay
         || !Number.isFinite(lastUsedAt)
         || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS
@@ -361,7 +452,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const recordAuditEvent = async (event = {}) => {
+  const recordAuditEvent = async (event: Record<string, unknown> = {}) => {
     const clientId = normalizeOptionalString(event.clientId);
     if (!clientId) return { recorded: false };
     const entry = {
@@ -372,10 +463,12 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       profile: normalizeOptionalString(event.profile),
       method: normalizeOptionalString(event.method),
       path: normalizeOptionalString(event.path),
-      status: Number.isInteger(event.status) ? event.status : null,
+      status: typeof event.status === 'number' && Number.isInteger(event.status) ? event.status : null,
       ip: normalizeOptionalString(event.ip),
       userAgent: normalizeOptionalString(event.userAgent),
-      durationMs: Number.isFinite(event.durationMs) ? Math.max(0, Math.round(event.durationMs)) : null,
+      durationMs: typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)
+        ? Math.max(0, Math.round(event.durationMs))
+        : null,
       target: event.target && typeof event.target === 'object' ? event.target : null,
     };
     let line = `${JSON.stringify(entry)}\n`;
@@ -391,13 +484,13 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     return { recorded: true };
   };
 
-  const listAuditEvents = async ({ limit = DEFAULT_AUDIT_LIMIT } = {}) => {
+  const listAuditEvents = async ({ limit = DEFAULT_AUDIT_LIMIT }: { limit?: unknown } = {}) => {
     const normalizedLimit = Math.min(Math.max(Number.parseInt(String(limit), 10) || DEFAULT_AUDIT_LIMIT, 1), MAX_AUDIT_LIMIT);
     let raw = '';
     try {
       raw = await fsPromises.readFile(auditPath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return [];
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return [];
       throw error;
     }
     return raw

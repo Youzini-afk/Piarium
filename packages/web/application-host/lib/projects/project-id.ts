@@ -1,10 +1,9 @@
-// @ts-nocheck
-const normalizeProjectPathForId = (value) => {
+const normalizeProjectPathForId = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   return value.replace(/\\/g, '/').replace(/\/+$/g, '') || value;
 };
 
-export const createProjectIdFromPath = (projectPath) => {
+export const createProjectIdFromPath = (projectPath: unknown): string => {
   const normalized = normalizeProjectPathForId(projectPath).trim();
   if (!normalized) {
     return '';

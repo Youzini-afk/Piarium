@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { spawn, spawnSync } from 'child_process';
 import {
   createExecutableSearchEnv,
@@ -6,6 +5,7 @@ import {
 } from './tunnels/executable-search.js';
 import { getTunnelDependencyInstallInfo } from './tunnels/install-help.js';
 import { TUNNEL_PROVIDER_NGROK } from './tunnels/types.js';
+import type { TunnelController } from './tunnels/types.js';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
 const NGROK_API_URL = 'http://127.0.0.1:4040/api/tunnels';
@@ -13,7 +13,17 @@ const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
 
-export async function checkNgrokAvailable() {
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+export interface NgrokAvailability {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+}
+
+export async function checkNgrokAvailable(): Promise<NgrokAvailability> {
   const target = resolveExecutableLaunchTarget('ngrok');
   if (target) {
     try {
@@ -33,7 +43,9 @@ export async function checkNgrokAvailable() {
   return { available: false, path: null, version: null };
 }
 
-export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
+export async function checkNgrokAuthtokenConfigured(
+  ngrokPath: string | null = null,
+): Promise<{ configured: boolean; detail: string }> {
   if (typeof process.env.NGROK_AUTHTOKEN === 'string' && process.env.NGROK_AUTHTOKEN.trim().length > 0) {
     return { configured: true, detail: 'NGROK_AUTHTOKEN is set.' };
   }
@@ -65,7 +77,14 @@ export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
   }
 }
 
-export async function checkNgrokApiReachability({ fetchImpl = globalThis.fetch, timeoutMs = 5000 } = {}) {
+export async function checkNgrokApiReachability({
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 5000,
+}: { fetchImpl?: typeof fetch | undefined; timeoutMs?: number | undefined } = {}): Promise<{
+  error: string | null;
+  reachable: boolean;
+  status: number | null;
+}> {
   if (typeof fetchImpl !== 'function') {
     return { reachable: false, status: null, error: 'Fetch API is unavailable in this runtime.' };
   }
@@ -89,14 +108,14 @@ export async function checkNgrokApiReachability({ fetchImpl = globalThis.fetch, 
   }
 }
 
-const spawnNgrok = (args, resolvedBinaryPath = 'ngrok') => spawn(resolvedBinaryPath, args, {
+const spawnNgrok = (args: string[], resolvedBinaryPath = 'ngrok') => spawn(resolvedBinaryPath, args, {
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
   env: createExecutableSearchEnv(),
   killSignal: 'SIGINT',
 });
 
-const normalizeNgrokPublicUrl = (value) => {
+const normalizeNgrokPublicUrl = (value: unknown): string | null => {
   if (typeof value !== 'string' || value.trim().length === 0) {
     return null;
   }
@@ -112,7 +131,7 @@ const normalizeNgrokPublicUrl = (value) => {
   return null;
 };
 
-export function extractNgrokPublicUrlFromText(text) {
+export function extractNgrokPublicUrlFromText(text: unknown): string | null {
   if (typeof text !== 'string' || text.trim().length === 0) {
     return null;
   }
@@ -120,8 +139,10 @@ export function extractNgrokPublicUrlFromText(text) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (const line of lines) {
     try {
-      const parsed = JSON.parse(line);
-      const parsedUrl = normalizeNgrokPublicUrl(parsed?.url) || normalizeNgrokPublicUrl(parsed?.public_url);
+      const parsed = JSON.parse(line) as unknown;
+      const parsedUrl = isRecord(parsed)
+        ? normalizeNgrokPublicUrl(parsed.url) || normalizeNgrokPublicUrl(parsed.public_url)
+        : null;
       if (parsedUrl) {
         return parsedUrl;
       }
@@ -139,7 +160,7 @@ export function extractNgrokPublicUrlFromText(text) {
   return null;
 }
 
-const normalizeNgrokDiagnosticText = (value) => {
+const normalizeNgrokDiagnosticText = (value: unknown): string => {
   if (typeof value !== 'string') {
     return '';
   }
@@ -153,7 +174,7 @@ const normalizeNgrokDiagnosticText = (value) => {
     .trim();
 };
 
-export const summarizeNgrokOutput = (lines) => {
+export const summarizeNgrokOutput = (lines: unknown): string => {
   const nonEmptyLines = Array.isArray(lines)
     ? lines.map((line) => String(line || '').trim()).filter(Boolean)
     : [];
@@ -163,12 +184,13 @@ export const summarizeNgrokOutput = (lines) => {
 
   for (const line of [...nonEmptyLines].reverse()) {
     try {
-      const parsed = JSON.parse(line);
-      const level = typeof parsed?.lvl === 'string' ? parsed.lvl.toLowerCase() : '';
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed)) continue;
+      const level = typeof parsed.lvl === 'string' ? parsed.lvl.toLowerCase() : '';
       if (level !== 'eror' && level !== 'error' && level !== 'crit') {
         continue;
       }
-      const err = normalizeNgrokDiagnosticText(parsed?.err);
+      const err = normalizeNgrokDiagnosticText(parsed.err);
       if (err && err !== '<nil>') {
         return err;
       }
@@ -179,12 +201,13 @@ export const summarizeNgrokOutput = (lines) => {
 
   for (const line of [...nonEmptyLines].reverse()) {
     try {
-      const parsed = JSON.parse(line);
-      const err = normalizeNgrokDiagnosticText(parsed?.err);
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed)) continue;
+      const err = normalizeNgrokDiagnosticText(parsed.err);
       if (err && err !== '<nil>' && !/context canceled/i.test(err)) {
         return err;
       }
-      const msg = normalizeNgrokDiagnosticText(parsed?.msg);
+      const msg = normalizeNgrokDiagnosticText(parsed.msg);
       if (msg && /failed|error|invalid|auth/i.test(msg)) {
         return msg;
       }
@@ -206,11 +229,11 @@ export const summarizeNgrokOutput = (lines) => {
     return '';
   }
   try {
-    const parsed = JSON.parse(lastLine);
-    if (typeof parsed?.err === 'string' && parsed.err.trim().length > 0) {
+    const parsed = JSON.parse(lastLine) as unknown;
+    if (isRecord(parsed) && typeof parsed.err === 'string' && parsed.err.trim().length > 0) {
       return normalizeNgrokDiagnosticText(parsed.err);
     }
-    if (typeof parsed?.msg === 'string' && parsed.msg.trim().length > 0) {
+    if (isRecord(parsed) && typeof parsed.msg === 'string' && parsed.msg.trim().length > 0) {
       return normalizeNgrokDiagnosticText(parsed.msg);
     }
   } catch {
@@ -219,12 +242,12 @@ export const summarizeNgrokOutput = (lines) => {
   return normalizeNgrokDiagnosticText(lastLine);
 };
 
-const appendNgrokOutputSummary = (message, lines) => {
+const appendNgrokOutputSummary = (message: string, lines: unknown): string => {
   const summary = summarizeNgrokOutput(lines);
   return summary ? `${message}: ${summary}` : message;
 };
 
-async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
+async function fetchNgrokPublicUrl(fetchImpl: typeof fetch = globalThis.fetch): Promise<string | null> {
   if (typeof fetchImpl !== 'function') {
     return null;
   }
@@ -233,17 +256,21 @@ async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
     if (!response.ok) {
       return null;
     }
-    const payload = await response.json();
-    const tunnels = Array.isArray(payload?.tunnels) ? payload.tunnels : [];
-    const httpsTunnel = tunnels.find((entry) => entry?.proto === 'https' && normalizeNgrokPublicUrl(entry?.public_url));
-    const fallbackTunnel = tunnels.find((entry) => normalizeNgrokPublicUrl(entry?.public_url));
-    return normalizeNgrokPublicUrl(httpsTunnel?.public_url) || normalizeNgrokPublicUrl(fallbackTunnel?.public_url);
+    const payload = await response.json() as unknown;
+    const tunnels = isRecord(payload) && Array.isArray(payload.tunnels) ? payload.tunnels : [];
+    const httpsTunnel = tunnels.find((entry) => isRecord(entry)
+      && entry.proto === 'https' && normalizeNgrokPublicUrl(entry.public_url));
+    const fallbackTunnel = tunnels.find((entry) => isRecord(entry) && normalizeNgrokPublicUrl(entry.public_url));
+    return normalizeNgrokPublicUrl(isRecord(httpsTunnel) ? httpsTunnel.public_url : null)
+      || normalizeNgrokPublicUrl(isRecord(fallbackTunnel) ? fallbackTunnel.public_url : null);
   } catch {
     return null;
   }
 }
 
-export async function startNgrokQuickTunnel({ port }) {
+export async function startNgrokQuickTunnel({ port }: { port: number | null }): Promise<TunnelController & {
+  process: ReturnType<typeof spawnNgrok>;
+}> {
   const ngrokCheck = await checkNgrokAvailable();
   if (!ngrokCheck.available) {
     throw new Error(getNgrokInstallInfo().message);
@@ -258,11 +285,14 @@ export async function startNgrokQuickTunnel({ port }) {
     throw new Error('A local port is required to start an ngrok tunnel');
   }
 
-  const child = spawnNgrok(['http', '--log=stdout', '--log-format=json', `127.0.0.1:${port}`], ngrokCheck.path);
-  let publicUrl = null;
-  const recentOutput = [];
+  const child = spawnNgrok(
+    ['http', '--log=stdout', '--log-format=json', `127.0.0.1:${port}`],
+    ngrokCheck.path ?? 'ngrok',
+  );
+  let publicUrl: string | null = null;
+  const recentOutput: string[] = [];
 
-  const captureOutput = (chunk) => {
+  const captureOutput = (chunk: string | Buffer): string => {
     const text = chunk.toString('utf8');
     const parsedUrl = extractNgrokPublicUrlFromText(text);
     if (parsedUrl) {
@@ -291,9 +321,9 @@ export async function startNgrokQuickTunnel({ port }) {
     process.stderr.write(text);
   });
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
-    const finish = (handler, value) => {
+    const finish = <T>(handler: (value: T) => void, value: T): void => {
       if (settled) {
         return;
       }
@@ -313,15 +343,15 @@ export async function startNgrokQuickTunnel({ port }) {
     const checkReady = setInterval(async () => {
       publicUrl = publicUrl || await fetchNgrokPublicUrl();
       if (publicUrl) {
-        finish(resolve, null);
+        finish(resolve, undefined);
       }
     }, 250);
 
-    const onError = (error) => {
+    const onError = (error: Error): void => {
       finish(reject, new Error(`Ngrok failed to start: ${error.message}`));
     };
 
-    const onExit = (code) => {
+    const onExit = (code: number | null): void => {
       finish(reject, new Error(appendNgrokOutputSummary(`Ngrok exited while starting (code ${code ?? 'unknown'})`, recentOutput)));
     };
 
@@ -330,7 +360,7 @@ export async function startNgrokQuickTunnel({ port }) {
   });
 
   return {
-    mode: 'quick',
+    mode: 'quick' as const,
     stop: () => {
       try {
         child.kill('SIGINT');

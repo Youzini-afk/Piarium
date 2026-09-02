@@ -1,7 +1,8 @@
 import { isPathWithinRoot } from '../workspace/path-safety.js';
+import type { PathLike } from 'node:fs';
 
 export interface DocumentRootGuardOptions {
-  fsPromises: Pick<typeof import('node:fs/promises'), 'realpath'>;
+  fsPromises: { realpath(path: PathLike): Promise<string> };
   pathModule: typeof import('node:path');
   readSettings: () => Promise<Record<string, unknown>>;
   getWorkspaceRoot?: () => string | undefined | null;

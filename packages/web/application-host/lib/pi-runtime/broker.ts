@@ -1,13 +1,31 @@
-// @ts-nocheck
 import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@piarium/runtime-broker';
+import type {
+  PiRuntimeBrokerOptions,
+  PiSessionExecutionAdmission,
+} from '@piarium/runtime-broker';
 import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 
-export function attachPiSessionExecutionAdmission(broker, admitSessionExecution) {
-  if (!broker || typeof broker.setSessionExecutionAdmission !== 'function') {
+export function attachPiSessionExecutionAdmission<Broker extends Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'>>(
+  broker: Broker,
+  admitSessionExecution: PiSessionExecutionAdmission,
+): Broker;
+export function attachPiSessionExecutionAdmission(
+  broker: unknown,
+  admitSessionExecution: PiSessionExecutionAdmission,
+): Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'>;
+export function attachPiSessionExecutionAdmission(
+  broker: unknown,
+  admitSessionExecution: PiSessionExecutionAdmission,
+): Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'> {
+  const candidate = broker && typeof broker === 'object'
+    ? broker as { setSessionExecutionAdmission?: unknown }
+    : null;
+  if (!candidate || typeof candidate.setSessionExecutionAdmission !== 'function') {
     throw new TypeError('Injected Pi runtime broker does not support session execution admission');
   }
-  broker.setSessionExecutionAdmission(admitSessionExecution);
-  return broker;
+  const compatible = broker as Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'>;
+  compatible.setSessionExecutionAdmission(admitSessionExecution);
+  return compatible;
 }
 
 export function createWebPiRuntimeBroker({
@@ -22,7 +40,19 @@ export function createWebPiRuntimeBroker({
   packageRoot,
   runtimeGeneration,
   runtimeSource,
-} = {}) {
+}: {
+  agentDir?: string | undefined;
+  admitSessionExecution?: PiSessionExecutionAdmission | undefined;
+  clientVersion?: string | undefined;
+  cwd?: string | undefined;
+  emit?: PiRuntimeBrokerOptions['emit'] | undefined;
+  foundationalPackages?: PiRuntimeBrokerOptions['foundationalPackages'] | undefined;
+  hostEntry?: string | undefined;
+  nodePath?: string | undefined;
+  packageRoot?: string | undefined;
+  runtimeGeneration?: number | undefined;
+  runtimeSource?: PiRuntimeBrokerOptions['runtimeSource'] | undefined;
+} = {}): PiRuntimeBroker {
   return new PiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
     ...(typeof admitSessionExecution === 'function' ? { admitSessionExecution } : {}),
@@ -38,7 +68,9 @@ export function createWebPiRuntimeBroker({
     hostEntry: hostEntry || resolveBundledPiHostEntry(),
     ...(nodePath ? { nodePath } : {}),
     ...(packageRoot ? { packageRoot } : {}),
-    ...(Number.isSafeInteger(runtimeGeneration) && runtimeGeneration > 0 ? { runtimeGeneration } : {}),
+    ...(typeof runtimeGeneration === 'number' && Number.isSafeInteger(runtimeGeneration) && runtimeGeneration > 0
+      ? { runtimeGeneration }
+      : {}),
     ...(runtimeSource ? { runtimeSource } : {}),
   });
 }

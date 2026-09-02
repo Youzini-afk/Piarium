@@ -4,15 +4,15 @@
 This module fetches quota and usage signals for supported providers in the web server runtime.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
-- `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
-- `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
-- `packages/web/server/lib/quota/utils/`: shared auth, transform, and formatting helpers.
+- `packages/web/application-host/lib/quota/index.js`: public entrypoint imported by `packages/web/application-host/index.js`.
+- `packages/web/application-host/lib/quota/routes.js`: Express route registration for quota endpoints.
+- `packages/web/application-host/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
+- `packages/web/application-host/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
+- `packages/web/application-host/lib/quota/utils/`: shared auth, transform, and formatting helpers.
 
 ## Supported provider IDs (dispatcher)
 
-These provider IDs are currently dispatchable via `fetchQuotaForProvider(providerId)` in `packages/web/server/lib/quota/providers/index.js`.
+These provider IDs are currently dispatchable via `fetchQuotaForProvider(providerId)` in `packages/web/application-host/lib/quota/providers/index.js`.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
@@ -58,12 +58,12 @@ at runtime. Piarium never commits those credentials or sends them to the rendere
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:
-   - Simple providers: create `packages/web/server/lib/quota/providers/<provider>.js`.
-   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Google (`index.js`, `auth.js`, `api.js`, `transforms.js`).
+   - Simple providers: create `packages/web/application-host/lib/quota/providers/<provider>.js`.
+   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/application-host/lib/quota/providers/<provider>/` with split modules like Google (`index.js`, `auth.js`, `api.js`, `transforms.js`).
 2. Export `providerId`, `providerName`, `aliases`, `isConfigured`, and `fetchQuota`.
-3. Use shared helpers from `packages/web/server/lib/quota/utils/index.js` (`buildResult`, `toUsageWindow`, auth/conversion helpers) to keep payload shape consistent.
-4. Register the provider in `packages/web/server/lib/quota/providers/index.js`.
-5. If needed for direct use, export a named fetcher from `packages/web/server/lib/quota/providers/index.js` and `packages/web/server/lib/quota/index.js`.
+3. Use shared helpers from `packages/web/application-host/lib/quota/utils/index.js` (`buildResult`, `toUsageWindow`, auth/conversion helpers) to keep payload shape consistent.
+4. Register the provider in `packages/web/application-host/lib/quota/providers/index.js`.
+5. If needed for direct use, export a named fetcher from `packages/web/application-host/lib/quota/providers/index.js` and `packages/web/application-host/lib/quota/index.js`.
 6. Update this file with the new provider ID, module path, and alias/auth details.
 7. Validate with `bun run type-check`, `bun run lint`, and `bun run build`.
 

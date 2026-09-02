@@ -4,8 +4,8 @@
 This module provides Git repository operations for the web server runtime, including repository management, branch/worktree operations, status/diff queries, commit handling, and merge/rebase workflows.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/git/`: Git module directory containing all Git-related functionality.
-  - `index.js`: Public API entry point imported by `packages/web/server/index.js`.
+- `packages/web/application-host/lib/git/`: Git module directory containing all Git-related functionality.
+  - `index.js`: Public API entry point imported by `packages/web/application-host/index.js`.
   - `routes.js`: Express route registration for `/api/git/*` endpoints.
   - `service.js`: Core Git operations (repository, branch, worktree, commit, merge/rebase, status/diff, log).
   - `credentials.js`: Git credentials management.
@@ -138,7 +138,7 @@ The following functions are internal helpers used by exported functions:
 ## Notes for Contributors
 
 ### Adding a New Git Operation
-1. Add the function to `packages/web/server/lib/git/service.js`.
+1. Add the function to `packages/web/application-host/lib/git/service.js`.
 2. Export the function if it's part of the public API.
 3. Use `createGit(directory)` to get a simple-git instance with the correct environment.
 4. Use `runGitCommand(cwd, args)` for direct git command execution with better error handling.

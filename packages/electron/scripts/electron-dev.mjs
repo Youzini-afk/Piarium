@@ -207,6 +207,7 @@ async function main() {
   const electronExecutable = ensureElectronInstalled();
   console.log('[electron:dev] building Pi runtime worker and broker...');
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
+  await runProcess('bun', ['run', '--cwd', 'packages/electron', 'bundle:main']);
 
   const useBundledUi = process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1';
   let devServer = null;
@@ -234,7 +235,7 @@ async function main() {
     console.log('[electron:dev] HMR UI and API are ready; launching Electron...');
   }
 
-  const electron = spawnProcess(electronExecutable, ['./main.mjs'], {
+  const electron = spawnProcess(electronExecutable, ['./dist-bundle/main.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,

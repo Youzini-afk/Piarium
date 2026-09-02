@@ -1,5 +1,24 @@
-// @ts-nocheck
-const asNonEmptyString = (value) => {
+import type { Express, Request, Response } from 'express';
+import { createScheduledTaskService } from './service.js';
+
+type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
+
+interface ScheduledTaskRouteDependencies extends ServiceDependencies {
+  scheduledTaskService?: ReturnType<typeof createScheduledTaskService>;
+}
+
+export interface PiariumEventRouteDependencies {
+  getPiariumEventClients: () => Set<Response>;
+  writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorRecord = (value: unknown): Record<string, unknown> => asRecord(value) ?? {};
+
+const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;
   }
@@ -7,17 +26,51 @@ const asNonEmptyString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const parseProjectID = (req) => asNonEmptyString(req?.params?.projectId);
-const parseTaskID = (req) => asNonEmptyString(req?.params?.taskId);
+const parseProjectID = (req: Request) => asNonEmptyString(req.params.projectId);
+const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
-export const registerScheduledTaskRoutes = (app, dependencies) => {
+export const registerPiariumEventRoutes = (
+  app: Express,
+  { getPiariumEventClients, writeSseEvent }: PiariumEventRouteDependencies,
+): void => {
+  app.get('/api/piarium/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const clients = getPiariumEventClients();
+    clients.add(res);
+    try {
+      writeSseEvent(res, {
+        type: 'piarium:event-stream-ready',
+        properties: { connectedAt: Date.now() },
+      });
+    } catch {
+      // The client can reconnect and receive the next heartbeat.
+    }
+
+    const heartbeat = setInterval(() => {
+      try {
+        writeSseEvent(res, {
+          type: 'piarium:heartbeat',
+          properties: { timestamp: Date.now() },
+        });
+      } catch {
+        clearInterval(heartbeat);
+        clients.delete(res);
+      }
+    }, 25_000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      clients.delete(res);
+    });
+  });
+};
+
+export const registerScheduledTaskRoutes = (app: Express, dependencies: ScheduledTaskRouteDependencies): void => {
   const {
-    readSettingsFromDisk,
-    sanitizeProjects,
-    projectConfigRuntime,
-    scheduledTasksRuntime,
-    getPiariumEventClients,
-    writeSseEvent,
     scheduledTaskService = createScheduledTaskService(dependencies),
   } = dependencies;
 
@@ -31,7 +84,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       const tasks = await scheduledTaskService.list(projectID);
       return res.json({ tasks });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to load tasks:', error);
       return res.status(500).json({ error: 'Failed to load scheduled tasks' });
     }
@@ -43,7 +97,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'projectId is required' });
     }
 
-    const taskInput = req.body && typeof req.body === 'object' ? req.body.task : null;
+    const taskInput = asRecord(req.body)?.task;
     if (!taskInput || typeof taskInput !== 'object') {
       return res.status(400).json({ error: 'task payload is required' });
     }
@@ -51,7 +105,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json(await scheduledTaskService.upsert(projectID, taskInput));
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
       const statusCode = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid')
         ? 400
@@ -76,7 +131,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ tasks: await scheduledTaskService.remove(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to delete task:', error);
       return res.status(500).json({ error: 'Failed to delete scheduled task' });
     }
@@ -90,7 +146,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ document: await scheduledTaskService.readLoopDocument(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to read loop file:', error);
       return res.status(500).json({ error: 'Failed to read loop file' });
     }
@@ -104,7 +161,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json(await scheduledTaskService.updateLoopDocument(projectID, taskID, req.body));
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to write loop file:', error);
       return res.status(500).json({ error: 'Failed to write loop file' });
     }
@@ -124,7 +182,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       );
       return res.json({ task });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to update loop file:', error);
       return res.status(500).json({ error: 'Failed to update loop file' });
     }
@@ -140,7 +199,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         tasks: await scheduledTaskService.removeLoopFile(projectID, taskID, req.body?.expectedRevision),
       });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message });
       console.error('[ScheduledTasks] failed to delete loop file:', error);
       return res.status(500).json({ error: 'Failed to delete loop file' });
     }
@@ -159,7 +219,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.task ? { task: error.task } : {}) });
+      const failure = errorRecord(error);
+      if (typeof failure.statusCode === 'number') return res.status(failure.statusCode).json({ error: failure.message, ...(failure.task ? { task: failure.task } : {}) });
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
     }
@@ -174,44 +235,4 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/piarium/events', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-
-    const clients = getPiariumEventClients();
-    clients.add(res);
-
-    try {
-      writeSseEvent(res, {
-        type: 'piarium:event-stream-ready',
-        properties: {
-          connectedAt: Date.now(),
-        },
-      });
-    } catch {
-    }
-
-    const heartbeat = setInterval(() => {
-      try {
-        writeSseEvent(res, {
-          type: 'piarium:heartbeat',
-          properties: {
-            timestamp: Date.now(),
-          },
-        });
-      } catch {
-        clearInterval(heartbeat);
-        clients.delete(res);
-      }
-    }, 25_000);
-
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      clients.delete(res);
-    });
-  });
 };
-import { createScheduledTaskService } from './service.js';

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Private relay service: config persistence, lifecycle of the relay host
 // client, and the /api/piarium/relay/* management routes.
 //
@@ -13,13 +12,46 @@
 // web-runtime capabilities.
 
 import express from 'express';
+import type cryptoModule from 'node:crypto';
+import type { Express } from 'express';
 
 import { createRelayIdentityRuntime } from './identity.js';
 import { startRelayHost } from './host-client.js';
+import type { createRelayHostLock } from './host-lock.js';
 
 export const DEFAULT_RELAY_URL = 'wss://relay.openchamber.dev/ws';
 
-const isValidRelayUrl = (value) => {
+interface RelaySettings extends Record<string, unknown> {
+  privateRelay?: unknown;
+  relayEncryptionKey?: unknown;
+  relaySigningKey?: unknown;
+}
+
+interface RelayConfig {
+  enabled: boolean;
+  relayUrl: string;
+  relayUrlLocked: boolean;
+}
+
+type RelayHostClient = ReturnType<typeof startRelayHost>;
+type RelayHostLock = ReturnType<typeof createRelayHostLock>;
+type RelayServiceState = 'connected' | 'connecting' | 'disabled' | 'reconnecting' | 'standby';
+
+interface RelayServiceStatus {
+  connectedClients: number;
+  lastError: string | null;
+  state: RelayServiceState;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+
+const isValidRelayUrl = (value: unknown): value is string => {
   if (typeof value !== 'string') return false;
   try {
     const url = new URL(value.trim());
@@ -29,7 +61,7 @@ const isValidRelayUrl = (value) => {
   }
 };
 
-const normalizeRelayUrl = (value) => {
+const normalizeRelayUrl = (value: unknown): string => {
   if (typeof value !== 'string') return DEFAULT_RELAY_URL;
   const trimmed = value.trim();
   if (!trimmed || !isValidRelayUrl(trimmed)) return DEFAULT_RELAY_URL;
@@ -39,8 +71,8 @@ const normalizeRelayUrl = (value) => {
 // A deployment can pin the relay endpoint via env (e.g. a self-hosted relay on
 // your own Cloudflare account/domain). When set and valid it overrides the
 // stored setting entirely, so the host connection, the pairing offer, and the
-// status all point at it 鈥?clients then inherit it from the offer automatically.
-const envRelayUrlOverride = () => {
+// status all point at it — clients then inherit it from the offer automatically.
+const envRelayUrlOverride = (): string | null => {
   const raw = process.env.PIARIUM_RELAY_URL;
   if (typeof raw !== 'string' || !raw.trim() || !isValidRelayUrl(raw)) return null;
   return raw.trim();
@@ -69,19 +101,29 @@ export const createRelayService = ({
   // on a random instance. Optional: without it, behavior is pre-lock.
   hostLock = null,
   logger = console,
+}: {
+  crypto: typeof cryptoModule;
+  getLocalPort: () => number;
+  hasRelayDemand?: () => Promise<boolean>;
+  hostLock?: RelayHostLock | null;
+  logger?: Pick<Console, 'info' | 'warn'>;
+  readSettingsFromDisk: () => Promise<RelaySettings>;
+  updateSettingsOnDisk: (
+    mutator: (settings: RelaySettings) => RelaySettings,
+  ) => Promise<RelaySettings>;
 }) => {
   const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDisk, updateSettingsOnDisk });
 
-  let hostClient = null;
-  let status = { state: 'disabled', lastError: null, connectedClients: 0 };
+  let hostClient: RelayHostClient | null = null;
+  let status: RelayServiceStatus = { state: 'disabled', lastError: null, connectedClients: 0 };
   // Re-checks the claim while enabled: a standby instance takes over when the
   // claimant dies; a running host stands down when another process claims.
-  let claimWatchTimer = null;
+  let claimWatchTimer: ReturnType<typeof setInterval> | null = null;
   const CLAIM_WATCH_INTERVAL_MS = 30_000;
 
-  const readConfig = async () => {
+  const readConfig = async (): Promise<RelayConfig> => {
     const settings = await readSettingsFromDisk();
-    const stored = settings?.privateRelay;
+    const stored = asRecord(settings.privateRelay);
     const override = envRelayUrlOverride();
     return {
       enabled: stored?.enabled === true,
@@ -92,38 +134,38 @@ export const createRelayService = ({
     };
   };
 
-  const writeConfig = async (config) => {
+  const writeConfig = async (config: Pick<RelayConfig, 'enabled' | 'relayUrl'>): Promise<void> => {
     await updateSettingsOnDisk((settings) => ({
       ...settings,
       privateRelay: { enabled: config.enabled === true, relayUrl: normalizeRelayUrl(config.relayUrl) },
     }));
   };
 
-  const stopHostClient = () => {
+  const stopHostClient = (): void => {
     if (!hostClient) return;
     hostClient.stop();
     hostClient = null;
   };
 
-  const standbyStatus = (holderPid) => ({
+  const standbyStatus = (holderPid: number | null): RelayServiceStatus => ({
     state: 'standby',
     lastError: `relay host is owned by another local Piarium process (pid ${holderPid})`,
     connectedClients: 0,
   });
 
   // Claim watcher, active while the relay is enabled:
-  //   - standby 鈫?claimant died 鈫?take over (start our host);
-  //   - running 鈫?another live process claimed 鈫?stand down (stop, standby).
+  //   - standby → claimant died → take over (start our host);
+  //   - running → another live process claimed → stand down (stop, standby).
   // This back-off is what actually ends the mutual-eviction fight: the loser
   // must STOP reconnecting, otherwise both keep replacing each other forever.
-  const ensureClaimWatch = (relayUrl) => {
+  const ensureClaimWatch = (relayUrl: string): void => {
     if (!hostLock || claimWatchTimer) return;
     claimWatchTimer = setInterval(() => {
       void (async () => {
         try {
           if (hostClient) {
             if (!hostLock.holdsClaim() && hostLock.liveClaimantPid() !== null) {
-              logger.warn('[Relay] host claim taken by another local instance 鈥?standing down');
+              logger.warn('[Relay] host claim taken by another local instance — standing down');
               const holder = hostLock.liveClaimantPid();
               stopHostClient();
               status = standbyStatus(holder);
@@ -131,24 +173,24 @@ export const createRelayService = ({
             return;
           }
           if (status.state === 'standby' && hostLock.tryClaim()) {
-            logger.warn('[Relay] host claim is free 鈥?taking over the relay host');
+            logger.warn('[Relay] host claim is free — taking over the relay host');
             await start(relayUrl);
           }
         } catch (error) {
-          logger.warn(`[Relay] claim watch failed: ${error?.message ?? error}`);
+          logger.warn(`[Relay] claim watch failed: ${errorMessage(error, 'unknown error')}`);
         }
       })();
     }, CLAIM_WATCH_INTERVAL_MS);
     if (typeof claimWatchTimer.unref === 'function') claimWatchTimer.unref();
   };
 
-  const stopClaimWatch = () => {
+  const stopClaimWatch = (): void => {
     if (!claimWatchTimer) return;
     clearInterval(claimWatchTimer);
     claimWatchTimer = null;
   };
 
-  const start = async (relayUrl, { claim = 'try' } = {}) => {
+  async function start(relayUrl: string, { claim = 'try' }: { claim?: 'force' | 'try' } = {}): Promise<void> {
     if (hostClient) return;
     if (hostLock) {
       const claimed = claim === 'force' ? hostLock.forceClaim() : hostLock.tryClaim();
@@ -170,30 +212,30 @@ export const createRelayService = ({
     });
     status = hostClient.getStatus();
     ensureClaimWatch(relayUrl);
-  };
+  }
 
-  const stop = () => {
+  const stop = (): void => {
     stopClaimWatch();
     stopHostClient();
     if (hostLock) hostLock.release();
     status = { state: 'disabled', lastError: null, connectedClients: 0 };
   };
 
-  const startIfEnabled = async () => {
+  const startIfEnabled = async (): Promise<void> => {
     try {
       const config = await readConfig();
       if (config.enabled) {
         await start(config.relayUrl);
       }
     } catch (error) {
-      logger.warn(`[Relay] startup failed: ${error?.message ?? error}`);
+      logger.warn(`[Relay] startup failed: ${errorMessage(error, 'unknown error')}`);
     }
   };
 
   // Drive the relay lifecycle from demand: run it when a device or pending
   // session uses the relay, stop it when none remain. Called on startup and after
   // pairing/device changes, so the operator never toggles it manually.
-  const reconcile = async () => {
+  const reconcile = async (): Promise<void> => {
     try {
       const demand = await hasRelayDemand();
       const config = await readConfig();
@@ -208,7 +250,7 @@ export const createRelayService = ({
         stop();
       }
     } catch (error) {
-      logger.warn(`[Relay] reconcile failed: ${error?.message ?? error}`);
+      logger.warn(`[Relay] reconcile failed: ${errorMessage(error, 'unknown error')}`);
     }
   };
 
@@ -216,7 +258,7 @@ export const createRelayService = ({
   // JWK). Derived from a public key, so it is not a secret; clients use it to
   // verify that a learned/probed address belongs to this server before trusting
   // it. Independent of whether the relay host is currently enabled.
-  const getServerId = async () => {
+  const getServerId = async (): Promise<string> => {
     const identity = await identityRuntime.getRelayIdentity();
     return identity.serverId;
   };
@@ -240,7 +282,7 @@ export const createRelayService = ({
 
   // Pairing candidate for the unified connection payload (pairing v2). Relay is
   // just another transport: it carries the relay route + E2EE trust anchor, no
-  // embedded token 鈥?the client redeems the one-time pairing secret over the
+  // embedded token — the client redeems the one-time pairing secret over the
   // tunnel like any other candidate. Returns null when the host relay is off, so
   // callers only advertise relay when it is actually reachable. Priority is high
   // (tried after LAN/tunnel) since the relay path is the last-resort transport.
@@ -273,7 +315,7 @@ export const createRelayService = ({
     }
     if (!hostClient) {
       const next = await readConfig();
-      // Force-claim: creating a pairing link is explicit user intent 鈥?the
+      // Force-claim: creating a pairing link is explicit user intent — the
       // instance the user is pairing against MUST be the one devices reach,
       // even if another local process currently holds the machine's claim
       // (its claim watcher sees the takeover and stands down).
@@ -282,12 +324,12 @@ export const createRelayService = ({
     return buildPairingCandidate();
   };
 
-  const registerRoutes = (app) => {
+  const registerRoutes = (app: Express): void => {
     app.get('/api/piarium/relay/status', async (_req, res) => {
       try {
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to read relay status' });
+        res.status(500).json({ error: errorMessage(error, 'Failed to read relay status') });
       }
     });
 
@@ -301,7 +343,7 @@ export const createRelayService = ({
         await start(relayUrl, { claim: 'force' });
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to enable relay' });
+        res.status(500).json({ error: errorMessage(error, 'Failed to enable relay') });
       }
     });
 
@@ -312,7 +354,7 @@ export const createRelayService = ({
         stop();
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to disable relay' });
+        res.status(500).json({ error: errorMessage(error, 'Failed to disable relay') });
       }
     });
 

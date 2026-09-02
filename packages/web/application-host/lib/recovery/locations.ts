@@ -7,21 +7,21 @@ import { RecoveryPrimitiveError } from './errors.js';
 type FsPromises = typeof fs.promises;
 type PathModule = typeof path;
 
-type RecoveryLocationMode = 'application-data' | 'workspace-local' | 'workspace-adjacent' | 'custom';
+export type RecoveryLocationMode = 'application-data' | 'workspace-local' | 'workspace-adjacent' | 'custom';
 type NonCustomRecoveryLocationMode = Exclude<RecoveryLocationMode, 'custom'>;
 
-interface CustomRecoveryLocation {
+export interface CustomRecoveryLocation {
   mode: 'custom';
   customRoot: string;
 }
 
-interface DefaultRecoveryLocation {
+export interface DefaultRecoveryLocation {
   mode: NonCustomRecoveryLocationMode;
 }
 
-type RecoveryLocation = CustomRecoveryLocation | DefaultRecoveryLocation;
+export type RecoveryLocation = CustomRecoveryLocation | DefaultRecoveryLocation;
 
-interface RecoveryLocationDocument {
+export interface RecoveryLocationDocument {
   authorityId: string;
   defaultLocation: RecoveryLocation;
   inheritedLocations: Record<string, RecoveryLocation>;
@@ -31,12 +31,12 @@ interface RecoveryLocationDocument {
   updatedAt: string;
 }
 
-interface RecoveryStorageIdentity {
+export interface RecoveryStorageIdentity {
   canonicalRoot: string;
   workspaceId: string;
 }
 
-interface RecoveryLocationSelection {
+export interface RecoveryLocationSelection {
   defaultLocation: RecoveryLocation;
   document: RecoveryLocationDocument;
   location: RecoveryLocation;
@@ -69,7 +69,7 @@ interface CommitOptions {
   expectedDefaultLocation?: unknown | undefined;
 }
 
-interface RecoveryLocationRegistry {
+export interface RecoveryLocationRegistry {
   authorityId: string;
   operationsRoot: string;
   registryPath: string;

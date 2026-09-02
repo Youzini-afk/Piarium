@@ -1,23 +1,15 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
-  toNumber,
-  toTimestamp
+  asObject,
 } from '../utils/index.js';
 
 const providerId = 'openai';
 const providerName = 'OpenAI';
 const aliases = ['openai', 'codex', 'chatgpt'];
-
-const isConfigured = () => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
-};
 
 export const fetchQuota = async () => {
   const auth = readAuthFile();
@@ -53,23 +45,24 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const primary = payload?.rate_limit?.primary_window ?? null;
-    const secondary = payload?.rate_limit?.secondary_window ?? null;
+    const payload = asObject(await response.json()) ?? {};
+    const rateLimit = asObject(payload.rate_limit) ?? {};
+    const primary = asObject(rateLimit.primary_window);
+    const secondary = asObject(rateLimit.secondary_window);
 
-    const windows = {};
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
     if (primary) {
       windows['5h'] = toUsageWindow({
-        usedPercent: primary.used_percent ?? null,
-        windowSeconds: primary.limit_window_seconds ?? null,
-        resetAt: primary.reset_at ? primary.reset_at * 1000 : null
+        usedPercent: typeof primary.used_percent === 'number' ? primary.used_percent : null,
+        windowSeconds: typeof primary.limit_window_seconds === 'number' ? primary.limit_window_seconds : null,
+        resetAt: typeof primary.reset_at === 'number' ? primary.reset_at * 1000 : null
       });
     }
     if (secondary) {
       windows['weekly'] = toUsageWindow({
-        usedPercent: secondary.used_percent ?? null,
-        windowSeconds: secondary.limit_window_seconds ?? null,
-        resetAt: secondary.reset_at ? secondary.reset_at * 1000 : null
+        usedPercent: typeof secondary.used_percent === 'number' ? secondary.used_percent : null,
+        windowSeconds: typeof secondary.limit_window_seconds === 'number' ? secondary.limit_window_seconds : null,
+        resetAt: typeof secondary.reset_at === 'number' ? secondary.reset_at * 1000 : null
       });
     }
 

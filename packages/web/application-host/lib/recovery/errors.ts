@@ -1,27 +1,27 @@
+import type {
+  JsonObject,
+  WorkspaceRecoveryFailure,
+  WorkspaceRecoveryFailureCode,
+  WorkspaceRecoveryFailureOrigin,
+} from '@piarium/extension-contract';
+
 export interface RecoveryErrorOptions {
   cause?: unknown;
-  retryable?: boolean;
-  details?: unknown;
-  operationId?: string;
-  origin?: string;
+  retryable?: boolean | undefined;
+  details?: JsonObject | undefined;
+  operationId?: string | undefined;
+  origin?: WorkspaceRecoveryFailureOrigin | undefined;
 }
 
-export interface RecoveryFailure {
-  code: string;
-  message: string;
-  retryable: boolean;
-  details?: unknown;
-  operationId?: string;
-  origin?: string;
-}
+export type RecoveryFailure = WorkspaceRecoveryFailure;
 
 export class RecoveryPrimitiveError extends Error {
-  code: string;
+  code: WorkspaceRecoveryFailureCode;
   retryable: boolean;
-  details: unknown;
+  details: JsonObject | undefined;
   operationId: string | undefined;
-  origin: string | undefined;
-  constructor(code: string, message: string, options: RecoveryErrorOptions = {}) {
+  origin: WorkspaceRecoveryFailureOrigin | undefined;
+  constructor(code: WorkspaceRecoveryFailureCode, message: string, options: RecoveryErrorOptions = {}) {
     super(message, options.cause ? { cause: options.cause } : undefined);
     this.name = 'RecoveryPrimitiveError';
     this.code = code;
@@ -32,7 +32,10 @@ export class RecoveryPrimitiveError extends Error {
   }
 }
 
-export const recoveryFailure = (error: unknown, fallbackCode = 'internal'): RecoveryFailure => {
+export const recoveryFailure = (
+  error: unknown,
+  fallbackCode: WorkspaceRecoveryFailureCode = 'internal',
+): RecoveryFailure => {
   if (error instanceof RecoveryPrimitiveError) {
     return {
       code: error.code,
@@ -56,7 +59,10 @@ export const recoveryFailure = (error: unknown, fallbackCode = 'internal'): Reco
   };
 };
 
-export const failedRecoveryResult = (error: unknown, fallbackCode?: string): { failure: RecoveryFailure; status: 'failed' } => ({
+export const failedRecoveryResult = (
+  error: unknown,
+  fallbackCode?: WorkspaceRecoveryFailureCode,
+): { failure: RecoveryFailure; status: 'failed' } => ({
   failure: recoveryFailure(error, fallbackCode),
   status: 'failed',
 });

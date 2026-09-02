@@ -1,9 +1,10 @@
-// @ts-nocheck
 import {
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   PIARIUM_CORE_SERVICE_VERSION,
   PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
 } from '@piarium/extension-contract';
+import type { JsonObject, JsonValue, PiariumExtensionStorageAddress } from '@piarium/extension-contract';
+import type { HostServiceHandler, HostServiceOwnerIdentity, HostServiceProvision } from '@piarium/extension-host';
 
 const OWNER = {
   entrypointId: 'workbench-layout',
@@ -11,21 +12,55 @@ const OWNER = {
   generation: 1,
 };
 
-const object = (value, label) => {
+interface WorkbenchLayoutStorage {
+  read(address: PiariumExtensionStorageAddress): Promise<unknown>;
+  update(
+    address: PiariumExtensionStorageAddress,
+    expectedRevision: number,
+    schemaVersion: number,
+    document: JsonObject,
+  ): Promise<unknown>;
+}
+
+interface WorkbenchLayoutRuntime {
+  catalog: {
+    snapshot(): Promise<{ extensions: Array<{ manifest: { id: string; version: string } }> }>;
+  };
+  services: {
+    drainOwner(owner: HostServiceOwnerIdentity): Promise<void>;
+    removeOwner(owner: HostServiceOwnerIdentity): void;
+    replaceOwner(owner: HostServiceOwnerIdentity, provisions: readonly HostServiceProvision[]): Promise<void>;
+  };
+  storage: WorkbenchLayoutStorage;
+}
+
+const object = (value: unknown, label: string): JsonObject => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object`);
   }
-  return value;
+  return value as JsonObject;
 };
 
-const text = (value, label) => {
+const text = (value: unknown, label: string): string => {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new TypeError(`${label} must be a non-empty string`);
   }
   return value.trim();
 };
 
-const addressFor = (input) => {
+const jsonValue = (value: unknown, label = 'value'): JsonValue => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map((entry, index) => jsonValue(entry, `${label}[${index}]`));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, jsonValue(entry, `${label}.${key}`)]),
+    );
+  }
+  throw new TypeError(`${label} must be JSON-safe`);
+};
+
+const addressFor = (input: JsonObject): PiariumExtensionStorageAddress => {
   const profileId = text(input.profileId, 'profileId');
   const workspaceId = input.workspaceId === undefined || input.workspaceId === null
     ? null
@@ -37,26 +72,30 @@ const addressFor = (input) => {
   };
 };
 
-export const createWorkbenchLayoutServiceHandler = (storage) => async (method, args) => {
+export const createWorkbenchLayoutServiceHandler = (
+  storage: WorkbenchLayoutStorage,
+): ((method: string, args: JsonValue[]) => Promise<JsonValue>) => async (method, args) => {
   const input = object(args[0], 'workbench layout request');
   const address = addressFor(input);
-  if (method === 'read') return storage.read(address);
+  if (method === 'read') return jsonValue(await storage.read(address));
   if (method === 'write') {
-    if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+    if (typeof input.expectedRevision !== 'number' || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
       throw new TypeError('expectedRevision must be a non-negative integer');
     }
     const document = object(input.document, 'document');
-    return storage.update(address, input.expectedRevision, 1, document);
+    return jsonValue(await storage.update(address, input.expectedRevision, 1, document));
   }
   throw new Error(`Unsupported workbench layout service method: ${method}`);
 };
 
-export const registerBuiltinWorkbenchLayoutService = async (extensionRuntime) => {
+export const registerBuiltinWorkbenchLayoutService = async (
+  extensionRuntime: WorkbenchLayoutRuntime,
+): Promise<() => Promise<void>> => {
   const catalog = await extensionRuntime.catalog.snapshot();
   const entry = catalog.extensions.find((candidate) => candidate.manifest.id === OWNER.extensionId);
   if (!entry) throw new Error('Built-in IDE Workbench extension is not installed');
   const owner = { ...OWNER, extensionVersion: entry.manifest.version };
-  const handler = createWorkbenchLayoutServiceHandler(extensionRuntime.storage);
+  const handler: HostServiceHandler = createWorkbenchLayoutServiceHandler(extensionRuntime.storage);
   await extensionRuntime.services.replaceOwner(owner, [{
     descriptor: {
       id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,

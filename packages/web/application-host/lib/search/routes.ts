@@ -1,9 +1,15 @@
-// @ts-nocheck
 import { isDocumentAuthorityError } from '../documents/errors.js';
 import { createFsSearchRuntime } from '../fs/search.js';
-import { createWorkspaceContentSearch } from './content.js';
+import type { Express, Request, RequestHandler, Response } from 'express';
+import type fs from 'node:fs';
+import type os from 'node:os';
+import type path from 'node:path';
+import {
+  createWorkspaceContentSearch,
+  type WorkspaceContentSearchDependencies,
+} from './content.js';
 
-const sendError = (res, error) => {
+const sendError = (res: Response, error: unknown): Response => {
   if (isDocumentAuthorityError(error)) {
     return res.status(error.statusCode).json({
       error: error.message,
@@ -14,7 +20,25 @@ const sendError = (res, error) => {
   return res.status(500).json({ error: message, reason: 'failed' });
 };
 
-const readBody = (req) => (req.body && typeof req.body === 'object' ? req.body : {});
+const readBody = (req: Request): Record<string, unknown> => (
+  req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : {}
+);
+
+interface ResolvedProjectDirectory {
+  directory?: string | null | undefined;
+  resolved?: string | undefined;
+}
+
+interface ResolveSearchDirectoryOptions {
+  directory: unknown;
+  normalizeDirectoryPath?: ((value: string) => string) | undefined;
+  os: Pick<typeof os, 'homedir'>;
+  path: typeof path;
+  req: Request;
+  resolveProjectDirectory(req: Request): Promise<ResolvedProjectDirectory | null>;
+}
 
 const resolveSearchDirectory = async ({
   req,
@@ -23,10 +47,11 @@ const resolveSearchDirectory = async ({
   os,
   normalizeDirectoryPath,
   resolveProjectDirectory,
-}) => {
+}: ResolveSearchDirectoryOptions): Promise<string> => {
   const raw = typeof directory === 'string' ? directory.trim() : '';
   const resolvedProject = await resolveProjectDirectory(req);
-  const fallback = resolvedProject?.resolved
+  const fallback = resolvedProject?.directory
+    || resolvedProject?.resolved
     || (typeof os.homedir === 'function' ? os.homedir() : process.cwd());
   const target = raw
     ? (path.isAbsolute(raw) ? raw : path.resolve(fallback, raw))
@@ -38,16 +63,29 @@ const resolveSearchDirectory = async ({
     const root = resolvedProject.resolved;
     const relative = path.relative(root, normalized);
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      const error = new Error('Search directory is outside the workspace');
-      error.statusCode = 403;
-      error.code = 'path-escape';
-      throw error;
+      throw Object.assign(new Error('Search directory is outside the workspace'), {
+        code: 'path-escape',
+        statusCode: 403,
+      });
     }
   }
   return normalized;
 };
 
-export const registerWorkspaceSearchRoutes = (app, {
+export interface WorkspaceSearchRouteOptions {
+  documents: WorkspaceContentSearchDependencies['documents'];
+  env?: NodeJS.ProcessEnv | undefined;
+  fsPromises: typeof fs.promises;
+  normalizeDirectoryPath?: ((value: string) => string) | undefined;
+  os: Pick<typeof os, 'homedir'>;
+  path: typeof path;
+  resolveGitBinaryForSpawn(...args: string[]): string;
+  resolveProjectDirectory(req: Request): Promise<ResolvedProjectDirectory | null>;
+  spawn: WorkspaceContentSearchDependencies['spawn'];
+  uiAuthController?: { requireAuth?: RequestHandler | undefined } | undefined;
+}
+
+export const registerWorkspaceSearchRoutes = (app: Express, {
   documents,
   uiAuthController,
   fsPromises,
@@ -58,7 +96,7 @@ export const registerWorkspaceSearchRoutes = (app, {
   normalizeDirectoryPath,
   resolveProjectDirectory,
   env = process.env,
-}) => {
+}: WorkspaceSearchRouteOptions) => {
   const requireAuth = uiAuthController?.requireAuth
     ?? ((_req, _res, next) => next());
   const fileSearch = createFsSearchRuntime({
@@ -104,8 +142,8 @@ export const registerWorkspaceSearchRoutes = (app, {
       return res.json(files.map((file) => file.relativePath));
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (error?.code === 'path-escape') {
-        return res.status(403).json({ error: error.message, reason: 'path-escape' });
+      if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'path-escape') {
+        return res.status(403).json({ error: error instanceof Error ? error.message : 'Path escaped', reason: 'path-escape' });
       }
       return sendError(res, error);
     } finally {
@@ -129,7 +167,7 @@ export const registerWorkspaceSearchRoutes = (app, {
         res.status(200);
         res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
-        res.flushHeaders?.();
+        res.flushHeaders();
         const result = await contentSearch.searchContent(body, {
           collect: false,
           generation: Number.isFinite(generation) ? generation : 0,
@@ -137,7 +175,7 @@ export const registerWorkspaceSearchRoutes = (app, {
           onBatch: (hits) => (
             res.writableEnded || res.write(`${JSON.stringify({ type: 'batch', hits })}\n`)
           ),
-          onDrain: () => new Promise((resolve) => res.once('drain', resolve)),
+          onDrain: () => new Promise<void>((resolve) => { res.once('drain', () => resolve()); }),
         });
         if (!res.writableEnded) {
           const finalResult = result.status === 'ready'

@@ -1,5 +1,21 @@
-// @ts-nocheck
-export const createRequestSecurityRuntime = (deps) => {
+import type { IncomingHttpHeaders } from 'node:http';
+
+export interface SecurityRequest {
+  headers: IncomingHttpHeaders;
+  socket?: object | undefined;
+}
+
+export interface UpgradeSocket {
+  destroyed?: boolean | undefined;
+  destroy(): void;
+  write(value: string | Buffer): unknown;
+}
+
+export interface RequestSecurityDependencies {
+  readSettingsFromDisk(): Promise<Record<string, unknown>>;
+}
+
+export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) => {
   const { readSettingsFromDisk } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
   // matches the server host: the desktop shell, the iOS Capacitor WebView
@@ -13,7 +29,7 @@ export const createRequestSecurityRuntime = (deps) => {
     'https://localhost',
   ]);
 
-  const getUiSessionTokenFromRequest = (req) => {
+  const getUiSessionTokenFromRequest = (req: SecurityRequest | null | undefined): string | null => {
     const cookieHeader = req?.headers?.cookie;
     if (!cookieHeader || typeof cookieHeader !== 'string') {
       return null;
@@ -34,20 +50,24 @@ export const createRequestSecurityRuntime = (deps) => {
     return null;
   };
 
-  const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
+  const rejectWebSocketUpgrade = (
+    socket: UpgradeSocket | null | undefined,
+    statusCode: number,
+    reason: unknown,
+  ): void => {
     if (!socket || socket.destroyed) {
       return;
     }
 
     const message = typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : 'Bad Request';
     const body = Buffer.from(message, 'utf8');
-    const statusText = {
+    const statusText = ({
       400: 'Bad Request',
       401: 'Unauthorized',
       403: 'Forbidden',
       404: 'Not Found',
       500: 'Internal Server Error',
-    }[statusCode] || 'Bad Request';
+    } as Record<number, string>)[statusCode] || 'Bad Request';
 
     try {
       socket.write(
@@ -58,23 +78,30 @@ export const createRequestSecurityRuntime = (deps) => {
       );
       socket.write(body);
     } catch {
+      // The peer may already have closed the upgrade socket.
     }
 
     try {
       socket.destroy();
     } catch {
+      // Destroy is best-effort after the rejection response.
     }
   };
 
-  const getRequestOriginCandidates = async (req) => {
-    const origins = new Set();
+  const getRequestOriginCandidates = async (req: SecurityRequest): Promise<Set<string>> => {
+    const origins = new Set<string>();
     const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
-      ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
+      ? req.headers['x-forwarded-proto'].split(',')[0]?.trim().toLowerCase() ?? ''
       : '';
-    const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
+    const encrypted = Boolean(
+      req.socket
+      && 'encrypted' in req.socket
+      && req.socket.encrypted === true
+    );
+    const protocol = forwardedProto || (encrypted ? 'https' : 'http');
 
     const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-      ? req.headers['x-forwarded-host'].split(',')[0].trim()
+      ? req.headers['x-forwarded-host'].split(',')[0]?.trim() ?? ''
       : '';
     const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
 
@@ -97,12 +124,13 @@ export const createRequestSecurityRuntime = (deps) => {
         origins.add(new URL(settings.publicOrigin.trim()).origin);
       }
     } catch {
+      // A settings read failure must not grant an additional allowed origin.
     }
 
     return origins;
   };
 
-  const isRequestOriginAllowed = async (req) => {
+  const isRequestOriginAllowed = async (req: SecurityRequest): Promise<boolean> => {
     const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;

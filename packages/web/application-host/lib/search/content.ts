@@ -1,4 +1,5 @@
-// @ts-nocheck
+import type path from 'node:path';
+
 const CONTENT_SEARCH_EXCLUDED_GLOBS = [
   '!**/node_modules/**',
   '!**/.git/**',
@@ -10,7 +11,67 @@ const CONTENT_SEARCH_EXCLUDED_GLOBS = [
   '!**/coverage/**',
 ];
 
-const toResourceId = (root, absolutePath, pathModule) => {
+type PathModule = typeof path;
+
+export interface WorkspaceSearchHit {
+  column: number;
+  line: number;
+  preview: string;
+  resource: { resourceId: string; workspaceId: string };
+}
+
+export type WorkspaceContentSearchResult =
+  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: 'ready' }
+  | { generation: number | undefined; status: 'empty' | 'cancelled' }
+  | { generation: number | undefined; message: string; status: 'failure' };
+
+export interface WorkspaceContentSearchRequest {
+  includeHidden?: boolean | undefined;
+  maxResults?: number | undefined;
+  query?: string | undefined;
+  workspaceId?: string | undefined;
+}
+
+export interface WorkspaceContentSearchOptions {
+  collect?: boolean | undefined;
+  generation?: number | undefined;
+  onBatch?: ((hits: WorkspaceSearchHit[]) => boolean | void) | undefined;
+  onDrain?: (() => Promise<void>) | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+export interface SearchReadable {
+  on(event: 'data', listener: (chunk: string) => void): unknown;
+  pause(): void;
+  resume(): void;
+  setEncoding(encoding: BufferEncoding): void;
+}
+
+export interface SearchDiagnosticsReadable {
+  on(event: 'data', listener: (chunk: unknown) => void): unknown;
+}
+
+export interface SearchChild {
+  kill(): unknown;
+  on(event: 'error', listener: (error: unknown) => void): unknown;
+  on(event: 'close', listener: (code: number | null) => void): unknown;
+  stderr: SearchDiagnosticsReadable;
+  stdout: SearchReadable;
+}
+
+export interface WorkspaceContentSearchDependencies {
+  documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
+  env?: NodeJS.ProcessEnv | undefined;
+  pathModule: PathModule;
+  spawn(command: string, args: string[], options: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: ['ignore', 'pipe', 'pipe'];
+    windowsHide: true;
+  }): SearchChild;
+}
+
+const toResourceId = (root: string, absolutePath: string, pathModule: PathModule): string | null => {
   const relative = pathModule.relative(root, absolutePath);
   if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
     return null;
@@ -18,23 +79,41 @@ const toResourceId = (root, absolutePath, pathModule) => {
   return relative.split(pathModule.sep).join('/');
 };
 
-const parseRipgrepMatch = (line, workspaceId, root, pathModule) => {
-  let payload;
+const parseRipgrepMatch = (
+  line: string,
+  workspaceId: string,
+  root: string,
+  pathModule: PathModule,
+): WorkspaceSearchHit | null => {
+  let payload: unknown;
   try {
     payload = JSON.parse(line);
   } catch {
     return null;
   }
-  if (!payload || payload.type !== 'match' || !payload.data) return null;
-  const absolutePath = typeof payload.data.path?.text === 'string' ? payload.data.path.text : '';
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (record.type !== 'match' || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) return null;
+  const data = record.data as Record<string, unknown>;
+  const pathValue = data.path && typeof data.path === 'object' && !Array.isArray(data.path)
+    ? data.path as Record<string, unknown>
+    : {};
+  const absolutePath = typeof pathValue.text === 'string' ? pathValue.text : '';
   if (!absolutePath) return null;
   const resourceId = toResourceId(root, absolutePath, pathModule);
   if (!resourceId) return null;
-  const lineNumber = Number(payload.data.line_number);
-  const lineText = typeof payload.data.lines?.text === 'string' ? payload.data.lines.text : '';
+  const lineNumber = Number(data.line_number);
+  const lines = data.lines && typeof data.lines === 'object' && !Array.isArray(data.lines)
+    ? data.lines as Record<string, unknown>
+    : {};
+  const lineText = typeof lines.text === 'string' ? lines.text : '';
   const preview = lineText.replace(/\r?\n$/, '');
-  const byteOffset = Array.isArray(payload.data.submatches) && payload.data.submatches[0]
-    ? Number(payload.data.submatches[0].start)
+  const firstSubmatch = Array.isArray(data.submatches) && data.submatches[0]
+    && typeof data.submatches[0] === 'object' && !Array.isArray(data.submatches[0])
+    ? data.submatches[0] as Record<string, unknown>
+    : null;
+  const byteOffset = firstSubmatch
+    ? Number(firstSubmatch.start)
     : 0;
   // ripgrep reports UTF-8 byte offsets while Monaco columns are UTF-16 code
   // units. Decode the matched line prefix so non-ASCII text lands on the exact
@@ -56,8 +135,11 @@ export const createWorkspaceContentSearch = ({
   spawn,
   pathModule,
   env = process.env,
-}) => {
-  const searchContent = async (request, options = {}) => {
+}: WorkspaceContentSearchDependencies) => {
+  const searchContent = async (
+    request: WorkspaceContentSearchRequest,
+    options: WorkspaceContentSearchOptions = {},
+  ): Promise<WorkspaceContentSearchResult> => {
     const generation = options.generation;
     const signal = options.signal;
     const query = typeof request?.query === 'string' ? request.query : '';
@@ -80,7 +162,8 @@ export const createWorkspaceContentSearch = ({
       return { status: 'failure', generation, message };
     }
 
-    const maxResults = Number.isFinite(request?.maxResults) && request.maxResults > 0
+    const maxResults = typeof request.maxResults === 'number'
+      && Number.isFinite(request.maxResults) && request.maxResults > 0
       ? Math.floor(request.maxResults)
       : null;
     const args = [
@@ -94,8 +177,8 @@ export const createWorkspaceContentSearch = ({
     if (request?.includeHidden) args.push('--hidden');
     args.push('--', query.trim(), workspace.root);
 
-    return await new Promise((resolve) => {
-      let child;
+    return await new Promise<WorkspaceContentSearchResult>((resolve) => {
+      let child: SearchChild;
       try {
         child = spawn('rg', args, {
           cwd: workspace.root,
@@ -114,9 +197,9 @@ export const createWorkspaceContentSearch = ({
 
       let settled = false;
       let stdoutBuffer = '';
-      const hits = options.collect === false ? null : [];
+      const hits: WorkspaceSearchHit[] | null = options.collect === false ? null : [];
       let hitCount = 0;
-      const publish = (batch) => {
+      const publish = (batch: WorkspaceSearchHit[]): boolean => {
         if (batch.length === 0) return false;
         const remaining = maxResults === null ? batch.length : Math.max(0, maxResults - hitCount);
         const accepted = remaining >= batch.length ? batch : batch.slice(0, remaining);
@@ -132,14 +215,14 @@ export const createWorkspaceContentSearch = ({
         }
         return maxResults !== null && hitCount >= maxResults;
       };
-      const ready = () => ({ status: 'ready', generation, hits: hits ?? [] });
-      const finish = (result) => {
+      const ready = (): WorkspaceContentSearchResult => ({ status: 'ready', generation, hits: hits ?? [] });
+      const finish = (result: WorkspaceContentSearchResult): void => {
         if (settled) return;
         settled = true;
         signal?.removeEventListener('abort', onAbort);
         resolve(result);
       };
-      const onAbort = () => {
+      const onAbort = (): void => {
         try {
           child.kill();
         } catch {

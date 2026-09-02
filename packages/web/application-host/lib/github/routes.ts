@@ -1,24 +1,61 @@
-// @ts-nocheck
 import {
   configureGitHubGitAuthor as defaultConfigureGitHubGitAuthor,
   installTerminalGitHubAuth as defaultInstallTerminalGitHubAuth,
 } from './terminal-auth.js';
+import type { Express, Request } from 'express';
+import type { Octokit } from '@octokit/rest';
+import type { GitHubRepoRef, GitHubUser } from './types.js';
+import type { RepoNetworkEntry } from './repo/fork-detection.js';
+
+type GitHubLibraries = typeof import('./index.js');
+type CheckRun = Awaited<ReturnType<Octokit['rest']['checks']['listForRef']>>['data']['check_runs'][number];
+type CombinedStatus = Awaited<ReturnType<Octokit['rest']['repos']['getCombinedStatusForRef']>>['data']['statuses'][number];
+type IssueListItem = Awaited<ReturnType<Octokit['rest']['issues']['listForRepo']>>['data'][number];
+type SearchIssueItem = Awaited<ReturnType<Octokit['rest']['search']['issuesAndPullRequests']>>['data']['items'][number];
+type IssueItem = IssueListItem | SearchIssueItem;
+type PullListItem = Awaited<ReturnType<Octokit['rest']['pulls']['list']>>['data'][number];
+type PullDetails = Awaited<ReturnType<Octokit['rest']['pulls']['get']>>['data'];
+type WorkflowJob = Awaited<ReturnType<Octokit['rest']['actions']['listJobsForWorkflowRun']>>['data']['jobs'][number];
+type CheckAnnotation = Awaited<ReturnType<Octokit['rest']['checks']['listAnnotations']>>['data'][number];
+
+interface GitHubRouteDependencies {
+  configureGitHubGitAuthor?: typeof defaultConfigureGitHubGitAuthor;
+  getGitHubLibraries?: () => Promise<unknown>;
+  installTerminalGitHubAuth?: typeof defaultInstallTerminalGitHubAuth;
+}
+
+interface TimedCacheEntry { data: Record<string, unknown>; fetchedAt: number }
+interface ContextCacheEntry extends TimedCacheEntry { includeCheckDetails: boolean }
+
+const errorRecord = (error: unknown): Record<string, unknown> => (
+  error && typeof error === 'object' ? error as Record<string, unknown> : {}
+);
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+const errorStatus = (error: unknown): unknown => errorRecord(error).status;
+const errorResponseData = (error: unknown): Record<string, unknown> => {
+  const response = errorRecord(error).response;
+  if (!response || typeof response !== 'object') return {};
+  const data = (response as Record<string, unknown>).data;
+  return data && typeof data === 'object' ? data as Record<string, unknown> : {};
+};
 
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
 // serial GitHub API calls; under GitHub secondary-rate-limiting a single request
 // can otherwise hang 20s+. We bound it so the route fails fast instead of holding
-// the response (and a client socket) open 鈥?the client keeps its last-known
+// the response (and a client socket) open — the client keeps its last-known
 // status on error, and a later poll fills it in.
 const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
-const prStatusCache = new Map();
-let resolvedAuthLoginPromise = null;
+const prStatusCache = new Map<string, TimedCacheEntry>();
+let resolvedAuthLoginPromise: Promise<string | null> | null = null;
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
-const prContextCache = new Map();
+const prContextCache = new Map<string, ContextCacheEntry>();
 
-function invalidatePrContextCache(directory, number) {
+function invalidatePrContextCache(directory: string, number?: number | null): void {
   for (const key of prContextCache.keys()) {
     try {
       const [cachedDirectory, cachedNumber] = JSON.parse(key);
@@ -38,8 +75,8 @@ function invalidatePrContextCache(directory, number) {
 // A re-run leaves the previous completed check run in the listForRef payload
 // alongside the new in-progress one. GitHub's UI shows only the latest run
 // per (app, name); mirror that so counts match what users see on github.com.
-function dedupeCheckRuns(checkRuns) {
-  const byName = new Map();
+function dedupeCheckRuns(checkRuns: CheckRun[]): CheckRun[] {
+  const byName = new Map<string, CheckRun>();
   for (const run of checkRuns) {
     const key = `${run?.app?.id ?? run?.app?.slug ?? ''}::${run?.name ?? ''}`;
     const previous = byName.get(key);
@@ -57,7 +94,7 @@ function dedupeCheckRuns(checkRuns) {
   return Array.from(byName.values());
 }
 
-function summarizeCheckRuns(checkRuns) {
+function summarizeCheckRuns(checkRuns: CheckRun[]) {
   const counts = { success: 0, failure: 0, pending: 0, inProgress: 0, queued: 0 };
   let startedAt = null;
   for (const run of checkRuns) {
@@ -94,7 +131,7 @@ function summarizeCheckRuns(checkRuns) {
   return { state, total, ...counts, ...(startedAt ? { startedAt } : {}) };
 }
 
-function summarizeCombinedStatuses(statuses) {
+function summarizeCombinedStatuses(statuses: CombinedStatus[]) {
   const counts = { success: 0, failure: 0, pending: 0 };
   statuses.forEach((s) => {
     if (s.state === 'success') counts.success += 1;
@@ -108,26 +145,30 @@ function summarizeCombinedStatuses(statuses) {
   return { state, total, ...counts, inProgress: counts.pending, queued: 0 };
 }
 
-function withTimeout(promise, timeoutMs, label) {
-  let timer;
-  const timeout = new Promise((_resolve, reject) => {
+function withTimeout<Result>(promise: Promise<Result>, timeoutMs: number, label: string): Promise<Result> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
-      error.code = 'ETIMEDOUT';
-      reject(error);
+      reject(Object.assign(new Error(`${label} timed out after ${timeoutMs}ms`), { code: 'ETIMEDOUT' }));
     }, timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
-function getRequestedRepo(req) {
+function getRequestedRepo(req: Request): Pick<GitHubRepoRef, 'owner' | 'repo'> | null {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
   const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
   return owner && repo ? { owner, repo } : null;
 }
 
-async function resolveRepoForRequest(octokit, directory, requestedRepo) {
+async function resolveRepoForRequest(
+  octokit: Octokit,
+  directory: string,
+  requestedRepo: Pick<GitHubRepoRef, 'owner' | 'repo'> | null,
+): Promise<GitHubRepoRef | Pick<GitHubRepoRef, 'owner' | 'repo'> | null> {
   const { resolveGitHubRepoFromDirectory } = await import('./index.js');
   const { repo } = await resolveGitHubRepoFromDirectory(directory);
   if (!requestedRepo) {
@@ -145,7 +186,7 @@ async function resolveRepoForRequest(octokit, directory, requestedRepo) {
   return allowed ? requestedRepo : null;
 }
 
-function setPrStatusCache(key, data, fetchedAt) {
+function setPrStatusCache(key: string, data: Record<string, unknown>, fetchedAt: number): void {
   // Evict oldest entry when cache exceeds max size
   if (prStatusCache.size >= PR_STATUS_CACHE_MAX_ENTRIES && !prStatusCache.has(key)) {
     const oldest = prStatusCache.entries().next().value;
@@ -156,18 +197,21 @@ function setPrStatusCache(key, data, fetchedAt) {
   prStatusCache.set(key, { data, fetchedAt });
 }
 
-export function registerGitHubRoutes(app, dependencies = {}) {
-  let githubLibraries = null;
-  const getGitHubLibraries = dependencies.getGitHubLibraries || (async () => {
+export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDependencies = {}): void {
+  let githubLibraries: GitHubLibraries | null = null;
+  const loadGitHubLibraries = dependencies.getGitHubLibraries || (async () => {
     if (!githubLibraries) {
       githubLibraries = await import('./index.js');
     }
     return githubLibraries;
   });
+  const getGitHubLibraries = async (): Promise<GitHubLibraries> => (
+    await loadGitHubLibraries() as GitHubLibraries
+  );
   const installTerminalGitHubAuth = dependencies.installTerminalGitHubAuth || defaultInstallTerminalGitHubAuth;
   const configureGitHubGitAuthor = dependencies.configureGitHubGitAuthor || defaultConfigureGitHubGitAuthor;
 
-  const getGitHubUserSummary = async (octokit) => {
+  const getGitHubUserSummary = async (octokit: Octokit): Promise<GitHubUser> => {
     const me = await octokit.rest.users.getAuthenticated();
 
     let email = typeof me.data.email === 'string' ? me.data.email : null;
@@ -192,8 +236,8 @@ export function registerGitHubRoutes(app, dependencies = {}) {
     };
   };
 
-  const isGitHubAuthInvalid = (error) => error?.status === 401 || error?.status === 403;
-  const isGitHubResourceUnavailable = (error) => error?.status === 403 || error?.status === 404;
+  const isGitHubAuthInvalid = (error: unknown): boolean => errorStatus(error) === 401 || errorStatus(error) === 403;
+  const isGitHubResourceUnavailable = (error: unknown): boolean => errorStatus(error) === 403 || errorStatus(error) === 404;
 
   app.get('/api/github/auth/status', async (_req, res) => {
     try {
@@ -201,7 +245,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       const { getGhCliToken } = await import('./gh-cli-credential.js');
 
       const auth = getGitHubAuth();
-      let accounts = getGitHubAuthAccounts();
+      let accounts: Array<Record<string, unknown>> = getGitHubAuthAccounts().map((account) => ({ ...account }));
       const ghCliDisabled = isGhCliDisabled();
       const ghCliActive = isGhCliActive();
       const ghToken = getGhCliToken();
@@ -222,17 +266,18 @@ export function registerGitHubRoutes(app, dependencies = {}) {
 
       const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
       if (ghCliUser) {
-        accounts = accounts
-          .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
-          .concat({
+        accounts = [
+          ...accounts.map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) })),
+          {
             id: GH_CLI_ACCOUNT_ID,
             user: ghCliUser,
             current: ghCliCurrent,
             source: 'gh-cli',
-          });
+          },
+        ];
       }
 
-      const buildGhCli = (activeUser = null) => ({
+      const buildGhCli = (activeUser: GitHubUser | null = null) => ({
         available: ghToken !== null,
         disabled: ghCliDisabled,
         active: ghCliCurrent,
@@ -254,7 +299,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         }
       }
 
-      const fallback = usingOwnToken ? auth.user : null;
+      const fallback = usingOwnToken ? auth?.user : null;
       const mergedUser = user || fallback;
       return res.json({
         connected: true,
@@ -265,7 +310,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to get GitHub auth status:', error);
-      return res.status(500).json({ error: error.message || 'Failed to get GitHub auth status' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to get GitHub auth status') });
     }
   });
 
@@ -279,7 +324,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ disabled: isGhCliDisabled() });
     } catch (error) {
       console.error('Failed to update gh CLI setting:', error);
-      return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to update gh CLI setting') });
     }
   });
 
@@ -311,7 +356,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to start GitHub device flow:', error);
-      return res.status(500).json({ error: error.message || 'Failed to start GitHub device flow' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to start GitHub device flow') });
     }
   });
 
@@ -344,7 +389,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       const accessToken = payload?.access_token;
-      if (!accessToken) {
+      if (typeof accessToken !== 'string' || !accessToken) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
 
@@ -367,7 +412,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to complete GitHub device flow:', error);
-      return res.status(500).json({ error: error.message || 'Failed to complete GitHub device flow' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to complete GitHub device flow') });
     }
   });
 
@@ -388,9 +433,10 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         const { createOctokit } = await import('./octokit.js');
         const user = await getGitHubUserSummary(createOctokit(ghToken));
         await setGhCliActive(true);
-        const accounts = getGitHubAuthAccounts()
-          .map((account) => ({ ...account, current: false }))
-          .concat({ id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' });
+        const accounts: Array<Record<string, unknown>> = [
+          ...getGitHubAuthAccounts().map((account) => ({ ...account, current: false })),
+          { id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' },
+        ];
         return res.json({
           connected: true,
           user,
@@ -410,7 +456,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       const auth = getGitHubAuth();
-      let accounts = getGitHubAuthAccounts();
+      let accounts: Array<Record<string, unknown>> = getGitHubAuthAccounts().map((account) => ({ ...account }));
       if (!auth?.accessToken) {
         return res.json({ connected: false, accounts });
       }
@@ -463,7 +509,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to activate GitHub account:', error);
-      return res.status(500).json({ error: error.message || 'Failed to activate GitHub account' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to activate GitHub account') });
     }
   });
 
@@ -490,7 +536,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to sync GitHub auth to terminal:', error);
-      return res.status(500).json({ error: error.message || 'Failed to sync GitHub auth to terminal' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to sync GitHub auth to terminal') });
     }
   });
 
@@ -511,7 +557,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to configure Git author from GitHub:', error);
-      return res.status(500).json({ error: error.message || 'Failed to configure Git author from GitHub' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to configure Git author from GitHub') });
     }
   });
 
@@ -522,7 +568,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ success: true, removed });
     } catch (error) {
       console.error('Failed to disconnect GitHub:', error);
-      return res.status(500).json({ error: error.message || 'Failed to disconnect GitHub' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to disconnect GitHub') });
     }
   });
 
@@ -546,7 +592,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json(user);
     } catch (error) {
       console.error('Failed to fetch GitHub user:', error);
-      return res.status(500).json({ error: error.message || 'Failed to fetch GitHub user' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to fetch GitHub user') });
     }
   });
 
@@ -581,17 +627,16 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       // Intercept res.json to cache successful responses before sending
-      // Only caches responses with connected:true 鈥?error/edge-case responses are not cached
+      // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
-      res.json = (data) => {
+      res.json = (data: Record<string, unknown>) => {
         if (data && data.connected === true) {
           // Freshness stamp travels with the payload (and survives cache
           // serves) so clients can refuse to overwrite newer data with a
           // stale cached response.
-          if (typeof data.fetchedAt !== 'number') {
-            data.fetchedAt = Date.now();
-          }
-          setPrStatusCache(cacheKey, data, data.fetchedAt);
+          const fetchedAt = typeof data.fetchedAt === 'number' ? data.fetchedAt : Date.now();
+          data.fetchedAt = fetchedAt;
+          setPrStatusCache(cacheKey, data, fetchedAt);
         }
         return originalJson(data);
       };
@@ -721,19 +766,19 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         resolvedRemoteName: resolvedStatus.resolvedRemoteName ?? null,
       });
     } catch (error) {
-      if (error?.status === 401) {
+      if (errorStatus(error) === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
       }
-      // Transient failures 鈥?a rate limit, or the overall resolve timeout
-      // firing 鈥?are expected under heavy load and should not be logged as hard
+      // Transient failures — a rate limit, or the overall resolve timeout
+      // firing — are expected under heavy load and should not be logged as hard
       // errors. Record a rate-limit cooldown when applicable, then serve the
       // last cached status (even if stale) or a 503 so the client keeps its
       // last-known value instead of clearing the badge.
       const { noteIfGitHubRateLimit } = await import('./rate-limit.js');
       const wasRateLimited = noteIfGitHubRateLimit(error);
-      const wasTimeout = error?.code === 'ETIMEDOUT';
+      const wasTimeout = errorRecord(error).code === 'ETIMEDOUT';
       if (wasRateLimited || wasTimeout) {
         const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
         const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
@@ -757,7 +802,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         });
       }
       console.error('Failed to load GitHub PR status:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load GitHub PR status' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to load GitHub PR status') });
     }
   });
 
@@ -799,7 +844,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
 
-      const normalizeBranchRef = (value, remoteNames = new Set()) => {
+      const normalizeBranchRef = (value: string, remoteNames: Set<string> = new Set()): string => {
         if (!value) {
           return value;
         }
@@ -899,7 +944,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
               branch: head,
             });
           } catch (branchError) {
-            if (branchError?.status === 404) {
+            if (errorStatus(branchError) === 404) {
               return res.status(400).json({
                 error: `Branch "${head}" not found on ${headOwner}/${headRepoName}. Please push your branch first: git push ${sourceRemote || 'origin'} ${head}`,
               });
@@ -950,11 +995,11 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       console.error('Failed to create GitHub PR:', error);
 
       // Check for head validation error (common with fork PRs)
-      const errorMessage = error.message || '';
+      const message = errorMessage(error, '');
       const isHeadValidationError =
-        errorMessage.includes('Validation Failed') &&
-        errorMessage.includes('"field":"head"') &&
-        errorMessage.includes('"code":"invalid"');
+        message.includes('Validation Failed') &&
+        message.includes('"field":"head"') &&
+        message.includes('"code":"invalid"');
 
       if (isHeadValidationError) {
         return res.status(400).json({
@@ -962,7 +1007,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         });
       }
 
-      return res.status(500).json({ error: error.message || 'Failed to create GitHub PR' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to create GitHub PR') });
     }
   });
 
@@ -998,21 +1043,23 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           ...(typeof body === 'string' ? { body } : {}),
         });
       } catch (error) {
-        if (error?.status === 401) {
+        if (errorStatus(error) === 401) {
           return res.status(401).json({ error: 'GitHub not connected' });
         }
-        if (error?.status === 403) {
+        if (errorStatus(error) === 403) {
           return res.status(403).json({ error: 'Not authorized to edit this PR' });
         }
-        if (error?.status === 404) {
+        if (errorStatus(error) === 404) {
           return res.status(404).json({ error: 'PR not found in this repository' });
         }
-        if (error?.status === 422) {
-          const apiMessage = error?.response?.data?.message;
-          const firstError = Array.isArray(error?.response?.data?.errors) && error.response.data.errors.length > 0
-            ? (error.response.data.errors[0]?.message || error.response.data.errors[0]?.code)
-            : null;
-          const message = [apiMessage, firstError].filter(Boolean).join(' 路 ') || 'Invalid PR update payload';
+        if (errorStatus(error) === 422) {
+          const data = errorResponseData(error);
+          const apiMessage = data.message;
+          const first = Array.isArray(data.errors) && data.errors.length > 0
+            ? errorRecord(data.errors[0])
+            : {};
+          const firstError = first.message || first.code || null;
+          const message = [apiMessage, firstError].filter(Boolean).join(' · ') || 'Invalid PR update payload';
           return res.status(422).json({ error: message });
         }
         throw error;
@@ -1039,7 +1086,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to update GitHub PR:', error);
-      return res.status(500).json({ error: error.message || 'Failed to update GitHub PR' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to update GitHub PR') });
     }
   });
 
@@ -1076,17 +1123,17 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         invalidateRepoPullsCache(repo.owner, repo.repo);
         return res.json({ merged: Boolean(result?.data?.merged), message: result?.data?.message });
       } catch (error) {
-        if (error?.status === 403) {
+        if (errorStatus(error) === 403) {
           return res.status(403).json({ error: 'Not authorized to merge this PR' });
         }
-        if (error?.status === 405 || error?.status === 409) {
-          return res.json({ merged: false, message: error?.message || 'PR not mergeable' });
+        if (errorStatus(error) === 405 || errorStatus(error) === 409) {
+          return res.json({ merged: false, message: errorMessage(error, 'PR not mergeable') });
         }
         throw error;
       }
     } catch (error) {
       console.error('Failed to merge GitHub PR:', error);
-      return res.status(500).json({ error: error.message || 'Failed to merge GitHub PR' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to merge GitHub PR') });
     }
   });
 
@@ -1126,7 +1173,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           { pullRequestId: nodeId }
         );
       } catch (error) {
-        if (error?.status === 403) {
+        if (errorStatus(error) === 403) {
           return res.status(403).json({ error: 'Not authorized to mark PR ready' });
         }
         throw error;
@@ -1140,7 +1187,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ ready: true });
     } catch (error) {
       console.error('Failed to mark PR ready:', error);
-      return res.status(500).json({ error: error.message || 'Failed to mark PR ready' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to mark PR ready') });
     }
   });
 
@@ -1208,7 +1255,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to detect upstream repo:', error);
-      return res.status(500).json({ error: error.message || 'Failed to detect upstream repo' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to detect upstream repo') });
     }
   });
 
@@ -1241,7 +1288,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ branches });
     } catch (error) {
       console.error('Failed to fetch repo branches:', error);
-      return res.status(500).json({ error: error.message || 'Failed to fetch repo branches' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to fetch repo branches') });
     }
   });
 
@@ -1272,9 +1319,9 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
-      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
+      const reposToQuery: RepoNetworkEntry[] = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      const mapIssueSummary = (item, repoRef) => ({
+      const mapIssueSummary = (item: IssueItem, repoRef: RepoNetworkEntry) => ({
         number: item.number,
         title: item.title,
         url: item.html_url,
@@ -1306,12 +1353,14 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           });
           const totalCount = searchResult.data.total_count;
           const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const primaryRepo = reposToQuery[0];
+          if (!primaryRepo) return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
           const issues = items
             .filter((item) => !item?.pull_request)
             .map((item) => {
               const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
               const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
-              return mapIssueSummary(item, matched || reposToQuery[0]);
+              return mapIssueSummary(item, matched || primaryRepo);
             });
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
@@ -1322,7 +1371,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         }
       }
 
-      const queryRepo = async (repoRef) => {
+      const queryRepo = async (repoRef: RepoNetworkEntry) => {
         try {
           const list = await octokit.rest.issues.listForRepo({
             owner: repoRef.owner,
@@ -1338,7 +1387,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
             .map((item) => mapIssueSummary(item, repoRef));
           return { issues, hasMore };
         } catch (error) {
-          console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
+          console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, errorMessage(error, 'GitHub request failed'));
           return { issues: [], hasMore: false };
         }
       };
@@ -1350,7 +1399,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore });
     } catch (error) {
       console.error('Failed to list GitHub issues:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list GitHub issues' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to list GitHub issues') });
     }
   });
 
@@ -1411,7 +1460,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       });
     } catch (error) {
       console.error('Failed to fetch GitHub issue:', error);
-      return res.status(500).json({ error: error.message || 'Failed to fetch GitHub issue' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to fetch GitHub issue') });
     }
   });
 
@@ -1454,7 +1503,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       return res.json({ connected: true, repo, comments });
     } catch (error) {
       console.error('Failed to fetch GitHub issue comments:', error);
-      return res.status(500).json({ error: error.message || 'Failed to fetch GitHub issue comments' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to fetch GitHub issue comments') });
     }
   });
 
@@ -1485,9 +1534,9 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
-      const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
+      const reposToQuery: RepoNetworkEntry[] = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      const mapPrSummary = (pr, repoRef) => {
+      const mapPrSummary = (pr: PullListItem | PullDetails, repoRef: RepoNetworkEntry) => {
         const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
         const headRepo = pr.head?.repo
           ? {
@@ -1507,8 +1556,8 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           base: pr.base?.ref,
           head: pr.head?.ref,
           headSha: pr.head?.sha,
-          mergeable: pr.mergeable,
-          mergeableState: pr.mergeable_state,
+          mergeable: 'mergeable' in pr ? pr.mergeable : null,
+          mergeableState: 'mergeable_state' in pr ? pr.mergeable_state : null,
           author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
           headLabel: pr.head?.label,
           headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
@@ -1531,16 +1580,18 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           });
           const totalCount = searchResult.data.total_count;
           const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const findRepoForSearchItem = (item) => {
+          const primaryRepo = reposToQuery[0];
+          if (!primaryRepo) return res.json({ connected: true, repo, prs: [], page: effectivePage, hasMore: false });
+          const findRepoForSearchItem = (item: SearchIssueItem): RepoNetworkEntry => {
             const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
             const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
-            if (!match) return reposToQuery[0];
-            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || reposToQuery[0];
+            if (!match) return primaryRepo;
+            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || primaryRepo;
           };
           const prRefs = items
             .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
             .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
-          let prs;
+          let prs: Array<ReturnType<typeof mapPrSummary>>;
           if (prRefs.length === 0) {
             prs = [];
           } else {
@@ -1556,7 +1607,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
                 return null;
               }
             }));
-            prs = results.filter(Boolean);
+            prs = results.filter((result): result is ReturnType<typeof mapPrSummary> => result !== null);
           }
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
@@ -1567,7 +1618,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         }
       }
 
-      const queryRepo = async (repoRef) => {
+      const queryRepo = async (repoRef: RepoNetworkEntry) => {
         try {
           const list = await octokit.rest.pulls.list({
             owner: repoRef.owner,
@@ -1581,7 +1632,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
           const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
           return { prs, hasMore };
         } catch (error) {
-          console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
+          console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, errorMessage(error, 'GitHub request failed'));
           return { prs: [], hasMore: false };
         }
       };
@@ -1592,13 +1643,13 @@ export function registerGitHubRoutes(app, dependencies = {}) {
 
       return res.json({ connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore });
     } catch (error) {
-      if (error?.status === 401) {
+      if (errorStatus(error) === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
       }
       console.error('Failed to list GitHub pull requests:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list GitHub pull requests' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to list GitHub pull requests') });
     }
   });
 
@@ -1637,13 +1688,12 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       }
 
       const originalJson = res.json.bind(res);
-      res.json = (data) => {
+      res.json = (data: Record<string, unknown>) => {
         if (data && data.pr) {
-          if (typeof data.fetchedAt !== 'number') {
-            data.fetchedAt = Date.now();
-          }
+          const fetchedAt = typeof data.fetchedAt === 'number' ? data.fetchedAt : Date.now();
+          data.fetchedAt = fetchedAt;
           prContextCache.delete(contextCacheKey);
-          prContextCache.set(contextCacheKey, { data, includeCheckDetails, fetchedAt: data.fetchedAt });
+          prContextCache.set(contextCacheKey, { data, includeCheckDetails, fetchedAt });
           if (prContextCache.size > PR_CONTEXT_CACHE_MAX_ENTRIES) {
             const oldest = prContextCache.keys().next().value;
             if (oldest !== undefined) {
@@ -1745,32 +1795,25 @@ export function registerGitHubRoutes(app, dependencies = {}) {
 
       // checks summary (same logic as status endpoint)
       let checks = null;
-      let checkRunsOut = undefined;
+      let checkRunsOut: Array<Record<string, unknown>> | undefined;
       const sha = prData.head?.sha;
       if (sha) {
         try {
           const runs = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
           const checkRuns = dedupeCheckRuns(Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
           if (checkRuns.length > 0) {
-            const parsedJobs = new Map();
-            const parsedAnnotations = new Map();
+            const parsedJobs = new Map<number, WorkflowJob[]>();
+            const parsedAnnotations = new Map<number, CheckAnnotation[]>();
             if (includeCheckDetails) {
               // Prefetch actions jobs per runId.
-              const runIds = new Set();
-              const jobIds = new Map();
+              const runIds = new Set<number>();
               for (const run of checkRuns) {
                 const details = typeof run.details_url === 'string' ? run.details_url : '';
                 const match = details.match(/\/actions\/runs\/(\d+)(?:\/job\/(\d+))?/);
                 if (match) {
                   const runId = Number(match[1]);
-                  const jobId = match[2] ? Number(match[2]) : null;
                   if (Number.isFinite(runId) && runId > 0) {
                     runIds.add(runId);
-                    if (jobId && Number.isFinite(jobId) && jobId > 0) {
-                      jobIds.set(details, { runId, jobId });
-                    } else {
-                      jobIds.set(details, { runId, jobId: null });
-                    }
                   }
                 }
               }
@@ -1806,7 +1849,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
                   continue;
                 }
 
-                const annotations = [];
+                const annotations: CheckAnnotation[] = [];
                 for (let page = 1; page <= 3; page += 1) {
                   try {
                     const annotationsResp = await octokit.rest.checks.listAnnotations({
@@ -1832,9 +1875,9 @@ export function registerGitHubRoutes(app, dependencies = {}) {
               }
             }
 
-            checkRunsOut = checkRuns.map((run) => {
+            checkRunsOut = checkRuns.map((run): Record<string, unknown> => {
               const detailsUrl = typeof run.details_url === 'string' ? run.details_url : undefined;
-              let job = undefined;
+              let job: Record<string, unknown> | undefined;
               if (includeCheckDetails && detailsUrl) {
                 const match = detailsUrl.match(/\/actions\/runs\/(\d+)(?:\/job\/(\d+))?/);
                 const runId = match ? Number(match[1]) : null;
@@ -1853,7 +1896,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
                       name: picked.name,
                       workflowName: picked.workflow_name || undefined,
                       conclusion: picked.conclusion,
-                          steps: Array.isArray(picked.steps)
+                      steps: Array.isArray(picked.steps)
                             ? picked.steps.map((s) => ({
                                 name: s.name,
                                 status: s.status,
@@ -1894,7 +1937,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
                 ...(job ? { job } : {}),
                 ...(run.id && parsedAnnotations.has(run.id)
                   ? {
-                      annotations: parsedAnnotations.get(run.id).map((a) => ({
+                      annotations: (parsedAnnotations.get(run.id) ?? []).map((a) => ({
                         path: a.path || undefined,
                         startLine: typeof a.start_line === 'number' ? a.start_line : undefined,
                         endLine: typeof a.end_line === 'number' ? a.end_line : undefined,
@@ -1946,13 +1989,13 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         ...(Array.isArray(checkRunsOut) ? { checkRuns: checkRunsOut } : {}),
       });
     } catch (error) {
-      if (error?.status === 401) {
+      if (errorStatus(error) === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
       }
       console.error('Failed to load GitHub PR context:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load GitHub PR context' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to load GitHub PR context') });
     }
   });
 }

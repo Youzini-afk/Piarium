@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as childProcess from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -13,54 +12,99 @@ const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Piarium/main/CHANGELOG.md';
 const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Youzini-afk/Piarium/releases';
-let cachedDetectedPm = null;
-let spawnSyncOverride = null;
+type PackageManager = 'bun' | 'electron' | 'npm' | 'pnpm' | 'yarn';
+type UpdateAppType = 'desktop-electron' | 'mobile-capacitor' | 'vscode' | 'web';
+type UpdatePlatform = 'android' | 'ios' | 'linux' | 'macos' | 'web' | 'windows';
+type UpdateArch = 'arm64' | 'unknown' | 'x64';
 
-function spawnSync(...args) {
-  if (typeof spawnSyncOverride === 'function') {
-    return spawnSyncOverride(...args);
-  }
-  return childProcess.spawnSync(...args);
+export interface UpdateCheckOptions {
+  appType?: unknown;
+  arch?: unknown;
+  currentVersion?: string;
+  platform?: unknown;
 }
 
-export function setPackageManagerSpawnSyncForTest(fn) {
+interface SpawnSyncResult {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+}
+
+interface PackageManagerDetails {
+  globalNodeModulesRoot: string | null;
+  packageManager: PackageManager;
+  packageManagerCommand: string | null;
+  packagePath: string | null;
+  reason: string;
+}
+
+type SpawnSyncOverride = (...args: unknown[]) => unknown;
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const normalizeSpawnResult = (value: unknown): SpawnSyncResult => {
+  const result = asRecord(value) ?? {};
+  return {
+    status: typeof result.status === 'number' ? result.status : null,
+    stdout: typeof result.stdout === 'string' ? result.stdout : Buffer.isBuffer(result.stdout) ? result.stdout.toString('utf8') : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : Buffer.isBuffer(result.stderr) ? result.stderr.toString('utf8') : '',
+  };
+};
+
+let cachedDetectedPm: PackageManager | null = null;
+let spawnSyncOverride: SpawnSyncOverride | null = null;
+
+function spawnSync(...args: unknown[]): SpawnSyncResult {
+  if (typeof spawnSyncOverride === 'function') {
+    return normalizeSpawnResult(spawnSyncOverride(...args));
+  }
+  return normalizeSpawnResult(Reflect.apply(childProcess.spawnSync, childProcess, args));
+}
+
+export function setPackageManagerSpawnSyncForTest(fn: SpawnSyncOverride | null): void {
   spawnSyncOverride = typeof fn === 'function' ? fn : null;
 }
 
-function getSpawnSyncBaseOptions() {
+function getSpawnSyncBaseOptions(): { windowsHide?: boolean } {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
 const getUpdateCheckUrl = () => process.env.PIARIUM_UPDATE_API_URL?.trim() || null;
 
-function mapPlatform(value) {
+const isCliPackageManager = (value: unknown): value is Exclude<PackageManager, 'electron'> => (
+  value === 'npm' || value === 'pnpm' || value === 'yarn' || value === 'bun'
+);
+
+function mapPlatform(value: unknown): UpdatePlatform {
   if (value === 'darwin') return 'macos';
   if (value === 'win32') return 'windows';
   if (value === 'linux') return 'linux';
   return 'web';
 }
 
-function mapArch(value) {
+function mapArch(value: unknown): UpdateArch {
   if (value === 'arm64' || value === 'aarch64') return 'arm64';
   if (value === 'x64' || value === 'amd64') return 'x64';
   return 'unknown';
 }
 
-function normalizeAppType(value) {
+function normalizeAppType(value: unknown): UpdateAppType {
   if (value === 'web' || value === 'desktop-electron' || value === 'vscode' || value === 'mobile-capacitor') return value;
   return 'web';
 }
 
-function normalizePlatform(value) {
+function normalizePlatform(value: unknown): UpdatePlatform {
   if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'web' || value === 'android' || value === 'ios') return value;
   return mapPlatform(process.platform);
 }
 
-function normalizeArch(value) {
+function normalizeArch(value: unknown): UpdateArch {
   if (value === 'arm64' || value === 'x64' || value === 'unknown') return value;
   return mapArch(process.arch);
 }
 
-async function resolveAndroidApkUrl(version, candidateUrl) {
+async function resolveAndroidApkUrl(version: string, candidateUrl?: string): Promise<string | undefined> {
   if (typeof candidateUrl === 'string') {
     try {
       if (new URL(candidateUrl).pathname.toLowerCase().endsWith('.apk')) return candidateUrl;
@@ -79,10 +123,14 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
     });
     if (!response.ok) return undefined;
 
-    const release = await response.json();
-    const apkAssets = Array.isArray(release?.assets)
-      ? release.assets.filter((asset) => (
-        typeof asset?.name === 'string'
+    const release = asRecord(await response.json()) ?? {};
+    const apkAssets = Array.isArray(release.assets)
+      ? release.assets.map(asRecord).filter((asset): asset is Record<string, unknown> & {
+        browser_download_url: string;
+        name: string;
+      } => (
+        Boolean(asset)
+        && typeof asset?.name === 'string'
         && asset.name.toLowerCase().endsWith('.apk')
         && typeof asset.browser_download_url === 'string'
       ))
@@ -90,11 +138,12 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
     const canonicalAsset = apkAssets.find((asset) => /^Piarium-.+-android\.apk$/i.test(asset.name));
     return (canonicalAsset || apkAssets[0])?.browser_download_url;
   } catch {
+    // The lexical path remains useful when its real path cannot be resolved.
     return undefined;
   }
 }
 
-async function checkForUpdatesFromApi(currentVersion, options = {}) {
+async function checkForUpdatesFromApi(currentVersion: string, options: UpdateCheckOptions = {}) {
   const updateCheckUrl = getUpdateCheckUrl();
   if (!updateCheckUrl) return null;
   try {
@@ -123,17 +172,18 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     });
 
     if (!response.ok) return null;
-    const data = await response.json();
+    const data = asRecord(await response.json()) ?? {};
     if (typeof data?.latestVersion !== 'string') return null;
 
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
 
     const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
+    const download = asRecord(data.download);
     const downloadUrl = typeof data.downloadUrl === 'string'
       ? data.downloadUrl
-      : typeof data.download?.url === 'string'
-        ? data.download.url
+      : typeof download?.url === 'string'
+        ? download.url
         : undefined;
     const updateAvailable = Boolean(data.updateAvailable) && versionComparison > 0;
     const mobileDownloadUrl = updateAvailable && appType === 'mobile-capacitor' && platform === 'android'
@@ -156,14 +206,14 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
   }
 }
 
-function normalizePathForComparison(filePath) {
+function normalizePathForComparison(filePath: unknown): string | null {
   if (!filePath || typeof filePath !== 'string') return null;
   const normalized = path.normalize(path.resolve(filePath));
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
-function getComparablePaths(filePath) {
-  const paths = new Set();
+function getComparablePaths(filePath: string): Set<string> {
+  const paths = new Set<string>();
   const normalized = normalizePathForComparison(filePath);
   if (normalized) {
     paths.add(normalized);
@@ -176,12 +226,13 @@ function getComparablePaths(filePath) {
       paths.add(normalizedRealPath);
     }
   } catch {
+    // The lexical path remains useful when its real path cannot be resolved.
   }
 
   return paths;
 }
 
-function pathSetContains(a, b) {
+function pathSetContains(a: Set<string>, b: Set<string>): boolean {
   for (const value of a) {
     if (b.has(value)) {
       return true;
@@ -190,19 +241,20 @@ function pathSetContains(a, b) {
   return false;
 }
 
-function getCurrentPackagePath() {
+function getCurrentPackagePath(): string {
   return path.resolve(__dirname, '..', '..');
 }
 
-function getPackagePathForGlobalRoot(rootPath) {
+function getPackagePathForGlobalRoot(rootPath: string | null): string | null {
   if (!rootPath) return null;
   return path.join(rootPath, ...PACKAGE_PATH_SEGMENTS);
 }
 
-function getUniquePaths(paths) {
-  const seen = new Set();
-  const result = [];
+function getUniquePaths(paths: Array<string | null>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
   for (const value of paths) {
+    if (!value) continue;
     const normalized = normalizePathForComparison(value);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
@@ -211,7 +263,7 @@ function getUniquePaths(paths) {
   return result;
 }
 
-function getCommandOutput(command, args) {
+function getCommandOutput(command: string, args: string[]): string | null {
   try {
     const result = spawnSync(command, args, {
       encoding: 'utf8',
@@ -231,7 +283,7 @@ function getCommandOutput(command, args) {
   }
 }
 
-function getGlobalBinDirs(pm) {
+function getGlobalBinDirs(pm: PackageManager): string[] {
   const pmCommand = resolvePackageManagerCommand(pm);
   if (!isCommandAvailable(pmCommand)) {
     return [];
@@ -266,14 +318,14 @@ function getGlobalBinDirs(pm) {
   return getUniquePaths(dirs);
 }
 
-function getGlobalNodeModulesRoots(pm) {
+function getGlobalNodeModulesRoots(pm: PackageManager): string[] {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
     if (!isCommandAvailable(pmCommand)) {
       return [];
     }
 
-    const roots = [];
+    const roots: string[] = [];
 
     switch (pm) {
       case 'pnpm': {
@@ -312,8 +364,8 @@ function getGlobalNodeModulesRoots(pm) {
   }
 }
 
-function getOwnedPackagePathsFromGlobalBins(pm) {
-  const packagePaths = [];
+function getOwnedPackagePathsFromGlobalBins(pm: PackageManager): string[] {
+  const packagePaths: string[] = [];
   for (const binDir of getGlobalBinDirs(pm)) {
     const binaryName = process.platform === 'win32' ? 'piarium.cmd' : 'piarium';
     const binaryPath = path.join(binDir, binaryName);
@@ -323,17 +375,18 @@ function getOwnedPackagePathsFromGlobalBins(pm) {
       const realBinaryPath = fs.realpathSync.native ? fs.realpathSync.native(binaryPath) : fs.realpathSync(binaryPath);
       packagePaths.push(path.resolve(realBinaryPath, '..', '..'));
     } catch {
+      // Ignore stale global-bin links and continue with other candidates.
     }
   }
 
   return getUniquePaths(packagePaths);
 }
 
-function detectPackageManagerFromCurrentInstallPath() {
+function detectPackageManagerFromCurrentInstallPath(): PackageManager | null {
   return detectPackageManagerFromInstallPath(getCurrentPackagePath());
 }
 
-function packageManagerOwnsCurrentInstall(pm) {
+function packageManagerOwnsCurrentInstall(pm: PackageManager): boolean {
   const currentPackagePaths = getComparablePaths(getCurrentPackagePath());
   const candidatePackagePaths = [
     ...getGlobalNodeModulesRoots(pm).map(getPackagePathForGlobalRoot),
@@ -350,8 +403,9 @@ function packageManagerOwnsCurrentInstall(pm) {
   return false;
 }
 
-export function detectPackageManagerDetails() {
-  // In desktop (Electron) runtime, package-manager detection is worthless 鈥?  // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
+export function detectPackageManagerDetails(): PackageManagerDetails {
+  // In desktop (Electron) runtime, package-manager detection is worthless —
+  // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
   // updates are handled by electron-updater. The detection path does up to a
   // dozen spawnSync(pm, ['bin', '-g']) calls with 10s timeouts each; under
   // the in-process server every one blocks the Electron main event loop and
@@ -377,7 +431,7 @@ export function detectPackageManagerDetails() {
   }
 
   const forcedPm = process.env.PIARIUM_PACKAGE_MANAGER?.trim();
-  if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm)) {
+  if (isCliPackageManager(forcedPm)) {
     const forcedPmCommand = resolvePackageManagerCommand(forcedPm);
     if (isCommandAvailable(forcedPmCommand)) {
       cachedDetectedPm = forcedPm;
@@ -404,7 +458,7 @@ export function detectPackageManagerDetails() {
     };
   }
 
-  const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
+  const ownershipCandidates: PackageManager[] = ['pnpm', 'yarn', 'bun', 'npm'];
   for (const candidate of ownershipCandidates) {
     if (packageManagerOwnsCurrentInstall(candidate)) {
       cachedDetectedPm = candidate;
@@ -420,7 +474,7 @@ export function detectPackageManagerDetails() {
 
   // Fall back to weaker hints only when ownership cannot be established.
   const userAgent = process.env.npm_config_user_agent || '';
-  let hintedPm = null;
+  let hintedPm: PackageManager | null = null;
   if (userAgent.startsWith('pnpm')) hintedPm = 'pnpm';
   else if (userAgent.startsWith('yarn')) hintedPm = 'yarn';
   else if (userAgent.startsWith('bun')) hintedPm = 'bun';
@@ -470,7 +524,7 @@ export function detectPackageManagerDetails() {
   }
 
   // Last resort: pick a PM that can at least see the package.
-  const pmChecks = [
+  const pmChecks: Array<{ check: () => boolean; name: PackageManager }> = [
     { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm')) },
     { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn')) },
     { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun')) },
@@ -503,12 +557,12 @@ export function detectPackageManagerDetails() {
   };
 }
 
-export function detectPackageManager() {
+export function detectPackageManager(): PackageManager {
   return detectPackageManagerDetails().packageManager;
 }
 
-function detectPackageManagerFromInstallPath(pkgPath) {
-  if (!pkgPath) return null;
+function detectPackageManagerFromInstallPath(pkgPath: unknown): PackageManager | null {
+  if (typeof pkgPath !== 'string' || !pkgPath) return null;
   const normalized = pkgPath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/')) return 'pnpm';
   if (normalized.includes('/.yarn/')) return 'yarn';
@@ -517,7 +571,7 @@ function detectPackageManagerFromInstallPath(pkgPath) {
   return null;
 }
 
-function detectPackageManagerFromRuntimePath(runtimePath) {
+function detectPackageManagerFromRuntimePath(runtimePath: unknown): PackageManager | null {
   if (!runtimePath || typeof runtimePath !== 'string') return null;
   const normalized = runtimePath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.bun/bin/bun') || normalized.endsWith('/bun') || normalized.endsWith('/bun.exe')) {
@@ -529,7 +583,7 @@ function detectPackageManagerFromRuntimePath(runtimePath) {
   return null;
 }
 
-function detectPackageManagerFromInvocationPath(invokedPath) {
+function detectPackageManagerFromInvocationPath(invokedPath: unknown): PackageManager | null {
   if (!invokedPath || typeof invokedPath !== 'string') return null;
   const normalized = invokedPath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.bun/bin/')) return 'bun';
@@ -538,8 +592,8 @@ function detectPackageManagerFromInvocationPath(invokedPath) {
   return null;
 }
 
-function getPackageManagerCommandCandidates(pm) {
-  const candidates = [];
+function getPackageManagerCommandCandidates(pm: PackageManager): string[] {
+  const candidates: string[] = [];
   if (pm === 'bun') {
     const bunExecutable = process.platform === 'win32' ? 'bun.exe' : 'bun';
     if (process.env.BUN_INSTALL) {
@@ -556,7 +610,7 @@ function getPackageManagerCommandCandidates(pm) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
-function resolvePackageManagerCommand(pm) {
+function resolvePackageManagerCommand(pm: PackageManager): string {
   const candidates = getPackageManagerCommandCandidates(pm);
   for (const candidate of candidates) {
     if (isCommandAvailable(candidate)) {
@@ -566,7 +620,7 @@ function resolvePackageManagerCommand(pm) {
   return pm;
 }
 
-function quoteCommand(command) {
+function quoteCommand(command: string): string {
   if (!command) return command;
   if (!/\s/.test(command)) return command;
   if (process.platform === 'win32') {
@@ -575,7 +629,7 @@ function quoteCommand(command) {
   return `'${command.replace(/'/g, "'\\''")}'`;
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command: string): boolean {
   try {
     const result = spawnSync(command, ['--version'], {
       encoding: 'utf8',
@@ -589,7 +643,7 @@ function isCommandAvailable(command) {
   }
 }
 
-function isPackageInstalledWith(pm) {
+function isPackageInstalledWith(pm: PackageManager): boolean {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
     let args;
@@ -624,7 +678,7 @@ function isPackageInstalledWith(pm) {
 /**
  * Get the update command for the detected package manager
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
+export function getUpdateCommand(pm: PackageManager = detectPackageManager()): string {
   const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
   switch (pm) {
     case 'pnpm':
@@ -641,11 +695,11 @@ export function getUpdateCommand(pm = detectPackageManager()) {
 /**
  * Get current installed version from package.json
  */
-export function getCurrentVersion() {
+export function getCurrentVersion(): string {
   try {
     const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    return pkg.version || 'unknown';
+    const pkg = asRecord(JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as unknown);
+    return typeof pkg?.version === 'string' ? pkg.version : 'unknown';
   } catch {
     return 'unknown';
   }
@@ -654,7 +708,7 @@ export function getCurrentVersion() {
 /**
  * Fetch latest version from npm registry
  */
-async function getLatestVersion() {
+async function getLatestVersion(): Promise<string | null> {
   try {
     const response = await fetch(NPM_REGISTRY_URL, {
       headers: { Accept: 'application/json' },
@@ -665,9 +719,10 @@ async function getLatestVersion() {
       throw new Error(`Registry responded with ${response.status}`);
     }
 
-    const data = await response.json();
-    return data['dist-tags']?.latest || null;
-  } catch (error) {
+    const data = asRecord(await response.json());
+    const tags = asRecord(data?.['dist-tags']);
+    return typeof tags?.latest === 'string' ? tags.latest : null;
+  } catch {
     return null;
   }
 }
@@ -675,8 +730,8 @@ async function getLatestVersion() {
 /**
  * Compare semver-like version strings.
  */
-function parseVersionForComparison(value) {
-  const normalized = String(value || '').replace(/^v/, '').split('+')[0];
+function parseVersionForComparison(value: unknown): { parts: number[]; prerelease: boolean } {
+  const normalized = String(value || '').replace(/^v/, '').split('+')[0] ?? '';
   const prereleaseIndex = normalized.indexOf('-');
   const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
   const parts = core.split('.').map((part) => {
@@ -690,7 +745,7 @@ function parseVersionForComparison(value) {
   };
 }
 
-function compareVersions(left, right) {
+function compareVersions(left: unknown, right: unknown): number {
   const a = parseVersionForComparison(left);
   const b = parseVersionForComparison(right);
   const length = Math.max(a.parts.length, b.parts.length);
@@ -710,7 +765,7 @@ function compareVersions(left, right) {
 /**
  * Fetch changelog notes between versions
  */
-async function fetchChangelogNotes(fromVersion, toVersion) {
+async function fetchChangelogNotes(fromVersion: string, toVersion: string): Promise<string | undefined> {
   try {
     const response = await fetch(CHANGELOG_URL, {
       signal: AbortSignal.timeout(10000),
@@ -737,7 +792,7 @@ async function fetchChangelogNotes(fromVersion, toVersion) {
   }
 }
 
-export async function checkForUpdates(options = {}) {
+export async function checkForUpdates(options: UpdateCheckOptions = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
@@ -796,7 +851,7 @@ export async function checkForUpdates(options = {}) {
 /**
  * Execute the update (used by CLI)
  */
-export function executeUpdate(pm = detectPackageManager(), options = {}) {
+export function executeUpdate(pm: PackageManager = detectPackageManager(), options: { silent?: boolean } = {}) {
   const command = getUpdateCommand(pm);
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);

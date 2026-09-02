@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * TTS Module Entry Point
  *

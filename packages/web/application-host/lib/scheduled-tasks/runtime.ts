@@ -1,7 +1,8 @@
-// @ts-nocheck
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { discoverLoops } from './loops.js';
+import type { ScheduledTask } from '../projects/project-config.js';
+import type { createProjectConfigRuntime } from '../projects/project-config.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -11,9 +12,58 @@ const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
+type RunReason = 'manual' | 'scheduled';
 
-const parseTimeParts = (time) => {
+interface ScheduledProject {
+  id: string;
+  path: string;
+}
+
+interface TaskRunEvent {
+  projectID: string;
+  ranAt: number;
+  sessionID?: string;
+  status: 'error' | 'running' | 'success';
+  taskID: string;
+}
+
+interface ExecutorInput {
+  onSessionCreated?: (sessionId: string) => void;
+  projectID: string;
+  projectPath: string;
+  reason: RunReason;
+  startedAt: number;
+  task: ScheduledTask;
+  title: string;
+}
+
+type TaskExecutor = (input: ExecutorInput) => Promise<{ sessionID: string }>;
+
+interface ScheduledTasksRuntimeDependencies {
+  emitTaskRunEvent?: (event: TaskRunEvent) => void;
+  executeTask?: TaskExecutor;
+  listProjects: () => Promise<ScheduledProject[]>;
+  logger?: Pick<Console, 'info' | 'warn'>;
+  maxGlobalConcurrency?: number;
+  maxProjectConcurrency?: number;
+  maxRunDurationMs?: number;
+  projectConfigRuntime: ReturnType<typeof createProjectConfigRuntime>;
+}
+
+export interface ScheduledTaskRunResult {
+  error?: string | undefined;
+  ok: boolean;
+  queued?: boolean;
+  running?: boolean;
+  sessionID?: string | undefined;
+  skipped?: boolean;
+  status?: 'error' | 'success';
+  task?: ScheduledTask | null | undefined;
+}
+
+const buildTaskKey = (projectID: string, taskID: string): string => `${projectID}:${taskID}`;
+
+const parseTimeParts = (time: unknown): { hour: number; minute: number } | null => {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
   if (!match) {
     return null;
@@ -24,7 +74,7 @@ const parseTimeParts = (time) => {
   };
 };
 
-const applyTimeToDate = (baseDateTime, time) => {
+const applyTimeToDate = (baseDateTime: DateTime, time: unknown): DateTime | null => {
   const parsed = parseTimeParts(time);
   if (!parsed) {
     return null;
@@ -37,8 +87,8 @@ const applyTimeToDate = (baseDateTime, time) => {
   });
 };
 
-const resolveScheduleTimes = (schedule) => {
-  const times = [];
+const resolveScheduleTimes = (schedule: ScheduledTask['schedule']): string[] => {
+  const times: string[] = [];
   if (Array.isArray(schedule?.times)) {
     for (const candidate of schedule.times) {
       if (typeof candidate === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
@@ -52,14 +102,14 @@ const resolveScheduleTimes = (schedule) => {
   return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
 };
 
-const weekdayAsZeroBased = (dateTime) => {
+const weekdayAsZeroBased = (dateTime: DateTime): number | null => {
   if (!dateTime || typeof dateTime.weekday !== 'number') {
     return null;
   }
   return dateTime.weekday % 7;
 };
 
-const safeErrorMessage = (error, maxLength = 2_000) => {
+const safeErrorMessage = (error: unknown, maxLength = 2_000): string => {
   const raw = error instanceof Error
     ? (error.message || String(error))
     : String(error ?? 'Unknown error');
@@ -70,7 +120,10 @@ const safeErrorMessage = (error, maxLength = 2_000) => {
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 };
 
-export const computeNextRunAt = (task, nowMs = Date.now()) => {
+export const computeNextRunAt = (task: {
+  enabled?: boolean;
+  schedule?: Partial<ScheduledTask['schedule']>;
+} | null | undefined, nowMs = Date.now()): number | null => {
   if (!task?.enabled) {
     return null;
   }
@@ -90,7 +143,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   }
 
   if (schedule.kind === 'daily') {
-    const times = resolveScheduleTimes(schedule);
+    const times = resolveScheduleTimes(schedule as ScheduledTask['schedule']);
     if (times.length === 0) {
       return null;
     }
@@ -115,7 +168,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
     if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) {
       return null;
     }
-    const times = resolveScheduleTimes(schedule);
+    const times = resolveScheduleTimes(schedule as ScheduledTask['schedule']);
     if (times.length === 0) {
       return null;
     }
@@ -164,6 +217,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   }
 
   if (schedule.kind === 'cron') {
+    if (typeof schedule.cron !== 'string' || !schedule.cron) return null;
     try {
       const iterator = parser.parseExpression(schedule.cron, {
         tz: zone,
@@ -171,6 +225,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
       });
       return iterator.next().getTime();
     } catch {
+      // Missing project metadata makes the task temporarily unrunnable.
       return null;
     }
   }
@@ -178,7 +233,10 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   return null;
 };
 
-export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
+export const formatScheduledSessionTitle = (task: {
+  name?: string;
+  schedule?: { timezone?: string };
+}, nowMs = Date.now()): string => {
   const timezone = typeof task?.schedule?.timezone === 'string' && task.schedule.timezone.trim().length > 0
     ? task.schedule.timezone.trim()
     : DateTime.local().zoneName;
@@ -194,7 +252,7 @@ export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
   return `${trimmedName}${suffix}`;
 };
 
-export const createScheduledTasksRuntime = (deps) => {
+export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependencies) => {
   const {
     projectConfigRuntime,
     listProjects,
@@ -208,16 +266,16 @@ export const createScheduledTasksRuntime = (deps) => {
 
   let executeTask = initialExecuteTask;
   let started = false;
-  const tasksByProject = new Map();
-  const projectPathByID = new Map();
-  const timersByTaskKey = new Map();
-  const queuedTaskKeys = new Set();
-  const runningTaskKeys = new Set();
-  const runningCountByProject = new Map();
+  const tasksByProject = new Map<string, Map<string, ScheduledTask>>();
+  const projectPathByID = new Map<string, string>();
+  const timersByTaskKey = new Map<string, ReturnType<typeof setTimeout>>();
+  const queuedTaskKeys = new Set<string>();
+  const runningTaskKeys = new Set<string>();
+  const runningCountByProject = new Map<string, number>();
   let runningGlobalCount = 0;
-  const queue = [];
+  const queue: Array<{ projectID: string; reason: RunReason; taskID: string }> = [];
 
-  const clearTimerForKey = (taskKey) => {
+  const clearTimerForKey = (taskKey: string): void => {
     const timer = timersByTaskKey.get(taskKey);
     if (timer) {
       clearTimeout(timer);
@@ -225,7 +283,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const clearProjectTimers = (projectID) => {
+  const clearProjectTimers = (projectID: string): void => {
     const tasks = tasksByProject.get(projectID);
     if (!tasks) {
       return;
@@ -236,16 +294,16 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const setProjectTasks = (projectID, tasks) => {
+  const setProjectTasks = (projectID: string, tasks: ScheduledTask[]): void => {
     clearProjectTimers(projectID);
-    const taskMap = new Map();
+    const taskMap = new Map<string, ScheduledTask>();
     for (const task of tasks) {
       taskMap.set(task.id, task);
     }
     tasksByProject.set(projectID, taskMap);
   };
 
-  const scheduleTask = (projectID, taskID, nextRunAt) => {
+  const scheduleTask = (projectID: string, taskID: string, nextRunAt: number): void => {
     const taskKey = buildTaskKey(projectID, taskID);
     clearTimerForKey(taskKey);
 
@@ -277,7 +335,7 @@ export const createScheduledTasksRuntime = (deps) => {
     timersByTaskKey.set(taskKey, timer);
   };
 
-  const updateInMemoryTask = (projectID, nextTask) => {
+  const updateInMemoryTask = (projectID: string, nextTask: ScheduledTask | null): void => {
     if (!nextTask) {
       return;
     }
@@ -288,7 +346,7 @@ export const createScheduledTasksRuntime = (deps) => {
     taskMap.set(nextTask.id, nextTask);
   };
 
-  const syncTaskSchedule = async (projectID, task) => {
+  const syncTaskSchedule = async (projectID: string, task: ScheduledTask | null): Promise<ScheduledTask | null> => {
     if (!task) {
       return task;
     }
@@ -300,7 +358,7 @@ export const createScheduledTasksRuntime = (deps) => {
     const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
     if (result.task) {
       updateInMemoryTask(projectID, result.task);
-      if (result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
+      if (result.task.enabled && typeof result.task.state.nextRunAt === 'number' && Number.isFinite(result.task.state.nextRunAt)) {
         scheduleTask(projectID, result.task.id, result.task.state.nextRunAt);
       }
       return result.task;
@@ -308,7 +366,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return task;
   };
 
-  const ensureProjectPath = async (projectID) => {
+  const ensureProjectPath = async (projectID: string): Promise<string | null> => {
     if (projectPathByID.has(projectID)) {
       return projectPathByID.get(projectID) || null;
     }
@@ -321,12 +379,13 @@ export const createScheduledTasksRuntime = (deps) => {
         return project.path;
       }
     } catch {
+      // Missing project metadata makes the task temporarily unrunnable.
     }
 
     return null;
   };
 
-  const syncProject = async (projectID) => {
+  const syncProject = async (projectID: string): Promise<ScheduledTask[]> => {
     const projectPath = await ensureProjectPath(projectID);
 
     let tasks = await projectConfigRuntime.listScheduledTasks(projectID);
@@ -351,9 +410,9 @@ export const createScheduledTasksRuntime = (deps) => {
     return Array.from(tasksByProject.get(projectID)?.values() || []);
   };
 
-  const syncAllProjects = async () => {
+  const syncAllProjects = async (): Promise<void> => {
     const projects = await listProjects();
-    const activeProjectIDs = new Set();
+    const activeProjectIDs = new Set<string>();
     projectPathByID.clear();
     for (const project of projects) {
       if (!project?.id || !project?.path) {
@@ -375,7 +434,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const queueTaskRun = (projectID, taskID, reason) => {
+  const queueTaskRun = (projectID: string, taskID: string, reason: RunReason): void => {
     const taskKey = buildTaskKey(projectID, taskID);
     if (queuedTaskKeys.has(taskKey) || runningTaskKeys.has(taskKey)) {
       return;
@@ -384,7 +443,7 @@ export const createScheduledTasksRuntime = (deps) => {
     queue.push({ projectID, taskID, reason });
   };
 
-  const canRunTask = (projectID) => {
+  const canRunTask = (projectID: string): boolean => {
     if (runningGlobalCount >= maxGlobalConcurrency) {
       return false;
     }
@@ -392,7 +451,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason) => {
+  const runTaskWithWatchdog = async (projectID: string, task: ScheduledTask, reason: RunReason) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -411,7 +470,7 @@ export const createScheduledTasksRuntime = (deps) => {
       startedAt,
       task,
       title,
-      onSessionCreated: (sessionID) => {
+      onSessionCreated: (sessionID: string) => {
         try {
           emitTaskRunEvent?.({
             projectID,
@@ -421,6 +480,7 @@ export const createScheduledTasksRuntime = (deps) => {
             sessionID,
           });
         } catch {
+          // Event delivery must not fail the scheduled execution itself.
         }
       },
     });
@@ -437,7 +497,7 @@ export const createScheduledTasksRuntime = (deps) => {
     };
   };
 
-  const runTask = async (projectID, taskID, reason) => {
+  const runTask = async (projectID: string, taskID: string, reason: RunReason): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
     if (!task || !task.enabled) {
@@ -465,15 +525,15 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     });
 
-    let status = 'success';
-    let sessionID;
+    let status: 'error' | 'success' = 'success';
+    let sessionID: string | undefined;
     let durationMs = 0;
-    let errorMessage;
+    let errorMessage: string | undefined;
 
     try {
       const runPromise = runTaskWithWatchdog(projectID, task, reason);
-      let timeoutID;
-      const timeoutPromise = new Promise((_, reject) => {
+      let timeoutID: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timeoutID = setTimeout(() => {
           reject(new Error('scheduled task run timed out'));
         }, maxRunDurationMs);
@@ -493,7 +553,7 @@ export const createScheduledTasksRuntime = (deps) => {
       );
     } catch (error) {
       status = 'error';
-      if (typeof error?.sessionID === 'string' && error.sessionID) sessionID = error.sessionID;
+      if (error && typeof error === 'object' && 'sessionID' in error && typeof error.sessionID === 'string') sessionID = error.sessionID;
       errorMessage = safeErrorMessage(error);
       logger.warn?.('[ScheduledTasks] run failed', {
         projectID,
@@ -541,7 +601,7 @@ export const createScheduledTasksRuntime = (deps) => {
     const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
     if (stateResult.task) {
       updateInMemoryTask(projectID, stateResult.task);
-      if (stateResult.task.enabled && Number.isFinite(stateResult.task.state?.nextRunAt)) {
+      if (stateResult.task.enabled && typeof stateResult.task.state.nextRunAt === 'number' && Number.isFinite(stateResult.task.state.nextRunAt)) {
         scheduleTask(projectID, taskID, stateResult.task.state.nextRunAt);
       }
     }
@@ -555,6 +615,7 @@ export const createScheduledTasksRuntime = (deps) => {
         ...(sessionID ? { sessionID } : {}),
       });
     } catch {
+      // Event delivery must not alter the persisted run result.
     }
 
     runningTaskKeys.delete(taskKey);
@@ -575,7 +636,7 @@ export const createScheduledTasksRuntime = (deps) => {
     };
   };
 
-  const pumpQueue = () => {
+  const pumpQueue = (): void => {
     if (!started) {
       return;
     }
@@ -583,6 +644,7 @@ export const createScheduledTasksRuntime = (deps) => {
     let consumed = false;
     for (let index = 0; index < queue.length; index += 1) {
       const item = queue[index];
+      if (!item) continue;
       if (!canRunTask(item.projectID)) {
         continue;
       }
@@ -604,7 +666,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runNow = async (projectID, taskID) => {
+  const runNow = async (projectID: string, taskID: string): Promise<ScheduledTaskRunResult> => {
     const taskKey = buildTaskKey(projectID, taskID);
     if (runningTaskKeys.has(taskKey)) {
       return {
@@ -624,7 +686,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return runTask(projectID, taskID, 'manual');
   };
 
-  const start = async () => {
+  const start = async (): Promise<void> => {
     if (started) {
       return;
     }
@@ -632,7 +694,7 @@ export const createScheduledTasksRuntime = (deps) => {
     await syncAllProjects();
   };
 
-  const stop = () => {
+  const stop = (): void => {
     if (!started) {
       return;
     }
@@ -664,7 +726,7 @@ export const createScheduledTasksRuntime = (deps) => {
     };
   };
 
-  const setExecutor = (nextExecutor) => {
+  const setExecutor = (nextExecutor: TaskExecutor): void => {
     executeTask = nextExecutor;
   };
 

@@ -1,13 +1,31 @@
-// @ts-nocheck
 const DEFAULT_PWA_APP_NAME = 'Piarium - Pi Coding Workspace';
 
-const mapPwaOrientationToManifest = (value) => {
+export interface PwaManifestRequest {
+  query?: Record<string, unknown> | undefined;
+}
+
+export interface PwaManifestResponse {
+  send(value: string): unknown;
+  setHeader(name: string, value: string): unknown;
+  type(value: string): unknown;
+}
+
+export type PwaManifestHandler = (
+  request: PwaManifestRequest,
+  response: PwaManifestResponse,
+) => Promise<void>;
+
+export interface PwaManifestApp {
+  get(path: string, handler: PwaManifestHandler): unknown;
+}
+
+const mapPwaOrientationToManifest = (value: unknown): string | undefined => {
   if (value === 'portrait') return 'portrait-primary';
   if (value === 'landscape') return 'landscape-primary';
   return undefined;
 };
 
-const finiteTimestamp = (...values) => {
+const finiteTimestamp = (...values: unknown[]): number => {
   for (const value of values) {
     const number = typeof value === 'string' && value.trim() ? Number(value) : value;
     if (typeof number === 'number' && Number.isFinite(number)) return number;
@@ -15,16 +33,43 @@ const finiteTimestamp = (...values) => {
   return 0;
 };
 
-export const registerPwaManifestRoute = (app, dependencies) => {
+interface RecentSession {
+  createdAt?: number | string | undefined;
+  id?: string | undefined;
+  lastActiveAt?: number | string | undefined;
+  name?: string | undefined;
+  title?: string | undefined;
+  updatedAt?: number | string | undefined;
+}
+
+interface RecentShortcut {
+  description: string;
+  icons: Array<{ sizes: string; src: string; type: string }>;
+  name: string;
+  short_name: string;
+  url: string;
+}
+
+export interface PwaManifestRouteDependencies {
+  listRecentSessions?: (() => Promise<RecentSession[]> | RecentSession[]) | undefined;
+  normalizePwaAppName(value: unknown, fallback: string): string | undefined;
+  normalizePwaOrientation(value: unknown, fallback: string): string | undefined;
+  readSettingsFromDisk(): Promise<Record<string, unknown>>;
+}
+
+export const registerPwaManifestRoute = (
+  app: PwaManifestApp,
+  dependencies: PwaManifestRouteDependencies,
+): void => {
   const {
     listRecentSessions = async () => [],
     readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
   } = dependencies;
-  let recentSessionCache = null;
+  let recentSessionCache: { at: number; data: RecentShortcut[] } | null = null;
 
-  const getRecentSessionShortcuts = async () => {
+  const getRecentSessionShortcuts = async (): Promise<RecentShortcut[]> => {
     const now = Date.now();
     if (recentSessionCache && now - recentSessionCache.at < 5000) return recentSessionCache.data;
     try {
@@ -33,14 +78,15 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         .map((session, index) => {
           const id = typeof session?.id === 'string' ? session.id.trim().slice(0, 160) : '';
           if (!id) return null;
-          const title = normalizePwaAppName(session.name || session.title, `Session ${index + 1}`).slice(0, 48);
+          const title = (normalizePwaAppName(session.name || session.title, `Session ${index + 1}`)
+            ?? `Session ${index + 1}`).slice(0, 48);
           return {
             id,
             title,
             updatedAt: finiteTimestamp(session.lastActiveAt, session.updatedAt, session.createdAt),
           };
         })
-        .filter(Boolean)
+        .filter((session): session is { id: string; title: string; updatedAt: number } => Boolean(session))
         .sort((left, right) => right.updatedAt - left.updatedAt)
         .slice(0, 3)
         .map((session) => ({
@@ -71,8 +117,8 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     let storedOrientation = 'system';
     try {
       const settings = await readSettingsFromDisk();
-      storedName = normalizePwaAppName(settings?.pwaAppName, '');
-      storedOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
+      storedName = normalizePwaAppName(settings.pwaAppName, '') ?? '';
+      storedOrientation = normalizePwaOrientation(settings.pwaOrientation, 'system') ?? 'system';
     } catch {
       // Defaults keep the manifest valid when settings cannot be read.
     }
@@ -83,7 +129,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     const orientation = mapPwaOrientationToManifest(
       queryOrientation === null
         ? storedOrientation
-        : normalizePwaOrientation(queryOrientation, 'system'),
+        : normalizePwaOrientation(queryOrientation, 'system') ?? 'system',
     );
     const shortcuts = await getRecentSessionShortcuts();
     const manifest = {

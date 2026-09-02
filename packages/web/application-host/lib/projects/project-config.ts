@@ -1,13 +1,100 @@
-// @ts-nocheck
 import crypto from 'node:crypto';
 import { DateTime, IANAZone } from 'luxon';
 import parser from 'cron-parser';
+import type fsPromisesModule from 'node:fs/promises';
+import type pathModule from 'node:path';
 
 const PROJECT_CONFIG_VERSION = 1;
 const MAX_LAST_ERROR_LENGTH = 2_000;
 const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
-const asNonEmptyString = (value) => {
+export type ScheduledTaskStatus = 'error' | 'idle' | 'running' | 'success';
+
+export interface ScheduledTaskSchedule {
+  cron?: string;
+  date?: string;
+  kind: 'cron' | 'daily' | 'once' | 'weekly';
+  time?: string;
+  times?: string[];
+  timezone: string;
+  weekdays?: number[];
+}
+
+export interface ScheduledTaskExecution {
+  agent?: string;
+  goalTokenBudget?: number;
+  modelID: string;
+  prompt: string;
+  providerID: string;
+  runAsGoal?: true;
+  thinkingLevel?: string;
+}
+
+export interface ScheduledTaskState {
+  createdAt: number;
+  lastDurationMs?: number;
+  lastError?: string;
+  lastRunAt?: number;
+  lastSessionId?: string;
+  lastStatus: ScheduledTaskStatus;
+  nextRunAt?: number;
+  updatedAt: number;
+}
+
+export interface ScheduledTask {
+  enabled: boolean;
+  execution: ScheduledTaskExecution;
+  id: string;
+  loopError?: string;
+  loopFile?: string;
+  loopRevision?: string;
+  loopScope?: 'project' | 'user';
+  loopShadowed?: true;
+  name: string;
+  schedule: ScheduledTaskSchedule;
+  state: ScheduledTaskState;
+}
+
+interface NormalizedLoopInput {
+  definition: Record<string, unknown> | null;
+  effectiveName: string | null;
+  error: string | null;
+  filePath: string;
+  name: string | null;
+  revision: string | null;
+  scope: 'project' | 'user' | undefined;
+}
+
+interface ProjectConfig extends Record<string, unknown> {
+  scheduledTasks: ScheduledTask[];
+  version: number;
+}
+
+interface ProjectConfigRuntimeOptions {
+  createTaskID?: () => string;
+  fsPromises: typeof fsPromisesModule;
+  path: typeof pathModule;
+  projectsDirPath: string;
+}
+
+interface NormalizeTaskOptions {
+  allowCreate: boolean;
+  createId: () => string;
+  existingTask: ScheduledTask | null;
+  now: number;
+  refreshUpdatedAt?: boolean;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorCode = (error: unknown): string | null => {
+  const record = asRecord(error);
+  return typeof record?.code === 'string' ? record.code : null;
+};
+
+const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;
   }
@@ -15,21 +102,21 @@ const asNonEmptyString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const clampLength = (value, maxLength) => {
+const clampLength = (value: unknown, maxLength: number): string => {
   if (typeof value !== 'string') {
     return '';
   }
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-const normalizeStatus = (value) => {
+const normalizeStatus = (value: unknown): ScheduledTaskStatus => {
   if (value === 'running' || value === 'success' || value === 'error' || value === 'idle') {
     return value;
   }
   return 'idle';
 };
 
-const normalizeTimeValue = (value) => {
+const normalizeTimeValue = (value: unknown): string | null => {
   const time = asNonEmptyString(value);
   if (!time) {
     return null;
@@ -40,7 +127,7 @@ const normalizeTimeValue = (value) => {
   return time;
 };
 
-const normalizeDateValue = (value) => {
+const normalizeDateValue = (value: unknown): string | null => {
   const date = asNonEmptyString(value);
   if (!date) {
     return null;
@@ -55,14 +142,14 @@ const normalizeDateValue = (value) => {
   return date;
 };
 
-const normalizeWeekdays = (value) => {
+const normalizeWeekdays = (value: unknown): number[] | null => {
   if (!Array.isArray(value)) {
     return null;
   }
 
-  const unique = new Set();
+  const unique = new Set<number>();
   for (const entry of value) {
-    if (!Number.isInteger(entry)) {
+    if (typeof entry !== 'number' || !Number.isInteger(entry)) {
       return null;
     }
     if (entry < 0 || entry > 6) {
@@ -78,8 +165,8 @@ const normalizeWeekdays = (value) => {
   return Array.from(unique).sort((a, b) => a - b);
 };
 
-const resolveScheduleTimes = (value, existingSchedule) => {
-  const times = [];
+const resolveScheduleTimes = (value: Record<string, unknown>, existingSchedule?: ScheduledTaskSchedule): string[] | null => {
+  const times: string[] = [];
 
   if (Array.isArray(value?.times)) {
     for (const item of value.times) {
@@ -112,7 +199,7 @@ const resolveScheduleTimes = (value, existingSchedule) => {
   return uniqueSorted;
 };
 
-const resolveDefaultTimezone = () => {
+const resolveDefaultTimezone = (): string => {
   const resolved = DateTime.local().zoneName;
   if (resolved && IANAZone.isValidZone(resolved)) {
     return resolved;
@@ -120,7 +207,7 @@ const resolveDefaultTimezone = () => {
   return 'UTC';
 };
 
-const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
+const normalizeTimezone = (value: unknown, fallback = resolveDefaultTimezone()): string | null => {
   const timezone = asNonEmptyString(value);
   if (!timezone) {
     return fallback;
@@ -128,7 +215,7 @@ const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
   return IANAZone.isValidZone(timezone) ? timezone : null;
 };
 
-const validateCronExpression = (expression, timezone) => {
+const validateCronExpression = (expression: string, timezone: string): boolean => {
   try {
     const iterator = parser.parseExpression(expression, {
       tz: timezone,
@@ -141,24 +228,25 @@ const validateCronExpression = (expression, timezone) => {
   }
 };
 
-const normalizeSchedule = (value, existingSchedule) => {
-  if (!value || typeof value !== 'object') {
+const normalizeSchedule = (value: unknown, existingSchedule?: ScheduledTaskSchedule): ScheduledTaskSchedule => {
+  const source = asRecord(value);
+  if (!source) {
     throw new Error('schedule is required');
   }
 
-  const kind = asNonEmptyString(value.kind);
+  const kind = asNonEmptyString(source.kind);
   if (kind !== 'daily' && kind !== 'weekly' && kind !== 'once' && kind !== 'cron') {
     throw new Error('schedule.kind must be daily, weekly, once, or cron');
   }
 
   const fallbackTimezone = existingSchedule?.timezone || resolveDefaultTimezone();
-  const timezone = normalizeTimezone(value.timezone, fallbackTimezone);
+  const timezone = normalizeTimezone(source.timezone, fallbackTimezone);
   if (!timezone) {
     throw new Error('schedule.timezone must be a valid IANA timezone');
   }
 
   if (kind === 'daily') {
-    const times = resolveScheduleTimes(value, existingSchedule);
+    const times = resolveScheduleTimes(source, existingSchedule);
     if (!times) {
       throw new Error('schedule.times must include at least one HH:mm value for daily schedule');
     }
@@ -166,11 +254,11 @@ const normalizeSchedule = (value, existingSchedule) => {
   }
 
   if (kind === 'weekly') {
-    const times = resolveScheduleTimes(value, existingSchedule);
+    const times = resolveScheduleTimes(source, existingSchedule);
     if (!times) {
       throw new Error('schedule.times must include at least one HH:mm value for weekly schedule');
     }
-    const weekdays = normalizeWeekdays(value.weekdays);
+    const weekdays = normalizeWeekdays(source.weekdays);
     if (!weekdays) {
       throw new Error('schedule.weekdays must include values from 0 to 6 for weekly schedule');
     }
@@ -178,12 +266,12 @@ const normalizeSchedule = (value, existingSchedule) => {
   }
 
   if (kind === 'once') {
-    const date = normalizeDateValue(value.date);
+    const date = normalizeDateValue(source.date);
     if (!date) {
       throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
     }
 
-    const time = normalizeTimeValue(value.time);
+    const time = normalizeTimeValue(source.time);
     if (!time) {
       throw new Error('schedule.time must be HH:mm for once schedule');
     }
@@ -191,7 +279,7 @@ const normalizeSchedule = (value, existingSchedule) => {
     return { kind, date, time, timezone };
   }
 
-  const cron = asNonEmptyString(value.cron) || '';
+  const cron = asNonEmptyString(source.cron) || '';
   if (!cron) {
     throw new Error('schedule.cron is required for cron schedule');
   }
@@ -203,27 +291,33 @@ const normalizeSchedule = (value, existingSchedule) => {
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value) => {
-  if (!value || typeof value !== 'object') {
+const normalizeExecution = (value: unknown): ScheduledTaskExecution => {
+  const source = asRecord(value);
+  if (!source) {
     throw new Error('execution is required');
   }
 
-  const prompt = asNonEmptyString(value.prompt) || '';
-  const providerID = asNonEmptyString(value.providerID);
-  const modelID = asNonEmptyString(value.modelID);
-  const requestedThinkingLevel = asNonEmptyString(value.thinkingLevel);
+  const prompt = asNonEmptyString(source.prompt) || '';
+  const providerID = asNonEmptyString(source.providerID);
+  const modelID = asNonEmptyString(source.modelID);
+  const requestedThinkingLevel = asNonEmptyString(source.thinkingLevel);
   const thinkingLevel = requestedThinkingLevel && PI_THINKING_LEVELS.has(requestedThinkingLevel)
     ? requestedThinkingLevel
     : undefined;
-  const runAsGoal = value.runAsGoal === true;
-  const agent = asNonEmptyString(value.agent);
-  const goalTokenBudget = value.goalTokenBudget;
-  if (goalTokenBudget !== undefined && !runAsGoal) {
+  const runAsGoal = source.runAsGoal === true;
+  const agent = asNonEmptyString(source.agent);
+  const rawGoalTokenBudget = source.goalTokenBudget;
+  if (rawGoalTokenBudget !== undefined && !runAsGoal) {
     throw new Error('execution.goalTokenBudget requires execution.runAsGoal');
   }
-  if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget <= 0)) {
+  if (rawGoalTokenBudget !== undefined && (
+    typeof rawGoalTokenBudget !== 'number'
+    || !Number.isSafeInteger(rawGoalTokenBudget)
+    || rawGoalTokenBudget <= 0
+  )) {
     throw new Error('execution.goalTokenBudget must be a positive integer');
   }
+  const goalTokenBudget = typeof rawGoalTokenBudget === 'number' ? rawGoalTokenBudget : undefined;
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
@@ -246,8 +340,8 @@ const normalizeExecution = (value) => {
   };
 };
 
-const normalizeState = (value, fallback) => {
-  const source = value && typeof value === 'object' ? value : fallback || {};
+const normalizeState = (value: unknown, fallback?: ScheduledTaskState): ScheduledTaskState => {
+  const source = asRecord(value) ?? fallback ?? {};
   const lastRunAt = typeof source.lastRunAt === 'number' && Number.isFinite(source.lastRunAt)
     ? Math.max(0, Math.round(source.lastRunAt))
     : undefined;
@@ -277,7 +371,7 @@ const normalizeState = (value, fallback) => {
   };
 };
 
-const normalizeTaskForStorage = (value, options) => {
+const normalizeTaskForStorage = (value: unknown, options: NormalizeTaskOptions): ScheduledTask => {
   const {
     now,
     createId,
@@ -286,11 +380,12 @@ const normalizeTaskForStorage = (value, options) => {
     refreshUpdatedAt = true,
   } = options;
 
-  if (!value || typeof value !== 'object') {
+  const source = asRecord(value);
+  if (!source) {
     throw new Error('task is required');
   }
 
-  const incomingId = asNonEmptyString(value.id);
+  const incomingId = asNonEmptyString(source.id);
   const existingId = asNonEmptyString(existingTask?.id);
 
   if (existingTask) {
@@ -304,33 +399,33 @@ const normalizeTaskForStorage = (value, options) => {
   }
 
   const id = existingId || incomingId || createId();
-  const name = asNonEmptyString(value.name) || '';
+  const name = asNonEmptyString(source.name) || '';
   if (!name) {
     throw new Error('task.name is required');
   }
 
-  const enabled = typeof value.enabled === 'boolean'
-    ? value.enabled
+  const enabled = typeof source.enabled === 'boolean'
+    ? source.enabled
     : (existingTask?.enabled ?? true);
 
-  const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
-  const execution = normalizeExecution(value.execution);
+  const schedule = normalizeSchedule(source.schedule, existingTask?.schedule);
+  const execution = normalizeExecution(source.execution);
 
   const nowMs = Math.max(0, Math.round(now));
-  const baseState = normalizeState(value.state, existingTask?.state);
+  const baseState = normalizeState(source.state, existingTask?.state);
   const state = {
     ...baseState,
     createdAt: existingTask?.state?.createdAt ?? baseState.createdAt ?? nowMs,
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
-  const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
-  const loopScope = value.loopScope === 'project' || value.loopScope === 'user'
-    ? value.loopScope
+  const loopFile = asNonEmptyString(source.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
+  const loopScope = source.loopScope === 'project' || source.loopScope === 'user'
+    ? source.loopScope
     : (existingTask?.loopScope === 'project' || existingTask?.loopScope === 'user' ? existingTask.loopScope : undefined);
-  const loopRevision = asNonEmptyString(value.loopRevision) ?? asNonEmptyString(existingTask?.loopRevision);
-  const loopError = asNonEmptyString(value.loopError);
-  const loopShadowed = value.loopShadowed === true;
+  const loopRevision = asNonEmptyString(source.loopRevision) ?? asNonEmptyString(existingTask?.loopRevision);
+  const loopError = asNonEmptyString(source.loopError);
+  const loopShadowed = source.loopShadowed === true;
 
   return {
     id,
@@ -347,12 +442,7 @@ const normalizeTaskForStorage = (value, options) => {
   };
 };
 
-const createEmptyProjectConfig = () => ({
-  version: PROJECT_CONFIG_VERSION,
-  scheduledTasks: [],
-});
-
-export const createProjectConfigRuntime = (deps) => {
+export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) => {
   const {
     fsPromises,
     path,
@@ -369,9 +459,9 @@ export const createProjectConfigRuntime = (deps) => {
       return `task_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     });
 
-  const writeLocks = new Map();
+  const writeLocks = new Map<string, Promise<void>>();
 
-  const sanitizeProjectID = (projectID) => {
+  const sanitizeProjectID = (projectID: unknown): string => {
     const value = asNonEmptyString(projectID);
     if (!value) {
       throw new Error('projectId is required');
@@ -382,30 +472,29 @@ export const createProjectConfigRuntime = (deps) => {
     return value;
   };
 
-  const resolveProjectConfigPath = (projectID) => {
+  const resolveProjectConfigPath = (projectID: unknown): string => {
     const safeProjectID = sanitizeProjectID(projectID);
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
-  const readRawProjectConfigFromDisk = async (projectID) => {
+  const readRawProjectConfigFromDisk = async (projectID: unknown): Promise<Record<string, unknown>> => {
     const filePath = resolveProjectConfigPath(projectID);
     try {
       const raw = await fsPromises.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      return asRecord(JSON.parse(raw) as unknown) ?? {};
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (errorCode(error) === 'ENOENT') {
         return {};
       }
       throw error;
     }
   };
 
-  const readProjectConfigFromDisk = async (projectID) => {
+  const readProjectConfigFromDisk = async (projectID: unknown): Promise<ProjectConfig> => {
     const parsed = await readRawProjectConfigFromDisk(projectID);
     const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
     const now = Date.now();
-    const scheduledTasks = [];
+    const scheduledTasks: ScheduledTask[] = [];
     for (const task of tasksRaw) {
       try {
         const normalized = normalizeTaskForStorage(task, {
@@ -417,6 +506,7 @@ export const createProjectConfigRuntime = (deps) => {
         });
         scheduledTasks.push(normalized);
       } catch {
+        // Preserve the rest of the project config while ignoring a malformed task record.
       }
     }
     return {
@@ -425,7 +515,7 @@ export const createProjectConfigRuntime = (deps) => {
     };
   };
 
-  const writeProjectConfigToDisk = async (projectID, config) => {
+  const writeProjectConfigToDisk = async (projectID: unknown, config: ProjectConfig): Promise<void> => {
     const filePath = resolveProjectConfigPath(projectID);
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -442,11 +532,11 @@ export const createProjectConfigRuntime = (deps) => {
     await fsPromises.rename(temporaryPath, filePath);
   };
 
-  const withProjectWriteLock = async (projectID, mutate) => {
+  const withProjectWriteLock = async <Result>(projectID: unknown, mutate: () => Promise<Result>): Promise<Result> => {
     const key = sanitizeProjectID(projectID);
     const previous = writeLocks.get(key) || Promise.resolve();
-    let release;
-    const next = new Promise((resolve) => {
+    let release: () => void = () => undefined;
+    const next = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chained = previous.finally(() => next);
@@ -464,20 +554,20 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
-  const listScheduledTasks = async (projectID) => {
+  const listScheduledTasks = async (projectID: unknown): Promise<ScheduledTask[]> => {
     const config = await readProjectConfigFromDisk(projectID);
     return config.scheduledTasks;
   };
 
-  const upsertScheduledTask = async (projectID, taskInput) => {
+  const upsertScheduledTask = async (projectID: unknown, taskInput: unknown) => {
     return withProjectWriteLock(projectID, async () => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
-      const incomingID = asNonEmptyString(taskInput?.id);
+      const incomingID = asNonEmptyString(asRecord(taskInput)?.id);
       const existingIndex = incomingID
         ? current.scheduledTasks.findIndex((task) => task.id === incomingID)
         : -1;
-      const existingTask = existingIndex >= 0 ? current.scheduledTasks[existingIndex] : null;
+      const existingTask = existingIndex >= 0 ? current.scheduledTasks[existingIndex] ?? null : null;
 
       const normalizedTask = normalizeTaskForStorage(taskInput, {
         now,
@@ -508,7 +598,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const deleteScheduledTask = async (projectID, taskID) => {
+  const deleteScheduledTask = async (projectID: unknown, taskID: unknown) => {
     return withProjectWriteLock(projectID, async () => {
       const normalizedTaskID = asNonEmptyString(taskID);
       if (!normalizedTaskID) {
@@ -533,7 +623,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const updateScheduledTaskState = async (projectID, taskID, statePatch) => {
+  const updateScheduledTaskState = async (projectID: unknown, taskID: unknown, statePatch: unknown) => {
     return withProjectWriteLock(projectID, async () => {
       const normalizedTaskID = asNonEmptyString(taskID);
       if (!normalizedTaskID) {
@@ -547,7 +637,8 @@ export const createProjectConfigRuntime = (deps) => {
       }
 
       const currentTask = current.scheduledTasks[taskIndex];
-      const patchObject = statePatch && typeof statePatch === 'object' ? statePatch : {};
+      if (!currentTask) return { task: null, tasks: current.scheduledTasks };
+      const patchObject = asRecord(statePatch) ?? {};
       const nextTask = {
         ...currentTask,
         state: normalizeState(
@@ -575,7 +666,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const reconcileLoopTasks = async (projectID, loopsInput) => {
+  const reconcileLoopTasks = async (projectID: unknown, loopsInput: unknown): Promise<ScheduledTask[]> => {
     return withProjectWriteLock(projectID, async () => {
       const current = await readProjectConfigFromDisk(projectID);
       const loops = Array.isArray(loopsInput) ? loopsInput : [];
@@ -584,21 +675,32 @@ export const createProjectConfigRuntime = (deps) => {
           .filter((task) => task.loopFile)
           .map((task) => [task.loopFile, task]),
       );
-      const discoveredByPath = new Map();
-      const selectedPathByName = new Map();
+      const discoveredByPath = new Map<string, NormalizedLoopInput>();
+      const selectedPathByName = new Map<string, string>();
 
       // Discovery is already ordered from highest to lowest precedence:
       // nearest project ancestor, then farther project ancestors, then user.
       // A malformed higher-precedence file still shadows a lower one by using
       // its last-good persisted name, so an edit error cannot start two loops.
-      for (const loop of loops) {
-        const filePath = asNonEmptyString(loop?.filePath);
+      for (const rawLoop of loops) {
+        const loop = asRecord(rawLoop) ?? {};
+        const definition = asRecord(loop.definition);
+        const filePath = asNonEmptyString(loop.filePath);
         if (!filePath || discoveredByPath.has(filePath)) continue;
         const existing = existingLoopTaskByPath.get(filePath);
-        const effectiveName = asNonEmptyString(loop?.definition?.name)
-          || asNonEmptyString(loop?.name)
+        const effectiveName = asNonEmptyString(definition?.name)
+          || asNonEmptyString(loop.name)
           || asNonEmptyString(existing?.name);
-        const normalized = { ...loop, filePath, effectiveName };
+        const scope = loop.scope === 'project' || loop.scope === 'user' ? loop.scope : undefined;
+        const normalized: NormalizedLoopInput = {
+          definition,
+          effectiveName,
+          error: asNonEmptyString(loop.error),
+          filePath,
+          name: asNonEmptyString(loop.name),
+          revision: asNonEmptyString(loop.revision),
+          ...(scope ? { scope } : { scope: undefined }),
+        };
         discoveredByPath.set(filePath, normalized);
         if (effectiveName && !selectedPathByName.has(effectiveName)) {
           selectedPathByName.set(effectiveName, filePath);
@@ -606,8 +708,8 @@ export const createProjectConfigRuntime = (deps) => {
       }
 
       const now = Date.now();
-      const nextTasks = [];
-      const consumedPaths = new Set();
+      const nextTasks: ScheduledTask[] = [];
+      const consumedPaths = new Set<string>();
       const existingIDs = new Set(current.scheduledTasks.map((task) => task.id));
 
       for (const task of current.scheduledTasks) {
@@ -672,6 +774,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       for (let index = 0; index < nextTasks.length; index += 1) {
         const task = nextTasks[index];
+        if (!task) continue;
         if (!task.loopFile || task.loopShadowed || !task.name) continue;
         const selectedPath = selectedPathByName.get(task.name);
         if (!selectedPath || selectedPath === task.loopFile) continue;
@@ -689,7 +792,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       for (const loop of discoveredByPath.values()) {
         if (consumedPaths.has(loop.filePath) || !loop.definition) continue;
-        const shadowed = selectedPathByName.get(loop.definition.name) !== loop.filePath;
+        const shadowed = !loop.effectiveName || selectedPathByName.get(loop.effectiveName) !== loop.filePath;
         if (shadowed) continue;
 
         let id = `loop:${crypto.createHash('sha256').update(path.resolve(loop.filePath), 'utf8').digest('hex')}`;
@@ -710,7 +813,7 @@ export const createProjectConfigRuntime = (deps) => {
             refreshUpdatedAt: false,
           }));
         } catch (error) {
-          console.warn(`[ScheduledTasks] ignored loop ${loop.filePath}:`, error?.message ?? error);
+          console.warn(`[ScheduledTasks] ignored loop ${loop.filePath}:`, error instanceof Error ? error.message : error);
         }
       }
 
@@ -720,7 +823,7 @@ export const createProjectConfigRuntime = (deps) => {
           const hasOtherState = Object.keys(raw).some((key) => key !== 'version' && key !== 'scheduledTasks');
           if (!hasOtherState) {
             await fsPromises.unlink(resolveProjectConfigPath(projectID)).catch((error) => {
-              if (error?.code !== 'ENOENT') throw error;
+              if (errorCode(error) !== 'ENOENT') throw error;
             });
             return nextTasks;
           }

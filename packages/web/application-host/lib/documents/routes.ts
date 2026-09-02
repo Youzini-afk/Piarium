@@ -1,31 +1,5 @@
 import { isDocumentAuthorityError } from './errors.js';
-
-// Minimal Express-like types (avoids dependency on @types/express)
-interface ExpressRequest {
-  body?: unknown;
-  query?: Record<string, unknown>;
-  on(event: string, listener: () => void): void;
-}
-
-interface ExpressResponse {
-  status(code: number): ExpressResponse;
-  json(data: unknown): ExpressResponse;
-  setHeader(name: string, value: string): void;
-  flushHeaders(): void;
-  write(data: string): boolean;
-  writableEnded: boolean;
-  destroyed: boolean;
-  on(event: string, listener: () => void): void;
-  flush?: () => void;
-}
-
-type Middleware = (req: ExpressRequest, res: ExpressResponse, next: () => void) => void;
-type RouteHandler = (req: ExpressRequest, res: ExpressResponse) => void | Promise<void>;
-
-interface ExpressApp {
-  post(path: string, ...handlers: (Middleware | RouteHandler)[]): void;
-  get(path: string, ...handlers: (Middleware | RouteHandler)[]): void;
-}
+import type { Express, Request, RequestHandler, Response } from 'express';
 
 interface DocumentAuthority {
   resolveWorkspace(input: unknown): Promise<unknown>;
@@ -46,7 +20,7 @@ interface DocumentAuthority {
 }
 
 interface UiAuthController {
-  requireAuth?: Middleware;
+  requireAuth?: RequestHandler;
 }
 
 interface DocumentRoutesOptions {
@@ -54,7 +28,7 @@ interface DocumentRoutesOptions {
   uiAuthController?: UiAuthController;
 }
 
-const sendError = (res: ExpressResponse, error: unknown): ExpressResponse => {
+const sendError = (res: Response, error: unknown): Response => {
   if (isDocumentAuthorityError(error)) {
     return res.status(error.statusCode).json({
       error: error.message,
@@ -66,18 +40,22 @@ const sendError = (res: ExpressResponse, error: unknown): ExpressResponse => {
   return res.status(500).json({ error: message, reason: 'failed' });
 };
 
-const readBody = (req: ExpressRequest): Record<string, unknown> => (
+const readBody = (req: Request): Record<string, unknown> => (
   req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {}
 );
 
-export const registerDocumentRoutes = (app: ExpressApp, {
+const flushResponse = (res: Response): void => {
+  (res as Response & { flush?: (() => void) | undefined }).flush?.();
+};
+
+export const registerDocumentRoutes = (app: Express, {
   documents,
   uiAuthController,
 }: DocumentRoutesOptions) => {
-  const requireAuth: Middleware = uiAuthController?.requireAuth
+  const requireAuth: RequestHandler = uiAuthController?.requireAuth
     ?? ((_req, _res, next) => next());
 
-  app.post('/api/documents/workspace/resolve', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/workspace/resolve', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.resolveWorkspace(readBody(req)));
     } catch (error) {
@@ -85,7 +63,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/read', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/read', requireAuth, async (req: Request, res: Response) => {
     try {
       const resource = readBody(req).resource;
       if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
@@ -95,7 +73,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/write', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/write', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.write(readBody(req)));
     } catch (error) {
@@ -103,7 +81,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/move', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/move', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.move(readBody(req)));
     } catch (error) {
@@ -111,7 +89,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/delete', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/delete', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.delete(readBody(req)));
     } catch (error) {
@@ -119,7 +97,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/dirty/publish', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/dirty/publish', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.publishDirtyBuffers(readBody(req)));
     } catch (error) {
@@ -127,7 +105,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/dirty/clear', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/dirty/clear', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.clearDirtyBuffers(readBody(req)));
     } catch (error) {
@@ -135,7 +113,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.acknowledgeDirtyStateBarrier(readBody(req)));
     } catch (error) {
@@ -143,7 +121,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.get('/api/documents/watch', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.get('/api/documents/watch', requireAuth, async (req: Request, res: Response) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!workspaceId) {
       return res.status(400).json({ error: 'workspaceId is required', reason: 'failed' });
@@ -176,7 +154,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
       if (closed || res.writableEnded || res.destroyed) return;
       try {
         res.write(':heartbeat\n\n');
-        res.flush?.();
+        flushResponse(res);
       } catch {
         closed = true;
       }
@@ -188,7 +166,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
         const payload = JSON.stringify(event);
         if (payload.includes('"content":')) return;
         res.write(`data: ${payload}\n\n`);
-        res.flush?.();
+        flushResponse(res);
       } catch {
         closed = true;
       }
@@ -215,7 +193,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     return undefined;
   });
 
-  app.post('/api/documents/recovery/list', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/recovery/list', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json({ journals: await documents.listRecoveryJournals(readBody(req)) });
     } catch (error) {
@@ -223,7 +201,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/recovery/read', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/recovery/read', requireAuth, async (req: Request, res: Response) => {
     try {
       const journalId = readBody(req).journalId;
       if (typeof journalId !== 'string' || !journalId) {
@@ -235,7 +213,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/recovery/write', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/recovery/write', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.writeRecoveryJournal(readBody(req)));
     } catch (error) {
@@ -243,7 +221,7 @@ export const registerDocumentRoutes = (app: ExpressApp, {
     }
   });
 
-  app.post('/api/documents/recovery/delete', requireAuth, async (req: ExpressRequest, res: ExpressResponse) => {
+  app.post('/api/documents/recovery/delete', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.deleteRecoveryJournal(readBody(req)));
     } catch (error) {

@@ -1,7 +1,32 @@
-// @ts-nocheck
-export const registerProjectIconRoutes = (app, dependencies) => {
+import type { Express } from 'express';
+import type path from 'node:path';
+import type { NormalizedProject } from './settings-normalization-runtime.js';
+
+type IconMime = 'image/png' | 'image/jpeg' | 'image/svg+xml' | 'image/webp' | 'image/x-icon';
+type ThemeVariant = 'light' | 'dark';
+type Settings = Record<string, unknown> & { projects?: NormalizedProject[] };
+
+const errorCode = (error: unknown): unknown => (
+  error && typeof error === 'object' && 'code' in error ? error.code : undefined
+);
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+export const registerProjectIconRoutes = (app: Express, dependencies: {
+  createFsSearchRuntime: typeof import('../fs/search.js').createFsSearchRuntime;
+  crypto: typeof import('node:crypto');
+  fsPromises: unknown;
+  path: typeof path;
+  persistSettings(input: Settings): Promise<Settings>;
+  piariumDataDir: string;
+  readSettingsFromDisk(): Promise<Settings>;
+  resolveGitBinaryForSpawn(): string;
+  sanitizeProjects(input: unknown): NormalizedProject[] | undefined;
+  spawn: unknown;
+}): void => {
   const {
-    fsPromises,
+    fsPromises: rawFsPromises,
     path,
     crypto,
     piariumDataDir,
@@ -12,27 +37,28 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     spawn,
     resolveGitBinaryForSpawn,
   } = dependencies;
+  const fsPromises = rawFsPromises as typeof import('node:fs/promises');
 
   const projectIconsDirPath = path.join(piariumDataDir, 'project-icons');
-  const projectIconMimeToExtension = {
+  const projectIconMimeToExtension: Record<IconMime, string> = {
     'image/png': 'png',
     'image/jpeg': 'jpg',
     'image/svg+xml': 'svg',
     'image/webp': 'webp',
     'image/x-icon': 'ico',
   };
-  const projectIconExtensionToMime = Object.fromEntries(
+  const projectIconExtensionToMime: Record<string, string> = Object.fromEntries(
     Object.entries(projectIconMimeToExtension).map(([mime, ext]) => [ext, mime])
   );
-  const projectIconSupportedMimes = new Set(Object.keys(projectIconMimeToExtension));
+  const projectIconSupportedMimes = new Set<IconMime>(Object.keys(projectIconMimeToExtension) as IconMime[]);
   const projectIconMaxBytes = 5 * 1024 * 1024;
-  const projectIconThemeColors = {
+  const projectIconThemeColors: Record<ThemeVariant, string> = {
     light: '#111111',
     dark: '#f5f5f5',
   };
   const projectIconHexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{4}|[\da-fA-F]{6}|[\da-fA-F]{8})$/;
 
-  const normalizeProjectIconMime = (value) => {
+  const normalizeProjectIconMime = (value: unknown): IconMime | null => {
     if (typeof value !== 'string') {
       return null;
     }
@@ -41,18 +67,18 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     if (normalized === 'image/jpg') {
       return 'image/jpeg';
     }
-    if (projectIconSupportedMimes.has(normalized)) {
-      return normalized;
+    if (projectIconSupportedMimes.has(normalized as IconMime)) {
+      return normalized as IconMime;
     }
     return null;
   };
 
-  const projectIconBaseName = (projectId) => {
+  const projectIconBaseName = (projectId: string): string => {
     const hash = crypto.createHash('sha1').update(projectId).digest('hex');
     return `project-${hash}`;
   };
 
-  const projectIconPathForMime = (projectId, mime) => {
+  const projectIconPathForMime = (projectId: string, mime: unknown): string | null => {
     const normalizedMime = normalizeProjectIconMime(mime);
     if (!normalizedMime) {
       return null;
@@ -61,12 +87,12 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     return path.join(projectIconsDirPath, `${projectIconBaseName(projectId)}.${ext}`);
   };
 
-  const projectIconPathCandidates = (projectId) => {
+  const projectIconPathCandidates = (projectId: string): string[] => {
     const base = projectIconBaseName(projectId);
     return Object.values(projectIconMimeToExtension).map((ext) => path.join(projectIconsDirPath, `${base}.${ext}`));
   };
 
-  const removeProjectIconFiles = async (projectId, keepPath) => {
+  const removeProjectIconFiles = async (projectId: string, keepPath?: string): Promise<void> => {
     const candidates = projectIconPathCandidates(projectId);
     await Promise.all(candidates.map(async (candidatePath) => {
       if (keepPath && candidatePath === keepPath) {
@@ -75,14 +101,16 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       try {
         await fsPromises.unlink(candidatePath);
       } catch (error) {
-        if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+        if (errorCode(error) !== 'ENOENT') {
           throw error;
         }
       }
     }));
   };
 
-  const parseProjectIconDataUrl = (value) => {
+  const parseProjectIconDataUrl = (value: unknown):
+    | { error: string; ok: false }
+    | { bytes: Buffer; mime: IconMime; ok: true } => {
     if (typeof value !== 'string') {
       return { ok: false, error: 'dataUrl is required' };
     }
@@ -99,7 +127,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
 
     try {
-      const base64 = match[2].replace(/\s+/g, '');
+      const base64 = (match[2] ?? '').replace(/\s+/g, '');
       const bytes = Buffer.from(base64, 'base64');
       if (bytes.length === 0) {
         return { ok: false, error: 'Icon content is empty' };
@@ -113,19 +141,19 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
   };
 
-  const normalizeProjectIconThemeVariant = (value) => {
+  const normalizeProjectIconThemeVariant = (value: unknown): ThemeVariant | null => {
     if (typeof value !== 'string') {
       return null;
     }
 
     const normalized = value.trim().toLowerCase();
     if (normalized === 'light' || normalized === 'dark') {
-      return normalized;
+      return normalized as ThemeVariant;
     }
     return null;
   };
 
-  const normalizeProjectIconColor = (value) => {
+  const normalizeProjectIconColor = (value: unknown): string | null => {
     if (typeof value !== 'string') {
       return null;
     }
@@ -137,12 +165,16 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     return normalized;
   };
 
-  const applyProjectIconSvgTheme = (svgMarkup, themeVariant, iconColor) => {
+  const applyProjectIconSvgTheme = (
+    svgMarkup: string,
+    themeVariant: ThemeVariant | null,
+    iconColor: string | null,
+  ): string => {
     if (typeof svgMarkup !== 'string') {
       return svgMarkup;
     }
 
-    const color = iconColor || projectIconThemeColors[themeVariant];
+    const color = iconColor || (themeVariant ? projectIconThemeColors[themeVariant] : null);
     if (!color) {
       return svgMarkup;
     }
@@ -161,7 +193,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
   };
 
-  const findProjectById = (settings, projectId) => {
+  const findProjectById = (settings: Settings, projectId: string) => {
     const projects = sanitizeProjects(settings?.projects) || [];
     const index = projects.findIndex((project) => project.id === projectId);
     if (index === -1) {
@@ -190,7 +222,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      const metadataMime = normalizeProjectIconMime(project.iconImage?.mime);
+      const metadataMime = normalizeProjectIconMime(asRecord(project.iconImage).mime);
       const preferredPath = metadataMime ? projectIconPathForMime(projectId, metadataMime) : null;
       const candidates = preferredPath
         ? [preferredPath, ...projectIconPathCandidates(projectId).filter((candidate) => candidate !== preferredPath)]
@@ -230,7 +262,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           return res.send(data);
         } catch (error) {
-          if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+          if (errorCode(error) !== 'ENOENT') {
             console.warn('Failed to read project icon:', error);
             return res.status(500).json({ error: 'Failed to read project icon' });
           }
@@ -331,7 +363,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       }
 
       const force = req.body?.force === true;
-      if (project.iconImage?.source === 'custom' && !force) {
+      if (asRecord(project.iconImage).source === 'custom' && !force) {
         return res.json({
           project,
           skipped: true,

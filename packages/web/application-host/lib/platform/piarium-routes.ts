@@ -1,7 +1,11 @@
-// @ts-nocheck
+import type { Express } from 'express';
+import type fs from 'node:fs';
+import type path from 'node:path';
+import type { Server } from 'node:http';
+
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
-export const resolveSystemdServiceUnit = (environment) => {
+export const resolveSystemdServiceUnit = (environment: NodeJS.ProcessEnv): string | null => {
   if (!environment.INVOCATION_ID) return null;
   const configured = typeof environment.PIARIUM_SYSTEMD_UNIT === 'string'
     ? environment.PIARIUM_SYSTEMD_UNIT.trim()
@@ -10,9 +14,18 @@ export const resolveSystemdServiceUnit = (environment) => {
   return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
 };
 
-const quotePosixShell = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+const quotePosixShell = (value: unknown): string => `'${String(value).replace(/'/g, "'\\''")}'`;
 
-export const registerPiariumRoutes = (app, dependencies) => {
+export const registerPiariumRoutes = (app: Express, dependencies: {
+  __dirname: string;
+  fs: typeof fs;
+  modelsDevApiUrl: string;
+  modelsMetadataCacheTtl: number;
+  path: typeof path;
+  piariumDataDir: string;
+  process: NodeJS.Process;
+  server: Server;
+}): void => {
   const {
     fs,
     path,
@@ -27,14 +40,23 @@ export const registerPiariumRoutes = (app, dependencies) => {
   app.get('/api/piarium/update-check', async (req, res) => {
     try {
       const { checkForUpdates } = await import('../package-manager.js');
-      const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
+      const parseString = (value: unknown): string | undefined => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
 
-      const updateInfo = await checkForUpdates({
-        appType: parseString(req.query.appType),
-        platform: parseString(req.query.platform),
-        arch: parseString(req.query.arch),
-        currentVersion: parseString(req.query.currentVersion),
-      });
+      const checkOptions: {
+        appType?: string;
+        arch?: string;
+        currentVersion?: string;
+        platform?: string;
+      } = {};
+      const appType = parseString(req.query.appType);
+      const platform = parseString(req.query.platform);
+      const arch = parseString(req.query.arch);
+      const currentVersion = parseString(req.query.currentVersion);
+      if (appType) checkOptions.appType = appType;
+      if (platform) checkOptions.platform = platform;
+      if (arch) checkOptions.arch = arch;
+      if (currentVersion) checkOptions.currentVersion = currentVersion;
+      const updateInfo = await checkForUpdates(checkOptions);
       res.json(updateInfo);
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -93,13 +115,22 @@ export const registerPiariumRoutes = (app, dependencies) => {
         return;
       }
 
-      const currentPort = server.address()?.port || 3000;
+      const address = server.address();
+      const currentPort = typeof address === 'object' && address ? address.port : 3000;
       const instanceFilePath = path.join(piariumDataDir, 'run', `piarium-${currentPort}.json`);
-      let storedOptions = { port: currentPort, daemon: true };
+      let storedOptions: {
+        apiOnly?: boolean;
+        daemon?: boolean;
+        host?: string;
+        launchMode?: string;
+        port: number;
+        uiPassword?: string;
+      } = { port: currentPort, daemon: true };
       try {
         const content = await fs.promises.readFile(instanceFilePath, 'utf8');
         storedOptions = JSON.parse(content);
       } catch {
+        // Missing or stale instance metadata falls back to the active port.
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
@@ -154,8 +185,8 @@ export const registerPiariumRoutes = (app, dependencies) => {
       }
 
       const isWindows = process.platform === 'win32';
-      const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
-      const quoteCmd = (value) => {
+      const quotePosix = (value: unknown): string => `'${String(value).replace(/'/g, "'\\''")}'`;
+      const quoteCmd = (value: unknown): string => {
         const stringValue = String(value);
         return `"${stringValue.replace(/"/g, '""')}"`;
       };
@@ -276,6 +307,7 @@ export const registerPiariumRoutes = (app, dependencies) => {
           try {
             fs.closeSync(logFd);
           } catch {
+            // The detached child owns its duplicated log descriptors.
           }
         }
 
@@ -304,7 +336,8 @@ export const registerPiariumRoutes = (app, dependencies) => {
       res.json(metadata);
     } catch (error) {
       console.warn('Failed to fetch models.dev metadata via server:', error);
-      const statusCode = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 502;
+      const errorName = error instanceof Error ? error.name : '';
+      const statusCode = errorName === 'TimeoutError' || errorName === 'AbortError' ? 504 : 502;
       res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
     }
   });

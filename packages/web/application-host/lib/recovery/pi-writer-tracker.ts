@@ -7,32 +7,33 @@ interface AdmissionFailure {
   currentEpoch?: number | undefined;
 }
 
-interface PiWriter {
+export interface PiWriter {
   markMutated: () => Promise<void>;
   close: () => Promise<void>;
 }
 
-interface MutationOwner {
+export interface MutationOwner {
   kind: string;
   id: string;
   generation?: number | undefined;
 }
 
-interface WatchSubscription {
+export interface WatchSubscription {
   ready: Promise<boolean>;
   settle: () => Promise<void>;
   close: () => void;
 }
 
-interface WorkspaceWatchEvent {
+export interface WorkspaceWatchEvent {
   kind?: string | undefined;
+  reason?: string | undefined;
   resource?: {
     workspaceId?: string | undefined;
     resourceId?: string | undefined;
   } | undefined;
 }
 
-interface PiWriterDocuments {
+export interface PiWriterDocuments {
   resolveScopeId?: ((scopeId: unknown) => Promise<string | null>) | undefined;
   watch?: ((
     workspaceId: string,
@@ -45,7 +46,7 @@ interface PiWriterDocuments {
   ) => Promise<PiWriter | null>;
 }
 
-interface PiWriterLease {
+export interface PiWriterLease {
   closed: boolean;
   close: () => Promise<void>;
 }
@@ -68,18 +69,29 @@ interface PiWriterState {
   writer: PiWriter | null;
 }
 
-interface SettledSummary {
+export interface SettledSummary {
   changedResourceIds: string[];
   coverageComplete: boolean;
   mutationObserved: boolean;
 }
 
-interface PiWriterAdmissionRequest {
+export interface PiWriterAdmissionRequest {
   cwd?: string | undefined;
   method?: string | undefined;
   phase?: string | undefined;
   sessionId?: string | undefined;
   workerId?: string | undefined;
+}
+
+export interface PiWorkerEvent {
+  envelope?: {
+    data?: unknown;
+    event?: string | undefined;
+    kind?: string | undefined;
+  } | undefined;
+  kind?: string | undefined;
+  sessionId?: string | undefined;
+  workerId: string;
 }
 
 interface ResolvedAdmissionRequest {
@@ -101,25 +113,7 @@ interface SessionSnapshotData {
   isStreaming?: boolean | undefined;
 }
 
-interface PiEventEnvelopeData extends SessionSnapshotData {
-  sessionId?: string | undefined;
-  event?: { type?: string | undefined } | undefined;
-}
-
-interface HostEventEnvelope {
-  kind?: string | undefined;
-  event?: string | undefined;
-  data?: PiEventEnvelopeData | undefined;
-}
-
-interface PiWorkerEvent {
-  kind?: string | undefined;
-  workerId: string;
-  sessionId?: string | undefined;
-  envelope?: HostEventEnvelope | undefined;
-}
-
-interface PiWorkspaceWriterTracker {
+export interface PiWorkspaceWriterTracker {
   admit: (request: PiWriterAdmissionRequest) => Promise<PiWriterLease | null>;
   processEvent: (event: PiWorkerEvent | undefined) => Promise<void>;
   waitForIdle: (workerId: string) => Promise<SettledSummary | null>;
@@ -139,6 +133,12 @@ const admissionError = (error: unknown): PiRuntimeBrokerError | unknown => {
     retryable: failure.code === 'maintenance' || failure.code === 'stale-epoch',
   });
 };
+
+const recordOf = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
 
 export const createPiWorkspaceWriterTracker = ({
   documents,
@@ -335,7 +335,10 @@ export const createPiWorkspaceWriterTracker = ({
 
   const admit = (request: PiWriterAdmissionRequest): Promise<PiWriterLease | null> => acquire(request);
 
-  const ensureFallback = async (event: PiWorkerEvent, sessionId: string): Promise<void> => {
+  const ensureFallback = async (
+    event: PiWorkerEvent,
+    sessionId: string,
+  ): Promise<void> => {
     if (!event.workerId || disposed) return;
     const snapshot = snapshots.get(sessionId);
     const cwd = typeof snapshot?.cwd === 'string' ? snapshot.cwd : '';
@@ -352,23 +355,30 @@ export const createPiWorkspaceWriterTracker = ({
     if (event?.kind === 'worker.exit') return forceRelease(event.workerId);
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return Promise.resolve();
     const envelope = event.envelope;
-    const sessionId = event.sessionId || envelope.data?.sessionId;
+    const envelopeData = recordOf(envelope.data);
+    const sessionId = event.sessionId || (typeof envelopeData.sessionId === 'string' ? envelopeData.sessionId : '');
     if (!sessionId) return Promise.resolve();
     if (envelope.event === 'session.closed') {
       snapshots.delete(sessionId);
       return forceRelease(event.workerId);
     }
     if (envelope.event === 'session.snapshot') {
-      snapshots.set(sessionId, envelope.data);
+      const snapshot: SessionSnapshotData = {
+        ...(typeof envelopeData.cwd === 'string' ? { cwd: envelopeData.cwd } : {}),
+        ...(typeof envelopeData.isRunning === 'boolean' ? { isRunning: envelopeData.isRunning } : {}),
+        ...(typeof envelopeData.busy === 'boolean' ? { busy: envelopeData.busy } : {}),
+        ...(typeof envelopeData.isStreaming === 'boolean' ? { isStreaming: envelopeData.isStreaming } : {}),
+      };
+      snapshots.set(sessionId, snapshot);
       if (
-        envelope.data?.isRunning === true
-        || envelope.data?.busy === true
-        || envelope.data?.isStreaming === true
+        snapshot.isRunning === true
+        || snapshot.busy === true
+        || snapshot.isStreaming === true
       ) return ensureFallback(event, sessionId);
       return Promise.resolve();
     }
     if (envelope.event !== 'agent.event') return Promise.resolve();
-    const agentEvent = envelope.data?.event;
+    const agentEvent = recordOf(envelopeData.event);
     if (agentEvent?.type === 'agent_start') return ensureFallback(event, sessionId);
     if (agentEvent?.type === 'agent_settled') {
       const state = writers.get(event.workerId);

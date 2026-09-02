@@ -1,40 +1,71 @@
-// @ts-nocheck
-import { createSettingsFileStore } from '@piarium/settings-store';
+import {
+  createSettingsFileStore,
+  type PiariumSettingsDocument,
+  type SettingsFileStore,
+} from '@piarium/settings-store';
+import type crypto from 'node:crypto';
 
 const MOBILE_DEVICES_VERSION = 1;
 const DEVICE_TOKEN_PREFIX = 'ocm_';
 
-const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+const normalizeString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-const normalizePlatform = (value) => {
+export type MobilePlatform = 'android' | 'ios' | 'unknown';
+
+const normalizePlatform = (value: unknown): MobilePlatform => {
   const normalized = normalizeString(value).toLowerCase();
   if (normalized === 'ios' || normalized === 'android') return normalized;
   return 'unknown';
 };
 
-const sanitizeDevice = (entry) => {
+interface StoredMobileDevice {
+  appVersion: string | null;
+  createdAt: number;
+  enabled: boolean;
+  id: string;
+  lastPushFailureAt: number | null;
+  lastPushSuccessAt: number | null;
+  lastSeenAt: number | null;
+  name: string;
+  platform: MobilePlatform;
+  pushProvider: string | null;
+  pushToken: string | null;
+  tokenHash: string;
+}
+
+export interface PublicMobileDevice extends Omit<StoredMobileDevice, 'pushToken' | 'tokenHash'> {
+  pushEnabled: boolean;
+}
+
+interface MobileDeviceDocument extends PiariumSettingsDocument {
+  devices: StoredMobileDevice[];
+  version: number;
+}
+
+const sanitizeDevice = (entry: unknown): StoredMobileDevice | null => {
   if (!entry || typeof entry !== 'object') return null;
-  const id = normalizeString(entry.id);
-  const tokenHash = normalizeString(entry.tokenHash);
+  const candidate = entry as Record<string, unknown>;
+  const id = normalizeString(candidate.id);
+  const tokenHash = normalizeString(candidate.tokenHash);
   if (!id || !tokenHash) return null;
 
   return {
     id,
     tokenHash,
-    name: normalizeString(entry.name) || 'Mobile device',
-    platform: normalizePlatform(entry.platform),
-    appVersion: normalizeString(entry.appVersion) || null,
-    pushProvider: normalizeString(entry.pushProvider) || null,
-    pushToken: normalizeString(entry.pushToken) || null,
-    enabled: entry.enabled !== false,
-    createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
-    lastSeenAt: Number.isFinite(entry.lastSeenAt) ? entry.lastSeenAt : null,
-    lastPushSuccessAt: Number.isFinite(entry.lastPushSuccessAt) ? entry.lastPushSuccessAt : null,
-    lastPushFailureAt: Number.isFinite(entry.lastPushFailureAt) ? entry.lastPushFailureAt : null,
+    name: normalizeString(candidate.name) || 'Mobile device',
+    platform: normalizePlatform(candidate.platform),
+    appVersion: normalizeString(candidate.appVersion) || null,
+    pushProvider: normalizeString(candidate.pushProvider) || null,
+    pushToken: normalizeString(candidate.pushToken) || null,
+    enabled: candidate.enabled !== false,
+    createdAt: typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt) ? candidate.createdAt : Date.now(),
+    lastSeenAt: typeof candidate.lastSeenAt === 'number' && Number.isFinite(candidate.lastSeenAt) ? candidate.lastSeenAt : null,
+    lastPushSuccessAt: typeof candidate.lastPushSuccessAt === 'number' && Number.isFinite(candidate.lastPushSuccessAt) ? candidate.lastPushSuccessAt : null,
+    lastPushFailureAt: typeof candidate.lastPushFailureAt === 'number' && Number.isFinite(candidate.lastPushFailureAt) ? candidate.lastPushFailureAt : null,
   };
 };
 
-const publicDevice = (device) => ({
+const publicDevice = (device: StoredMobileDevice): PublicMobileDevice => ({
   id: device.id,
   name: device.name,
   platform: device.platform,
@@ -48,23 +79,29 @@ const publicDevice = (device) => ({
   lastPushFailureAt: device.lastPushFailureAt,
 });
 
-export const createMobileDeviceStore = (deps) => {
+export interface MobileDeviceStoreDependencies {
+  crypto: Pick<typeof crypto, 'createHash' | 'randomBytes'>;
+  deviceStore?: SettingsFileStore | undefined;
+  mobileDevicesFilePath: string;
+}
+
+export const createMobileDeviceStore = (deps: MobileDeviceStoreDependencies) => {
   const {
     crypto,
     mobileDevicesFilePath,
   } = deps;
 
-  const emptyStore = () => ({ version: MOBILE_DEVICES_VERSION, devices: [] });
+  const emptyStore = (): MobileDeviceDocument => ({ version: MOBILE_DEVICES_VERSION, devices: [] });
   const deviceStore = deps.deviceStore ?? createSettingsFileStore({
     filePath: mobileDevicesFilePath,
     defaultValue: emptyStore(),
   });
 
-  const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
-  const createDeviceToken = () => `${DEVICE_TOKEN_PREFIX}${crypto.randomBytes(32).toString('base64url')}`;
-  const createDeviceId = () => `mob_${crypto.randomBytes(12).toString('base64url')}`;
+  const hashToken = (token: unknown): string => crypto.createHash('sha256').update(String(token)).digest('hex');
+  const createDeviceToken = (): string => `${DEVICE_TOKEN_PREFIX}${crypto.randomBytes(32).toString('base64url')}`;
+  const createDeviceId = (): string => `mob_${crypto.randomBytes(12).toString('base64url')}`;
 
-  const readStore = async () => {
+  const readStore = async (): Promise<MobileDeviceDocument> => {
     try {
       const parsed = await deviceStore.read();
       if (!parsed || typeof parsed !== 'object' || parsed.version !== MOBILE_DEVICES_VERSION) {
@@ -74,38 +111,46 @@ export const createMobileDeviceStore = (deps) => {
         throw new Error('Mobile devices file has invalid devices');
       }
       const devices = parsed.devices.map(sanitizeDevice);
-      if (devices.some((device) => device === null)) {
+      const validDevices = devices.filter((device): device is StoredMobileDevice => device !== null);
+      if (validDevices.length !== devices.length) {
         throw new Error('Mobile devices file contains an invalid device');
       }
-      return { version: MOBILE_DEVICES_VERSION, devices };
+      return { version: MOBILE_DEVICES_VERSION, devices: validDevices };
     } catch (error) {
-      console.warn('[Mobile] Failed to read devices file:', error?.message || error);
+      console.warn('[Mobile] Failed to read devices file:', error instanceof Error ? error.message : error);
       throw error;
     }
   };
 
-  const updateStore = async (mutate) => {
+  const updateStore = async (
+    mutate: (current: MobileDeviceDocument) => MobileDeviceDocument | Promise<MobileDeviceDocument>,
+  ): Promise<PiariumSettingsDocument> => {
     return deviceStore.update(async (stored) => {
       if (stored.version !== MOBILE_DEVICES_VERSION || !Array.isArray(stored.devices)) {
         throw new Error(`Unsupported mobile devices version: ${String(stored.version)}`);
       }
       const devices = stored.devices.map(sanitizeDevice);
-      if (devices.some((device) => device === null)) {
+      const validDevices = devices.filter((device): device is StoredMobileDevice => device !== null);
+      if (validDevices.length !== devices.length) {
         throw new Error('Mobile devices file contains an invalid device');
       }
       return mutate({
         version: MOBILE_DEVICES_VERSION,
-        devices,
+        devices: validDevices,
       });
     });
   };
 
-  const listDevices = async () => {
+  const listDevices = async (): Promise<PublicMobileDevice[]> => {
     const store = await readStore();
     return store.devices.map(publicDevice);
   };
 
-  const createDevice = async ({ name, platform, appVersion } = {}) => {
+  const createDevice = async ({
+    name,
+    platform,
+    appVersion,
+  }: { name?: unknown; platform?: unknown; appVersion?: unknown } = {}) => {
     const token = createDeviceToken();
     const now = Date.now();
     const device = {
@@ -131,7 +176,7 @@ export const createMobileDeviceStore = (deps) => {
     return { device: publicDevice(device), deviceToken: token };
   };
 
-  const authenticateDevice = async (deviceId, deviceToken) => {
+  const authenticateDevice = async (deviceId: unknown, deviceToken: unknown): Promise<PublicMobileDevice | null> => {
     const id = normalizeString(deviceId);
     const token = normalizeString(deviceToken);
     if (!id || !token) return null;
@@ -141,10 +186,10 @@ export const createMobileDeviceStore = (deps) => {
     return device ? publicDevice(device) : null;
   };
 
-  const touchDevice = async (deviceId) => {
+  const touchDevice = async (deviceId: unknown): Promise<PublicMobileDevice | null> => {
     const id = normalizeString(deviceId);
     if (!id) return null;
-    let touched = null;
+    let touched: StoredMobileDevice | null = null;
     await updateStore((current) => {
       const devices = current.devices.map((device) => {
         if (device.id !== id) return device;
@@ -156,11 +201,18 @@ export const createMobileDeviceStore = (deps) => {
     return touched ? publicDevice(touched) : null;
   };
 
-  const registerPushToken = async (deviceId, { pushToken, pushProvider = 'expo', appVersion } = {}) => {
+  const registerPushToken = async (
+    deviceId: unknown,
+    { pushToken, pushProvider = 'expo', appVersion }: {
+      pushToken?: unknown;
+      pushProvider?: unknown;
+      appVersion?: unknown;
+    } = {},
+  ): Promise<PublicMobileDevice | null> => {
     const id = normalizeString(deviceId);
     const token = normalizeString(pushToken);
     if (!id || !token) return null;
-    let updated = null;
+    let updated: StoredMobileDevice | null = null;
     await updateStore((current) => {
       const devices = current.devices.map((device) => {
         if (device.id !== id) return device;
@@ -179,7 +231,7 @@ export const createMobileDeviceStore = (deps) => {
     return updated ? publicDevice(updated) : null;
   };
 
-  const deleteDevice = async (deviceId) => {
+  const deleteDevice = async (deviceId: unknown): Promise<boolean> => {
     const id = normalizeString(deviceId);
     if (!id) return false;
     let removed = false;
@@ -196,10 +248,12 @@ export const createMobileDeviceStore = (deps) => {
     return removed;
   };
 
-  const listPushTargets = async () => {
+  const listPushTargets = async (): Promise<Array<{ id: string; pushProvider: string; pushToken: string }>> => {
     const store = await readStore();
     return store.devices
-      .filter((device) => device.enabled !== false && device.pushProvider === 'expo' && device.pushToken)
+      .filter((device): device is StoredMobileDevice & { pushProvider: 'expo'; pushToken: string } => (
+        device.enabled !== false && device.pushProvider === 'expo' && Boolean(device.pushToken)
+      ))
       .map((device) => ({
         id: device.id,
         pushProvider: device.pushProvider,
@@ -207,7 +261,7 @@ export const createMobileDeviceStore = (deps) => {
       }));
   };
 
-  const markPushResult = async (deviceId, success) => {
+  const markPushResult = async (deviceId: unknown, success: boolean): Promise<void> => {
     const id = normalizeString(deviceId);
     if (!id) return;
     await updateStore((current) => {
@@ -223,7 +277,7 @@ export const createMobileDeviceStore = (deps) => {
     });
   };
 
-  const disablePushToken = async (pushToken) => {
+  const disablePushToken = async (pushToken: unknown): Promise<void> => {
     const token = normalizeString(pushToken);
     if (!token) return;
     await updateStore((current) => {
@@ -251,3 +305,5 @@ export const createMobileDeviceStore = (deps) => {
     disablePushToken,
   };
 };
+
+export type MobileDeviceStore = ReturnType<typeof createMobileDeviceStore>;

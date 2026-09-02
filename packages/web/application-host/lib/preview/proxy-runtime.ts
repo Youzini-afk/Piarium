@@ -1,4 +1,9 @@
-// @ts-nocheck
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
+
+import type { NextFunction, RequestHandler } from 'express';
+import type { Options as ProxyOptions, RequestHandler as ProxyRequestHandler } from 'http-proxy-middleware';
+
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
 const TOKEN_COOKIE_NAME = 'piarium_preview_token';
 const TOKEN_QUERY_PARAM = 'piarium_preview_token';
@@ -23,7 +28,148 @@ const LOOPBACK_HOSTS = new Set([
 
 const PREVIEW_BRIDGE_SCRIPT_ID = 'piarium-preview-bridge';
 
-const parsePreviewResourcePath = (url) => {
+type HttpHeaderValue = string | readonly string[] | number;
+
+interface HeaderSource {
+  headers?: unknown;
+}
+
+interface MutableHeaderResponse {
+  headersSent?: boolean;
+  setHeader(name: string, value: HttpHeaderValue): unknown;
+  removeHeader?(name: string): unknown;
+}
+
+interface PreviewResourceContext {
+  tag: string;
+  path: string;
+  pathAndSearch: string;
+  lower: string;
+}
+
+interface PreviewResourceNoiseRuleSet {
+  name: string;
+  suppress(context: PreviewResourceContext): boolean;
+}
+
+export type PreviewNavigation = {
+  action: 'allow' | 'proxy' | 'external';
+  url: string;
+};
+
+interface PreviewRequest {
+  body?: Record<string, unknown>;
+  headers: IncomingHttpHeaders;
+  originalUrl?: string;
+  secure?: boolean;
+  url?: string;
+}
+
+type PreviewProxyRequest = IncomingMessage & PreviewRequest;
+
+interface PreviewResponse extends MutableHeaderResponse {
+  headersSent?: boolean;
+  status(code: number): PreviewResponse;
+  json(body: unknown): unknown;
+}
+
+type PreviewProxyResponse = ServerResponse & PreviewResponse;
+
+interface PreviewTargetEntry {
+  id: string;
+  origin: string;
+  token: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+type PreviewTargetResolution = {
+  ok: true;
+  id: string;
+  entry: PreviewTargetEntry;
+  parsed: URL;
+} | {
+  ok: false;
+  status: number;
+  code: 'missing' | 'expired' | 'invalid-token';
+  error: string;
+};
+
+interface PreviewUiAuthController {
+  enabled: boolean;
+  ensureSessionToken?(req: PreviewRequest, res: PreviewResponse): Promise<string | null | undefined>;
+}
+
+interface PreviewExpressRuntime {
+  json(): RequestHandler;
+}
+
+type PreviewRouteHandler = (
+  req: PreviewRequest,
+  res: PreviewResponse,
+  next: NextFunction,
+) => unknown;
+
+interface PreviewApplication {
+  post(path: string, ...handlers: Array<PreviewRouteHandler | RequestHandler>): unknown;
+  use(path: string, ...handlers: Array<PreviewRouteHandler | RequestHandler | PreviewProxyMiddleware>): unknown;
+}
+
+interface PreviewUpgradeServer {
+  on(
+    event: 'upgrade',
+    listener: (req: PreviewProxyRequest, socket: Socket, head: Buffer) => void,
+  ): unknown;
+}
+
+type PreviewProxyOptions = ProxyOptions<PreviewProxyRequest, PreviewProxyResponse>;
+type PreviewProxyMiddleware = ProxyRequestHandler<PreviewProxyRequest, PreviewProxyResponse, NextFunction>;
+type CreatePreviewProxyMiddleware = (options: PreviewProxyOptions) => PreviewProxyMiddleware;
+type PreviewResponseInterceptorHandler = (
+  buffer: Buffer,
+  proxyRes: IncomingMessage,
+  req: PreviewProxyRequest,
+  res: PreviewProxyResponse,
+) => Promise<Buffer | string>;
+type PreviewResponseInterceptor = (
+  handler: PreviewResponseInterceptorHandler,
+) => (proxyRes: IncomingMessage, req: PreviewProxyRequest, res: PreviewProxyResponse) => Promise<void>;
+
+interface PreviewProxyRuntimeDependencies {
+  crypto: {
+    randomBytes(size: number): { toString(encoding: 'hex' | 'base64'): string };
+  };
+  URL: typeof globalThis.URL;
+  createProxyMiddleware: CreatePreviewProxyMiddleware;
+  responseInterceptor: PreviewResponseInterceptor;
+}
+
+interface PreviewAttachDependencies {
+  server: PreviewUpgradeServer;
+  express: PreviewExpressRuntime;
+  uiAuthController: PreviewUiAuthController | null;
+  isRequestOriginAllowed(req: PreviewRequest): Promise<boolean>;
+  rejectWebSocketUpgrade(socket: Socket, status: number, message: string): void;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const isPreviewResponse = (value: unknown): value is PreviewResponse => (
+  isRecord(value)
+  && typeof value.status === 'function'
+  && typeof value.json === 'function'
+  && typeof value.setHeader === 'function'
+);
+
+const asHttpHeaderValue = (value: unknown): HttpHeaderValue | undefined => {
+  if (typeof value === 'string' || typeof value === 'number') return value;
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) return value;
+  return undefined;
+};
+
+const parsePreviewResourcePath = (url: unknown): string => {
   try {
     const parsed = new URL(String(url || ''), 'http://localhost');
     const match = parsed.pathname.match(/^\/api\/preview\/proxy\/[a-f0-9]{16,64}(\/.*)?$/i);
@@ -34,16 +180,20 @@ const parsePreviewResourcePath = (url) => {
   }
 };
 
-const readHeader = (headers, name) => {
+const readHeader = (headers: unknown, name: string): HttpHeaderValue | undefined => {
   if (!headers || typeof headers !== 'object') return undefined;
-  const direct = headers[name];
+  const values = headers as Record<string, unknown>;
+  const direct = asHttpHeaderValue(values[name]);
   if (direct !== undefined) return direct;
   const lowerName = name.toLowerCase();
-  const key = Object.keys(headers).find((entry) => entry.toLowerCase() === lowerName);
-  return key ? headers[key] : undefined;
+  const key = Object.keys(values).find((entry) => entry.toLowerCase() === lowerName);
+  return key ? asHttpHeaderValue(values[key]) : undefined;
 };
 
-export const applyPreviewPassthroughRequestHeaders = (req, proxyReq) => {
+export const applyPreviewPassthroughRequestHeaders = (
+  req: HeaderSource,
+  proxyReq: { setHeader(name: string, value: HttpHeaderValue): unknown },
+): void => {
   for (const headerName of PREVIEW_PASSTHROUGH_REQUEST_HEADERS) {
     const value = readHeader(req?.headers, headerName);
     if (value !== undefined) {
@@ -52,7 +202,10 @@ export const applyPreviewPassthroughRequestHeaders = (req, proxyReq) => {
   }
 };
 
-export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
+export const applyPreviewPassthroughResponseHeaders = (
+  proxyRes: HeaderSource,
+  res: MutableHeaderResponse,
+): void => {
   if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
   for (const headerName of PREVIEW_PASSTHROUGH_RESPONSE_HEADERS) {
     const value = readHeader(proxyRes?.headers, headerName);
@@ -62,7 +215,10 @@ export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
   }
 };
 
-const synchronizePreviewFramePolicyResponseHeaders = (headers, res) => {
+const synchronizePreviewFramePolicyResponseHeaders = (
+  headers: unknown,
+  res: MutableHeaderResponse,
+): void => {
   if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
   for (const headerName of PREVIEW_FRAME_POLICY_RESPONSE_HEADERS) {
     const value = readHeader(headers, headerName);
@@ -74,7 +230,7 @@ const synchronizePreviewFramePolicyResponseHeaders = (headers, res) => {
   }
 };
 
-const previewResourceNoiseRuleSets = [
+const previewResourceNoiseRuleSets: PreviewResourceNoiseRuleSet[] = [
   {
     name: 'vite',
     suppress: ({ lower, path, tag }) => path === '/@vite/client'
@@ -145,7 +301,13 @@ const previewResourceNoiseRuleSets = [
   },
 ];
 
-export const classifyPreviewResourceError = ({ tagName, url }) => {
+export const classifyPreviewResourceError = ({
+  tagName,
+  url,
+}: {
+  tagName?: unknown;
+  url?: unknown;
+}): 'report' | 'suppress' => {
   const tag = typeof tagName === 'string' ? tagName.toLowerCase() : '';
   if (tag !== 'script' && tag !== 'link') return 'report';
 
@@ -159,7 +321,15 @@ export const classifyPreviewResourceError = ({ tagName, url }) => {
   return 'report';
 };
 
-export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => {
+export const classifyPreviewNavigation = ({
+  url,
+  currentUrl,
+  targetOrigin,
+}: {
+  url?: unknown;
+  currentUrl?: string;
+  targetOrigin?: string;
+}): PreviewNavigation => {
   let parsed;
   try {
     parsed = new URL(String(url || ''), currentUrl || 'http://localhost/');
@@ -193,7 +363,8 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
     return { action: 'allow', url: parsed.toString() };
   }
 
-  if (proxyMatch && parsed.origin === current?.origin && path.startsWith('/') && !path.startsWith(proxyMatch[1])) {
+  const proxyBasePath = proxyMatch?.[1];
+  if (proxyBasePath && parsed.origin === current?.origin && path.startsWith('/') && !path.startsWith(proxyBasePath)) {
     try {
       if (targetOrigin) {
         const upstreamUrl = new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, targetOrigin);
@@ -922,8 +1093,8 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   post({ type: 'ready', url: window.location.href, title: document.title || '' });
 })();`;
 
-const parseCookieHeader = (cookieHeader) => {
-  const result = new Map();
+const parseCookieHeader = (cookieHeader: unknown): Map<string, string> => {
+  const result = new Map<string, string>();
   if (typeof cookieHeader !== 'string' || cookieHeader.length === 0) {
     return result;
   }
@@ -950,7 +1121,13 @@ const buildCookie = ({
   path,
   maxAgeSeconds,
   secure,
-}) => {
+}: {
+  name: string;
+  value: string;
+  path?: string;
+  maxAgeSeconds?: number;
+  secure?: boolean;
+}): string => {
   const chunks = [`${name}=${value}`];
   if (path) chunks.push(`Path=${path}`);
   if (typeof maxAgeSeconds === 'number' && Number.isFinite(maxAgeSeconds)) {
@@ -965,11 +1142,11 @@ const buildCookie = ({
 // SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
 // reserved addresses (incl. cloud-metadata 169.254.169.254). Operates on the
 // WHATWG-normalized hostname, so decimal/hex/octal IPv4 forms are already canonical
-// dotted-decimal here. NOTE: this blocks IP *literals* only 鈥?a hostname that
+// dotted-decimal here. NOTE: this blocks IP *literals* only — a hostname that
 // resolves to a private IP (DNS rebinding) is not caught and would need
 // resolve-time IP pinning. Loopback for local preview goes through the non-external
 // path (allowExternal=false), which is unaffected.
-const isBlockedExternalHost = (hostname) => {
+const isBlockedExternalHost = (hostname: string): boolean => {
   if (!hostname) return true;
   let host = hostname.toLowerCase();
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
@@ -999,8 +1176,19 @@ const isBlockedExternalHost = (hostname) => {
   return false;
 };
 
-export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) => {
-  let url;
+export type NormalizedProxyTarget = {
+  ok: true;
+  origin: string;
+} | {
+  ok: false;
+  error: string;
+};
+
+export const normalizeProxyTargetUrl = (
+  rawUrl: string,
+  { allowExternal = false }: { allowExternal?: boolean } = {},
+): NormalizedProxyTarget => {
+  let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
@@ -1035,7 +1223,15 @@ export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) 
   return { ok: true, origin: url.origin };
 };
 
-const appendProxyAuthToProxyUrl = (value, { previewToken = '', urlAuthToken = '' } = {}) => {
+interface PreviewProxyAuth {
+  previewToken?: string;
+  urlAuthToken?: string;
+}
+
+const appendProxyAuthToProxyUrl = (
+  value: string,
+  { previewToken = '', urlAuthToken = '' }: PreviewProxyAuth = {},
+): string => {
   if (typeof value !== 'string' || !value) return value;
   const needsQueryRewrite = previewToken
     || urlAuthToken
@@ -1054,16 +1250,34 @@ const appendProxyAuthToProxyUrl = (value, { previewToken = '', urlAuthToken = ''
   }
 };
 
-const normalizeLoopbackUrl = (rawUrl) => normalizeProxyTargetUrl(rawUrl, { allowExternal: false });
+const normalizeLoopbackUrl = (rawUrl: string): NormalizedProxyTarget => (
+  normalizeProxyTargetUrl(rawUrl, { allowExternal: false })
+);
 
-export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', urlAuthToken = '' }) => {
+type PreviewBodyKind = 'html' | 'css' | 'javascript';
+
+interface RewritePreviewBodyInput extends PreviewProxyAuth {
+  bodyText: string;
+  proxyBasePath: string;
+  targetOrigin?: string;
+  kind: PreviewBodyKind;
+}
+
+export const rewritePreviewBody = ({
+  bodyText,
+  proxyBasePath,
+  targetOrigin,
+  kind,
+  previewToken = '',
+  urlAuthToken = '',
+}: RewritePreviewBodyInput): string => {
   if (typeof bodyText !== 'string' || bodyText.length === 0) {
     return bodyText;
   }
 
   const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
   const target = targetOrigin ? new URL(targetOrigin) : null;
-  const isSameTargetOrigin = (url) => {
+  const isSameTargetOrigin = (url: URL): boolean => {
     if (!target) return false;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (url.origin === target.origin) return true;
@@ -1074,7 +1288,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return url.port === target.port;
   };
-  const rewriteResourceUrl = (value) => {
+  const rewriteResourceUrl = (value: string): string => {
     if (typeof value !== 'string' || value.length === 0) return value;
     if (value.startsWith('/') && !value.startsWith('//')) {
       if (value.startsWith('/api/preview/proxy/')) return appendProxyAuthToProxyUrl(value, { previewToken, urlAuthToken });
@@ -1090,10 +1304,10 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return value;
   };
-  const stripPreviewCspMeta = (text) => text
+  const stripPreviewCspMeta = (text: string): string => text
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
-  const rewriteCss = (text) => text
+  const rewriteCss = (text: string): string => text
     .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
       const q = quote || '';
       return `url(${q}${rewriteResourceUrl(value)}${q})`;
@@ -1101,7 +1315,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     .replace(/@import\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
       return `@import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
     });
-  const rewriteJavaScript = (text) => text
+  const rewriteJavaScript = (text: string): string => text
     .replace(/\bfrom\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
       return `from ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
     })
@@ -1111,7 +1325,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
       return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
     });
-  const rewriteInlineModuleScripts = (text) => text.replace(
+  const rewriteInlineModuleScripts = (text: string): string => text.replace(
     /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
     (match, attrs, scriptBody) => {
       if (/\bsrc\s*=/i.test(attrs)) return match;
@@ -1125,7 +1339,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
       return `<script${attrs}>${rewrittenScriptBody}</script>`;
     },
   );
-  const rewriteHtml = (text) => rewriteInlineModuleScripts(text
+  const rewriteHtml = (text: string): string => rewriteInlineModuleScripts(text
     .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
       return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
     })
@@ -1151,10 +1365,18 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
 // per-response nonce, while keeping the dev server's own script restrictions.
 // frame-ancestors is dropped (it blocks embedding) and require-trusted-types-for
 // is dropped (it can block the bridge's DOM use); everything else is preserved.
-export const rewritePreviewCspHeader = (cspValue, nonce) => {
+interface CspDirective {
+  name: string;
+  tokens: string[];
+}
+
+export const rewritePreviewCspHeader = (
+  cspValue: string | undefined,
+  nonce: string,
+): string | null | undefined => {
   if (typeof cspValue !== 'string' || cspValue.length === 0) return cspValue;
   const nonceSource = nonce ? `'nonce-${nonce}'` : '';
-  const directives = cspValue
+  const directives: CspDirective[] = cspValue
     .split(';')
     .map((part) => part.trim())
     .filter(Boolean)
@@ -1166,7 +1388,7 @@ export const rewritePreviewCspHeader = (cspValue, nonce) => {
 
   if (nonceSource) {
     const byName = new Map(directives.map((directive) => [directive.name, directive]));
-    const allowNonce = (directive) => {
+    const allowNonce = (directive: CspDirective): void => {
       // Drop a lone 'none' so the nonce takes effect, then add our nonce.
       directive.tokens = directive.tokens.filter((token) => token.toLowerCase() !== "'none'");
       if (!directive.tokens.includes(nonceSource)) directive.tokens.push(nonceSource);
@@ -1175,8 +1397,9 @@ export const rewritePreviewCspHeader = (cspValue, nonce) => {
     const scriptSrc = byName.get('script-src');
     if (scriptElem) allowNonce(scriptElem);
     if (scriptSrc) allowNonce(scriptSrc);
-    if (!scriptElem && !scriptSrc && byName.has('default-src')) {
-      const base = byName.get('default-src').tokens.slice(1).filter((token) => token.toLowerCase() !== "'none'");
+    const defaultSource = byName.get('default-src');
+    if (!scriptElem && !scriptSrc && defaultSource) {
+      const base = defaultSource.tokens.slice(1).filter((token) => token.toLowerCase() !== "'none'");
       directives.push({ name: 'script-src', tokens: ['script-src', ...base, nonceSource] });
     }
   }
@@ -1185,7 +1408,19 @@ export const rewritePreviewCspHeader = (cspValue, nonce) => {
   return rebuilt.length > 0 ? rebuilt.join('; ') : null;
 };
 
-export const rewritePreviewRedirectLocation = ({ location, proxyBasePath, targetOrigin, previewToken = '', urlAuthToken = '' }) => {
+interface RewritePreviewRedirectInput extends PreviewProxyAuth {
+  location: string;
+  proxyBasePath: string;
+  targetOrigin?: string;
+}
+
+export const rewritePreviewRedirectLocation = ({
+  location,
+  proxyBasePath,
+  targetOrigin,
+  previewToken = '',
+  urlAuthToken = '',
+}: RewritePreviewRedirectInput): string => {
   if (typeof location !== 'string' || !location) return location;
   const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
   const target = targetOrigin ? new URL(targetOrigin) : null;
@@ -1207,13 +1442,13 @@ export const createPreviewProxyRuntime = ({
   URL,
   createProxyMiddleware,
   responseInterceptor,
-}) => {
-  const targets = new Map();
-  let sweepTimer = null;
+}: PreviewProxyRuntimeDependencies) => {
+  const targets = new Map<string, PreviewTargetEntry>();
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  const now = () => Date.now();
+  const now = (): number => Date.now();
 
-  const sweepExpired = () => {
+  const sweepExpired = (): void => {
     const t = now();
     for (const [id, entry] of targets.entries()) {
       if (entry.expiresAt <= t) {
@@ -1222,7 +1457,7 @@ export const createPreviewProxyRuntime = ({
     }
   };
 
-  const ensureSweeper = () => {
+  const ensureSweeper = (): void => {
     if (sweepTimer) {
       return;
     }
@@ -1231,7 +1466,10 @@ export const createPreviewProxyRuntime = ({
     sweepTimer.unref?.();
   };
 
-  const createTarget = (origin, ttlMs) => {
+  const createTarget = (
+    origin: string,
+    ttlMs: number,
+  ): Pick<PreviewTargetEntry, 'id' | 'token' | 'expiresAt'> => {
     const id = crypto.randomBytes(16).toString('hex');
     const token = crypto.randomBytes(16).toString('hex');
     const createdAt = now();
@@ -1246,7 +1484,7 @@ export const createPreviewProxyRuntime = ({
     return { id, token, expiresAt };
   };
 
-  const resolveTargetFromRequest = (req) => {
+  const resolveTargetFromRequest = (req: PreviewRequest): PreviewTargetResolution => {
     const rawUrl = req?.originalUrl || req?.url || '';
     const parsed = new URL(rawUrl, 'http://localhost');
     const pathname = parsed.pathname || '';
@@ -1272,7 +1510,7 @@ export const createPreviewProxyRuntime = ({
     return { ok: true, id, entry, parsed };
   };
 
-  const stripProxyPrefix = (pathname, id) => {
+  const stripProxyPrefix = (pathname: string, id: string): string => {
     const prefix = `/api/preview/proxy/${id}`;
     if (!pathname.startsWith(prefix)) {
       return pathname;
@@ -1281,7 +1519,7 @@ export const createPreviewProxyRuntime = ({
     return rest.length === 0 ? '/' : rest;
   };
 
-  const removeRawQueryParam = (search, paramName) => {
+  const removeRawQueryParam = (search: string, paramName: string): string => {
     if (typeof search !== 'string' || search.length <= 1) {
       return '';
     }
@@ -1295,7 +1533,10 @@ export const createPreviewProxyRuntime = ({
 
   // Drop only CSP directives that prevent framing or the injected preview bridge.
   // Preview targets are restricted to loopback dev servers.
-  const stripFrameBustingHeaders = (headers, bridgeNonce) => {
+  const stripFrameBustingHeaders = (
+    headers: IncomingHttpHeaders,
+    bridgeNonce: string,
+  ): void => {
     if (!headers || typeof headers !== 'object') {
       return;
     }
@@ -1312,7 +1553,7 @@ export const createPreviewProxyRuntime = ({
         const values = Array.isArray(original) ? original : [original];
         const rewritten = values
           .map((value) => rewritePreviewCspHeader(value, bridgeNonce))
-          .filter((value) => typeof value === 'string' && value.length > 0);
+          .filter((value): value is string => typeof value === 'string' && value.length > 0);
         if (rewritten.length === 0) {
           delete headers[key];
         } else {
@@ -1322,16 +1563,20 @@ export const createPreviewProxyRuntime = ({
     }
   };
 
-  const attach = (app, {
+  const attach = (app: PreviewApplication, {
     server,
     express,
     uiAuthController,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
-  }) => {
+  }: PreviewAttachDependencies): void => {
     ensureSweeper();
 
-    const injectPreviewBridge = (bodyText, targetOrigin, bridgeNonce) => {
+    const injectPreviewBridge = (
+      bodyText: string,
+      targetOrigin: string,
+      bridgeNonce: string,
+    ): string => {
       if (typeof bodyText !== 'string' || bodyText.includes(PREVIEW_BRIDGE_SCRIPT_ID)) {
         return bodyText;
       }
@@ -1348,7 +1593,7 @@ export const createPreviewProxyRuntime = ({
       return `${bodyText}${script}`;
     };
 
-    const rewriteViteClientHmr = (bodyText, proxyBasePath) => {
+    const rewriteViteClientHmr = (bodyText: string, proxyBasePath: string): string => {
       if (typeof bodyText !== 'string' || !bodyText.includes('vite-hmr')) {
         return bodyText;
       }
@@ -1367,7 +1612,7 @@ export const createPreviewProxyRuntime = ({
         );
     };
 
-    app.post('/api/preview/targets', express.json(), async (req, res) => {
+    const createPreviewTarget: PreviewRouteHandler = async (req, res) => {
       try {
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, res);
@@ -1381,13 +1626,14 @@ export const createPreviewProxyRuntime = ({
           }
         }
 
-        const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+        const body = req.body ?? {};
+        const rawUrl = typeof body.url === 'string' ? body.url.trim() : '';
         if (!rawUrl) {
           return res.status(400).json({ error: 'url is required' });
         }
 
-        const ttlMs = typeof req.body?.ttlMs === 'number' ? req.body.ttlMs : DEFAULT_TARGET_TTL_MS;
-        const allowExternal = req.body?.allowExternal === true;
+        const ttlMs = typeof body.ttlMs === 'number' ? body.ttlMs : DEFAULT_TARGET_TTL_MS;
+        const allowExternal = body.allowExternal === true;
         const normalized = allowExternal
           ? normalizeProxyTargetUrl(rawUrl, { allowExternal: true })
           : normalizeLoopbackUrl(rawUrl);
@@ -1416,7 +1662,8 @@ export const createPreviewProxyRuntime = ({
         console.error('[preview-proxy] Failed to create target:', error);
         return res.status(500).json({ error: 'Failed to create preview target' });
       }
-    });
+    };
+    app.post('/api/preview/targets', express.json(), createPreviewTarget);
 
     const proxy = createProxyMiddleware({
       target: 'http://127.0.0.1',
@@ -1552,16 +1799,25 @@ export const createPreviewProxyRuntime = ({
 
           console.error('[preview-proxy] proxy error:', message);
 
-          if (res && !res.headersSent && typeof res.status === 'function') {
-            const payload = { error: 'Preview proxy error' };
+          if (isPreviewResponse(res) && !res.headersSent) {
+            const payload: {
+              error: string;
+              details?: {
+                message: string;
+                code?: unknown;
+                targetOrigin?: string;
+              };
+            } = { error: 'Preview proxy error' };
 
             if (isDev) {
               try {
                 const resolved = resolveTargetFromRequest(_req);
+                const targetOrigin = resolved.ok ? resolved.entry.origin : undefined;
+                const code = isRecord(err) ? err.code : undefined;
                 payload.details = {
                   message,
-                  code: err && typeof err === 'object' ? err.code : undefined,
-                  targetOrigin: resolved?.ok ? resolved.entry.origin : undefined,
+                  ...(code !== undefined ? { code } : {}),
+                  ...(targetOrigin !== undefined ? { targetOrigin } : {}),
                 };
               } catch {
                 payload.details = { message };
@@ -1574,14 +1830,15 @@ export const createPreviewProxyRuntime = ({
       },
     });
 
-    app.use('/api/preview/proxy', (req, res, next) => {
+    const requirePreviewTarget: PreviewRouteHandler = (req, res, next) => {
       const resolved = resolveTargetFromRequest(req);
       if (!resolved.ok) {
         res.setHeader(PREVIEW_TARGET_ERROR_HEADER, resolved.code);
         return res.status(resolved.status).json({ error: resolved.error });
       }
       next();
-    }, proxy);
+    };
+    app.use('/api/preview/proxy', requirePreviewTarget, proxy);
 
     server.on('upgrade', (req, socket, head) => {
       const resolved = resolveTargetFromRequest(req);

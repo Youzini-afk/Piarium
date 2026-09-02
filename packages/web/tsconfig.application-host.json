@@ -1,13 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": false,
+    "allowJs": false,
     "rootDir": "application-host",
     "outDir": ".application-host-build",
     "types": ["node"],
     "sourceMap": true,
-    "declaration": false,
+    "declaration": true,
+    "declarationMap": true,
     "noEmit": false,
     "lib": ["ES2023"],
     "paths": {
@@ -22,6 +22,6 @@
       "@piarium/extension-builtins": ["./node_modules/@piarium/extension-builtins/dist/index.d.ts"]
     }
   },
-  "include": ["application-host/**/*.ts", "application-host/**/*.js"],
-  "exclude": ["application-host/**/*.test.ts", "application-host/**/*.test.js"]
+  "include": ["application-host/**/*.ts"],
+  "exclude": ["application-host/**/*.test.ts"]
 }

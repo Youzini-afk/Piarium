@@ -1,10 +1,11 @@
-// @ts-nocheck
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
+import type { PwaManifestRouteDependencies } from './pwa-manifest-routes.js';
+import type { Express, RequestHandler, Response } from 'express';
 
 const IMMUTABLE_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const REVALIDATE_DOCUMENT_CACHE_CONTROL = 'no-cache';
 
-const isFingerprintAsset = (filePath, path) => {
+const isFingerprintAsset = (filePath: unknown, path: { sep: string }): boolean => {
   if (typeof filePath !== 'string') return false;
   const segments = filePath.split(path.sep);
   const assetsIndex = segments.lastIndexOf('assets');
@@ -13,7 +14,18 @@ const isFingerprintAsset = (filePath, path) => {
   return /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+(?:\.map)?$/.test(fileName);
 };
 
-export const createStaticRoutesRuntime = (dependencies) => {
+export const createStaticRoutesRuntime = (dependencies: {
+  __dirname: string;
+  express: { static(root: string, options?: { setHeaders?(response: Response, filePath: string): void }): RequestHandler };
+  fs: { existsSync(path: string): boolean };
+  listRecentSessions?: PwaManifestRouteDependencies['listRecentSessions'];
+  normalizePwaAppName(value: unknown, fallback: string): unknown;
+  normalizePwaOrientation(value: unknown, fallback: string): unknown;
+  path: { join(...parts: string[]): string; resolve(path: string): string; sep: string };
+  process: { env: Record<string, string | undefined> };
+  readSettingsFromDisk: PwaManifestRouteDependencies['readSettingsFromDisk'];
+  [key: string]: unknown;
+}) => {
   const {
     fs,
     path,
@@ -26,7 +38,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     normalizePwaOrientation,
   } = dependencies;
 
-  const resolveDistPath = () => {
+  const resolveDistPath = (): string => {
     const env = typeof process.env.PIARIUM_DIST_DIR === 'string' ? process.env.PIARIUM_DIST_DIR.trim() : '';
     if (env) {
       return path.resolve(env);
@@ -34,13 +46,13 @@ export const createStaticRoutesRuntime = (dependencies) => {
     return path.join(__dirname, '..', 'dist');
   };
 
-  const registerStaticRoutes = (app) => {
+  const registerStaticRoutes = (app: Express): void => {
     const distPath = resolveDistPath();
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
       app.use(express.static(distPath, {
-        setHeaders(res, filePath) {
+        setHeaders(res: Response, filePath: string) {
           // Service workers should never be long-cached; iOS is especially sensitive.
           if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
@@ -60,11 +72,16 @@ export const createStaticRoutesRuntime = (dependencies) => {
       }));
 
       registerPwaManifestRoute(app, {
-        process,
         listRecentSessions,
         readSettingsFromDisk,
-        normalizePwaAppName,
-        normalizePwaOrientation,
+        normalizePwaAppName: (value, fallback) => {
+          const normalized = normalizePwaAppName(value, fallback);
+          return typeof normalized === 'string' ? normalized : undefined;
+        },
+        normalizePwaOrientation: (value, fallback) => {
+          const normalized = normalizePwaOrientation(value, fallback);
+          return typeof normalized === 'string' ? normalized : undefined;
+        },
       });
 
       app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
@@ -80,7 +97,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     });
   };
 
-  const registerApiOnlyFallbackRoutes = (app) => {
+  const registerApiOnlyFallbackRoutes = (app: Express): void => {
     app.get(/^(?!\/api|\/auth|\/health|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
       const command = 'piarium connect-url --help';
       res.status(200).format({

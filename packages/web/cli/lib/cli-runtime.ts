@@ -1,0 +1,67 @@
+import type {
+  RuntimeMethod,
+  RuntimeMethodParams,
+  RuntimeMethodResult,
+} from '@piarium/protocol';
+import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
+import { requestJson } from './cli-http.js';
+import type { CliOptions } from './cli-types.js';
+
+const asNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+export const requestRuntimeMethod = async <Method extends RuntimeMethod>(
+  port: number,
+  method: Method,
+  params: RuntimeMethodParams<Method>,
+  options: CliOptions = {},
+): Promise<RuntimeMethodResult<Method>> => {
+  const { response, body } = await requestJson(port, '/api/piarium/runtime/request', {
+    ...options,
+    timeoutMs: typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : 60_000,
+    method: 'POST',
+    body: JSON.stringify({ method, params, trustProject: options.trustProject !== false }),
+  });
+  if (response.ok) return body?.result as RuntimeMethodResult<Method>;
+  const message = asNonEmptyString(body?.error) || `Pi runtime method ${method} failed`;
+  const status = Number(response?.status);
+  throw new TunnelCliError(
+    message,
+    status === 400 || status === 404 ? EXIT_CODE.USAGE_ERROR : EXIT_CODE.GENERAL_ERROR,
+  );
+};
+
+export const requestPiariumApi = async (
+  port: number,
+  endpoint: string,
+  options: CliOptions = {},
+): Promise<Record<string, unknown>> => {
+  const { response, body } = await requestJson(port, endpoint, options);
+  if (response.ok) return body ?? {};
+  const message = asNonEmptyString(body?.error) || `Piarium API request failed: ${endpoint}`;
+  const status = Number(response?.status);
+  throw new TunnelCliError(
+    message,
+    status === 400 || status === 404 ? EXIT_CODE.USAGE_ERROR : EXIT_CODE.GENERAL_ERROR,
+  );
+};
+
+export const waitForSessionIdle = async (
+  port: number,
+  sessionId: string,
+  options: CliOptions = {},
+): Promise<RuntimeMethodResult<'session.snapshot'>> => {
+  const timeoutSeconds = Number(options.timeout) > 0 ? Number(options.timeout) : 600;
+  const deadline = Date.now() + (timeoutSeconds * 1000);
+  while (Date.now() < deadline) {
+    const snapshot = await requestRuntimeMethod(port, 'session.snapshot', { sessionId }, options);
+    if (!snapshot.busy && !snapshot.isStreaming && !snapshot.isCompacting) return snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new TunnelCliError(`Session ${sessionId} did not become idle within ${timeoutSeconds}s.`, EXIT_CODE.GENERAL_ERROR);
+};

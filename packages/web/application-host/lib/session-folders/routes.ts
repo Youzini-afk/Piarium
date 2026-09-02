@@ -1,9 +1,25 @@
-// @ts-nocheck
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
 
-const hasValidFolderShape = (folder) => (
+interface SessionFolder {
+  createdAt: number;
+  id: string;
+  name: string;
+  parentId?: string | null | undefined;
+  sessionIds: string[];
+}
+
+interface SessionFolderSnapshot extends Record<string, unknown> {
+  collapsedFolderIds: string[];
+  foldersMap: Record<string, SessionFolder[]>;
+  updatedAt: number;
+  version: 1;
+}
+
+const hasValidFolderShape = (folder: unknown): folder is SessionFolder => (
   isObjectRecord(folder)
   && typeof folder.id === 'string'
   && typeof folder.name === 'string'
@@ -14,14 +30,14 @@ const hasValidFolderShape = (folder) => (
   && (folder.parentId === undefined || folder.parentId === null || typeof folder.parentId === 'string')
 );
 
-const hasValidFoldersMapShape = (foldersMap) => (
+const hasValidFoldersMapShape = (foldersMap: unknown): foldersMap is Record<string, SessionFolder[]> => (
   isObjectRecord(foldersMap)
   && Object.values(foldersMap).every((folders) => (
     Array.isArray(folders) && folders.every(hasValidFolderShape)
   ))
 );
 
-const hasValidFolderSnapshotShape = (snapshot) => (
+const hasValidFolderSnapshotShape = (snapshot: unknown): snapshot is SessionFolderSnapshot => (
   isObjectRecord(snapshot)
   && snapshot.version === 1
   && hasValidFoldersMapShape(snapshot.foldersMap)
@@ -29,7 +45,42 @@ const hasValidFolderSnapshotShape = (snapshot) => (
   && snapshot.collapsedFolderIds.every((folderId) => typeof folderId === 'string')
 );
 
-export const registerSessionFoldersRoutes = (app, dependencies) => {
+export interface SessionFolderRequest { body?: unknown }
+export interface SessionFolderResponse {
+  json(payload: unknown): unknown;
+  status(code: number): SessionFolderResponse;
+}
+export type SessionFolderHandler = (
+  request: SessionFolderRequest,
+  response: SessionFolderResponse,
+) => Promise<unknown>;
+export interface SessionFolderApp {
+  get(path: string, handler: SessionFolderHandler): unknown;
+  post(path: string, handler: SessionFolderHandler): unknown;
+}
+export interface SessionFolderFsPromises {
+  mkdir(path: string, options: { recursive: true }): Promise<unknown>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  rename(oldPath: string, newPath: string): Promise<unknown>;
+  unlink(path: string): Promise<unknown>;
+  writeFile(path: string, value: string, encoding: 'utf8'): Promise<unknown>;
+}
+export interface SessionFolderRouteDependencies {
+  fsPromises: SessionFolderFsPromises;
+  path: Pick<typeof import('node:path'), 'dirname' | 'join'>;
+  piariumDataDir: string;
+}
+
+const errorCode = (error: unknown): string | undefined => (
+  error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
+);
+
+export const registerSessionFoldersRoutes = (
+  app: SessionFolderApp,
+  dependencies: SessionFolderRouteDependencies,
+): void => {
   const {
     fsPromises,
     path,
@@ -37,23 +88,23 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
   } = dependencies;
 
   const filePath = path.join(piariumDataDir, 'sessions-directories.json');
-  let saveQueue = Promise.resolve();
+  let saveQueue: Promise<unknown> = Promise.resolve();
 
-  const ensureDir = async () => {
+  const ensureDir = async (): Promise<void> => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
   };
 
   app.get('/api/session-folders', async (_req, res) => {
     try {
       const raw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
-        if (error && error.code === 'ENOENT') return null;
+        if (errorCode(error) === 'ENOENT') return null;
         throw error;
       });
       if (!raw) {
         return res.json({ version: 1, exists: false });
       }
       try {
-        const parsed = JSON.parse(raw);
+        const parsed = JSON.parse(raw) as unknown;
         if (
           !hasValidFolderSnapshotShape(parsed)
           || typeof parsed.updatedAt !== 'number'
@@ -88,17 +139,17 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'updatedAt must be a positive finite number' });
     }
 
-    const save = async () => {
-      let tmp;
+    const save = async (): Promise<unknown> => {
+      let tmp: string | undefined;
       let saved = false;
       try {
         const currentRaw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
-          if (error && error.code === 'ENOENT') return null;
+          if (errorCode(error) === 'ENOENT') return null;
           throw error;
         });
         if (currentRaw) {
           try {
-            const current = JSON.parse(currentRaw);
+            const current = JSON.parse(currentRaw) as unknown;
             const currentUpdatedAt = hasValidFolderSnapshotShape(current)
               && typeof current.updatedAt === 'number'
               && Number.isFinite(current.updatedAt)
@@ -118,7 +169,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         return res.json({ success: true });
       } catch (error) {
         if (tmp && !saved) {
-          await fsPromises.unlink(tmp).catch(() => {});
+          await fsPromises.unlink(tmp).catch(() => undefined);
         }
         const message = error instanceof Error ? error.message : 'Failed to write session folders';
         return res.status(500).json({ error: message });

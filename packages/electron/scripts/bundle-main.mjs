@@ -1,5 +1,5 @@
 /**
- * Bundle main.mjs into a single file. Small electron-* helper deps are
+ * Bundle the TypeScript Electron runtime into deployable ESM files. Small electron-* helper deps are
  * inlined; everything else — including the in-process web server
  * (@piarium/web) and native modules — stays external so it resolves
  * from node_modules at runtime inside the packaged app.
@@ -20,7 +20,7 @@ const root = path.resolve(__dirname, '..');
 const updaterE2eBuild = process.env.PIARIUM_UPDATER_E2E_BUILD === '1';
 
 const result = await Bun.build({
-  entrypoints: [path.join(root, 'main.mjs')],
+  entrypoints: [path.join(root, 'main.ts'), path.join(root, 'preload.ts')],
   outdir: path.join(root, 'dist-bundle'),
   target: 'node',
   format: 'esm',
@@ -49,4 +49,4 @@ if (!result.success) {
   process.exit(1);
 }
 
-console.log(`[electron] main.mjs bundled -> dist-bundle/main.mjs (updater E2E=${updaterE2eBuild})`);
+console.log(`[electron] main.ts + preload.ts bundled -> dist-bundle/*.mjs (updater E2E=${updaterE2eBuild})`);

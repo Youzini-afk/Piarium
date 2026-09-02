@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -7,42 +6,60 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
+  asObject,
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/index.js';
 
 // Status 3 indicates the window is not applicable for the current plan tier.
 const WINDOW_STATUS_INACTIVE = 3;
 
 const TEXT_MODELS = ['general', 'chat', 'text'];
 
-const pickChatModel = (modelRemains) => {
-  if (!Array.isArray(modelRemains) || modelRemains.length === 0) return null;
+type MiniMaxModel = Record<string, unknown>;
 
-  const m3Candidate = modelRemains.find(
-    (m) => m?.model_name && /^minimax-m/i.test(m.model_name) && toNumber(m.current_interval_total_count) > 0
+interface MiniMaxProviderOptions {
+  aliases: string[];
+  codingPlanUrl: string;
+  providerId: string;
+  providerName: string;
+  tokenPlanUrl: string;
+}
+
+const pickChatModel = (modelRemains: unknown): MiniMaxModel | null => {
+  if (!Array.isArray(modelRemains) || modelRemains.length === 0) return null;
+  const models = modelRemains
+    .map(asObject)
+    .filter((model): model is MiniMaxModel => Boolean(model));
+  if (models.length === 0) return null;
+
+  const m3Candidate = models.find(
+    (model) => typeof model.model_name === 'string'
+      && /^minimax-m/i.test(model.model_name)
+      && (toNumber(model.current_interval_total_count) ?? 0) > 0
   );
   if (m3Candidate) return m3Candidate;
 
-  const textCandidate = modelRemains.find(
-    (m) => m?.model_name && TEXT_MODELS.includes(m.model_name.toLowerCase())
+  const textCandidate = models.find(
+    (model) => typeof model.model_name === 'string' && TEXT_MODELS.includes(model.model_name.toLowerCase())
   );
   if (textCandidate) return textCandidate;
 
-  const percentCandidate = modelRemains.find(
-    (m) => typeof m?.current_interval_remaining_percent === 'number'
+  const percentCandidate = models.find(
+    (model) => typeof model.current_interval_remaining_percent === 'number'
   );
   if (percentCandidate) return percentCandidate;
 
-  return modelRemains[0];
+  return models[0] ?? null;
 };
 
-const isUsablePayload = (payload) => {
-  const baseResp = payload?.base_resp;
+const isUsablePayload = (payload: Record<string, unknown>): boolean => {
+  const baseResp = asObject(payload.base_resp);
   if (baseResp && baseResp.status_code !== 0) return false;
-  const rems = payload?.model_remains;
+  const rems = payload.model_remains;
   return Array.isArray(rems) && rems.length > 0;
 };
 
-const fetchEndpoint = async (url, apiKey) => {
+const fetchEndpoint = async (url: string, apiKey: string): Promise<Record<string, unknown> | null> => {
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -52,7 +69,8 @@ const fetchEndpoint = async (url, apiKey) => {
       },
     });
     if (!response.ok) return null;
-    const payload = await response.json();
+    const payload = asObject(await response.json());
+    if (!payload) return null;
     if (!isUsablePayload(payload)) return null;
     return payload;
   } catch {
@@ -60,7 +78,7 @@ const fetchEndpoint = async (url, apiKey) => {
   }
 };
 
-const coercePercent = (value) => {
+const coercePercent = (value: unknown): number | null => {
   const n = toNumber(value);
   return n !== null ? Math.max(0, Math.min(100, n)) : null;
 };
@@ -70,7 +88,7 @@ const coercePercent = (value) => {
  * Status 3 means the window is not applicable (e.g. legacy plans without weekly limits).
  * When the status field is absent, default to active.
  */
-const isWindowActive = (status) => {
+const isWindowActive = (status: unknown): boolean => {
   const n = toNumber(status);
   return n === null || n !== WINDOW_STATUS_INACTIVE;
 };
@@ -80,7 +98,11 @@ const isWindowActive = (status) => {
  * MiniMax API returns remains_time in milliseconds (confirmed via live API testing:
  * 9664502 ms = 2.68h in a 5h window, consistent with remaining_percent).
  */
-const calculateWindowSeconds = (startAt, resetAt, remainsTimeMs) => {
+const calculateWindowSeconds = (
+  startAt: number | null,
+  resetAt: number | null,
+  remainsTimeMs: number | null,
+): number | null => {
   if (startAt && resetAt && resetAt > startAt) {
     return Math.floor((resetAt - startAt) / 1000);
   }
@@ -90,7 +112,7 @@ const calculateWindowSeconds = (startAt, resetAt, remainsTimeMs) => {
   return null;
 };
 
-const calculateUsage = (model, isTokenPlan) => {
+const calculateUsage = (model: MiniMaxModel, isTokenPlan: boolean) => {
   const intervalTotal = toNumber(model.current_interval_total_count);
   const intervalUsageRaw = toNumber(model.current_interval_usage_count);
   const intervalStartAt = toTimestamp(model.start_time);
@@ -108,7 +130,7 @@ const calculateUsage = (model, isTokenPlan) => {
   let intervalUsedPercent = null;
   if (intervalRemainingPercent !== null) {
     intervalUsedPercent = 100 - intervalRemainingPercent;
-  } else if (intervalTotal > 0 && intervalUsageRaw !== null) {
+  } else if (intervalTotal !== null && intervalTotal > 0 && intervalUsageRaw !== null) {
     const intervalUsed = isTokenPlan
       ? Math.max(0, intervalTotal - intervalUsageRaw)
       : intervalUsageRaw;
@@ -118,7 +140,7 @@ const calculateUsage = (model, isTokenPlan) => {
   let weeklyUsedPercent = null;
   if (weeklyRemainingPercent !== null) {
     weeklyUsedPercent = 100 - weeklyRemainingPercent;
-  } else if (weeklyTotal > 0 && weeklyUsageRaw !== null) {
+  } else if (weeklyTotal !== null && weeklyTotal > 0 && weeklyUsageRaw !== null) {
     const weeklyUsed = isTokenPlan
       ? Math.max(0, weeklyTotal - weeklyUsageRaw)
       : weeklyUsageRaw;
@@ -138,7 +160,13 @@ const calculateUsage = (model, isTokenPlan) => {
   };
 };
 
-export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, aliases, tokenPlanUrl, codingPlanUrl }) => {
+export const createMiniMaxCodingPlanProvider = ({
+  providerId,
+  providerName,
+  aliases,
+  tokenPlanUrl,
+  codingPlanUrl,
+}: MiniMaxProviderOptions) => {
   const isConfigured = () => {
     const auth = readAuthFile();
     const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
@@ -148,7 +176,11 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
   const fetchQuota = async () => {
     const auth = readAuthFile();
     const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-    const apiKey = entry?.key ?? entry?.token;
+    const apiKey = typeof entry?.key === 'string'
+      ? entry.key
+      : typeof entry?.token === 'string'
+        ? entry.token
+        : null;
 
     if (!apiKey) {
       return buildResult({
@@ -199,7 +231,7 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
         weeklyResetAt,
       } = calculateUsage(model, isTokenPlan);
 
-      const windows = {
+      const windows: Record<string, UsageWindow> = {
         '5h': toUsageWindow({
           usedPercent: intervalUsedPercent,
           windowSeconds: intervalWindowSeconds,
@@ -213,7 +245,7 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
       const hasWeeklyData =
         weeklyActive &&
         (coercePercent(model.current_weekly_remaining_percent) !== null ||
-          toNumber(model.current_weekly_total_count) > 0);
+          (toNumber(model.current_weekly_total_count) ?? 0) > 0);
 
       if (hasWeeklyData) {
         windows.weekly = toUsageWindow({

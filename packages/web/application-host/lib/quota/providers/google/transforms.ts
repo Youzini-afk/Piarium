@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Google Provider - Transforms
  *
@@ -8,6 +7,7 @@
 
 import {
   asNonEmptyString,
+  asObject,
   toNumber,
   toTimestamp,
   toUsageWindow
@@ -16,7 +16,7 @@ import {
 const GOOGLE_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
-export const parseGoogleRefreshToken = (rawRefreshToken) => {
+export const parseGoogleRefreshToken = (rawRefreshToken: unknown) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
   if (!refreshToken) {
     return { refreshToken: null, projectId: null, managedProjectId: null };
@@ -30,7 +30,7 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
   };
 };
 
-const resolveGoogleWindow = (sourceId, resetAt) => {
+const resolveGoogleWindow = (sourceId: string, resetAt: number | null) => {
   if (sourceId === 'gemini') {
     return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS };
   }
@@ -50,8 +50,9 @@ const resolveGoogleWindow = (sourceId, resetAt) => {
   return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS };
 };
 
-export const transformQuotaBucket = (bucket, sourceId) => {
-  const modelId = asNonEmptyString(bucket?.modelId);
+export const transformQuotaBucket = (value: unknown, sourceId: string) => {
+  const bucket = asObject(value) ?? {};
+  const modelId = asNonEmptyString(bucket.modelId);
   if (!modelId) {
     return null;
   }
@@ -60,12 +61,12 @@ export const transformQuotaBucket = (bucket, sourceId) => {
     ? modelId
     : `${sourceId}/${modelId}`;
 
-  const remainingFraction = toNumber(bucket?.remainingFraction);
+  const remainingFraction = toNumber(bucket.remainingFraction);
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = toTimestamp(bucket?.resetTime);
+  const resetAt = toTimestamp(bucket.resetTime);
   const window = resolveGoogleWindow(sourceId, resetAt);
 
   return {
@@ -81,18 +82,20 @@ export const transformQuotaBucket = (bucket, sourceId) => {
   };
 };
 
-export const transformModelData = (modelName, modelData, sourceId) => {
+export const transformModelData = (modelName: string, value: unknown, sourceId: string) => {
+  const modelData = asObject(value) ?? {};
   const scopedName = modelName.startsWith(`${sourceId}/`)
     ? modelName
     : `${sourceId}/${modelName}`;
 
-  const remainingFraction = modelData?.quotaInfo?.remainingFraction;
+  const quotaInfo = asObject(modelData.quotaInfo);
+  const remainingFraction = quotaInfo?.remainingFraction;
   const remainingPercent = typeof remainingFraction === 'number'
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = modelData?.quotaInfo?.resetTime
-    ? new Date(modelData.quotaInfo.resetTime).getTime()
+  const resetAt = typeof quotaInfo?.resetTime === 'string' || typeof quotaInfo?.resetTime === 'number'
+    ? new Date(quotaInfo.resetTime).getTime()
     : null;
   const window = resolveGoogleWindow(sourceId, resetAt);
 

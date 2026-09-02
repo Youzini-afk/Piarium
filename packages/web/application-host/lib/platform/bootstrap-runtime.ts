@@ -1,5 +1,63 @@
-// @ts-nocheck
-export const createServerBootstrapRuntime = (dependencies) => {
+import type { Express } from 'express';
+import type expressModule from 'express';
+
+import type { registerMobileRoutes } from '../mobile/routes.js';
+import type { registerNotificationRoutes } from '../notifications/routes.js';
+import type { registerTtsRoutes } from '../tts/routes.js';
+import type { createUiAuth } from '../ui-auth/ui-auth.js';
+import type {
+  AuthAccessDependencies,
+  CommonRequestMiddlewareDependencies,
+  ServerStatusDependencies,
+} from './core-routes.js';
+import type { registerPiariumRoutes } from './piarium-routes.js';
+
+type UiAuthOptions = NonNullable<Parameters<typeof createUiAuth>[0]>;
+type UiAuthController = ReturnType<typeof createUiAuth>;
+type NotificationDependencies = Parameters<typeof registerNotificationRoutes>[1];
+type MobileDependencies = Parameters<typeof registerMobileRoutes>[1];
+type TtsDependencies = Parameters<typeof registerTtsRoutes>[1];
+type PiariumDependencies = Parameters<typeof registerPiariumRoutes>[1];
+
+type SessionNotificationMethod =
+  | 'getSessionActivitySnapshot'
+  | 'getSessionAttentionSnapshot'
+  | 'getSessionAttentionState'
+  | 'getSessionState'
+  | 'getSessionStateSnapshot'
+  | 'markSessionUnviewed'
+  | 'markSessionViewed'
+  | 'markUserMessageSent';
+
+export type ServerBootstrapOptions =
+  Omit<ServerStatusDependencies, 'express' | 'uiAuthController'>
+  & Omit<AuthAccessDependencies, 'express' | 'uiAuthController'>
+  & TtsDependencies
+  & Omit<NotificationDependencies, 'uiAuthController' | SessionNotificationMethod>
+  & PiariumDependencies
+  & {
+    clientPairingRuntime: AuthAccessDependencies['clientPairingRuntime'];
+    mobileDeviceStore: MobileDependencies['deviceStore'];
+    mobilePairingRuntime: MobileDependencies['pairingRuntime'];
+    mobilePushRuntime: MobileDependencies['mobilePushRuntime'];
+    sessionRuntime: Pick<NotificationDependencies, SessionNotificationMethod>;
+    uiPassword: UiAuthOptions['password'];
+    verboseRequestLogs?: CommonRequestMiddlewareDependencies['verboseRequestLogs'];
+  };
+
+export interface ServerBootstrapDependencies {
+  createUiAuth(options: UiAuthOptions): UiAuthController;
+  express: typeof expressModule;
+  registerAuthAndAccessRoutes(app: Express, dependencies: AuthAccessDependencies): void;
+  registerCommonRequestMiddleware(app: Express, dependencies: CommonRequestMiddlewareDependencies): void;
+  registerMobileRoutes?: typeof registerMobileRoutes;
+  registerNotificationRoutes: typeof registerNotificationRoutes;
+  registerPiariumRoutes: typeof registerPiariumRoutes;
+  registerServerStatusRoutes(app: Express, dependencies: ServerStatusDependencies): void;
+  registerTtsRoutes: typeof registerTtsRoutes;
+}
+
+export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDependencies) => {
   const {
     createUiAuth,
     registerServerStatusRoutes,
@@ -12,7 +70,9 @@ export const createServerBootstrapRuntime = (dependencies) => {
     express,
   } = dependencies;
 
-  const setupBaseRoutes = (app, options) => {
+  const setupBaseRoutes = (app: Express, options: ServerBootstrapOptions): {
+    uiAuthController: UiAuthController;
+  } => {
     const {
       process,
       piariumVersion,
@@ -80,14 +140,17 @@ export const createServerBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
-      getServerId,
-      getServerPort,
-      getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
+      ...(getServerId ? { getServerId } : {}),
+      getServerPort,
+      getTunnelUrl,
     });
 
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+    registerCommonRequestMiddleware(app, {
+      express,
+      ...(verboseRequestLogs !== undefined ? { verboseRequestLogs } : {}),
+    });
 
     registerAuthAndAccessRoutes(app, {
       express,
@@ -95,14 +158,14 @@ export const createServerBootstrapRuntime = (dependencies) => {
       uiAuthController,
       remoteClientAuthRuntime,
       clientPairingRuntime,
-      getRelayPairingCandidate,
-      reconcileRelay,
-      getPairingTransports,
-      getDirectCandidateUrls,
-      getServerId,
-      getServerLabel,
       readSettingsFromDisk,
       normalizeTunnelSessionTtlMs,
+      ...(getRelayPairingCandidate ? { getRelayPairingCandidate } : {}),
+      ...(reconcileRelay ? { reconcileRelay } : {}),
+      ...(getPairingTransports ? { getPairingTransports } : {}),
+      ...(getDirectCandidateUrls ? { getDirectCandidateUrls } : {}),
+      ...(getServerId ? { getServerId } : {}),
+      ...(getServerLabel ? { getServerLabel } : {}),
     });
 
     registerTtsRoutes(app, { sayTTSCapability });
@@ -119,7 +182,7 @@ export const createServerBootstrapRuntime = (dependencies) => {
       addOrUpdateApnsToken,
       removeApnsToken,
       updateUiVisibility,
-      clearPendingPushBadge,
+      ...(clearPendingPushBadge ? { clearPendingPushBadge } : {}),
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,

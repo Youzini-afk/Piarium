@@ -52,7 +52,7 @@ message invalidates stale assistance without a clearing write.
 
 - `packages/pi-host/test/session-features.test.ts` covers persistence,
   branching, stale writes, and the Goal prompt hook.
-- `packages/web/server/lib/pi-session-automation/runtime.test.js` covers Goal
+- `packages/web/application-host/lib/pi-session-automation/runtime.test.js` covers Goal
   settlement/continuation and Assist writes.
 - `packages/runtime-broker/test/runtime-broker.test.ts` exercises the feature
   RPC through real catalog and session workers.

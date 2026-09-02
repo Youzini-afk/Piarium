@@ -1,4 +1,3 @@
-// @ts-nocheck
 export const renderExtensionRecoveryPage = () => `<!doctype html>
 <html lang="en">
 <head>
@@ -49,7 +48,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
     <section id="extensions" aria-live="polite"></section>
     <details>
       <summary>Catalog diagnostics</summary>
-      <pre id="diagnostics">Loading鈥?/pre>
+      <pre id="diagnostics">Loading…</pre>
     </details>
   </main>
   <script type="module">
@@ -97,7 +96,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
           name.textContent = extension.manifest.displayName || extension.manifest.id;
           const meta = document.createElement('div');
           meta.className = 'meta';
-          meta.textContent = extension.manifest.id + ' 路 ' + extension.manifest.version + ' 路 ' + extension.source.display;
+          meta.textContent = extension.manifest.id + ' · ' + extension.manifest.version + ' · ' + extension.source.display;
           const states = document.createElement('div');
           states.className = 'states';
           const desired = document.createElement('span');
@@ -119,7 +118,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
           toggle.setAttribute('aria-checked', String(extension.desired.enabled));
           toggle.addEventListener('click', async () => {
             toggle.disabled = true;
-            setStatus('Updating ' + extension.manifest.id + '鈥?);
+            setStatus('Updating ' + extension.manifest.id + '…');
             try {
               const payload = await request('/api/piarium/extensions/v1/extensions/' + encodeURIComponent(extension.manifest.id) + '/enabled', {
                 method: 'PATCH',
@@ -147,7 +146,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
       }, null, 2);
     };
     const load = async () => {
-      setStatus('Loading extension catalog鈥?);
+      setStatus('Loading extension catalog…');
       try {
         const payload = await request('/api/piarium/extensions/v1/catalog');
         if (payload.status !== 'ready') throw new Error(payload.error?.message || 'Catalog unavailable');
@@ -162,7 +161,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
     disableAll.addEventListener('click', async () => {
       if (!snapshot) return;
       disableAll.disabled = true;
-      setStatus('Disabling all extensions鈥?);
+      setStatus('Disabling all extensions…');
       try {
         const payload = await request('/api/piarium/extensions/v1/disable-all', {
           method: 'POST',

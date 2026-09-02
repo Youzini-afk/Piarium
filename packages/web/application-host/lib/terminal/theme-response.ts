@@ -1,4 +1,3 @@
-// @ts-nocheck
 const MODE_SET = '\u001b[?2031h';
 const MODE_RESET = '\u001b[?2031l';
 const CAPABILITY_QUERY = '\u001b[?2031$p';
@@ -9,7 +8,14 @@ const OSC_QUERIES = [10, 11].flatMap((code) => [
 ]);
 const CONTROL_SEQUENCES = [MODE_SET, MODE_RESET, CAPABILITY_QUERY, ...MODE_QUERIES, ...OSC_QUERIES.map(({ sequence }) => sequence)];
 
-const parseColor = (value) => {
+interface TerminalAppearance {
+  background: string;
+  foreground: string;
+  modeEnabled?: boolean | undefined;
+  themeMode: string;
+}
+
+const parseColor = (value: unknown): number[] | null => {
   if (typeof value !== 'string') return null;
   const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)?.[1];
   if (hex) {
@@ -20,19 +26,23 @@ const parseColor = (value) => {
   return rgb ? rgb.slice(1, 4).map((part) => Math.min(255, Number(part))) : null;
 };
 
-const colorReport = (code, color) => {
+const colorReport = (code: number, color: unknown): string | null => {
   const rgb = parseColor(color);
   if (!rgb) return null;
   const channels = rgb.map((channel) => channel.toString(16).padStart(2, '0').repeat(2));
   return `\u001b]${code};rgb:${channels.join('/')}\u001b\\`;
 };
 
-export const terminalThemeModeReport = (themeMode) => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
+export const terminalThemeModeReport = (themeMode: unknown): string => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
 
-export const consumeTerminalThemeQueries = (pending, data, appearance) => {
+export const consumeTerminalThemeQueries = (
+  pending: string,
+  data: string,
+  appearance: TerminalAppearance,
+): { modeEnabled: boolean; pending: string; responses: string[] } => {
   if (!pending && !data.includes('\u001b')) return { pending: '', responses: [], modeEnabled: appearance.modeEnabled === true };
   const input = `${pending}${data}`;
-  const responses = [];
+  const responses: string[] = [];
   let modeEnabled = appearance.modeEnabled === true;
 
   for (let index = 0; index < input.length; index += 1) {

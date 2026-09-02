@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -7,7 +6,8 @@ import {
   toUsageWindow,
   resolveWindowSeconds,
   resolveWindowLabel,
-  normalizeTimestamp
+  normalizeTimestamp,
+  asObject,
 } from '../utils/index.js';
 
 export const providerId = 'zai-coding-plan';
@@ -54,10 +54,13 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const windows = {};
-    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
+    const payload = asObject(await response.json()) ?? {};
+    const data = asObject(payload.data) ?? {};
+    const limits = Array.isArray(data.limits) ? data.limits : [];
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
+    for (const tokensLimit of limits
+      .map(asObject)
+      .filter((limit): limit is Record<string, unknown> => Boolean(limit) && limit?.type === 'TOKENS_LIMIT')) {
       const windowSeconds = resolveWindowSeconds(tokensLimit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
@@ -70,7 +73,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
+    const mcpToolsTimeLimit = limits.map(asObject).find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       windows['MCP Tools'] = toUsageWindow({
         usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,

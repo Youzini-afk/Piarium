@@ -1,17 +1,22 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "moduleDetection": "force",
-    "allowJs": true,
-    "checkJs": false,
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "allowJs": false,
     "resolveJsonModule": true,
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "electron"]
+    "types": ["node", "electron"],
+    "paths": {
+      "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
+      "@piarium/runtime-broker": ["./node_modules/@piarium/runtime-broker/dist/index.d.ts"],
+      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
+      "@piarium/web": ["./node_modules/@piarium/web/server/index.d.ts"],
+      "@piarium/web/*": ["./node_modules/@piarium/web/*"]
+    }
   },
-  "include": ["*.mjs", "*.cjs", "scripts/**/*.mjs", "scripts/**/*.cjs"]
+  "include": ["*.ts"],
+  "exclude": ["*.test.ts"]
 }

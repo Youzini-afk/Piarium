@@ -490,7 +490,7 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
    candidate leaves the previous shell active. Profile selection never silently changes the desired
    extension set.
 2. **Workspace identity and DocumentsAPI.** The application host owns one revisioned document
-   authority (`packages/web/server/lib/documents`) with workspace resolve/read/write/move/delete, an
+   authority (`packages/web/application-host/lib/documents`) with workspace resolve/read/write/move/delete, an
    SSE watch, and crash-recovery journals behind authenticated `/api/documents/*` routes plus a
    resource-scoped `workspace.documents` host capability. Revisions are opaque and writes are
    expected-revision checked. Workspace IDs and journals are scoped per application host, so another

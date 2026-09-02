@@ -1,5 +1,42 @@
-// @ts-nocheck
-export const createGracefulShutdownRuntime = (dependencies) => {
+interface DisposableRuntime { dispose(): unknown }
+interface StoppableRuntime { stop(): Promise<unknown> | unknown }
+interface TerminalRuntime { shutdown(): Promise<unknown> }
+interface DocumentsAuthorityRuntime { dispose(): Promise<unknown> }
+interface UiAuthRuntime { dispose(): unknown }
+interface TunnelController { stop?(): unknown }
+interface ClosableServer { close(callback: () => void): unknown }
+
+export interface GracefulShutdownDependencies<
+  Terminal extends TerminalRuntime = TerminalRuntime,
+  Documents extends DocumentsAuthorityRuntime = DocumentsAuthorityRuntime,
+  UiAuth extends UiAuthRuntime = UiAuthRuntime,
+  Tunnel extends TunnelController = TunnelController,
+> {
+  getActiveTunnelController(): Tunnel | null;
+  getDocumentsAuthority?(): Documents | null;
+  getExitOnShutdown(): boolean;
+  getIsShuttingDown(): boolean;
+  getServer(): ClosableServer | null;
+  getTerminalRuntime(): Terminal | null;
+  getUiAuthController(): UiAuth | null;
+  process: { exit(code?: number): unknown };
+  scheduledTasksRuntime?: StoppableRuntime | null | undefined;
+  sessionRuntime?: DisposableRuntime | null | undefined;
+  setActiveTunnelController(value: Tunnel | null): void;
+  setDocumentsAuthority?(value: Documents | null): void;
+  setIsShuttingDown(value: boolean): void;
+  setTerminalRuntime(value: Terminal | null): void;
+  setUiAuthController(value: UiAuth | null): void;
+  shutdownTimeoutMs: number;
+  tunnelAuthController: { clearActiveTunnel(): void };
+}
+
+export const createGracefulShutdownRuntime = <
+  Terminal extends TerminalRuntime,
+  Documents extends DocumentsAuthorityRuntime,
+  UiAuth extends UiAuthRuntime,
+  Tunnel extends TunnelController,
+>(dependencies: GracefulShutdownDependencies<Terminal, Documents, UiAuth, Tunnel>) => {
   const {
     process,
     shutdownTimeoutMs,
@@ -19,9 +56,11 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setActiveTunnelController,
     tunnelAuthController,
   } = dependencies;
-  let shutdownPromise = null;
+  let shutdownPromise: Promise<void> | null = null;
 
-  const runShutdown = async (options = {}) => {
+  const runShutdown = async (
+    options: { exitProcess?: boolean | undefined } = {},
+  ): Promise<void> => {
     if (getIsShuttingDown()) return;
     setIsShuttingDown(true);
     console.log('Starting graceful shutdown...');
@@ -43,12 +82,12 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     const server = getServer();
     if (server && typeof server.close === 'function') {
-      let closeTimeout = null;
+      let closeTimeout: ReturnType<typeof setTimeout> | null = null;
       try {
         await Promise.race([
-          new Promise((resolve) => server.close(resolve)),
-          new Promise((resolve) => {
-            closeTimeout = setTimeout(resolve, shutdownTimeoutMs);
+          new Promise<void>((resolve) => { server.close(resolve); }),
+          new Promise<void>((resolve) => {
+            closeTimeout = setTimeout(() => resolve(), shutdownTimeoutMs);
           }),
         ]);
       } finally {
@@ -62,7 +101,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         await documentsAuthority.dispose();
       } catch (error) {
         // Continue closing process-owned resources after a failed authority cleanup.
-        console.error('Document authority shutdown failed:', error?.message || error);
+        console.error('Document authority shutdown failed:', error instanceof Error ? error.message : error);
       } finally {
         setDocumentsAuthority?.(null);
       }
@@ -77,7 +116,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     const tunnelController = getActiveTunnelController();
     if (tunnelController) {
       try {
-        tunnelController.stop();
+        tunnelController.stop?.();
       } finally {
         setActiveTunnelController(null);
         tunnelAuthController.clearActiveTunnel();
@@ -88,7 +127,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (exitProcess) process.exit(0);
   };
 
-  const gracefulShutdown = (options = {}) => {
+  const gracefulShutdown = (
+    options: { exitProcess?: boolean | undefined } = {},
+  ): Promise<void> => {
     shutdownPromise ??= runShutdown(options);
     return shutdownPromise;
   };

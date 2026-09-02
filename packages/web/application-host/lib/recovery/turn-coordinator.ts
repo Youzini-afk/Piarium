@@ -1,4 +1,7 @@
 import { createWorkspaceRecoveryAPI } from '@piarium/extension-contract';
+import type {
+  PiSessionExecutionAdmissionRequest,
+} from '@piarium/runtime-broker';
 
 interface WriterOwner {
   kind?: string;
@@ -17,7 +20,7 @@ interface MutationState {
 }
 
 interface SessionSnapshot {
-  workspace?: { kind: string; id: string; authorityId?: string };
+  workspace?: { kind: string; id?: string; authorityId?: string };
   [key: string]: unknown;
 }
 
@@ -39,17 +42,9 @@ interface TurnRecord {
   workspaceId: string;
 }
 
-interface AdmitRequest {
-  phase?: string;
-  sessionId?: string;
-  executionId: string;
-  runtimeGeneration: number;
-  workerId: string;
-  workspace?: { kind: string; id: string; authorityId?: string };
-  [key: string]: unknown;
-}
+export type AdmitRequest = PiSessionExecutionAdmissionRequest;
 
-interface MutationRequest {
+export interface MutationRequest {
   sessionId: string;
   requestId: string;
   path: string;
@@ -60,37 +55,47 @@ interface MutationRequest {
   [key: string]: unknown;
 }
 
-interface HostEvent {
+export interface HostEvent {
+  envelope?: {
+    data?: unknown;
+    event?: string | undefined;
+    kind?: string | undefined;
+  } | undefined;
+  executionId?: string | undefined;
   kind: string;
-  envelope?: { event: string; data?: Record<string, unknown> };
-  executionId?: string;
-  [key: string]: unknown;
+  sessionId?: string | undefined;
+  workerId?: string | undefined;
 }
 
-interface WriterLease {
+export interface WriterLease {
   close: () => Promise<void>;
 }
 
-interface WriterTracker {
+export interface WriterTracker {
   admit(request: AdmitRequest): Promise<WriterLease | null>;
   waitForIdle(workerId: string): Promise<{
     mutationObserved?: boolean;
     coverageComplete?: boolean;
     changedResourceIds?: string[];
-  }>;
+  } | null>;
 }
 
-interface TurnCoordinatorOptions {
+export interface RecoveryServiceRequest extends Record<string, unknown> {
+  args: unknown[];
+  method: string;
+}
+
+export interface TurnCoordinatorOptions {
   documents: {
     inspectMutation(workspaceId: string): Promise<MutationState>;
   };
   getSessionSnapshot: (sessionId: string) => SessionSnapshot | null;
-  invokeService: (request: Record<string, unknown>) => Promise<unknown>;
+  invokeService: (request: RecoveryServiceRequest) => Promise<unknown>;
   respondMutation: (request: MutationRequest, accepted: boolean) => Promise<void>;
   writerTracker: WriterTracker;
 }
 
-interface TurnCoordinator {
+export interface TurnCoordinator {
   admit(request: AdmitRequest): Promise<WriterLease | null>;
   processEvent(event: HostEvent): Promise<unknown>;
   dispose(): Promise<void>;
@@ -106,6 +111,12 @@ const incompleteFailure = (message: string) => ({
   message,
   retryable: false,
 });
+
+const recordOf = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
 
 const isBoundWorkspace = (workspace: unknown): workspace is { kind: string; id: string; authorityId?: string } => (
   (workspace as { kind?: string })?.kind === 'workspace'
@@ -131,8 +142,8 @@ export const createRecoveryTurnCoordinator = ({
   const pending = new Map<string, TurnRecord>();
   let disposed = false;
 
-  const apiFor = (turn: TurnRecord) => createWorkspaceRecoveryAPI(((request: unknown) => invokeService({
-    ...(request as Record<string, unknown>),
+  const apiFor = (turn: TurnRecord) => createWorkspaceRecoveryAPI(((request: RecoveryServiceRequest) => invokeService({
+    ...request,
     routing: {
       invocationId: turn.executionId,
       runtimeId: String(turn.runtimeGeneration),
@@ -312,7 +323,7 @@ export const createRecoveryTurnCoordinator = ({
       const executionId = event?.executionId;
       const turn = executionId ? pending.get(executionId) ?? null : null;
       if (event?.kind === 'host' && event.envelope?.event === 'workspace.mutation.request') {
-        const request = event.envelope.data as unknown as MutationRequest;
+        const request = event.envelope.data as MutationRequest;
         const handle = (): Promise<void> => handleMutationRequest(turn, request);
         if (!turn) return handle();
         turn.eventTail = turn.eventTail.then(handle, handle);
@@ -324,7 +335,7 @@ export const createRecoveryTurnCoordinator = ({
           return finalize(turn, incompleteFailure('Pi worker exited before the turn settled'));
         }
         if (event.kind !== 'host' || event.envelope?.event !== 'agent.event') return;
-        const agentEvent = (event.envelope?.data as Record<string, unknown>)?.event as Record<string, unknown> | undefined;
+        const agentEvent = recordOf(recordOf(event.envelope.data).event);
         if (agentEvent?.type === 'agent_start') turn.agentStarted = true;
         if (
           agentEvent?.type === 'tool_execution_start'

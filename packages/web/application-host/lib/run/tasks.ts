@@ -1,18 +1,28 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveWorkspacePath } from '../workspace/path-safety.js';
+import type { ChildProcess } from 'node:child_process';
+import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
+import type {
+  PiariumTaskConfiguration,
+  PiariumTaskEvent,
+  PiariumTaskListResult,
+  PiariumTaskRunStatus,
+  ProcessWriter,
+  TaskRunRecord,
+  TaskRunnerOptions,
+} from './types.js';
 
 const TASKS_FILE = 'piarium.tasks.json';
 
-const workspaceIdOf = (value) => {
+const workspaceIdOf = (value: unknown): string => {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object' && typeof value.workspaceId === 'string') return value.workspaceId;
+  if (value && typeof value === 'object' && 'workspaceId' in value && typeof value.workspaceId === 'string') return value.workspaceId;
   return '';
 };
 
-const waitForChildExit = (child) => new Promise((resolve) => {
+const waitForChildExit = (child: ChildProcess | null): Promise<void> => new Promise((resolve) => {
   if (!child || child.exitCode !== null || child.signalCode) {
     resolve();
     return;
@@ -29,12 +39,16 @@ const waitForChildExit = (child) => new Promise((resolve) => {
   child.once('close', finish);
 });
 
-const registerProcessWriter = async (documents, scopeId, owner, purpose) => {
-  if (typeof documents?.registerWriterForScope !== 'function') return null;
+const registerProcessWriter = async (
+  documents: DocumentAuthority,
+  scopeId: string,
+  owner: MutationOwner,
+  purpose: string,
+): Promise<ProcessWriter | null> => {
   return documents.registerWriterForScope(scopeId, owner, { mode: 'process', purpose });
 };
 
-const releaseProcessWriter = async (writer, mutated = true) => {
+const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true): Promise<void> => {
   if (!writer) return;
   if (mutated) {
     try { await writer.markMutated(); } catch { /* authority may already be gone */ }
@@ -42,12 +56,12 @@ const releaseProcessWriter = async (writer, mutated = true) => {
   try { await writer.close(); } catch { /* authority may already be gone */ }
 };
 
-const asRecord = (value) => (
-  value && typeof value === 'object' && !Array.isArray(value) ? value : null
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 );
 
-const parseTaskDocument = (content) => {
-  let parsed;
+const parseTaskDocument = (content: string): PiariumTaskConfiguration[] => {
+  let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -57,13 +71,13 @@ const parseTaskDocument = (content) => {
   if (!root) throw new Error('piarium.tasks.json must be an object');
   if (root.version !== 1) throw new Error('piarium.tasks.json version is unsupported');
   if (!Array.isArray(root.tasks)) throw new Error('piarium.tasks.json tasks must be an array');
-  const tasks = [];
+  const tasks: PiariumTaskConfiguration[] = [];
   for (const item of root.tasks) {
     const record = asRecord(item);
     if (!record || typeof record.id !== 'string' || !record.id.trim()) continue;
     if (typeof record.label !== 'string' || !record.label.trim()) continue;
     const type = record.type === 'process' || record.type === 'npm' ? record.type : 'node';
-    const next = {
+    const next: PiariumTaskConfiguration = {
       id: record.id.trim(),
       label: record.label.trim(),
       type,
@@ -71,7 +85,7 @@ const parseTaskDocument = (content) => {
     if (typeof record.script === 'string' && record.script.trim()) next.script = record.script.trim();
     if (typeof record.command === 'string' && record.command.trim()) next.command = record.command.trim();
     if (Array.isArray(record.args)) {
-      next.args = record.args.filter((value) => typeof value === 'string');
+      next.args = record.args.filter((value): value is string => typeof value === 'string');
     }
     tasks.push(next);
   }
@@ -85,16 +99,16 @@ export const createWorkspaceTaskRunner = ({
   env = process.env,
   isTrusted = async () => false,
   execPath = process.execPath,
-}) => {
-  const runs = new Map();
-  const workspaceListeners = new Map();
-  const pendingExits = new Set();
+}: TaskRunnerOptions) => {
+  const runs = new Map<string, TaskRunRecord>();
+  const workspaceListeners = new Map<string, Set<(event: PiariumTaskEvent) => void>>();
+  const pendingExits = new Set<Promise<void>>();
 
-  const acquireWriter = (scopeId, owner) => {
+  const acquireWriter = (scopeId: string, owner: MutationOwner): Promise<ProcessWriter | null> => {
     return registerProcessWriter(documents, scopeId, owner, 'task-process');
   };
 
-  const releaseRecordWriter = async (record, mutated = true) => {
+  const releaseRecordWriter = async (record: TaskRunRecord, mutated = true): Promise<void> => {
     if (!record?.writer || record.writerReleased) return;
     record.writerReleased = true;
     const writer = record.writer;
@@ -102,14 +116,14 @@ export const createWorkspaceTaskRunner = ({
     await releaseProcessWriter(writer, mutated);
   };
 
-  const emit = (workspaceId, event) => {
+  const emit = (workspaceId: string, event: PiariumTaskEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record) => {
-    const snapshot = {
+  const snapshotFor = (record: TaskRunRecord): PiariumTaskRunStatus => {
+    const snapshot: PiariumTaskRunStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       runId: record.runId,
@@ -121,7 +135,7 @@ export const createWorkspaceTaskRunner = ({
     return snapshot;
   };
 
-  const disposeRun = (record, reason = 'Task stopped') => {
+  const disposeRun = (record: TaskRunRecord | undefined, reason = 'Task stopped'): void => {
     if (!record) return;
     const child = record.child;
     try {
@@ -147,11 +161,10 @@ export const createWorkspaceTaskRunner = ({
     }
   };
 
-  const list = async (request) => {
+  const list = async (request: unknown): Promise<PiariumTaskListResult> => {
     const workspaceId = workspaceIdOf(request);
-    let workspace;
     try {
-      workspace = await documents.inspectWorkspace(workspaceId);
+      await documents.inspectWorkspace(workspaceId);
     } catch (error) {
       return {
         status: 'failure',
@@ -199,7 +212,7 @@ export const createWorkspaceTaskRunner = ({
     }
   };
 
-  const run = async (request) => {
+  const run = async (request: { taskId?: unknown; workspaceId?: unknown }): Promise<PiariumTaskRunStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const taskId = typeof request?.taskId === 'string' ? request.taskId : '';
     const listed = await list(workspaceId);
@@ -230,7 +243,7 @@ export const createWorkspaceTaskRunner = ({
       };
     }
     let command = execPath;
-    let args = [];
+    let args: string[] = [];
     if (task.type === 'node') {
       const script = task.script || task.command;
       if (!script) {
@@ -254,16 +267,16 @@ export const createWorkspaceTaskRunner = ({
       args = [resolved.realPath];
     } else if (task.type === 'npm') {
       command = 'npm';
-      args = ['run', task.script || task.command].filter(Boolean);
+      args = ['run', task.script || task.command].filter((value): value is string => Boolean(value));
     } else {
-      command = task.command;
       args = Array.isArray(task.args) ? task.args : [];
-      if (!command) {
+      if (!task.command) {
         return { status: 'failed', workspaceId, taskId, message: 'Process task requires a command' };
       }
+      command = task.command;
     }
     const runId = randomUUID();
-    const record = {
+    const record: TaskRunRecord = {
       runId,
       workspaceId,
       taskId,
@@ -276,7 +289,7 @@ export const createWorkspaceTaskRunner = ({
       pendingTermination: null,
     };
     runs.set(runId, record);
-    let child;
+    let child: ChildProcess | null = null;
     try {
       record.writer = await acquireWriter(workspaceId, {
         kind: 'task',
@@ -329,16 +342,17 @@ export const createWorkspaceTaskRunner = ({
   return {
     list,
     run,
-    cancel(request) {
+    cancel(request: { runId?: unknown; workspaceId?: unknown }): PiariumTaskRunStatus {
       const runId = typeof request?.runId === 'string' ? request.runId : '';
+      const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
       const record = runs.get(runId);
-      if (!record || record.workspaceId !== request?.workspaceId) {
-        return { status: 'failed', workspaceId: request?.workspaceId, message: 'Task run was not found' };
+      if (!record || record.workspaceId !== workspaceId) {
+        return { status: 'failed', workspaceId, message: 'Task run was not found' };
       }
       disposeRun(record, 'Task cancelled');
       return snapshotFor(record);
     },
-    subscribe(workspaceId, listener) {
+    subscribe(workspaceId: string, listener: (event: PiariumTaskEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);
@@ -349,7 +363,7 @@ export const createWorkspaceTaskRunner = ({
         },
       };
     },
-    async disposeWorkspace(request) {
+    async disposeWorkspace(request: unknown): Promise<void> {
       const workspaceId = workspaceIdOf(request);
       for (const [runId, record] of runs) {
         if (record.workspaceId !== workspaceId) continue;
@@ -359,7 +373,7 @@ export const createWorkspaceTaskRunner = ({
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
-    async dispose() {
+    async dispose(): Promise<void> {
       for (const record of runs.values()) disposeRun(record, 'Task runner disposed');
       runs.clear();
       workspaceListeners.clear();

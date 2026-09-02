@@ -50,6 +50,8 @@ Thumbs.db
 *.sln
 *.sw?
 *.tsbuildinfo
+*.d.ts.map
+*.js.map
 
 .opencode/plans/*
 docs/personal/*

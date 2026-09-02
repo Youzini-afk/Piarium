@@ -25,7 +25,7 @@ interface JournalRecord {
   updatedAt: string;
 }
 
-interface JournalSummary {
+export interface JournalSummary {
   journalId: string;
   resource: DocumentResource;
   revision: number;
@@ -38,9 +38,10 @@ interface JournalSummary {
 interface MutationToken {
   workspaceId: string;
   epoch: number;
+  owner: unknown;
 }
 
-interface WriteRequest {
+export interface RecoveryJournalWriteRequest {
   workspaceId: string;
   recoverySessionId: string;
   resource: DocumentResource;
@@ -52,13 +53,13 @@ interface WriteRequest {
   token: MutationToken;
 }
 
-interface DeleteRequest {
+export interface RecoveryJournalDeleteRequest {
   journalId: string;
   expectedRevision: number;
   token: MutationToken;
 }
 
-interface ListRequest {
+export interface RecoveryJournalListRequest {
   workspaceId: string;
   recoverySessionId?: string;
 }
@@ -201,7 +202,7 @@ export const createRecoveryJournalStore = ({
   };
 
   return {
-    async list({ workspaceId, recoverySessionId }: ListRequest): Promise<JournalSummary[]> {
+    async list({ workspaceId, recoverySessionId }: RecoveryJournalListRequest): Promise<JournalSummary[]> {
       assertPathSegment(workspaceId, 'workspaceId');
       if (recoverySessionId !== undefined) assertPathSegment(recoverySessionId, 'recoverySessionId');
       const summaries: JournalSummary[] = [];
@@ -262,7 +263,7 @@ export const createRecoveryJournalStore = ({
       };
     },
 
-    async write(request: WriteRequest): Promise<
+    async write(request: RecoveryJournalWriteRequest): Promise<
       | { status: 'conflict'; journal: JournalSummary }
       | { status: 'missing'; journalId: string }
       | { status: 'written'; journal: JournalSummary }
@@ -340,7 +341,7 @@ export const createRecoveryJournalStore = ({
       });
     },
 
-    async delete({ journalId, expectedRevision, token }: DeleteRequest): Promise<
+    async delete({ journalId, expectedRevision, token }: RecoveryJournalDeleteRequest): Promise<
       | { status: 'missing' }
       | { status: 'conflict'; journal: JournalSummary }
       | { status: 'deleted' }

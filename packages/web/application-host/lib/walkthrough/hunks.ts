@@ -1,31 +1,32 @@
-// @ts-nocheck
 import crypto from 'crypto';
+import type { DiffFile, IndexedHunk, ParsingDiffFile, ParsingHunk } from './types.js';
 
 // Parsing a unified diff into addressable hunks lives here and only here. The
 // model anchors its narrative to hunk ids, the client resolves those ids back
-// to rendered code, and staleness is "an id the current diff no longer has" 鈥?// all three break the moment two implementations disagree about what an id is,
+// to rendered code, and staleness is "an id the current diff no longer has" —
+// all three break the moment two implementations disagree about what an id is,
 // so the client is never given the algorithm, only the results.
 
 const FILE_HEADER = /^diff --git /;
 const HUNK_HEADER = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(.*)$/;
 
-const contentHash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const contentHash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
-const parsePathsFromFileHeader = (line) => {
+const parsePathsFromFileHeader = (line: string): { newPath: string; oldPath: string } | null => {
   // `diff --git a/old b/new`, with either side quoted when it contains spaces.
   const match = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/.exec(line);
   if (!match) return null;
-  return { oldPath: match[1], newPath: match[2] };
+  return { oldPath: match[1] ?? '', newPath: match[2] ?? '' };
 };
 
-const statusFromHeaderLines = (lines) => {
+const statusFromHeaderLines = (lines: string[]): string => {
   if (lines.some((line) => line.startsWith('new file mode'))) return 'added';
   if (lines.some((line) => line.startsWith('deleted file mode'))) return 'deleted';
   if (lines.some((line) => line.startsWith('rename from'))) return 'renamed';
   return 'modified';
 };
 
-const isBinaryHeader = (lines) => lines.some((line) => line.startsWith('Binary files ') || line.startsWith('GIT binary patch'));
+const isBinaryHeader = (lines: string[]): boolean => lines.some((line) => line.startsWith('Binary files ') || line.startsWith('GIT binary patch'));
 
 /**
  * Split a unified diff covering any number of files into files and hunks.
@@ -37,21 +38,21 @@ const isBinaryHeader = (lines) => lines.some((line) => line.startsWith('Binary f
  *   changes never silently resolves against unstaged ones.
  * @returns {{files: Array<{path: string, oldPath: string|null, status: string, binary: boolean, hunks: Array<object>}>}}
  */
-export function parseDiffFiles(patch, scope = 'diff') {
+export function parseDiffFiles(patch: unknown, scope = 'diff'): { files: DiffFile[] } {
   const text = typeof patch === 'string' ? patch : '';
   if (!text.trim()) return { files: [] };
 
   const lines = text.split(/\r?\n/);
-  const files = [];
-  let current = null;
-  let headerLines = [];
-  let hunk = null;
+  const files: DiffFile[] = [];
+  let current: ParsingDiffFile | null = null;
+  let headerLines: string[] = [];
+  let hunk: ParsingHunk | null = null;
 
   const closeHunk = () => {
     if (!current || !hunk) return;
     const body = hunk.lines.join('\n');
-    // The id covers the header and the body, so any edit to the hunk 鈥?even one
-    // that keeps its line numbers 鈥?produces a different id. That is what makes
+    // The id covers the header and the body, so any edit to the hunk — even one
+    // that keeps its line numbers — produces a different id. That is what makes
     // "this stop is stale" detectable without diffing narratives.
     const digest = contentHash(`${hunk.header}\n${body}`);
     const seen = current.hunkDigests.get(digest) ?? 0;
@@ -80,8 +81,15 @@ export function parseDiffFiles(patch, scope = 'diff') {
     closeHunk();
     if (!current) return;
     current.binary = current.binary || isBinaryHeader(headerLines);
-    delete current.hunkDigests;
-    files.push(current);
+    const complete: DiffFile = {
+      binary: current.binary,
+      headerText: current.headerText,
+      hunks: current.hunks,
+      oldPath: current.oldPath,
+      path: current.path,
+      status: current.status,
+    };
+    files.push(complete);
     current = null;
   };
 
@@ -111,9 +119,9 @@ export function parseDiffFiles(patch, scope = 'diff') {
       current.headerText = headerLines.join('\n');
       hunk = {
         header: line,
-        oldStart: Number.parseInt(hunkMatch[1], 10),
+        oldStart: Number.parseInt(hunkMatch[1] ?? '0', 10),
         oldLines: hunkMatch[2] === undefined ? 1 : Number.parseInt(hunkMatch[2], 10),
-        newStart: Number.parseInt(hunkMatch[3], 10),
+        newStart: Number.parseInt(hunkMatch[3] ?? '0', 10),
         newLines: hunkMatch[4] === undefined ? 1 : Number.parseInt(hunkMatch[4], 10),
         added: 0,
         deleted: 0,
@@ -143,8 +151,8 @@ export function parseDiffFiles(patch, scope = 'diff') {
  * Flatten parsed files into an id-keyed index for resolution and staleness
  * checks.
  */
-export function indexHunks(files) {
-  const index = new Map();
+export function indexHunks(files: DiffFile[]): Map<string, IndexedHunk> {
+  const index = new Map<string, IndexedHunk>();
   for (const file of files) {
     for (const hunk of file.hunks) {
       index.set(hunk.id, { ...hunk, path: file.path, status: file.status });
@@ -157,8 +165,8 @@ export function indexHunks(files) {
  * Every hunk id in the diff, in file-then-position order. Used to compute the
  * "not covered by any stop" tail.
  */
-export function listHunkIds(files) {
-  const ids = [];
+export function listHunkIds(files: DiffFile[]): string[] {
+  const ids: string[] = [];
   for (const file of files) {
     for (const hunk of file.hunks) ids.push(hunk.id);
   }

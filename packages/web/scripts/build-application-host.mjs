@@ -5,9 +5,8 @@
  * Compiles packages/web/application-host to a staging directory, then
  * atomically replaces packages/web/server with the staged output.
  *
- * During the transitional period (Phase 2+), application-host contains
- * a mix of .js and .ts files. tsc with allowJs:true emits both. Non-JS
- * assets (templates, fixtures needed at runtime) are copied as-is.
+ * Application Host source is TypeScript. Non-code assets (templates and
+ * runtime fixtures) are copied as-is after compilation.
  *
  * On failure, the staging directory is removed and the existing server/
  * is left untouched. On success, the old server/ is replaced.
@@ -24,6 +23,25 @@ const sourceDir = path.join(webRoot, 'application-host');
 const outputDir = path.join(webRoot, 'server');
 
 const log = (message) => process.stdout.write(`[build:application-host] ${message}\n`);
+
+const removeGeneratedOutputs = () => {
+  const targets = [outputDir, path.join(webRoot, '.application-host-build')];
+  for (const entry of fs.readdirSync(webRoot, { withFileTypes: true })) {
+    if (entry.name.startsWith('.application-host-staging-') || entry.name.startsWith('.server-backup-')) {
+      targets.push(path.join(webRoot, entry.name));
+    }
+  }
+  for (const target of targets) {
+    if (path.dirname(target) !== webRoot) throw new Error(`Refusing to clean outside Web package: ${target}`);
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+};
+
+if (process.argv.includes('--clean')) {
+  removeGeneratedOutputs();
+  log('Generated Application Host outputs removed.');
+  process.exit(0);
+}
 
 // ── Step 1: Compile to a staging directory ───────────────────────────────
 
@@ -69,6 +87,7 @@ try {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       // Skip test files
       if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.ts')) continue;
+      if (entry.name.endsWith('.md')) continue;
 
       const srcPath = path.join(srcDir, entry.name);
       const destPath = path.join(destDir, entry.name);
@@ -77,10 +96,9 @@ try {
         fs.mkdirSync(destPath, { recursive: true });
         copyAssets(srcPath, destPath);
       } else {
-        // Copy non-JS/TS files (JS/TS are emitted by tsc) and hand-written .d.ts files
+        // Copy runtime assets; TypeScript emits JavaScript and declarations.
         const ext = path.extname(entry.name);
-        const isDeclaration = entry.name.endsWith('.d.ts');
-        if (isDeclaration || (ext !== '.js' && ext !== '.ts' && ext !== '.mjs' && ext !== '.mts' && ext !== '.cjs' && ext !== '.cts' && ext !== '.d.ts.map' && ext !== '.js.map')) {
+        if (ext !== '.js' && ext !== '.ts' && ext !== '.mjs' && ext !== '.mts' && ext !== '.cjs' && ext !== '.cts' && ext !== '.d.ts' && ext !== '.d.ts.map' && ext !== '.js.map') {
           fs.copyFileSync(srcPath, destPath);
         }
       }
@@ -92,6 +110,11 @@ try {
   const indexJs = path.join(stagingDir, 'index.js');
   if (!fs.existsSync(indexJs)) {
     throw new Error('Staging directory does not contain index.js');
+  }
+  const indexDeclaration = path.join(stagingDir, 'index.d.ts');
+  const publicContract = path.join(stagingDir, 'public-contract.js');
+  if (!fs.existsSync(indexDeclaration) || !fs.existsSync(publicContract)) {
+    throw new Error('Staging directory does not contain the typed public Host contract');
   }
 
   // Verify index.js is syntactically valid

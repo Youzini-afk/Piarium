@@ -1,14 +1,18 @@
-// @ts-nocheck
-const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+import type { Express, Request, RequestHandler } from 'express';
+import type { MobileDeviceStore, PublicMobileDevice } from './device-store.js';
+import type { MobilePairingRuntime } from './pairing-runtime.js';
+import type { MobilePushRuntime } from './push-runtime.js';
 
-const getBearerToken = (req) => {
+const normalizeString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const getBearerToken = (req: Request): string => {
   const header = req.headers.authorization;
   if (typeof header !== 'string') return '';
   const match = header.match(/^Bearer\s+(.+)$/i);
   return match ? normalizeString(match[1]) : '';
 };
 
-const resolveServerUrl = (req, explicitOrigin) => {
+const resolveServerUrl = (req: Request, explicitOrigin: unknown): string => {
   const configured = normalizeString(explicitOrigin)
     || normalizeString(process.env.PIARIUM_PUBLIC_ORIGIN);
   if (configured) return configured.replace(/\/$/, '');
@@ -19,18 +23,31 @@ const resolveServerUrl = (req, explicitOrigin) => {
   return host ? `${proto}://${host}` : '';
 };
 
-const requireMobileDevice = (deviceStore) => async (req, res, next) => {
+const requireMobileDevice = (
+  deviceStore: MobileDeviceStore,
+  authenticatedDevices: WeakMap<Request, PublicMobileDevice>,
+): RequestHandler => async (req, res, next) => {
   const deviceId = normalizeString(req.headers['x-piarium-device-id']) || normalizeString(req.body?.deviceId);
   const deviceToken = getBearerToken(req) || normalizeString(req.body?.deviceToken);
   const device = await deviceStore.authenticateDevice(deviceId, deviceToken);
   if (!device) {
     return res.status(401).json({ error: 'Mobile device authentication required' });
   }
-  req.mobileDevice = device;
+  authenticatedDevices.set(req, device);
   return next();
 };
 
-export const registerMobileRoutes = (app, dependencies) => {
+export interface MobileRoutesDependencies {
+  deviceStore: MobileDeviceStore;
+  mobilePushRuntime: MobilePushRuntime;
+  pairingRuntime: MobilePairingRuntime;
+  uiAuthController: {
+    issueTrustedSession?: ((req: Request, res: import('express').Response) => Promise<unknown>) | undefined;
+    requireAuth: RequestHandler;
+  };
+}
+
+export const registerMobileRoutes = (app: Express, dependencies: MobileRoutesDependencies): void => {
   const {
     uiAuthController,
     deviceStore,
@@ -38,7 +55,8 @@ export const registerMobileRoutes = (app, dependencies) => {
     mobilePushRuntime,
   } = dependencies;
 
-  const requireDevice = requireMobileDevice(deviceStore);
+  const authenticatedDevices = new WeakMap<Request, PublicMobileDevice>();
+  const requireDevice = requireMobileDevice(deviceStore, authenticatedDevices);
 
   app.use('/api/mobile', (req, res, next) => {
     if (req.path === '/pair/complete') {
@@ -107,7 +125,9 @@ export const registerMobileRoutes = (app, dependencies) => {
     if (!pushToken) {
       return res.status(400).json({ error: 'pushToken required' });
     }
-    const device = await deviceStore.registerPushToken(req.mobileDevice.id, {
+    const authenticatedDevice = authenticatedDevices.get(req);
+    if (!authenticatedDevice) return res.status(401).json({ error: 'Mobile device authentication required' });
+    const device = await deviceStore.registerPushToken(authenticatedDevice.id, {
       pushToken,
       pushProvider: req.body?.pushProvider || 'expo',
       appVersion: req.body?.appVersion,
@@ -119,8 +139,10 @@ export const registerMobileRoutes = (app, dependencies) => {
   });
 
   app.post('/api/mobile/session', requireDevice, async (req, res) => {
+    const authenticatedDevice = authenticatedDevices.get(req);
+    if (!authenticatedDevice) return res.status(401).json({ error: 'Mobile device authentication required' });
     const result = await pairingRuntime.createLoginToken({
-      deviceId: req.mobileDevice.id,
+      deviceId: authenticatedDevice.id,
       deviceToken: getBearerToken(req) || req.body?.deviceToken,
     });
     if (!result.ok) {

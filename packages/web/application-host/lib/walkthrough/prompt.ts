@@ -1,9 +1,9 @@
-// @ts-nocheck
 import { DEFAULT_LANGUAGE, languageName } from './languages.js';
+import type { BuiltDigest, Walkthrough, WalkthroughLanguage, WalkthroughSource } from './types.js';
 
 const SYSTEM = `You are writing a guided review of a code change for the engineer who is about to read it.
 
-Your job is to impose a reading order the diff itself does not have. A diff is ordered by file path, which is almost never the order in which the change makes sense. Group related hunks 鈥?across files 鈥?into stops, and order the stops so that each one is understandable given the ones before it.
+Your job is to impose a reading order the diff itself does not have. A diff is ordered by file path, which is almost never the order in which the change makes sense. Group related hunks — across files — into stops, and order the stops so that each one is understandable given the ones before it.
 
 What a good stop says:
 - what this code now does differently, in terms of behavior, not syntax
@@ -11,11 +11,11 @@ What a good stop says:
 - what a reviewer should check or be suspicious about, when there is something
 
 What a bad stop says:
-- "Renamed X to Y", "Added a parameter", "Updated the imports" 鈥?restating the diff in prose is worthless; the reader can already see it
+- "Renamed X to Y", "Added a parameter", "Updated the imports" — restating the diff in prose is worthless; the reader can already see it
 - speculation about intent you cannot support from the code
 
 Rules:
-- Anchor every stop to hunk aliases from the digest, exactly as given (h1, h2, 鈥?. Never invent an alias.
+- Anchor every stop to hunk aliases from the digest, exactly as given (h1, h2, …). Never invent an alias.
 - Anchor each hunk at most once, in the stop where it matters most.
 - You do not have to cover every hunk. Mechanical changes are better left out than padded into a stop; whatever you omit is still shown to the reader separately.
 - Order stops so the reader builds understanding: entry points and data shape before the code that consumes them.
@@ -30,17 +30,17 @@ Respond with a single JSON object and nothing else. (Some providers refuse a str
 //
 // Only prose is translated. Hunk aliases are keys the server resolves back to
 // hunk ids, and `icon`/`importance` are enums the normalizer validates against
-// fixed English values 鈥?translating either produces a walkthrough that drops
+// fixed English values — translating either produces a walkthrough that drops
 // its anchors or loses its styling, silently and completely. Identifiers taken
 // from the diff stay verbatim for the same reason a translated function name
 // would be unsearchable.
-const languageInstruction = (language) => `
+const languageInstruction = (language: WalkthroughLanguage): string => `
 
 Write all prose in ${languageName(language)}: the walkthrough title, the focus line, chapter titles and blurbs, and stop titles and prose. The reader of this review reads ${languageName(language)}.
 
-Keep these in English exactly as given, regardless of the prose language: hunk aliases (h1, h2, 鈥?, the "icon" values, and the "importance" values. Keep identifiers, file paths, and API names as they appear in the code 鈥?never translate them.`;
+Keep these in English exactly as given, regardless of the prose language: hunk aliases (h1, h2, …), the "icon" values, and the "importance" values. Keep identifiers, file paths, and API names as they appear in the code — never translate them.`;
 
-const sizing = ({ fileCount, hunkCount }) => {
+const sizing = ({ fileCount, hunkCount }: { fileCount: number; hunkCount: number }): string => {
   const targetStops = Math.max(1, Math.round(hunkCount / 2.5) || 1);
   const targetChapters = hunkCount <= 4
     ? 1
@@ -53,7 +53,7 @@ Aim for about ${targetStops} stop(s) across about ${targetChapters} chapter(s). 
 Chapter titles render in a narrow column, so keep them concise.`;
 };
 
-const previousWalkthroughSection = (previous) => {
+const previousWalkthroughSection = (previous?: Walkthrough | null): string => {
   if (!previous || !Array.isArray(previous.chapters) || previous.chapters.length === 0) return '';
 
   const outline = previous.chapters
@@ -61,16 +61,16 @@ const previousWalkthroughSection = (previous) => {
       const stops = (chapter.stops || [])
         .map((stop) => `  - ${stop.title}: ${stop.prose}`)
         .join('\n');
-      return `- ${chapter.title}${chapter.blurb ? ` 鈥?${chapter.blurb}` : ''}\n${stops}`;
+      return `- ${chapter.title}${chapter.blurb ? ` — ${chapter.blurb}` : ''}\n${stops}`;
     })
     .join('\n');
 
   return `
-A previous walkthrough of an earlier state of this change is below. The code has moved on since it was written, so its anchors are gone 鈥?deliberately, so you re-anchor everything against the current digest.
+A previous walkthrough of an earlier state of this change is below. The code has moved on since it was written, so its anchors are gone — deliberately, so you re-anchor everything against the current digest.
 
 Keep the stops that are still accurate and phrased well, revise the ones whose code changed, drop the ones whose code no longer exists, and add stops for work that is new. Do not preserve its structure out of loyalty; preserve it only where it still fits.
 
-Previous walkthrough 鈥?"${previous.title}":
+Previous walkthrough — "${previous.title}":
 ${outline}
 `;
 };
@@ -81,7 +81,14 @@ export const JSON_SHAPE_INSTRUCTION = `
 Return ONLY a JSON object, with no prose around it and no markdown fences, in exactly this shape:
 {"title": string, "focus": string, "chapters": [{"title": string, "icon": "bug"|"wrench"|"path"|"flask"|"doc"|"gear", "blurb": string, "stops": [{"title": string, "hunks": [string], "importance": "critical"|"normal"|"context", "prose": string}]}]}`;
 
-export function buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language = DEFAULT_LANGUAGE }) {
+export function buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language = DEFAULT_LANGUAGE }: {
+  digest: BuiltDigest['digest'];
+  fileCount: number;
+  hunkCount: number;
+  language?: WalkthroughLanguage;
+  previousWalkthrough?: Walkthrough | null;
+  source: WalkthroughSource;
+}): { prompt: string; system: string } {
   const sourceLine = source.kind === 'working-tree'
     ? `Uncommitted local changes (${source.scope === 'all' ? 'staged and unstaged' : source.scope}).`
     : source.kind === 'branch'

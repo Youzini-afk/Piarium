@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Dictation runtime: registers the streaming dictation WebSocket endpoint and
  * the HTTP status/model routes.
@@ -25,17 +24,54 @@ import { WebSocketServer } from 'ws';
 
 import { DictationStreamManager } from './stream-manager.js';
 import { createDictationService } from './service.js';
+import type { Express } from 'express';
+import type { Server } from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { DictationStartOptions } from './types.js';
 
 const DICTATION_WS_PATH = '/api/dictation/ws';
 
 const DICTATION_WS_MAX_PAYLOAD_BYTES = 512 * 1024;
 const DICTATION_WS_HEARTBEAT_INTERVAL_MS = 30000;
 
-const parseRequestPathname = (url) => {
+interface DictationUiAuthController {
+  enabled?: boolean;
+  ensureSessionToken?: (request: IncomingMessage, response: null) => Promise<string | null>;
+}
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error ? error.message : fallback
+);
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const parseStartOptions = (value: unknown): DictationStartOptions => {
+  const options = asRecord(value);
+  const compatible = asRecord(options.openaiCompatible);
+  return {
+    ...(typeof options.provider === 'string' ? { provider: options.provider } : {}),
+    ...(typeof options.language === 'string' ? { language: options.language } : {}),
+    ...(typeof options.localModel === 'string' ? { localModel: options.localModel } : {}),
+    ...(Object.keys(compatible).length > 0 ? {
+      openaiCompatible: {
+        ...(typeof compatible.baseUrl === 'string' ? { baseUrl: compatible.baseUrl } : {}),
+        ...(typeof compatible.model === 'string' ? { model: compatible.model } : {}),
+        ...(typeof compatible.apiKey === 'string' ? { apiKey: compatible.apiKey } : {}),
+      },
+    } : {}),
+  };
+};
+
+const parseRequestPathname = (url: string | undefined): string => {
   try {
-    return new URL(url, 'http://localhost').pathname;
+    return new URL(url ?? '', 'http://localhost').pathname;
   } catch {
-    return typeof url === 'string' ? url.split('?')[0] : '';
+    return typeof url === 'string' ? (url.split('?')[0] ?? '') : '';
   }
 };
 
@@ -47,6 +83,14 @@ export function createDictationRuntime({
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   modelsDir,
+}: {
+  app: Express;
+  express: { json(options?: { limit?: string }): import('express').RequestHandler };
+  isRequestOriginAllowed: (request: IncomingMessage) => boolean | Promise<boolean>;
+  modelsDir: string;
+  rejectWebSocketUpgrade: (socket: Duplex, statusCode: number, message: string) => void;
+  server: Server;
+  uiAuthController?: DictationUiAuthController;
 }) {
   const service = createDictationService({ modelsDir });
 
@@ -54,18 +98,19 @@ export function createDictationRuntime({
   // 503 with a reason code while the model is still downloading.
   app.post('/api/dictation/tts/speak', express.json({ limit: '1mb' }), async (req, res) => {
     try {
-      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      const body = asRecord(req.body);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
       if (!text) {
         res.status(400).json({ error: 'Text is required' });
         return;
       }
       const result = await service.synthesizeSpeech({
         text,
-        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
-        speakerId: Number.isInteger(req.body?.speakerId) ? req.body.speakerId : undefined,
-        speed: typeof req.body?.speed === 'number' ? req.body.speed : undefined,
+        ...(typeof body.model === 'string' ? { model: body.model } : {}),
+        ...(typeof body.speakerId === 'number' && Number.isInteger(body.speakerId) ? { speakerId: body.speakerId } : {}),
+        ...(typeof body.speed === 'number' ? { speed: body.speed } : {}),
       });
-      if (result.error) {
+      if ('error' in result) {
         res.status(503).json({
           error: result.error,
           retryable: result.retryable !== false,
@@ -76,7 +121,7 @@ export function createDictationRuntime({
       res.setHeader('Content-Type', result.format || 'audio/wav');
       res.send(result.audio);
     } catch (error) {
-      res.status(500).json({ error: error?.message || 'Failed to synthesize speech' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to synthesize speech') });
     }
   });
 
@@ -84,10 +129,13 @@ export function createDictationRuntime({
     try {
       const provider = typeof req.query.provider === 'string' ? req.query.provider : undefined;
       const localModel = typeof req.query.localModel === 'string' ? req.query.localModel : undefined;
-      const status = await service.getStatus({ provider, localModel });
+      const status = await service.getStatus({
+        ...(provider ? { provider } : {}),
+        ...(localModel ? { localModel } : {}),
+      });
       res.json(status);
     } catch (error) {
-      res.status(500).json({ error: error?.message || 'Failed to read dictation status' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to read dictation status') });
     }
   });
 
@@ -100,7 +148,7 @@ export function createDictationRuntime({
       }
       res.json(result);
     } catch (error) {
-      res.status(500).json({ error: error?.message || 'Failed to start model download' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to start model download') });
     }
   });
 
@@ -113,7 +161,7 @@ export function createDictationRuntime({
       }
       res.json(result);
     } catch (error) {
-      res.status(500).json({ error: error?.message || 'Failed to delete model' });
+      res.status(500).json({ error: errorMessage(error, 'Failed to delete model') });
     }
   });
 
@@ -123,7 +171,7 @@ export function createDictationRuntime({
   });
 
   wsServer.on('connection', (socket) => {
-    const send = (msg) => {
+    const send = (msg: Record<string, unknown>): void => {
       if (socket.readyState !== 1) {
         return;
       }
@@ -156,23 +204,18 @@ export function createDictationRuntime({
       if (isBinary) {
         return;
       }
-      let message;
+      let message: Record<string, unknown>;
       try {
-        message = JSON.parse(raw.toString('utf8'));
+        message = asRecord(JSON.parse(raw.toString('utf8')));
       } catch {
         return;
       }
-      if (!message || typeof message !== 'object') {
-        return;
-      }
-
       switch (message.type) {
         case 'start': {
           if (typeof message.dictationId !== 'string' || typeof message.format !== 'string') {
             return;
           }
-          const options =
-            message.options && typeof message.options === 'object' ? message.options : {};
+          const options = parseStartOptions(message.options);
           void manager.handleStart(message.dictationId, message.format, options);
           return;
         }
@@ -223,7 +266,7 @@ export function createDictationRuntime({
     });
   });
 
-  const upgradeHandler = (req, socket, head) => {
+  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const pathname = parseRequestPathname(req.url);
     if (pathname !== DICTATION_WS_PATH) {
       return;
@@ -258,7 +301,7 @@ export function createDictationRuntime({
 
   server.on('upgrade', upgradeHandler);
 
-  const stop = () => {
+  const stop = (): void => {
     server.off('upgrade', upgradeHandler);
     for (const client of wsServer.clients) {
       try {

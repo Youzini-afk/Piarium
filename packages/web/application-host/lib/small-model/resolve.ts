@@ -1,5 +1,5 @@
-// @ts-nocheck
 import { getCatalogProvider } from './catalog.js';
+import type { ModelsMetadata } from '../platform/models-metadata.js';
 
 // Piarium's small-model fallback chain:
 // 1. `smallModel` from the merged Pi settings layers ("provider/model").
@@ -8,35 +8,43 @@ import { getCatalogProvider } from './catalog.js';
 const FAMILY_PRIORITY = ['gemini-flash', 'gpt-nano', 'claude-haiku'];
 const COPILOT_UTILITY_MODELS = ['gpt-5.4-nano', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini'];
 // The ChatGPT-plan codex backend only accepts a small allowlist of models
-// (nano/API-key models are rejected with 400) 鈥?this is its cheapest one.
+// (nano/API-key models are rejected with 400) — this is its cheapest one.
 const OPENAI_OAUTH_SMALL_MODEL = 'gpt-5.4-mini';
 
 const AUTH_PROVIDER_ALIASES = {
   'github-copilot': ['github-copilot', 'copilot'],
-};
+} as const;
 
-export function getAuthEntryForProvider(auth, providerID) {
-  const aliases = AUTH_PROVIDER_ALIASES[providerID] || [providerID];
+type AuthEntry = Record<string, unknown>;
+type AuthStore = Record<string, unknown>;
+export interface ModelRef { modelID: string; providerID: string }
+export interface SmallModelResolution extends ModelRef { source: string }
+
+export function getAuthEntryForProvider(auth: AuthStore, providerID: string): AuthEntry | null {
+  const aliases: readonly string[] = providerID === 'github-copilot'
+    ? AUTH_PROVIDER_ALIASES['github-copilot']
+    : [providerID];
   for (const alias of aliases) {
     const entry = auth?.[alias];
     if (entry && typeof entry === 'object') {
-      return entry;
+      return entry as AuthEntry;
     }
   }
   return null;
 }
 
-export function isUsableAuthEntry(entry) {
+export function isUsableAuthEntry(entry: unknown): boolean {
   if (!entry || typeof entry !== 'object') return false;
-  if (entry.type === 'api_key') return typeof entry.key === 'string' && entry.key.length > 0;
-  if (entry.type === 'oauth') {
-    return (typeof entry.access === 'string' && entry.access.length > 0)
-      || (typeof entry.refresh === 'string' && entry.refresh.length > 0);
+  const record = entry as AuthEntry;
+  if (record.type === 'api_key') return typeof record.key === 'string' && record.key.length > 0;
+  if (record.type === 'oauth') {
+    return (typeof record.access === 'string' && record.access.length > 0)
+      || (typeof record.refresh === 'string' && record.refresh.length > 0);
   }
   return false;
 }
 
-export function parseModelRef(value) {
+export function parseModelRef(value: unknown): ModelRef | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   const slash = trimmed.indexOf('/');
@@ -47,35 +55,50 @@ export function parseModelRef(value) {
   };
 }
 
-const pickByFamily = (models, family) => {
+const pickByFamily = (models: Record<string, unknown>, family: string): AuthEntry | null => {
   const matches = Object.values(models)
-    .filter((model) => model && typeof model === 'object' && model.family === family);
+    .filter((model): model is AuthEntry => Boolean(model) && typeof model === 'object'
+      && (model as AuthEntry).family === family);
   if (matches.length === 0) return null;
   matches.sort((a, b) => String(b.release_date || '').localeCompare(String(a.release_date || '')));
-  return matches[0];
+  return matches[0] ?? null;
 };
 
 // Small-model candidates within ONE provider, by family priority. Copilot and
 // ChatGPT-plan OpenAI have fixed small models that never appear in the
 // catalog; everyone else is scanned through the catalog families.
-const pickWithinProvider = (providerID, auth, catalog, family) => {
-  if (providerID === 'openai' && auth.openai?.type === 'oauth') {
+const pickWithinProvider = (
+  providerID: string,
+  auth: AuthStore,
+  catalog: ModelsMetadata,
+  family: string,
+): SmallModelResolution | null => {
+  const openaiAuth = auth.openai;
+  if (providerID === 'openai' && openaiAuth && typeof openaiAuth === 'object'
+    && (openaiAuth as AuthEntry).type === 'oauth') {
     return family === 'gpt-nano'
       ? { providerID, modelID: OPENAI_OAUTH_SMALL_MODEL, source: 'codex-small' }
       : null;
   }
   if (providerID === 'github-copilot') {
     return family === 'gpt-nano'
-      ? { providerID, modelID: COPILOT_UTILITY_MODELS[0], source: 'copilot-utility' }
+      ? { providerID, modelID: COPILOT_UTILITY_MODELS[0]!, source: 'copilot-utility' }
       : null;
   }
   const provider = getCatalogProvider(catalog, providerID);
-  if (!provider || !provider.models || typeof provider.models !== 'object') return null;
-  const model = pickByFamily(provider.models, family);
-  return model?.id ? { providerID, modelID: model.id, source: 'family-scan' } : null;
+  if (!provider || !provider.models || typeof provider.models !== 'object' || Array.isArray(provider.models)) return null;
+  const model = pickByFamily(provider.models as Record<string, unknown>, family);
+  return typeof model?.id === 'string' ? { providerID, modelID: model.id, source: 'family-scan' } : null;
 };
 
-export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }) {
+export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }: {
+  auth: AuthStore;
+  catalog: ModelsMetadata;
+  configSmallModel?: unknown;
+  preferredModelID?: unknown;
+  preferredProviderID?: unknown;
+  settingsSmallModel?: unknown;
+}): SmallModelResolution | null {
   // Piarium's explicit Settings override outranks the native Pi config.
   const fromSettings = parseModelRef(settingsSmallModel);
   if (fromSettings) {
@@ -120,7 +143,7 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
   if (isUsableAuthEntry(copilotEntry)) {
     return {
       providerID: 'github-copilot',
-      modelID: COPILOT_UTILITY_MODELS[0],
+      modelID: COPILOT_UTILITY_MODELS[0]!,
       source: 'copilot-utility',
     };
   }

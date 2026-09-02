@@ -1,6 +1,6 @@
-// @ts-nocheck
 import { isGeneratedArtifact } from './generated.js';
 import { parseDiffFiles } from './hunks.js';
+import type { BuiltDigest, DiffFile, DiffSection, DigestFile } from './types.js';
 
 // The digest is what the model actually reads. Within what it covers there is
 // no truncation: a diff that does not fit the model's context is refused
@@ -9,18 +9,18 @@ import { parseDiffFiles } from './hunks.js';
 //
 // The one thing it does not cover is tool-produced files (lockfiles, minified
 // bundles, codegen). Those are excluded by name, not by size, and they are not
-// hidden 鈥?they carry no hunk aliases, so nothing can anchor to them, and they
+// hidden — they carry no hunk aliases, so nothing can anchor to them, and they
 // surface in the uncovered tail like any other unreviewed change.
 
 /**
  * Parse sections into files and build the model-facing digest.
  *
- * Hunks are exposed to the model as request-local aliases (`h1`, `h2`, 鈥?
+ * Hunks are exposed to the model as request-local aliases (`h1`, `h2`, …)
  * rather than their real ids: the aliases are far cheaper in tokens, and a
  * model cannot invent a plausible-looking id for a hunk that does not exist.
  */
-export function buildDigest(sections) {
-  const files = [];
+export function buildDigest(sections: DiffSection[]): BuiltDigest {
+  const files: DiffFile[] = [];
   for (const section of sections) {
     const parsed = parseDiffFiles(section.patch, section.scope);
     for (const file of parsed.files) {
@@ -28,19 +28,21 @@ export function buildDigest(sections) {
     }
   }
 
-  const idByAlias = new Map();
-  const aliasById = new Map();
+  const idByAlias = new Map<string, string>();
+  const aliasById = new Map<string, string>();
   let counter = 0;
 
   const digestFiles = files
     .filter((file) => !file.generated)
-    .map((file) => ({
-      path: file.path,
-      ...(file.oldPath ? { oldPath: file.oldPath } : {}),
-      status: file.status,
-      ...(file.scope !== 'branch' && !file.scope.startsWith('pr:') ? { scope: file.scope } : {}),
-      ...(file.binary ? { binary: true } : {}),
-      hunks: file.hunks.map((hunk) => {
+    .map((file): DigestFile => {
+      const fileScope = file.scope ?? 'diff';
+      return {
+        path: file.path,
+        ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+        status: file.status,
+        ...(fileScope !== 'branch' && !fileScope.startsWith('pr:') ? { scope: fileScope } : {}),
+        ...(file.binary ? { binary: true as const } : {}),
+        hunks: file.hunks.map((hunk) => {
         counter += 1;
         const alias = `h${counter}`;
         idByAlias.set(alias, hunk.id);
@@ -54,8 +56,9 @@ export function buildDigest(sections) {
           deleted: hunk.deleted,
           patch: hunk.body,
         };
-      }),
-    }));
+        }),
+      };
+    });
 
   const generatedFiles = files.filter((file) => file.generated);
 

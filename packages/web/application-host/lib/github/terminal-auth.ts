@@ -1,17 +1,17 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync as defaultSpawnSync } from 'node:child_process';
 import YAML from 'yaml';
+import type { GitHubAuthEntry, GitHubUser, SpawnSync, SpawnSyncResult, TerminalAuthOptions } from './types.js';
 
 const GITHUB_HOST = 'github.com';
 
-const ensureDir = (dirPath) => {
+const ensureDir = (dirPath: string): void => {
   fs.mkdirSync(dirPath, { recursive: true });
 };
 
-const chmodBestEffort = (filePath, mode) => {
+const chmodBestEffort = (filePath: string, mode: number): void => {
   try {
     fs.chmodSync(filePath, mode);
   } catch {
@@ -19,9 +19,12 @@ const chmodBestEffort = (filePath, mode) => {
   }
 };
 
-const normalizeHomeDir = (homeDir = os.homedir()) => path.resolve(homeDir || os.homedir());
+const normalizeHomeDir = (homeDir = os.homedir()): string => path.resolve(homeDir || os.homedir());
 
-const getPaths = ({ homeDir = os.homedir(), authFilePath } = {}) => {
+const getPaths = ({ homeDir = os.homedir(), authFilePath }: {
+  authFilePath?: string;
+  homeDir?: string;
+} = {}) => {
   const home = normalizeHomeDir(homeDir);
   const dataDir = authFilePath
     ? path.dirname(path.resolve(authFilePath))
@@ -33,20 +36,22 @@ const getPaths = ({ homeDir = os.homedir(), authFilePath } = {}) => {
   };
 };
 
-const readYamlObject = (filePath) => {
+const readYamlObject = (filePath: string): Record<string, unknown> => {
   if (!fs.existsSync(filePath)) {
     return {};
   }
 
   try {
-    const parsed = YAML.parse(fs.readFileSync(filePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    const parsed: unknown = YAML.parse(fs.readFileSync(filePath, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
   }
 };
 
-const getActiveToken = (auth) => {
+type TerminalAuth = GitHubAuthEntry | { accessToken?: string; user?: GitHubUser | null } | null | undefined;
+
+const getActiveToken = (auth: TerminalAuth): string => {
   const token = typeof auth?.accessToken === 'string' ? auth.accessToken.trim() : '';
   if (!token) {
     throw new Error('GitHub is not connected');
@@ -54,12 +59,12 @@ const getActiveToken = (auth) => {
   return token;
 };
 
-const getLogin = (auth) => {
+const getLogin = (auth: TerminalAuth): string => {
   const login = typeof auth?.user?.login === 'string' ? auth.user.login.trim() : '';
   return login || 'x-access-token';
 };
 
-const writeGhHosts = ({ auth, ghConfigPath }) => {
+const writeGhHosts = ({ auth, ghConfigPath }: { auth: TerminalAuth; ghConfigPath: string }): void => {
   const token = getActiveToken(auth);
   const login = getLogin(auth);
   const hosts = readYamlObject(ghConfigPath);
@@ -76,7 +81,7 @@ const writeGhHosts = ({ auth, ghConfigPath }) => {
   chmodBestEffort(ghConfigPath, 0o600);
 };
 
-const buildCredentialHelperScript = (authFilePath) => `#!/usr/bin/env node
+const buildCredentialHelperScript = (authFilePath: string): string => `#!/usr/bin/env node
 const fs = require('node:fs');
 
 const AUTH_FILE = ${JSON.stringify(path.resolve(authFilePath))};
@@ -141,15 +146,21 @@ process.stdin.on('end', () => {
 });
 `;
 
-const quoteGitHelperPath = (helperPath) => `"${helperPath.replace(/(["\\$`])/g, '\\$1')}"`;
+const quoteGitHelperPath = (helperPath: string): string => `"${helperPath.replace(/(["\\$`])/g, '\\$1')}"`;
 
-const writeCredentialHelper = ({ helperPath, authFilePath }) => {
+const writeCredentialHelper = ({ helperPath, authFilePath }: {
+  authFilePath: string;
+  helperPath: string;
+}): void => {
   ensureDir(path.dirname(helperPath));
   fs.writeFileSync(helperPath, buildCredentialHelperScript(authFilePath), 'utf8');
   chmodBestEffort(helperPath, 0o700);
 };
 
-const configureGitCredentialHelper = ({ helperPath, spawnSync = defaultSpawnSync }) => {
+const configureGitCredentialHelper = ({ helperPath, spawnSync = defaultSpawnSync }: {
+  helperPath: string;
+  spawnSync?: SpawnSync;
+}) => {
   const helperCommand = `!${quoteGitHelperPath(helperPath)}`;
   const result = spawnSync(
     'git',
@@ -176,7 +187,7 @@ export function installTerminalGitHubAuth({
   authFilePath,
   configureGit = true,
   spawnSync = defaultSpawnSync,
-} = {}) {
+}: TerminalAuthOptions = {}) {
   getActiveToken(auth);
 
   const resolvedAuthFilePath = authFilePath || path.join(normalizeHomeDir(homeDir), '.config', 'piarium', 'github-auth.json');
@@ -203,11 +214,17 @@ export function isTerminalGitHubAuthConfigured({
   auth,
   homeDir = os.homedir(),
   authFilePath,
-} = {}) {
+}: Pick<TerminalAuthOptions, 'auth' | 'authFilePath' | 'homeDir'> = {}) {
   const token = typeof auth?.accessToken === 'string' ? auth.accessToken.trim() : '';
-  const { ghConfigPath, helperPath } = getPaths({ homeDir, authFilePath });
+  const { ghConfigPath, helperPath } = getPaths({
+    homeDir,
+    ...(authFilePath ? { authFilePath } : {}),
+  });
   const hosts = readYamlObject(ghConfigPath);
-  const hostEntry = hosts[GITHUB_HOST] && typeof hosts[GITHUB_HOST] === 'object' ? hosts[GITHUB_HOST] : {};
+  const rawHostEntry = hosts[GITHUB_HOST];
+  const hostEntry = rawHostEntry && typeof rawHostEntry === 'object' && !Array.isArray(rawHostEntry)
+    ? rawHostEntry as Record<string, unknown>
+    : {};
   const ghConfigured = Boolean(token && hostEntry.oauth_token === token);
 
   return {
@@ -219,7 +236,7 @@ export function isTerminalGitHubAuthConfigured({
   };
 }
 
-const getGitHubAuthor = (auth) => {
+const getGitHubAuthor = (auth: TerminalAuth): { userEmail: string; userName: string } => {
   getActiveToken(auth);
 
   const user = auth?.user && typeof auth.user === 'object' ? auth.user : {};
@@ -241,7 +258,7 @@ const getGitHubAuthor = (auth) => {
   return { userName, userEmail };
 };
 
-const getSpawnError = (result) => {
+const getSpawnError = (result: SpawnSyncResult): string => {
   if (result?.error?.message) {
     return result.error.message;
   }
@@ -249,7 +266,11 @@ const getSpawnError = (result) => {
   return stderr || 'git config failed';
 };
 
-const setGlobalGitConfig = ({ key, value, spawnSync }) => {
+const setGlobalGitConfig = ({ key, value, spawnSync }: {
+  key: string;
+  spawnSync: SpawnSync;
+  value: string;
+}): void => {
   const result = spawnSync(
     'git',
     ['config', '--global', '--replace-all', key, value],
@@ -264,7 +285,7 @@ const setGlobalGitConfig = ({ key, value, spawnSync }) => {
 export function configureGitHubGitAuthor({
   auth,
   spawnSync = defaultSpawnSync,
-} = {}) {
+}: Pick<TerminalAuthOptions, 'auth' | 'spawnSync'> = {}) {
   const { userName, userEmail } = getGitHubAuthor(auth);
 
   setGlobalGitConfig({ key: 'user.name', value: userName, spawnSync });

@@ -1,5 +1,47 @@
-// @ts-nocheck
-export const createTunnelRoutesRuntime = (dependencies) => {
+import type { Express, Request, Response } from 'express';
+import type { TunnelController, TunnelIntent, TunnelMode, TunnelProviderId } from './types.js';
+import type { TunnelProviderRegistry } from './registry.js';
+
+type TunnelService = ReturnType<typeof import('./index.js').createTunnelService>;
+type TunnelAuth = ReturnType<typeof import('../platform/tunnel-auth.js').createTunnelAuth>;
+type ManagedConfigRuntime = ReturnType<typeof import('./managed-config.js').createManagedTunnelConfigRuntime>;
+
+export interface TunnelRoutesDependencies {
+  TUNNEL_MODE_MANAGED_LOCAL: TunnelMode;
+  TUNNEL_MODE_MANAGED_REMOTE: TunnelMode;
+  TUNNEL_MODE_QUICK: TunnelMode;
+  TUNNEL_PROVIDER_CLOUDFLARE: TunnelProviderId;
+  TunnelServiceError: typeof import('./types.js').TunnelServiceError;
+  URL: typeof URL;
+  crypto: { randomUUID(): string };
+  getActivePort(): number | null;
+  getActiveTunnelController(): TunnelController | null;
+  getRuntimeManagedRemoteTunnelHostname(): string;
+  getRuntimeManagedRemoteTunnelToken(): string;
+  isSupportedTunnelMode: typeof import('./types.js').isSupportedTunnelMode;
+  normalizeManagedRemoteTunnelHostname(value: unknown): string | undefined;
+  normalizeOptionalPath: typeof import('./types.js').normalizeOptionalPath;
+  normalizeTunnelBootstrapTtlMs(value: unknown): number | null;
+  normalizeTunnelMode: typeof import('./types.js').normalizeTunnelMode;
+  normalizeTunnelProvider: typeof import('./types.js').normalizeTunnelProvider;
+  normalizeTunnelSessionTtlMs(value: unknown): number;
+  readManagedRemoteTunnelConfigFromDisk: ManagedConfigRuntime['readManagedRemoteTunnelConfigFromDisk'];
+  readSettingsFromDisk(): Promise<Record<string, unknown>>;
+  resolveManagedRemoteTunnelToken: ManagedConfigRuntime['resolveManagedRemoteTunnelToken'];
+  setActiveTunnelController(controller: TunnelController | null): void;
+  setRuntimeManagedRemoteTunnelHostname(value: string): void;
+  setRuntimeManagedRemoteTunnelToken(value: string): void;
+  tunnelAuthController: TunnelAuth;
+  tunnelProviderRegistry: TunnelProviderRegistry;
+  tunnelService: TunnelService;
+  upsertManagedRemoteTunnelToken: ManagedConfigRuntime['upsertManagedRemoteTunnelToken'];
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies) => {
   const {
     crypto,
     URL,
@@ -31,7 +73,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     setActiveTunnelController,
   } = dependencies;
 
-  const resolveActiveNormalizedTunnelMode = () => {
+  const resolveActiveNormalizedTunnelMode = (): TunnelMode => {
     const mode = tunnelService.resolveActiveMode();
     if (mode === TUNNEL_MODE_MANAGED_LOCAL) {
       return TUNNEL_MODE_MANAGED_LOCAL;
@@ -42,7 +84,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     return TUNNEL_MODE_QUICK;
   };
 
-  const resolveNormalizedTunnelHost = (publicUrl) => {
+  const resolveNormalizedTunnelHost = (publicUrl: unknown): string | null => {
     if (typeof publicUrl !== 'string' || publicUrl.trim().length === 0) {
       return null;
     }
@@ -53,9 +95,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     }
   };
 
-  const resolvePreferredTunnelProvider = async (reqBody = null) => {
-    if (typeof reqBody?.provider === 'string' && reqBody.provider.trim().length > 0) {
-      return normalizeTunnelProvider(reqBody.provider);
+  const resolvePreferredTunnelProvider = async (reqBody: unknown = null): Promise<TunnelProviderId> => {
+    const body = asRecord(reqBody);
+    if (typeof body.provider === 'string' && body.provider.trim().length > 0) {
+      return normalizeTunnelProvider(body.provider);
     }
     const activeProvider = tunnelService.resolveActiveProvider();
     if (activeProvider) {
@@ -74,17 +117,28 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     configPath,
     selectedPresetId,
     selectedPresetName,
+  }: {
+    configPath?: string | null;
+    hostname?: string;
+    intent?: TunnelIntent | string;
+    mode: TunnelMode | string;
+    provider: TunnelProviderId | string;
+    selectedPresetId: string;
+    selectedPresetName: string;
+    token?: string;
   }) => {
+    const normalizedHostname = hostname ?? '';
+    const normalizedToken = token ?? '';
     if (provider === TUNNEL_PROVIDER_CLOUDFLARE && mode === TUNNEL_MODE_MANAGED_REMOTE) {
-      setRuntimeManagedRemoteTunnelHostname(hostname);
-      setRuntimeManagedRemoteTunnelToken(token);
+      setRuntimeManagedRemoteTunnelHostname(normalizedHostname);
+      setRuntimeManagedRemoteTunnelToken(normalizedToken);
 
-      if (token && hostname) {
+      if (normalizedToken && normalizedHostname) {
         await upsertManagedRemoteTunnelToken({
-          id: selectedPresetId || hostname,
-          name: selectedPresetName || hostname,
-          hostname,
-          token,
+          id: selectedPresetId || normalizedHostname,
+          name: selectedPresetName || normalizedHostname,
+          hostname: normalizedHostname,
+          token: normalizedToken,
         });
       }
     }
@@ -94,8 +148,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       mode,
       intent,
       configPath,
-      token,
-      hostname,
+      token: normalizedToken,
+      hostname: normalizedHostname,
     });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
@@ -107,7 +161,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const createGenericModeChecks = ({ modeKey, requiredFields, doctorRequest, startupReady }) => {
+  const createGenericModeChecks = ({ modeKey, requiredFields, doctorRequest, startupReady }: {
+    doctorRequest: Record<string, unknown>;
+    modeKey: string;
+    requiredFields: string[];
+    startupReady: boolean;
+  }) => {
     const checks = [
       {
         id: 'startup_readiness',
@@ -149,7 +208,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }) => {
+  const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }: {
+    doctorRequest: Record<string, unknown>;
+    modeFilter: string | null;
+    providerId: TunnelProviderId;
+  }) => {
     const provider = tunnelProviderRegistry.get(providerId);
     if (!provider) {
       throw new TunnelServiceError('provider_unsupported', `Unsupported tunnel provider: ${providerId}`);
@@ -160,20 +223,18 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       ? capabilities.modes.map((entry) => entry?.key).filter((key) => typeof key === 'string' && key.length > 0)
       : [];
 
-    if (modeFilter && !modeKeys.includes(modeFilter)) {
+    if (modeFilter && !modeKeys.some((mode) => mode === modeFilter)) {
       throw new TunnelServiceError('mode_unsupported', `Provider '${providerId}' does not support mode '${modeFilter}'`);
     }
 
     if (typeof provider.diagnose === 'function') {
-      const diagnosed = await provider.diagnose({
+      const diagnosed = asRecord(await provider.diagnose({
         ...doctorRequest,
         mode: modeFilter || doctorRequest?.mode,
-      }, {
-        capabilities,
-      });
-      const providerChecks = Array.isArray(diagnosed?.providerChecks) ? diagnosed.providerChecks : [];
-      const allModes = Array.isArray(diagnosed?.modes) ? diagnosed.modes : [];
-      const modes = modeFilter ? allModes.filter((entry) => entry?.mode === modeFilter) : allModes;
+      }));
+      const providerChecks = Array.isArray(diagnosed.providerChecks) ? diagnosed.providerChecks : [];
+      const allModes = Array.isArray(diagnosed.modes) ? diagnosed.modes : [];
+      const modes = modeFilter ? allModes.filter((entry) => asRecord(entry).mode === modeFilter) : allModes;
       return {
         ok: true,
         provider: providerId,
@@ -210,7 +271,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const registerRoutes = (app) => {
+  const registerRoutes = (app: Express): void => {
     app.get('/api/piarium/tunnel/check', async (req, res) => {
       try {
         const requestedProvider = typeof req?.query?.provider === 'string' && req.query.provider.trim().length > 0
@@ -233,7 +294,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    const handleTunnelDoctor = async (req, res) => {
+    const handleTunnelDoctor = async (req: Request, res: Response) => {
       try {
         const params = req.query || {};
         const body = req.body || {};
@@ -415,7 +476,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             sessionTtlMs,
           },
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({ error: 'Failed to get tunnel status' });
       }
     });
@@ -440,7 +501,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
-      } catch (error) {
+      } catch {
         return res.status(500).json({ ok: false, error: 'Failed to save managed remote tunnel token' });
       }
     });
@@ -506,10 +567,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const { publicUrl, provider: activeProvider, providerMetadata } = await startTunnelWithNormalizedRequest({
           provider,
           mode,
-          intent,
-          hostname,
-          token,
-          configPath: requestConfigPath,
+          ...(typeof intent === 'string' ? { intent } : {}),
+          ...(hostname ? { hostname } : {}),
+          ...(token ? { token } : {}),
+          ...(requestConfigPath ? { configPath: requestConfigPath } : {}),
           selectedPresetId,
           selectedPresetName,
         });

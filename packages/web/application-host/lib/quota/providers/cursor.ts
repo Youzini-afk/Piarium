@@ -1,16 +1,18 @@
-// @ts-nocheck
 import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { readManagedCredential, writeManagedCredential } from '../credentials/providers.js';
 import {
+  asObject,
   buildResult,
   formatMoney,
   toNumber,
   toTimestamp,
   toUsageWindow
 } from '../utils/index.js';
+import type { ManagedCredential } from '../credentials/providers.js';
+import type { UsageWindow } from '../utils/index.js';
 
 const BASE_URL = 'https://api2.cursor.sh';
 const USAGE_URL = `${BASE_URL}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`;
@@ -21,21 +23,26 @@ const CLIENT_ID = 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB';
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
 
+interface CursorAuthState {
+  accessToken: string | null;
+  refreshToken: string | null;
+  source: 'env' | 'file' | 'managed' | 'import' | 'validation';
+}
+
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
-const aliases = ['cursor'];
 
-const readJwtPayload = (token) => {
+const readJwtPayload = (token: string): Record<string, unknown> | null => {
   try {
     const [, payload] = String(token).split('.');
     if (!payload) return null;
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return asObject(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown);
   } catch {
     return null;
   }
 };
 
-const readStateValue = (key) => {
+const readStateValue = (key: string): string | null => {
   if (!existsSync(STATE_DB)) return null;
   try {
     const escapedKey = String(key).replace(/'/g, "''");
@@ -48,15 +55,16 @@ const readStateValue = (key) => {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore']
     });
-    const parsed = JSON.parse(rows || '[]');
-    const value = parsed?.[0]?.value;
+    const parsed = JSON.parse(rows || '[]') as unknown;
+    const first = Array.isArray(parsed) ? asObject(parsed[0]) : null;
+    const value = first?.value;
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   } catch {
     return null;
   }
 };
 
-const readFileToken = (path) => {
+const readFileToken = (path: string | null): string | null => {
   try {
     if (!path || !existsSync(path)) return null;
     const content = readFileSync(path, 'utf8').trim();
@@ -66,7 +74,7 @@ const readFileToken = (path) => {
   }
 };
 
-const loadAuthState = () => {
+const loadAuthState = (): CursorAuthState => {
   const envAccessToken = process.env.CURSOR_TOKEN || process.env.CURSOR_ACCESS_TOKEN || null;
   const envRefreshToken = process.env.CURSOR_REFRESH_TOKEN || null;
   const accessTokenPath = process.env.CURSOR_TOKEN_FILE || null;
@@ -98,14 +106,14 @@ const loadAuthState = () => {
   };
 };
 
-const tokenNeedsRefresh = (token) => {
+const tokenNeedsRefresh = (token: string | null): boolean => {
   if (!token) return true;
   const payload = readJwtPayload(token);
   const expiresAt = typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
   return !expiresAt || expiresAt - Date.now() <= REFRESH_BUFFER_MS;
 };
 
-const persistAccessToken = (auth, accessToken) => {
+const persistAccessToken = (auth: CursorAuthState, accessToken: string): void => {
   if (auth.source === 'managed') writeManagedCredential(providerId, { accessToken, refreshToken: auth.refreshToken || '' });
 };
 
@@ -120,7 +128,7 @@ export const importCursorCredential = async () => {
   return writeManagedCredential(providerId, { ...credential, accessToken });
 };
 
-const refreshAccessToken = async (auth) => {
+const refreshAccessToken = async (auth: CursorAuthState): Promise<string | null> => {
   if (!auth.refreshToken) return auth.accessToken;
 
   const response = await fetch(REFRESH_URL, {
@@ -133,7 +141,7 @@ const refreshAccessToken = async (auth) => {
     })
   });
 
-  const body = await response.json().catch(() => null);
+  const body = asObject(await response.json().catch(() => null));
   if (body?.shouldLogout === true) {
     throw new Error('Session expired - please sign in to Cursor again');
   }
@@ -148,7 +156,7 @@ const refreshAccessToken = async (auth) => {
   return body.access_token;
 };
 
-const resolveCredentialAccessToken = async (auth) => {
+const resolveCredentialAccessToken = async (auth: CursorAuthState): Promise<string | null> => {
   if (!auth.accessToken && !auth.refreshToken) return null;
   if (!tokenNeedsRefresh(auth.accessToken)) return auth.accessToken;
   return refreshAccessToken(auth);
@@ -156,13 +164,19 @@ const resolveCredentialAccessToken = async (auth) => {
 
 const resolveAccessToken = async () => resolveCredentialAccessToken(loadAuthState());
 
-export const validateCursorCredential = async (credential) => {
-  const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'validation' });
+const toCursorAuthState = (credential: ManagedCredential, source: CursorAuthState['source']): CursorAuthState => ({
+  accessToken: credential.accessToken || null,
+  refreshToken: credential.refreshToken || null,
+  source,
+});
+
+export const validateCursorCredential = async (credential: ManagedCredential): Promise<void> => {
+  const accessToken = await resolveCredentialAccessToken(toCursorAuthState(credential, 'validation'));
   if (!accessToken) throw new Error('Cursor credentials are invalid');
   await connectPost(USAGE_URL, accessToken);
 };
 
-const connectPost = async (url, accessToken) => {
+const connectPost = async (url: string, accessToken: string): Promise<Record<string, unknown>> => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -177,29 +191,33 @@ const connectPost = async (url, accessToken) => {
     throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
   }
 
-  return response.json();
+  return asObject(await response.json()) ?? {};
 };
 
-const centsLabel = (cents) => {
+const centsLabel = (cents: unknown): string | null => {
   const value = toNumber(cents);
   return value === null ? null : `$${formatMoney(value / 100)}`;
 };
 
-const percentFromSpend = (planUsage) => {
-  const explicit = toNumber(planUsage?.totalPercentUsed);
+const percentFromSpend = (planUsage: Record<string, unknown>): number | null => {
+  const explicit = toNumber(planUsage.totalPercentUsed);
   if (explicit !== null) return explicit;
-  const limit = toNumber(planUsage?.limit);
-  const remaining = toNumber(planUsage?.remaining);
+  const limit = toNumber(planUsage.limit);
+  const remaining = toNumber(planUsage.remaining);
   if (!limit || remaining === null) return null;
   return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
 };
 
-const buildWindows = (usage, plan) => {
-  const planUsage = usage?.planUsage ?? {};
-  const spendLimitUsage = usage?.spendLimitUsage ?? {};
-  const resetAt = toTimestamp(usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd);
+const buildWindows = (
+  usage: Record<string, unknown>,
+  plan: Record<string, unknown> | null,
+): Record<string, UsageWindow> => {
+  const planUsage = asObject(usage.planUsage) ?? {};
+  const spendLimitUsage = asObject(usage.spendLimitUsage) ?? {};
+  const planInfo = asObject(plan?.planInfo);
+  const resetAt = toTimestamp(usage.billingCycleEnd ?? planInfo?.billingCycleEnd);
   const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
-  const windows = {};
+  const windows: Record<string, UsageWindow> = {};
 
   windows.billing_cycle = toUsageWindow({
     usedPercent: percentFromSpend(planUsage),
@@ -246,7 +264,10 @@ const buildWindows = (usage, plan) => {
   return windows;
 };
 
-const appendCreditsWindow = (windows, credits) => {
+const appendCreditsWindow = (
+  windows: Record<string, UsageWindow>,
+  credits: Record<string, unknown> | null,
+): void => {
   const balance = toNumber(credits?.balanceCents ?? credits?.totalBalanceCents ?? credits?.amountCents);
   if (balance === null) return;
   windows.credits = toUsageWindow({
@@ -281,7 +302,7 @@ export const fetchQuota = async () => {
       connectPost(CREDITS_URL, accessToken).catch(() => null)
     ]);
 
-    if (usage?.enabled === false || !usage?.planUsage) {
+    if (usage.enabled === false || !usage.planUsage) {
       return buildResult({
         providerId,
         providerName,
@@ -293,10 +314,12 @@ export const fetchQuota = async () => {
 
     const windows = buildWindows(usage, plan);
     appendCreditsWindow(windows, credits);
+    const planInfo = asObject(plan?.planInfo);
+    const planName = typeof planInfo?.planName === 'string' ? planInfo.planName : null;
 
     return buildResult({
       providerId,
-      providerName: plan?.planInfo?.planName ? `Cursor ${plan.planInfo.planName}` : providerName,
+      providerName: planName ? `Cursor ${planName}` : providerName,
       ok: true,
       configured: true,
       usage: { windows }

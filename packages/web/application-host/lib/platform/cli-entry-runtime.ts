@@ -1,5 +1,21 @@
-// @ts-nocheck
-export const runCliEntryIfMain = (dependencies) => {
+import type {
+  ParsedServeCliArgs,
+  ParseServeCliOptionsInput,
+  StartWebUiServerOptions,
+} from '../../public-contract.js';
+
+export interface CliEntryDependencies {
+  cloudflareProvider: string;
+  currentFilename: string;
+  defaultPort: number;
+  managedLocalMode: string;
+  parseServeCliOptions(input: ParseServeCliOptionsInput): ParsedServeCliArgs;
+  process: Pick<NodeJS.Process, 'argv' | 'env' | 'exit'>;
+  setExitOnShutdown(value: boolean): void;
+  startServer(options: StartWebUiServerOptions): Promise<unknown>;
+}
+
+export const runCliEntryIfMain = (dependencies: CliEntryDependencies): void => {
   const {
     process,
     currentFilename,
@@ -38,7 +54,7 @@ export const runCliEntryIfMain = (dependencies) => {
     exitOnShutdown: true,
     uiPassword: cliOptions.uiPassword,
     apiOnly: cliOptions.apiOnly,
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     console.error('Failed to start server:', error);
     process.exit(1);
   });

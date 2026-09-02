@@ -1,9 +1,12 @@
-// @ts-nocheck
 import { printTunnelWarning } from '../cloudflare-tunnel.js';
 import { createTunnelService } from '../tunnels/index.js';
 import { createTunnelRoutesRuntime } from '../tunnels/routes.js';
+import type { TunnelRoutesDependencies } from '../tunnels/routes.js';
+import type { Express } from 'express';
 
-export const createTunnelWiringRuntime = (dependencies) => {
+export const createTunnelWiringRuntime = (
+  dependencies: Omit<TunnelRoutesDependencies, 'getActivePort' | 'tunnelService'>,
+) => {
   const {
     crypto,
     URL,
@@ -33,7 +36,7 @@ export const createTunnelWiringRuntime = (dependencies) => {
     setRuntimeManagedRemoteTunnelToken,
   } = dependencies;
 
-  const initialize = (app, initialPort) => {
+  const initialize = (app: Express, initialPort: number) => {
     let activePort = initialPort;
 
     const tunnelService = createTunnelService({
@@ -81,9 +84,11 @@ export const createTunnelWiringRuntime = (dependencies) => {
 
     return {
       tunnelService,
-      startTunnelWithNormalizedRequest: (...args) => tunnelRoutesRuntime.startTunnelWithNormalizedRequest(...args),
+      startTunnelWithNormalizedRequest: (...args: Parameters<typeof tunnelRoutesRuntime.startTunnelWithNormalizedRequest>) => (
+        tunnelRoutesRuntime.startTunnelWithNormalizedRequest(...args)
+      ),
       getActivePort: () => activePort,
-      setActivePort: (value) => {
+      setActivePort: (value: number) => {
         activePort = value;
       },
     };

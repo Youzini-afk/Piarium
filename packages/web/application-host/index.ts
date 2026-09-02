@@ -1,8 +1,7 @@
-// @ts-nocheck
 import 'reflect-metadata';
 import compression from 'compression';
 import crypto from 'crypto';
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import http from 'http';
 import http2 from 'node:http2';
@@ -17,10 +16,15 @@ import {
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
 } from '@piarium/extension-host';
-import { createDocumentAuthority } from './lib/documents/authority.js';
+import { createDocumentAuthority, type DocumentAuthority } from './lib/documents/authority.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
+import { toJsonValue } from './lib/extensions/json-value.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
-import { createWorkspaceRecoveryEngine } from './lib/recovery/engine.js';
+import {
+  createWorkspaceRecoveryEngine,
+  type RecoverySessionNavigation,
+  type WorkspaceRecoveryEngine,
+} from './lib/recovery/engine.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
 import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
@@ -53,6 +57,7 @@ import {
   normalizeTunnelMode,
   normalizeTunnelProvider,
   normalizeTunnelStartRequest,
+  type TunnelController,
 } from './lib/tunnels/types.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
@@ -67,6 +72,7 @@ import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
+import { mintOutsideFileGrant } from './lib/fs/routes.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import {
   createGlobalUiEventBroadcaster,
@@ -108,7 +114,6 @@ import { createPlatformEnvironmentRuntime } from './lib/platform/environment-run
 import { resolvePiariumDataDir } from './lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from './lib/platform/inherited-env.js';
 import { pathLooksUserConfigured, mergePathValues } from './lib/platform/path-utils.js';
-import { mintOutsideFileGrant } from './lib/fs/routes.js';
 import { createProjectDirectoryRuntime } from './lib/platform/project-directory-runtime.js';
 import { registerPiariumRoutes } from './lib/platform/piarium-routes.js';
 import { createPlatformRoutesRuntime } from './lib/platform/routes-runtime.js';
@@ -123,6 +128,13 @@ import { createStartupPipelineRuntime } from './lib/platform/startup-pipeline-ru
 import { createThemeRuntime } from './lib/platform/theme-runtime.js';
 import { createTunnelAuth } from './lib/platform/tunnel-auth.js';
 import { createTunnelWiringRuntime } from './lib/platform/tunnel-wiring-runtime.js';
+import type {
+  DesktopNotificationPayload,
+  HostPiRuntimeBrokerFactoryOptions,
+  StartWebUiServerOptions,
+  WebUiServerController,
+} from './public-contract.js';
+export type * from './public-contract.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -131,8 +143,6 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 const CLIENT_RELOAD_DELAY_MS = 800;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const MODELS_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
-const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
-const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
@@ -143,13 +153,22 @@ const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
 const DESKTOP_NOTIFY_PREFIX = '[PiariumDesktopNotify] ';
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
-const isEnvFlagEnabled = (value) => {
+const errorMessage = (error: unknown): string => (
+  error instanceof Error ? error.message : String(error)
+);
+const recordOf = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const isEnvFlagEnabled = (value: unknown): boolean => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
   return value.trim() === '1' || value.trim().toLowerCase() === 'true';
 };
 
-const isEnvFlagDisabled = (value) => {
+const isEnvFlagDisabled = (value: unknown): boolean => {
   if (value === false || value === 0) return true;
   if (typeof value !== 'string') return false;
   return value.trim() === '0' || value.trim().toLowerCase() === 'false';
@@ -161,7 +180,7 @@ const PIARIUM_VERSION = (() => {
     if (typeof pkg?.version === 'string' && pkg.version.trim()) return pkg.version.trim();
     throw new Error('package.json does not declare a version');
   } catch (error) {
-    throw new Error(`Unable to resolve the Piarium Web application version: ${error?.message || error}`);
+    throw new Error(`Unable to resolve the Piarium Web application version: ${errorMessage(error)}`);
   }
 })();
 
@@ -178,7 +197,7 @@ const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'client-pa
 const MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
 const LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-named-tunnels.json');
 
-const shouldSkipApiCompression = () => {
+const shouldSkipApiCompression = (): boolean => {
   if (isEnvFlagEnabled(process.env.PIARIUM_SKIP_API_COMPRESSION)) return true;
   if (isEnvFlagEnabled(process.env.PIARIUM_COMPRESS_API)) return false;
   if (isEnvFlagDisabled(process.env.PIARIUM_COMPRESS_API)) return true;
@@ -192,9 +211,9 @@ const SSE_PATHS = new Set([
   '/api/piarium/realtime-proxy/sse',
 ]);
 
-const shouldSkipCompression = (req, res) => {
+const shouldSkipCompression = (req: Request, res: Response): boolean => {
   if (process.env.PIARIUM_RUNTIME === 'desktop') return true;
-  const acceptsSse = (value) => Array.isArray(value)
+  const acceptsSse = (value: unknown): boolean => Array.isArray(value)
     ? value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'))
     : typeof value === 'string' && value.toLowerCase().includes('text/event-stream');
   if (acceptsSse(req.headers.accept)) return true;
@@ -216,19 +235,21 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   tunnelSessionTtlMinMs: TUNNEL_SESSION_TTL_MIN_MS,
   tunnelSessionTtlMaxMs: TUNNEL_SESSION_TTL_MAX_MS,
 });
-const normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
-const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
-const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
-const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
-const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
-const normalizeManagedRemoteTunnelHostname = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
-const normalizeManagedRemoteTunnelPresets = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresets(...args);
-const normalizeManagedRemoteTunnelPresetTokens = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
-const sanitizeTypographySizesPartial = (...args) => settingsNormalizationRuntime.sanitizeTypographySizesPartial(...args);
-const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
-const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
-const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
-const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
+const {
+  normalizeDirectoryPath,
+  normalizePathForPersistence,
+  normalizeSettingsPaths,
+  normalizeTunnelBootstrapTtlMs,
+  normalizeTunnelSessionTtlMs,
+  normalizeManagedRemoteTunnelHostname,
+  normalizeManagedRemoteTunnelPresets,
+  normalizeManagedRemoteTunnelPresetTokens,
+  sanitizeTypographySizesPartial,
+  normalizeStringArray,
+  sanitizeModelRefs,
+  sanitizeSkillCatalogs,
+  sanitizeProjects,
+} = settingsNormalizationRuntime;
 
 const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   fsPromises,
@@ -241,10 +262,12 @@ const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
     CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION: 1,
   },
 });
-const readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk(...args);
-const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
-const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
-const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
+const {
+  readManagedRemoteTunnelConfigFromDisk,
+  syncManagedRemoteTunnelConfigWithPresets,
+  upsertManagedRemoteTunnelToken,
+  resolveManagedRemoteTunnelToken,
+} = managedTunnelConfigRuntime;
 
 const settingsHelpers = createSettingsHelpers({
   normalizePathForPersistence,
@@ -263,22 +286,25 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeSkillCatalogs,
   sanitizeProjects,
 });
-const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
-const normalizePwaOrientation = (...args) => settingsHelpers.normalizePwaOrientation(...args);
-const sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpdate(...args);
-const mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
-const formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
+const {
+  normalizePwaAppName,
+  normalizePwaOrientation,
+  sanitizeSettingsUpdate,
+  mergePersistedSettings,
+  formatSettingsResponse,
+} = settingsHelpers;
 
-let readSettingsFromDisk = async () => ({});
+type SettingsRuntime = ReturnType<typeof createSettingsRuntime>;
+let readSettingsFromDisk: SettingsRuntime['readSettingsFromDisk'] = async () => ({});
 const projectDirectoryRuntime = createProjectDirectoryRuntime({
   fsPromises,
   path,
   normalizeDirectoryPath,
+  readSettingsFromDisk,
   getReadSettingsFromDisk: () => readSettingsFromDisk,
   sanitizeProjects,
 });
-const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
-const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
+const { resolveProjectDirectory } = projectDirectoryRuntime;
 
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
@@ -292,9 +318,8 @@ const settingsRuntime = createSettingsRuntime({
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
 });
-readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
-const updateSettingsOnDisk = (...args) => settingsRuntime.updateSettingsOnDisk(...args);
-const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+readSettingsFromDisk = settingsRuntime.readSettingsFromDisk;
+const { updateSettingsOnDisk, persistSettings } = settingsRuntime;
 
 const themeRuntime = createThemeRuntime({
   fsPromises,
@@ -303,58 +328,59 @@ const themeRuntime = createThemeRuntime({
   maxThemeJsonBytes: MAX_THEME_JSON_BYTES,
   logger: console,
 });
-const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
+const { readCustomThemesFromDisk } = themeRuntime;
 
 const requestSecurityRuntime = createRequestSecurityRuntime({ readSettingsFromDisk });
-const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
-const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
-const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
+const {
+  getUiSessionTokenFromRequest,
+  rejectWebSocketUpgrade,
+  isRequestOriginAllowed,
+} = requestSecurityRuntime;
 
 const pushRuntime = createPushRuntime({
-  fsPromises,
-  path,
   webPush,
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDisk,
   updateSettingsOnDisk,
 });
-const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
-const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
-const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
-const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
-const isAnyInteractiveClientVisible = (...args) => pushRuntime.isAnyInteractiveClientVisible(...args);
-const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
-const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
-const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
-const updateUiVisibility = (...args) => pushRuntime.updateUiVisibility(...args);
+const {
+  getOrCreateVapidKeys,
+  addOrUpdatePushSubscription,
+  removePushSubscription,
+  sendPushToAllUiSessions,
+  isAnyInteractiveClientVisible,
+  isUiVisible,
+  ensurePushInitialized,
+  setPushInitialized,
+  updateUiVisibility,
+} = pushRuntime;
 
 const mobileDeviceStore = createMobileDeviceStore({
-  fsPromises,
-  path,
   crypto,
   mobileDevicesFilePath: MOBILE_DEVICES_FILE_PATH,
 });
 const mobilePushRuntime = createMobilePushRuntime({ deviceStore: mobileDeviceStore });
-const sendMobilePushToAllDevices = (...args) => mobilePushRuntime.sendMobilePushToAllDevices(...args);
+const { sendMobilePushToAllDevices } = mobilePushRuntime;
 const mobilePairingRuntime = createMobilePairingRuntime({ crypto, deviceStore: mobileDeviceStore });
 const apnsRuntime = createApnsRuntime({
   fsPromises,
-  path,
   crypto,
   http2,
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDisk,
   updateSettingsOnDisk,
 });
-const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
-const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
-const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
+const {
+  addOrUpdateApnsToken,
+  removeApnsToken,
+  sendApnsToAllUiSessions,
+} = apnsRuntime;
 
-const uiNotificationClients = new Set();
-const uiPiariumEventClients = new Set();
+const uiNotificationClients = new Set<Response>();
+const uiPiariumEventClients = new Set<Response>();
 const desktopNotifyEnabled = process.env.PIARIUM_DESKTOP_NOTIFY === 'true'
   || process.env.PIARIUM_RUNTIME === 'desktop';
-let broadcastGlobalUiEvent = null;
+let broadcastGlobalUiEvent: ReturnType<typeof createGlobalUiEventBroadcaster> | null = null;
 const notificationEmitterRuntime = createNotificationEmitterRuntime({
   process,
   getDesktopNotifyEnabled: () => desktopNotifyEnabled,
@@ -362,13 +388,15 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
   getUiNotificationClients: () => uiNotificationClients,
   getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
-const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
+const {
+  writeSseEvent,
+  emitDesktopNotification,
+  broadcastUiNotification,
+} = notificationEmitterRuntime;
 broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
   writeSseEvent,
 });
-const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
-const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 const sessionRuntime = createPiSessionRuntime({ broadcastEvent: broadcastGlobalUiEvent });
 
 const projectConfigRuntime = createProjectConfigRuntime({
@@ -378,7 +406,7 @@ const projectConfigRuntime = createProjectConfigRuntime({
 });
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
-  listProjects: async () => sanitizeProjects((await readSettingsFromDisk())?.projects || []),
+  listProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects || []) ?? [],
   emitTaskRunEvent: (event) => {
     for (const client of uiPiariumEventClients) {
       try {
@@ -428,11 +456,14 @@ const clientPairingRuntime = createClientPairingRuntime({
   remoteClientAuthRuntime,
 });
 
-let server = null;
-let uiAuthController = null;
-let activeTunnelController = null;
-let terminalRuntime = null;
-let activeDocumentsAuthority = null;
+type UiAuthController = ReturnType<typeof createUiAuth>;
+type TerminalRuntime = ReturnType<typeof createTerminalRuntime>;
+
+let server: http.Server | null = null;
+let uiAuthController: UiAuthController | null = null;
+let activeTunnelController: TunnelController | null = null;
+let terminalRuntime: TerminalRuntime | null = null;
+let activeDocumentsAuthority: DocumentAuthority | null = null;
 let exitOnShutdown = true;
 let isShuttingDown = false;
 let signalsAttached = false;
@@ -487,7 +518,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setActiveTunnelController: (value) => { activeTunnelController = value; },
   tunnelAuthController,
 });
-const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
+const gracefulShutdown = gracefulShutdownRuntime.gracefulShutdown;
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
@@ -506,19 +537,27 @@ const bootstrapRuntime = createServerBootstrapRuntime({
 });
 const platformRoutesRuntime = createPlatformRoutesRuntime({ clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS });
 
-const requestReachedLanAddress = (req) => {
+const requestReachedLanAddress = (req: Request): string | null => {
   const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
   const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
   return /^\d+\.\d+\.\d+\.\d+$/.test(address) && !address.startsWith('127.') ? address : null;
 };
 
-const extractAssistantText = (messages) => {
+const extractAssistantText = (messages: unknown): string => {
   if (!Array.isArray(messages)) return '';
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
-    const text = message.content
-      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
+    const candidate = message as Record<string, unknown>;
+    if (candidate.role !== 'assistant' || !Array.isArray(candidate.content)) continue;
+    const text = candidate.content
+      .filter((part: unknown): part is { text: string; type: 'text' } => (
+        Boolean(part)
+        && typeof part === 'object'
+        && !Array.isArray(part)
+        && (part as Record<string, unknown>).type === 'text'
+        && typeof (part as Record<string, unknown>).text === 'string'
+      ))
       .map((part) => part.text.trim())
       .filter(Boolean)
       .join('\n');
@@ -527,10 +566,12 @@ const extractAssistantText = (messages) => {
   return '';
 };
 
-async function main(options = {}) {
+async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerController> {
   if (server?.listening) throw new Error('Piarium server is already running');
   isShuttingDown = false;
-  const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
+  const port = typeof options.port === 'number' && Number.isFinite(options.port) && options.port >= 0
+    ? Math.trunc(options.port)
+    : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : undefined;
   const configuredBindHost = host || process.env.PIARIUM_HOST?.trim() || '127.0.0.1';
   const effectiveBindHost = normalizeBindHost(configuredBindHost);
@@ -559,7 +600,7 @@ async function main(options = {}) {
     : null;
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.PIARIUM_API_ONLY);
   const attachSignals = options.attachSignals !== false;
-  const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : null;
+  const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : undefined;
   const startupTunnelRequest = (
     typeof options.tunnelMode === 'string'
     || typeof options.tunnelProvider === 'string'
@@ -576,7 +617,11 @@ async function main(options = {}) {
         hostname: normalizeManagedRemoteTunnelHostname(options.tunnelHostname),
       })
     : options.tryCfTunnel === true
-      ? { provider: TUNNEL_PROVIDER_CLOUDFLARE, mode: TUNNEL_MODE_QUICK, token: '' }
+      ? normalizeTunnelStartRequest({
+          provider: TUNNEL_PROVIDER_CLOUDFLARE,
+          mode: TUNNEL_MODE_QUICK,
+          token: '',
+        })
       : null;
 
   console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
@@ -619,18 +664,21 @@ async function main(options = {}) {
   }));
   server = http.createServer(app);
   const serverStartedAt = new Date().toISOString();
-  let piRuntimeHandshake = null;
-  let piRuntimeLifecycle = null;
-  let relayServiceInstance = null;
-  let tunnelRuntimeContext = null;
-  let realtimeProxyRuntime = { stop: () => {} };
-  let dictationRuntime = null;
+  type PiRuntimeHandshake = Awaited<ReturnType<PiRuntimeLifecycle['start']>> | null;
+  type RelayService = ReturnType<typeof createRelayService>;
+  type TunnelRuntimeContext = ReturnType<ReturnType<typeof createTunnelWiringRuntime>['initialize']>;
+  let piRuntimeHandshake: PiRuntimeHandshake = null;
+  let piRuntimeLifecycle: PiRuntimeLifecycle | null = null;
+  let relayServiceInstance: RelayService | null = null;
+  let tunnelRuntimeContext: TunnelRuntimeContext | null = null;
+  let realtimeProxyRuntime: Pick<ReturnType<typeof attachRealtimeProxy>, 'stop'> = { stop: () => {} };
+  let dictationRuntime: ReturnType<typeof createDictationRuntime> | null = null;
   const currentPiRuntimeHandshake = () => (
     piRuntimeLifecycle ? piRuntimeLifecycle.handshake : piRuntimeHandshake
   );
 
   const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
-  const resolvePairingTransports = (req) => {
+  const resolvePairingTransports = (req: Request) => {
     const local = `http://127.0.0.1:${activePort()}`;
     let lanHost = null;
     if (isNetworkExposedBindHost(effectiveBindHost)) {
@@ -647,9 +695,9 @@ async function main(options = {}) {
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort()}` : null;
     return { local, lan, relayAvailable: true };
   };
-  const resolveDirectLanUrls = (req) => {
-    const urls = [];
-    const add = (address) => {
+  const resolveDirectLanUrls = (req: Request): string[] => {
+    const urls: string[] = [];
+    const add = (address: string | null): void => {
       if (!address) return;
       const url = `http://${address.includes(':') ? `[${address}]` : address}:${activePort()}`;
       if (!urls.includes(url)) urls.push(url);
@@ -696,7 +744,7 @@ async function main(options = {}) {
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
-    getRelayPairingCandidate: (pairingOptions) => relayServiceInstance
+    getRelayPairingCandidate: async (pairingOptions) => relayServiceInstance
       ? pairingOptions?.ensureEnabled
         ? relayServiceInstance.ensureEnabledForPairing()
         : relayServiceInstance.getPairingCandidate()
@@ -747,9 +795,12 @@ async function main(options = {}) {
   });
 
   const requirePiRuntime = options.requirePiRuntime ?? process.env.PIARIUM_RUNTIME !== 'desktop';
-  let piWriterTracker = null;
-  let recoveryTurnCoordinator = null;
-  const admitPiSessionExecution = (request) => {
+  type PiWriterTracker = ReturnType<typeof createPiWorkspaceWriterTracker>;
+  type RecoveryTurnCoordinator = ReturnType<typeof createRecoveryTurnCoordinator>;
+  type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
+  let piWriterTracker: PiWriterTracker | null = null;
+  let recoveryTurnCoordinator: RecoveryTurnCoordinator | null = null;
+  const admitPiSessionExecution = (request: PiAdmissionRequest) => {
     if (!piWriterTracker) {
       throw new PiRuntimeBrokerError(
         'runtime_not_ready',
@@ -759,27 +810,28 @@ async function main(options = {}) {
     }
     return recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request);
   };
-  const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions) => createWebPiRuntimeBroker({
+  const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions: HostPiRuntimeBrokerFactoryOptions) => createWebPiRuntimeBroker({
     agentDir: process.env.PIARIUM_AGENT_DIR,
     clientVersion: PIARIUM_VERSION,
     cwd: process.cwd(),
     ...brokerOptions,
   }));
-  const createPiRuntimeBroker = (brokerOptions) => attachPiSessionExecutionAdmission(
+  const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(
     piRuntimeBrokerFactory({
       ...brokerOptions,
       admitSessionExecution: admitPiSessionExecution,
     }),
     admitPiSessionExecution,
   );
+  const standalonePayloadDir = options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD;
   piRuntimeLifecycle = options.piRuntimeLifecycle || new PiRuntimeLifecycle({
     dataDir: PIARIUM_DATA_DIR,
     createBroker: (brokerOptions) => createPiRuntimeBroker(brokerOptions),
     ...(options.hostEntry ? { hostEntry: options.hostEntry } : {}),
-    ...(options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD
+    ...(standalonePayloadDir
       ? {
           installer: {
-            standalonePayloadDir: options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD,
+            standalonePayloadDir,
           },
         }
       : {}),
@@ -808,7 +860,7 @@ async function main(options = {}) {
     } catch (error) {
       recordStartupPerformance('pi-runtime.warmup.error');
       if (requirePiRuntime) throw error;
-      console.warn('[PiRuntime] Deferred runtime start:', error?.message || error);
+      console.warn('[PiRuntime] Deferred runtime start:', errorMessage(error));
     }
   };
   piRuntimeLifecycle.subscribe((snapshot) => {
@@ -835,19 +887,21 @@ async function main(options = {}) {
     readSettings: readSettingsFromDisk,
     getWorkspaceRoot: () => workspaceConfig.root,
   });
+  const configuredDirtyBarrierTimeout = process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '';
+  const dirtyBarrierTimeoutMs = /^\d+$/.test(configuredDirtyBarrierTimeout)
+    ? Number(configuredDirtyBarrierTimeout)
+    : undefined;
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
-    dirtyBarrierTimeoutMs: /^\d+$/.test(process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '')
-      ? Number(process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS)
-      : undefined,
+    ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
-  const workspaceRecoveryEngines = new Map();
-  const assertRecoverySessionWorkspace = async (sessionId, workspaceId) => {
+  const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
+  const assertRecoverySessionWorkspace = async (sessionId: string, workspaceId: string): Promise<void> => {
     const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId });
     const authorityWorkspaceId = snapshot.workspace?.kind === 'workspace'
       ? snapshot.workspace.authorityId ?? snapshot.workspace.id
@@ -860,7 +914,7 @@ async function main(options = {}) {
       );
     }
   };
-  const recoverySessionNavigation = {
+  const recoverySessionNavigation: RecoverySessionNavigation = {
     async commit(input) {
       await assertRecoverySessionWorkspace(input.sessionId, input.workspaceId);
       return piRuntimeBroker.requestForSession(
@@ -905,7 +959,9 @@ async function main(options = {}) {
       );
     },
   };
-  const recoveryEngineForOwner = (context) => {
+  const recoveryEngineForOwner = (context: {
+    owner?: { extensionId?: string | undefined } | undefined;
+  }): WorkspaceRecoveryEngine => {
     const storageOwnerId = context?.owner?.extensionId;
     if (typeof storageOwnerId !== 'string' || !storageOwnerId) {
       throw new Error('Workspace recovery capability requires an extension owner');
@@ -932,7 +988,7 @@ async function main(options = {}) {
     fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();
     await foundationalRecoveryEngine.resumeWorkspaceOperations();
   } catch (error) {
-    console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', error?.message || error);
+    console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', errorMessage(error));
   }
   const piRuntimeStartup = startPiRuntime();
   if (requirePiRuntime || fencedRecoveryOperations.length > 0) await piRuntimeStartup;
@@ -940,11 +996,11 @@ async function main(options = {}) {
   const combinedRecoveryStartup = piRuntimeStartup.then(() => (
     foundationalRecoveryEngine.resumeCombinedOperations()
   )).catch((error) => {
-    console.error('[WorkspaceRecovery] Startup combined recovery requires attention:', error?.message || error);
+    console.error('[WorkspaceRecovery] Startup combined recovery requires attention:', errorMessage(error));
   });
   if (fencedRecoveryOperations.length > 0) await combinedRecoveryStartup;
   else void combinedRecoveryStartup;
-  extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
+  extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
     documents: documentsAuthority,
@@ -1010,37 +1066,52 @@ async function main(options = {}) {
       ? request.params
       : {};
     let result;
-    if (target.kind === 'catalog') result = await piRuntimeBroker.requestCatalog(hostMethod, params);
+    if (target.kind === 'catalog') result = await piRuntimeBroker.requestCatalogDynamic(hostMethod, params);
     else if (target.kind === 'workspace' && typeof target.cwd === 'string') {
-      result = await piRuntimeBroker.requestForWorkspace(target.cwd, hostMethod, params);
+      result = await piRuntimeBroker.requestForWorkspaceDynamic(target.cwd, hostMethod, params);
     } else if (target.kind === 'session' && typeof target.sessionId === 'string') {
-      result = await piRuntimeBroker.requestForSession(target.sessionId, hostMethod, params);
+      result = await piRuntimeBroker.requestForSessionDynamic(target.sessionId, hostMethod, params);
     } else throw new Error('The pi-runtime capability target is invalid');
-    return result ?? null;
+    return toJsonValue(result ?? null);
   });
   await extensionRuntime.start().catch((error) => {
     console.warn('[Piarium Extensions] Host reconciliation failed:', error?.message || error);
   });
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
-  const sessionNames = new Map();
-  const sessionSnapshots = new Map();
+  const sessionNames = new Map<string, string>();
+  const sessionSnapshots = new Map<string, Record<string, unknown>>();
   recoveryTurnCoordinator = createRecoveryTurnCoordinator({
     documents: documentsAuthority,
-    getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId),
+    getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId) ?? null,
     invokeService: (request) => extensionRuntime.invokeService(request),
-    respondMutation: (request, accepted) => piRuntimeBroker.requestForSession(
-      request.sessionId,
-      'workspace.mutation.respond',
-      { accepted, requestId: request.requestId, sessionId: request.sessionId },
-    ),
+    respondMutation: async (request, accepted) => {
+      await piRuntimeBroker.requestForSession(
+        request.sessionId,
+        'workspace.mutation.respond',
+        { accepted, requestId: request.requestId, sessionId: request.sessionId },
+      );
+    },
     writerTracker: piWriterTracker,
   });
-  const sendPiSessionNotification = async ({ body, kind, sessionId, tag, title }) => {
-    const settings = await readSettingsFromDisk().catch(() => ({}));
-    if (settings.notifyOnCompletion === false) return;
+  interface SessionNotificationRequest extends DesktopNotificationPayload {
+    body: string;
+    kind: 'completion' | 'error';
+    sessionId: string;
+    tag: string;
+    title: string;
+  }
+  const sendPiSessionNotification = async ({
+    body,
+    kind,
+    sessionId,
+    tag,
+    title,
+  }: SessionNotificationRequest): Promise<void> => {
+    const settings = await readSettingsFromDisk().catch(() => null);
+    if (settings?.notifyOnCompletion === false) return;
     const payload = { body, kind, sessionId, tag, title };
-    const desktopDelivered = getIsWindowFocused() && settings.notificationMode !== 'always'
+    const desktopDelivered = getIsWindowFocused() && settings?.notificationMode !== 'always'
       ? false
       : emitDesktopNotification(payload);
     broadcastUiNotification(payload, { desktopNotificationDelivered: desktopDelivered });
@@ -1080,19 +1151,22 @@ async function main(options = {}) {
     if (event?.kind === 'worker.exit') return;
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
-    const sessionId = event.sessionId || envelope.data?.sessionId;
+    const envelopeData = recordOf(envelope.data);
+    const sessionId = event.sessionId || (typeof envelopeData.sessionId === 'string' ? envelopeData.sessionId : '');
     if (envelope.event === 'session.snapshot' && sessionId) {
-      sessionSnapshots.set(sessionId, envelope.data);
-      const name = typeof envelope.data?.name === 'string' ? envelope.data.name.trim() : '';
+      sessionSnapshots.set(sessionId, envelopeData);
+      const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
       return;
     }
     if (envelope.event !== 'agent.event' || !sessionId) return;
-    const agentEvent = envelope.data?.event;
+    const agentEvent = recordOf(envelopeData.event);
     if (agentEvent?.type === 'agent_settled') return;
     if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
     void (async () => {
-      if (sessionSnapshots.get(sessionId)?.features?.goal?.status === 'active') return;
+      const features = recordOf(sessionSnapshots.get(sessionId)?.features);
+      const goal = recordOf(features.goal);
+      if (goal.status === 'active') return;
       const body = extractAssistantText(agentEvent.messages) || 'Pi finished the current task.';
       const title = sessionNames.get(sessionId) || 'Piarium task complete';
       await sendPiSessionNotification({
@@ -1117,10 +1191,8 @@ async function main(options = {}) {
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
   const relayService = createRelayService({
     crypto,
-    os,
     readSettingsFromDisk,
     updateSettingsOnDisk,
-    remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({
       lockFilePath: path.join(PIARIUM_DATA_DIR, 'relay-host.lock'),
@@ -1147,7 +1219,6 @@ async function main(options = {}) {
 
   await platformRoutesRuntime.registerRoutes(app, {
     crypto,
-    fs,
     os,
     path,
     process,
@@ -1222,8 +1293,6 @@ async function main(options = {}) {
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
-    terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
-    terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
     staticRoutesRuntime,
     process,
     crypto,
@@ -1237,10 +1306,10 @@ async function main(options = {}) {
     TUNNEL_MODE_QUICK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
-    host,
+    ...(host ? { host } : {}),
     port,
     startupTunnelRequest,
-    onTunnelReady,
+    ...(onTunnelReady ? { onTunnelReady } : {}),
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
@@ -1266,7 +1335,7 @@ async function main(options = {}) {
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => Boolean(currentPiRuntimeHandshake()),
-    stop: async (shutdownOptions = {}) => {
+    stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       piSessionAutomation.stop();
       brokerUnsubscribe();
       await unregisterWorkbenchLayoutService();
@@ -1311,8 +1380,6 @@ export {
   gracefulShutdown,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
-  // Platform facade 鈥?cross-package consumers (Electron) should import
-  // these from '@piarium/web/server' instead of deep-importing server/lib/*.
   resolvePiariumDataDir,
   clearAppImageArgv0FromProcessEnv,
   pathLooksUserConfigured,

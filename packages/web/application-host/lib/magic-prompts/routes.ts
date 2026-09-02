@@ -1,7 +1,16 @@
-// @ts-nocheck
 import { createMagicPromptRuntime } from './runtime.js';
+import type { Express } from 'express';
 
-export const registerMagicPromptRoutes = (app, dependencies) => {
+export interface MagicPromptRouteDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'readFile' | 'writeFile'>;
+  path: Pick<typeof import('node:path'), 'dirname' | 'join'>;
+  piariumDataDir: string;
+}
+
+export const registerMagicPromptRoutes = (
+  app: Express,
+  dependencies: MagicPromptRouteDependencies,
+): void => {
   const {
     fsPromises,
     path,

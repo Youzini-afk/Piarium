@@ -1,17 +1,13 @@
-// @ts-nocheck
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import yaml from 'yaml';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
 } from './tunnels/executable-search.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import type { TunnelController } from './tunnels/types.js';
 
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
@@ -22,7 +18,17 @@ const TUNNEL_MODE_QUICK = 'quick';
 const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
-export async function checkCloudflaredAvailable() {
+export interface CloudflaredAvailability {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+export async function checkCloudflaredAvailable(): Promise<CloudflaredAvailability> {
   const target = resolveExecutableLaunchTarget('cloudflared');
   if (target) {
     try {
@@ -42,21 +48,11 @@ export async function checkCloudflaredAvailable() {
   return { available: false, path: null, version: null };
 }
 
-function printCloudflareTunnelInstallHelp() {
-  const platform = process.platform;
-  let installCmd = '';
-
-  if (platform === 'darwin') {
-    installCmd = 'brew install cloudflared';
-  } else if (platform === 'win32') {
-    installCmd = 'winget install --id Cloudflare.cloudflared';
-  } else {
-    installCmd = 'Download from https://github.com/cloudflare/cloudflared/releases';
-  }
-
+function printCloudflareTunnelInstallHelp(): void {
   console.log(`
-鈺斺晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晽
-鈺? Cloudflare tunnel requires 'cloudflared' to be installed        鈺?鈺氣晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨暆
+╔══════════════════════════════════════════════════════════════════╗
+║  Cloudflare tunnel requires 'cloudflared' to be installed        ║
+╚══════════════════════════════════════════════════════════════════╝
 
 Install instructions for your platform:
 
@@ -68,7 +64,11 @@ Or visit: https://developers.cloudflare.com/cloudflare-one/networks/connectors/c
 `);
 }
 
-const spawnCloudflared = (args, envOverrides = {}, resolvedBinaryPath = 'cloudflared') => spawn(resolvedBinaryPath, args, {
+const spawnCloudflared = (
+  args: string[],
+  envOverrides: NodeJS.ProcessEnv = {},
+  resolvedBinaryPath = 'cloudflared',
+) => spawn(resolvedBinaryPath, args, {
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
   env: {
@@ -79,7 +79,7 @@ const spawnCloudflared = (args, envOverrides = {}, resolvedBinaryPath = 'cloudfl
   killSignal: 'SIGINT',
 });
 
-const normalizeHostname = (value) => {
+const normalizeHostname = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;
   }
@@ -99,11 +99,18 @@ const normalizeHostname = (value) => {
   }
 };
 
-export function normalizeCloudflareTunnelHostname(value) {
+export function normalizeCloudflareTunnelHostname(value: unknown): string | null {
   return normalizeHostname(value);
 }
 
-export async function checkCloudflareApiReachability({ fetchImpl = globalThis.fetch, timeoutMs = 5000 } = {}) {
+export async function checkCloudflareApiReachability({
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 5000,
+}: { fetchImpl?: typeof fetch | undefined; timeoutMs?: number | undefined } = {}): Promise<{
+  error: string | null;
+  reachable: boolean;
+  status: number | null;
+}> {
   if (typeof fetchImpl !== 'function') {
     return {
       reachable: false,
@@ -155,22 +162,22 @@ const FATAL_LOG_PATTERNS = [
   /provided tunnel credentials are invalid/i,
 ];
 
-function isCloudflaredReadyLogLine(line) {
+function isCloudflaredReadyLogLine(line: string): boolean {
   if (!line) {
     return false;
   }
   return READY_LOG_PATTERNS.some((pattern) => pattern.test(line));
 }
 
-function isCloudflaredFatalLogLine(line) {
+function isCloudflaredFatalLogLine(line: string): boolean {
   if (!line) {
     return false;
   }
   return FATAL_LOG_PATTERNS.some((pattern) => pattern.test(line));
 }
 
-function assertReadableFile(filePath, contextLabel) {
-  let stats;
+function assertReadableFile(filePath: string, contextLabel: string): void {
+  let stats: import('node:fs').Stats;
   try {
     stats = fs.statSync(filePath);
   } catch {
@@ -200,12 +207,17 @@ function assertReadableFile(filePath, contextLabel) {
   }
 }
 
-function extractHostnameFromCloudflaredConfigDetailed(configPath) {
+interface ConfigHostnameResult {
+  hostname: string | null;
+  parseError: Error | null;
+}
+
+function extractHostnameFromCloudflaredConfigDetailed(configPath: unknown): ConfigHostnameResult {
   if (typeof configPath !== 'string' || configPath.trim().length === 0) {
     return { hostname: null, parseError: null };
   }
 
-  let raw;
+  let raw: string;
   try {
     raw = fs.readFileSync(configPath, 'utf8');
   } catch {
@@ -215,7 +227,7 @@ function extractHostnameFromCloudflaredConfigDetailed(configPath) {
     };
   }
 
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = yaml.parse(raw);
   } catch {
@@ -225,9 +237,9 @@ function extractHostnameFromCloudflaredConfigDetailed(configPath) {
     };
   }
 
-  const ingress = Array.isArray(parsed?.ingress) ? parsed.ingress : [];
+  const ingress = isRecord(parsed) && Array.isArray(parsed.ingress) ? parsed.ingress : [];
   for (const rule of ingress) {
-    const hostname = normalizeHostname(rule?.hostname);
+    const hostname = normalizeHostname(isRecord(rule) ? rule.hostname : undefined);
     if (hostname) {
       return { hostname, parseError: null };
     }
@@ -236,13 +248,19 @@ function extractHostnameFromCloudflaredConfigDetailed(configPath) {
   return { hostname: null, parseError: null };
 }
 
-const extractHostnameFromCloudflaredConfig = (configPath) => {
-  return extractHostnameFromCloudflaredConfigDetailed(configPath).hostname;
-};
-
 const getDefaultCloudflaredConfigPath = () => path.join(os.homedir(), '.cloudflared', 'config.yml');
 
-export function inspectManagedLocalCloudflareConfig({ configPath, hostname } = {}) {
+export type ManagedLocalConfigInspection = {
+  effectiveConfigPath: string;
+  error: string | null;
+  ok: boolean;
+  resolvedHostname: string | null;
+};
+
+export function inspectManagedLocalCloudflareConfig({
+  configPath,
+  hostname,
+}: { configPath?: unknown; hostname?: unknown } = {}): ManagedLocalConfigInspection {
   const requestedPath = typeof configPath === 'string' ? configPath.trim() : '';
   const effectiveConfigPath = requestedPath || getDefaultCloudflaredConfigPath();
 
@@ -289,12 +307,15 @@ export function inspectManagedLocalCloudflareConfig({ configPath, hostname } = {
   };
 }
 
-async function waitForManagedTunnelReady(child, { modeLabel }) {
-  await new Promise((resolve, reject) => {
+async function waitForManagedTunnelReady(
+  child: ReturnType<typeof spawnCloudflared>,
+  { modeLabel }: { modeLabel: string },
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
     let sawOutput = false;
 
-    const finish = (handler, value) => {
+    const finish = <T>(handler: (value: T) => void, value: T): void => {
       if (settled) {
         return;
       }
@@ -307,7 +328,7 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
       handler(value);
     };
 
-    const inspectChunk = (chunk) => {
+    const inspectChunk = (chunk: string | Buffer): void => {
       const text = chunk.toString('utf8');
       if (text.trim().length > 0) {
         sawOutput = true;
@@ -315,7 +336,7 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
       const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       for (const line of lines) {
         if (isCloudflaredReadyLogLine(line)) {
-          finish(resolve, null);
+          finish(resolve, undefined);
           return;
         }
         if (isCloudflaredFatalLogLine(line)) {
@@ -325,15 +346,15 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
       }
     };
 
-    const onStdout = (chunk) => {
+    const onStdout = (chunk: string | Buffer): void => {
       inspectChunk(chunk);
     };
 
-    const onStderr = (chunk) => {
+    const onStderr = (chunk: string | Buffer): void => {
       inspectChunk(chunk);
     };
 
-    const onExit = (code) => {
+    const onExit = (code: number | null): void => {
       finish(reject, new Error(`Cloudflared exited while starting ${modeLabel} (code ${code ?? 'unknown'})`));
     };
 
@@ -343,7 +364,7 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
 
     const fallbackTimer = setTimeout(() => {
       if (sawOutput) {
-        finish(resolve, null);
+        finish(resolve, undefined);
       }
     }, MANAGED_TUNNEL_LIVENESS_FALLBACK_MS);
 
@@ -353,7 +374,9 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
   });
 }
 
-export async function startCloudflareQuickTunnel({ originUrl }) {
+export async function startCloudflareQuickTunnel({ originUrl }: { originUrl: string }): Promise<TunnelController & {
+  process: ReturnType<typeof spawnCloudflared>;
+}> {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -365,12 +388,12 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cf-'));
 
-  const child = spawnCloudflared(['tunnel', '--url', originUrl], { HOME: tempDir }, cfCheck.path);
+  const child = spawnCloudflared(['tunnel', '--url', originUrl], { HOME: tempDir }, cfCheck.path ?? 'cloudflared');
 
-  let publicUrl = null;
+  let publicUrl: string | null = null;
   let tunnelReady = false;
 
-  const onData = (chunk, isStderr) => {
+  const onData = (chunk: string | Buffer, isStderr: boolean): void => {
     const text = chunk.toString('utf8');
 
     if (!tunnelReady) {
@@ -392,7 +415,7 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
     cleanupTempDir();
   });
 
-  const cleanupTempDir = () => {
+  const cleanupTempDir = (): void => {
     try {
       if (fs.existsSync(tempDir)) {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -402,7 +425,7 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
     }
   };
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       if (!publicUrl) {
         try { child.kill('SIGINT'); } catch { /* ignore */ }
@@ -415,7 +438,7 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
       if (publicUrl) {
         clearTimeout(timeout);
         clearInterval(checkReady);
-        resolve(null);
+        resolve();
       }
     }, 100);
 
@@ -443,7 +466,13 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
   };
 }
 
-export async function startCloudflareManagedRemoteTunnel({ token, hostname, tokenFilePath }) {
+export async function startCloudflareManagedRemoteTunnel({
+  token,
+  hostname,
+  tokenFilePath,
+}: { token: unknown; hostname: unknown; tokenFilePath?: string | undefined }): Promise<TunnelController & {
+  process: ReturnType<typeof spawnCloudflared>;
+}> {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -462,7 +491,7 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname, toke
   }
 
   let effectiveTokenFilePath = typeof tokenFilePath === 'string' ? tokenFilePath : null;
-  let tempTokenFile = null;
+  let tempTokenFile: { dir: string; path: string } | null = null;
 
   if (!effectiveTokenFilePath) {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cf-token-'));
@@ -471,7 +500,7 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname, toke
     tempTokenFile = { dir: tempDir, path: effectiveTokenFilePath };
   }
 
-  const child = spawnCloudflared(['tunnel', 'run', '--token-file', effectiveTokenFilePath], {}, cfCheck.path);
+  const child = spawnCloudflared(['tunnel', 'run', '--token-file', effectiveTokenFilePath], {}, cfCheck.path ?? 'cloudflared');
   const publicUrl = `https://${normalizedHost}`;
 
   child.stdout.on('data', () => {
@@ -483,7 +512,7 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname, toke
     process.stderr.write(text);
   });
 
-  const cleanupTempTokenFile = () => {
+  const cleanupTempTokenFile = (): void => {
     if (tempTokenFile) {
       try {
         if (fs.existsSync(tempTokenFile.dir)) {
@@ -527,7 +556,12 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname, toke
   };
 }
 
-export async function startCloudflareManagedLocalTunnel({ configPath, hostname }) {
+export async function startCloudflareManagedLocalTunnel({
+  configPath,
+  hostname,
+}: { configPath: unknown; hostname: unknown }): Promise<TunnelController & {
+  process: ReturnType<typeof spawnCloudflared>;
+}> {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -561,7 +595,7 @@ export async function startCloudflareManagedLocalTunnel({ configPath, hostname }
   }
   args.push('run');
 
-  const child = spawnCloudflared(args, {}, cfCheck.path);
+  const child = spawnCloudflared(args, {}, cfCheck.path ?? 'cloudflared');
   const publicUrl = `https://${resolvedHost}`;
 
   child.stdout.on('data', () => {
@@ -600,18 +634,13 @@ export async function startCloudflareManagedLocalTunnel({ configPath, hostname }
   };
 }
 
-async function startCloudflareTunnel({ originUrl, port }) {
-  void port;
-  return startCloudflareQuickTunnel({ originUrl });
-}
-
-export function printTunnelWarning() {
+export function printTunnelWarning(): void {
   console.log(`
-鈿狅笍  Quick Tunnel Limitations:
+⚠️  Quick Tunnel Limitations:
 
-   鈥?Provider limits may apply
-   鈥?URLs are temporary and will expire when the tunnel stops
-   鈥?Password protection is required for tunnel access
+   • Provider limits may apply
+   • URLs are temporary and will expire when the tunnel stops
+   • Password protection is required for tunnel access
 
    For production use, set up a persistent provider tunnel or static domain.
 `);

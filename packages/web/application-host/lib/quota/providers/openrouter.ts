@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -6,7 +5,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  formatMoney
+  formatMoney,
+  asObject,
 } from '../utils/index.js';
 
 export const providerId = 'openrouter';
@@ -53,8 +53,8 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const credits = payload?.data ?? {};
+    const payload = asObject(await response.json()) ?? {};
+    const credits = asObject(payload.data) ?? {};
     const totalCredits = toNumber(credits.total_credits);
     const totalUsage = toNumber(credits.total_usage);
     const remaining = totalCredits !== null && totalUsage !== null
@@ -62,7 +62,7 @@ export const fetchQuota = async () => {
       : null;
     let valueLabel = null;
     if (remaining !== null && totalUsage !== null) {
-      valueLabel = `$${formatMoney(remaining)} left 路 $${formatMoney(totalUsage)} spent`;
+      valueLabel = `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`;
     }
 
     const windows = {

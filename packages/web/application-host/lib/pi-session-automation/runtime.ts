@@ -1,4 +1,18 @@
-// @ts-nocheck
+import type {
+  EventEnvelope,
+  HostMethodParams,
+  HostMethodResult,
+  PiAssistantMessage,
+  PiSessionEntry,
+  PiSessionFeatureMutation,
+  PiSessionGoalState,
+  PiSessionMessageEntry,
+  PiUserMessage,
+  SessionSnapshot,
+} from '@piarium/protocol';
+import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+import type { generateSmallModelText } from '../small-model/index.js';
+
 const GOAL_IDLE_QUIET_MS = 15_000;
 const GOAL_KICKOFF_QUIET_MS = 3_000;
 const GOAL_RESUME_QUIET_MS = 250;
@@ -10,21 +24,79 @@ const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
 const NOTE_CHAR_LIMIT = 280;
 
-const clampText = (value, limit) => String(value ?? '').trim().slice(0, limit);
+type AutomationMethod =
+  | 'agent.prompt'
+  | 'session.entries'
+  | 'session.features.get'
+  | 'session.features.mutate'
+  | 'session.snapshot'
+  | 'session.stats';
 
-const escapeXml = (value) => String(value ?? '')
+type GoalUpdatePatch = Omit<Extract<PiSessionFeatureMutation, { type: 'goal.update' }>, 'goalId' | 'type'>;
+type SmallModelService = { generateSmallModelText: typeof generateSmallModelText };
+
+interface AutomationSettings {
+  sessionGoalEnabled?: boolean;
+  sessionRecapEnabled?: boolean;
+  sessionSuggestionEnabled?: boolean;
+}
+
+interface PiSessionAutomationOptions {
+  assistQuietMs?: number;
+  broker: Pick<PiRuntimeBroker, 'requestForSession'>;
+  getSmallModelService: () => Promise<SmallModelService>;
+  goalIdleQuietMs?: number;
+  goalKickoffQuietMs?: number;
+  goalResumeQuietMs?: number;
+  maxAutoTurns?: number;
+  onGoalSettled?: (input: {
+    goal: PiSessionGoalState;
+    sessionId: string;
+    snapshot: SessionSnapshot;
+  }) => Promise<void> | void;
+  readSettings?: () => Promise<AutomationSettings>;
+}
+
+interface LatestExchange {
+  assistantEntry: PiSessionMessageEntry & { message: PiAssistantMessage };
+  compactedAfter: boolean;
+  userEntry: (PiSessionMessageEntry & { message: PiUserMessage }) | null;
+}
+
+type AuditVerdict = 'blocked' | 'complete' | 'continue';
+
+interface GoalAudit {
+  evaluationModel: string;
+  evaluationProvider: string;
+  note: string;
+  verdict: AuditVerdict;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const errorStatus = (error: unknown): number | null => {
+  const value = asRecord(error)?.statusCode;
+  return typeof value === 'number' ? value : null;
+};
+
+const clampText = (value: unknown, limit: number): string => String(value ?? '').trim().slice(0, limit);
+
+const escapeXml = (value: unknown): string => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
 
-const assistantText = (message) => Array.isArray(message?.content)
+const assistantText = (message: PiAssistantMessage | null | undefined): string => Array.isArray(message?.content)
   ? message.content
     .map((part) => part?.type === 'text' && typeof part.text === 'string' ? part.text : '')
     .filter(Boolean)
     .join('\n')
   : '';
 
-const userText = (message) => {
+const userText = (message: PiUserMessage | null | undefined): string => {
   if (typeof message?.content === 'string') return message.content;
   if (!Array.isArray(message?.content)) return '';
   return message.content
@@ -33,11 +105,12 @@ const userText = (message) => {
     .join('\n');
 };
 
-const latestExchange = (entries) => {
+const latestExchange = (entries: PiSessionEntry[]): LatestExchange | null => {
   let assistantIndex = -1;
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
-    if (entry?.type !== 'message') continue;
+    if (!entry) continue;
+    if (entry.type !== 'message') continue;
     if (entry.message?.role === 'user') return null;
     if (entry.message?.role === 'assistant') {
       assistantIndex = index;
@@ -46,22 +119,24 @@ const latestExchange = (entries) => {
   }
   if (assistantIndex === -1) return null;
   const assistantEntry = entries[assistantIndex];
-  let userEntry = null;
+  if (!assistantEntry || assistantEntry.type !== 'message' || assistantEntry.message.role !== 'assistant') return null;
+  const typedAssistantEntry = { ...assistantEntry, message: assistantEntry.message };
+  let userEntry: (PiSessionMessageEntry & { message: PiUserMessage }) | null = null;
   for (let index = assistantIndex - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry?.type === 'message' && entry.message?.role === 'user') {
-      userEntry = entry;
+      userEntry = { ...entry, message: entry.message };
       break;
     }
   }
   return {
-    assistantEntry,
+    assistantEntry: typedAssistantEntry,
     compactedAfter: entries.slice(assistantIndex + 1).some((entry) => entry?.type === 'compaction'),
     userEntry,
   };
 };
 
-const extractJsonObject = (value) => {
+const extractJsonObject = (value: unknown): Record<string, unknown> | null => {
   const text = String(value ?? '').trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = (fenced?.[1] ?? text).trim();
@@ -70,8 +145,8 @@ const extractJsonObject = (value) => {
   for (let end = candidate.length; end > start; end -= 1) {
     if (candidate[end - 1] !== '}') continue;
     try {
-      const parsed = JSON.parse(candidate.slice(start, end));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      const parsed = asRecord(JSON.parse(candidate.slice(start, end)) as unknown);
+      if (parsed) return parsed;
     } catch {
       // Providers sometimes wrap the JSON in prose. Keep looking for the
       // largest valid object instead of treating that as an automation error.
@@ -87,7 +162,7 @@ const SCRIPT_RANGES = [
   /[\u0600-\u06FF]/,
 ];
 
-const hasScriptMismatch = (text, inputText) => (
+const hasScriptMismatch = (text: string, inputText: string): boolean => (
   SCRIPT_RANGES.some((range) => range.test(text) && !range.test(inputText))
 );
 
@@ -99,7 +174,7 @@ const buildGoalAuditSystemPrompt = () => [
   'Otherwise use continue. Keep note under 20 words and in the objective language.',
 ].join('\n');
 
-const buildContinuationPrompt = (goal) => {
+const buildContinuationPrompt = (goal: PiSessionGoalState): string => {
   const remaining = goal.tokenBudget === undefined
     ? null
     : Math.max(0, goal.tokenBudget - goal.tokensUsed);
@@ -117,7 +192,7 @@ const buildContinuationPrompt = (goal) => {
   ].join('\n');
 };
 
-const buildAssistSystemPrompt = ({ recap, suggestion }) => [
+const buildAssistSystemPrompt = ({ recap, suggestion }: { recap: boolean; suggestion: boolean }): string => [
   'Based only on the latest user/assistant exchange, return exactly one JSON object and nothing else.',
   `Shape: {${[recap ? '"recap":string' : '', suggestion ? '"suggestion":string' : ''].filter(Boolean).join(',')}}`,
   recap ? 'recap: at most 20 words; state the result or next move directly, without narration.' : '',
@@ -125,7 +200,7 @@ const buildAssistSystemPrompt = ({ recap, suggestion }) => [
   'Use the same language as the exchange.',
 ].filter(Boolean).join('\n');
 
-const hostEvent = (event) => (
+const hostEvent = (event: PiRuntimeBrokerEvent): EventEnvelope | null => (
   event?.kind === 'host' && event.envelope?.kind === 'event'
     ? event.envelope
     : null
@@ -141,41 +216,49 @@ export const createPiSessionAutomationRuntime = ({
   goalResumeQuietMs = GOAL_RESUME_QUIET_MS,
   assistQuietMs = ASSIST_IDLE_QUIET_MS,
   maxAutoTurns = MAX_AUTO_TURNS,
-}) => {
+}: PiSessionAutomationOptions) => {
   if (!broker || typeof broker.requestForSession !== 'function') {
     throw new TypeError('Pi session automation requires a runtime broker');
   }
-  const goalTimers = new Map();
-  const assistTimers = new Map();
-  const goalInflight = new Set();
-  const assistInflight = new Set();
+  const goalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const assistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const goalInflight = new Set<string>();
+  const assistInflight = new Set<string>();
   let stopped = false;
 
-  const request = (sessionId, method, params = {}) => broker.requestForSession(sessionId, method, {
+  const request = <Method extends AutomationMethod>(
+    sessionId: string,
+    method: Method,
+    params: Omit<HostMethodParams<Method>, 'sessionId'> = {} as Omit<HostMethodParams<Method>, 'sessionId'>,
+  ): Promise<HostMethodResult<Method>> => broker.requestForSession(sessionId, method, {
     ...params,
     sessionId,
-  });
+  } as HostMethodParams<Method>);
 
-  const clearTimer = (timers, sessionId) => {
+  const clearTimer = (timers: Map<string, ReturnType<typeof setTimeout>>, sessionId: string): void => {
     const timer = timers.get(sessionId);
     if (timer) clearTimeout(timer);
     timers.delete(sessionId);
   };
 
-  const clearSessionTimers = (sessionId) => {
+  const clearSessionTimers = (sessionId: string): void => {
     clearTimer(goalTimers, sessionId);
     clearTimer(assistTimers, sessionId);
   };
 
-  const updateGoal = (sessionId, goalId, patch) => request(
+  const updateGoal = (sessionId: string, goalId: string, patch: GoalUpdatePatch) => request(
     sessionId,
     'session.features.mutate',
     { mutation: { goalId, type: 'goal.update', ...patch } },
   );
 
-  const getFeatureState = (sessionId) => request(sessionId, 'session.features.get');
+  const getFeatureState = (sessionId: string) => request(sessionId, 'session.features.get');
 
-  const runGoalAudit = async ({ goal, message, cwd }) => {
+  const runGoalAudit = async ({ goal, message, cwd }: {
+    cwd: string;
+    goal: PiSessionGoalState;
+    message: PiAssistantMessage;
+  }): Promise<GoalAudit | null> => {
     let service;
     try {
       service = await getSmallModelService();
@@ -210,17 +293,22 @@ export const createPiSessionAutomationRuntime = ({
         evaluationModel: generated.modelID,
         evaluationProvider: generated.providerID,
         note,
-        verdict,
+        verdict: verdict as AuditVerdict,
       };
     } catch (error) {
-      if (Number(error?.statusCode) !== 404) {
-        console.warn('[pi-session-goal] audit failed:', error?.message ?? error);
+      if (errorStatus(error) !== 404) {
+        console.warn('[pi-session-goal] audit failed:', errorMessage(error));
       }
       return null;
     }
   };
 
-  const settleGoal = async (sessionId, goal, patch, snapshot) => {
+  const settleGoal = async (
+    sessionId: string,
+    goal: PiSessionGoalState,
+    patch: GoalUpdatePatch,
+    snapshot: SessionSnapshot,
+  ): Promise<void> => {
     const state = await updateGoal(sessionId, goal.id, {
       auditFailStreak: 0,
       blockedStreak: 0,
@@ -231,12 +319,12 @@ export const createPiSessionAutomationRuntime = ({
     try {
       await onGoalSettled?.({ goal: settledGoal, sessionId, snapshot });
     } catch (error) {
-      console.warn('[pi-session-goal] settled notification failed:', error?.message ?? error);
+      console.warn('[pi-session-goal] settled notification failed:', errorMessage(error));
     }
   };
 
-  const tickGoal = async (sessionId) => {
-    const settings = await readSettings().catch(() => ({}));
+  const tickGoal = async (sessionId: string): Promise<void> => {
+    const settings = await readSettings().catch((): AutomationSettings => ({}));
     if (settings.sessionGoalEnabled === false) return;
     const state = await getFeatureState(sessionId);
     const goal = state.goal;
@@ -378,13 +466,13 @@ export const createPiSessionAutomationRuntime = ({
       });
       if (result.accepted !== true) throw new Error('Pi did not accept the goal continuation');
     } catch (error) {
-      console.warn('[pi-session-goal] continuation failed:', error?.message ?? error);
+      console.warn('[pi-session-goal] continuation failed:', errorMessage(error));
       armGoal(sessionId, goalIdleQuietMs);
     }
   };
 
-  const generateAssist = async (sessionId) => {
-    const settings = await readSettings().catch(() => ({}));
+  const generateAssist = async (sessionId: string): Promise<void> => {
+    const settings = await readSettings().catch((): AutomationSettings => ({}));
     const targets = {
       recap: settings.sessionRecapEnabled !== false,
       suggestion: settings.sessionSuggestionEnabled !== false,
@@ -429,8 +517,8 @@ export const createPiSessionAutomationRuntime = ({
         system: buildAssistSystemPrompt(targets),
       });
     } catch (error) {
-      if (Number(error?.statusCode) !== 404) {
-        console.warn('[pi-session-assist] generation failed:', error?.message ?? error);
+      if (errorStatus(error) !== 404) {
+        console.warn('[pi-session-assist] generation failed:', errorMessage(error));
       }
       return;
     }
@@ -457,7 +545,14 @@ export const createPiSessionAutomationRuntime = ({
     });
   };
 
-  function arm(timers, inflight, sessionId, delay, task, label) {
+  function arm(
+    timers: Map<string, ReturnType<typeof setTimeout>>,
+    inflight: Set<string>,
+    sessionId: string,
+    delay: number,
+    task: (targetSessionId: string) => Promise<void>,
+    label: string,
+  ): void {
     clearTimer(timers, sessionId);
     if (stopped) return;
     const timer = setTimeout(() => {
@@ -466,7 +561,7 @@ export const createPiSessionAutomationRuntime = ({
       inflight.add(sessionId);
       task(sessionId)
         .catch((error) => {
-          console.warn(`[${label}] failed:`, error?.message ?? error);
+          console.warn(`[${label}] failed:`, errorMessage(error));
         })
         .finally(() => inflight.delete(sessionId));
     }, Math.max(0, delay));
@@ -474,19 +569,21 @@ export const createPiSessionAutomationRuntime = ({
     timers.set(sessionId, timer);
   }
 
-  function armGoal(sessionId, delay = goalIdleQuietMs) {
+  function armGoal(sessionId: string, delay = goalIdleQuietMs): void {
     arm(goalTimers, goalInflight, sessionId, delay, tickGoal, 'pi-session-goal');
   }
 
-  function armAssist(sessionId, delay = assistQuietMs) {
+  function armAssist(sessionId: string, delay = assistQuietMs): void {
     arm(assistTimers, assistInflight, sessionId, delay, generateAssist, 'pi-session-assist');
   }
 
-  const processBrokerEvent = (event) => {
+  const processBrokerEvent = (event: PiRuntimeBrokerEvent): void => {
     if (stopped) return;
     const envelope = hostEvent(event);
     if (!envelope) return;
-    const sessionId = event.sessionId || envelope.data?.sessionId || envelope.source?.sessionId;
+    const eventData = asRecord(envelope.data);
+    const brokerSessionId = 'sessionId' in event && typeof event.sessionId === 'string' ? event.sessionId : null;
+    const sessionId = brokerSessionId || (typeof eventData?.sessionId === 'string' ? eventData.sessionId : null);
     if (!sessionId) return;
 
     if (envelope.event === 'session.closed') {
@@ -523,7 +620,7 @@ export const createPiSessionAutomationRuntime = ({
     }
   };
 
-  const stop = () => {
+  const stop = (): void => {
     stopped = true;
     for (const timer of goalTimers.values()) clearTimeout(timer);
     for (const timer of assistTimers.values()) clearTimeout(timer);

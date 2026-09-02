@@ -1,10 +1,32 @@
-// @ts-nocheck
 const PAIRING_TOKEN_TTL_MS = 5 * 60 * 1000;
 const MOBILE_LOGIN_TOKEN_TTL_MS = 60 * 1000;
 
-const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+import type crypto from 'node:crypto';
+import type { MobileDeviceStore, PublicMobileDevice } from './device-store.js';
 
-export const createMobilePairingRuntime = (deps) => {
+const normalizeString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+interface PairingTokenRecord {
+  expiresAt: number;
+  serverUrl: string;
+  token: string;
+  used: boolean;
+}
+
+interface LoginTokenRecord {
+  deviceId: string;
+  expiresAt: number;
+  token: string;
+}
+
+export interface MobilePairingDependencies {
+  crypto: Pick<typeof crypto, 'randomBytes'>;
+  deviceStore: MobileDeviceStore;
+  loginTokenTtlMs?: number | undefined;
+  pairingTokenTtlMs?: number | undefined;
+}
+
+export const createMobilePairingRuntime = (deps: MobilePairingDependencies) => {
   const {
     crypto,
     deviceStore,
@@ -12,12 +34,12 @@ export const createMobilePairingRuntime = (deps) => {
     loginTokenTtlMs = MOBILE_LOGIN_TOKEN_TTL_MS,
   } = deps;
 
-  const pairingTokens = new Map();
-  const loginTokens = new Map();
+  const pairingTokens = new Map<string, PairingTokenRecord>();
+  const loginTokens = new Map<string, LoginTokenRecord>();
 
-  const createToken = (prefix) => `${prefix}_${crypto.randomBytes(32).toString('base64url')}`;
+  const createToken = (prefix: string): string => `${prefix}_${crypto.randomBytes(32).toString('base64url')}`;
 
-  const pruneExpired = (map) => {
+  const pruneExpired = <T extends { expiresAt: number }>(map: Map<string, T>): void => {
     const now = Date.now();
     for (const [token, entry] of map.entries()) {
       if (!entry || typeof entry.expiresAt !== 'number' || entry.expiresAt <= now) {
@@ -26,7 +48,11 @@ export const createMobilePairingRuntime = (deps) => {
     }
   };
 
-  const startPairing = ({ serverUrl } = {}) => {
+  const startPairing = ({ serverUrl }: { serverUrl?: unknown } = {}): {
+    expiresAt: number;
+    pairingToken: string;
+    serverUrl: string | null;
+  } => {
     pruneExpired(pairingTokens);
     const token = createToken('pair');
     const expiresAt = Date.now() + pairingTokenTtlMs;
@@ -39,7 +65,15 @@ export const createMobilePairingRuntime = (deps) => {
     return { pairingToken: token, expiresAt, serverUrl: normalizeString(serverUrl) || null };
   };
 
-  const completePairing = async ({ pairingToken, deviceName, platform, appVersion } = {}) => {
+  const completePairing = async ({ pairingToken, deviceName, platform, appVersion }: {
+    appVersion?: unknown;
+    deviceName?: unknown;
+    pairingToken?: unknown;
+    platform?: unknown;
+  } = {}): Promise<
+    | { ok: false; reason: 'invalid-token' }
+    | { device: PublicMobileDevice; deviceToken: string; ok: true }
+  > => {
     pruneExpired(pairingTokens);
     const token = normalizeString(pairingToken);
     const entry = token ? pairingTokens.get(token) : null;
@@ -56,7 +90,13 @@ export const createMobilePairingRuntime = (deps) => {
     return { ok: true, ...result };
   };
 
-  const createLoginToken = async ({ deviceId, deviceToken } = {}) => {
+  const createLoginToken = async ({ deviceId, deviceToken }: {
+    deviceId?: unknown;
+    deviceToken?: unknown;
+  } = {}): Promise<
+    | { ok: false; reason: 'unauthorized' }
+    | { device: PublicMobileDevice; expiresAt: number; loginToken: string; ok: true }
+  > => {
     pruneExpired(loginTokens);
     const device = await deviceStore.authenticateDevice(deviceId, deviceToken);
     if (!device) {
@@ -73,7 +113,10 @@ export const createMobilePairingRuntime = (deps) => {
     return { ok: true, loginToken: token, expiresAt, device };
   };
 
-  const consumeLoginToken = async (token) => {
+  const consumeLoginToken = async (token: unknown): Promise<
+    | { ok: false; reason: 'invalid-token' }
+    | { deviceId: string; ok: true }
+  > => {
     pruneExpired(loginTokens);
     const normalized = normalizeString(token);
     const entry = normalized ? loginTokens.get(normalized) : null;
@@ -92,3 +135,5 @@ export const createMobilePairingRuntime = (deps) => {
     consumeLoginToken,
   };
 };
+
+export type MobilePairingRuntime = ReturnType<typeof createMobilePairingRuntime>;

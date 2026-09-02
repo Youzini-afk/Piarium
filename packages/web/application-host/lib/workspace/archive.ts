@@ -104,7 +104,7 @@ interface ExtractResult {
   deletedArchive: boolean;
 }
 
-interface ArchiveDependencies extends WorkspaceDependencies {}
+type ArchiveDependencies = WorkspaceDependencies;
 
 // ── Constants ─────────────────────────────────────────────────────────────
 

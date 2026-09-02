@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { resolveWorktreeTopLevel } from '../git/service.js';
 import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
 import { buildDigest } from './digest.js';
@@ -16,6 +15,35 @@ import {
 } from './store.js';
 import { readWalkthroughModelOverride } from './model-settings.js';
 import { loadSourceSections, parseSource, sourceKey, WalkthroughSourceError } from './sources.js';
+import type {
+  BuiltDigest,
+  DiffFile,
+  IndexedHunk,
+  SerializedHunk,
+  Walkthrough,
+  WalkthroughDependencies,
+  WalkthroughGenerationResult,
+  WalkthroughLanguage,
+  WalkthroughModel,
+  WalkthroughReadiness,
+  WalkthroughReadResult,
+  WalkthroughResolution,
+  WalkthroughSource,
+} from './types.js';
+
+type GenerationStage = 'collecting' | 'asking' | 'retrying' | 'assembling';
+interface WalkthroughRequest {
+  directory: string;
+  language?: unknown;
+  model?: string;
+  source: unknown;
+}
+interface GenerateWalkthroughRequest extends WalkthroughRequest { force?: boolean }
+interface GenerationJob {
+  controller: AbortController;
+  promise: Promise<WalkthroughGenerationResult>;
+  stage: GenerationStage;
+}
 
 // Walkthrough generation is always user-initiated and never automatic: it costs
 // tokens, and a background regeneration on every keystroke would be a way to
@@ -31,7 +59,7 @@ setTimeout(() => {
   });
 }, 0).unref?.();
 
-const getRepositoryRoot = async (directory) => (await resolveWorktreeTopLevel(directory)).root;
+const getRepositoryRoot = async (directory: string): Promise<string> => (await resolveWorktreeTopLevel(directory)).root;
 
 // A hang guard, not a pace-setter. Losing a nearly-finished generation wastes
 // real money and minutes, while an over-long deadline only holds a job slot, so
@@ -41,7 +69,7 @@ const GENERATION_TIMEOUT_BASE_MS = 120_000;
 const GENERATION_TIMEOUT_PER_HUNK_MS = 1_000;
 const GENERATION_TIMEOUT_MAX_MS = 900_000;
 
-const generationTimeoutMs = (hunkCount) => Math.min(
+const generationTimeoutMs = (hunkCount: number): number => Math.min(
   GENERATION_TIMEOUT_MAX_MS,
   GENERATION_TIMEOUT_BASE_MS + Math.max(0, hunkCount) * GENERATION_TIMEOUT_PER_HUNK_MS,
 );
@@ -71,7 +99,10 @@ const OUTPUT_CONTEXT_SHARE = 0.125;
  * bounded by a share of its context and never below Piarium's existing
  * small-model output reserve.
  */
-const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
+const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }: {
+  contextTokens: number;
+  outputTokenLimit: number | null;
+}): number => {
   const wanted = Math.min(
     MAX_OUTPUT_TOKENS,
     Math.max(MIN_OUTPUT_TOKENS, Math.floor((Number(contextTokens) || 0) * OUTPUT_CONTEXT_SHARE)),
@@ -81,8 +112,11 @@ const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
   return Number(outputTokenLimit) > 0 ? Math.min(wanted, Number(outputTokenLimit)) : wanted;
 };
 
-const fail = (message, statusCode, extra = {}) =>
-  Object.assign(new Error(message), { statusCode, ...extra });
+const fail = <Extra extends Record<string, unknown> = Record<string, never>>(
+  message: string,
+  statusCode: number,
+  extra?: Extra,
+): Error & { statusCode: number } & Extra => Object.assign(new Error(message), { statusCode }, extra);
 
 // Generation outlives the request that started it.
 //
@@ -91,20 +125,20 @@ const fail = (message, statusCode, extra = {}) =>
 // a minute of paid-for work. Jobs are keyed by repository + source, so a client
 // that comes back attaches to the running job instead of starting a second one,
 // and cancelling is an explicit request rather than a side effect of leaving.
-const jobs = new Map();
+const jobs = new Map<string, GenerationJob>();
 
 // Providers that answered a schema request with a 4xx. Retrying the schema on
 // every generation means paying for a call we already know will fail, so the
 // refusal is remembered and the fallback goes first next time.
 //
 // Process-lifetime only, on purpose: a provider that gains structured-output
-// support should not need a settings change to be tried again 鈥?a restart is
+// support should not need a settings change to be tried again — a restart is
 // enough, and the cost of one wasted first attempt after that is small.
-const schemaRefusedBy = new Set();
+const schemaRefusedBy = new Set<string>();
 
-const modelKey = (model) => `${model.providerID}/${model.modelID}`;
+const modelKey = (model: WalkthroughModel): string => `${model.providerID}/${model.modelID}`;
 
-const jobKey = (repoRoot, sourceKeyValue) => `${repoRoot}\0${sourceKeyValue}`;
+const jobKey = (repoRoot: string, sourceKeyValue: string): string => `${repoRoot}\0${sourceKeyValue}`;
 
 /**
  * Coarse stages, reported so a long wait is legible.
@@ -114,18 +148,18 @@ const jobKey = (repoRoot, sourceKeyValue) => `${repoRoot}\0${sourceKeyValue}`;
  * would imply progress where there is none. `retrying` appears only when a
  * provider rejects the schema and the prompt-side fallback runs.
  */
-export const GENERATION_STAGES = ['collecting', 'asking', 'retrying', 'assembling'];
+export const GENERATION_STAGES: GenerationStage[] = ['collecting', 'asking', 'retrying', 'assembling'];
 
-const setStage = (repoRoot, sourceKeyValue, stage) => {
+const setStage = (repoRoot: string, sourceKeyValue: string, stage: GenerationStage): void => {
   const job = jobs.get(jobKey(repoRoot, sourceKeyValue));
   if (job) job.stage = stage;
 };
 
 /**
  * Current stage of a running generation, or `null` when nothing is running.
- * Reads memory only 鈥?no git, no network 鈥?so it is cheap to poll.
+ * Reads memory only — no git, no network — so it is cheap to poll.
  */
-export function getGenerationStage(repoRoot, sourceKeyValue) {
+export function getGenerationStage(repoRoot: string, sourceKeyValue: string): GenerationStage | null {
   return jobs.get(jobKey(repoRoot, sourceKeyValue))?.stage ?? null;
 }
 
@@ -133,7 +167,7 @@ export function getGenerationStage(repoRoot, sourceKeyValue) {
  * Whether a generation is currently running for a source. Lets a reconnecting
  * client show progress instead of an empty panel.
  */
-export function isGenerating(repoRoot, sourceKeyValue) {
+export function isGenerating(repoRoot: string, sourceKeyValue: string): boolean {
   return jobs.has(jobKey(repoRoot, sourceKeyValue));
 }
 
@@ -141,16 +175,19 @@ export function isGenerating(repoRoot, sourceKeyValue) {
  * Resolve the pair the job registry is keyed by, for callers that need to look
  * a job up without doing any diff work.
  */
-export async function getRepositoryRootFor(directory, rawSource) {
+export async function getRepositoryRootFor(directory: string, rawSource: unknown): Promise<{ repoRoot: string; sourceKey: string }> {
   const source = parseSource(rawSource);
   return { repoRoot: await getRepositoryRoot(directory), sourceKey: sourceKey(source) };
 }
 
 /**
- * Stop a running generation. Only an explicit request does this 鈥?leaving the
+ * Stop a running generation. Only an explicit request does this — leaving the
  * page does not.
  */
-export async function cancelWalkthroughGeneration({ directory, source: rawSource }) {
+export async function cancelWalkthroughGeneration({ directory, source: rawSource }: {
+  directory: string;
+  source: unknown;
+}): Promise<{ cancelled: boolean }> {
   const source = parseSource(rawSource);
   const repoRoot = await getRepositoryRoot(directory);
   const job = jobs.get(jobKey(repoRoot, sourceKey(source)));
@@ -159,7 +196,7 @@ export async function cancelWalkthroughGeneration({ directory, source: rawSource
   return { cancelled: true };
 }
 
-const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
+const modelLabel = (model: WalkthroughModel): string => `${model.providerID}/${model.modelID}`;
 
 /**
  * Resolve the model for this feature: the walkthrough override when set,
@@ -167,13 +204,13 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
  */
 /**
  * Resolve the model for this feature. An explicit per-review choice outranks the
- * saved setting, which in turn outranks the small-model chain 鈥?the user picking
+ * saved setting, which in turn outranks the small-model chain — the user picking
  * a roomier model for a risky change is the most specific intent there is.
  */
-const resolveModel = (directory, explicitModel) => describeSmallModel({
+const resolveModel = (directory: string, explicitModel?: string): Promise<WalkthroughModel | null> => describeSmallModel({
   directory,
   outputReserveTokens: walkthroughOutputTokens,
-  overrideModel: explicitModel || readWalkthroughModelOverride(),
+  overrideModel: explicitModel || readWalkthroughModelOverride() || undefined,
 });
 
 export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
@@ -181,13 +218,17 @@ export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
 /**
  * Current diff for a source, parsed into files and hunks.
  */
-async function loadCurrentDiff(directory, source, deps) {
+async function loadCurrentDiff(
+  directory: string,
+  source: WalkthroughSource,
+  deps: WalkthroughDependencies,
+): Promise<BuiltDigest> {
   const { sections } = await loadSourceSections(directory, source, deps);
   const built = buildDigest(sections);
   return built;
 }
 
-const stopHunkIds = (walkthrough) =>
+const stopHunkIds = (walkthrough: Walkthrough): string[] =>
   walkthrough.chapters.flatMap((chapter) => chapter.stops.flatMap((stop) => stop.hunkIds));
 
 /**
@@ -197,9 +238,12 @@ const stopHunkIds = (walkthrough) =>
  * so an anchor that no longer resolves is proof that the code it described has
  * changed or gone. Anchors that still resolve are still accurate.
  */
-function resolveAgainstCurrent(walkthrough, hunkIndex) {
-  const missingHunkIds = [];
-  const staleStopIds = [];
+function resolveAgainstCurrent(
+  walkthrough: Walkthrough,
+  hunkIndex: Map<string, IndexedHunk>,
+): WalkthroughResolution {
+  const missingHunkIds: string[] = [];
+  const staleStopIds: string[] = [];
 
   for (const chapter of walkthrough.chapters) {
     for (const stop of chapter.stops) {
@@ -221,12 +265,12 @@ function resolveAgainstCurrent(walkthrough, hunkIndex) {
   };
 }
 
-const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) => ({
+const serializeHunks = (files: DiffFile[]): SerializedHunk[] => files.flatMap((file) => file.hunks.map((hunk) => ({
   id: hunk.id,
   path: file.path,
   oldPath: file.oldPath || null,
   status: file.status,
-  scope: file.scope,
+  ...(file.scope ? { scope: file.scope } : {}),
   header: hunk.header,
   newStart: hunk.newStart,
   added: hunk.added,
@@ -238,7 +282,10 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
  * Read the last walkthrough for a source, resolved against the current diff.
  * Never generates and never spends tokens.
  */
-export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, language: rawLanguage }, deps = {}) {
+export async function getWalkthrough(
+  { directory, source: rawSource, model: explicitModel, language: rawLanguage }: WalkthroughRequest,
+  deps: WalkthroughDependencies = {},
+): Promise<WalkthroughReadResult> {
   const source = parseSource(rawSource);
   const repoRoot = await getRepositoryRoot(directory);
   const key = sourceKey(source);
@@ -295,7 +342,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   // Showing it makes it the last walkthrough shown here, and a regeneration
   // re-authors from whatever the reader is actually looking at. Only written
   // when it moved, so an unchanged read stays a pure read.
-  if (requested && pointer?.cacheKey !== requestedKey) {
+  if (requested && requestedKey && pointer?.cacheKey !== requestedKey) {
     writePointer(repoRoot, key, {
       repoRoot,
       sourceKey: key,
@@ -325,7 +372,16 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
  * answers need the same diff, and computing it twice doubled the git work on
  * every panel open.
  */
-function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language }) {
+function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language }: {
+  digest: BuiltDigest['digest'];
+  fileCount: number;
+  files: DiffFile[];
+  generatedFileCount: number;
+  hunkCount: number;
+  language: WalkthroughLanguage;
+  model: WalkthroughModel | null;
+  source: WalkthroughSource;
+}): WalkthroughReadiness {
   if (!model) return { ready: false, reason: 'no-model' };
 
   if (hunkCount === 0) {
@@ -337,7 +393,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   }
 
   // A resolved override/config model can still have no usable login. Refuse up
-  // front and omit the model 鈥?offering an unauthenticated selection in the
+  // front and omit the model — offering an unauthenticated selection in the
   // picker is what made the old raw auth error feel like a product bug.
   if (model.hasLogin === false) {
     return { ready: false, reason: 'no-provider-login' };
@@ -369,10 +425,14 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
 /**
  * Generate a walkthrough for a source.
  *
- * Returns the cached entry when the diff, model, and prompt are all unchanged 鈥? * which also means returning to a previous state of the working tree costs
+ * Returns the cached entry when the diff, model, and prompt are all unchanged —
+ * which also means returning to a previous state of the working tree costs
  * nothing.
  */
-export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage }, deps = {}) {
+export async function generateWalkthrough(
+  { directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage }: GenerateWalkthroughRequest,
+  deps: WalkthroughDependencies = {},
+): Promise<WalkthroughGenerationResult> {
   const source = parseSource(rawSource);
   const repoRoot = await getRepositoryRoot(directory);
   const key = sourceKey(source);
@@ -384,7 +444,16 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   if (existing) return existing.promise;
 
   const controller = new AbortController();
-  const promise = runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal: controller.signal }, deps)
+  const promise = runGeneration({
+    directory,
+    source,
+    repoRoot,
+    key,
+    force,
+    ...(explicitModel ? { explicitModel } : {}),
+    language,
+    signal: controller.signal,
+  }, deps)
     .finally(() => {
       if (jobs.get(jobKey(repoRoot, key))?.controller === controller) {
         jobs.delete(jobKey(repoRoot, key));
@@ -395,15 +464,24 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   return promise;
 }
 
-async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal }, deps) {
+async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal }: {
+  directory: string;
+  explicitModel?: string;
+  force: boolean;
+  key: string;
+  language: WalkthroughLanguage;
+  repoRoot: string;
+  signal: AbortSignal;
+  source: WalkthroughSource;
+}, deps: WalkthroughDependencies): Promise<WalkthroughGenerationResult> {
 
   const model = await resolveModel(directory, explicitModel);
   if (!model) {
-    throw fail('No model is available 鈥?sign in to a provider first', 404, { code: 'no-model' });
+    throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
   }
   if (model.hasLogin === false) {
     throw fail(
-      `No Pi login found for provider "${model.providerID}" 鈥?sign in or choose a different model`,
+      `No Pi login found for provider "${model.providerID}" — sign in or choose a different model`,
       401,
       { code: 'no-provider-login', model },
     );
@@ -413,7 +491,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   setStage(repoRoot, key, 'asking');
   if (hunkCount === 0) {
     if (files.length > 0 && generatedFileCount === files.length) {
-      throw fail('Only generated files changed 鈥?there is nothing to review', 400, { code: 'only-generated' });
+      throw fail('Only generated files changed — there is nothing to review', 400, { code: 'only-generated' });
     }
     throw fail('There are no changes to review', 400, { code: 'empty-diff' });
   }
@@ -454,8 +532,8 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
 
   // A forced regeneration hands the model its own previous narrative so it can
   // keep what is still true instead of starting from a blank page. The old
-  // anchors are deliberately not included 鈥?they belong to code that has moved.
-  let previousWalkthrough = null;
+  // anchors are deliberately not included — they belong to code that has moved.
+  let previousWalkthrough: Walkthrough | null = null;
   const pointer = readPointer(repoRoot, key);
   if (pointer) {
     const previousEntry = readCachedWalkthrough(pointer.cacheKey);
@@ -468,13 +546,17 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
 
   if (model.structuredOutput === false) {
     throw fail(
-      `${modelLabel(model)} cannot produce structured output 鈥?choose a different small model`,
+      `${modelLabel(model)} cannot produce structured output — choose a different small model`,
       409,
       { code: 'structured-output-unsupported', model },
     );
   }
 
-  const run = (options) => generateSmallModelText({
+  const run = (options: {
+    prompt: string;
+    responseSchema: typeof responseSchema | undefined;
+    system: string;
+  }) => generateSmallModelText({
     prompt: options.prompt,
     system: options.system,
     directory,
@@ -498,28 +580,33 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     responseSchema: undefined,
   });
 
-  const asRequestFailure = (error) => {
-    if (error?.code === 'context-too-small') {
-      return fail(error.message, 409, {
+  const asRequestFailure = (error: unknown): Error | null => {
+    const failure = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+    const message = error instanceof Error ? error.message : 'Walkthrough request failed';
+    if (failure.code === 'context-too-small') {
+      return fail(message, 409, {
         code: 'context-too-small',
         model,
-        requiredChars: error.requiredChars,
-        availableChars: error.availableChars,
+        requiredChars: failure.requiredChars,
+        availableChars: failure.availableChars,
       });
     }
-    if (error?.code === 'output-exhausted') {
-      return fail(error.message, 409, { code: 'output-exhausted', model });
+    if (failure.code === 'output-exhausted') {
+      return fail(message, 409, { code: 'output-exhausted', model });
     }
-    if (error?.code === 'no-provider-login') {
-      return fail(error.message, 401, { code: 'no-provider-login', model });
+    if (failure.code === 'no-provider-login') {
+      return fail(message, 401, { code: 'no-provider-login', model });
     }
     return null;
   };
 
-  const refusesSchema = (error) => error?.code === 'structured-output-unsupported'
-    || (Number(error?.status) >= 400 && Number(error?.status) < 500);
+  const refusesSchema = (error: unknown): boolean => {
+    const failure = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+    return failure.code === 'structured-output-unsupported'
+      || (Number(failure.status) >= 400 && Number(failure.status) < 500);
+  };
 
-  let raw;
+  let raw: Awaited<ReturnType<typeof generateSmallModelText>>;
   let usedSchema = false;
 
   if (schemaRefusedBy.has(modelKey(model))) {
@@ -567,9 +654,9 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
       );
     }
     throw fail(
-      `${modelLabel(model)} did not return a usable walkthrough 鈥?try a different small model`,
+      `${modelLabel(model)} did not return a usable walkthrough — try a different small model`,
       502,
-      { code: 'invalid-walkthrough', model, cause: error?.message },
+        { code: 'invalid-walkthrough', model, cause: error instanceof Error ? error.message : String(error) },
     );
   }
 

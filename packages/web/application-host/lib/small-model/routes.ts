@@ -1,5 +1,10 @@
-// @ts-nocheck
-export function registerSmallModelRoutes(app, { getSmallModelService }) {
+import type { Express } from 'express';
+
+type SmallModelService = typeof import('./index.js');
+
+export function registerSmallModelRoutes(app: Express, {
+  getSmallModelService,
+}: { getSmallModelService(): Promise<SmallModelService> }): void {
   app.get('/api/small-model', async (req, res) => {
     try {
       const { describeSmallModel, listAuthenticatedProviders } = await getSmallModelService();
@@ -15,7 +20,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       });
     } catch (error) {
       console.error('Failed to resolve small model:', error);
-      res.status(500).json({ error: error.message || 'Failed to resolve small model' });
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to resolve small model' });
     }
   });
 
@@ -35,11 +40,11 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       });
       res.json(result);
     } catch (error) {
-      const statusCode = Number(error?.statusCode) || 500;
+      const statusCode = Number(error && typeof error === 'object' ? (error as { statusCode?: unknown }).statusCode : undefined) || 500;
       if (statusCode >= 500) {
         console.error('Small model generation failed:', error);
       }
-      res.status(statusCode).json({ error: error.message || 'Small model generation failed' });
+      res.status(statusCode).json({ error: error instanceof Error ? error.message : 'Small model generation failed' });
     }
   });
 }

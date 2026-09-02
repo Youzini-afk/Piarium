@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * DictationStreamManager
  *
@@ -16,6 +15,12 @@
  */
 
 import { Pcm16MonoResampler, parsePcmRateFromFormat, pcm16lePeakAbs } from './audio.js';
+import type {
+  DictationEvent,
+  DictationStartOptions,
+  DictationStreamState,
+  SttSessionResolution,
+} from './types.js';
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
 const DEFAULT_AUTO_COMMIT_SECONDS = 15;
@@ -26,6 +31,12 @@ const FINAL_TIMEOUT_PER_MISSING_SEQ_MS = 250;
 const SILENCE_PEAK_THRESHOLD = 300;
 
 export class DictationStreamManager {
+  readonly emit: (message: DictationEvent) => void;
+  readonly createSttSession: (options: DictationStartOptions) => Promise<SttSessionResolution>;
+  readonly finalTimeoutMs: number;
+  autoCommitSeconds: number;
+  private readonly streams: Map<string, DictationStreamState>;
+
   /**
    * @param {object} params
    * @param {(msg: { type: string, payload: object }) => void} params.emit
@@ -36,7 +47,12 @@ export class DictationStreamManager {
    * @param {number} [params.finalTimeoutMs]
    * @param {number} [params.autoCommitSeconds]
    */
-  constructor({ emit, createSttSession, finalTimeoutMs, autoCommitSeconds }) {
+  constructor({ emit, createSttSession, finalTimeoutMs, autoCommitSeconds }: {
+    autoCommitSeconds?: number;
+    createSttSession: (options: DictationStartOptions) => Promise<SttSessionResolution>;
+    emit: (message: DictationEvent) => void;
+    finalTimeoutMs?: number;
+  }) {
     this.emit = emit;
     this.createSttSession = createSttSession;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
@@ -44,7 +60,7 @@ export class DictationStreamManager {
     this.streams = new Map();
   }
 
-  cleanupAll() {
+  cleanupAll(): void {
     for (const dictationId of Array.from(this.streams.keys())) {
       this.cleanupStream(dictationId);
     }
@@ -55,7 +71,7 @@ export class DictationStreamManager {
    * @param {string} format e.g. "audio/pcm;rate=16000;bits=16"
    * @param {object} startOptions provider/config options forwarded to createSttSession
    */
-  async handleStart(dictationId, format, startOptions = {}) {
+  async handleStart(dictationId: string, format: string, startOptions: DictationStartOptions = {}): Promise<void> {
     this.cleanupStream(dictationId);
 
     const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
@@ -68,22 +84,22 @@ export class DictationStreamManager {
     try {
       resolved = await this.createSttSession(startOptions);
     } catch (error) {
-      this.failStream(dictationId, error?.message || String(error), true);
+      this.failStream(dictationId, error instanceof Error ? error.message : String(error), true);
       return;
     }
-    if (!resolved || resolved.error) {
+    if ('error' in resolved) {
       this.failStream(
         dictationId,
-        resolved?.error || 'Dictation STT not configured',
-        Boolean(resolved?.retryable),
-        resolved?.reasonCode,
+        resolved.error || 'Dictation STT not configured',
+        Boolean(resolved.retryable),
+        resolved.reasonCode,
       );
       return;
     }
 
     const stt = resolved.session;
 
-    stt.on('committed', ({ segmentId }) => {
+    stt.on('committed', ({ segmentId }: { segmentId: string }) => {
       const state = this.streams.get(dictationId);
       if (!state) {
         return;
@@ -99,7 +115,11 @@ export class DictationStreamManager {
       this.maybeFinalizeStream(dictationId);
     });
 
-    stt.on('transcript', ({ segmentId, transcript, isFinal }) => {
+    stt.on('transcript', ({ segmentId, transcript, isFinal }: {
+      isFinal: boolean;
+      segmentId: string;
+      transcript: string;
+    }) => {
       const state = this.streams.get(dictationId);
       if (!state) {
         return;
@@ -126,8 +146,8 @@ export class DictationStreamManager {
       this.maybeFinalizeStream(dictationId);
     });
 
-    stt.on('error', (err) => {
-      const message = err?.message || String(err);
+    stt.on('error', (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
       this.failAndCleanupStream(dictationId, message, true);
     });
 
@@ -141,7 +161,7 @@ export class DictationStreamManager {
         inputRate === stt.requiredSampleRate
           ? null
           : new Pcm16MonoResampler({ inputRate, outputRate: stt.requiredSampleRate }),
-      receivedChunks: new Map(),
+      receivedChunks: new Map<number, Buffer>(),
       nextSeqToForward: 0,
       ackSeq: -1,
       autoCommitBytes:
@@ -150,9 +170,9 @@ export class DictationStreamManager {
           : 0,
       bytesSinceCommit: 0,
       peakSinceCommit: 0,
-      committedSegmentIds: [],
-      transcriptsBySegmentId: new Map(),
-      finalTranscriptSegmentIds: new Set(),
+      committedSegmentIds: [] as string[],
+      transcriptsBySegmentId: new Map<string, string>(),
+      finalTranscriptSegmentIds: new Set<string>(),
       awaitingFinalCommit: false,
       finishRequested: false,
       finishSealed: false,
@@ -166,7 +186,11 @@ export class DictationStreamManager {
   /**
    * @param {{ dictationId: string, seq: number, audioBase64: string }} params
    */
-  handleChunk({ dictationId, seq, audioBase64 }) {
+  handleChunk({ dictationId, seq, audioBase64 }: {
+    audioBase64: string;
+    dictationId: string;
+    seq: number;
+  }): void {
     const state = this.streams.get(dictationId);
     if (!state) {
       this.failStream(dictationId, 'Dictation stream not started', true);
@@ -199,6 +223,7 @@ export class DictationStreamManager {
       const nextSeq = state.nextSeqToForward;
       const pcm16 = state.receivedChunks.get(nextSeq);
       state.receivedChunks.delete(nextSeq);
+      if (!pcm16) break;
 
       const resampled = state.resampler ? state.resampler.processChunk(pcm16) : pcm16;
       if (resampled.length > 0) {
@@ -208,7 +233,7 @@ export class DictationStreamManager {
         try {
           this.maybeAutoCommitSegment(state);
         } catch (error) {
-          this.failAndCleanupStream(dictationId, error?.message || String(error), true);
+          this.failAndCleanupStream(dictationId, error instanceof Error ? error.message : String(error), true);
           return;
         }
       }
@@ -226,7 +251,7 @@ export class DictationStreamManager {
    * @param {string} dictationId
    * @param {number} finalSeq highest seq the client sent (or -1 if none)
    */
-  handleFinish(dictationId, finalSeq) {
+  handleFinish(dictationId: string, finalSeq: number): void {
     const state = this.streams.get(dictationId);
     if (!state) {
       this.failStream(dictationId, 'Dictation stream not started', true);
@@ -270,15 +295,15 @@ export class DictationStreamManager {
     this.emit({ type: 'finish_accepted', payload: { dictationId, timeoutMs } });
   }
 
-  handleCancel(dictationId) {
+  handleCancel(dictationId: string): void {
     this.cleanupStream(dictationId);
   }
 
-  emitAck(dictationId, ackSeq) {
+  emitAck(dictationId: string, ackSeq: number): void {
     this.emit({ type: 'ack', payload: { dictationId, ackSeq } });
   }
 
-  failStream(dictationId, error, retryable, reasonCode) {
+  failStream(dictationId: string, error: string, retryable: boolean, reasonCode?: string): void {
     this.emit({
       type: 'error',
       payload: {
@@ -290,12 +315,12 @@ export class DictationStreamManager {
     });
   }
 
-  failAndCleanupStream(dictationId, error, retryable) {
+  failAndCleanupStream(dictationId: string, error: string, retryable: boolean): void {
     this.failStream(dictationId, error, retryable);
     this.cleanupStream(dictationId);
   }
 
-  cleanupStream(dictationId) {
+  cleanupStream(dictationId: string): void {
     const state = this.streams.get(dictationId);
     if (!state) {
       return;
@@ -311,7 +336,7 @@ export class DictationStreamManager {
     this.streams.delete(dictationId);
   }
 
-  estimateFinalizationTimeout(state) {
+  estimateFinalizationTimeout(state: DictationStreamState): number {
     const bytesPerSecond = Math.max(1, state.outputRate * 2);
     const pendingCommittedSegments = state.committedSegmentIds.reduce((count, segmentId) => {
       return state.finalTranscriptSegmentIds.has(segmentId) ? count : count + 1;
@@ -344,7 +369,7 @@ export class DictationStreamManager {
     );
   }
 
-  maybeAutoCommitSegment(state) {
+  maybeAutoCommitSegment(state: DictationStreamState): void {
     if (state.finishRequested) {
       return;
     }
@@ -363,7 +388,7 @@ export class DictationStreamManager {
     state.stt.commit();
   }
 
-  maybeSealStreamFinish(dictationId) {
+  maybeSealStreamFinish(dictationId: string): void {
     const state = this.streams.get(dictationId);
     if (!state) {
       return;
@@ -390,7 +415,7 @@ export class DictationStreamManager {
         try {
           state.stt.commit();
         } catch (error) {
-          this.failAndCleanupStream(dictationId, error?.message || String(error), true);
+          this.failAndCleanupStream(dictationId, error instanceof Error ? error.message : String(error), true);
           return;
         }
       }
@@ -401,7 +426,7 @@ export class DictationStreamManager {
     state.finishSealed = true;
   }
 
-  dropUncommittedNonFinalTranscripts(state) {
+  dropUncommittedNonFinalTranscripts(state: DictationStreamState): void {
     const committedSet = new Set(state.committedSegmentIds);
     for (const segmentId of Array.from(state.transcriptsBySegmentId.keys())) {
       if (committedSet.has(segmentId)) {
@@ -414,7 +439,7 @@ export class DictationStreamManager {
     }
   }
 
-  maybeFinalizeStream(dictationId) {
+  maybeFinalizeStream(dictationId: string): void {
     const state = this.streams.get(dictationId);
     if (!state) {
       return;

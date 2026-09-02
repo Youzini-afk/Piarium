@@ -1,11 +1,15 @@
-// @ts-nocheck
+import type {
+  ParsedServeCliArgs,
+  ParseServeCliOptionsInput,
+} from '../../public-contract.js';
+
 export const parseServeCliOptions = ({
   argv = [],
   env = {},
   defaultPort,
   cloudflareProvider,
   managedLocalMode,
-}) => {
+}: ParseServeCliOptionsInput): ParsedServeCliArgs => {
   const args = Array.isArray(argv) ? [...argv] : [];
   const envPassword = env.PIARIUM_UI_PASSWORD || null;
   const envCfTunnel = env.PIARIUM_TRY_CF_TUNNEL === 'true';
@@ -23,7 +27,7 @@ export const parseServeCliOptions = ({
     ? parsedEnvPort
     : defaultPort;
 
-  const options = {
+  const options: ParsedServeCliArgs = {
     port: effectiveDefaultPort,
     host: undefined,
     uiPassword: envPassword,
@@ -36,7 +40,10 @@ export const parseServeCliOptions = ({
     apiOnly: envApiOnly,
   };
 
-  const consumeValue = (currentIndex, inlineValue) => {
+  const consumeValue = (
+    currentIndex: number,
+    inlineValue: string | undefined,
+  ): { value: string | undefined; nextIndex: number } => {
     if (typeof inlineValue === 'string') {
       return { value: inlineValue, nextIndex: currentIndex };
     }
@@ -48,7 +55,7 @@ export const parseServeCliOptions = ({
   };
 
   for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
+    const arg = args[i]!;
     if (!arg.startsWith('--')) {
       continue;
     }

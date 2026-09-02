@@ -1,10 +1,12 @@
-// @ts-nocheck
 import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import type { IncomingHttpHeaders } from 'node:http';
+import type { NextFunction } from 'express';
+import type { PiariumAuthenticatedClient } from '../client-auth/request-context.js';
 
 const SESSION_COOKIE_NAME = 'piarium_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -18,12 +20,85 @@ const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
 const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.PIARIUM_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
 
-const loginRateLimiter = new Map();
-let rateLimitCleanupTimer = null;
+interface UiAuthRequest {
+  baseUrl?: string | undefined;
+  body?: Record<string, unknown> | undefined;
+  connection?: { remoteAddress: string | undefined };
+  headers: IncomingHttpHeaders;
+  hostname?: string | undefined;
+  method?: string | undefined;
+  originalUrl?: string | undefined;
+  params?: Record<string, string | string[] | undefined>;
+  path?: string | undefined;
+  query?: Record<string, unknown>;
+  secure?: boolean | undefined;
+  socket?: { encrypted?: boolean | undefined; remoteAddress: string | undefined };
+  url?: string | undefined;
+}
 
-const rateLimitLocks = new Map();
+interface UiAuthHeaderResponse {
+  setHeader(name: string, value: number | string | readonly string[]): unknown;
+}
 
-const getClientIp = (req) => {
+interface UiAuthResponse extends UiAuthHeaderResponse {
+  json(payload: unknown): UiAuthResponse;
+  send?(payload: unknown): UiAuthResponse;
+  status(code: number): UiAuthResponse;
+  type?(contentType: string): UiAuthResponse;
+}
+
+interface ClientAuthResult {
+  client?: PiariumAuthenticatedClient;
+  clientId?: string;
+  id?: string;
+  ok?: boolean;
+  sessionToken?: string;
+}
+
+interface ClientAuthController {
+  authenticateBearerToken?(token: string, req: UiAuthRequest): Promise<ClientAuthResult | null>;
+  createClient?(input: Record<string, unknown>): Promise<{
+    client: Record<string, unknown> & { id: string };
+    token: string;
+  }>;
+}
+
+interface UiAuthOptions {
+  clientAuthController?: ClientAuthController | null;
+  cookieName?: string;
+  password?: unknown;
+  readSettingsFromDisk?: () => Promise<Record<string, unknown>>;
+  requireClientAuth?: boolean;
+  sessionTtlMs?: number;
+}
+
+interface RateLimitRecord {
+  count: number;
+  lastAttempt: number;
+  lockedUntil?: number;
+}
+
+interface RateLimitResult {
+  allowed: boolean;
+  limit: number;
+  locked?: boolean;
+  remaining: number;
+  reset: number;
+  retryAfter?: number;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const loginRateLimiter = new Map<string, RateLimitRecord>();
+let rateLimitCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+const rateLimitLocks = new Map<string, Promise<void>>();
+
+const getClientIp = (req: UiAuthRequest): string | null => {
   // Password login is unauthenticated, so forwarded headers are attacker input
   // unless every deployment configures an exact proxy trust chain. Bucket by
   // the actual peer instead; a reverse proxy intentionally becomes one shared
@@ -38,13 +113,13 @@ const getClientIp = (req) => {
   return null;
 };
 
-const getRateLimitKey = (req) => {
+const getRateLimitKey = (req: UiAuthRequest): string => {
   const ip = getClientIp(req);
   if (ip) return ip;
   return 'rate-limit:no-ip';
 };
 
-const getRateLimitConfig = (key) => {
+const getRateLimitConfig = (key: string): { maxAttempts: number; windowMs: number } => {
   if (key === 'rate-limit:no-ip') {
     return {
       maxAttempts: RATE_LIMIT_NO_IP_MAX_ATTEMPTS,
@@ -57,14 +132,14 @@ const getRateLimitConfig = (key) => {
   };
 };
 
-const acquireRateLimitLock = async (key) => {
+const acquireRateLimitLock = async (key: string): Promise<void> => {
   const prev = rateLimitLocks.get(key) || Promise.resolve();
-  const curr = prev.then(() => rateLimitLocks.delete(key));
+  const curr = prev.then(() => { rateLimitLocks.delete(key); });
   rateLimitLocks.set(key, curr);
   await curr;
 };
 
-const checkRateLimit = async (req) => {
+const checkRateLimit = async (req: UiAuthRequest): Promise<RateLimitResult> => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
@@ -75,7 +150,7 @@ const checkRateLimit = async (req) => {
   try {
     record = loginRateLimiter.get(key);
   } catch (err) {
-    console.error('[RateLimit] Failed to get record', { key, error: err.message });
+    console.error('[RateLimit] Failed to get record', { key, error: errorMessage(err) });
     return {
       allowed: true,
       limit: maxAttempts,
@@ -99,7 +174,7 @@ const checkRateLimit = async (req) => {
     try {
       loginRateLimiter.delete(key);
     } catch (err) {
-      console.error('[RateLimit] Failed to delete expired record', { key, error: err.message });
+      console.error('[RateLimit] Failed to delete expired record', { key, error: errorMessage(err) });
     }
   }
 
@@ -117,7 +192,7 @@ const checkRateLimit = async (req) => {
     try {
       loginRateLimiter.set(key, { count: record.count + 1, lastAttempt: now, lockedUntil });
     } catch (err) {
-      console.error('[RateLimit] Failed to set lockout', { key, error: err.message });
+      console.error('[RateLimit] Failed to set lockout', { key, error: errorMessage(err) });
     }
     return {
       allowed: false,
@@ -139,42 +214,41 @@ const checkRateLimit = async (req) => {
   };
 };
 
-const recordFailedAttempt = async (req) => {
+const recordFailedAttempt = async (req: UiAuthRequest): Promise<void> => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
   const now = Date.now();
-  const { maxAttempts } = getRateLimitConfig(key);
   const record = loginRateLimiter.get(key);
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
     try {
       loginRateLimiter.set(key, { count: 1, lastAttempt: now });
     } catch (err) {
-      console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
+      console.error('[RateLimit] Failed to record attempt', { key, error: errorMessage(err) });
     }
   } else {
     const newCount = record.count + 1;
     try {
       loginRateLimiter.set(key, { count: newCount, lastAttempt: now });
     } catch (err) {
-      console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
+      console.error('[RateLimit] Failed to record attempt', { key, error: errorMessage(err) });
     }
   }
 };
 
-const clearRateLimit = async (req) => {
+const clearRateLimit = async (req: UiAuthRequest): Promise<void> => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
   try {
     loginRateLimiter.delete(key);
   } catch (err) {
-    console.error('[RateLimit] Failed to clear', { key, error: err.message });
+    console.error('[RateLimit] Failed to clear', { key, error: errorMessage(err) });
   }
 };
 
-const cleanupRateLimitRecords = () => {
+const cleanupRateLimitRecords = (): void => {
   const now = Date.now();
   for (const [key, record] of loginRateLimiter.entries()) {
     const isExpired = record.lockedUntil && now >= record.lockedUntil;
@@ -183,13 +257,13 @@ const cleanupRateLimitRecords = () => {
       try {
         loginRateLimiter.delete(key);
       } catch (err) {
-        console.error('[RateLimit] Cleanup failed', { key, error: err.message });
+        console.error('[RateLimit] Cleanup failed', { key, error: errorMessage(err) });
       }
     }
   }
 };
 
-const startRateLimitCleanup = () => {
+const startRateLimitCleanup = (): void => {
   if (!rateLimitCleanupTimer) {
     rateLimitCleanupTimer = setInterval(cleanupRateLimitRecords, RATE_LIMIT_CLEANUP_MS);
     if (rateLimitCleanupTimer && typeof rateLimitCleanupTimer.unref === 'function') {
@@ -198,14 +272,14 @@ const startRateLimitCleanup = () => {
   }
 };
 
-const stopRateLimitCleanup = () => {
+const stopRateLimitCleanup = (): void => {
   if (rateLimitCleanupTimer) {
     clearInterval(rateLimitCleanupTimer);
     rateLimitCleanupTimer = null;
   }
 };
 
-const isSecureRequest = (req) => {
+const isSecureRequest = (req: UiAuthRequest): boolean => {
   if (req.secure) {
     return true;
   }
@@ -217,12 +291,12 @@ const isSecureRequest = (req) => {
   return false;
 };
 
-const parseCookies = (cookieHeader) => {
+const parseCookies = (cookieHeader: unknown): Record<string, string> => {
   if (!cookieHeader || typeof cookieHeader !== 'string') {
     return {};
   }
 
-  return cookieHeader.split(';').reduce((acc, segment) => {
+  return cookieHeader.split(';').reduce<Record<string, string>>((acc, segment) => {
     const [name, ...rest] = segment.split('=');
     if (!name) {
       return acc;
@@ -241,7 +315,7 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
-const getBearerTokenFromRequest = (req) => {
+const getBearerTokenFromRequest = (req: UiAuthRequest): string | null => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value === 'string') {
@@ -252,7 +326,7 @@ const getBearerTokenFromRequest = (req) => {
   return null;
 };
 
-const getUrlAuthTokenFromRequest = (req) => {
+const getUrlAuthTokenFromRequest = (req: UiAuthRequest): string | null => {
   const headerToken = req?.headers?.['x-piarium-application-token'];
   const normalizedHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (typeof normalizedHeader === 'string' && normalizedHeader.trim()) return normalizedHeader.trim();
@@ -268,7 +342,7 @@ const getUrlAuthTokenFromRequest = (req) => {
   return typeof token === 'string' && token.trim() ? token.trim() : null;
 };
 
-const isApplicationTokenWritePath = (pathname) => (
+const isApplicationTokenWritePath = (pathname: string): boolean => (
   /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/activate$/.test(pathname)
   || /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/enabled$/.test(pathname)
   || pathname === '/api/piarium/extensions/v1/assets/read'
@@ -284,7 +358,7 @@ const isApplicationTokenWritePath = (pathname) => (
   || pathname === '/api/piarium/extensions/v1/install'
 );
 
-const getRequestPathname = (req) => {
+const getRequestPathname = (req: UiAuthRequest): string => {
   const rawUrl = req?.originalUrl || req?.url;
   if (typeof rawUrl === 'string' && rawUrl) {
     try {
@@ -300,13 +374,13 @@ const getRequestPathname = (req) => {
   return '';
 };
 
-const isWebSocketUpgrade = (req) => {
+const isWebSocketUpgrade = (req: UiAuthRequest): boolean => {
   const upgrade = req?.headers?.upgrade;
   const upgradeValue = Array.isArray(upgrade) ? upgrade[0] : upgrade;
   return String(upgradeValue || '').toLowerCase() === 'websocket';
 };
 
-const isUrlAuthReadableHttpPath = (pathname) => {
+const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
   return pathname === '/api/piarium/events'
     || pathname === '/api/piarium/runtime-manager/events'
     || pathname === '/api/piarium/extensions/v1/catalog'
@@ -320,7 +394,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname);
 };
 
-const isUrlAuthWebSocketPath = (pathname) => {
+const isUrlAuthWebSocketPath = (pathname: string): boolean => {
   return pathname === '/api/piarium/runtime/ws'
     || pathname === '/api/piarium/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
@@ -328,7 +402,7 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname.startsWith('/api/preview/proxy/');
 };
 
-const canUseUrlAuthTokenForRequest = (req) => {
+const canUseUrlAuthTokenForRequest = (req: UiAuthRequest): boolean => {
   const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET';
   const pathname = getRequestPathname(req);
   if (isWebSocketUpgrade(req)) {
@@ -343,7 +417,7 @@ const buildCookie = ({
   value,
   maxAge,
   secure,
-}) => {
+}: { maxAge: number; name: string; secure: boolean; value: string }): string => {
   const attributes = [
     `${name}=${value}`,
     'Path=/',
@@ -368,19 +442,19 @@ const buildCookie = ({
   return attributes.join('; ');
 };
 
-const normalizePassword = (candidate) => {
+const normalizePassword = (candidate: unknown): string => {
   if (typeof candidate !== 'string') {
     return '';
   }
   return candidate.normalize().trim();
 };
 
-const isTrustedDeviceRequest = (value) => value === true;
+const isTrustedDeviceRequest = (value: unknown): boolean => value === true;
 
 const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
 const JWT_SECRET_FILE = path.join(PIARIUM_DATA_DIR, 'jwt-secret');
 
-function getOrCreateJwtSecret() {
+function getOrCreateJwtSecret(): Uint8Array {
   const envSecret = process.env.PIARIUM_JWT_SECRET;
   if (envSecret) {
     return new TextEncoder().encode(envSecret);
@@ -391,7 +465,7 @@ function getOrCreateJwtSecret() {
       return new TextEncoder().encode(fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim());
     }
   } catch (e) {
-    console.warn('[JWT] Failed to read secret file:', e.message);
+    console.warn('[JWT] Failed to read secret file:', errorMessage(e));
   }
 
   const secret = crypto.randomBytes(32).toString('hex');
@@ -400,16 +474,15 @@ function getOrCreateJwtSecret() {
     fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
     console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
   } catch (e) {
-    console.warn('[JWT] Failed to persist secret:', e.message);
+    console.warn('[JWT] Failed to persist secret:', errorMessage(e));
   }
 
   return new TextEncoder().encode(secret);
 }
 
-function persistJwtSecret(secret) {
+function persistJwtSecret(secret: string): Uint8Array {
   if (process.env.PIARIUM_JWT_SECRET) {
-    const error = new Error('Global sign-out is unavailable while PIARIUM_JWT_SECRET is set');
-    error.statusCode = 400;
+    const error = Object.assign(new Error('Global sign-out is unavailable while PIARIUM_JWT_SECRET is set'), { statusCode: 400 });
     throw error;
   }
 
@@ -425,11 +498,11 @@ export const createUiAuth = ({
   readSettingsFromDisk,
   clientAuthController = null,
   requireClientAuth = false,
-} = {}) => {
+}: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
-  const urlAuthTokens = new Map();
+  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string }>();
 
-  const sweepUrlAuthTokens = () => {
+  const sweepUrlAuthTokens = (): void => {
     const now = Date.now();
     for (const [token, entry] of urlAuthTokens.entries()) {
       if (!entry || entry.expiresAt <= now) {
@@ -438,7 +511,7 @@ export const createUiAuth = ({
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken) => {
+  const issueUrlAuthTokenForSession = (sessionToken: string) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
@@ -446,7 +519,7 @@ export const createUiAuth = ({
     return { token, expiresAt };
   };
 
-  const authenticateUrlAuthToken = (req) => {
+  const authenticateUrlAuthToken = (req: UiAuthRequest): ClientAuthResult | null => {
     if (!canUseUrlAuthTokenForRequest(req)) return null;
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
@@ -458,7 +531,10 @@ export const createUiAuth = ({
     return { ok: true, sessionToken: entry.sessionToken || 'url:authenticated' };
   };
 
-  const authenticateClientRequest = async (req, { allowUrlToken = true } = {}) => {
+  const authenticateClientRequest = async (
+    req: UiAuthRequest,
+    { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
+  ): Promise<ClientAuthResult | null> => {
     if (allowUrlToken) {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
@@ -478,19 +554,19 @@ export const createUiAuth = ({
     }
   };
 
-  const clientSessionToken = (clientAuth) => {
+  const clientSessionToken = (clientAuth: ClientAuthResult): string => {
     const raw = clientAuth?.sessionToken || clientAuth?.clientId || clientAuth?.id;
     if (typeof raw === 'string' && (raw.startsWith('client:') || raw.startsWith('url:'))) return raw;
     return typeof raw === 'string' && raw.length > 0 ? `client:${raw}` : 'client:authenticated';
   };
 
-  const clientAuthClientId = (clientAuth) => {
+  const clientAuthClientId = (clientAuth: ClientAuthResult): string | null => {
     const raw = clientAuth?.client?.id || clientAuth?.clientId || clientAuth?.id || clientAuth?.sessionToken;
     if (typeof raw !== 'string' || raw.length === 0) return null;
     return raw.startsWith('client:') ? raw.slice('client:'.length) : raw;
   };
 
-  const clientAuthContext = (clientAuth) => ({
+  const clientAuthContext = (clientAuth: ClientAuthResult) => ({
     type: 'client',
     token: clientSessionToken(clientAuth),
     clientId: clientAuthClientId(clientAuth),
@@ -498,7 +574,7 @@ export const createUiAuth = ({
   });
 
   if (!normalizedPassword) {
-    const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
+    const setSessionCookie = (req: UiAuthRequest, res: UiAuthHeaderResponse, token: string, ttlMs = sessionTtlMs): void => {
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
@@ -510,7 +586,7 @@ export const createUiAuth = ({
       res.setHeader('Set-Cookie', header);
     };
 
-    const ensureSessionToken = async (req, res) => {
+    const ensureSessionToken = async (req: UiAuthRequest, res: UiAuthHeaderResponse): Promise<string> => {
       const cookies = parseCookies(req.headers.cookie);
       if (cookies[cookieName]) {
         return cookies[cookieName];
@@ -520,7 +596,7 @@ export const createUiAuth = ({
       return token;
     };
 
-    const requireAuth = async (req, res, next) => {
+    const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
       if (!requireClientAuth) {
         return next();
       }
@@ -534,7 +610,7 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
     };
 
-    const requireSessionAuth = async (req, res, next) => {
+    const requireSessionAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
       if (!requireClientAuth) {
         return next();
       }
@@ -544,7 +620,11 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'UI session authentication required', locked: true });
     };
 
-    const resolveAuthContext = async (req, res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
+    const resolveAuthContext = async (
+      req: UiAuthRequest,
+      res: UiAuthResponse | null,
+      { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
+    ) => {
       const cookies = parseCookies(req.headers.cookie);
       if (cookies[cookieName]) {
         return { type: 'session', token: cookies[cookieName] };
@@ -554,13 +634,14 @@ export const createUiAuth = ({
         if (clientAuth) return clientAuthContext(clientAuth);
       }
       if (!requireClientAuth) {
+        if (!res) return null;
         const token = await ensureSessionToken(req, res);
         return { type: 'session', token };
       }
       return null;
     };
 
-    const resolveWebSocketAuthContext = async (req) => {
+    const resolveWebSocketAuthContext = async (req: UiAuthRequest) => {
       if (!requireClientAuth) {
         const cookies = parseCookies(req.headers?.cookie);
         if (cookies[cookieName]) {
@@ -578,7 +659,7 @@ export const createUiAuth = ({
       requireSessionAuth,
       resolveAuthContext,
       resolveWebSocketAuthContext,
-      handleSessionStatus: async (req, res) => {
+      handleSessionStatus: async (req: UiAuthRequest, res: UiAuthResponse) => {
         if (requireClientAuth) {
           const clientAuth = await authenticateClientRequest(req);
           if (clientAuth) {
@@ -588,10 +669,10 @@ export const createUiAuth = ({
         }
         res.json({ authenticated: true, disabled: true });
       },
-      handleSessionCreate: (_req, res) => {
+      handleSessionCreate: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handleUrlAuthToken: async (req, res) => {
+      handleUrlAuthToken: async (req: UiAuthRequest, res: UiAuthResponse) => {
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
         if (clientAuth) {
           res.setHeader('Cache-Control', 'no-store');
@@ -604,43 +685,42 @@ export const createUiAuth = ({
         res.setHeader('Cache-Control', 'no-store');
         return res.json(issueUrlAuthTokenForSession(sessionToken));
       },
-      handlePasskeyStatus: (_req, res) => {
+      handlePasskeyStatus: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
       },
-      handlePasskeyRegistrationOptions: (_req, res) => {
+      handlePasskeyRegistrationOptions: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyRegistrationVerify: (_req, res) => {
+      handlePasskeyRegistrationVerify: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyAuthenticationOptions: (_req, res) => {
+      handlePasskeyAuthenticationOptions: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyAuthenticationVerify: (_req, res) => {
+      handlePasskeyAuthenticationVerify: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyList: (_req, res) => {
+      handlePasskeyList: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.json({ passkeys: [] });
       },
-      handlePasskeyRevoke: (_req, res) => {
+      handlePasskeyRevoke: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handleResetAuth: (_req, res) => {
+      handleResetAuth: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      issueTrustedSession: async (req, res) => {
+      issueTrustedSession: async (req: UiAuthRequest, res: UiAuthResponse) => {
         const token = crypto.randomBytes(32).toString('base64url');
         setSessionCookie(req, res, token, TRUSTED_DEVICE_SESSION_TTL_MS);
         return token;
       },
-      ensureSessionToken: async (req, res) => {
+      ensureSessionToken: async (req: UiAuthRequest, res: UiAuthHeaderResponse | null): Promise<string | null> => {
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
+        if (!res) return null;
         return ensureSessionToken(req, res);
       },
-      dispose: () => {
-
-      },
+      dispose: () => undefined,
     };
   }
 
@@ -648,29 +728,29 @@ export const createUiAuth = ({
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
   let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
-  const resolveSessionTtlMs = (trustDevice) => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
+  const resolveSessionTtlMs = (trustDevice: unknown): number => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
-    readSettingsFromDisk,
+    ...(readSettingsFromDisk ? { readSettingsFromDisk } : {}),
   });
 
-  const rebuildPasskeyController = () => {
+  const rebuildPasskeyController = (): void => {
     passkeyController.dispose();
     passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
     passkeyController = createUiPasskeys({
       passwordBinding,
-      readSettingsFromDisk,
+      ...(readSettingsFromDisk ? { readSettingsFromDisk } : {}),
     });
   };
 
-  const rotateJwtSecret = () => {
+  const rotateJwtSecret = (): void => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
     urlAuthTokens.clear();
     rebuildPasskeyController();
   };
 
-  const getTokenFromRequest = (req) => {
+  const getTokenFromRequest = (req: UiAuthRequest): string | null => {
     const cookies = parseCookies(req.headers.cookie);
     if (cookies[cookieName]) {
       return cookies[cookieName];
@@ -678,7 +758,7 @@ export const createUiAuth = ({
     return null;
   };
 
-  const setSessionCookie = (req, res, token, ttlMs) => {
+  const setSessionCookie = (req: UiAuthRequest, res: UiAuthHeaderResponse, token: string, ttlMs: number): void => {
     const secure = isSecureRequest(req);
     const maxAgeSeconds = Math.floor(ttlMs / 1000);
     const header = buildCookie({
@@ -690,7 +770,7 @@ export const createUiAuth = ({
     res.setHeader('Set-Cookie', header);
   };
 
-  const clearSessionCookie = (req, res) => {
+  const clearSessionCookie = (req: UiAuthRequest, res: UiAuthHeaderResponse): void => {
     const secure = isSecureRequest(req);
     const header = buildCookie({
       name: cookieName,
@@ -701,7 +781,7 @@ export const createUiAuth = ({
     res.setHeader('Set-Cookie', header);
   };
 
-  const verifyPassword = (candidate) => {
+  const verifyPassword = (candidate: unknown): boolean => {
     if (!candidate) {
       return false;
     }
@@ -717,7 +797,7 @@ export const createUiAuth = ({
     }
   };
 
-  const isSessionValid = async (token) => {
+  const isSessionValid = async (token: string | null): Promise<boolean> => {
     if (!token) {
       return false;
     }
@@ -729,7 +809,11 @@ export const createUiAuth = ({
     }
   };
 
-  const issueSession = async (req, res, { trustDevice = false } = {}) => {
+  const issueSession = async (
+    req: UiAuthRequest,
+    res: UiAuthHeaderResponse,
+    { trustDevice = false }: { trustDevice?: boolean } = {},
+  ): Promise<string> => {
     const ttlMs = resolveSessionTtlMs(trustDevice);
     const token = await new SignJWT({ type: 'ui-session' })
       .setProtectedHeader({ alg: 'HS256' })
@@ -742,17 +826,19 @@ export const createUiAuth = ({
 
   startRateLimitCleanup();
 
-  const respondUnauthorized = (req, res) => {
+  const respondUnauthorized = (req: UiAuthRequest, res: UiAuthResponse) => {
     res.status(401);
     const acceptsJson = req.headers.accept?.includes('application/json');
     if (acceptsJson || req.path?.startsWith('/api')) {
       res.json({ error: 'UI authentication required', locked: true });
+    } else if (res.type && res.send) {
+      res.type('text/plain').send?.('Authentication required');
     } else {
-      res.type('text/plain').send('Authentication required');
+      res.json({ error: 'UI authentication required', locked: true });
     }
   };
 
-  const requireAuth = async (req, res, next) => {
+  const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
@@ -768,7 +854,7 @@ export const createUiAuth = ({
     return respondUnauthorized(req, res);
   };
 
-  const requireSessionAuth = async (req, res, next) => {
+  const requireSessionAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
@@ -780,7 +866,7 @@ export const createUiAuth = ({
     return respondUnauthorized(req, res);
   };
 
-  const handleSessionStatus = async (req, res) => {
+  const handleSessionStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       res.json({ authenticated: true });
@@ -795,7 +881,10 @@ export const createUiAuth = ({
     res.status(401).json({ authenticated: false, locked: true });
   };
 
-  const resolveAuthenticatedSessionToken = async (req, { allowUrlToken = true } = {}) => {
+  const resolveAuthenticatedSessionToken = async (
+    req: UiAuthRequest,
+    { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
+  ): Promise<string | null> => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return token;
@@ -804,7 +893,11 @@ export const createUiAuth = ({
     return clientAuth ? clientSessionToken(clientAuth) : null;
   };
 
-  const resolveAuthContext = async (req, _res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
+  const resolveAuthContext = async (
+    req: UiAuthRequest,
+    _res: UiAuthResponse | null,
+    { allowClientAuth = true, allowUrlToken = true }: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
+  ) => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return { type: 'session', token };
@@ -814,9 +907,9 @@ export const createUiAuth = ({
     return clientAuth ? clientAuthContext(clientAuth) : null;
   };
 
-  const resolveWebSocketAuthContext = async (req) => resolveAuthContext(req, null);
+  const resolveWebSocketAuthContext = async (req: UiAuthRequest) => resolveAuthContext(req, null);
 
-  const handleUrlAuthToken = async (req, res) => {
+  const handleUrlAuthToken = async (req: UiAuthRequest, res: UiAuthResponse) => {
     const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
     if (!sessionToken) {
       clearSessionCookie(req, res);
@@ -826,7 +919,7 @@ export const createUiAuth = ({
     return res.json(issueUrlAuthTokenForSession(sessionToken));
   };
 
-  const handleSessionCreate = async (req, res) => {
+  const handleSessionCreate = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     const rateLimitResult = await checkRateLimit(req);
 
     res.setHeader('X-RateLimit-Limit', rateLimitResult.limit);
@@ -834,7 +927,7 @@ export const createUiAuth = ({
     res.setHeader('X-RateLimit-Reset', rateLimitResult.reset);
 
     if (!rateLimitResult.allowed) {
-      res.setHeader('Retry-After', rateLimitResult.retryAfter);
+      res.setHeader('Retry-After', rateLimitResult.retryAfter ?? 0);
       res.status(429).json({
         error: 'Too many login attempts, please try again later',
         retryAfter: rateLimitResult.retryAfter
@@ -876,12 +969,13 @@ export const createUiAuth = ({
     });
   };
 
-  const respondPasskeyError = (res, error) => {
-    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 400;
-    res.status(statusCode).json({ error: error?.message || 'Passkey request failed' });
+  const respondPasskeyError = (res: UiAuthResponse, error: unknown): void => {
+    const record = asRecord(error);
+    const statusCode = typeof record?.statusCode === 'number' ? record.statusCode : 400;
+    res.status(statusCode).json({ error: error instanceof Error ? error.message : 'Passkey request failed' });
   };
 
-  const handlePasskeyStatus = async (req, res) => {
+  const handlePasskeyStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       res.json(await passkeyController.getStatus(req));
     } catch (error) {
@@ -889,7 +983,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRegistrationOptions = async (req, res) => {
+  const handlePasskeyRegistrationOptions = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const label = typeof req.body?.label === 'string' ? req.body.label : '';
       const options = await passkeyController.beginRegistration(req, { label });
@@ -899,7 +993,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRegistrationVerify = async (req, res) => {
+  const handlePasskeyRegistrationVerify = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const result = await passkeyController.finishRegistration(req.body);
       res.json(result);
@@ -908,7 +1002,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyAuthenticationOptions = async (req, res) => {
+  const handlePasskeyAuthenticationOptions = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const options = await passkeyController.beginAuthentication(req);
       res.json(options);
@@ -917,7 +1011,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyAuthenticationVerify = async (req, res) => {
+  const handlePasskeyAuthenticationVerify = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       await passkeyController.finishAuthentication(req.body);
       const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
@@ -946,7 +1040,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyList = async (req, res) => {
+  const handlePasskeyList = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       res.json({ passkeys: await passkeyController.listPasskeys(req) });
     } catch (error) {
@@ -954,7 +1048,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRevoke = async (req, res) => {
+  const handlePasskeyRevoke = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const result = await passkeyController.revokePasskey(req, req.params?.id);
       res.json(result);
@@ -963,7 +1057,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handleResetAuth = async (req, res) => {
+  const handleResetAuth = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
     try {
       const passkeyResult = await passkeyController.clearAllPasskeys();
       rotateJwtSecret();
@@ -978,12 +1072,9 @@ export const createUiAuth = ({
     }
   };
 
-  const dispose = () => {
+  const dispose = (): void => {
     loginRateLimiter.clear();
-    if (rateLimitCleanupTimer) {
-      clearInterval(rateLimitCleanupTimer);
-      rateLimitCleanupTimer = null;
-    }
+    stopRateLimitCleanup();
     passkeyController.dispose();
   };
 
@@ -1004,8 +1095,9 @@ export const createUiAuth = ({
     handlePasskeyList,
     handlePasskeyRevoke,
     handleResetAuth,
-    issueTrustedSession: (req, res) => issueSession(req, res, { trustDevice: true }),
-    ensureSessionToken: async (req, _res) => {
+    issueTrustedSession: (req: UiAuthRequest, res: UiAuthResponse) => issueSession(req, res, { trustDevice: true }),
+    ensureSessionToken: async (req: UiAuthRequest, res: UiAuthHeaderResponse | null) => {
+      void res;
       return resolveAuthenticatedSessionToken(req);
     },
     dispose,

@@ -1,16 +1,17 @@
-// @ts-nocheck
 import crypto from 'crypto';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { PROMPT_VERSION, WALKTHROUGH_VERSION } from './schema.js';
+import type { WalkthroughCacheEntry, WalkthroughLanguage, WalkthroughPointer } from './types.js';
 
 // Two artifacts with two different jobs.
 //
 // Cache entries are content-addressed and immutable: the key is derived from
 // the *current* diff, so a hit means "this walkthrough was written about
-// exactly this code". There is no freshness question to ask of an entry 鈥?// staleness is a miss.
+// exactly this code". There is no freshness question to ask of an entry —
+// staleness is a miss.
 //
 // The pointer is mutable and keyed by repository + source only. It answers the
 // questions the cache cannot: which walkthrough was the last one here, what was
@@ -39,21 +40,23 @@ const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 // dense Unicode while rejecting files that cannot be a legitimate cache entry.
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
-const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const sha256 = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
-const ensureDir = (dir) => {
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const ensureDir = (dir: string): boolean => {
   try {
     fs.mkdirSync(dir, { recursive: true });
     return true;
   } catch (error) {
-    console.error('[walkthrough] failed to create store directory:', error?.message || error);
+    console.error('[walkthrough] failed to create store directory:', errorMessage(error));
     return false;
   }
 };
 
 // Atomic so a crash mid-write leaves the previous entry intact rather than a
 // half-written file that later fails to parse.
-const writeJsonAtomic = (filePath, value) => {
+const writeJsonAtomic = (filePath: string, value: unknown): boolean => {
   if (!ensureDir(path.dirname(filePath))) return false;
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
@@ -61,7 +64,7 @@ const writeJsonAtomic = (filePath, value) => {
     fs.renameSync(tmp, filePath);
     return true;
   } catch (error) {
-    console.error('[walkthrough] failed to write store file:', error?.message || error);
+    console.error('[walkthrough] failed to write store file:', errorMessage(error));
     try {
       fs.unlinkSync(tmp);
     } catch {
@@ -71,14 +74,14 @@ const writeJsonAtomic = (filePath, value) => {
   }
 };
 
-const readJson = (filePath) => {
+const readJson = (filePath: string): unknown => {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch {
     // Missing, unreadable, or corrupt all mean the same thing to callers: no
-    // usable cached walkthrough. Never throw 鈥?a bad cache file must not break
+    // usable cached walkthrough. Never throw — a bad cache file must not break
     // the feature.
     return null;
   }
@@ -88,7 +91,14 @@ const readJson = (filePath) => {
  * Content-addressed key. Every input that can change the output is in here:
  * change any of them and you get a miss rather than a stale hit.
  */
-export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, language, files }) {
+export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, language, files }: {
+  files: Array<{ hunks: Array<{ id: string }>; path: string; status: string }>;
+  language?: WalkthroughLanguage;
+  modelID: string;
+  providerID: string;
+  repoRoot: string;
+  sourceKey: string;
+}): string {
   const canonical = JSON.stringify({
     walkthroughVersion: WALKTHROUGH_VERSION,
     promptVersion: PROMPT_VERSION,
@@ -107,23 +117,23 @@ export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, langua
   return sha256(canonical);
 }
 
-const entryPath = (cacheKey) => path.join(ENTRIES_DIR, `${cacheKey}.json`);
-const pointerPath = (repoRoot, sourceKey) => path.join(POINTERS_DIR, `${sha256(`${repoRoot}\0${sourceKey}`)}.json`);
+const entryPath = (cacheKey: string): string => path.join(ENTRIES_DIR, `${cacheKey}.json`);
+const pointerPath = (repoRoot: string, sourceKey: string): string => path.join(POINTERS_DIR, `${sha256(`${repoRoot}\0${sourceKey}`)}.json`);
 
-const isWalkthroughEntry = (value) => Boolean(
-  value
-  && typeof value === 'object'
-  && value.walkthroughVersion === WALKTHROUGH_VERSION
-  && value.walkthrough
-  && Array.isArray(value.walkthrough.chapters),
-);
+const isWalkthroughEntry = (value: unknown): value is WalkthroughCacheEntry & { walkthroughVersion: number } => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  if (entry.walkthroughVersion !== WALKTHROUGH_VERSION) return false;
+  if (!entry.walkthrough || typeof entry.walkthrough !== 'object' || Array.isArray(entry.walkthrough)) return false;
+  return Array.isArray((entry.walkthrough as Record<string, unknown>).chapters);
+};
 
-export function readCachedWalkthrough(cacheKey) {
+export function readCachedWalkthrough(cacheKey: string): WalkthroughCacheEntry | null {
   const value = readJson(entryPath(cacheKey));
   return isWalkthroughEntry(value) ? value : null;
 }
 
-export function writeCachedWalkthrough(cacheKey, entry) {
+export function writeCachedWalkthrough(cacheKey: string, entry: WalkthroughCacheEntry): boolean {
   const written = writeJsonAtomic(entryPath(cacheKey), {
     walkthroughVersion: WALKTHROUGH_VERSION,
     ...entry,
@@ -132,13 +142,25 @@ export function writeCachedWalkthrough(cacheKey, entry) {
   return written;
 }
 
-export function readPointer(repoRoot, sourceKey) {
+export function readPointer(repoRoot: string, sourceKey: string): WalkthroughPointer | null {
   const value = readJson(pointerPath(repoRoot, sourceKey));
-  if (!value || typeof value !== 'object' || typeof value.cacheKey !== 'string') return null;
-  return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const pointer = value as Record<string, unknown>;
+  if (
+    typeof pointer.cacheKey !== 'string'
+    || typeof pointer.generatedAt !== 'string'
+    || typeof pointer.repoRoot !== 'string'
+    || typeof pointer.sourceKey !== 'string'
+  ) return null;
+  return {
+    cacheKey: pointer.cacheKey,
+    generatedAt: pointer.generatedAt,
+    repoRoot: pointer.repoRoot,
+    sourceKey: pointer.sourceKey,
+  };
 }
 
-export function writePointer(repoRoot, sourceKey, pointer) {
+export function writePointer(repoRoot: string, sourceKey: string, pointer: WalkthroughPointer): boolean {
   return writeJsonAtomic(pointerPath(repoRoot, sourceKey), pointer);
 }
 
@@ -147,8 +169,8 @@ export function writePointer(repoRoot, sourceKey, pointer) {
  * entries. Pointers are tiny and are left alone; a pointer to an evicted entry
  * simply reads as "no walkthrough", which is the truthful answer.
  */
-function evictEntries() {
-  let files;
+function evictEntries(): void {
+  let files: Array<{ atime: number; full: string; size: number }>;
   try {
     files = fs.readdirSync(ENTRIES_DIR)
       .filter((name) => name.endsWith('.json'))
@@ -161,7 +183,7 @@ function evictEntries() {
           return null;
         }
       })
-      .filter(Boolean);
+      .filter((file): file is { atime: number; full: string; size: number } => file !== null);
   } catch {
     return;
   }
@@ -195,8 +217,8 @@ function evictEntries() {
  * Drop pointers for repositories that no longer exist. Only ever removes
  * entries whose subject is provably gone.
  */
-export async function pruneMissingRepositories() {
-  let names;
+export async function pruneMissingRepositories(): Promise<number> {
+  let names: string[];
   try {
     names = (await fsp.readdir(POINTERS_DIR)).filter((name) => name.endsWith('.json'));
   } catch {
@@ -222,7 +244,7 @@ export async function pruneMissingRepositories() {
       // Unreachable is not the same as gone. Only a definite "no such file"
       // justifies deleting: a disconnected share or a permissions error must
       // not cost the user their walkthroughs.
-      if (error?.code !== 'ENOENT') continue;
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') continue;
     }
 
     try {

@@ -1,12 +1,28 @@
-// @ts-nocheck
 import express from 'express';
+import type { Express, Response } from 'express';
 import { PiRuntimeNotReadyError } from '@piarium/runtime-broker';
 
 const json = express.json({ limit: '32kb' });
 
-const snapshotBody = (lifecycle) => lifecycle.snapshot;
+export interface RuntimeManagerLifecycle {
+  readonly snapshot: unknown;
+  activate(id: string): Promise<unknown>;
+  activateCustom(packageRoot: string, nodePath?: string | undefined): Promise<unknown>;
+  install(): Promise<unknown>;
+  refresh(): Promise<unknown>;
+  subscribe(listener: (snapshot: unknown) => void): () => void;
+  upgrade(): Promise<unknown>;
+}
 
-const handleAction = async (res, work) => {
+export interface RuntimeManagerRouteOptions {
+  lifecycle: RuntimeManagerLifecycle;
+  openFilesystemPath?: ((targetPath: string) => Promise<void> | void) | undefined;
+  pickPiPackageRoot?: (() => Promise<string | null>) | undefined;
+}
+
+const snapshotBody = (lifecycle: RuntimeManagerLifecycle): unknown => lifecycle.snapshot;
+
+const handleAction = async (res: Response, work: () => Promise<unknown>): Promise<Response> => {
   try {
     const snapshot = await work();
     return res.json(snapshot);
@@ -19,11 +35,11 @@ const handleAction = async (res, work) => {
   }
 };
 
-export const registerRuntimeManagerRoutes = (app, {
+export const registerRuntimeManagerRoutes = (app: Express, {
   lifecycle,
   pickPiPackageRoot,
   openFilesystemPath,
-}) => {
+}: RuntimeManagerRouteOptions): void => {
   app.get('/api/piarium/runtime-manager', (_req, res) => {
     res.json(snapshotBody(lifecycle));
   });
@@ -32,8 +48,8 @@ export const registerRuntimeManagerRoutes = (app, {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
-    const send = (snapshot) => {
+    res.flushHeaders();
+    const send = (snapshot: unknown): void => {
       res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
     };
     send(lifecycle.snapshot);

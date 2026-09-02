@@ -14,6 +14,7 @@ import type {
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
   RuntimeContextTarget,
+  RuntimeMethod,
   RuntimeSourceKind,
   RuntimeWorkerRole,
   SessionSnapshot,
@@ -24,6 +25,7 @@ import {
   findFoundationalPackageBySource,
   FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
   matchesFoundationalPackage,
+  isRuntimeMethod,
   type FoundationalPiPackageId,
   type FoundationalPiPackageManifestEntry,
   type FoundationalPiPackageStatusSnapshot,
@@ -139,40 +141,63 @@ export interface PiRuntimeBrokerOptions {
   promptForProjectTrust?(request: ProjectTrustRequest): Promise<ProjectTrustDecision>;
 }
 
-export type PiCatalogMethod =
-  | "agentProvider.action"
-  | "agentProvider.list"
-  | "config.document.get"
-  | "config.document.update"
-  | "config.text.authority.get"
-  | "config.text.authority.update"
-  | "config.text.get"
-  | "config.text.update"
-  | "config.watch"
-  | "model.list"
-  | "mcp.config.snapshot"
-  | "package.install"
-  | "package.list"
-  | "package.remove"
-  | "package.setEnabled"
-  | "package.update"
-  | "provider.list"
-  | "provider.config.delete"
-  | "provider.config.get"
-  | "provider.config.upsert"
-  | "provider.models.discover"
-  | "provider.login"
-  | "provider.logout"
-  | "resource.copy"
-  | "resource.create"
-  | "resource.delete"
-  | "resource.get"
-  | "resource.list"
-  | "resource.update"
-  | "session.rename"
-  | "session.list"
-  | "settings.get"
-  | "settings.update";
+export const PI_CATALOG_METHODS = [
+  "agentProvider.action",
+  "agentProvider.list",
+  "config.document.get",
+  "config.document.update",
+  "config.text.authority.get",
+  "config.text.authority.update",
+  "config.text.get",
+  "config.text.update",
+  "config.watch",
+  "model.list",
+  "mcp.config.snapshot",
+  "package.install",
+  "package.list",
+  "package.remove",
+  "package.setEnabled",
+  "package.update",
+  "provider.list",
+  "provider.config.delete",
+  "provider.config.get",
+  "provider.config.upsert",
+  "provider.models.discover",
+  "provider.login",
+  "provider.logout",
+  "resource.copy",
+  "resource.create",
+  "resource.delete",
+  "resource.get",
+  "resource.list",
+  "resource.update",
+  "session.rename",
+  "session.list",
+  "settings.get",
+  "settings.update",
+] as const;
+
+export type PiCatalogMethod = (typeof PI_CATALOG_METHODS)[number];
+const PI_CATALOG_METHOD_SET = new Set<string>(PI_CATALOG_METHODS);
+
+export const isPiCatalogMethod = (value: unknown): value is PiCatalogMethod => (
+  typeof value === "string" && PI_CATALOG_METHOD_SET.has(value)
+);
+
+type SessionDynamicMethod = Extract<RuntimeMethod, HostMethod>;
+const BROKER_ONLY_RUNTIME_METHODS: Record<Exclude<RuntimeMethod, HostMethod>, true> = {
+  "package.foundation.restore": true,
+  "package.foundation.setAutoInstallNew": true,
+  "package.foundation.status": true,
+  "session.archive": true,
+  "session.delete": true,
+  "session.entries.preview": true,
+  "session.unarchive": true,
+};
+
+const isSessionDynamicMethod = (value: unknown): value is SessionDynamicMethod => (
+  isRuntimeMethod(value) && !(value in BROKER_ONLY_RUNTIME_METHODS)
+);
 
 export type PiPackageMutationMethod =
   | "package.install"
@@ -360,6 +385,17 @@ export class PiRuntimeBroker {
     return worker.request(method, params);
   }
 
+  async requestCatalogDynamic(method: unknown, params: unknown): Promise<unknown> {
+    if (!isPiCatalogMethod(method)) {
+      throw new PiRuntimeBrokerError(
+        "unsupported_method",
+        `Unsupported catalog method: ${String(method)}`,
+        { retryable: false },
+      );
+    }
+    return this.requestCatalog(method, params as HostMethodParams<typeof method>);
+  }
+
   async requestForWorkspace<M extends Exclude<PiCatalogMethod, "session.list">>(
     cwd: string,
     method: M,
@@ -389,6 +425,17 @@ export class PiRuntimeBroker {
       params,
       "workspace-mutation",
     );
+  }
+
+  async requestForWorkspaceDynamic(cwd: string, method: unknown, params: unknown): Promise<unknown> {
+    if (!isPiCatalogMethod(method) || method === "session.list") {
+      throw new PiRuntimeBrokerError(
+        "unsupported_method",
+        `Unsupported workspace method: ${String(method)}`,
+        { retryable: false },
+      );
+    }
+    return this.requestForWorkspace(cwd, method, params as HostMethodParams<typeof method>);
   }
 
   async listCommandsForWorkspace(cwd: string): Promise<HostMethodResult<"command.list">> {
@@ -622,6 +669,17 @@ export class PiRuntimeBroker {
       params,
       AGENT_RUN_METHODS.has(method) ? "agent-run" : "workspace-mutation",
     );
+  }
+
+  requestForSessionDynamic(sessionId: string, method: unknown, params: unknown): Promise<unknown> {
+    if (!isSessionDynamicMethod(method)) {
+      throw new PiRuntimeBrokerError(
+        "unsupported_method",
+        `Unsupported session method: ${String(method)}`,
+        { retryable: false },
+      );
+    }
+    return this.requestForSession(sessionId, method, params as HostMethodParams<typeof method>);
   }
 
   async #requestWithExecutionAdmission<M extends HostMethod>(

@@ -1,23 +1,74 @@
-// @ts-nocheck
-// TODO: Remove @ts-nocheck once full TypeScript conversion is complete.
-// This 2042-line file was renamed from .js to .ts but needs comprehensive
-// type annotations. Tracked as part of Phase 5 recovery migration.
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  parseWorkspaceCombinedRecoveryPlan,
+  parseRecoveryRetentionPolicy,
+  parseRecoveryStorageMoveOperation,
+  parseWorkspaceRecoveryCheckpointSummary,
+  parseWorkspaceRecoveryFailure,
+  parseWorkspaceRecoveryTurnBinding,
+  type RecoveryRetentionPolicy,
+  type RecoveryRetentionPolicyInput,
+  type RecoveryRetentionStatus,
+  type RecoveryStorageCleanupInput,
+  type RecoveryStorageCleanupOperationResult,
+  type RecoveryStorageCleanupResult,
+  type RecoveryStorageLocation,
+  type RecoveryStorageMoveOperation,
+  type RecoveryStorageMoveResult,
+  type RecoveryStorageStatus,
+  type RecoveryStorageStatusResult,
+  type RecoveryStorageWorkspaceSummary,
+  type RecoveryStorageWorkspaceListResult,
+  type RecoveryRetentionStatusResult,
+  type WorkspaceCombinedRecoveryApplyInput,
+  type WorkspaceCombinedRecoveryListResult,
+  type WorkspaceCombinedRecoveryOperation,
+  type WorkspaceCombinedRecoveryOperationResult,
+  type WorkspaceCombinedRecoveryOperationState,
+  type WorkspaceCombinedRecoveryPlan,
+  type WorkspaceCombinedRecoveryPrepareInput,
+  type WorkspaceCombinedRecoveryPrepareResult,
+  type WorkspaceRecoveryCheckpointInput,
+  type WorkspaceRecoveryCheckpointListResult,
+  type WorkspaceRecoveryCheckpointQuery,
+  type WorkspaceRecoveryCheckpointResult,
+  type WorkspaceRecoveryCheckpointSummary,
+  type WorkspaceRecoveryConflict,
+  type WorkspaceRecoveryEntryTarget,
+  type WorkspaceRecoveryEntryBindingResult,
+  type WorkspaceRecoveryFailure,
+  type WorkspaceRecoveryFailureCode,
+  type WorkspaceRecoveryFailedResult,
+  type WorkspaceRecoveryMutationAfterInput,
+  type WorkspaceRecoveryMutationBeforeInput,
+  type WorkspaceRecoveryMutationResult,
+  type WorkspaceRecoveryStatusResult,
+  type WorkspaceRecoveryTurnBinding,
+  type WorkspaceRecoveryTurnBindingResult,
+  type WorkspaceRecoveryTurnSettledInput,
+  type WorkspaceRecoveryTurnStartInput,
+  type SetRecoveryStorageLocationInput,
+} from '@piarium/extension-contract';
+import {
+  type BindingRow,
+  type ChangeRow,
+  type CheckpointRow,
+  type OperationFilePhase,
+  type OperationFileRow,
+  type OperationData,
+  type OperationRow,
+  type SqliteDatabase,
   bindingFromRow,
   changeFromRow,
   checkpointFromRow,
   deleteObjectReferences,
   initOperationFiles,
   inspectRecoveryJournalCatalog,
-  objectPath,
   openRecoveryJournalCatalog,
-  operationFileByPath,
   operationFileRows,
   operationFromRow,
-  recoveryCatalogStatus,
   rebuildObjectReferences,
   replaceObjectReferences,
   updateOperationFilePhase,
@@ -28,34 +79,368 @@ import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from '.
 import {
   createRecoveryFileStore,
   normalizeResourceId,
+  parseRecoveryState,
   sameState,
   stateIdentity,
   statTree,
+  type RecoveryFileStore,
+  type RecoveryIdentity,
+  type RecoveryState,
 } from './journal-files.js';
 import {
   createRecoveryLocationRegistry,
   readRecoveryJsonAtomic,
   writeRecoveryJsonAtomic,
+  type RecoveryLocationRegistry,
 } from './locations.js';
 import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
+
+type FsPromises = typeof fs.promises;
+type PathModule = typeof path;
+
+interface WorkspaceRegistration {
+  canonicalPath: string;
+  workspaceId: string;
+}
+
+interface DirtyBufferResource {
+  baseRevision: string | null;
+  localEditRevision: number;
+  resource: { resourceId: string; workspaceId: string };
+}
+
+interface DirtyBufferPublication {
+  generation: number;
+  ownerId: string;
+  resources: DirtyBufferResource[];
+  updatedAt: string;
+  workspaceId: string;
+}
+
+interface DirtyBarrierHandle {
+  release(): Promise<void>;
+  settle(): Promise<void>;
+}
+
+interface RecoveryDocumentsAuthority {
+  beginDirtyStateBarrier?: (
+    workspaceId: string,
+    paths: string[],
+    options: { caseSensitive: boolean },
+  ) => Promise<DirtyBarrierHandle>;
+  inspectDirtyBuffers(workspaceId: string): Promise<DirtyBufferPublication[]>;
+  inspectWorkspace(workspaceId: string): Promise<{ root: string; workspaceId: string }>;
+  listWorkspaceRegistrations(): Promise<WorkspaceRegistration[]>;
+}
+
+interface NavigationPrepared {
+  editorImages?: WorkspaceCombinedRecoveryOperation['editorImages'] | undefined;
+  editorText?: string | undefined;
+  expectedLeafId: string | null;
+  removedEntryIds?: string[] | undefined;
+  targetLeafId: string | null;
+}
+
+interface NavigationCommitted {
+  editorImages?: WorkspaceCombinedRecoveryOperation['editorImages'] | undefined;
+  editorText?: string | undefined;
+  markerId?: string | undefined;
+  navigationMarkerId?: string | undefined;
+}
+
+export interface RecoverySessionNavigation {
+  commit(input: {
+    entryId: string;
+    expectedLeafId: string | null;
+    operationId: string;
+    preparedTargetLeafId: string | null;
+    sessionId: string;
+    workspaceId: string;
+  }): Promise<NavigationCommitted>;
+  commitLeaf(input: {
+    expectedLeafId: string | null;
+    operationId: string;
+    preparedTargetLeafId: string | null;
+    sessionId: string;
+    workspaceId: string;
+  }): Promise<NavigationCommitted>;
+  prepare(input: WorkspaceCombinedRecoveryPrepareInput): Promise<NavigationPrepared>;
+  prepareLeaf(input: {
+    sessionId: string;
+    targetLeafId: string | null;
+    workspaceId: string;
+  }): Promise<NavigationPrepared>;
+}
+
+export interface CreateWorkspaceRecoveryEngineOptions {
+  authorityId: string;
+  dataDir: string;
+  defaultRecoveryDir?: string | undefined;
+  documents: RecoveryDocumentsAuthority;
+  fileStore?: RecoveryFileStore | undefined;
+  fsModule?: typeof fs | undefined;
+  fsPromises?: FsPromises | undefined;
+  pathModule?: PathModule | undefined;
+  sessionNavigation: RecoverySessionNavigation;
+  storageOwnerId?: string | undefined;
+}
+
+interface RecoveryTargetStates {
+  expected: RecoveryState;
+  target: RecoveryState;
+}
+
+type RecoveryTargets = Record<string, RecoveryTargetStates>;
+
+interface CombinedOperationRecord extends OperationData {
+  appliedPaths: string[];
+  conversationState: WorkspaceCombinedRecoveryOperation['conversationState'];
+  createdAt: string;
+  editorImages?: WorkspaceCombinedRecoveryOperation['editorImages'] | undefined;
+  editorText?: string | undefined;
+  failure: WorkspaceRecoveryFailure | null;
+  fileState: WorkspaceCombinedRecoveryOperation['fileState'];
+  id: string;
+  navigationMarkerId: string | null;
+  plan: WorkspaceCombinedRecoveryPlan;
+  safety: Record<string, RecoveryState>;
+  state: WorkspaceCombinedRecoveryOperationState;
+  targets: RecoveryTargets;
+  updatedAt: string;
+  workspaceId: string;
+}
+
+interface BindingFailureOptions {
+  code?: WorkspaceRecoveryFailureCode | undefined;
+  origin?: WorkspaceRecoveryFailure['origin'] | undefined;
+  reason?: string | undefined;
+  retryable?: boolean | undefined;
+}
+
+interface WorkspaceLeaseOptions {
+  mode: 'exclusive' | 'shared';
+  purpose: string;
+}
+
+interface LocatedOperation {
+  identity: RecoveryIdentity;
+  record: CombinedOperationRecord;
+  root: string;
+}
+
+interface SequencedRecoveryChange {
+  after: RecoveryState;
+  before: RecoveryState;
+  checkpointId: string;
+  mutationId: string;
+  path: string;
+  sequence: number;
+  toolName: string;
+}
+
+type MoveOperation = RecoveryStorageMoveOperation;
+
+export interface WorkspaceRecoveryEngine {
+  locations: RecoveryLocationRegistry;
+  applyCombinedRecovery(input: WorkspaceCombinedRecoveryApplyInput): Promise<WorkspaceCombinedRecoveryOperationResult>;
+  cancelCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
+  clearStorageLocationOverride(workspaceId: string): Promise<RecoveryStorageMoveResult>;
+  cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupOperationResult>;
+  createCheckpoint(input: WorkspaceRecoveryCheckpointInput): Promise<WorkspaceRecoveryCheckpointResult>;
+  deleteWorkspaceHistory(workspaceId: string): Promise<RecoveryStorageCleanupOperationResult>;
+  fenceUnfinishedOperations(): Promise<WorkspaceCombinedRecoveryOperation[]>;
+  getCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
+  getStorageMove(operationId: string): Promise<RecoveryStorageMoveResult>;
+  listCheckpoints(input: WorkspaceRecoveryCheckpointQuery): Promise<WorkspaceRecoveryCheckpointListResult>;
+  listCombinedOperations(workspaceId: string): Promise<WorkspaceCombinedRecoveryListResult>;
+  listStorageWorkspaces(): Promise<RecoveryStorageWorkspaceListResult>;
+  prepareCombinedRecovery(input: WorkspaceCombinedRecoveryPrepareInput): Promise<WorkspaceCombinedRecoveryPrepareResult>;
+  prepareCombinedUndo(operationId: string): Promise<WorkspaceCombinedRecoveryPrepareResult>;
+  recordMutationAfter(input: WorkspaceRecoveryMutationAfterInput): Promise<WorkspaceRecoveryMutationResult>;
+  recordMutationBefore(input: WorkspaceRecoveryMutationBeforeInput): Promise<WorkspaceRecoveryMutationResult>;
+  recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBindingResult>;
+  recordTurnStart(input: WorkspaceRecoveryTurnStartInput): Promise<WorkspaceRecoveryTurnBindingResult>;
+  retentionStatus(workspaceId: string): Promise<RecoveryRetentionStatusResult>;
+  resolveEntry(input: WorkspaceRecoveryEntryTarget): Promise<WorkspaceRecoveryEntryBindingResult>;
+  resumeCombinedOperations(): Promise<WorkspaceCombinedRecoveryOperation[]>;
+  resumeWorkspaceOperations(): Promise<never[]>;
+  setDefaultStorageLocation(location: RecoveryStorageLocation): Promise<RecoveryStorageStatusResult>;
+  setRetentionPolicy(input: RecoveryRetentionPolicyInput): Promise<RecoveryRetentionStatusResult>;
+  setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveResult>;
+  status(workspaceId: string): Promise<WorkspaceRecoveryStatusResult>;
+  storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
+  dispose(): Promise<void>;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const errorCode = (error: unknown): string | undefined => (
+  isRecord(error) && typeof error.code === 'string' ? error.code : undefined
+);
+
+const requireRecord = (value: unknown, label: string): Record<string, unknown> => {
+  if (!isRecord(value)) {
+    throw new RecoveryPrimitiveError('storage-malformed', `${label} is malformed`, { origin: 'storage' });
+  }
+  return value;
+};
+
+const requireString = (value: unknown, label: string): string => {
+  if (typeof value !== 'string') {
+    throw new RecoveryPrimitiveError('storage-malformed', `${label} is malformed`, { origin: 'storage' });
+  }
+  return value;
+};
+
+const parseStateRecord = (value: unknown, label: string): Record<string, RecoveryState> => {
+  const record = requireRecord(value, label);
+  return Object.fromEntries(Object.entries(record).map(([relativePath, state]) => [
+    relativePath,
+    parseRecoveryState(state),
+  ]));
+};
+
+const parseTargets = (value: unknown): RecoveryTargets => {
+  const record = requireRecord(value, 'Recovery operation targets');
+  return Object.fromEntries(Object.entries(record).map(([relativePath, rawStates]) => {
+    const states = requireRecord(rawStates, `Recovery target ${relativePath}`);
+    return [relativePath, {
+      expected: parseRecoveryState(states.expected),
+      target: parseRecoveryState(states.target),
+    }];
+  }));
+};
+
+const parseCombinedOperationRecord = (row: OperationRow): CombinedOperationRecord => {
+  const raw = operationFromRow(row);
+  const plan = parseWorkspaceCombinedRecoveryPlan(raw.plan);
+  const state = requireString(raw.state, 'Recovery operation state') as WorkspaceCombinedRecoveryOperationState;
+  const allowedStates: readonly WorkspaceCombinedRecoveryOperationState[] = [
+    'planned', 'applying-files', 'files-restored', 'navigating-conversation',
+    'compensating-files', 'compensated', 'complete', 'aborted', 'needs-attention',
+  ];
+  if (!allowedStates.includes(state)) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery operation state is malformed', { origin: 'storage' });
+  }
+  const appliedPaths = Array.isArray(raw.appliedPaths) && raw.appliedPaths.every((entry) => typeof entry === 'string')
+    ? [...raw.appliedPaths] as string[]
+    : (() => { throw new RecoveryPrimitiveError('storage-malformed', 'Recovery applied paths are malformed', { origin: 'storage' }); })();
+  const conversationState = raw.conversationState;
+  if (conversationState !== 'unchanged' && conversationState !== 'navigated' && conversationState !== 'diverged') {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery conversation state is malformed', { origin: 'storage' });
+  }
+  const fileState = raw.fileState;
+  if (fileState !== 'unchanged' && fileState !== 'restored' && fileState !== 'compensated' && fileState !== 'needs-attention') {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file state is malformed', { origin: 'storage' });
+  }
+  const createdAt = requireString(raw.createdAt, 'Recovery operation creation time');
+  const updatedAt = requireString(raw.updatedAt, 'Recovery operation update time');
+  if (!Number.isFinite(Date.parse(createdAt)) || !Number.isFinite(Date.parse(updatedAt))) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery operation timestamp is malformed', { origin: 'storage' });
+  }
+  if (plan.id !== raw.id || plan.workspaceId !== raw.workspaceId) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery operation identity is inconsistent', { origin: 'storage' });
+  }
+  const failure = raw.failure === null || raw.failure === undefined
+    ? null
+    : parseWorkspaceRecoveryFailure(raw.failure);
+  const navigationMarkerId = raw.navigationMarkerId === null || raw.navigationMarkerId === undefined
+    ? null
+    : requireString(raw.navigationMarkerId, 'Recovery navigation marker');
+  const editorImages = raw.editorImages === undefined
+    ? undefined
+    : requireRecord({ value: raw.editorImages }, 'Recovery editor images').value;
+  if (editorImages !== undefined && (!Array.isArray(editorImages) || editorImages.some((entry) => (
+    !isRecord(entry) || typeof entry.data !== 'string' || typeof entry.mimeType !== 'string'
+  )))) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery editor images are malformed', { origin: 'storage' });
+  }
+  if (raw.editorText !== undefined && typeof raw.editorText !== 'string') {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery editor text is malformed', { origin: 'storage' });
+  }
+  return {
+    appliedPaths,
+    conversationState,
+    createdAt,
+    failure,
+    fileState,
+    id: raw.id,
+    navigationMarkerId,
+    plan,
+    safety: parseStateRecord(raw.safety ?? {}, 'Recovery safety states'),
+    state,
+    targets: parseTargets(raw.targets),
+    updatedAt,
+    workspaceId: raw.workspaceId,
+    ...(editorImages === undefined ? {} : { editorImages: editorImages as NonNullable<WorkspaceCombinedRecoveryOperation['editorImages']> }),
+    ...(typeof raw.editorText === 'string' ? { editorText: raw.editorText } : {}),
+  };
+};
+
+const parseBindingRow = (row: BindingRow): WorkspaceRecoveryTurnBinding => (
+  parseWorkspaceRecoveryTurnBinding(bindingFromRow(row))
+);
+
+const parseCheckpointRow = (row: CheckpointRow): WorkspaceRecoveryCheckpointSummary => (
+  parseWorkspaceRecoveryCheckpointSummary(checkpointFromRow(row))
+);
+
+const parseChangeRow = (row: ChangeRow) => {
+  const change = changeFromRow(row);
+  return {
+    ...change,
+    after: change.after === null ? null : parseRecoveryState(change.after),
+    before: parseRecoveryState(change.before),
+  };
+};
+
+const targetStatesFor = (record: CombinedOperationRecord, relativePath: string): RecoveryTargetStates => {
+  const states = record.targets[relativePath];
+  if (!states) {
+    throw new RecoveryPrimitiveError('storage-malformed', `Recovery target is missing: ${relativePath}`, {
+      origin: 'storage',
+    });
+  }
+  return states;
+};
+
+const safetyStateFor = (record: CombinedOperationRecord, relativePath: string): RecoveryState => {
+  const state = record.safety[relativePath];
+  if (!state) {
+    throw new RecoveryPrimitiveError('storage-malformed', `Recovery safety state is missing: ${relativePath}`, {
+      origin: 'storage',
+    });
+  }
+  return state;
+};
+
+const stateByteLength = (state: RecoveryState): number => (
+  state.kind === 'regular-file' ? state.byteLength : 0
+);
+
+const stateObjectHash = (state: RecoveryState): string | undefined => (
+  state.kind === 'regular-file' ? state.objectHash : undefined
+);
 
 const IGNORED_WATCH_PATH = /\.piarium-(?:tmp|restore|recovery)-/;
 const TERMINAL_STATES = new Set(['complete', 'aborted', 'compensated', 'needs-attention']);
 const PRUNABLE_OPERATION_STATES = new Set(['complete', 'aborted', 'compensated']);
-const DEFAULT_RETENTION_POLICY = Object.freeze({
+const DEFAULT_RETENTION_POLICY: Readonly<RecoveryRetentionPolicy> = Object.freeze({
   maxAgeDays: null,
   maxByteLength: null,
   maxCheckpointCount: null,
   maxOperationCount: null,
 });
-const retentionPolicyKey = (workspaceId: string) => `retention_policy:${workspaceId}`;
-const retentionRunKey = (workspaceId: string) => `retention_last_run:${workspaceId}`;
+const retentionPolicyKey = (workspaceId: string): string => `retention_policy:${workspaceId}`;
+const retentionRunKey = (workspaceId: string): string => `retention_last_run:${workspaceId}`;
 
-const operationRevision = (value: unknown) => `sha256-${createHash('sha256')
+const operationRevision = (value: unknown): string => `sha256-${createHash('sha256')
   .update(JSON.stringify(value))
   .digest('hex')}`;
 
-const publicOperation = (record: Record<string, unknown>) => ({
+const publicOperation = (record: CombinedOperationRecord): WorkspaceCombinedRecoveryOperation => ({
   affectedPathCount: record.plan.affectedPaths.length,
   appliedPathCount: record.appliedPaths.length,
   conversationState: record.conversationState,
@@ -77,7 +462,11 @@ const publicOperation = (record: Record<string, unknown>) => ({
   ...(record.plan.undoOf ? { undoOf: record.plan.undoOf } : {}),
 });
 
-const bindingFailure = (message: string, paths: string[] = [], options: Record<string, unknown> = {}) => ({
+const bindingFailure = (
+  message: string,
+  paths: string[] = [],
+  options: BindingFailureOptions = {},
+): WorkspaceRecoveryFailure => ({
   code: options.code ?? 'checkpoint-incomplete',
   message,
   origin: options.origin ?? 'coverage',
@@ -88,20 +477,20 @@ const bindingFailure = (message: string, paths: string[] = [], options: Record<s
   } } : {}),
 });
 
-const providerBindingFailure = (message: string, paths: string[] = []) => bindingFailure(message, paths, {
+const providerBindingFailure = (message: string, paths: string[] = []): WorkspaceRecoveryFailure => bindingFailure(message, paths, {
   code: 'checkpoint-unavailable',
   origin: 'provider',
   reason: 'provider-failure',
   retryable: true,
 });
 
-const runImmediateTransaction = (database: { transaction: (op: () => unknown) => { immediate: () => unknown } }, label: string, operation: () => unknown) => {
+const runImmediateTransaction = <T>(database: SqliteDatabase, label: string, operation: () => T): T => {
   try {
     return database.transaction(operation).immediate();
   } catch (error) {
-    const code = String(error?.code ?? '');
+    const code = errorCode(error) ?? '';
     if (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')
-      || (code.startsWith('SQLITE_CONSTRAINT') && String(error?.message ?? '').includes('checkpoints.workspace_id'))) {
+      || (code.startsWith('SQLITE_CONSTRAINT') && String(error instanceof Error ? error.message : '').includes('checkpoints.workspace_id'))) {
       throw new RecoveryPrimitiveError('recovery-in-progress', `${label} raced with another recovery process`, {
         cause: error,
         origin: 'concurrency',
@@ -112,9 +501,11 @@ const runImmediateTransaction = (database: { transaction: (op: () => unknown) =>
   }
 };
 
-const conflictFingerprint = (value) => operationRevision(value);
+const conflictFingerprint = (value: unknown): string => operationRevision(value);
 
-export const createWorkspaceRecoveryEngine = (options) => {
+export const createWorkspaceRecoveryEngine = (
+  options: CreateWorkspaceRecoveryEngineOptions,
+): WorkspaceRecoveryEngine => {
   const {
     authorityId,
     dataDir,
@@ -137,16 +528,20 @@ export const createWorkspaceRecoveryEngine = (options) => {
   });
   const fileStore = fileStoreOverride ?? createRecoveryFileStore({ fsModule, fsPromises, pathModule });
   const leases = createRecoveryWorkspaceLeaseManager({ fsModule, fsPromises, pathModule });
-  const queues = new Map();
-  const startupFailures = new Map();
+  const queues = new Map<string, Promise<unknown>>();
+  const startupFailures = new Map<string, WorkspaceRecoveryFailure[]>();
   let disposed = false;
 
-  const rememberFailure = (workspaceId, error, fallbackCode = 'internal') => {
+  const rememberFailure = (
+    workspaceId: string,
+    error: unknown,
+    fallbackCode: WorkspaceRecoveryFailureCode = 'internal',
+  ): void => {
     const failures = startupFailures.get(workspaceId) ?? [];
     failures.push(recoveryFailure(error, fallbackCode));
     startupFailures.set(workspaceId, failures);
   };
-  const rememberLeaseReleaseFailure = (workspaceId, error) => rememberFailure(
+  const rememberLeaseReleaseFailure = (workspaceId: string, error: unknown): void => rememberFailure(
     workspaceId,
     new RecoveryPrimitiveError('lease-unavailable', 'Recovery workspace lease could not be released', {
       cause: error,
@@ -155,7 +550,11 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }),
   );
 
-  const runWorkspace = (workspaceId, operation, leaseOptions = null) => {
+  const runWorkspace = <T>(
+    workspaceId: string,
+    operation: () => Promise<T> | T,
+    leaseOptions: WorkspaceLeaseOptions | null = null,
+  ): Promise<T> => {
     const previous = queues.get(workspaceId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
       if (disposed) {
@@ -188,14 +587,14 @@ export const createWorkspaceRecoveryEngine = (options) => {
         }
       }
     });
-    queues.set(workspaceId, current);
+    queues.set(workspaceId, current as Promise<unknown>);
     void current.finally(() => {
       if (queues.get(workspaceId) === current) queues.delete(workspaceId);
     }).catch(() => undefined);
     return current;
   };
 
-  const inspectIdentity = async (workspaceId) => {
+  const inspectIdentity = async (workspaceId: string): Promise<RecoveryIdentity> => {
     const workspace = await documents.inspectWorkspace(workspaceId);
     return {
       authorityId,
@@ -205,7 +604,10 @@ export const createWorkspaceRecoveryEngine = (options) => {
     };
   };
 
-  const inspectStorageIdentity = async (workspaceId) => {
+  const inspectStorageIdentity = async (workspaceId: string): Promise<{
+    identity: RecoveryIdentity;
+    workspaceAvailable: boolean;
+  }> => {
     try {
       return { identity: await inspectIdentity(workspaceId), workspaceAvailable: true };
     } catch (error) {
@@ -224,7 +626,10 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const storageFor = async (identity, create = true) => {
+  const storageFor = async (identity: RecoveryIdentity, create = true): Promise<{
+    root: string;
+    selected: Awaited<ReturnType<RecoveryLocationRegistry['selection']>>;
+  }> => {
     const selected = create
       ? await locations.materialize(identity.workspaceId)
       : await locations.selection(identity.workspaceId);
@@ -234,53 +639,63 @@ export const createWorkspaceRecoveryEngine = (options) => {
     };
   };
 
-  const nextSequence = (database, workspaceId) => (
-    database.prepare('SELECT COALESCE(MAX(sequence), 0) AS value FROM checkpoints WHERE workspace_id = ?')
-      .get(workspaceId).value + 1
-  );
-
-  const checkpointFor = (database, checkpointId) => {
-    const row = database.prepare('SELECT * FROM checkpoints WHERE id = ?').get(checkpointId);
-    return row ? checkpointFromRow(row) : null;
+  const nextSequence = (database: SqliteDatabase, workspaceId: string): number => {
+    const row = database.prepare('SELECT COALESCE(MAX(sequence), 0) AS value FROM checkpoints WHERE workspace_id = ?')
+      .get(workspaceId) as { value: number };
+    return row.value + 1;
   };
 
-  const bindingFor = (database, executionId) => {
-    const row = database.prepare('SELECT * FROM turn_bindings WHERE execution_id = ?').get(executionId);
-    return row ? bindingFromRow(row) : null;
+  const checkpointFor = (database: SqliteDatabase, checkpointId: string): WorkspaceRecoveryCheckpointSummary | null => {
+    const row = database.prepare('SELECT * FROM checkpoints WHERE id = ?').get(checkpointId) as CheckpointRow | undefined;
+    return row ? parseCheckpointRow(row) : null;
   };
 
-  const addJournaledPath = (database, executionId, relativePath) => {
+  const bindingFor = (database: SqliteDatabase, executionId: string): WorkspaceRecoveryTurnBinding | null => {
+    const row = database.prepare('SELECT * FROM turn_bindings WHERE execution_id = ?').get(executionId) as BindingRow | undefined;
+    return row ? parseBindingRow(row) : null;
+  };
+
+  const addJournaledPath = (database: SqliteDatabase, executionId: string, relativePath: string): void => {
     const row = database.prepare(`
       SELECT journaled_resource_ids_json FROM turn_bindings WHERE execution_id = ?
-    `).get(executionId);
+    `).get(executionId) as { journaled_resource_ids_json: string } | undefined;
     if (!row) return;
-    const paths = new Set(JSON.parse(row.journaled_resource_ids_json));
+    const parsed = JSON.parse(row.journaled_resource_ids_json) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery journaled paths are malformed', { origin: 'storage' });
+    }
+    const paths = new Set<string>(parsed);
     paths.add(relativePath);
     database.prepare(`
       UPDATE turn_bindings SET journaled_resource_ids_json = ? WHERE execution_id = ?
     `).run(JSON.stringify([...paths].sort()), executionId);
   };
 
-  const updateCheckpointStats = (database, checkpointId) => {
+  const updateCheckpointStats = (database: SqliteDatabase, checkpointId: string): void => {
     const rows = database.prepare(`
       SELECT before_json, after_json FROM checkpoint_changes
       WHERE checkpoint_id = ? AND after_json IS NOT NULL
-    `).all(checkpointId);
+    `).all(checkpointId) as { after_json: string; before_json: string }[];
     let byteLength = 0;
     let changedPathCount = 0;
     for (const row of rows) {
-      const before = JSON.parse(row.before_json);
-      const after = JSON.parse(row.after_json);
+      const before = parseRecoveryState(JSON.parse(row.before_json) as unknown);
+      const after = parseRecoveryState(JSON.parse(row.after_json) as unknown);
       if (sameState(before, after)) continue;
       changedPathCount += 1;
-      byteLength += Math.max(before.byteLength ?? 0, after.byteLength ?? 0);
+      byteLength += Math.max(stateByteLength(before), stateByteLength(after));
     }
     database.prepare(`
       UPDATE checkpoints SET changed_path_count = ?, byte_length = ? WHERE id = ?
     `).run(changedPathCount, byteLength, checkpointId);
   };
 
-  const setBindingIncomplete = (database, binding, failure, paths = binding.unrecordedResourceIds) => {
+  const setBindingIncomplete = (
+    database: SqliteDatabase,
+    binding: WorkspaceRecoveryTurnBinding,
+    failure: WorkspaceRecoveryFailure,
+    paths: string[] = binding.unrecordedResourceIds,
+  ): void => {
     runImmediateTransaction(database, 'Recovery binding update', () => {
       database.prepare(`
         UPDATE turn_bindings
@@ -292,14 +707,39 @@ export const createWorkspaceRecoveryEngine = (options) => {
     });
   };
 
-  const recordTurnStartInternal = async (input) => {
+  const openWritableCatalog = async (root: string): Promise<SqliteDatabase> => {
+    const database = await openRecoveryJournalCatalog(root, { create: true, fsPromises });
+    if (!database) {
+      throw new RecoveryPrimitiveError('checkpoint-unavailable', 'Recovery catalog could not be created', {
+        origin: 'storage',
+        retryable: true,
+      });
+    }
+    return database;
+  };
+
+  const openExistingCatalog = async (root: string, operationId?: string): Promise<SqliteDatabase> => {
+    const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
+    if (!database) {
+      throw new RecoveryPrimitiveError(
+        operationId ? 'operation-not-found' : 'checkpoint-missing',
+        operationId ? `Unknown recovery operation: ${operationId}` : 'Recovery catalog is missing',
+        { origin: 'storage' },
+      );
+    }
+    return database;
+  };
+
+  const recordTurnStartInternal = async (
+    input: WorkspaceRecoveryTurnStartInput,
+  ): Promise<WorkspaceRecoveryTurnBinding> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const checkpointId = randomUUID();
       const createdAt = new Date().toISOString();
-      let result;
+      let result: WorkspaceRecoveryTurnBinding | null = null;
       runImmediateTransaction(database, 'Turn checkpoint creation', () => {
         const existing = bindingFor(database, input.executionId);
         if (existing) {
@@ -343,23 +783,31 @@ export const createWorkspaceRecoveryEngine = (options) => {
         );
         result = bindingFor(database, input.executionId);
       });
+      if (!result) {
+        throw new RecoveryPrimitiveError('checkpoint-unavailable', 'Turn checkpoint could not be created', {
+          origin: 'storage',
+          retryable: true,
+        });
+      }
       return result;
     } finally {
       database.close();
     }
   };
 
-  const recordMutationBeforeInternal = async (input) => {
+  const recordMutationBeforeInternal = async (
+    input: WorkspaceRecoveryMutationBeforeInput,
+  ): Promise<boolean> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding || binding.workspaceId !== input.workspaceId || binding.status === 'incomplete') return false;
       const captured = await fileStore.captureState(identity, storage.root, input.path, { store: true });
       const existing = database.prepare(`
         SELECT 1 FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?
-      `).get(binding.checkpointId, captured.path);
+      `).get(binding.checkpointId, captured.path) as { 1: number } | undefined;
       runImmediateTransaction(database, 'Recovery before-image record', () => {
         if (!existing) {
           const now = new Date().toISOString();
@@ -381,8 +829,8 @@ export const createWorkspaceRecoveryEngine = (options) => {
             input.workspaceId,
             'checkpoint-change',
             JSON.stringify([binding.checkpointId, captured.path]),
-            captured.state?.objectHash
-              ? [{ objectHash: captured.state.objectHash, slot: 'before' }]
+            stateObjectHash(captured.state)
+              ? [{ objectHash: stateObjectHash(captured.state)!, slot: 'before' }]
               : [],
           );
         }
@@ -400,17 +848,19 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const recordMutationAfterInternal = async (input) => {
+  const recordMutationAfterInternal = async (
+    input: WorkspaceRecoveryMutationAfterInput,
+  ): Promise<boolean> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding || binding.workspaceId !== input.workspaceId || binding.status === 'incomplete') return false;
       const captured = await fileStore.captureState(identity, storage.root, input.path, { store: true });
       const row = database.prepare(`
         SELECT * FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?
-      `).get(binding.checkpointId, captured.path);
+      `).get(binding.checkpointId, captured.path) as ChangeRow | undefined;
       if (!row) {
         setBindingIncomplete(database, binding, providerBindingFailure(
           `Mutation finished without a durable before-image: ${captured.path}`,
@@ -418,7 +868,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         ), [captured.path]);
         return false;
       }
-      const change = changeFromRow(row);
+      const change = parseChangeRow(row);
       const changed = !sameState(change.before, captured.state);
       runImmediateTransaction(database, 'Recovery after-image record', () => {
         const ownerId = JSON.stringify([binding.checkpointId, captured.path]);
@@ -436,8 +886,8 @@ export const createWorkspaceRecoveryEngine = (options) => {
             captured.path,
           );
           replaceObjectReferences(database, input.workspaceId, 'checkpoint-change', ownerId, [
-            ...(change.before?.objectHash ? [{ objectHash: change.before.objectHash, slot: 'before' }] : []),
-            ...(captured.state?.objectHash ? [{ objectHash: captured.state.objectHash, slot: 'after' }] : []),
+            ...(stateObjectHash(change.before) ? [{ objectHash: stateObjectHash(change.before)!, slot: 'before' }] : []),
+            ...(stateObjectHash(captured.state) ? [{ objectHash: stateObjectHash(captured.state)!, slot: 'after' }] : []),
           ]);
         } else {
           database.prepare('DELETE FROM checkpoint_changes WHERE checkpoint_id = ? AND path = ?')
@@ -452,22 +902,31 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const recordTurnSettledInternal = async (input) => {
+  const recordTurnSettledInternal = async (
+    input: WorkspaceRecoveryTurnSettledInput,
+  ): Promise<WorkspaceRecoveryTurnBinding> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding) throw new RecoveryPrimitiveError('checkpoint-missing', 'Turn checkpoint was not created');
       const coverageRow = database.prepare(`
         SELECT journaled_resource_ids_json FROM turn_bindings WHERE execution_id = ?
-      `).get(input.executionId);
-      const recorded = JSON.parse(coverageRow.journaled_resource_ids_json).map(normalizeResourceId);
-      const comparison = (value) => process.platform === 'win32' ? value.toLowerCase() : value;
+      `).get(input.executionId) as { journaled_resource_ids_json: string } | undefined;
+      if (!coverageRow) {
+        throw new RecoveryPrimitiveError('checkpoint-missing', 'Turn checkpoint coverage is missing', { origin: 'storage' });
+      }
+      const rawRecorded = JSON.parse(coverageRow.journaled_resource_ids_json) as unknown;
+      if (!Array.isArray(rawRecorded)) {
+        throw new RecoveryPrimitiveError('storage-malformed', 'Turn checkpoint coverage is malformed', { origin: 'storage' });
+      }
+      const recorded = rawRecorded.map(normalizeResourceId);
+      const comparison = (value: string): string => process.platform === 'win32' ? value.toLowerCase() : value;
       const recordedKeys = new Set(recorded.map(comparison));
       const observed = [...new Set(input.observedResourceIds
         .map(normalizeResourceId)
-        .filter((value) => value && !IGNORED_WATCH_PATH.test(value)))].sort();
+        .filter((value): value is string => Boolean(value) && !IGNORED_WATCH_PATH.test(value)))].sort();
       const unrecorded = observed.filter((value) => !recordedKeys.has(comparison(value)));
       const retainedFailure = binding.status === 'incomplete' && binding.failure?.origin === 'provider'
         ? binding.failure
@@ -503,13 +962,17 @@ export const createWorkspaceRecoveryEngine = (options) => {
           .run(exact ? 'ready' : 'incomplete', binding.checkpointId);
         updateCheckpointStats(database, binding.checkpointId);
       });
-      return bindingFor(database, input.executionId);
+      const settled = bindingFor(database, input.executionId);
+      if (!settled) throw new RecoveryPrimitiveError('checkpoint-missing', 'Settled turn checkpoint is missing', { origin: 'storage' });
+      return settled;
     } finally {
       database.close();
     }
   };
 
-  const resolveEntryInternal = async (input) => {
+  const resolveEntryInternal = async (
+    input: WorkspaceRecoveryEntryTarget,
+  ): Promise<Exclude<WorkspaceRecoveryEntryBindingResult, WorkspaceRecoveryFailedResult>> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
@@ -520,9 +983,9 @@ export const createWorkspaceRecoveryEngine = (options) => {
         WHERE session_id = ? AND workspace_id = ?
           AND (user_entry_id = ? OR assistant_entry_id = ?)
         LIMIT 1
-      `).get(input.sessionId, input.workspaceId, input.entryId, input.entryId);
+      `).get(input.sessionId, input.workspaceId, input.entryId, input.entryId) as BindingRow | undefined;
       if (!row) return { reason: 'entry-unbound', status: 'unbound' };
-      const binding = bindingFromRow(row);
+      const binding = parseBindingRow(row);
       if (binding.status !== 'ready') return { binding, reason: 'checkpoint-incomplete', status: 'incomplete' };
       const checkpoint = checkpointFor(database, binding.checkpointId);
       if (!checkpoint || checkpoint.state !== 'ready') {
@@ -539,7 +1002,11 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const changesForEntries = (database, sessionId, entryIds) => {
+  const changesForEntries = (
+    database: SqliteDatabase,
+    sessionId: string,
+    entryIds: string[],
+  ): { changes: SequencedRecoveryChange[]; incomplete: string[] } => {
     if (entryIds.length === 0) return { changes: [], incomplete: [] };
     const placeholders = entryIds.map(() => '?').join(', ');
     const checkpoints = database.prepare(`
@@ -549,16 +1016,21 @@ export const createWorkspaceRecoveryEngine = (options) => {
       WHERE b.session_id = ?
         AND (b.user_entry_id IN (${placeholders}) OR b.assistant_entry_id IN (${placeholders}))
       ORDER BY c.sequence ASC
-    `).all(sessionId, ...entryIds, ...entryIds);
-    const changes = [];
+    `).all(sessionId, ...entryIds, ...entryIds) as {
+      checkpoint_id: string;
+      sequence: number;
+      status: string;
+    }[];
+    const changes: SequencedRecoveryChange[] = [];
     for (const checkpoint of checkpoints.filter((row) => row.status === 'ready')) {
       for (const row of database.prepare(`
         SELECT * FROM checkpoint_changes WHERE checkpoint_id = ? AND after_json IS NOT NULL
         ORDER BY path
-      `).all(checkpoint.checkpoint_id)) {
-        const change = changeFromRow(row);
-        if (!sameState(change.before, change.after)) {
-          changes.push({ ...change, sequence: checkpoint.sequence });
+      `).all(checkpoint.checkpoint_id) as ChangeRow[]) {
+        const change = parseChangeRow(row);
+        const after = change.after;
+        if (after && !sameState(change.before, after)) {
+          changes.push({ ...change, after, sequence: checkpoint.sequence });
         }
       }
     }
@@ -568,9 +1040,12 @@ export const createWorkspaceRecoveryEngine = (options) => {
     };
   };
 
-  const mergeInverseTargets = (changes) => {
-    const byPath = new Map();
-    const chainConflicts = new Set();
+  const mergeInverseTargets = (changes: SequencedRecoveryChange[]): {
+    byPath: Map<string, RecoveryTargetStates>;
+    chainConflicts: string[];
+  } => {
+    const byPath = new Map<string, RecoveryTargetStates>();
+    const chainConflicts = new Set<string>();
     for (const change of changes.sort((left, right) => left.sequence - right.sequence)) {
       const current = byPath.get(change.path);
       if (!current) byPath.set(change.path, { expected: change.after, target: change.before });
@@ -582,8 +1057,13 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return { byPath, chainConflicts: [...chainConflicts] };
   };
 
-  const inspectTargetConflicts = async (identity, root, targets, options = {}) => {
-    let dirtyOwners;
+  const inspectTargetConflicts = async (
+    identity: RecoveryIdentity,
+    root: string,
+    targets: RecoveryTargets,
+    options: { store?: boolean | undefined } = {},
+  ): Promise<{ conflicts: WorkspaceRecoveryConflict[]; currentStates: Record<string, RecoveryState> }> => {
+    let dirtyOwners: DirtyBufferPublication[];
     try {
       dirtyOwners = await documents.inspectDirtyBuffers(identity.workspaceId);
     } catch (error) {
@@ -593,8 +1073,13 @@ export const createWorkspaceRecoveryEngine = (options) => {
         retryable: true,
       });
     }
-    const comparison = (value) => process.platform === 'win32' ? value.toLowerCase() : value;
-    const dirtyByPath = new Map();
+    const comparison = (value: string): string => process.platform === 'win32' ? value.toLowerCase() : value;
+    const dirtyByPath = new Map<string, {
+      baseRevision: string | null;
+      generation: number;
+      localEditRevision: number;
+      ownerId: string;
+    }[]>();
     for (const owner of dirtyOwners) {
       for (const entry of owner.resources) {
         const key = comparison(normalizeResourceId(entry.resource.resourceId));
@@ -613,8 +1098,8 @@ export const createWorkspaceRecoveryEngine = (options) => {
         || left.generation - right.generation
         || left.localEditRevision - right.localEditRevision);
     }
-    const conflicts = [];
-    const currentStates = {};
+    const conflicts: WorkspaceRecoveryConflict[] = [];
+    const currentStates: Record<string, RecoveryState> = {};
     for (const [relativePath, states] of Object.entries(targets)) {
       try {
         const current = (await fileStore.captureState(identity, root, relativePath, {
@@ -662,7 +1147,10 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return { conflicts, currentStates };
   };
 
-  const beginDirtyBarrier = async (identity, paths) => {
+  const beginDirtyBarrier = async (
+    identity: RecoveryIdentity,
+    paths: string[],
+  ): Promise<DirtyBarrierHandle> => {
     if (paths.length === 0) return { release: async () => undefined, settle: async () => undefined };
     if (typeof documents.beginDirtyStateBarrier !== 'function') {
       throw new RecoveryPrimitiveError('dirty-state-unavailable', 'Document surfaces do not support a dirty-state barrier', {
@@ -683,11 +1171,19 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const buildConflicts = async (identity, root, targets) => (
+  const buildConflicts = async (
+    identity: RecoveryIdentity,
+    root: string,
+    targets: RecoveryTargets,
+  ): Promise<WorkspaceRecoveryConflict[]> => (
     await inspectTargetConflicts(identity, root, targets)
   ).conflicts;
 
-  const validateConflictConfirmation = (planned, current, input) => {
+  const validateConflictConfirmation = (
+    planned: WorkspaceRecoveryConflict[],
+    current: WorkspaceRecoveryConflict[],
+    input: WorkspaceCombinedRecoveryApplyInput,
+  ): void => {
     const plannedByPath = new Map(planned.map((conflict) => [conflict.path, conflict]));
     const currentByPath = new Map(current.map((conflict) => [conflict.path, conflict]));
     // unsupported conflicts can never be overwritten by any policy.
@@ -749,7 +1245,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const persistOperation = (database, record) => {
+  const persistOperation = (database: SqliteDatabase, record: CombinedOperationRecord): void => {
     record.updatedAt = new Date().toISOString();
     writeOperationRow(database, {
       createdAt: record.createdAt,
@@ -762,42 +1258,59 @@ export const createWorkspaceRecoveryEngine = (options) => {
     });
   };
 
-  const locateOperation = async (operationId) => {
+  const locateOperation = async (operationId: string): Promise<LocatedOperation> => {
     const registrations = await documents.listWorkspaceRegistrations();
+    let inspectionFailure: unknown;
     for (const registration of registrations) {
-      let identity;
+      let identity: RecoveryIdentity;
       try {
         identity = await inspectIdentity(registration.workspaceId);
-      } catch {
+      } catch (error) {
+        inspectionFailure ??= error;
         continue;
       }
-      const storage = await storageFor(identity, false).catch(() => null);
-      if (!storage) continue;
-      const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises }).catch(() => null);
+      let storage: Awaited<ReturnType<typeof storageFor>>;
+      let database: SqliteDatabase | null;
+      try {
+        storage = await storageFor(identity, false);
+        database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+      } catch (error) {
+        inspectionFailure ??= error;
+        continue;
+      }
       if (!database) continue;
       try {
-        const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'").get(operationId);
-        if (row) return { identity, record: operationFromRow(row), root: storage.root };
+        const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'")
+          .get(operationId) as OperationRow | undefined;
+        if (row) return { identity, record: parseCombinedOperationRecord(row), root: storage.root };
       } finally {
         database.close();
       }
     }
+    if (inspectionFailure) {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery operation lookup could not inspect every workspace catalog', {
+        cause: inspectionFailure,
+        origin: 'storage',
+      });
+    }
     throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${operationId}`);
   };
 
-  const prepareCombinedInternal = async (input) => {
+  const prepareCombinedInternal = async (
+    input: WorkspaceCombinedRecoveryPrepareInput,
+  ): Promise<WorkspaceCombinedRecoveryPlan> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
     const navigation = await sessionNavigation.prepare(input);
     const removedEntryIds = [...new Set(navigation.removedEntryIds ?? [])];
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const targetBinding = await resolveEntryInternal(input);
       const loaded = changesForEntries(database, input.sessionId, removedEntryIds);
       const merged = mergeInverseTargets(loaded.changes);
       const targets = Object.fromEntries(merged.byPath);
       const dirtyBarrier = await beginDirtyBarrier(identity, Object.keys(targets));
-      let conflicts;
+      let conflicts: WorkspaceRecoveryConflict[];
       try {
         conflicts = await buildConflicts(identity, storage.root, targets);
       } finally {
@@ -815,9 +1328,9 @@ export const createWorkspaceRecoveryEngine = (options) => {
       const createdAt = new Date().toISOString();
       const affectedPaths = Object.keys(targets).sort();
       const changedBytes = Object.values(targets).reduce((total, states) => (
-        total + Math.max(states.target.byteLength ?? 0, states.expected.byteLength ?? 0)
+        total + Math.max(stateByteLength(states.target), stateByteLength(states.expected))
       ), 0);
-      const draft = {
+      const draft: Omit<WorkspaceCombinedRecoveryPlan, 'revision'> = {
         affectedPaths,
         changedBytes,
         conflicts,
@@ -831,8 +1344,8 @@ export const createWorkspaceRecoveryEngine = (options) => {
         targetLeafId: navigation.targetLeafId,
         workspaceId: input.workspaceId,
       };
-      const plan = { ...draft, revision: operationRevision(draft) };
-      const record = {
+      const plan: WorkspaceCombinedRecoveryPlan = { ...draft, revision: operationRevision(draft) };
+      const record: CombinedOperationRecord = {
         appliedPaths: [],
         conversationState: 'unchanged',
         createdAt,
@@ -847,6 +1360,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         state: 'planned',
         targets,
         updatedAt: createdAt,
+        workspaceId: input.workspaceId,
       };
       // Persist the operation row and initialize operation_files in the
       // same transaction so a crash cannot leave one without the other.
@@ -860,17 +1374,22 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const compensate = async (record, identity, root, database) => {
+  const compensate = async (
+    record: CombinedOperationRecord,
+    identity: RecoveryIdentity,
+    root: string,
+    database: SqliteDatabase,
+  ): Promise<void> => {
     record.state = 'compensating-files';
     persistOperation(database, record);
     // Compensate in reverse order, using operation_files phases to track
     // exactly which files were applied and need rollback.
     // Handle files in any of these phases:
-    //   target-observed   �?write phase=compensate-intent, then write safety
-    //   compensate-intent �?safety write was interrupted; continue writing safety
-    //   safety-observed   �?already compensated, skip
-    //   needs-attention   �?blocking terminal, must not be skipped
-    //   pending/apply-intent �?never applied, skip (no compensation needed)
+    //   target-observed   → write phase=compensate-intent, then write safety
+    //   compensate-intent → safety write was interrupted; continue writing safety
+    //   safety-observed   → already compensated, skip
+    //   needs-attention   → blocking terminal, must not be skipped
+    //   pending/apply-intent → never applied, skip (no compensation needed)
     const fileRows = operationFileRows(database, record.id).reverse();
     for (const row of fileRows) {
       const relativePath = row.path;
@@ -884,16 +1403,16 @@ export const createWorkspaceRecoveryEngine = (options) => {
       // target-observed or compensate-intent: verify disk is at target, then write safety
       if (row.phase === 'target-observed' || row.phase === 'compensate-intent') {
         const current = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-        if (!sameState(current, record.targets[relativePath].target)) {
+        if (!sameState(current, targetStatesFor(record, relativePath).target)) {
           updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
           throw new RecoveryPrimitiveError('needs-attention', `Cannot compensate a file changed after recovery: ${relativePath}`, {
             origin: 'storage',
           });
         }
         updateOperationFilePhase(database, record.id, relativePath, 'compensate-intent');
-        await fileStore.applyState(identity, root, relativePath, record.safety[relativePath]);
+        await fileStore.applyState(identity, root, relativePath, safetyStateFor(record, relativePath));
         const safetyState = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-        if (!sameState(safetyState, record.safety[relativePath])) {
+        if (!sameState(safetyState, safetyStateFor(record, relativePath))) {
           updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
           throw new RecoveryPrimitiveError('needs-attention', `Compensated file did not match safety state: ${relativePath}`, {
             origin: 'storage',
@@ -907,15 +1426,19 @@ export const createWorkspaceRecoveryEngine = (options) => {
     persistOperation(database, record);
   };
 
-  const applyLocatedOperation = async (located, input) => {
+  const applyLocatedOperation = async (
+    located: LocatedOperation,
+    input: WorkspaceCombinedRecoveryApplyInput,
+  ): Promise<WorkspaceCombinedRecoveryOperation> => {
     const { identity, root } = located;
     const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
     if (!database) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${input.operationId}`);
-    let dirtyBarrier;
+    let dirtyBarrier: DirtyBarrierHandle | undefined;
     try {
-      const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'").get(input.operationId);
+      const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'")
+        .get(input.operationId) as OperationRow | undefined;
       if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${input.operationId}`);
-      const record = operationFromRow(row);
+      const record = parseCombinedOperationRecord(row);
       if (record.plan.revision !== input.expectedRevision) {
         throw new RecoveryPrimitiveError('stale-plan', 'Recovery plan changed before it was applied', {
           origin: 'conflict',
@@ -935,7 +1458,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       const currentConflicts = await buildConflicts(identity, root, record.targets);
       validateConflictConfirmation(record.plan.conflicts, currentConflicts, input);
       if (record.state === 'planned') {
-        for (const [relativePath, states] of Object.entries(record.targets)) {
+        for (const relativePath of Object.keys(record.targets)) {
           const current = await fileStore.captureState(identity, root, relativePath, { store: true });
           record.safety[relativePath] = current.state;
           updateOperationFilePhase(database, record.id, relativePath, 'apply-intent', {
@@ -951,7 +1474,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         for (const row of fileRows) {
           const relativePath = row.path;
           // needs-attention is a blocking terminal phase. It must never be
-          // skipped by the apply loop �?doing so would let the operation
+          // skipped by the apply loop — doing so would let the operation
           // proceed to files-restored and navigate the conversation despite
           // a file whose state could not be verified.
           if (row.phase === 'needs-attention') {
@@ -973,7 +1496,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
           // conflict policy. Under overwrite-confirmed the user authorized the
           // conflicts they saw; a *new* change after that is still a stale-plan.
           const current = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-          if (!sameState(current, record.safety[relativePath])) {
+          if (!sameState(current, safetyStateFor(record, relativePath))) {
             updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
             throw new RecoveryPrimitiveError('stale-plan', `File changed after safety capture: ${relativePath}`, {
               details: { paths: [relativePath] },
@@ -981,9 +1504,9 @@ export const createWorkspaceRecoveryEngine = (options) => {
               retryable: true,
             });
           }
-          await fileStore.applyState(identity, root, relativePath, record.targets[relativePath].target);
+          await fileStore.applyState(identity, root, relativePath, targetStatesFor(record, relativePath).target);
           const verified = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-          if (!sameState(verified, record.targets[relativePath].target)) {
+          if (!sameState(verified, targetStatesFor(record, relativePath).target)) {
             updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
             throw new RecoveryPrimitiveError('needs-attention', `Restored file did not match its checkpoint: ${relativePath}`, {
               origin: 'storage',
@@ -1038,7 +1561,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         record.conversationState = 'navigated';
         record.editorImages = navigation.editorImages ?? record.editorImages;
         record.editorText = navigation.editorText ?? record.editorText;
-        record.navigationMarkerId = navigation.markerId ?? navigation.navigationMarkerId;
+        record.navigationMarkerId = navigation.markerId ?? navigation.navigationMarkerId ?? null;
       } catch (error) {
         record.conversationState = 'diverged';
         if (record.appliedPaths.length > 0) await compensate(record, identity, root, database);
@@ -1060,16 +1583,18 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const getOperationInternal = async (operationId) => {
+  const getOperationInternal = async (operationId: string): Promise<WorkspaceCombinedRecoveryOperation> => {
     const located = await locateOperation(operationId);
     return publicOperation(located.record);
   };
 
-  const cancelOperationInternal = async (operationId) => {
+  const cancelOperationInternal = async (operationId: string): Promise<WorkspaceCombinedRecoveryOperation> => {
     const located = await locateOperation(operationId);
-    const database = await openRecoveryJournalCatalog(located.root, { create: false, fsPromises });
+    const database = await openExistingCatalog(located.root, operationId);
     try {
-      const record = operationFromRow(database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId));
+      const row = database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
+      if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${operationId}`);
+      const record = parseCombinedOperationRecord(row);
       if (record.state === 'planned') {
         record.state = 'aborted';
         persistOperation(database, record);
@@ -1080,11 +1605,13 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const prepareUndoInternal = async (operationId) => {
+  const prepareUndoInternal = async (operationId: string): Promise<WorkspaceCombinedRecoveryPlan> => {
     const located = await locateOperation(operationId);
-    const database = await openRecoveryJournalCatalog(located.root, { create: false, fsPromises });
+    const database = await openExistingCatalog(located.root, operationId);
     try {
-      const original = operationFromRow(database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId));
+      const row = database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
+      if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${operationId}`);
+      const original = parseCombinedOperationRecord(row);
       if (original.state !== 'complete') {
         throw new RecoveryPrimitiveError('recovery-in-progress', 'Only a completed recovery can be undone');
       }
@@ -1093,26 +1620,27 @@ export const createWorkspaceRecoveryEngine = (options) => {
         targetLeafId: original.plan.expectedLeafId,
         workspaceId: original.plan.workspaceId,
       });
-      const targets = {};
+      const targets: RecoveryTargets = {};
       for (const relativePath of original.plan.affectedPaths) {
+        const originalStates = targetStatesFor(original, relativePath);
         targets[relativePath] = {
-          expected: original.targets[relativePath].target,
-          target: original.safety[relativePath],
+          expected: originalStates.target,
+          target: safetyStateFor(original, relativePath),
         };
       }
       const id = randomUUID();
       const createdAt = new Date().toISOString();
       const dirtyBarrier = await beginDirtyBarrier(located.identity, Object.keys(targets));
-      let conflicts;
+      let conflicts: WorkspaceRecoveryConflict[];
       try {
         conflicts = await buildConflicts(located.identity, located.root, targets);
       } finally {
         await dirtyBarrier.release();
       }
-      const draft = {
+      const draft: Omit<WorkspaceCombinedRecoveryPlan, 'revision'> = {
         affectedPaths: Object.keys(targets).sort(),
         changedBytes: Object.values(targets).reduce((total, states) => (
-          total + Math.max(states.expected.byteLength ?? 0, states.target.byteLength ?? 0)
+          total + Math.max(stateByteLength(states.expected), stateByteLength(states.target))
         ), 0),
         conflicts,
         coverage: 'ready',
@@ -1126,7 +1654,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         undoOf: original.id,
         workspaceId: original.plan.workspaceId,
       };
-      const plan = { ...draft, revision: operationRevision(draft) };
+      const plan: WorkspaceCombinedRecoveryPlan = { ...draft, revision: operationRevision(draft) };
       database.transaction(() => {
         persistOperation(database, {
           appliedPaths: [],
@@ -1141,6 +1669,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
           state: 'planned',
           targets,
           updatedAt: createdAt,
+          workspaceId: original.plan.workspaceId,
         });
         initOperationFiles(database, id, targets);
       })();
@@ -1150,10 +1679,12 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const createCheckpointInternal = async (input) => {
+  const createCheckpointInternal = async (
+    input: WorkspaceRecoveryCheckpointInput,
+  ): Promise<WorkspaceRecoveryCheckpointSummary> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       const id = randomUUID();
       runImmediateTransaction(database, 'Named checkpoint creation', () => {
@@ -1162,13 +1693,18 @@ export const createWorkspaceRecoveryEngine = (options) => {
           VALUES (?, ?, ?, 'named', 'ready', ?, ?)
         `).run(id, input.workspaceId, nextSequence(database, input.workspaceId), new Date().toISOString(), input.name);
       });
-      return checkpointFor(database, id);
+      const checkpoint = checkpointFor(database, id);
+      if (!checkpoint) throw new RecoveryPrimitiveError('checkpoint-missing', 'Named checkpoint was not persisted', { origin: 'storage' });
+      return checkpoint;
     } finally {
       database.close();
     }
   };
 
-  const listCheckpointsInternal = async (input) => {
+  const listCheckpointsInternal = async (input: WorkspaceRecoveryCheckpointQuery): Promise<{
+    checkpoints: WorkspaceRecoveryCheckpointSummary[];
+    nextCursor: number | null;
+  }> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
@@ -1184,31 +1720,32 @@ export const createWorkspaceRecoveryEngine = (options) => {
         input.cursor ?? null,
         input.cursor ?? null,
         limit === undefined ? -1 : limit + 1,
-      );
+      ) as CheckpointRow[];
       const hasMore = limit !== undefined && rows.length > limit;
-      const checkpoints = (limit === undefined ? rows : rows.slice(0, limit)).map(checkpointFromRow);
-      return { checkpoints, nextCursor: hasMore ? checkpoints.at(-1).sequence : null };
+      const checkpoints = (limit === undefined ? rows : rows.slice(0, limit)).map(parseCheckpointRow);
+      return { checkpoints, nextCursor: hasMore ? checkpoints.at(-1)!.sequence : null };
     } finally {
       database.close();
     }
   };
 
-  const listOperationsInternal = async (workspaceId) => {
+  const listOperationsInternal = async (workspaceId: string): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
     if (!database) return [];
     try {
-      return database.prepare(`
+      const rows = database.prepare(`
         SELECT * FROM operations WHERE workspace_id = ? AND kind = 'combined'
         ORDER BY created_at DESC
-      `).all(workspaceId).map(operationFromRow).map(publicOperation);
+      `).all(workspaceId) as OperationRow[];
+      return rows.map(parseCombinedOperationRecord).map(publicOperation);
     } finally {
       database.close();
     }
   };
 
-  const storageStatusInternal = async (workspaceId) => {
+  const storageStatusInternal = async (workspaceId?: string): Promise<RecoveryStorageStatus> => {
     const locationDocument = await locations.read();
     if (!workspaceId) {
       return {
@@ -1233,15 +1770,15 @@ export const createWorkspaceRecoveryEngine = (options) => {
       .catch(() => ({ byteLength: 0, objectCount: 0 }));
     let checkpointCount = 0;
     let readyCheckpointCount = 0;
-    let state = 'missing';
-    let catalog = { currentSchemaVersion: 0, retiredCatalogCount: 0, state: 'missing' };
-    // Use the read-only inspect path for status queries �?this never
+    let state: RecoveryStorageStatus['state'] = 'missing';
+    let catalog: RecoveryStorageStatus['catalog'] = { currentSchemaVersion: 0, retiredCatalogCount: 0, state: 'missing' };
+    // Use the read-only inspect path for status queries — this never
     // migrates, retires, or creates a catalog. It only classifies and,
     // for current v5 catalogs, opens a readonly handle to count rows.
     const inspected = await inspectRecoveryJournalCatalog(root, { fsPromises }).catch((error) => {
-      if (error?.code === 'storage-schema-newer') {
+      if (errorCode(error) === 'storage-schema-newer') {
         state = 'corrupt';
-      } else if (error?.code === 'storage-malformed') {
+      } else if (errorCode(error) === 'storage-malformed') {
         state = 'malformed';
       } else {
         state = 'corrupt';
@@ -1249,14 +1786,21 @@ export const createWorkspaceRecoveryEngine = (options) => {
       return null;
     });
     if (inspected) {
-      catalog = inspected.status;
+      catalog = {
+        currentSchemaVersion: inspected.status.currentSchemaVersion,
+        retiredCatalogCount: inspected.status.retiredCatalogCount,
+        state: inspected.status.state,
+        ...('migratedFrom' in inspected.status && inspected.status.migratedFrom !== undefined
+          ? { migratedFrom: inspected.status.migratedFrom }
+          : {}),
+      };
       if (inspected.database) {
         try {
           const counts = inspected.database.prepare(`
             SELECT COUNT(*) AS count,
               SUM(CASE WHEN state = 'ready' THEN 1 ELSE 0 END) AS ready
             FROM checkpoints WHERE workspace_id = ?
-          `).get(workspaceId);
+          `).get(workspaceId) as { count: number; ready: number | null };
           checkpointCount = counts.count;
           readyCheckpointCount = counts.ready ?? 0;
           state = 'ready';
@@ -1267,7 +1811,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         || inspected.classification.kind === 'retire'
         || inspected.classification.kind === 'empty') {
         // Catalog exists but needs activation before it can be read.
-        // Report it as 'ready' with zero counts �?the caller can activate
+        // Report it as 'ready' with zero counts — the caller can activate
         // by performing a write operation (createCheckpoint, etc).
         state = 'ready';
       }
@@ -1288,13 +1832,17 @@ export const createWorkspaceRecoveryEngine = (options) => {
     };
   };
 
-  const writeMoveOperation = (operation) => writeRecoveryJsonAtomic(
+  const writeMoveOperation = (operation: MoveOperation): Promise<void> => writeRecoveryJsonAtomic(
     pathModule.join(locations.operationsRoot, `${operation.id}.json`),
     operation,
     { fsPromises, pathModule },
   );
 
-  const moveStorageInternal = async (workspaceId, targetLocation, sourceKind) => {
+  const moveStorageInternal = async (
+    workspaceId: string,
+    targetLocation: RecoveryStorageLocation,
+    sourceKind: 'global' | 'workspace',
+  ): Promise<MoveOperation> => {
     const identity = await inspectIdentity(workspaceId);
     const selected = await locations.selection(workspaceId);
     const from = selected.location;
@@ -1302,7 +1850,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     const sourceRoot = await locations.resolve(identity, from);
     const destinationRoot = await locations.resolve(identity, to);
     const now = new Date().toISOString();
-    const operation = {
+    const operation: MoveOperation = {
       byteLength: 0,
       from,
       id: randomUUID(),
@@ -1321,7 +1869,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         try {
           await fsPromises.lstat(sourceRoot);
         } catch (error) {
-          if (error?.code !== 'ENOENT') throw error;
+          if (errorCode(error) !== 'ENOENT') throw error;
           sourceExists = false;
         }
         if (sourceExists) {
@@ -1336,7 +1884,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
             await fsPromises.lstat(destinationRoot);
             throw new RecoveryPrimitiveError('storage-move-failed', `Recovery destination already exists: ${destinationRoot}`);
           } catch (error) {
-            if (error?.code !== 'ENOENT') throw error;
+            if (errorCode(error) !== 'ENOENT') throw error;
           }
           await fsPromises.rename(staging, destinationRoot);
         } else {
@@ -1366,14 +1914,14 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return operation;
   };
 
-  const listStorageWorkspacesInternal = async () => {
+  const listStorageWorkspacesInternal = async (): Promise<RecoveryStorageWorkspaceSummary[]> => {
     const registrations = await documents.listWorkspaceRegistrations();
     const document = await locations.read();
     const known = new Map(registrations.map((entry) => [entry.workspaceId, entry]));
     for (const workspaceId of [...Object.keys(document.locations), ...Object.keys(document.inheritedLocations)]) {
       if (!known.has(workspaceId)) known.set(workspaceId, { canonicalPath: workspaceId, workspaceId });
     }
-    const results = [];
+    const results: RecoveryStorageWorkspaceSummary[] = [];
     for (const entry of known.values()) {
       const selected = await locations.selection(entry.workspaceId);
       try {
@@ -1381,17 +1929,18 @@ export const createWorkspaceRecoveryEngine = (options) => {
         const { identity } = storageIdentity;
         const status = await storageStatusInternal(entry.workspaceId);
         const storage = await storageFor(identity, false);
-        let lastActivityAt = null;
+        let lastActivityAt: string | null = null;
         // Use the read-only inspect path for last-activity queries.
         const inspected = await inspectRecoveryJournalCatalog(storage.root, { fsPromises }).catch(() => null);
         if (inspected?.database) {
           try {
-            lastActivityAt = inspected.database.prepare(`
+            const lastActivity = inspected.database.prepare(`
               SELECT MAX(value) AS value FROM (
                 SELECT MAX(created_at) AS value FROM checkpoints WHERE workspace_id = ?
                 UNION ALL SELECT MAX(updated_at) AS value FROM operations WHERE workspace_id = ?
               )
-            `).get(entry.workspaceId, entry.workspaceId).value ?? null;
+            `).get(entry.workspaceId, entry.workspaceId) as { value: string | null };
+            lastActivityAt = lastActivity.value ?? null;
           } finally {
             inspected.database.close();
           }
@@ -1433,49 +1982,41 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return results.sort((left, right) => String(right.lastActivityAt ?? '').localeCompare(String(left.lastActivityAt ?? '')));
   };
 
-  const retentionPolicyFor = (database, workspaceId) => {
-    const row = database.prepare('SELECT value FROM metadata WHERE key = ?').get(retentionPolicyKey(workspaceId));
+  const retentionPolicyFor = (database: SqliteDatabase, workspaceId: string): RecoveryRetentionPolicy => {
+    const row = database.prepare('SELECT value FROM metadata WHERE key = ?')
+      .get(retentionPolicyKey(workspaceId)) as { value: string } | undefined;
     if (!row) return { ...DEFAULT_RETENTION_POLICY };
-    let value;
     try {
-      value = JSON.parse(row.value);
+      return parseRecoveryRetentionPolicy(JSON.parse(row.value) as unknown);
     } catch (error) {
       throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
         cause: error,
         origin: 'storage',
       });
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
-        origin: 'storage',
-      });
-    }
-    for (const key of Object.keys(DEFAULT_RETENTION_POLICY)) {
-      if (value[key] !== null && (!Number.isSafeInteger(value[key]) || value[key] < 0)) {
-        throw new RecoveryPrimitiveError('storage-malformed', 'Recovery retention policy is malformed', {
-          origin: 'storage',
-        });
-      }
-    }
-    return Object.fromEntries(Object.keys(DEFAULT_RETENTION_POLICY).map((key) => [key, value[key]]));
   };
 
-  const retentionStatusFor = (database, workspaceId) => {
+  const retentionStatusFor = (database: SqliteDatabase, workspaceId: string): RecoveryRetentionStatus => {
     const checkpoint = database.prepare(`
       SELECT
         SUM(CASE WHEN source = 'turn' AND state != 'pending' THEN 1 ELSE 0 END) AS eligible,
         SUM(CASE WHEN source != 'turn' OR state = 'pending' THEN 1 ELSE 0 END) AS protected,
         COALESCE(SUM(byte_length), 0) AS bytes
       FROM checkpoints WHERE workspace_id = ?
-    `).get(workspaceId);
+    `).get(workspaceId) as { bytes: number | null; eligible: number | null; protected: number | null };
     const operation = database.prepare(`
       SELECT
         SUM(CASE WHEN state IN ('complete', 'aborted', 'compensated') THEN 1 ELSE 0 END) AS terminal,
         SUM(CASE WHEN state NOT IN ('complete', 'aborted', 'compensated') THEN 1 ELSE 0 END) AS protected,
         MIN(CASE WHEN state NOT IN ('complete', 'aborted', 'compensated') THEN created_at END) AS oldest_protected
       FROM operations WHERE workspace_id = ? AND kind = 'combined'
-    `).get(workspaceId);
-    const lastRun = database.prepare('SELECT value FROM metadata WHERE key = ?').get(retentionRunKey(workspaceId));
+    `).get(workspaceId) as {
+      oldest_protected: string | null;
+      protected: number | null;
+      terminal: number | null;
+    };
+    const lastRun = database.prepare('SELECT value FROM metadata WHERE key = ?')
+      .get(retentionRunKey(workspaceId)) as { value: string } | undefined;
     return {
       eligibleCheckpointCount: checkpoint.eligible ?? 0,
       lastRunAt: lastRun?.value ?? null,
@@ -1489,9 +2030,14 @@ export const createWorkspaceRecoveryEngine = (options) => {
     };
   };
 
-  const retentionEnabled = (policy) => Object.values(policy).some((value) => value !== null);
+  const retentionEnabled = (policy: RecoveryRetentionPolicy): boolean => (
+    Object.values(policy).some((value) => value !== null)
+  );
 
-  const pruneRetentionRecords = (database, workspaceId) => {
+  const pruneRetentionRecords = (
+    database: SqliteDatabase,
+    workspaceId: string,
+  ): { policy: RecoveryRetentionPolicy; recordsDeleted: number } => {
     const policy = retentionPolicyFor(database, workspaceId);
     if (!retentionEnabled(policy)) return { recordsDeleted: 0, policy };
     const checkpoints = database.prepare(`
@@ -1499,16 +2045,16 @@ export const createWorkspaceRecoveryEngine = (options) => {
       FROM checkpoints
       WHERE workspace_id = ? AND source = 'turn' AND state != 'pending'
       ORDER BY sequence ASC
-    `).all(workspaceId);
+    `).all(workspaceId) as { byte_length: number; created_at: string; id: string }[];
     const operations = database.prepare(`
       SELECT id, updated_at, state
       FROM operations
       WHERE workspace_id = ? AND kind = 'combined'
       ORDER BY updated_at ASC, id ASC
-    `).all(workspaceId);
-    const checkpointIds = new Set();
-    const operationIds = new Set();
-    let cutoff = null;
+    `).all(workspaceId) as { id: string; state: string; updated_at: string }[];
+    const checkpointIds = new Set<string>();
+    const operationIds = new Set<string>();
+    let cutoff: string | null = null;
     if (policy.maxAgeDays !== null) {
       const ageMilliseconds = policy.maxAgeDays * 86_400_000;
       if (!Number.isSafeInteger(ageMilliseconds)) {
@@ -1545,7 +2091,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     runImmediateTransaction(database, 'Recovery retention pruning', () => {
       for (const checkpointId of checkpointIds) {
         const changes = database.prepare('SELECT path FROM checkpoint_changes WHERE checkpoint_id = ?')
-          .all(checkpointId);
+          .all(checkpointId) as { path: string }[];
         for (const change of changes) {
           deleteObjectReferences(
             database,
@@ -1559,7 +2105,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       }
       for (const operationId of operationIds) {
         const files = database.prepare('SELECT path FROM operation_files WHERE operation_id = ?')
-          .all(operationId);
+          .all(operationId) as { path: string }[];
         for (const file of files) {
           deleteObjectReferences(
             database,
@@ -1583,22 +2129,25 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return { recordsDeleted, policy };
   };
 
-  const referencedObjects = (database) => new Set(
+  const referencedObjects = (database: SqliteDatabase): Set<string> => new Set(
     database.prepare('SELECT DISTINCT object_hash FROM object_references')
-      .all().map((row) => row.object_hash),
+      .all().map((row) => (row as { object_hash: string }).object_hash),
   );
 
-  const collectUnreachableObjects = async (root, database) => {
+  const collectUnreachableObjects = async (
+    root: string,
+    database: SqliteDatabase,
+  ): Promise<{ byteLengthReclaimed: number; objectsDeleted: number }> => {
     const refs = referencedObjects(database);
     const objectsRoot = pathModule.join(root, 'objects');
     let byteLengthReclaimed = 0;
     let objectsDeleted = 0;
-    const walk = async (directory) => {
-      let entries;
+    const walk = async (directory: string): Promise<void> => {
+      let entries: import('node:fs').Dirent[];
       try {
         entries = await fsPromises.readdir(directory, { withFileTypes: true });
       } catch (error) {
-        if (error?.code === 'ENOENT') return;
+        if (errorCode(error) === 'ENOENT') return;
         throw error;
       }
       for (const entry of entries) {
@@ -1617,7 +2166,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return { byteLengthReclaimed, objectsDeleted };
   };
 
-  const retentionStatusInternal = async (workspaceId) => {
+  const retentionStatusInternal = async (workspaceId: string): Promise<RecoveryRetentionStatus> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
     const inspected = await inspectRecoveryJournalCatalog(storage.root, { fsPromises });
@@ -1642,10 +2191,12 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const setRetentionPolicyInternal = async (input) => {
+  const setRetentionPolicyInternal = async (
+    input: RecoveryRetentionPolicyInput,
+  ): Promise<RecoveryRetentionStatus> => {
     const { identity } = await inspectStorageIdentity(input.workspaceId);
     const storage = await storageFor(identity, true);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: true, fsPromises });
+    const database = await openWritableCatalog(storage.root);
     try {
       runImmediateTransaction(database, 'Recovery retention policy update', () => {
         database.prepare(`
@@ -1661,7 +2212,10 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const cleanupStorageInternal = async (workspaceId, options = {}) => {
+  const cleanupStorageInternal = async (
+    workspaceId: string,
+    options: { scanUnchangedObjects?: boolean | undefined } = {},
+  ): Promise<RecoveryStorageCleanupResult> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
@@ -1678,7 +2232,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
     }
   };
 
-  const deleteWorkspaceHistoryInternal = async (workspaceId) => {
+  const deleteWorkspaceHistoryInternal = async (workspaceId: string): Promise<RecoveryStorageCleanupResult> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
     const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
@@ -1694,7 +2248,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         // via foreign keys; operations are deleted directly.
         const checkpointIds = database.prepare(
           'SELECT id FROM checkpoints WHERE workspace_id = ?',
-        ).all(workspaceId).map((row) => row.id);
+        ).all(workspaceId).map((row) => (row as { id: string }).id);
         // Delete checkpoint_changes for this workspace's checkpoints.
         if (checkpointIds.length > 0) {
           const placeholders = checkpointIds.map(() => '?').join(', ');
@@ -1738,7 +2292,13 @@ export const createWorkspaceRecoveryEngine = (options) => {
   // In each case, we update the phase to reflect the actual disk state so
   // resume can proceed correctly. If disk doesn't match either expected
   // state, the file goes to needs-attention.
-  const reconcileOperationFile = async (record, fileRow, identity, root, database) => {
+  const reconcileOperationFile = async (
+    record: CombinedOperationRecord,
+    fileRow: OperationFileRow,
+    identity: RecoveryIdentity,
+    root: string,
+    database: SqliteDatabase,
+  ): Promise<OperationFilePhase> => {
     const relativePath = fileRow.path;
     const states = record.targets[relativePath];
     if (!states) {
@@ -1748,26 +2308,26 @@ export const createWorkspaceRecoveryEngine = (options) => {
     const current = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
     if (fileRow.phase === 'apply-intent') {
       if (sameState(current, states.target)) {
-        // File was written but phase wasn't updated �?treat as applied.
+        // File was written but phase wasn't updated — treat as applied.
         updateOperationFilePhase(database, record.id, relativePath, 'target-observed');
         return 'target-observed';
       }
-      if (sameState(current, record.safety[relativePath])) {
-        // File wasn't written yet �?still at safety, safe to abort.
+      if (sameState(current, safetyStateFor(record, relativePath))) {
+        // File wasn't written yet — still at safety, safe to abort.
         return 'apply-intent';
       }
-      // Disk is in an unknown state �?needs attention.
+      // Disk is in an unknown state — needs attention.
       updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
       return 'needs-attention';
     }
     if (fileRow.phase === 'compensate-intent') {
-      if (sameState(current, record.safety[relativePath])) {
+      if (sameState(current, safetyStateFor(record, relativePath))) {
         // Compensation was written but phase wasn't updated.
         updateOperationFilePhase(database, record.id, relativePath, 'safety-observed');
         return 'safety-observed';
       }
       if (sameState(current, states.target)) {
-        // Compensation wasn't written yet �?still at target.
+        // Compensation wasn't written yet — still at target.
         return 'compensate-intent';
       }
       updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
@@ -1776,9 +2336,9 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return fileRow.phase;
   };
 
-  const resumeUnfinished = async () => {
+  const resumeUnfinished = async (): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const registrations = await documents.listWorkspaceRegistrations();
-    const resolved = [];
+    const resolved: WorkspaceCombinedRecoveryOperation[] = [];
     for (const registration of registrations) {
       const workspaceId = registration.workspaceId;
       const identity = await inspectIdentity(workspaceId).catch((error) => {
@@ -1790,7 +2350,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       if (!identity) continue;
       const storage = await storageFor(identity, false).catch(() => null);
       if (!storage) continue;
-      let workspaceLease;
+      let workspaceLease: Awaited<ReturnType<typeof leases.acquire>>;
       try {
         workspaceLease = await leases.acquire({
           root: storage.root,
@@ -1818,16 +2378,16 @@ export const createWorkspaceRecoveryEngine = (options) => {
         const rows = database.prepare(`
           SELECT * FROM operations WHERE kind = 'combined'
           AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention')
-        `).all();
+        `).all() as OperationRow[];
         for (const row of rows) {
-          const record = operationFromRow(row);
+          const record = parseCombinedOperationRecord(row);
           if (record.state === 'planned') continue;
           try {
             // Reconcile each file's phase against its on-disk state.
             // This closes the crash window between writing the file and
             // updating the phase row.
             const fileRows = operationFileRows(database, record.id);
-            const reconciledPhases = [];
+            const reconciledPhases: OperationFilePhase[] = [];
             for (const fileRow of fileRows) {
               if (fileRow.phase === 'apply-intent' || fileRow.phase === 'compensate-intent') {
                 const phase = await reconcileOperationFile(record, fileRow, identity, storage.root, database);
@@ -1837,7 +2397,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
               }
             }
             // If any file is needs-attention, the operation must go to
-            // needs-attention �?it cannot be silently aborted.
+            // needs-attention — it cannot be silently aborted.
             if (reconciledPhases.includes('needs-attention')) {
               record.failure = recoveryFailure(
                 new RecoveryPrimitiveError('needs-attention', 'Operation has files in an unreconcilable state after crash', {
@@ -1859,12 +2419,12 @@ export const createWorkspaceRecoveryEngine = (options) => {
             if (hasCompensatingFiles || (hasAppliedFiles && Object.keys(record.safety ?? {}).length > 0)) {
               await compensate(record, identity, storage.root, database);
             } else if (hasSafetyObserved && !hasAppliedFiles && !hasCompensatingFiles) {
-              // All files are safety-observed �?compensation already complete.
+              // All files are safety-observed — compensation already complete.
               record.fileState = 'compensated';
               record.state = 'compensated';
               persistOperation(database, record);
             } else if (hasSafetyCaptured && Object.keys(record.safety ?? {}).length > 0) {
-              // Safety was captured but no files were applied yet �?safe to abort.
+              // Safety was captured but no files were applied yet — safe to abort.
               record.state = 'aborted';
               persistOperation(database, record);
             } else {
@@ -1887,9 +2447,18 @@ export const createWorkspaceRecoveryEngine = (options) => {
     return resolved;
   };
 
-  const safe = (operation, fallbackCode) => operation().catch((error) => failedRecoveryResult(error, fallbackCode));
+  const safe = async <T>(
+    operation: () => Promise<T>,
+    fallbackCode: WorkspaceRecoveryFailureCode = 'internal',
+  ): Promise<T | WorkspaceRecoveryFailedResult> => {
+    try {
+      return await operation();
+    } catch (error) {
+      return failedRecoveryResult(error, fallbackCode);
+    }
+  };
 
-  const scheduleAutomaticRetention = (workspaceId) => {
+  const scheduleAutomaticRetention = (workspaceId: string): void => {
     void retentionStatusInternal(workspaceId).then((retention) => {
       if (!retentionEnabled(retention.policy) || disposed) return;
       return runWorkspace(
@@ -1898,7 +2467,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         { mode: 'exclusive', purpose: 'recovery-retention-automatic' },
       );
     }).catch((error) => {
-      if (error?.code === 'lease-unavailable') return;
+      if (errorCode(error) === 'lease-unavailable') return;
       const failures = startupFailures.get(workspaceId) ?? [];
       failures.push(recoveryFailure(error, 'internal'));
       startupFailures.set(workspaceId, failures);
@@ -1907,7 +2476,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
 
   return {
     locations,
-    applyCombinedRecovery: (input) => safe(async () => {
+    applyCombinedRecovery: (input: WorkspaceCombinedRecoveryApplyInput) => safe(async () => {
       const located = await locateOperation(input.operationId);
       return {
         operation: await runWorkspace(located.identity.workspaceId, async () => (
@@ -1916,7 +2485,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         status: 'ready',
       };
     }),
-    cancelCombinedOperation: (operationId) => safe(async () => {
+    cancelCombinedOperation: (operationId: string) => safe(async () => {
       const located = await locateOperation(operationId);
       return {
         operation: await runWorkspace(
@@ -1927,29 +2496,32 @@ export const createWorkspaceRecoveryEngine = (options) => {
         status: 'ready',
       };
     }),
-    clearStorageLocationOverride: (workspaceId) => safe(() => runWorkspace(workspaceId, async () => {
+    clearStorageLocationOverride: (workspaceId: string) => safe(() => runWorkspace(workspaceId, async () => {
       const global = await locations.globalSelection();
       return { operation: await moveStorageInternal(workspaceId, global.location, 'global'), status: 'ready' };
     }, { mode: 'exclusive', purpose: 'recovery-storage-move' })),
-    cleanupStorage: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
+    cleanupStorage: (input: RecoveryStorageCleanupInput) => safe(() => runWorkspace(input.workspaceId, async () => ({
       result: await cleanupStorageInternal(input.workspaceId),
       status: 'ready',
     }), { mode: 'exclusive', purpose: 'recovery-retention-cleanup' })),
-    createCheckpoint: (input) => safe(async () => ({ checkpoint: await runWorkspace(input.workspaceId, () => createCheckpointInternal(input)), status: 'ready' })),
-    deleteWorkspaceHistory: (workspaceId) => safe(() => runWorkspace(workspaceId, async () => ({
+    createCheckpoint: (input: WorkspaceRecoveryCheckpointInput) => safe(async () => ({ checkpoint: await runWorkspace(input.workspaceId, () => createCheckpointInternal(input)), status: 'ready' })),
+    deleteWorkspaceHistory: (workspaceId: string) => safe(() => runWorkspace(workspaceId, async () => ({
       result: await deleteWorkspaceHistoryInternal(workspaceId),
       status: 'ready',
     }), { mode: 'exclusive', purpose: 'recovery-history-delete' })),
     fenceUnfinishedOperations: resumeUnfinished,
-    getCombinedOperation: (operationId) => safe(async () => ({ operation: await getOperationInternal(operationId), status: 'ready' })),
-    getStorageMove: (operationId) => safe(async () => ({
-      operation: await readRecoveryJsonAtomic(pathModule.join(locations.operationsRoot, `${operationId}.json`), { fsPromises }),
+    getCombinedOperation: (operationId: string) => safe(async () => ({ operation: await getOperationInternal(operationId), status: 'ready' })),
+    getStorageMove: (operationId: string) => safe(async () => ({
+      operation: parseRecoveryStorageMoveOperation(await readRecoveryJsonAtomic(
+        pathModule.join(locations.operationsRoot, `${operationId}.json`),
+        { fsPromises },
+      )),
       status: 'ready',
     })),
-    listCheckpoints: (input) => safe(async () => ({ page: await listCheckpointsInternal(input), status: 'ready' })),
-    listCombinedOperations: (workspaceId) => safe(async () => ({ operations: await listOperationsInternal(workspaceId), status: 'ready' })),
+    listCheckpoints: (input: WorkspaceRecoveryCheckpointQuery) => safe(async () => ({ page: await listCheckpointsInternal(input), status: 'ready' })),
+    listCombinedOperations: (workspaceId: string) => safe(async () => ({ operations: await listOperationsInternal(workspaceId), status: 'ready' })),
     listStorageWorkspaces: () => safe(async () => ({ status: 'ready', workspaces: await listStorageWorkspacesInternal() })),
-    prepareCombinedRecovery: (input) => safe(async () => ({
+    prepareCombinedRecovery: (input: WorkspaceCombinedRecoveryPrepareInput) => safe(async () => ({
       plan: await runWorkspace(
         input.workspaceId,
         () => prepareCombinedInternal(input),
@@ -1957,7 +2529,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       ),
       status: 'ready',
     })),
-    prepareCombinedUndo: (operationId) => safe(async () => {
+    prepareCombinedUndo: (operationId: string) => safe(async () => {
       const located = await locateOperation(operationId);
       return {
         plan: await runWorkspace(
@@ -1968,7 +2540,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         status: 'ready',
       };
     }),
-    recordMutationAfter: (input) => safe(async () => ({
+    recordMutationAfter: (input: WorkspaceRecoveryMutationAfterInput) => safe(async () => ({
       recorded: await runWorkspace(
         input.workspaceId,
         () => recordMutationAfterInternal(input),
@@ -1976,7 +2548,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
       ),
       status: 'ready',
     })),
-    recordMutationBefore: (input) => safe(async () => ({
+    recordMutationBefore: (input: WorkspaceRecoveryMutationBeforeInput) => safe(async () => ({
       recorded: await runWorkspace(
         input.workspaceId,
         () => recordMutationBeforeInternal(input),
@@ -1984,32 +2556,32 @@ export const createWorkspaceRecoveryEngine = (options) => {
       ),
       status: 'ready',
     })),
-    recordTurnSettled: (input) => safe(async () => {
+    recordTurnSettled: (input: WorkspaceRecoveryTurnSettledInput) => safe(async () => {
       const binding = await runWorkspace(input.workspaceId, () => recordTurnSettledInternal(input));
       scheduleAutomaticRetention(input.workspaceId);
       return { binding, status: 'ready' };
     }),
-    recordTurnStart: (input) => safe(async () => ({ binding: await runWorkspace(input.workspaceId, () => recordTurnStartInternal(input)), status: 'ready' })),
-    retentionStatus: (workspaceId) => safe(async () => ({
+    recordTurnStart: (input: WorkspaceRecoveryTurnStartInput) => safe(async () => ({ binding: await runWorkspace(input.workspaceId, () => recordTurnStartInternal(input)), status: 'ready' })),
+    retentionStatus: (workspaceId: string) => safe(async () => ({
       retention: await retentionStatusInternal(workspaceId),
       status: 'ready',
     })),
-    resolveEntry: (input) => safe(() => resolveEntryInternal(input)),
+    resolveEntry: (input: WorkspaceRecoveryEntryTarget) => safe(() => resolveEntryInternal(input)),
     resumeCombinedOperations: resumeUnfinished,
     resumeWorkspaceOperations: async () => [],
-    setDefaultStorageLocation: (location) => safe(async () => {
+    setDefaultStorageLocation: (location: RecoveryStorageLocation) => safe(async () => {
       await locations.setDefault(await locations.validateLocation(location));
       return { status: 'ready', storage: await storageStatusInternal() };
     }),
-    setRetentionPolicy: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
+    setRetentionPolicy: (input: RecoveryRetentionPolicyInput) => safe(() => runWorkspace(input.workspaceId, async () => ({
       retention: await setRetentionPolicyInternal(input),
       status: 'ready',
     }), { mode: 'exclusive', purpose: 'recovery-retention-policy' })),
-    setStorageLocation: (input) => safe(() => runWorkspace(input.workspaceId, async () => ({
+    setStorageLocation: (input: SetRecoveryStorageLocationInput) => safe(() => runWorkspace(input.workspaceId, async () => ({
       operation: await moveStorageInternal(input.workspaceId, input.location, 'workspace'),
       status: 'ready',
     }), { mode: 'exclusive', purpose: 'recovery-storage-move' })),
-    status: (workspaceId) => safe(async () => {
+    status: (workspaceId: string) => safe(async () => {
       const [storage, retention] = await Promise.all([
         storageStatusInternal(workspaceId),
         retentionStatusInternal(workspaceId),
@@ -2035,7 +2607,7 @@ export const createWorkspaceRecoveryEngine = (options) => {
         storage,
       };
     }),
-    storageStatus: (workspaceId) => safe(async () => ({ status: 'ready', storage: await storageStatusInternal(workspaceId) })),
+    storageStatus: (workspaceId?: string) => safe(async () => ({ status: 'ready', storage: await storageStatusInternal(workspaceId) })),
     dispose: async () => {
       if (disposed) return;
       disposed = true;

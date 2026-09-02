@@ -1,4 +1,3 @@
-// @ts-nocheck
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
@@ -13,12 +12,12 @@ const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'logs',
 ]);
 
-const normalizeRelativeSearchPath = (rootPath, targetPath, path) => {
+const normalizeRelativeSearchPath = (rootPath: string, targetPath: string, path: PathModule): string => {
   const relative = path.relative(rootPath, targetPath) || path.basename(targetPath);
   return relative.split(path.sep).join('/') || targetPath;
 };
 
-const shouldSkipSearchDirectory = (name, includeHidden) => {
+const shouldSkipSearchDirectory = (name: string, includeHidden: boolean): boolean => {
   if (!name) {
     return false;
   }
@@ -28,7 +27,7 @@ const shouldSkipSearchDirectory = (name, includeHidden) => {
   return FILE_SEARCH_EXCLUDED_DIRS.has(name.toLowerCase());
 };
 
-const listDirectoryEntries = async (dirPath, fsPromises) => {
+const listDirectoryEntries = async (dirPath: string, fsPromises: FsPromises): Promise<Dirent[]> => {
   try {
     return await fsPromises.readdir(dirPath, { withFileTypes: true });
   } catch {
@@ -36,7 +35,7 @@ const listDirectoryEntries = async (dirPath, fsPromises) => {
   }
 };
 
-const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
+const fuzzyMatchScoreNormalized = (normalizedQuery: string, candidate: string): number | null => {
   if (!normalizedQuery) return 0;
 
   const q = normalizedQuery;
@@ -96,8 +95,21 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
   return score;
 };
 
-export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
-  const searchFilesystemFiles = async (rootPath, options) => {
+export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: rawSpawn, resolveGitBinaryForSpawn }: {
+  fsPromises: unknown;
+  path: PathModule;
+  resolveGitBinaryForSpawn(): string;
+  spawn: unknown;
+}) => {
+  const fsPromises = rawFsPromises as FsPromises;
+  const spawn = rawSpawn as typeof nodeSpawn;
+  const searchFilesystemFiles = async (rootPath: string, options: {
+    includeHidden?: boolean;
+    limit?: number;
+    query: string;
+    respectGitignore?: boolean;
+    signal?: AbortSignal;
+  }): Promise<FileSearchItem[]> => {
     const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
@@ -105,11 +117,13 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     const queue = [rootPath];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    const requestedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+    const requestedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : null;
     const collectLimit = requestedLimit === null
       ? Number.POSITIVE_INFINITY
       : matchAll ? requestedLimit : Math.max(requestedLimit * 3, 200);
-    const candidates = [];
+    const candidates: Array<FileSearchItem & { score: number }> = [];
 
     while (queue.length > 0 && candidates.length < collectLimit) {
       if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
@@ -128,7 +142,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               return { dir, dirents, ignoredPaths: new Set() };
             }
 
-            const result = await new Promise((resolve) => {
+            const result = await new Promise<string>((resolve) => {
               const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                 cwd: dir,
                 windowsHide: true,
@@ -136,7 +150,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               });
 
               let stdout = '';
-              child.stdout.on('data', (data) => { stdout += data.toString(); });
+              child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
               child.on('close', () => resolve(stdout));
               child.on('error', () => resolve(''));
             });
@@ -192,7 +206,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               name: entryName,
               path: entryPath,
               relativePath,
-              extension,
+              ...(extension ? { extension } : {}),
               score: 0,
             });
           } else {
@@ -202,7 +216,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
                 name: entryName,
                 path: entryPath,
                 relativePath,
-                extension,
+                ...(extension ? { extension } : {}),
                 score,
               });
             }
@@ -235,7 +249,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
       name,
       path: filePath,
       relativePath,
-      extension,
+      ...(extension ? { extension } : {}),
     }));
   };
 
@@ -243,3 +257,6 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     searchFilesystemFiles,
   };
 };
+import type { Dirent } from 'node:fs';
+import type { spawn as nodeSpawn } from 'node:child_process';
+import type { FileSearchItem, FsPromises, PathModule } from './types.js';

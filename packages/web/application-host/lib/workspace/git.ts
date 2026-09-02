@@ -32,14 +32,14 @@ interface GitCommitPayload {
 
 interface GitCommitOptions {
   addAll: boolean;
-  files?: unknown[] | undefined;
+  files?: unknown[];
 }
 
 interface GitStatusResult {
   isGitRepository: boolean;
   files?: unknown[];
   branch?: string | null | undefined;
-  current?: string | undefined;
+  current?: string | null | undefined;
   tracking?: string | null | undefined;
   ahead?: number | undefined;
   behind?: number | undefined;
@@ -226,7 +226,7 @@ export const workspaceGitCommit = async (
   }
   const commitOptions: GitCommitOptions = {
     addAll: payload?.addAll === true,
-    files: Array.isArray(payload?.files) ? payload.files as unknown[] : undefined,
+    ...(Array.isArray(payload?.files) ? { files: payload.files as unknown[] } : {}),
   };
   return git.commit(directory, message, commitOptions);
 };

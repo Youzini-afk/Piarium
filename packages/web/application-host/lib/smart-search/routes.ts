@@ -1,16 +1,25 @@
-// @ts-nocheck
 import { createSmartSearchRuntime } from './runtime.js';
+import type { Express, Response } from 'express';
 
-const sendError = (res, error) => {
-  const status = Number.isInteger(error?.status) ? error.status : 500;
+type RuntimeDependencies = NonNullable<Parameters<typeof createSmartSearchRuntime>[0]>;
+type SmartSearchRuntime = ReturnType<typeof createSmartSearchRuntime>;
+type SmartSearchRouteDependencies = RuntimeDependencies & { runtime?: SmartSearchRuntime };
+
+const errorRecord = (error: unknown): Record<string, unknown> => (
+  error && typeof error === 'object' ? error as Record<string, unknown> : {}
+);
+
+const sendError = (res: Response, error: unknown): void => {
+  const record = errorRecord(error);
+  const status = typeof record.status === 'number' && Number.isInteger(record.status) ? record.status : 500;
   res.status(status).json({
     ok: false,
-    error: error?.message || 'Smart Search request failed.',
-    details: error?.details,
+    error: typeof record.message === 'string' ? record.message : 'Smart Search request failed.',
+    details: record.details,
   });
 };
 
-export const registerSmartSearchRoutes = (app, dependencies) => {
+export const registerSmartSearchRoutes = (app: Express, dependencies: SmartSearchRouteDependencies): void => {
   const runtime = dependencies.runtime || createSmartSearchRuntime(dependencies);
 
   app.get('/api/smart-search/status', async (_req, res) => {

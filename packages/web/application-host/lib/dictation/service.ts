@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Dictation service: resolves STT providers, tracks local model download
  * state, and exposes a readiness snapshot for the status route.
@@ -27,19 +26,36 @@ import {
   isLocalTtsModelId,
 } from './local/model-catalog.js';
 import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
+import type { LocalSttModelId } from './local/model-catalog.js';
+import type {
+  DictationStartOptions,
+  LocalSpeechModelCatalog,
+  SttSessionResolution,
+} from './types.js';
 
-export function createDictationService({ modelsDir }) {
+interface LocalModelStatus {
+  description: string;
+  downloadError: string | null;
+  downloadProgress: number | null;
+  downloading: boolean;
+  id: string;
+  installed: boolean;
+}
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+export function createDictationService({ modelsDir }: { modelsDir: string }) {
   const workerClient = new DictationWorkerClient();
   /** modelId -> 'downloading' | 'error' */
-  const downloadStates = new Map();
+  const downloadStates = new Map<string, 'downloading' | 'error'>();
   /** modelId -> last download error message */
-  const downloadErrors = new Map();
+  const downloadErrors = new Map<string, string>();
   /** modelId -> in-flight ensure promise */
-  const downloadPromises = new Map();
+  const downloadPromises = new Map<string, Promise<void>>();
   /** modelId -> 0..100 download percent (null while size unknown) */
-  const downloadProgress = new Map();
+  const downloadProgress = new Map<string, number | null>();
 
-  const startModelDownload = (modelId) => {
+  const startModelDownload = (modelId: string): Promise<void> => {
     const existing = downloadPromises.get(modelId);
     if (existing) {
       return existing;
@@ -50,7 +66,7 @@ export function createDictationService({ modelsDir }) {
     const promise = ensureLocalSttModel({
       modelsDir,
       modelId,
-      onProgress: (downloadedBytes, totalBytes) => {
+      onProgress: (downloadedBytes: number, totalBytes: number | null) => {
         downloadProgress.set(
           modelId,
           totalBytes ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : null,
@@ -64,7 +80,7 @@ export function createDictationService({ modelsDir }) {
       })
       .catch((error) => {
         downloadStates.set(modelId, 'error');
-        downloadErrors.set(modelId, error?.message || String(error));
+        downloadErrors.set(modelId, errorMessage(error));
         downloadPromises.delete(modelId);
         downloadProgress.delete(modelId);
       });
@@ -72,7 +88,7 @@ export function createDictationService({ modelsDir }) {
     return promise;
   };
 
-  const resolveLocalModelId = (requested) => {
+  const resolveLocalModelId = (requested: unknown): LocalSttModelId => {
     return isLocalSttModelId(requested) ? requested : DEFAULT_LOCAL_STT_MODEL;
   };
 
@@ -84,22 +100,22 @@ export function createDictationService({ modelsDir }) {
    * @param {{ provider?: string, language?: string, localModel?: string,
    *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
    */
-  const createSttSession = async (options = {}) => {
+  const createSttSession = async (options: DictationStartOptions = {}): Promise<SttSessionResolution> => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
 
     if (provider === 'openai-compatible') {
       const config = options.openaiCompatible || {};
       const session = new OpenAICompatibleTranscriptionSession({
-        baseURL: config.baseUrl,
-        model: config.model,
-        apiKey: config.apiKey || undefined,
-        language: options.language || undefined,
+        baseURL: config.baseUrl ?? '',
+        model: config.model ?? '',
+        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(options.language ? { language: options.language } : {}),
       });
       try {
         await session.connect();
       } catch (error) {
         return {
-          error: error?.message || String(error),
+          error: errorMessage(error),
           retryable: false,
           reasonCode: 'stt_not_configured',
         };
@@ -133,7 +149,7 @@ export function createDictationService({ modelsDir }) {
     try {
       await session.connect();
     } catch (error) {
-      const message = error?.message || String(error);
+      const message = errorMessage(error);
       // A model that passes the file-presence check but fails to load is
       // corrupt on disk (e.g. truncated by an interrupted extraction). Remove
       // it so the next attempt re-downloads instead of crashing forever.
@@ -159,13 +175,13 @@ export function createDictationService({ modelsDir }) {
    * Readiness snapshot for the status route and UI gating.
    * @param {{ provider?: string, localModel?: string }} [options]
    */
-  const getStatus = async (options = {}) => {
+  const getStatus = async (options: { localModel?: string; provider?: string } = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
     const modelId = resolveLocalModelId(options.localModel);
 
-    const describeModel = async (id, catalog) => ({
+    const describeModel = async (id: string, catalog: LocalSpeechModelCatalog): Promise<LocalModelStatus> => ({
       id,
-      description: catalog[id].description,
+      description: catalog[id]?.description ?? id,
       installed: await isLocalSttModelInstalled(modelsDir, id),
       downloading: downloadStates.get(id) === 'downloading',
       downloadProgress: downloadProgress.get(id) ?? null,
@@ -223,7 +239,15 @@ export function createDictationService({ modelsDir }) {
    * readiness error while the model is missing/downloading.
    * @param {{ text: string, model?: string, speakerId?: number, speed?: number }} options
    */
-  const synthesizeSpeech = async ({ text, model, speakerId, speed }) => {
+  const synthesizeSpeech = async ({ text, model, speakerId, speed }: {
+    model?: string;
+    speakerId?: number;
+    speed?: number;
+    text: string;
+  }): Promise<
+    | { error: string; reasonCode: string; retryable: boolean }
+    | { audio: Buffer; format: string }
+  > => {
     const modelId = isLocalTtsModelId(model) ? model : DEFAULT_LOCAL_TTS_MODEL;
     const installed = await isLocalSttModelInstalled(modelsDir, modelId);
     if (!installed) {
@@ -249,8 +273,8 @@ export function createDictationService({ modelsDir }) {
       modelsDir,
       modelId,
       text,
-      speakerId,
-      speed,
+      ...(typeof speakerId === 'number' ? { speakerId } : {}),
+      ...(typeof speed === 'number' ? { speed } : {}),
     });
     return { audio: result.audio, format: result.format };
   };
@@ -259,7 +283,7 @@ export function createDictationService({ modelsDir }) {
    * Kick off a background download for a model (used by the status route's
    * download action so Settings can pre-download models).
    */
-  const requestModelDownload = async (modelId) => {
+  const requestModelDownload = async (modelId: string) => {
     if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
@@ -276,7 +300,7 @@ export function createDictationService({ modelsDir }) {
    * copy until the worker's idle shutdown; the files are simply re-downloaded
    * on the next use if the model is selected again.
    */
-  const deleteModel = async (modelId) => {
+  const deleteModel = async (modelId: string) => {
     if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
@@ -288,7 +312,7 @@ export function createDictationService({ modelsDir }) {
     return { ok: true };
   };
 
-  const shutdown = () => {
+  const shutdown = (): void => {
     workerClient.shutdown();
   };
 

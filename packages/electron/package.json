@@ -47,23 +47,24 @@
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
-    "test:architecture": "bun run prepare:pi-runtime && node --test ./pi-runtime.test.mjs ./renderer-security-policy.test.mjs ./startup-url-selection.test.mjs ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
-    "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
-    "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
+    "test:runtime": "vitest run --config vitest.config.ts",
+    "test:architecture": "bun run prepare:pi-runtime && bun run test:runtime && node --test ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:updater": "vitest run updater-capability.test.ts updater-channel.test.ts updater-check.test.ts updater-feed.test.ts --config vitest.config.ts && node --test ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
+    "test:linux-desktop": "vitest run linux-autostart.test.ts --config vitest.config.ts && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "package:win:x64": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs --win --x64 --publish=never",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./pi-runtime.mjs && node --check ./preload.mjs",
-    "lint": "node -e \"process.exit(0)\""
+    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
+    "lint": "eslint \"./*.ts\" --config ../../eslint.config.js"
   },
   "build": {
     "appId": "dev.piarium.desktop",
     "productName": "Piarium",
     "files": [
       "dist-bundle/main.mjs",
-      "preload.mjs"
+      "dist-bundle/preload.mjs"
     ],
     "asarUnpack": [
       "node_modules/**/*"

@@ -1,3 +1,9 @@
+import {
+  toJsonValue,
+  type CapabilityInvocationContext,
+  type JsonCapabilityHandler,
+} from '../extensions/json-value.js';
+
 const METHODS = new Set<string>([
   'resolveWorkspace',
   'read',
@@ -29,24 +35,9 @@ const asResource = (params: unknown): Record<string, unknown> | null => {
   return null;
 };
 
-interface CapabilityOwner {
-  extensionId: string;
-  entrypointId: string;
-  generation: number;
-}
-
-interface CapabilityContext {
-  owner?: CapabilityOwner;
-}
-
-interface TokenRecord {
-  token?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-
 const bindCapabilityOwner = (
   record: Record<string, unknown>,
-  context: CapabilityContext | undefined,
+  context: CapabilityInvocationContext | undefined,
 ): Record<string, unknown> => {
   const owner = context?.owner;
   const token = record.token;
@@ -65,8 +56,9 @@ const bindCapabilityOwner = (
 };
 
 export const createDocumentsCapabilityHandler =
-  (authority: Record<string, unknown>) =>
-  async (method: string, params: unknown, context?: CapabilityContext): Promise<unknown> => {
+  (authority: Record<string, unknown>): JsonCapabilityHandler =>
+  async (method, params, context) => {
+    const result = await (async (): Promise<unknown> => {
     if (!METHODS.has(method)) {
       throw new Error(`workspace.documents does not implement ${method}`);
     }
@@ -105,4 +97,6 @@ export const createDocumentsCapabilityHandler =
         : (authority.clearDirtyBuffers as (request: unknown) => Promise<unknown>)(request);
     }
     throw new Error(`workspace.documents does not implement ${method}`);
+    })();
+    return toJsonValue(result);
   };

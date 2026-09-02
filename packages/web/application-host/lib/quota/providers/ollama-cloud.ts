@@ -1,13 +1,11 @@
-// @ts-nocheck
 import { buildResult, toUsageWindow, toNumber } from '../utils/index.js';
 import { readManagedCredential } from '../credentials/providers.js';
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
-const aliases = ['ollama-cloud', 'ollamacloud'];
 
-export const parseOllamaSettingsHtml = (html) => {
-  const windows = {};
+export const parseOllamaSettingsHtml = (html: string): Record<string, ReturnType<typeof toUsageWindow>> => {
+  const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
   const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
   if (sessionMatch) {
     windows.session = toUsageWindow({
@@ -43,7 +41,11 @@ export const isConfigured = () => {
   return Boolean(readManagedCredential(providerId));
 };
 
-export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
+export const fetchOllamaCloudUsage = async (
+  credential: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Record<string, ReturnType<typeof toUsageWindow>>> => {
+  if (!credential.cookie) throw new Error('Ollama Cloud cookie is missing');
   const response = await fetchImpl('https://ollama.com/settings', {
     method: 'GET',
     headers: { Cookie: credential.cookie, 'User-Agent': 'Piarium quota provider' },

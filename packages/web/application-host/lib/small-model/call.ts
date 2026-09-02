@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile, writePiAuthFile as writeAuthFile } from '../pi-config/storage.js';
 import { readPiConfiguration as readConfig } from '../pi-config/storage.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
+import type { ModelsMetadata } from '../platform/models-metadata.js';
 
 // Direct, non-streaming text generation against provider APIs using Pi's
 // settings, model configuration, and auth store. Credentials never leave this
@@ -11,7 +11,7 @@ import { getAuthEntryForProvider } from './resolve.js';
 const REQUEST_TIMEOUT_MS = 60_000;
 const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 // Generous default: thinking models that can't be switched off (DeepSeek,
-// Qwen, 鈥? spend part of this budget on reasoning before the actual answer.
+// Qwen, …) spend part of this budget on reasoning before the actual answer.
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'piarium/0.1';
@@ -20,7 +20,63 @@ const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 
-const httpError = async (response, provider) => {
+type AuthEntry = Record<string, unknown>;
+type AuthStore = Record<string, unknown>;
+
+interface BaseModelCall {
+  maxOutputTokens: number;
+  modelID: string;
+  prompt: string;
+  responseSchema?: unknown;
+  signal?: AbortSignal | undefined;
+  system?: string | undefined;
+  timeoutMs?: number | undefined;
+}
+
+interface HeaderModelCall extends BaseModelCall {
+  headers: Record<string, string>;
+  providerLabel: string;
+}
+
+interface OpenAiCompatibleCall extends HeaderModelCall {
+  baseURL: string;
+  extraBody?: Record<string, unknown> | undefined;
+}
+
+interface MessagesCall extends HeaderModelCall {
+  url: string;
+}
+
+interface ApiKeyModelCall extends BaseModelCall {
+  apiKey: string;
+}
+
+export interface CallSmallModelInput {
+  auth: AuthStore;
+  catalog: ModelsMetadata;
+  maxOutputTokens?: unknown;
+  modelID: string;
+  prompt: string;
+  providerID: string;
+  responseSchema?: unknown;
+  signal?: AbortSignal | undefined;
+  system?: string | undefined;
+  timeoutMs?: number | undefined;
+  workingDirectory?: string | undefined;
+}
+
+interface ProviderConfig {
+  auth: AuthEntry | null;
+  baseURL: string | null;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const asString = (value: unknown): string | null => typeof value === 'string' && value ? value : null;
+
+const httpError = async (response: Response, provider: string): Promise<Error & { provider: string; status: number }> => {
   const body = await response.text().catch(() => '');
   const snippet = body ? `: ${body.slice(0, 300)}` : '';
   return Object.assign(new Error(`${provider} request failed with ${response.status}${snippet}`), {
@@ -29,7 +85,7 @@ const httpError = async (response, provider) => {
   });
 };
 
-const requestSignal = (timeoutMs, signal) => {
+const requestSignal = (timeoutMs?: number, signal?: AbortSignal): AbortSignal => {
   const deadline = AbortSignal.timeout(Number(timeoutMs) > 0 ? Number(timeoutMs) : REQUEST_TIMEOUT_MS);
   return signal ? AbortSignal.any([deadline, signal]) : deadline;
 };
@@ -44,10 +100,10 @@ const GOOGLE_UNSUPPORTED_SCHEMA_KEYS = new Set([
   'strict',
 ]);
 
-const toGoogleSchema = (schema) => {
+const toGoogleSchema = (schema: unknown): unknown => {
   if (Array.isArray(schema)) return schema.map(toGoogleSchema);
   if (!schema || typeof schema !== 'object') return schema;
-  const result = {};
+  const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
     if (!GOOGLE_UNSUPPORTED_SCHEMA_KEYS.has(key)) result[key] = toGoogleSchema(value);
   }
@@ -59,25 +115,26 @@ const toGoogleSchema = (schema) => {
 // refreshed token persisted back into Pi's auth.json.
 // ---------------------------------------------------------------------------
 
-let openaiRefreshPromise = null;
+let openaiRefreshPromise: Promise<AuthEntry> | null = null;
 
-const decodeJwtClaims = (token) => {
+const decodeJwtClaims = (token: string): Record<string, unknown> | null => {
   try {
     const payload = token.split('.')[1];
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!payload) return null;
+    return asRecord(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown);
   } catch {
     return null;
   }
 };
 
-const extractChatgptAccountId = (accessToken) => {
+const extractChatgptAccountId = (accessToken: string): string | null => {
   const claims = decodeJwtClaims(accessToken);
-  const auth = claims?.['https://api.openai.com/auth'];
+  const auth = asRecord(claims?.['https://api.openai.com/auth']);
   const value = auth?.chatgpt_account_id;
   return typeof value === 'string' && value ? value : null;
 };
 
-const refreshOpenaiOauth = async (entry) => {
+const refreshOpenaiOauth = async (entry: AuthEntry): Promise<AuthEntry> => {
   if (!openaiRefreshPromise) {
     openaiRefreshPromise = (async () => {
       const response = await fetch(CODEX_TOKEN_URL, {
@@ -93,8 +150,8 @@ const refreshOpenaiOauth = async (entry) => {
       if (!response.ok) {
         throw await httpError(response, 'OpenAI token refresh');
       }
-      const payload = await response.json();
-      const access = typeof payload?.access_token === 'string' ? payload.access_token : '';
+      const payload = asRecord(await response.json()) ?? {};
+      const access = asString(payload.access_token) ?? '';
       if (!access) {
         throw new Error('OpenAI token refresh returned no access token');
       }
@@ -118,8 +175,8 @@ const refreshOpenaiOauth = async (entry) => {
   return openaiRefreshPromise;
 };
 
-const ensureFreshOpenaiOauth = async (entry) => {
-  if (entry.access && Number(entry.expires) > Date.now()) {
+const ensureFreshOpenaiOauth = async (entry: AuthEntry): Promise<AuthEntry> => {
+  if (typeof entry.access === 'string' && entry.access && Number(entry.expires) > Date.now()) {
     return entry;
   }
   if (!entry.refresh) {
@@ -132,13 +189,13 @@ const ensureFreshOpenaiOauth = async (entry) => {
 // Wire formats
 // ---------------------------------------------------------------------------
 
-const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody, responseSchema, timeoutMs, signal }) => {
+const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody, responseSchema, timeoutMs, signal }: OpenAiCompatibleCall): Promise<string> => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   console.log('[small-model:diagnostic] request', {
     provider: providerLabel,
     model: modelID,
     maxOutputTokens,
-    thinkingDisabled: extraBody?.thinking?.type === 'disabled',
+    thinkingDisabled: asRecord(extraBody?.thinking)?.type === 'disabled',
     promptChars: prompt.length,
     systemChars: system?.length ?? 0,
     inputChars: prompt.length + (system?.length ?? 0),
@@ -179,12 +236,14 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   if (!response.ok) {
     throw await httpError(response, providerLabel);
   }
-  const payload = await response.json();
-  const message = payload?.choices?.[0]?.message;
+  const payload = asRecord(await response.json()) ?? {};
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = asRecord(choices[0]);
+  const message = asRecord(firstChoice?.message);
   console.log('[small-model:diagnostic] completion', {
     provider: providerLabel,
     model: modelID,
-    finishReason: payload?.choices?.[0]?.finish_reason ?? null,
+    finishReason: firstChoice?.finish_reason ?? null,
     contentType: Array.isArray(message?.content) ? 'parts' : typeof message?.content,
     contentChars: typeof message?.content === 'string'
       ? message.content.length
@@ -205,7 +264,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
       .map((part) => (typeof part?.text === 'string' ? part.text : ''))
       .join('');
   }
-  const finishReason = payload?.choices?.[0]?.finish_reason;
+  const finishReason = firstChoice?.finish_reason;
   if (!text.trim() && (finishReason === 'length' || (typeof message?.reasoning_content === 'string' && message.reasoning_content.trim()))) {
     throw Object.assign(
       new Error(
@@ -221,7 +280,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   return text;
 };
 
-const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
+const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }: HeaderModelCall & { baseURL: string }): Promise<string> => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   const response = await fetch(`${trimmedBase}/responses`, {
     method: 'POST',
@@ -258,13 +317,19 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
   if (!response.ok) {
     throw await httpError(response, providerLabel);
   }
-  const payload = await response.json();
+  const payload = asRecord(await response.json()) ?? {};
   const text = typeof payload?.output_text === 'string'
     ? payload.output_text
     : Array.isArray(payload?.output)
       ? payload.output
-        .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
-        .map((part) => (part?.type === 'output_text' && typeof part.text === 'string' ? part.text : ''))
+        .flatMap((item) => {
+          const record = asRecord(item);
+          return Array.isArray(record?.content) ? record.content : [];
+        })
+        .map((part) => {
+          const record = asRecord(part);
+          return record?.type === 'output_text' && typeof record.text === 'string' ? record.text : '';
+        })
         .join('')
       : '';
   if (!text.trim()) {
@@ -273,7 +338,7 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
   return text;
 };
 
-const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
+const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }: MessagesCall): Promise<string> => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -302,9 +367,12 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   if (!response.ok) {
     throw await httpError(response, providerLabel);
   }
-  const payload = await response.json();
+  const payload = asRecord(await response.json()) ?? {};
+  const content = Array.isArray(payload.content)
+    ? payload.content.map(asRecord).filter((part): part is Record<string, unknown> => Boolean(part))
+    : [];
   if (responseSchema) {
-    const toolUse = (payload?.content || []).find(
+    const toolUse = content.find(
       (part) => part?.type === 'tool_use' && part.name === STRUCTURED_OUTPUT_NAME,
     );
     if (!toolUse || typeof toolUse.input !== 'object' || toolUse.input === null) {
@@ -312,7 +380,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
     }
     return JSON.stringify(toolUse.input);
   }
-  const text = (payload?.content || [])
+  const text = content
     .filter((part) => part?.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text)
     .join('');
@@ -322,7 +390,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
+const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }: ApiKeyModelCall) => callMessages({
   url: 'https://api.anthropic.com/v1/messages',
   headers: {
     'x-api-key': apiKey,
@@ -338,7 +406,11 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens,
   signal,
 });
 
-const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
+const getCopilotEndpoint = async ({ baseURL, headers, modelID }: {
+  baseURL: string;
+  headers: Record<string, string>;
+  modelID: string;
+}): Promise<'chat' | 'messages' | 'responses'> => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   const response = await fetch(`${trimmedBase}/models`, {
     headers: {
@@ -351,9 +423,9 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
     throw await httpError(response, 'GitHub Copilot models');
   }
 
-  let payload;
+  let payload: Record<string, unknown> | null;
   try {
-    payload = await response.json();
+    payload = asRecord(await response.json());
   } catch {
     throw new Error('GitHub Copilot models returned invalid JSON');
   }
@@ -361,7 +433,7 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
     throw new Error('GitHub Copilot models returned an invalid model list');
   }
 
-  const model = payload.data.find((item) => item && typeof item === 'object' && item.id === modelID);
+  const model = payload.data.map(asRecord).find((item) => item?.id === modelID);
   if (!model) {
     throw new Error(`GitHub Copilot model "${modelID}" was not returned by /models`);
   }
@@ -383,7 +455,7 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
   throw new Error(`GitHub Copilot model "${modelID}" has no supported text endpoint`);
 };
 
-const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
+const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }: ApiKeyModelCall): Promise<string> => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
   const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
     ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
@@ -411,9 +483,16 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
   if (!response.ok) {
     throw await httpError(response, 'Google');
   }
-  const payload = await response.json();
-  const text = (payload?.candidates?.[0]?.content?.parts || [])
-    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+  const payload = asRecord(await response.json()) ?? {};
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const candidate = asRecord(candidates[0]);
+  const content = asRecord(candidate?.content);
+  const parts = Array.isArray(content?.parts) ? content.parts : [];
+  const text = parts
+    .map((part) => {
+      const record = asRecord(part);
+      return typeof record?.text === 'string' ? record.text : '';
+    })
     .join('');
   if (!text) {
     throw new Error('Google returned no text content');
@@ -422,8 +501,16 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
 };
 
 // ChatGPT-plan traffic goes to the codex backend, which only speaks the
-// streaming Responses API 鈥?collect the output_text deltas from the SSE body.
-const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, timeoutMs, signal }) => {
+// streaming Responses API — collect the output_text deltas from the SSE body.
+const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, timeoutMs, signal }: {
+  accessToken: string;
+  accountId: string | null;
+  modelID: string;
+  prompt: string;
+  signal?: AbortSignal | undefined;
+  system?: string | undefined;
+  timeoutMs?: number | undefined;
+}): Promise<string> => {
   const response = await fetch(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -461,9 +548,9 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
     if (!line.startsWith('data:')) continue;
     const data = line.slice(5).trim();
     if (!data || data === '[DONE]') continue;
-    let event;
+    let event: Record<string, unknown> | null;
     try {
-      event = JSON.parse(data);
+      event = asRecord(JSON.parse(data) as unknown);
     } catch {
       continue;
     }
@@ -474,7 +561,9 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
       completedText = event.text;
     }
     if (event?.type === 'response.failed' || event?.type === 'error') {
-      const message = event?.response?.error?.message || event?.message || 'response failed';
+      const responseRecord = asRecord(event?.response);
+      const responseError = asRecord(responseRecord?.error);
+      const message = asString(responseError?.message) || asString(event?.message) || 'response failed';
       throw new Error(`OpenAI (ChatGPT plan) stream error: ${message}`);
     }
   }
@@ -489,7 +578,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value) => {
+const resolveConfigApiKey = (value: string): string | null => {
   if (value.startsWith('$$')) return value.slice(1);
   if (value.startsWith('$!')) return value.slice(1);
   if (value.startsWith('!')) return null;
@@ -499,11 +588,12 @@ const resolveConfigApiKey = (value) => {
   return expanded.trim() || null;
 };
 
-const readProviderConfig = (workingDirectory, providerID) => {
+const readProviderConfig = (workingDirectory: string | undefined, providerID: string): ProviderConfig | null => {
   try {
     const config = readConfig(workingDirectory);
-    const providerCfg = config?.providers?.[providerID];
-    if (!providerCfg || typeof providerCfg !== 'object') return null;
+    const providers = asRecord(config.providers);
+    const providerCfg = asRecord(providers?.[providerID]);
+    if (!providerCfg) return null;
     const baseURL = typeof providerCfg.baseUrl === 'string' ? providerCfg.baseUrl.trim() : null;
     const rawApiKey = typeof providerCfg.apiKey === 'string' ? providerCfg.apiKey.trim() : null;
     const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey) : null;
@@ -513,7 +603,7 @@ const readProviderConfig = (workingDirectory, providerID) => {
       auth: apiKey ? { type: 'api_key', key: apiKey } : null,
     };
   } catch {
-    // Provider config is non-essential 鈥?continue with catalog-only resolution.
+    // Provider config is non-essential — continue with catalog-only resolution.
     return null;
   }
 }
@@ -522,12 +612,16 @@ const readProviderConfig = (workingDirectory, providerID) => {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export function resolveProviderLogin({ auth, workingDirectory, providerID }) {
+export function resolveProviderLogin({ auth, workingDirectory, providerID }: {
+  auth: AuthStore;
+  providerID: string;
+  workingDirectory?: string | undefined;
+}): AuthEntry | null {
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   return providerConfig?.auth || getAuthEntryForProvider(auth, providerID) || null;
 }
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
+export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }: CallSmallModelInput): Promise<string> {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   // Pi's provider-specific models.json key takes precedence over auth.json.
@@ -543,11 +637,11 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   if (providerID === 'github-copilot') {
     // Copilot stores the device OAuth token as the bearer; no token exchange
     // is required for model calls.
-    const token = entry.refresh || entry.access || entry.key;
+    const token = asString(entry.refresh) || asString(entry.access) || asString(entry.key);
     if (!token) {
       throw new Error('GitHub Copilot login has no token');
     }
-    const enterpriseDomain = entry.enterpriseDomain || entry.enterpriseUrl;
+    const enterpriseDomain = asString(entry.enterpriseDomain) || asString(entry.enterpriseUrl);
     const baseURL = enterpriseDomain
       ? `https://copilot-api.${String(enterpriseDomain).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
       : 'https://api.githubcopilot.com';
@@ -597,14 +691,16 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   if (providerID === 'openai' && entry.type === 'oauth') {
     if (responseSchema) {
       throw Object.assign(
-        new Error('The ChatGPT-plan OpenAI login does not support structured output 鈥?choose another small model'),
+        new Error('The ChatGPT-plan OpenAI login does not support structured output — choose another small model'),
         { code: 'structured-output-unsupported' },
       );
     }
     const fresh = await ensureFreshOpenaiOauth(entry);
+    const accessToken = asString(fresh.access);
+    if (!accessToken) throw new Error('OpenAI OAuth refresh returned no access token');
     return callCodexResponses({
-      accessToken: fresh.access,
-      accountId: fresh.accountId || extractChatgptAccountId(fresh.access),
+      accessToken,
+      accountId: asString(fresh.accountId) || extractChatgptAccountId(accessToken),
       modelID,
       prompt,
       system,
@@ -613,7 +709,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     });
   }
 
-  const apiKey = entry.type === 'api_key' ? entry.key : entry.access;
+  const apiKey = entry.type === 'api_key' ? asString(entry.key) : asString(entry.access);
   if (!apiKey) {
     throw new Error(`Pi credential for "${providerID}" has no usable key`);
   }
@@ -659,7 +755,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     prompt,
     system,
     maxOutputTokens: tokens,
-    providerLabel: provider?.name || providerID,
+    providerLabel: asString(provider?.name) || providerID,
     extraBody,
     responseSchema,
     timeoutMs,

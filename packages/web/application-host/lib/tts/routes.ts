@@ -1,11 +1,14 @@
-// @ts-nocheck
 import express from 'express';
+import type { Express } from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
+import type { SayTtsCapability } from './capability-runtime.js';
 
-export function registerTtsRoutes(app, { sayTTSCapability }) {
-  let ttsModulePromise = null;
-  const getTtsModule = async () => {
+export function registerTtsRoutes(app: Express, {
+  sayTTSCapability,
+}: { sayTTSCapability: SayTtsCapability | Promise<SayTtsCapability> | null }): void {
+  let ttsModulePromise: Promise<typeof import('./index.js')> | null = null;
+  const getTtsModule = async (): Promise<typeof import('./index.js')> => {
     if (!ttsModulePromise) {
       ttsModulePromise = import('./index.js');
     }
@@ -45,7 +48,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL } = req.body || {};
+      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, apiKey, baseURL } = req.body || {};
 
       const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
       if (normalizedBaseURLResult.error) {
@@ -73,7 +76,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         });
       }
 
-      let textToSpeak = text.trim();
+      const textToSpeak = text.trim();
 
       // Historical summarize request fields are intentionally ignored. The
       // model-backed summarization provider is retired.
@@ -116,6 +119,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         text,
         threshold,
         maxLength,
+        zenModel: undefined,
         mode: typeof mode === 'string' ? mode : 'tts',
       });
 
@@ -125,7 +129,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const sanitized = typeof req.body?.mode === 'string' && req.body.mode === 'note'
         ? sanitizeForNote(req.body?.text || '')
         : sanitizeForTTS(req.body?.text || '');
-      return res.json({ summary: sanitized, summarized: false, reason: error.message });
+      return res.json({ summary: sanitized, summarized: false, reason: error instanceof Error ? error.message : 'Summarization failed' });
     }
   });
 
@@ -141,7 +145,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
         ]
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({ error: 'Failed to check TTS status' });
     }
   });
@@ -192,7 +196,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const audioBuffer = await fs.promises.readFile(tempFile);
 
       // Clean up temp file
-      fs.promises.unlink(tempFile).catch(() => {});
+      fs.promises.unlink(tempFile).catch(() => undefined);
 
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
@@ -215,7 +219,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       try {
         const { transcribeAudio } = await import('./stt.js');
 
-        const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
+        const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0]?.trim() || 'audio/webm';
         const baseURL = typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '';
         const model = typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
           ? req.headers['x-model'].trim()

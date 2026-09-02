@@ -1,18 +1,19 @@
-// @ts-nocheck
+import path from 'node:path';
 import { createWorkspaceTaskRunner } from './tasks.js';
 import { createDebugSupervisor } from './debug-supervisor.js';
 import { createTestSupervisor } from './test-supervisor.js';
-import { PIARIUM_NODE_DAP_ADAPTER_PATH } from './servers.js';
+import { PIARIUM_NODE_DAP_ADAPTER_ARGS } from './servers.js';
+import type { RunRuntimeOptions } from './types.js';
 
 export const createRunRuntime = ({
   documents,
   spawn,
-  pathModule,
-  env,
-  isTrusted,
+  pathModule = path,
+  env = process.env,
+  isTrusted = async () => false,
   execPath = process.execPath,
   registerBuiltins = true,
-}) => {
+}: RunRuntimeOptions) => {
   const tasks = createWorkspaceTaskRunner({
     documents,
     spawn,
@@ -40,7 +41,7 @@ export const createRunRuntime = ({
     debug.registerAdapter({
       adapterId: 'piarium.node',
       command: execPath,
-      args: [PIARIUM_NODE_DAP_ADAPTER_PATH],
+      args: PIARIUM_NODE_DAP_ADAPTER_ARGS,
       languageIds: ['javascript', 'javascriptreact', 'typescript'],
       source: 'builtin',
     });

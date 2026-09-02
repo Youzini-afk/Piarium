@@ -1,5 +1,5 @@
-// @ts-nocheck
-import { buildResult } from '../../utils/index.js';
+import { asObject, buildResult } from '../../utils/index.js';
+import type { ModelQuotaUsage } from '../../utils/index.js';
 import {
   resolveGoogleAuthSources,
   resolveGoogleOAuthClient,
@@ -33,8 +33,8 @@ export const fetchGoogleQuota = async () => {
     });
   }
 
-  const models = {};
-  const sourceErrors = [];
+  const models: Record<string, ModelQuotaUsage> = {};
+  const sourceErrors: string[] = [];
 
   for (const source of authSources) {
     const now = Date.now();
@@ -78,7 +78,8 @@ export const fetchGoogleQuota = async () => {
 
     const payload = await fetchGoogleModels(accessToken, projectId);
     if (payload) {
-      for (const [modelName, modelData] of Object.entries(payload.models ?? {})) {
+      const payloadModels = asObject(payload.models) ?? {};
+      for (const [modelName, modelData] of Object.entries(payloadModels)) {
         const transformed = transformModelData(modelName, modelData, source.sourceId);
         Object.assign(models, transformed);
         mergedAnyModel = true;
@@ -107,7 +108,7 @@ export const fetchGoogleQuota = async () => {
     configured: true,
     usage: {
       windows: {},
-      models: Object.keys(models).length ? models : undefined
+      models
     }
   });
 };

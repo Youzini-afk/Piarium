@@ -1,14 +1,16 @@
-// @ts-nocheck
 // Long-lived relay host client: maintains the signed `host-control` socket to
 // the relay, and per connected client a signed `host-data` socket that runs the
 // responder E2EE handshake and feeds decrypted frames into a tunnel-host
 // dispatcher. Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 1).
 
 import { WebSocket } from 'ws';
+import type { RawData } from 'ws';
 
 import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
+import type { RelayFrameChannel } from './e2ee.js';
 import { createOutboundFrameBatcher, decodeFrameBatch } from './tunnel-codec.js';
 import { createTunnelHost } from './tunnel-host.js';
+import type { RelayIdentity } from './identity.js';
 
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
@@ -17,13 +19,14 @@ const DATA_SOCKET_OPEN_TIMEOUT_MS = 15000;
 // with no inbound traffic for 3 ping intervals belongs to a client that died
 // without a WebSocket close (network loss, battery kill). The relay worker may
 // not notice the dead client leg for a long time, so the host must reap these
-// itself 鈥?both to free resources and to keep the "N devices connected" status
+// itself — both to free resources and to keep the "N devices connected" status
 // honest instead of counting ghosts.
 const DATA_SOCKET_IDLE_TIMEOUT_MS = 90_000;
 const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
 // Protocol-level keepalive for the control socket. Without it, a network path
 // that dies silently (NAT timeout, relay-edge eviction without close frames)
-// leaves the host believing it is registered while the relay has forgotten it 鈥?// every client tunnel then hangs in `connecting` forever. A missed pong window
+// leaves the host believing it is registered while the relay has forgotten it —
+// every client tunnel then hangs in `connecting` forever. A missed pong window
 // terminates the socket, which drives the normal reconnect + re-registration.
 const CONTROL_PING_INTERVAL_MS = 30_000;
 const CONTROL_PONG_GRACE_MS = 10_000;
@@ -31,8 +34,46 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
 // the 150 ms default. Only applies on directions where batching was negotiated.
-const resolveBatchWindowMs = (option) => {
-  if (Number.isFinite(option) && option >= 0) return option;
+type RelayHostState = 'connected' | 'connecting' | 'disabled' | 'reconnecting';
+
+interface RelayHostStatus {
+  connectedClients: number;
+  lastError: string | null;
+  state: RelayHostState;
+}
+
+interface RelayHostOptions {
+  batch?: boolean;
+  batchWindowMs?: number;
+  getLocalPort?: () => number;
+  identity: RelayIdentity;
+  localPort?: number;
+  logger?: Pick<Console, 'info' | 'warn'>;
+  onStatus?: (status: RelayHostStatus) => void;
+  relayUrl: string;
+}
+
+type TunnelHost = ReturnType<typeof createTunnelHost>;
+type FrameBatcher = ReturnType<typeof createOutboundFrameBatcher>;
+
+interface DataSocketEntry {
+  batcher: FrameBatcher | null;
+  lastActivityAt: number;
+  openTimer: ReturnType<typeof setTimeout> | null;
+  socket: WebSocket;
+  tunnel: TunnelHost | null;
+}
+
+const rawDataBytes = (data: RawData): Uint8Array => {
+  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+};
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const resolveBatchWindowMs = (option?: number): number => {
+  if (typeof option === 'number' && Number.isFinite(option) && option >= 0) return option;
   const envValue = Number.parseInt(process.env.PIARIUM_RELAY_BATCH_WINDOW_MS ?? '', 10);
   if (Number.isFinite(envValue) && envValue >= 0) return envValue;
   return DEFAULT_BATCH_WINDOW_MS;
@@ -48,21 +89,21 @@ const resolveBatchWindowMs = (option) => {
  *   logger?: Pick<Console, 'warn'>,
  * }} options
  */
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, batchWindowMs, batch }) => {
-  const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, batchWindowMs, batch }: RelayHostOptions) => {
+  const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort ?? 0;
   const localBatch = batch !== false;
   const resolvedBatchWindowMs = resolveBatchWindowMs(batchWindowMs);
 
   let stopped = false;
-  let state = 'connecting';
-  let lastError = null;
-  let controlSocket = null;
-  let reconnectTimer = null;
+  let state: RelayHostState = 'connecting';
+  let lastError: string | null = null;
+  let controlSocket: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let consecutiveFailures = 0;
   /** @type {Map<string, { socket: WebSocket, tunnel: ReturnType<typeof createTunnelHost> | null, openTimer: NodeJS.Timeout | null }>} */
-  const dataSockets = new Map();
+  const dataSockets = new Map<string, DataSocketEntry>();
 
-  const emitStatus = () => {
+  const emitStatus = (): void => {
     try {
       onStatus?.({ state, lastError, connectedClients: dataSockets.size });
     } catch {
@@ -70,13 +111,13 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
   };
 
-  const setState = (nextState, error) => {
+  const setState = (nextState: RelayHostState, error?: string | null): void => {
     state = nextState;
     if (error !== undefined) lastError = error;
     emitStatus();
   };
 
-  const buildSocketUrl = (role, connectionId) => {
+  const buildSocketUrl = (role: string, connectionId?: string): string => {
     const url = new URL(relayUrl);
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', role);
@@ -89,7 +130,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     return url.toString();
   };
 
-  const teardownDataSocket = (connectionId, closeCode, reason) => {
+  const teardownDataSocket = (connectionId: string, closeCode?: number, reason?: string): void => {
     const entry = dataSockets.get(connectionId);
     if (!entry) return;
     dataSockets.delete(connectionId);
@@ -107,18 +148,18 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     emitStatus();
   };
 
-  const openDataSocket = (connectionId) => {
+  const openDataSocket = (connectionId: string): void => {
     if (stopped || dataSockets.has(connectionId)) return;
 
-    let socket;
+    let socket: WebSocket;
     try {
       socket = new WebSocket(buildSocketUrl('host-data', connectionId));
     } catch (error) {
-      logger.warn(`[Relay] host-data dial failed: ${error?.message ?? error}`);
+      logger.warn(`[Relay] host-data dial failed: ${errorMessage(error)}`);
       return;
     }
 
-    const entry = { socket, tunnel: null, openTimer: null, batcher: null, lastActivityAt: Date.now() };
+    const entry: DataSocketEntry = { socket, tunnel: null, openTimer: null, batcher: null, lastActivityAt: Date.now() };
     dataSockets.set(connectionId, entry);
     entry.openTimer = setTimeout(() => {
       logger.warn('[Relay] host-data socket open timeout');
@@ -126,7 +167,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }, DATA_SOCKET_OPEN_TIMEOUT_MS);
 
     const handshake = createHostHandshake(identity.hostEncPrivateKey, { batch: localBatch });
-    let channel = null;
+    let channel: RelayFrameChannel | null = null;
     let batchNegotiated = false;
     // Serialize async message handling so encrypted frame order (and the
     // strictly-increasing decrypt counter) is preserved.
@@ -135,7 +176,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     // encryption order. One encrypt() == one WS message == one counter tick,
     // whether it carries a batch or a lone frame.
     let sendChain = Promise.resolve();
-    const sendEncryptedPlaintext = (plaintext) => {
+    const sendEncryptedPlaintext = (plaintext: Uint8Array): void => {
       sendChain = sendChain
         .then(async () => {
           if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN || !channel) return;
@@ -143,17 +184,17 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           socket.send(encrypted, { binary: true });
         })
         .catch((error) => {
-          logger.warn(`[Relay] host-data send failed: ${error?.message ?? error}`);
+          logger.warn(`[Relay] host-data send failed: ${errorMessage(error)}`);
         });
     };
 
-    const failChannel = (closeCode, reason) => {
-      // connectionId + reason only 鈥?never payload contents.
+    const failChannel = (closeCode: number, reason?: string): void => {
+      // connectionId + reason only — never payload contents.
       logger.warn(`[Relay] data channel failed connectionId=${connectionId} reason=${reason ?? 'unknown'}`);
       teardownDataSocket(connectionId, closeCode, reason);
     };
 
-    const handleMessage = async (data, isBinary) => {
+    const handleMessage = async (data: RawData, isBinary: boolean): Promise<void> => {
       const current = dataSockets.get(connectionId);
       if (current !== entry) return;
       // Any inbound message (including the client's keepalive Ping) proves the
@@ -194,7 +235,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
       let plaintext;
       try {
-        plaintext = await channel.decryptor.decrypt(new Uint8Array(data));
+        plaintext = await channel.decryptor.decrypt(rawDataBytes(data));
       } catch {
         failChannel(RelayCloseCode.ChannelFailure, 'frame decryption failed');
         return;
@@ -211,7 +252,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           await entry.tunnel.handleFrame(plaintext);
         }
       } catch (error) {
-        logger.warn(`[Relay] tunnel frame handling failed: ${error?.message ?? error}`);
+        logger.warn(`[Relay] tunnel frame handling failed: ${errorMessage(error)}`);
       }
     };
 
@@ -226,7 +267,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       processing = processing
         .then(() => handleMessage(data, isBinary))
         .catch((error) => {
-          logger.warn(`[Relay] data socket message failed: ${error?.message ?? error}`);
+          logger.warn(`[Relay] data socket message failed: ${errorMessage(error)}`);
           failChannel(RelayCloseCode.ChannelFailure, 'internal error');
         });
     });
@@ -234,25 +275,26 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       teardownDataSocket(connectionId);
     });
     socket.on('error', (error) => {
-      logger.warn(`[Relay] host-data socket error: ${error?.message ?? error}`);
+      logger.warn(`[Relay] host-data socket error: ${errorMessage(error)}`);
     });
   };
 
-  const handleControlMessage = (raw) => {
-    let message;
+  const handleControlMessage = (raw: string): void => {
+    let message: Record<string, unknown> | null;
     try {
-      message = JSON.parse(raw);
+      const parsed = JSON.parse(raw) as unknown;
+      message = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
     } catch {
       return;
     }
-    if (!message || typeof message !== 'object') return;
+    if (!message) return;
     if (message.type === 'sync' && Array.isArray(message.connectionIds)) {
       // The WebSocket `open` event only proves that the local transport completed
       // its upgrade. The relay's first sync is the authoritative registration
       // acknowledgement: only now may callers advertise the host as connected.
       consecutiveFailures = 0;
       setState('connected', null);
-      const wanted = new Set(message.connectionIds.filter((id) => typeof id === 'string' && id.length > 0));
+      const wanted = new Set<string>(message.connectionIds.filter((id): id is string => typeof id === 'string' && id.length > 0));
       for (const connectionId of [...dataSockets.keys()]) {
         if (!wanted.has(connectionId)) teardownDataSocket(connectionId);
       }
@@ -270,7 +312,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
   };
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (): void => {
     if (stopped || reconnectTimer) return;
     const delay = Math.min(BACKOFF_BASE_MS * 2 ** consecutiveFailures, BACKOFF_CAP_MS);
     consecutiveFailures += 1;
@@ -281,27 +323,28 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }, delay);
   };
 
-  const connectControl = () => {
+  function connectControl(): void {
     if (stopped) return;
     setState(consecutiveFailures === 0 ? 'connecting' : 'reconnecting');
 
-    let socket;
+    let socket: WebSocket;
     try {
       socket = new WebSocket(buildSocketUrl('host-control'));
     } catch (error) {
-      lastError = error?.message ?? String(error);
+      lastError = errorMessage(error);
       scheduleReconnect();
       return;
     }
     controlSocket = socket;
 
     // Liveness: ping on an interval; any pong (or message) proves the path.
-    // A quiet window beyond interval+grace means the connection silently died 鈥?    // terminate so the close handler reconnects and re-registers at the relay.
+    // A quiet window beyond interval+grace means the connection silently died —
+    // terminate so the close handler reconnects and re-registers at the relay.
     let lastAliveAt = Date.now();
     const pingTimer = setInterval(() => {
       if (controlSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
       if (Date.now() - lastAliveAt > CONTROL_PING_INTERVAL_MS + CONTROL_PONG_GRACE_MS) {
-        logger.warn('[Relay] control socket unresponsive (missed pong) 鈥?reconnecting');
+        logger.warn('[Relay] control socket unresponsive (missed pong) — reconnecting');
         try {
           socket.terminate();
         } catch {
@@ -331,7 +374,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     });
     socket.on('error', (error) => {
       if (controlSocket !== socket) return;
-      lastError = error?.message ?? String(error);
+      lastError = errorMessage(error);
     });
     socket.on('close', (code, reasonBuffer) => {
       clearInterval(pingTimer);
@@ -345,10 +388,10 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       // alive through a 30 s control-reconnect grace window, so leave them up.
       scheduleReconnect();
     });
-  };
+  }
 
   // Reap data sockets whose client went silent (no frames, no keepalive pings)
-  // 鈥?a dead phone leg the relay worker hasn't noticed yet.
+  // — a dead phone leg the relay worker hasn't noticed yet.
   const idleSweepTimer = setInterval(() => {
     const now = Date.now();
     for (const [connectionId, entry] of [...dataSockets.entries()]) {
@@ -359,7 +402,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
   }, DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS);
   if (typeof idleSweepTimer.unref === 'function') idleSweepTimer.unref();
 
-  const stop = () => {
+  const stop = (): void => {
     if (stopped) return;
     stopped = true;
     clearInterval(idleSweepTimer);

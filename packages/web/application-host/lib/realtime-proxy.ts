@@ -1,29 +1,63 @@
-// @ts-nocheck
 import { WebSocket, WebSocketServer } from 'ws';
+import type { Express, Response } from 'express';
+import type { IncomingHttpHeaders, IncomingMessage, Server } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { RawData } from 'ws';
 
 const PROXY_SSE_PATH = '/api/piarium/realtime-proxy/sse';
 const PROXY_WS_PATH = '/api/piarium/realtime-proxy/ws';
 
-const isAllowedSsePath = (pathname) => {
+type ProxyType = 'sse' | 'ws';
+
+interface DesktopRuntimeConfig {
+  apiBaseUrl?: string;
+  requestHeaders?: unknown;
+}
+
+interface ProxyRequest extends IncomingMessage {
+  query?: Record<string, unknown>;
+}
+
+interface UiAuthController {
+  ensureSessionToken(
+    req: IncomingMessage,
+    res: { setHeader(name: string, value: number | string | readonly string[]): unknown },
+  ): Promise<unknown>;
+}
+
+interface RealtimeProxyOptions {
+  app?: Express | null;
+  getDesktopRuntimeConfig?: (() => DesktopRuntimeConfig | null) | null;
+  getUiAuthController?: (() => UiAuthController | null) | null;
+  isRequestOriginAllowed?: ((req: IncomingMessage) => boolean | Promise<boolean>) | null;
+  server?: Server | null;
+}
+
+interface ResolvedProxyTarget {
+  requestHeaders: Record<string, string>;
+  target: URL;
+}
+
+const isAllowedSsePath = (pathname: string): boolean => {
   return pathname === '/api/piarium/events'
     || pathname === '/api/piarium/runtime-manager/events'
     || pathname === '/api/notifications/stream';
 };
 
-const isAllowedWebSocketPath = (pathname) => {
+const isAllowedWebSocketPath = (pathname: string): boolean => {
   return pathname === '/api/piarium/runtime/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws';
 };
 
-const normalizeBaseUrl = (value) => {
+const normalizeBaseUrl = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\/+$/, '');
 };
 
-const sanitizeHeaders = (headers) => {
+const sanitizeHeaders = (headers: unknown): Record<string, string> => {
   if (!headers || typeof headers !== 'object') return {};
-  const next = {};
+  const next: Record<string, string> = {};
   for (const [rawName, rawValue] of Object.entries(headers)) {
     const name = typeof rawName === 'string' ? rawName.trim() : '';
     const value = typeof rawValue === 'string' ? rawValue.trim() : '';
@@ -34,9 +68,9 @@ const sanitizeHeaders = (headers) => {
   return next;
 };
 
-const hasHeaders = (headers) => Object.keys(headers).length > 0;
+const hasHeaders = (headers: Record<string, string>): boolean => Object.keys(headers).length > 0;
 
-const getTargetParam = (req) => {
+const getTargetParam = (req: ProxyRequest): URL | null => {
   let raw = typeof req.query?.url === 'string' ? req.query.url : '';
   if (!raw) {
     try {
@@ -53,7 +87,7 @@ const getTargetParam = (req) => {
   }
 };
 
-const urlsMatchRuntime = (target, apiBaseUrl) => {
+const urlsMatchRuntime = (target: URL, apiBaseUrl: unknown): boolean => {
   const base = normalizeBaseUrl(apiBaseUrl);
   if (!base) return false;
   try {
@@ -67,16 +101,20 @@ const urlsMatchRuntime = (target, apiBaseUrl) => {
   }
 };
 
-const protocolMatchesProxyType = (target, type) => {
+const protocolMatchesProxyType = (target: URL, type: ProxyType): boolean => {
   if (type === 'ws') return target.protocol === 'ws:' || target.protocol === 'wss:';
   return target.protocol === 'http:' || target.protocol === 'https:';
 };
 
-const pathMatchesProxyType = (target, type) => {
+const pathMatchesProxyType = (target: URL, type: ProxyType): boolean => {
   return type === 'ws' ? isAllowedWebSocketPath(target.pathname) : isAllowedSsePath(target.pathname);
 };
 
-const resolveProxyTarget = (req, getDesktopRuntimeConfig, type) => {
+const resolveProxyTarget = (
+  req: ProxyRequest,
+  getDesktopRuntimeConfig: () => DesktopRuntimeConfig | null,
+  type: ProxyType,
+): ResolvedProxyTarget | null => {
   const config = typeof getDesktopRuntimeConfig === 'function' ? getDesktopRuntimeConfig() : null;
   const requestHeaders = sanitizeHeaders(config?.requestHeaders);
   const apiBaseUrl = normalizeBaseUrl(config?.apiBaseUrl);
@@ -88,14 +126,14 @@ const resolveProxyTarget = (req, getDesktopRuntimeConfig, type) => {
   return { target, requestHeaders };
 };
 
-const safeHeader = (headers, name) => {
+const safeHeader = (headers: IncomingHttpHeaders, name: string): string => {
   const value = headers?.[name.toLowerCase()];
   if (Array.isArray(value)) return value.find((item) => typeof item === 'string' && item.trim()) || '';
   return typeof value === 'string' ? value.trim() : '';
 };
 
-const buildSseRequestHeaders = (req, requestHeaders) => {
-  const headers = {};
+const buildSseRequestHeaders = (req: IncomingMessage, requestHeaders: Record<string, string>): Record<string, string> => {
+  const headers: Record<string, string> = {};
   const accept = safeHeader(req.headers, 'accept');
   const lastEventId = safeHeader(req.headers, 'last-event-id');
   if (accept) headers.Accept = accept;
@@ -103,30 +141,36 @@ const buildSseRequestHeaders = (req, requestHeaders) => {
   return { ...headers, ...requestHeaders };
 };
 
-const rejectWebSocketUpgrade = (socket, statusCode, message) => {
+const rejectWebSocketUpgrade = (socket: Duplex, statusCode: number, message: string): void => {
   socket.write(`HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\n\r\n`);
   socket.destroy();
 };
 
-export const buildRealtimeProxySseUrl = (localOrigin, targetUrl) => {
+export const buildRealtimeProxySseUrl = (localOrigin: string, targetUrl: string): string => {
   const url = new URL(PROXY_SSE_PATH, localOrigin);
   url.searchParams.set('url', targetUrl);
   return url.toString();
 };
 
-export const buildRealtimeProxyWsUrl = (localOrigin, targetUrl) => {
+export const buildRealtimeProxyWsUrl = (localOrigin: string, targetUrl: string): string => {
   const url = new URL(PROXY_WS_PATH, localOrigin);
   url.searchParams.set('url', targetUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 };
 
-export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getUiAuthController, isRequestOriginAllowed }) => {
+export const attachRealtimeProxy = ({
+  app,
+  server,
+  getDesktopRuntimeConfig,
+  getUiAuthController,
+  isRequestOriginAllowed,
+}: RealtimeProxyOptions) => {
   if (!app || !server || typeof getDesktopRuntimeConfig !== 'function') {
     return { stop: () => {} };
   }
 
-  const originAllowed = async (req) => {
+  const originAllowed = async (req: IncomingMessage): Promise<boolean> => {
     if (typeof isRequestOriginAllowed !== 'function') return false;
     try {
       return await isRequestOriginAllowed(req);
@@ -135,10 +179,13 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     }
   };
 
-  const ensureAuthenticated = async (req, res) => {
+  const ensureAuthenticated = async (
+    req: IncomingMessage,
+    res: Response | null,
+  ): Promise<boolean> => {
     const controller = typeof getUiAuthController === 'function' ? getUiAuthController() : null;
     if (typeof controller?.ensureSessionToken !== 'function') return false;
-    const response = res || { setHeader: () => {} };
+    const response = res || { setHeader: () => undefined };
     const token = await controller.ensureSessionToken(req, response);
     return Boolean(token);
   };
@@ -201,11 +248,13 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     const upstream = new WebSocket(resolved.target.toString(), {
       headers: resolved.requestHeaders,
     });
-    const pending = [];
+    const pending: Array<[RawData, boolean]> = [];
 
     const flush = () => {
       while (pending.length > 0 && upstream.readyState === WebSocket.OPEN) {
-        const [data, isBinary] = pending.shift();
+        const pendingMessage = pending.shift();
+        if (!pendingMessage) break;
+        const [data, isBinary] = pendingMessage;
         upstream.send(data, { binary: isBinary });
       }
     };
@@ -242,7 +291,7 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
     });
   });
 
-  const upgradeHandler = (req, socket, head) => {
+  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const pathname = (() => {
       try { return new URL(req.url || '/', 'http://127.0.0.1').pathname; } catch { return ''; }
     })();

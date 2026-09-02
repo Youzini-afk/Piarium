@@ -40,6 +40,6 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 Run:
 
 ```sh
-bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
-bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
+bun test packages/web/application-host/lib/terminal/runtime.test.js packages/web/application-host/lib/terminal/terminal-ws-protocol.test.js
+bun test packages/web/application-host/lib/ui-auth/ui-auth.test.js packages/web/application-host/lib/relay/cross-compat.test.js
 ```

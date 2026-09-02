@@ -72,6 +72,8 @@ export type WorkspaceDownloadResult = FileDownloadInfo | ArchiveDownloadStream;
 
 const safeDownloadName = (nameValue: unknown): string => {
   const cleaned = String(nameValue || 'workspace')
+    // Control characters are intentionally replaced in download filenames.
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
     .replace(/[. ]+$/g, '')
     .trim();

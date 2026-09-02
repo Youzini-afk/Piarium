@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Zhipu AI Coding Plan quota fetch
  *
@@ -33,27 +32,34 @@ import {
   buildResult,
   toUsageWindow,
   resolveWindowSeconds,
-  normalizeTimestamp
+  normalizeTimestamp,
+  asObject,
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/index.js';
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
 const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
-function getApiKey() {
+function getApiKey(): string | null {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKeyFromAuth = entry?.key ?? entry?.token;
+  const apiKeyFromAuth = typeof entry?.key === 'string'
+    ? entry.key
+    : typeof entry?.token === 'string'
+      ? entry.token
+      : null;
 
   if (apiKeyFromAuth) {
     return apiKeyFromAuth;
   }
 
   try {
-    const { mergedConfig } = readConfigLayers();
+    const { mergedConfig } = readConfigLayers(undefined);
+    const providers = asObject(mergedConfig.providers);
 
     for (const alias of aliases) {
-      const providerConfig = mergedConfig?.providers?.[alias];
+      const providerConfig = asObject(providers?.[alias]);
       if (typeof providerConfig?.apiKey === 'string' && providerConfig.apiKey.trim()) {
         return providerConfig.apiKey.trim();
       }
@@ -101,13 +107,16 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
+    const payload = asObject(await response.json()) ?? {};
+    const data = asObject(payload.data);
+    const limits = Array.isArray(data?.limits)
+      ? data.limits.map(asObject).filter((limit): limit is Record<string, unknown> => Boolean(limit))
+      : [];
 
     const tokensLimit = limits.find((limit) => limit?.type === 'TOKENS_LIMIT');
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
 
     // Handle TOKENS_LIMIT (5-hour window for token usage)
     if (tokensLimit) {

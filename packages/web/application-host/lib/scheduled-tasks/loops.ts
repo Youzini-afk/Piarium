@@ -1,4 +1,3 @@
-// @ts-nocheck
 import crypto from 'node:crypto';
 import fsPromisesDefault from 'node:fs/promises';
 import osDefault from 'node:os';
@@ -7,17 +6,49 @@ import YAML from 'yaml';
 import parser from 'cron-parser';
 import { IANAZone } from 'luxon';
 import { resolveWorktreeTopLevel } from '../git/service.js';
+import type { ScheduledTaskExecution } from '../projects/project-config.js';
 
 const LOOP_DIRECTORY = 'loops';
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
-const asNonEmptyString = (value) => {
+export interface LoopDefinition {
+  enabled: boolean;
+  execution: ScheduledTaskExecution;
+  name: string;
+  schedule: { cron: string; kind: 'cron'; timezone?: string };
+}
+
+export interface ParsedLoopContent {
+  definition: LoopDefinition | null;
+  error: string | null;
+  name: string | null;
+}
+
+export interface DiscoveredLoop extends ParsedLoopContent {
+  filePath: string;
+  revision: string;
+  scope: 'project' | 'user';
+}
+
+type FsPromises = typeof fsPromisesDefault;
+type PathModule = typeof pathDefault;
+
+const asRecord = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+);
+
+const errorCode = (error: unknown): string | null => {
+  const record = asRecord(error);
+  return typeof record?.code === 'string' ? record.code : null;
+};
+
+const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 };
 
-const splitProviderModel = (value) => {
+const splitProviderModel = (value: unknown): { modelID: string; providerID: string } | null => {
   const raw = asNonEmptyString(value);
   const separator = raw?.indexOf('/') ?? -1;
   if (!raw || separator <= 0 || separator === raw.length - 1) return null;
@@ -26,10 +57,10 @@ const splitProviderModel = (value) => {
   return providerID && modelID ? { providerID, modelID } : null;
 };
 
-const bestEffortFrontmatterName = (raw) => {
+const bestEffortFrontmatterName = (raw: unknown): string | null => {
   const match = String(raw || '').match(/^\s*name\s*:\s*(.+?)\s*$/m);
   if (!match) return null;
-  const value = match[1].trim();
+  const value = match[1]?.trim() ?? '';
   if (!value || value === '|' || value === '>') return null;
   if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
     return asNonEmptyString(value.slice(1, -1));
@@ -37,38 +68,50 @@ const bestEffortFrontmatterName = (raw) => {
   return asNonEmptyString(value.replace(/\s+#.*$/, ''));
 };
 
-const splitMarkdown = (content) => {
+type MarkdownParts =
+  | { error: string; ok: false }
+  | {
+      bodyRaw: string;
+      bom: string;
+      eol: string;
+      frontmatterRaw: string;
+      ok: true;
+      separator: string;
+    };
+
+const splitMarkdown = (content: unknown): MarkdownParts => {
   const raw = typeof content === 'string' ? content : '';
   const bom = raw.charCodeAt(0) === 0xfeff ? '\ufeff' : '';
   const normalized = bom ? raw.slice(1) : raw;
   const match = normalized.match(/^---(\r?\n)([\s\S]*?)(\r?\n)---((?:\r?\n)?)([\s\S]*)$/);
   if (!match) {
-    return { error: 'Loop file must start with YAML frontmatter', name: null };
+    return { error: 'Loop file must start with YAML frontmatter', ok: false };
   }
   return {
     bom,
-    bodyRaw: match[5],
-    eol: match[1],
-    frontmatterRaw: match[2],
-    separator: match[4],
+    bodyRaw: match[5] ?? '',
+    eol: match[1] ?? '\n',
+    frontmatterRaw: match[2] ?? '',
+    separator: match[4] ?? '',
+    ok: true,
   };
 };
 
-const parseFrontmatter = (raw) => {
+const parseFrontmatter = (raw: string) => {
   const document = YAML.parseDocument(raw, { keepSourceTokens: true });
   if (document.errors.length > 0) {
     throw document.errors[0];
   }
-  const value = document.toJS();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  const value = asRecord(document.toJS());
+  if (!value) {
     throw new Error('Loop frontmatter must be a YAML object');
   }
   return { document, value };
 };
 
-export const parseLoopContent = (content) => {
+export const parseLoopContent = (content: unknown): ParsedLoopContent => {
   const parts = splitMarkdown(content);
-  if (parts.error) return { definition: null, error: parts.error, name: null };
+  if (!parts.ok) return { definition: null, error: parts.error, name: null };
 
   let frontmatter;
   try {
@@ -135,7 +178,7 @@ export const parseLoopContent = (content) => {
     if (!runAsGoal) {
       return { definition: null, error: 'Frontmatter "goal_token_budget" requires "run_as_goal: true"', name };
     }
-    if (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget <= 0) {
+    if (typeof goalTokenBudget !== 'number' || !Number.isSafeInteger(goalTokenBudget) || goalTokenBudget <= 0) {
       return { definition: null, error: 'Frontmatter "goal_token_budget" must be a positive integer', name };
     }
   }
@@ -164,11 +207,13 @@ export const parseLoopContent = (content) => {
   };
 };
 
-export const loopContentRevision = (content) => (
+export const loopContentRevision = (content: unknown): string => (
   crypto.createHash('sha256').update(String(content ?? ''), 'utf8').digest('hex')
 );
 
-export const readLoopFile = async (filePath, { fsPromises = fsPromisesDefault } = {}) => {
+export const readLoopFile = async (filePath: string, { fsPromises = fsPromisesDefault }: {
+  fsPromises?: Pick<FsPromises, 'readFile'>;
+} = {}) => {
   const content = await fsPromises.readFile(filePath, 'utf8');
   return { content, revision: loopContentRevision(content) };
 };
@@ -181,9 +226,13 @@ export class LoopRevisionConflictError extends Error {
 }
 
 export const writeLoopFile = async (
-  filePath,
-  content,
-  { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault } = {},
+  filePath: string,
+  content: string,
+  { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault }: {
+    expectedRevision?: string | undefined;
+    fsPromises?: Pick<FsPromises, 'copyFile' | 'readFile' | 'rename' | 'unlink' | 'writeFile'>;
+    path?: PathModule;
+  } = {},
 ) => {
   const current = await readLoopFile(filePath, { fsPromises });
   if (expectedRevision && current.revision !== expectedRevision) {
@@ -200,7 +249,7 @@ export const writeLoopFile = async (
     try {
       await fsPromises.rename(temporaryPath, filePath);
     } catch (error) {
-      const code = error?.code;
+      const code = errorCode(error);
       const windowsReplaceFailure = process.platform === 'win32'
         && (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY' || code === 'EEXIST');
       if (!windowsReplaceFailure) throw error;
@@ -217,15 +266,20 @@ export const writeLoopFile = async (
 };
 
 export const setLoopFileEnabled = async (
-  filePath,
-  enabled,
-  { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault } = {},
+  filePath: string,
+  enabled: unknown,
+  { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault }: {
+    expectedRevision?: string | undefined;
+    fsPromises?: Pick<FsPromises, 'copyFile' | 'readFile' | 'rename' | 'unlink' | 'writeFile'>;
+    path?: PathModule;
+  } = {},
 ) => {
   const current = await readLoopFile(filePath, { fsPromises });
   const parsed = parseLoopContent(current.content);
   if (!parsed.definition) throw new Error(parsed.error || 'Loop file is invalid');
 
   const parts = splitMarkdown(current.content);
+  if (!parts.ok) throw new Error(parts.error);
   const { document } = parseFrontmatter(parts.frontmatterRaw);
   document.set('enabled', Boolean(enabled));
   const nextFrontmatter = document.toString({ lineWidth: 0 }).replace(/\r?\n$/, '').replace(/\r?\n/g, parts.eol);
@@ -237,12 +291,15 @@ export const setLoopFileEnabled = async (
   });
 };
 
-const walkLoopFiles = async (directory, { fsPromises, path }) => {
+const walkLoopFiles = async (directory: string, { fsPromises, path }: {
+  fsPromises: Pick<FsPromises, 'readdir' | 'realpath'>;
+  path: PathModule;
+}): Promise<string[]> => {
   let entries;
   try {
     entries = await fsPromises.readdir(directory, { withFileTypes: true });
   } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return [];
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return [];
     throw error;
   }
   const files = entries
@@ -252,12 +309,12 @@ const walkLoopFiles = async (directory, { fsPromises, path }) => {
   return Promise.all(files.map(async (filePath) => fsPromises.realpath(filePath).catch(() => path.resolve(filePath))));
 };
 
-const ancestorDirectories = (startDirectory, stopDirectory, path) => {
+const ancestorDirectories = (startDirectory: string, stopDirectory: string, path: PathModule): string[] => {
   const start = path.resolve(startDirectory);
   const stop = path.resolve(stopDirectory || startDirectory);
   const relative = path.relative(stop, start);
   const boundedStop = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)) ? stop : start;
-  const result = [];
+  const result: string[] = [];
   let current = start;
   while (true) {
     result.push(current);
@@ -270,15 +327,20 @@ const ancestorDirectories = (startDirectory, stopDirectory, path) => {
 };
 
 export const discoverLoopFiles = async (
-  projectPath,
+  projectPath: string | null | undefined,
   {
     fsPromises = fsPromisesDefault,
     homeDirectory = osDefault.homedir(),
     path = pathDefault,
     resolveWorktreeRoot = async (directory) => (await resolveWorktreeTopLevel(directory)).root,
+  }: {
+    fsPromises?: Pick<FsPromises, 'readdir' | 'realpath'>;
+    homeDirectory?: string;
+    path?: PathModule;
+    resolveWorktreeRoot?: (directory: string) => Promise<string>;
   } = {},
-) => {
-  const files = [];
+): Promise<Array<{ filePath: string; scope: 'project' | 'user' }>> => {
+  const files: Array<{ filePath: string; scope: 'project' | 'user' }> = [];
   if (projectPath) {
     const projectDirectory = await fsPromises.realpath(projectPath).catch(() => path.resolve(projectPath));
     const discoveredWorktreeRoot = await resolveWorktreeRoot(projectDirectory).catch(() => projectDirectory);
@@ -297,17 +359,23 @@ export const discoverLoopFiles = async (
   return files;
 };
 
-export const discoverLoops = async (projectPath, options = {}) => {
+export const discoverLoops = async (projectPath: string | null | undefined, options: {
+  fsPromises?: FsPromises;
+  homeDirectory?: string;
+  logger?: Pick<Console, 'warn'>;
+  path?: PathModule;
+  resolveWorktreeRoot?: (directory: string) => Promise<string>;
+} = {}): Promise<DiscoveredLoop[]> => {
   const fsPromises = options.fsPromises || fsPromisesDefault;
   const logger = options.logger || console;
-  const loops = [];
+  const loops: DiscoveredLoop[] = [];
   for (const entry of await discoverLoopFiles(projectPath, options)) {
     let content;
     try {
       content = await fsPromises.readFile(entry.filePath, 'utf8');
     } catch (error) {
       logger.warn?.(`[ScheduledTasks] failed to read loop ${entry.filePath}:`, error);
-      loops.push({ ...entry, definition: null, error: 'Failed to read loop file', name: null });
+      loops.push({ ...entry, definition: null, error: 'Failed to read loop file', name: null, revision: '' });
       continue;
     }
     const parsed = parseLoopContent(content);

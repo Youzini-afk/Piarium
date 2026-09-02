@@ -1,7 +1,10 @@
-// @ts-nocheck
 import { isDocumentAuthorityError } from '../documents/errors.js';
+import type { Express, Request, RequestHandler, Response } from 'express';
+import type { createLanguageSupervisor } from './supervisor.js';
 
-const sendError = (res, error) => {
+type LanguageRuntime = ReturnType<typeof createLanguageSupervisor>;
+
+const sendError = (res: Response, error: unknown) => {
   if (isDocumentAuthorityError(error)) {
     return res.status(error.statusCode).json({
       error: error.message,
@@ -12,7 +15,10 @@ const sendError = (res, error) => {
   return res.status(500).json({ error: message, reason: 'failed' });
 };
 
-const readBody = (req) => (req.body && typeof req.body === 'object' ? req.body : {});
+const readBody = (req: Request): Record<string, unknown> => (
+  req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Record<string, unknown> : {}
+);
+const stringField = (value: unknown): string => typeof value === 'string' ? value : '';
 
 const FEATURES = new Set([
   'completion',
@@ -42,17 +48,20 @@ const FEATURES = new Set([
   'colorPresentations',
 ]);
 
-export const registerLanguageRoutes = (app, {
+export const registerLanguageRoutes = (app: Express, {
   language,
   uiAuthController,
-}) => {
+}: {
+  language: LanguageRuntime;
+  uiAuthController?: { requireAuth?: RequestHandler };
+}): void => {
   const requireAuth = uiAuthController?.requireAuth
     ?? ((_req, _res, next) => next());
 
   app.post('/api/language/status', requireAuth, async (req, res) => {
     try {
       const body = readBody(req);
-      return res.json(language.getStatus(body.workspaceId, body.languageId));
+      return res.json(language.getStatus(stringField(body.workspaceId), stringField(body.languageId)));
     } catch (error) {
       return sendError(res, error);
     }
@@ -73,7 +82,9 @@ export const registerLanguageRoutes = (app, {
       if (!FEATURES.has(method)) {
         return res.status(400).json({ error: 'Unknown language feature', reason: 'failed' });
       }
-      return res.json(await language[method](body.request ?? {}));
+      const handler = language[method as keyof LanguageRuntime];
+      if (typeof handler !== 'function') throw new Error(`Language feature is unavailable: ${method}`);
+      return res.json(await (handler as (request: unknown) => unknown)(body.request ?? {}));
     } catch (error) {
       return sendError(res, error);
     }
@@ -82,7 +93,7 @@ export const registerLanguageRoutes = (app, {
   app.post('/api/language/restart', requireAuth, async (req, res) => {
     try {
       const body = readBody(req);
-      return res.json(await language.restart(body.workspaceId, body.languageId));
+      return res.json(await language.restart(stringField(body.workspaceId), stringField(body.languageId)));
     } catch (error) {
       return sendError(res, error);
     }
@@ -90,7 +101,7 @@ export const registerLanguageRoutes = (app, {
 
   app.post('/api/language/dispose-workspace', requireAuth, async (req, res) => {
     try {
-      await language.disposeWorkspace(readBody(req).workspaceId);
+      await language.disposeWorkspace(stringField(readBody(req).workspaceId));
       return res.json({ status: 'disposed' });
     } catch (error) {
       return sendError(res, error);
@@ -108,7 +119,7 @@ export const registerLanguageRoutes = (app, {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
     let closed = false;
-    const write = (event) => {
+    const write = (event: unknown): void => {
       if (closed || res.writableEnded || res.destroyed) return;
       const payload = JSON.stringify(event);
       if (event && typeof event === 'object' && Object.prototype.hasOwnProperty.call(event, 'content')) return;

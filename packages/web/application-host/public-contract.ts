@@ -1,0 +1,109 @@
+import type { Express } from 'express';
+import type { Server } from 'node:http';
+import type {
+  PiRuntimeBroker,
+  PiRuntimeBrokerFactoryOptions,
+  PiRuntimeBrokerOptions,
+  PiRuntimeLifecycle,
+} from '@piarium/runtime-broker';
+import type {
+  ApplicationExtensionCatalog,
+  ApplicationExtensionRuntime,
+  ExtensionPackageManager,
+} from '@piarium/extension-host';
+
+export interface DesktopNotificationPayload {
+  badge?: number | undefined;
+  body?: string | undefined;
+  data?: Record<string, unknown> | undefined;
+  tag?: string | undefined;
+  title?: string | undefined;
+  [key: string]: unknown;
+}
+
+export interface DesktopRuntimeConfig {
+  apiBaseUrl: string;
+  requestHeaders: Record<string, string>;
+}
+
+export type HostPiRuntimeBrokerFactoryOptions = PiRuntimeBrokerFactoryOptions
+  & Pick<PiRuntimeBrokerOptions, 'admitSessionExecution'>;
+
+export interface StartWebUiServerOptions {
+  apiOnly?: boolean | undefined;
+  attachSignals?: boolean | undefined;
+  createPiRuntimeBroker?: ((options: HostPiRuntimeBrokerFactoryOptions) => PiRuntimeBroker) | undefined;
+  exitOnShutdown?: boolean | undefined;
+  extensionCatalog?: ApplicationExtensionCatalog | undefined;
+  extensionPackages?: ExtensionPackageManager | undefined;
+  extensionRuntime?: ApplicationExtensionRuntime | undefined;
+  getDesktopRuntimeConfig?: (() => DesktopRuntimeConfig | null) | undefined;
+  getIsWindowFocused?: (() => boolean) | undefined;
+  host?: string | undefined;
+  hostEntry?: string | undefined;
+  onDesktopNotification?: ((payload: DesktopNotificationPayload) => void) | undefined;
+  onTunnelReady?: ((publicUrl: string, connectUrl: string | null) => void) | undefined;
+  openFilesystemPath?: ((targetPath: string) => void | Promise<void>) | undefined;
+  piRuntimeBroker?: PiRuntimeBroker | undefined;
+  piRuntimeLifecycle?: PiRuntimeLifecycle | undefined;
+  pickPiPackageRoot?: (() => Promise<string | null>) | undefined;
+  port?: number | undefined;
+  requirePiRuntime?: boolean | undefined;
+  standalonePayloadDir?: string | undefined;
+  tryCfTunnel?: boolean | undefined;
+  tunnelConfigPath?: string | null | undefined;
+  tunnelHostname?: string | undefined;
+  tunnelMode?: string | undefined;
+  tunnelProvider?: string | undefined;
+  tunnelToken?: string | undefined;
+  uiPassword?: string | null | undefined;
+}
+
+export interface QuitRiskStatus {
+  scheduledTasks: unknown;
+  tunnel: { active: boolean };
+}
+
+export interface WebUiServerController {
+  expressApp: Express;
+  getPort(): number;
+  getQuitRiskStatus(): QuitRiskStatus;
+  getTunnelUrl(): string | null;
+  httpServer: Server;
+  isReady(): boolean;
+  stop(options?: { exitProcess?: boolean | undefined }): Promise<void>;
+}
+
+export interface ParseServeCliOptionsInput {
+  argv?: readonly string[] | undefined;
+  cloudflareProvider: string;
+  defaultPort: number;
+  env?: NodeJS.ProcessEnv | undefined;
+  managedLocalMode: string;
+}
+
+export interface ParsedServeCliArgs {
+  apiOnly: boolean;
+  host?: string | undefined;
+  port: number;
+  tryCfTunnel: boolean;
+  tunnelConfigPath?: string | null | undefined;
+  tunnelHostname?: string | undefined;
+  tunnelMode?: string | undefined;
+  tunnelProvider?: string | undefined;
+  tunnelToken?: string | undefined;
+  uiPassword: string | null;
+}
+
+export interface OutsideFileGrantOptions {
+  crypto?: Pick<typeof import('node:crypto'), 'randomUUID'> | undefined;
+  fsPromises?: Pick<typeof import('node:fs/promises'), 'realpath' | 'stat'> | undefined;
+  path?: Pick<typeof import('node:path'), 'dirname'> | undefined;
+  scopes?: readonly string[] | undefined;
+}
+
+export interface OutsideFileGrantResult {
+  expiresAt: number;
+  outsideFileGrant: string;
+  path: string;
+}

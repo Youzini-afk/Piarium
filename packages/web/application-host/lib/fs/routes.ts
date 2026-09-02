@@ -1,31 +1,58 @@
-// @ts-nocheck
 import { createRealpathCache } from '../path-realpath-cache.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
 import { canonicalizePathIdentity } from '../workspace/path-safety.js';
+import type { Express, Request, Response } from 'express';
+import type { spawn as nodeSpawn } from 'node:child_process';
+import type {
+  CommandResult,
+  ExecJob,
+  FsPromises,
+  FsRouteDependencies,
+  OsModule,
+  PathModule,
+  ResolveProjectDirectory,
+  WorkspacePathResult,
+} from './types.js';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
 
-const outsideFileGrants = new Map();
+interface OutsideFileGrant {
+  base: string;
+  canonicalPath: string;
+  expiresAt: number;
+  scopes: Set<string>;
+}
 
-const isOsPermissionError = (error) => (
+const outsideFileGrants = new Map<string, OutsideFileGrant>();
+
+const errorRecord = (error: unknown): Record<string, unknown> => (
+  error && typeof error === 'object' ? error as Record<string, unknown> : {}
+);
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
+const errorCode = (error: unknown): unknown => errorRecord(error).code;
+
+const isOsPermissionError = (error: unknown): boolean => Boolean(
   error
   && typeof error === 'object'
-  && (error.code === 'EACCES' || error.code === 'EPERM')
+  && ('code' in error && (error.code === 'EACCES' || error.code === 'EPERM'))
 );
 
-const sendMutationAuthorityError = (res, error) => {
-  if (error?.code !== 'maintenance' && error?.code !== 'stale-epoch') return null;
-  const status = Number.isInteger(error.statusCode) ? error.statusCode : 409;
+const sendMutationAuthorityError = (res: Response, error: unknown): Response | null => {
+  const failure = errorRecord(error);
+  if (failure.code !== 'maintenance' && failure.code !== 'stale-epoch') return null;
+  const status = typeof failure.statusCode === 'number' && Number.isInteger(failure.statusCode) ? failure.statusCode : 409;
   return res.status(status).json({
-    error: error.message || 'Workspace mutation is unavailable',
-    reason: error.code,
-    ...(error.currentEpoch ? { currentEpoch: error.currentEpoch } : {}),
+    error: typeof failure.message === 'string' ? failure.message : 'Workspace mutation is unavailable',
+    reason: failure.code,
+    ...(failure.currentEpoch ? { currentEpoch: failure.currentEpoch } : {}),
   });
 };
 
-const pruneOutsideFileGrants = () => {
+const pruneOutsideFileGrants = (): void => {
   const now = Date.now();
   for (const [token, grant] of outsideFileGrants.entries()) {
     if (!grant || grant.expiresAt <= now) {
@@ -34,18 +61,24 @@ const pruneOutsideFileGrants = () => {
   }
 };
 
-export const mintOutsideFileGrant = async (targetPath, {
+export const mintOutsideFileGrant = async (targetPath: unknown, {
   scopes = ['stat', 'read', 'raw'],
   fsPromises = nodeFsPromises,
   path = nodePath,
   crypto = globalThis.crypto,
+}: {
+  crypto?: { randomUUID(): string };
+  fsPromises?: unknown;
+  path?: PathModule;
+  scopes?: string[];
 } = {}) => {
+  const fileSystem = fsPromises as FsPromises;
   const raw = typeof targetPath === 'string' ? targetPath.trim() : '';
   if (!raw) {
     throw new Error('Path is required');
   }
-  const canonicalPath = await fsPromises.realpath(raw);
-  const stats = await fsPromises.stat(canonicalPath);
+  const canonicalPath = await fileSystem.realpath(raw);
+  const stats = await fileSystem.stat(canonicalPath);
   if (!stats.isFile()) {
     throw new Error('Outside file grants require a file path');
   }
@@ -55,7 +88,7 @@ export const mintOutsideFileGrant = async (targetPath, {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const normalizedScopes = new Set(
     (Array.isArray(scopes) ? scopes : [])
-      .filter((scope) => typeof scope === 'string' && scope.trim())
+      .filter((scope): scope is string => typeof scope === 'string' && Boolean(scope.trim()))
       .map((scope) => scope.trim())
   );
   if (normalizedScopes.size === 0) {
@@ -75,7 +108,12 @@ export const mintOutsideFileGrant = async (targetPath, {
   };
 };
 
-const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
+const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }: {
+  fsPromises: FsPromises;
+  scope: string;
+  targetPath: string;
+  token: unknown;
+}): Promise<WorkspacePathResult> => {
   pruneOutsideFileGrants();
   if (typeof token !== 'string' || !token.trim()) {
     return { ok: false, error: 'Outside workspace file access requires a grant' };
@@ -91,10 +129,10 @@ const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises })
   if (canonicalPath !== grant.canonicalPath) {
     return { ok: false, error: 'Outside workspace file grant does not match requested path' };
   }
-  return { ok: true, base: grant.base, resolved: canonicalPath, granted: true };
+  return { ok: true, base: grant.base, resolved: canonicalPath, workspaceRoot: false, granted: true };
 };
 
-const createCommandTimeoutMs = () => {
+const createCommandTimeoutMs = (): number => {
   const raw = Number(process.env.PIARIUM_FS_EXEC_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw > 0) return raw;
   return 5 * 60 * 1000;
@@ -104,19 +142,19 @@ const createCommandTimeoutMs = () => {
 // directory is effectively static while the app runs, so a short TTL safely
 // absorbs the burst of identical lookups a fresh client (e.g. right after a
 // page reload) fires for every project. Set to 0 to disable caching.
-const createGitReadCacheTtlMs = () => {
+const createGitReadCacheTtlMs = (): number => {
   const raw = Number(process.env.PIARIUM_GIT_READ_CACHE_TTL_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 30 * 1000;
 };
 
-const createGitCheckIgnoreTimeoutMs = () => {
+const createGitCheckIgnoreTimeoutMs = (): number => {
   const raw = Number(process.env.PIARIUM_GIT_CHECK_IGNORE_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 2500;
 };
 
-const FILE_MIME_MAP = Object.freeze({
+const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
   '.html': 'text/html',
   '.htm': 'text/html',
   '.css': 'text/css',
@@ -150,11 +188,11 @@ const MAX_SERVE_BYTES = 100 * 1024 * 1024;
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
-// 鈥?we never cache arbitrary exec.
-const normalizeCommand = (command) =>
+// — we never cache arbitrary exec.
+const normalizeCommand = (command: unknown): string =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
 
-const isCacheableGitReadCommand = (command) => {
+const isCacheableGitReadCommand = (command: unknown): boolean => {
   const normalized = normalizeCommand(command);
   return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
 };
@@ -165,10 +203,10 @@ const isCacheableGitReadCommand = (command) => {
 const GIT_READ_CACHE_MAX_ENTRIES = 500;
 const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 
-const gitReadEntryBytes = (key, result) =>
+const gitReadEntryBytes = (key: string, result: CommandResult): number =>
   key.length + (result?.stdout?.length || 0) + (result?.stderr?.length || 0);
 
-const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
+const isPathWithinRoot = (resolvedPath: string, rootPath: string, path: PathModule, os: OsModule): boolean => {
   const resolvedRoot = path.resolve(rootPath || os.homedir());
   const relative = path.relative(resolvedRoot, resolvedPath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -177,7 +215,16 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   return true;
 };
 
-const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }) => {
+interface WorkspacePathOptions {
+  baseDirectory?: string;
+  normalizeDirectoryPath<Value>(path: Value): Value | string;
+  os: OsModule;
+  path: PathModule;
+  piariumUserConfigRoot: string;
+  targetPath: unknown;
+}
+
+const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspacePathOptions): WorkspacePathResult => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -197,7 +244,7 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath }) => {
+const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath }: Omit<WorkspacePathOptions, 'piariumUserConfigRoot'>): Promise<WorkspacePathResult> => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -211,9 +258,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
     const worktrees = await getWorktrees(resolvedBase);
 
     for (const worktree of worktrees) {
-      const candidatePath = typeof worktree?.path === 'string'
-        ? worktree.path
-        : (typeof worktree?.worktree === 'string' ? worktree.worktree : '');
+      const candidatePath = typeof worktree?.path === 'string' ? worktree.path : '';
       const candidate = normalizeDirectoryPath(candidatePath);
       if (!candidate) {
         continue;
@@ -230,7 +275,12 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }) => {
+interface WorkspaceContextOptions extends Omit<WorkspacePathOptions, 'baseDirectory'> {
+  req: Request;
+  resolveProjectDirectory: ResolveProjectDirectory;
+}
+
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspaceContextOptions): Promise<WorkspacePathResult> => {
   const resolvedProject = await resolveProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
@@ -257,7 +307,10 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, piariumUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspaceContextOptions & {
+  fsPromises: FsPromises;
+  scope?: string;
+}): Promise<WorkspacePathResult> => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
@@ -267,7 +320,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     return resolveOutsideFileGrant({
       token: req.query?.outsideFileGrant,
       targetPath: resolved,
-      scope,
+      scope: scope ?? 'read',
       fsPromises,
     });
   }
@@ -283,7 +336,15 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }: {
+  buildAugmentedPath(): string;
+  command: string;
+  commandTimeoutMs: number;
+  resolvedCwd: string;
+  shell: string;
+  shellFlag: string;
+  spawn: typeof nodeSpawn;
+}): Promise<CommandResult> => {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -304,14 +365,15 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
       try {
         child.kill('SIGKILL');
       } catch {
+        // The process may already have exited.
       }
     }, commandTimeoutMs);
 
-    child.stdout?.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
-    child.stderr?.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
@@ -320,20 +382,19 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
       resolve({
         command,
         success: false,
-        exitCode: undefined,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
-        error: (error && error.message) || 'Command execution failed',
+        error: errorMessage(error, 'Command execution failed'),
       });
     });
 
     child.on('close', (code, signal) => {
       clearTimeout(timeout);
       const exitCode = typeof code === 'number' ? code : undefined;
-      const base = {
+      const base: CommandResult = {
         command,
         success: exitCode === 0 && !timedOut,
-        exitCode,
+        ...(typeof exitCode === 'number' ? { exitCode } : {}),
         stdout: stdout.trim(),
         stderr: stderr.trim(),
       };
@@ -352,12 +413,12 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
   });
 };
 
-export const registerFsRoutes = (app, dependencies) => {
+export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies): void => {
   const {
     os,
     path,
-    fsPromises,
-    spawn,
+    fsPromises: rawFsPromises,
+    spawn: rawSpawn,
     platform = process.platform,
     crypto,
     normalizeDirectoryPath,
@@ -367,12 +428,19 @@ export const registerFsRoutes = (app, dependencies) => {
     piariumUserConfigRoot,
     documents,
   } = dependencies;
+  const fsPromises = rawFsPromises as FsPromises;
+  const spawn = rawSpawn as typeof nodeSpawn;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
   });
 
-  const runWorkspaceMutation = (resolved, ownerId, operation, options = {}) => {
-    if (!resolved?.workspaceRoot || typeof documents?.runMutationForScope !== 'function') {
+  const runWorkspaceMutation = <Result>(
+    resolved: WorkspacePathResult | null,
+    ownerId: string,
+    operation: () => Promise<Result>,
+    options: Record<string, unknown> = {},
+  ): Promise<Result> => {
+    if (!resolved || !resolved.ok || !resolved.workspaceRoot || typeof documents?.runMutationForScope !== 'function') {
       return operation();
     }
     return documents.runMutationForScope(
@@ -383,15 +451,15 @@ export const registerFsRoutes = (app, dependencies) => {
     );
   };
 
-  const spawnDetached = (command, args) => new Promise((resolve, reject) => {
-    let child;
+  const spawnDetached = (command: string, args: string[]): Promise<void> => new Promise((resolve, reject) => {
+    let child: ReturnType<typeof nodeSpawn>;
     try {
       child = spawn(command, args, { windowsHide: true, stdio: 'ignore', detached: true });
     } catch (error) {
       reject(new Error('Failed to launch file browser', { cause: error }));
       return;
     }
-    const onError = (error) => {
+    const onError = (error: Error) => {
       child.removeListener('spawn', onSpawn);
       reject(new Error('Failed to launch file browser', { cause: error }));
     };
@@ -404,14 +472,14 @@ export const registerFsRoutes = (app, dependencies) => {
     child.once('spawn', onSpawn);
   });
 
-  const execJobs = new Map();
+  const execJobs = new Map<string, ExecJob>();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
-  const gitReadCache = new Map();
-  const inFlightGitReadCache = new Map();
+  const gitReadCache = new Map<string, { at: number; result: CommandResult }>();
+  const inFlightGitReadCache = new Map<string, Promise<CommandResult>>();
 
-  const pruneExecJobs = () => {
+  const pruneExecJobs = (): void => {
     const now = Date.now();
     for (const [jobId, job] of execJobs.entries()) {
       if (!job || typeof job !== 'object') {
@@ -425,7 +493,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   };
 
-  const pruneGitReadCache = () => {
+  const pruneGitReadCache = (): void => {
     if (gitReadCacheTtlMs <= 0) {
       return;
     }
@@ -440,7 +508,7 @@ export const registerFsRoutes = (app, dependencies) => {
   // Insert with LRU (oldest-first) eviction enforcing both count and byte caps.
   // Map iteration order is insertion order, so deleting+re-setting a key moves
   // it to the most-recently-used position.
-  const setGitReadCacheEntry = (key, result) => {
+  const setGitReadCacheEntry = (key: string, result: CommandResult): void => {
     gitReadCache.delete(key);
     gitReadCache.set(key, { result, at: Date.now() });
 
@@ -463,7 +531,12 @@ export const registerFsRoutes = (app, dependencies) => {
 
   // Runs a command, transparently serving/storing cacheable git-read results.
   // Non-cacheable commands always execute and are never stored.
-  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
+  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }: {
+    command: string;
+    resolvedCwd: string;
+    shell: string;
+    shellFlag: string;
+  }): Promise<CommandResult> => {
     const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
     const cacheKey = cacheable ? `${resolvedCwd} ${normalizeCommand(command)}` : null;
 
@@ -495,7 +568,7 @@ export const registerFsRoutes = (app, dependencies) => {
       buildAugmentedPath,
       commandTimeoutMs,
     }).then((result) => {
-      // Only cache successful results 鈥?failures may be transient.
+      // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {
         setGitReadCacheEntry(cacheKey, result);
       }
@@ -513,14 +586,14 @@ export const registerFsRoutes = (app, dependencies) => {
     return runPromise;
   };
 
-  const runExecJob = async (job) => {
+  const runExecJob = async (job: ExecJob): Promise<void> => {
     job.status = 'running';
     job.updatedAt = Date.now();
 
-    const results = [];
+    const results: CommandResult[] = [];
     for (const command of job.commands) {
       if (typeof command !== 'string' || !command.trim()) {
-        results.push({ command, success: false, error: 'Invalid command' });
+        results.push({ command: String(command ?? ''), success: false, error: 'Invalid command', stdout: '', stderr: '' });
         continue;
       }
 
@@ -536,7 +609,9 @@ export const registerFsRoutes = (app, dependencies) => {
         results.push({
           command,
           success: false,
-          error: (error && error.message) || 'Command execution failed',
+          error: errorMessage(error, 'Command execution failed'),
+          stdout: '',
+          stderr: '',
         });
       }
 
@@ -560,7 +635,7 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ home });
     } catch (error) {
       console.error('Failed to resolve home directory:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to resolve home directory' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to resolve home directory') });
     }
   });
 
@@ -572,15 +647,15 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       let resolvedPath = '';
-      let resolvedContext = null;
+      let resolvedContext: WorkspacePathResult | null = null;
       if (allowOutsideWorkspace) {
         resolvedPath = path.resolve(normalizeDirectoryPath(dirPath.trim()));
-        resolvedContext = { workspaceRoot: false };
+        resolvedContext = { ok: true, base: path.dirname(resolvedPath), resolved: resolvedPath, workspaceRoot: false };
         if (typeof documents?.runMutationForScope === 'function') {
           const project = await resolveProjectDirectory(req).catch(() => null);
           const projectRoot = project?.directory ? path.resolve(project.directory) : '';
           if (projectRoot && isPathWithinRoot(resolvedPath, projectRoot, path, os)) {
-            resolvedContext = { base: projectRoot, resolved: resolvedPath, workspaceRoot: true };
+            resolvedContext = { ok: true, base: projectRoot, resolved: resolvedPath, workspaceRoot: true };
           }
         }
       } else {
@@ -610,7 +685,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const authorityResponse = sendMutationAuthorityError(res, error);
       if (authorityResponse) return authorityResponse;
       console.error('Failed to create directory:', error);
-      return res.status(500).json({ error: error.message || 'Failed to create directory' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to create directory') });
     }
   });
 
@@ -657,17 +732,17 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ path: canonicalPath, isFile: true, size: stats.size, mtimeMs: stats.mtimeMs });
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         if (optional) {
           return res.json({ path: filePath, exists: false });
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to stat file:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to stat file' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to stat file') });
     }
   });
 
@@ -712,7 +787,7 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       let content = await fsPromises.readFile(canonicalPath, 'utf8');
-      // Retry empty reads 鈥?concurrent writer may have truncated the file
+      // Retry empty reads — concurrent writer may have truncated the file
       // between our stat and read (O_TRUNC window). If the file existed with
       // content at stat time but we read nothing, the writer hasn't finished
       // writing yet.
@@ -729,17 +804,17 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         if (optional) {
           return res.type('text/plain').send('');
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to read file:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to read file') });
     }
   });
 
@@ -783,7 +858,7 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       const ext = path.extname(canonicalPath).toLowerCase();
-      const mimeMap = {
+      const mimeMap: Record<string, string> = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -802,7 +877,12 @@ export const registerFsRoutes = (app, dependencies) => {
         const fileName = path.basename(canonicalPath);
         // RFC 5987: use filename*= for non-ASCII filenames, with ASCII-only
         // filename= as fallback for older clients.
-        const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
+        const asciiOnly = [...fileName]
+          .filter((character) => {
+            const codePoint = character.codePointAt(0) ?? 0;
+            return codePoint >= 0x20 && codePoint <= 0x7e;
+          })
+          .join('');
         const fallback = asciiOnly || 'file';
         // Percent-encode the raw UTF-8 bytes for filename*=
         const encoded = encodeURIComponent(fileName);
@@ -817,14 +897,14 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to read raw file:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to read file') });
     }
   });
 
@@ -846,6 +926,8 @@ export const registerFsRoutes = (app, dependencies) => {
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
+        scope: 'read',
         normalizeDirectoryPath,
         piariumUserConfigRoot,
       });
@@ -878,14 +960,14 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to serve file:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to serve file') });
     }
   });
 
@@ -947,11 +1029,11 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       const authorityResponse = sendMutationAuthorityError(res, err);
       if (authorityResponse) return authorityResponse;
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to write file:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to write file') });
     }
   });
 
@@ -985,14 +1067,14 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       const authorityResponse = sendMutationAuthorityError(res, err);
       if (authorityResponse) return authorityResponse;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'File or directory not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to delete path:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to delete path' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to delete path') });
     }
   });
 
@@ -1049,14 +1131,14 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       const authorityResponse = sendMutationAuthorityError(res, err);
       if (authorityResponse) return authorityResponse;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to rename path:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to rename path' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to rename path') });
     }
   });
 
@@ -1082,7 +1164,7 @@ export const registerFsRoutes = (app, dependencies) => {
         const escapedPath = resolved.replace(/'/g, "''");
         const explorerArg = stat.isDirectory() ? escapedPath : `/select,${escapedPath}`;
         const command = `Start-Process -FilePath explorer.exe -ArgumentList '${explorerArg}'`;
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
             windowsHide: true,
             stdio: 'ignore',
@@ -1105,11 +1187,11 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ success: true, path: resolved });
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+      if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'Path not found' });
       }
       console.error('Failed to reveal path:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to reveal path' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to reveal path') });
     }
   });
 
@@ -1154,7 +1236,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const shellFlag = process.platform === 'win32' ? '/c' : '-c';
 
       const jobId = crypto.randomUUID();
-      const job = {
+      const job: ExecJob = {
         jobId,
         status: 'queued',
         success: null,
@@ -1179,7 +1261,9 @@ export const registerFsRoutes = (app, dependencies) => {
           job.results.push({
             command: '',
             success: false,
-            error: (error && error.message) || 'Command execution failed',
+            error: errorMessage(error, 'Command execution failed'),
+            stdout: '',
+            stderr: '',
           });
           job.finishedAt = Date.now();
           job.updatedAt = Date.now();
@@ -1207,7 +1291,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const authorityResponse = sendMutationAuthorityError(res, error);
       if (authorityResponse) return authorityResponse;
       console.error('Failed to execute commands:', error);
-      return res.status(500).json({ error: (error && error.message) || 'Failed to execute commands' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to execute commands') });
     }
   });
 
@@ -1251,13 +1335,13 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       const dirents = await fsPromises.readdir(resolvedPath, { withFileTypes: true });
-      let ignoredPaths = new Set();
+      const ignoredPaths = new Set<string>();
       if (respectGitignore) {
         try {
           const pathsToCheck = dirents.map((d) => d.name);
           if (pathsToCheck.length > 0) {
             try {
-              const result = await new Promise((resolve) => {
+              const result = await new Promise<string>((resolve) => {
                 const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
                   windowsHide: true,
@@ -1266,8 +1350,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
                 let stdout = '';
                 let settled = false;
-                let timeout = null;
-                const finish = (value) => {
+                let timeout: ReturnType<typeof setTimeout> | null = null;
+                const finish = (value: string): void => {
                   if (settled) return;
                   settled = true;
                   if (timeout) clearTimeout(timeout);
@@ -1279,12 +1363,13 @@ export const registerFsRoutes = (app, dependencies) => {
                     try {
                       child.kill('SIGKILL');
                     } catch {
+                      // The check-ignore process may already have exited.
                     }
                     finish('');
                   }, gitCheckIgnoreTimeoutMs);
                 }
 
-                child.stdout.on('data', (data) => { stdout += data.toString(); });
+                child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
                 child.on('close', () => finish(stdout));
                 child.on('error', () => finish(''));
               });
@@ -1294,9 +1379,11 @@ export const registerFsRoutes = (app, dependencies) => {
                 ignoredPaths.add(fullPath);
               });
             } catch {
+              // Git ignore filtering is best-effort; list all entries on failure.
             }
           }
         } catch {
+          // Git ignore filtering is best-effort; list all entries on failure.
         }
       }
 
@@ -1345,7 +1432,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (isOsPermissionError(err)) {
         return res.status(403).json({ error: 'Access to directory denied', reason: 'os-permission' });
       }
-      return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
+      return res.status(500).json({ error: errorMessage(error, 'Failed to list directory') });
     }
   });
 };

@@ -1,16 +1,16 @@
-// @ts-nocheck
 // Per-machine relay-host claim. Every Piarium instance on a machine shares
 // the same data dir and therefore the same relay signing key / serverId, so if
 // two processes run a relay host at once they fight over the single host slot
 // at the relay worker (each new connection closes the previous one with
 // "4001: Control replaced") and paired devices land on whichever instance won
-// last 鈥?often a dev/worktree instance running different code.
+// last — often a dev/worktree instance running different code.
 //
 // The claim file (`relay-host.lock` in the shared data dir) makes the contest
 // deterministic instead of a network race:
 //   - an instance only starts its relay host when there is no LIVE claimant
 //     (a dead claimant's stale file is ignored);
-//   - explicit user intent (creating a pairing link) claims unconditionally 鈥?//     the instance the user is interacting with must be the one devices reach;
+//   - explicit user intent (creating a pairing link) claims unconditionally —
+//     the instance the user is interacting with must be the one devices reach;
 //   - a running host that discovers another live process has claimed backs off
 //     instead of reconnecting, which is what ends the replace/reconnect fight.
 //
@@ -26,27 +26,40 @@
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
  */
-export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = console }) => {
+const errorCode = (error: unknown): string | null => (
+  error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : null
+);
+
+export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = console }: {
+  fs: {
+    readFileSync(path: string, encoding: 'utf8'): string;
+    unlinkSync(path: string): void;
+    writeFileSync(path: string, data: string): void;
+  };
+  lockFilePath: string;
+  logger?: Pick<Console, 'warn'>;
+  process: { kill(pid: number, signal: 0): unknown; pid: number };
+}) => {
   const fsImpl = fs;
   const selfPid = proc.pid;
 
-  const isPidAlive = (pid) => {
-    if (!Number.isInteger(pid) || pid <= 0) return false;
+  const isPidAlive = (pid: unknown): boolean => {
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
     try {
       proc.kill(pid, 0);
       return true;
     } catch (error) {
-      // EPERM means the process exists but belongs to another user 鈥?treat as
+      // EPERM means the process exists but belongs to another user — treat as
       // alive; only ESRCH (no such process) means the claim is stale.
-      return error?.code === 'EPERM';
+      return errorCode(error) === 'EPERM';
     }
   };
 
-  const readClaim = () => {
+  const readClaim = (): { pid: number } | null => {
     try {
       const raw = fsImpl.readFileSync(lockFilePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      const pid = Number(parsed?.pid);
+      const parsed = JSON.parse(raw) as unknown;
+      const pid = Number(parsed && typeof parsed === 'object' && 'pid' in parsed ? parsed.pid : NaN);
       return Number.isInteger(pid) && pid > 0 ? { pid } : null;
     } catch {
       // Missing file or unparsable content: no valid claim.
@@ -59,9 +72,9 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
       fsImpl.writeFileSync(lockFilePath, JSON.stringify({ pid: selfPid, claimedAt: new Date().toISOString() }));
       return true;
     } catch (error) {
-      // An unwritable data dir must not take the relay down with it 鈥?fall back
+      // An unwritable data dir must not take the relay down with it — fall back
       // to pre-lock behavior (start the host, let the relay worker arbitrate).
-      logger.warn(`[Relay] could not write host claim file: ${error?.message ?? error}`);
+      logger.warn(`[Relay] could not write host claim file: ${error instanceof Error ? error.message : error}`);
       return true;
     }
   };
@@ -80,7 +93,7 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
     return writeClaim();
   };
 
-  /** Unconditional claim 鈥?explicit user intent (pairing) overrides any holder. */
+  /** Unconditional claim — explicit user intent (pairing) overrides any holder. */
   const forceClaim = () => writeClaim();
 
   /** True while this process is the live claimant. */
@@ -93,7 +106,7 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
     try {
       fsImpl.unlinkSync(lockFilePath);
     } catch {
-      // Already gone or unwritable 鈥?nothing to do.
+      // Already gone or unwritable — nothing to do.
     }
   };
 

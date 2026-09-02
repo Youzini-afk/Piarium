@@ -106,6 +106,50 @@ export interface RecoveryFileStore {
   verifyObject: (root: string, state: RecoveryState) => Promise<void>;
 }
 
+const parseOptionalMode = (value: unknown): number | undefined => {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file mode is malformed', { origin: 'storage' });
+  }
+  return value as number;
+};
+
+export const parseRecoveryState = (value: unknown): RecoveryState => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file state is malformed', { origin: 'storage' });
+  }
+  const record = value as Record<string, unknown>;
+  const mode = parseOptionalMode(record.mode);
+  if (record.kind === 'missing') return { kind: 'missing' };
+  if (record.kind === 'unsupported') return { kind: 'unsupported' };
+  if (record.kind === 'directory') {
+    return { kind: 'directory', ...(mode === undefined ? {} : { mode }) };
+  }
+  if (record.kind === 'symlink') {
+    if (typeof record.symlinkTarget !== 'string') {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery symlink state is malformed', { origin: 'storage' });
+    }
+    return {
+      kind: 'symlink',
+      symlinkTarget: record.symlinkTarget,
+      ...(mode === undefined ? {} : { mode }),
+    };
+  }
+  if (record.kind === 'regular-file') {
+    if (!Number.isSafeInteger(record.byteLength) || (record.byteLength as number) < 0
+      || typeof record.objectHash !== 'string' || !/^sha256-[0-9a-f]{64}$/u.test(record.objectHash)) {
+      throw new RecoveryPrimitiveError('storage-malformed', 'Recovery regular-file state is malformed', { origin: 'storage' });
+    }
+    return {
+      byteLength: record.byteLength as number,
+      kind: 'regular-file',
+      objectHash: record.objectHash,
+      ...(mode === undefined ? {} : { mode }),
+    };
+  }
+  throw new RecoveryPrimitiveError('storage-malformed', 'Recovery file state kind is unsupported', { origin: 'storage' });
+};
+
 export const normalizeResourceId = (value: unknown): string => String(value || '')
   .replace(/\\/g, '/')
   .replace(/^\.\//, '')

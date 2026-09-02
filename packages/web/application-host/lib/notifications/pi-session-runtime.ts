@@ -1,4 +1,5 @@
-// @ts-nocheck
+import type { PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -14,14 +15,39 @@ const activeAgentEventTypes = new Set([
   'summarization_retry_attempt_start',
 ]);
 
-export const createPiSessionRuntime = ({ broadcastEvent }) => {
-  const activity = new Map();
-  const cooldownTimers = new Map();
-  const states = new Map();
-  const attention = new Map();
+type SessionPhase = 'busy' | 'cooldown' | 'idle';
+type SessionStatus = 'busy' | 'idle' | 'retry';
+
+interface SessionAttentionState {
+  isViewed: boolean;
+  lastStatusChangeAt: number;
+  lastUserMessageAt: number | null;
+  needsAttention: boolean;
+  status: SessionStatus;
+  viewedByClients: Set<string>;
+}
+
+interface SessionState {
+  lastUpdateAt: number;
+  metadata: Record<string, unknown>;
+  status: SessionStatus;
+}
+
+interface BroadcastEvent extends Record<string, unknown> {
+  properties: Record<string, unknown>;
+  type: string;
+}
+
+export const createPiSessionRuntime = ({ broadcastEvent }: {
+  broadcastEvent?: (event: BroadcastEvent) => void;
+}) => {
+  const activity = new Map<string, { phase: SessionPhase; updatedAt: number }>();
+  const cooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const states = new Map<string, SessionState>();
+  const attention = new Map<string, SessionAttentionState>();
   let activeSessionCount = 0;
 
-  const attentionState = (sessionId) => {
+  const attentionState = (sessionId: string): SessionAttentionState => {
     let state = attention.get(sessionId);
     if (!state) {
       state = {
@@ -37,7 +63,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     return state;
   };
 
-  const emitStatus = (sessionId) => {
+  const emitStatus = (sessionId: string): void => {
     const state = states.get(sessionId);
     const attentionEntry = attention.get(sessionId);
     broadcastEvent?.({
@@ -52,7 +78,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     });
   };
 
-  const setActivity = (sessionId, phase) => {
+  const setActivity = (sessionId: string, phase: SessionPhase): void => {
     if (!sessionId) return;
     const previous = activity.get(sessionId)?.phase ?? 'idle';
     if (previous === phase) return;
@@ -75,7 +101,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     }
   };
 
-  const updateStatus = (sessionId, status, metadata = {}) => {
+  const updateStatus = (sessionId: string, status: SessionStatus, metadata: Record<string, unknown> = {}): void => {
     if (!sessionId) return;
     const now = Date.now();
     const previous = states.get(sessionId);
@@ -94,10 +120,10 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     setActivity(sessionId, status === 'busy' || status === 'retry' ? 'busy' : 'cooldown');
   };
 
-  const processBrokerEvent = (event) => {
+  const processBrokerEvent = (event: PiRuntimeBrokerEvent): void => {
     if (event?.kind !== 'host' || !event.envelope || event.envelope.kind !== 'event') return;
     const envelope = event.envelope;
-    const sessionId = event.sessionId || envelope.data?.sessionId;
+    const sessionId = event.sessionId || ('sessionId' in envelope.data ? envelope.data.sessionId : null);
     if (!sessionId) return;
     if (envelope.event === 'session.closed') {
       updateStatus(sessionId, 'idle', { closed: true });
@@ -105,7 +131,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     }
     if (envelope.event === 'session.snapshot') {
       const snapshot = envelope.data;
-      const isWorking = snapshot?.isStreaming === true || snapshot?.status === 'busy';
+      const isWorking = snapshot.isStreaming === true || snapshot.busy === true;
       updateStatus(sessionId, isWorking ? 'busy' : 'idle');
       return;
     }
@@ -127,7 +153,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     }
   };
 
-  const markSessionViewed = (sessionId, clientId) => {
+  const markSessionViewed = (sessionId: string, clientId: string): void => {
     if (!sessionId || !clientId) return;
     const state = attentionState(sessionId);
     state.viewedByClients.add(clientId);
@@ -138,14 +164,14 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     }
   };
 
-  const markSessionUnviewed = (sessionId, clientId) => {
+  const markSessionUnviewed = (sessionId: string, clientId: string): void => {
     const state = attention.get(sessionId);
     if (!state || !clientId) return;
     state.viewedByClients.delete(clientId);
     state.isViewed = state.viewedByClients.size > 0;
   };
 
-  const markUserMessageSent = (sessionId) => {
+  const markUserMessageSent = (sessionId: string): void => {
     if (!sessionId) return;
     attentionState(sessionId).lastUserMessageAt = Date.now();
   };
@@ -165,8 +191,8 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
       status: entry.status,
     }]),
   );
-  const getSessionState = (sessionId) => states.get(sessionId) ?? null;
-  const getSessionAttentionState = (sessionId) => {
+  const getSessionState = (sessionId: string) => states.get(sessionId) ?? null;
+  const getSessionAttentionState = (sessionId: string) => {
     const entry = attention.get(sessionId);
     return entry ? {
       isViewed: entry.viewedByClients.size > 0,
@@ -177,7 +203,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
     } : null;
   };
 
-  const cleanup = () => {
+  const cleanup = (): void => {
     const cutoff = Date.now() - SESSION_STATE_MAX_AGE_MS;
     for (const [sessionId, entry] of states) if (entry.lastUpdateAt < cutoff) states.delete(sessionId);
     for (const [sessionId, entry] of attention) if (entry.lastStatusChangeAt < cutoff) attention.delete(sessionId);
@@ -186,7 +212,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }) => {
   const cleanupTimer = setInterval(cleanup, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref?.();
 
-  const dispose = () => {
+  const dispose = (): void => {
     clearInterval(cleanupTimer);
     for (const timer of cooldownTimers.values()) clearTimeout(timer);
     cooldownTimers.clear();

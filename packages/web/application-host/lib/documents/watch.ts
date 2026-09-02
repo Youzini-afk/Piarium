@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { WatchOptions } from 'node:fs';
-import type fs from 'node:fs';
-import type fsPromises from 'node:fs/promises';
 import type path from 'node:path';
 
 interface DocumentResource {
@@ -35,11 +33,28 @@ export interface WorkspaceWatcher {
   close(): void;
 }
 
+export interface NativeWatcher {
+  close(): void;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+}
+
+export interface WorkspaceWatchFs {
+  watch(
+    rootPath: string,
+    options: WatchOptions,
+    listener: (eventType: string, filename: string | Buffer | null) => void,
+  ): NativeWatcher;
+}
+
+export interface WorkspaceWatchFsPromises {
+  stat(filePath: string): Promise<Pick<import('node:fs').Stats, 'isFile'>>;
+}
+
 export interface WorkspaceWatcherOptions {
   workspaceId: string;
   rootPath: string;
-  fsModule: Pick<typeof fs, 'watch'>;
-  fsPromises: Pick<typeof fsPromises, 'stat'>;
+  fsModule: WorkspaceWatchFs;
+  fsPromises: WorkspaceWatchFsPromises;
   pathModule: typeof path;
   overflowLimit?: number;
   onEvent: (event: WatchEvent) => void;
@@ -115,7 +130,7 @@ export const createWorkspaceWatcher = ({
       const resourceId = relativeFrom(absolutePath);
       if (!resourceId) continue;
       const resource = toResource(workspaceId, resourceId);
-      let stat: import('node:fs').Stats | null = null;
+      let stat: Awaited<ReturnType<WorkspaceWatchFsPromises['stat']>> | null = null;
       try {
         stat = await fsPromises.stat(absolutePath);
       } catch (error) {

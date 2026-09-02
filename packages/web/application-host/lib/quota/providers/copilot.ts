@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readPiAuthFile as readAuthFile } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
@@ -6,15 +5,19 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  asObject,
 } from '../utils/index.js';
+import type { UsageWindow } from '../utils/index.js';
 
-const buildCopilotWindows = (payload) => {
-  const quota = payload?.quota_snapshots ?? {};
-  const resetAt = toTimestamp(payload?.quota_reset_date);
-  const windows = {};
+const buildCopilotWindows = (value: unknown): Record<string, UsageWindow> => {
+  const payload = asObject(value) ?? {};
+  const quota = asObject(payload.quota_snapshots) ?? {};
+  const resetAt = toTimestamp(payload.quota_reset_date);
+  const windows: Record<string, UsageWindow> = {};
 
-  const addWindow = (label, snapshot) => {
+  const addWindow = (label: string, value: unknown): void => {
+    const snapshot = asObject(value);
     if (!snapshot) return;
     const entitlement = toNumber(snapshot.entitlement);
     const remaining = toNumber(snapshot.remaining);

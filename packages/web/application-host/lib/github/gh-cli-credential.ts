@@ -1,12 +1,11 @@
-// @ts-nocheck
 import { execFileSync } from 'child_process';
 
 const CACHE_TTL_MS = 30_000;
-let cachedToken = null;
+let cachedToken: string | null = null;
 let cachedAt = 0;
 let hasCachedToken = false;
 
-function fetchGhCliToken() {
+function fetchGhCliToken(): string | null {
   try {
     const token = execFileSync('gh', ['auth', 'token'], {
       encoding: 'utf8',
@@ -20,7 +19,7 @@ function fetchGhCliToken() {
   }
 }
 
-export function getGhCliToken() {
+export function getGhCliToken(): string | null {
   const now = Date.now();
   if (hasCachedToken && now - cachedAt < CACHE_TTL_MS) {
     return cachedToken;
@@ -32,7 +31,7 @@ export function getGhCliToken() {
   return token;
 }
 
-export function clearGhCliTokenCache() {
+export function clearGhCliTokenCache(): void {
   cachedToken = null;
   cachedAt = 0;
   hasCachedToken = false;

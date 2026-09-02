@@ -1,5 +1,28 @@
-// @ts-nocheck
-export const createServerStartupRuntime = (dependencies) => {
+import type { Server } from 'node:http';
+import type { TunnelStartRequest } from '../tunnels/types.js';
+
+type StartupTunnelRequest = TunnelStartRequest;
+
+interface TunnelAuthController {
+  issueBootstrapToken(options: { ttlMs: number | null }): { token: string };
+  setActiveTunnel(input: { mode: string; publicUrl: string; tunnelId: string }): void;
+}
+
+export const createServerStartupRuntime = (dependencies: {
+  TUNNEL_MODE_MANAGED_LOCAL: string;
+  TUNNEL_MODE_MANAGED_REMOTE: string;
+  TUNNEL_MODE_QUICK: string;
+  crypto: { randomUUID(): string };
+  getSignalsAttached(): boolean;
+  gracefulShutdown(): Promise<void>;
+  normalizeTunnelBootstrapTtlMs(value: unknown): number | null;
+  process: NodeJS.Process;
+  readSettingsFromDisk(): Promise<Record<string, unknown>>;
+  server: Server;
+  setSignalsAttached(value: boolean): void;
+  startTunnelWithNormalizedRequest(input: Record<string, unknown>): Promise<{ mode: string; publicUrl: string }>;
+  tunnelAuthController: TunnelAuthController;
+}) => {
   const {
     process,
     crypto,
@@ -16,7 +39,7 @@ export const createServerStartupRuntime = (dependencies) => {
     TUNNEL_MODE_MANAGED_REMOTE,
   } = dependencies;
 
-  const resolveBindHost = (host) =>
+  const resolveBindHost = (host?: string): string =>
     host
     || (typeof process.env.PIARIUM_HOST === 'string' && process.env.PIARIUM_HOST.trim().length > 0
       ? process.env.PIARIUM_HOST.trim()
@@ -27,16 +50,21 @@ export const createServerStartupRuntime = (dependencies) => {
     bindHost,
     startupTunnelRequest,
     onTunnelReady,
-  }) => {
+  }: {
+    bindHost: string;
+    onTunnelReady?: (publicUrl: string, connectUrl: string | null) => void;
+    port: number;
+    startupTunnelRequest?: StartupTunnelRequest | null;
+  }): Promise<{ activePort: number }> => {
     let activePort = port;
 
-    await new Promise((resolve, reject) => {
-      const onError = (error) => {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error): void => {
         server.off('error', onError);
         reject(error);
       };
       server.once('error', onError);
-      const onListening = async () => {
+      const onListening = async (): Promise<void> => {
         server.off('error', onError);
         const addressInfo = server.address();
         activePort = typeof addressInfo === 'object' && addressInfo ? addressInfo.port : port;
@@ -87,14 +115,14 @@ export const createServerStartupRuntime = (dependencies) => {
               if (onTunnelReady) {
                 onTunnelReady(publicUrl, connectUrl);
               } else {
-                console.log(`\n馃寪 Tunnel URL: ${connectUrl}`);
-                console.log('馃攽 One-time connect link (expires after first use)\n');
+                console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
+                console.log('🔑 One-time connect link (expires after first use)\n');
               }
             } else if (onTunnelReady) {
               onTunnelReady(publicUrl, null);
             }
           } catch (error) {
-            console.error(`Failed to start tunnel: ${error.message}`);
+            console.error(`Failed to start tunnel: ${error instanceof Error ? error.message : String(error)}`);
             console.log('Continuing without tunnel...');
           }
         }
@@ -108,9 +136,9 @@ export const createServerStartupRuntime = (dependencies) => {
     return { activePort };
   };
 
-  const attachProcessHandlers = ({ attachSignals }) => {
+  const attachProcessHandlers = ({ attachSignals }: { attachSignals: boolean }): void => {
     if (attachSignals && !getSignalsAttached()) {
-      const handleSignal = async () => {
+      const handleSignal = async (): Promise<void> => {
         await gracefulShutdown();
       };
       // Cover every signal a shell or dev harness may use to stop/restart us so

@@ -1,11 +1,16 @@
-// @ts-nocheck
-const buildScheduledInstructions = (execution) => [
+import type { HostMethodParams } from '@piarium/protocol';
+import type { PiRuntimeBroker } from '@piarium/runtime-broker';
+import type { ScheduledTask, ScheduledTaskExecution } from '../projects/project-config.js';
+
+const buildScheduledInstructions = (execution: ScheduledTaskExecution): string => [
   ...(typeof execution?.agent === 'string' && execution.agent.trim()
     ? [`Use the Pi agent role or profile named "${execution.agent.trim()}" for this turn when it is available.`]
     : []),
 ].join('\n');
 
-export const buildScheduledPiPrompt = (task) => {
+type ScheduledExecutionTask = Pick<ScheduledTask, 'execution'>;
+
+export const buildScheduledPiPrompt = (task: ScheduledExecutionTask): string => {
   const prompt = typeof task?.execution?.prompt === 'string'
     ? task.execution.prompt.trim()
     : '';
@@ -13,12 +18,19 @@ export const buildScheduledPiPrompt = (task) => {
   return prompt && instructions ? `${prompt}\n\n${instructions}` : prompt;
 };
 
-export const createPiScheduledTaskExecutor = ({ broker }) => {
+export const createPiScheduledTaskExecutor = ({ broker }: {
+  broker: Pick<PiRuntimeBroker, 'createSession' | 'requestForSession'>;
+}) => {
   if (!broker || typeof broker.createSession !== 'function' || typeof broker.requestForSession !== 'function') {
     throw new Error('A Pi runtime broker is required for scheduled tasks');
   }
 
-  return async ({ projectPath, task, title, onSessionCreated }) => {
+  return async ({ projectPath, task, title, onSessionCreated }: {
+    onSessionCreated?: (sessionId: string) => void;
+    projectPath: string;
+    task: ScheduledExecutionTask;
+    title: string;
+  }) => {
     const snapshot = await broker.createSession(projectPath, title);
     const sessionID = snapshot.sessionId;
     try {
@@ -30,7 +42,7 @@ export const createPiScheduledTaskExecutor = ({ broker }) => {
       });
       if (task.execution.thinkingLevel) {
         await broker.requestForSession(sessionID, 'thinking.select', {
-          level: task.execution.thinkingLevel,
+          level: task.execution.thinkingLevel as HostMethodParams<'thinking.select'>['level'],
           sessionId: sessionID,
         });
       }
@@ -40,7 +52,9 @@ export const createPiScheduledTaskExecutor = ({ broker }) => {
         await broker.requestForSession(sessionID, 'session.features.mutate', {
           mutation: {
             objective: typeof task.execution.prompt === 'string' ? task.execution.prompt.trim() : prompt,
-            ...(Number.isSafeInteger(task.execution.goalTokenBudget) && task.execution.goalTokenBudget > 0
+            ...(typeof task.execution.goalTokenBudget === 'number'
+              && Number.isSafeInteger(task.execution.goalTokenBudget)
+              && task.execution.goalTokenBudget > 0
               ? { tokenBudget: task.execution.goalTokenBudget }
               : {}),
             type: 'goal.start',

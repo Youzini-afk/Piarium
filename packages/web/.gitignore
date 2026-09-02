@@ -5,3 +5,8 @@ test-results/
 server/
 .application-host-build/
 .application-host-staging-*
+# Generated CLI runtime output (built from cli/)
+bin/
+.cli-build/
+.cli-staging-*
+.cli-backup-*

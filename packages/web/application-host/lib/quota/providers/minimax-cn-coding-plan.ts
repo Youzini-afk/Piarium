@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { createMiniMaxCodingPlanProvider } from './minimax-shared.js';
 
 const provider = createMiniMaxCodingPlanProvider({
@@ -11,6 +10,5 @@ const provider = createMiniMaxCodingPlanProvider({
 
 export const providerId = provider.providerId;
 export const providerName = provider.providerName;
-const aliases = provider.aliases;
 export const isConfigured = provider.isConfigured;
 export const fetchQuota = provider.fetchQuota;
