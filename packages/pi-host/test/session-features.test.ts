@@ -113,8 +113,12 @@ describe("Piarium session features", () => {
     const goalResult = await goalHandler(
       { systemPrompt: "base", type: "before_agent_start" },
       { sessionManager: manager } as unknown as ExtensionContext,
-    ) as { systemPrompt: string };
-    assert.match(goalResult.systemPrompt, /base/);
-    assert.match(goalResult.systemPrompt, /Preserve every custom capability/);
+    ) as { message?: { customType: string; content: string; display: boolean }; systemPrompt?: string };
+    // Zone 0 fix: the hook returns a message (Zone 2 append), not a systemPrompt modification.
+    assert.equal(goalResult.systemPrompt, undefined);
+    assert.ok(goalResult.message);
+    assert.equal(goalResult.message.customType, "piarium-goal");
+    assert.equal(goalResult.message.display, false);
+    assert.match(goalResult.message.content, /Preserve every custom capability/);
   });
 });
