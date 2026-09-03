@@ -234,4 +234,138 @@ describe("Pi hooks contract (0.84.3)", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  // -------------------------------------------------------------------------
+  // 2.6 verify-before-implement experiment: does Pi consume the
+  // `compaction` field from `session_before_compact` handler return value?
+  // If yes, the harness can provide its own summary (zero LLM calls for
+  // compaction). If no, the harness must follow the plan's alternative path.
+  //
+  // This test registers a `session_before_compact` handler that returns
+  // `{ compaction: { summary, firstKeptEntryId, tokensBefore } }` and
+  // verifies:
+  // 1. The custom summary text appears in the session after compaction.
+  // 2. The faux provider's summarization function is NOT called (zero LLM
+  //    calls for compaction — the extension-provided result is used as-is).
+  // -------------------------------------------------------------------------
+  it("session_before_compact compaction result is consumed by Pi (zero LLM calls)", async () => {
+    // This test generates a large session and triggers compaction.
+    const root = await mkdtemp(join(tmpdir(), "piarium-compact-"));
+    const agentDir = join(root, "agent");
+    const projectExtensions = join(root, ".pi", "extensions");
+    await mkdir(projectExtensions, { recursive: true });
+
+    // Project extension that hooks session_before_compact and provides
+    // a custom compaction result, bypassing Pi's LLM summarization.
+    await writeFile(
+      join(projectExtensions, "compact-test.ts"),
+      `export default function extension(pi: any) {
+        pi.on("session_before_compact", (event: any) => {
+          return {
+            compaction: {
+              summary: "piarium-custom-compaction-summary-marker",
+              firstKeptEntryId: event.preparation.firstKeptEntryId,
+              tokensBefore: event.preparation.tokensBefore,
+            },
+          };
+        });
+      }\n`,
+      "utf8",
+    );
+
+    // Generate enough context to exceed keepRecentTokens (20000 tokens).
+    // Use large assistant text responses to build up context quickly.
+    const largeText = "x".repeat(30000); // ~7500 tokens per response
+    const faux = registerFauxProvider();
+    const capturedContexts: Context[] = [];
+
+    faux.setResponses([
+      (context) => {
+        capturedContexts.push(context);
+        return fauxAssistantMessage(largeText + " turn 1");
+      },
+      (context) => {
+        capturedContexts.push(context);
+        return fauxAssistantMessage(largeText + " turn 2");
+      },
+      (context) => {
+        capturedContexts.push(context);
+        return fauxAssistantMessage(largeText + " turn 3");
+      },
+      (context) => {
+        capturedContexts.push(context);
+        return fauxAssistantMessage("done");
+      },
+    ]);
+
+    const model = faux.getModel();
+    const configureServices = async (services: AgentSessionServices) => {
+      services.modelRuntime.registerProvider(model.provider, {
+        api: model.api,
+        baseUrl: model.baseUrl,
+        models: [
+          {
+            api: model.api,
+            baseUrl: model.baseUrl,
+            contextWindow: model.contextWindow,
+            cost: model.cost,
+            id: model.id,
+            input: model.input,
+            maxTokens: model.maxTokens,
+            name: model.name,
+            reasoning: model.reasoning,
+          },
+        ],
+      });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+      return { model };
+    };
+
+    const host = new SessionHost({
+      agentDir,
+      configureServices,
+      emit: (() => {}) as <E extends HostEvent>(event: E, data: HostEventData<E>) => void,
+      projectTrustOverride: true,
+    });
+
+    try {
+      const snapshot = await host.create(root);
+      // Send multiple prompts to build up context across turns.
+      await host.prompt(snapshot.sessionId, "tell me about turn 1");
+      await host.session.waitForIdle();
+      await host.prompt(snapshot.sessionId, "tell me about turn 2");
+      await host.session.waitForIdle();
+      await host.prompt(snapshot.sessionId, "tell me about turn 3");
+      await host.session.waitForIdle();
+      await host.prompt(snapshot.sessionId, "say done");
+      await host.session.waitForIdle();
+
+      // 4 provider calls for 4 agent turns.
+      assert.equal(capturedContexts.length, 4, "expected exactly four provider calls for agent turns");
+
+      // Now trigger manual compaction via the Pi session.
+      // The session_before_compact hook should provide the custom summary.
+      // compact() returns a Promise<CompactionResult> — await it directly.
+      await host.session.compact();
+
+      // Verify the custom summary marker appears in the session messages.
+      const messagesJson = JSON.stringify(host.session.messages);
+      assert.match(
+        messagesJson,
+        /piarium-custom-compaction-summary-marker/,
+        "custom compaction summary must appear in session messages after compaction",
+      );
+
+      // Still only 4 provider calls — compaction used the extension result.
+      assert.equal(
+        capturedContexts.length,
+        4,
+        "no additional provider calls for compaction (extension provided result)",
+      );
+    } finally {
+      await host.dispose();
+      faux.unregister();
+      try { await rm(root, { force: true, recursive: true }); } catch { /* Windows EBUSY */ }
+    }
+  });
 });
