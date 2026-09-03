@@ -205,7 +205,6 @@ export function createApplyPatchTool(
     promptGuidelines: [
       "Use apply_patch for multi-file edits with Codex patch syntax.",
       "Format: *** Begin Patch / *** Update File: path / @@ context / +added / -removed / *** End Patch",
-      "Each file's write goes through workspace mutation journal (before/after).",
     ],
     parameters: ApplyPatchParams,
     executionMode: "sequential",

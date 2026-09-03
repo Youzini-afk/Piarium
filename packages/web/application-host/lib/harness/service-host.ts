@@ -36,6 +36,12 @@ export interface HarnessServiceHostOptions {
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
+  /**
+   * Called when a session's shell supervisor is created to register a
+   * process-mode writer with the document authority. Returns a handle
+   * with a close() method, or null if registration is not available.
+   */
+  registerWriter?: (sessionId: string, workspaceRoot: string) => Promise<{ close: () => Promise<void> } | null>;
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -64,6 +70,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         interpreter: interpreterResult,
         outputStore,
         sessionId: ctx.sessionId,
+        ...(options.registerWriter ? {
+          registerWriter: () => options.registerWriter!(ctx.sessionId, ctx.workspaceRoot),
+        } : {}),
       });
     }
 

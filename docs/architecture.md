@@ -416,7 +416,7 @@ requests. Two out-of-band methods ride on the same broker transport as
 
 - `harness.request` — pi-host sends `{ method, params, requestId, sessionId }`
   to invoke a host-side harness service.
-- `harness.respond` — host replies with `{ requestId, result | error }`.
+- `harness.respond` — host replies with `{ requestId, sessionId, ok: true, result }` or `{ requestId, sessionId, ok: false, error: HarnessError }`, matching `HarnessRespondParams`.
 
 The `HarnessServiceMap` defines ten methods: `shell.exec`, `shell.read`,
 `shell.write`, `shell.kill`, `output.store`, `output.read`,

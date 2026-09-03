@@ -1,5 +1,21 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
-import type { HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
+import type { HarnessError, HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
+
+/**
+ * Error thrown by harness services to produce a specific HarnessError code
+ * in the router's catch block. The router checks for this class to extract
+ * the code; other errors default to "failed".
+ */
+export class HarnessServiceError extends Error {
+  readonly harnessCode: HarnessError["code"];
+  readonly harnessRetryable: boolean;
+  constructor(code: HarnessError["code"], message: string, retryable = false) {
+    super(message);
+    this.name = "HarnessServiceError";
+    this.harnessCode = code;
+    this.harnessRetryable = retryable;
+  }
+}
 import type { OutputStore } from "./output-store.js";
 import type { PathLockService } from "./path-lock.js";
 import type { HarnessSearchService } from "./search-service.js";
@@ -71,7 +87,7 @@ export function createOutputReadService(store: OutputStore): HarnessService<"out
     handle: async (params, ctx: HarnessServiceContext) => {
       const slice = store.read(ctx.sessionId, params.handle, params.offset, params.length);
       if (!slice) {
-        throw new Error(`Output handle not found: ${params.handle}`);
+        throw new HarnessServiceError("not-found", `Output handle not found: ${params.handle}`);
       }
       return slice;
     },

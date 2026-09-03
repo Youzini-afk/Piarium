@@ -1,4 +1,5 @@
 import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessServiceMap } from "@piarium/protocol";
+import { HarnessServiceError } from "./harness-services.js";
 
 export interface HarnessServiceContext {
   sessionId: string;
@@ -91,11 +92,24 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       });
       await options.respond(data.sessionId, data.requestId, { ok: true, result });
     } catch (error) {
-      const code: HarnessError["code"] = error instanceof Error && error.name === "AbortError" ? "timeout" : "failed";
-      const message = error instanceof Error ? error.message : String(error);
+      let code: HarnessError["code"];
+      let message: string;
+      let retryable = false;
+      if (error instanceof HarnessServiceError) {
+        code = error.harnessCode;
+        message = error.message;
+        retryable = error.harnessRetryable;
+      } else if (error instanceof Error && error.name === "AbortError") {
+        code = "timeout";
+        message = error.message;
+        retryable = true;
+      } else {
+        code = "failed";
+        message = error instanceof Error ? error.message : String(error);
+      }
       await options.respond(data.sessionId, data.requestId, {
         ok: false,
-        error: harnessError(code, message, code === "timeout"),
+        error: harnessError(code, message, retryable),
       });
     } finally {
       clearTimeout(timer);

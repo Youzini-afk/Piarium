@@ -1039,6 +1039,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return null;
       }
     },
+    registerWriter: async (sessionId, workspaceRoot) => {
+      try {
+        const writer = await documentsAuthority.registerWriterForScope(
+          workspaceRoot,
+          { kind: "harness-bash", id: sessionId },
+          { mode: "process", purpose: "harness-bash" },
+        );
+        if (!writer) return null;
+        return { close: async () => { await writer.close(); } };
+      } catch {
+        return null;
+      }
+    },
     ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
