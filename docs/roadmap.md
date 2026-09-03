@@ -607,32 +607,56 @@ conformance remains in the package tests and architecture checks.
 
 ## Agent harness — Phase 2/3/3b (2026-09-03)
 
-### Phase 2: Context layer
+### Phase 2: Context layer (modules + wiring complete 2026-09-03)
 
 - **2.1 Knowledge store v1**: TriviumDB-backed workspace knowledge base
   (`lib/knowledge/store.ts`). Event/session/block/knowledge nodes,
   placeholder vector mode (dim=8), single-writer queue, cascade delete,
-  retention. 17 tests.
+  retention. 17 tests. **Wired**: lazy per-workspace store opening in
+  `index.ts`, `getKnowledgeStoreForSession` resolver.
 - **2.2 Zone 2 assembly**: `piarium-context` message template with budget
-  folding (`lib/harness/zone2.ts`). 13 tests.
+  folding (`lib/harness/zone2.ts`). 13 tests. **Wired**: `zone2-extension.ts`
+  in pi-host hooks `before_agent_start`, requests `zone2.assemble` via
+  bridge, returns custom message. 1s timeout (critical path).
 - **2.3 Host observers**: Document/terminal/diagnostic/git event handlers
   writing to knowledge store (`lib/knowledge/observers.ts`). 10 tests.
+  **Wired**: observer infrastructure in `index.ts` (sessionObservers map).
+  Event source subscription TODO.
 - **2.4 Memory agent**: Gating table, `memory_edit` ops (replace/patch/
   create/delete/mark_plan), prefix reuse, interval adaptation
-  (`lib/harness/memory-agent.ts`). 30 tests.
+  (`lib/harness/memory-agent.ts`). 30 tests. **Wired**: runner field in
+  service-host. Model access TODO (currently null).
 - **2.5 todo tool**: Plan block management with confidence confirmation
-  (`lib/harness/todo-tool.ts`). 12 tests.
+  (`lib/harness/todo-tool.ts`). 12 tests. **Wired**: `todo-tool.ts` in
+  pi-host calls `todo.upsert` via bridge, registered in `selectHarnessTools`.
+  e2e: 1 test (todo → bridge → router → service → store).
 - **2.6 Compaction**: `piarium-compaction` summary with non-stacking
   guarantee, re-injection (`lib/harness/compaction.ts`). 10 tests.
+  **Wired**: `compaction-extension.ts` in pi-host hooks
+  `session_before_compact` (5s timeout) + `session_compact`. e2e: 2 tests
+  (compaction.before + compaction.after). D-022 verified Pi consumes
+  `{ compaction }` return value (zero LLM calls).
 - **2.7 Knowledge suggestions**: Three triggers, review tray actions,
   supersedes chain (`lib/harness/knowledge-suggestions.ts`). 10 tests.
+  **Not wired** (TODO).
 - **2.8 Embedding providers**: OpenAI/Voyage/Cohere/Jina/Mistral/Gemini
   adapters, meta persistence, dimension validation
-  (`lib/knowledge/embedding.ts`). 11 tests.
+  (`lib/knowledge/embedding.ts`). 11 tests. **Not wired** (TODO).
 - **2.9 Model slots**: Nine slots + permissionJudge, presets, resolution
-  (`lib/harness/model-slots.ts`). 12 tests.
+  (`lib/harness/model-slots.ts`). 12 tests. **Not wired** (TODO).
 - **2.10 recall tool**: Workspace + user store merge, formatted output
-  (`lib/harness/recall-tool.ts`). 5 tests.
+  (`lib/harness/recall-tool.ts`). 5 tests. **Wired**: `recall-tool.ts` in
+  pi-host calls `recall.search` via bridge, registered in
+  `selectHarnessTools`. e2e: 1 test (recall → bridge → router → service →
+  store). User store TODO (currently null).
+
+**Phase 2 wiring summary**: 5 new `HarnessServiceMap` methods
+(`zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`,
+`recall.search`). Provider injection pattern in `HarnessServiceHost` —
+providers are optional, services not registered when provider is null.
+pi-host extensions use short timeouts and catch errors to avoid blocking
+the agent when Phase 2 services are unavailable. 76/76 pi-host harness
+tests pass, 102/102 web harness+knowledge tests pass. See D-023.
 
 ### Phase 3: Retrieval and sub-agents
 
