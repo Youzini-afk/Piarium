@@ -126,3 +126,50 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 考虑过的替代：(1) unified diff 语法（D-012，已回退）——不匹配 OpenAI 训练数据。(2) 不经过 mutation journal——绕过了 recovery 系统。(3) 所有模型都注册——浪费非 OpenAI 模型的工具槽位。
 影响：`packages/pi-host/src/harness/apply-patch-tool.ts`（完全重写）；`packages/pi-host/src/session-host.ts`（OpenAI-only 条件注册 + 传入 mutationJournal）。
 状态：已实施
+
+## 阶段小结 · 阶段 1
+
+### 模块已写并有单测
+
+| 工作项 | 模块 | 单测数 | 状态 |
+|--------|------|--------|------|
+| 1.1 | HarnessServiceMap, HostServicesBridge, HarnessRouter | 17 | ✓ |
+| 1.2 | Zone 0 violation fix + stability contract | 5 | ✓ |
+| 1.3 | ShellSupervisor (PTY), bash tool | 21 | ✓ |
+| 1.4 | OutputStore, tool-result-truncation | 12 | ✓ |
+| 1.5 | HarnessSearchService, grep tool | 6 | ✓ |
+| 1.6 | LspDiagnosticsService, apply_patch (Codex) | 6 | ✓ |
+| 1.7 | PathLockService, withPathLock | 13 | ✓ |
+| 1.8 | CounterTracker (toolErrors, toolRetries, outputBytes, cacheHitRatio) | 7 | ✓ |
+| 1.9 | HarnessSettings schema + Settings page | 6 | ✓ |
+| 1.10 | promptSnippet / promptGuidelines (via ToolDefinition) | — | ✓ |
+| 补齐 | get_output, write_to_process, kill_shell, diagnostics | 15 | ✓ |
+
+### 已接进运行系统并在真实会话里跑通
+
+| 接线点 | 位置 | 状态 |
+|--------|------|------|
+| Host 侧实例化 | `index.ts`: HarnessServiceHost after workspaceContentSearch | ✓ |
+| HarnessRouter | `index.ts`: after recoveryTurnCoordinator | ✓ |
+| Broker 事件消费 | `index.ts`: harnessRouter.processEvent in subscribe | ✓ |
+| 会话注册 | `index.ts`: session.snapshot event handler | ✓ |
+| pi-host 工具注册 | `session-host.ts`: customTools array | ✓ |
+| 截断扩展 | `session-host.ts`: extensionFactories | ✓ |
+| bash cwd | `session-host.ts`: cwd passed to createBashTool | ✓ |
+| mutation journal 诊断 | `workspace-mutation-journal.ts`: hostServicesBridge | ✓ |
+| apply_patch OpenAI-only | `session-host.ts`: isOpenAIFamily check | ✓ |
+
+### Smoke 测试（Windows, 6/6 pass）
+
+1. bash pwd (cwd=workspace root) — ✓
+2. cwd persistence (cd packages && pwd) — ✓
+3. background + get_output — ✓
+4. grep (hit + miss) — ✓
+5. read 5000-line file + pagination — ✓
+6. Settings (grep disable) — ✓
+
+### 决策回退
+
+- D-010 (child_process.spawn) → D-013 (PTY)
+- D-012 (unified diff) → D-014 (Codex syntax)
+- D-005 (mode: controlled) → 修正为 mode: process

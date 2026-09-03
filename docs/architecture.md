@@ -408,6 +408,30 @@ An initial handshake requires the single Piarium v1 contract and reports capabil
 pre-release development every product surface changes in lockstep; no historical Piarium ABI is
 accepted. UI disables unavailable actions instead of guessing from runtime versions.
 
+### 5.1 Agent harness protocol
+
+The agent harness extends the host protocol with worker→host service
+requests. Two out-of-band methods ride on the same broker transport as
+`workspace.mutation.request`/`respond`:
+
+- `harness.request` — pi-host sends `{ method, params, requestId, sessionId }`
+  to invoke a host-side harness service.
+- `harness.respond` — host replies with `{ requestId, result | error }`.
+
+The `HarnessServiceMap` defines ten methods: `shell.exec`, `shell.read`,
+`shell.write`, `shell.kill`, `output.store`, `output.read`,
+`search.content`, `fs.lock`, `lsp.diagnostics`, and
+`lsp.diagnosticsSnapshot`. Each has typed params and result in
+`@piarium/protocol`. The host's `HarnessRouter` dispatches requests to
+registered services and the `HostServicesBridge` on the pi-host side
+resolves the response promise.
+
+`HarnessSettings` (in `harness-settings.ts`) configures shell
+interpreter selection, output truncation budgets, and per-tool enable
+flags. The Settings page contribution lets users toggle tools like grep;
+when disabled, the next session does not register the tool and Pi falls
+back to its built-in equivalent.
+
 ## 6. Data ownership
 
 | Data | Authority | Piarium behavior |
