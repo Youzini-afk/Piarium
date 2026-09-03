@@ -1,0 +1,167 @@
+import { describe, it, expect } from "vitest";
+import {
+  extractIdentifiers,
+  extractQuotedLiterals,
+  expandWithSynonyms,
+  buildRgPatterns,
+  rankSnippets,
+  explore,
+  type ExploreDeps,
+  type RgHit,
+  type ExploreSnippet,
+} from "./explore.js";
+
+describe("extractIdentifiers", () => {
+  it("extracts identifiers ≥ 3 chars", () => {
+    const ids = extractIdentifiers("how does authentication work");
+    expect(ids).toContain("how");
+    expect(ids).toContain("does");
+    expect(ids).toContain("authentication");
+    expect(ids).toContain("work");
+  });
+
+  it("splits camelCase", () => {
+    const ids = extractIdentifiers("how does myFunction work");
+    expect(ids).toContain("myFunction");
+    expect(ids).toContain("Function"); // "my" is 2 chars, filtered out
+  });
+
+  it("splits snake_case", () => {
+    const ids = extractIdentifiers("how does my_func work");
+    expect(ids).toContain("my_func");
+    expect(ids).toContain("func"); // "my" is 2 chars, filtered out
+  });
+
+  it("filters short words", () => {
+    const ids = extractIdentifiers("ab cd ef");
+    expect(ids).toHaveLength(0);
+  });
+});
+
+describe("extractQuotedLiterals", () => {
+  it("extracts double-quoted strings", () => {
+    expect(extractQuotedLiterals('find "error message"')).toEqual(["error message"]);
+  });
+
+  it("extracts single-quoted strings", () => {
+    expect(extractQuotedLiterals("find 'error message'")).toEqual(["error message"]);
+  });
+
+  it("returns empty when no quotes", () => {
+    expect(extractQuotedLiterals("no quotes here")).toEqual([]);
+  });
+});
+
+describe("expandWithSynonyms", () => {
+  it("expands config with synonyms", () => {
+    const result = expandWithSynonyms(["config"]);
+    expect(result).toContain("config");
+    expect(result).toContain("settings");
+    expect(result).toContain("configuration");
+  });
+
+  it("does not expand words without synonyms", () => {
+    const result = expandWithSynonyms(["random"]);
+    expect(result).toEqual(["random"]);
+  });
+});
+
+describe("buildRgPatterns", () => {
+  it("creates patterns from identifiers and literals", () => {
+    const patterns = buildRgPatterns(["auth", "login"], ["error"], []);
+    expect(patterns).toHaveLength(3);
+    expect(patterns[0]?.fixedStrings).toBe(true); // literal first
+    expect(patterns[1]?.pattern).toContain("auth");
+    expect(patterns[2]?.pattern).toContain("login");
+  });
+
+  it("limits to 12 patterns", () => {
+    const ids = Array.from({ length: 20 }, (_, i) => `id${i}`);
+    const patterns = buildRgPatterns(ids, [], []);
+    expect(patterns.length).toBeLessThanOrEqual(12);
+  });
+
+  it("includes symbol candidates", () => {
+    const patterns = buildRgPatterns(["test"], [], ["MyClass", "myFunc"]);
+    const symPatterns = patterns.filter((p) => p.pattern.includes("MyClass") || p.pattern.includes("myFunc"));
+    expect(symPatterns.length).toBeGreaterThan(0);
+  });
+});
+
+describe("rankSnippets", () => {
+  it("ranks by combined score", () => {
+    const snippets: ExploreSnippet[] = [
+      { path: "src/a.ts", startLine: 1, endLine: 5, text: "a", why: "" },
+      { path: "src/b.ts", startLine: 1, endLine: 5, text: "b", why: "" },
+    ];
+    const hits = new Map<string, RgHit[]>();
+    hits.set("src/a.ts", [{ path: "src/a.ts", line: 1, text: "match" }]);
+    hits.set("src/b.ts", [{ path: "src/b.ts", line: 1, text: "match" }, { path: "src/b.ts", line: 2, text: "match2" }]);
+
+    const deps: ExploreDeps = {
+      rgSearch: async () => [],
+      searchSymbols: async () => [],
+    };
+
+    const ranked = rankSnippets(snippets, hits, deps, false);
+    // b.ts has more hits → higher hitDensity
+    expect(ranked[0]?.snippet.path).toBe("src/b.ts");
+  });
+});
+
+describe("explore (pure algorithm mode)", () => {
+  it("returns snippets without LLM", async () => {
+    const deps: ExploreDeps = {
+      rgSearch: async (pattern) => [
+        { path: "src/auth.ts", line: 10, text: `function ${pattern}` },
+      ],
+      searchSymbols: async () => [],
+    };
+
+    const result = await explore({ question: "how does auth work" }, deps);
+    expect(result.usedLlm).toBe(false);
+    expect(result.snippets.length).toBeGreaterThan(0);
+    expect(result.searched.patterns).toBeGreaterThan(0);
+    expect(result.searched.ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("zero model calls in pure algorithm mode", async () => {
+    let llmCalled = false;
+    const deps: ExploreDeps = {
+      rgSearch: async () => [],
+      searchSymbols: async () => [],
+      llmExpand: async () => { llmCalled = true; return { patterns: [], symbols: [] }; },
+    };
+
+    // Don't pass llmExpand to test pure algorithm
+    const result = await explore({ question: "test" }, {
+      rgSearch: deps.rgSearch,
+      searchSymbols: deps.searchSymbols,
+    });
+    expect(llmCalled).toBe(false);
+    expect(result.usedLlm).toBe(false);
+  });
+
+  it("uses LLM when provided", async () => {
+    const deps: ExploreDeps = {
+      rgSearch: async () => [],
+      searchSymbols: async () => [],
+      llmExpand: async () => ({ patterns: ["custom"], symbols: ["MyClass"] }),
+    };
+
+    const result = await explore({ question: "test" }, deps);
+    expect(result.usedLlm).toBe(true);
+  });
+
+  it("respects limit", async () => {
+    const deps: ExploreDeps = {
+      rgSearch: async () => Array.from({ length: 50 }, (_, i) => ({
+        path: `file${i}.ts`, line: 1, text: "match",
+      })),
+      searchSymbols: async () => [],
+    };
+
+    const result = await explore({ question: "test", limit: 5 }, deps);
+    expect(result.snippets.length).toBeLessThanOrEqual(5);
+  });
+});
