@@ -140,6 +140,8 @@ interface BackgroundShell {
   writer: { close: () => Promise<void> } | null;
 }
 
+export type ShellSupervisor = ReturnType<typeof createShellSupervisor>;
+
 export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const { interpreter, outputStore, sessionId } = deps;
   const cols = deps.cols ?? 120;
@@ -357,10 +359,16 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       };
 
       // If cwd is different from current, cd first
+      const shell = ptyProcess;
+      if (!shell) {
+        clearTimeout(timeout);
+        resolvePromise({ kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" });
+        return;
+      }
       if (options.cwd) {
-        ptyProcess.write(`cd ${JSON.stringify(options.cwd)} && ${wrapped}\n`);
+        shell.write(`cd ${JSON.stringify(options.cwd)} && ${wrapped}\n`);
       } else {
-        ptyProcess.write(`${wrapped}\n`);
+        shell.write(`${wrapped}\n`);
       }
     });
   };

@@ -84,7 +84,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const timer = setTimeout(() => controller.abort(), defaultTimeoutMs);
     try {
       const workspaceId = await options.resolveWorkspace(data.sessionId);
-      const result = await service.handle(data.params, {
+      const result = await service.handle(data.params as never, {
         sessionId: data.sessionId,
         workspaceId,
         signal: controller.signal,

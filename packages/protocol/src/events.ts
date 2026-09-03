@@ -23,7 +23,7 @@ interface WorkspaceMutationRequestBase {
   requestId: string;
   sessionId: string;
   toolCallId: string;
-  toolName: "write" | "edit";
+  toolName: "write" | "edit" | "apply_patch";
 }
 
 export type WorkspaceMutationRequest = WorkspaceMutationRequestBase & (

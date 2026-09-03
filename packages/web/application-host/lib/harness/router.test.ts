@@ -44,8 +44,8 @@ describe("harness router", () => {
       },
     });
     expect(responses).toHaveLength(1);
-    expect(responses[0].ok).toBe(false);
-    expect(responses[0].error?.code).toBe("unavailable");
+    expect(responses[0]!.ok).toBe(false);
+    expect(responses[0]!.error?.code).toBe("unavailable");
     router.dispose();
   });
 
@@ -70,9 +70,9 @@ describe("harness router", () => {
       },
     });
     expect(responses).toHaveLength(1);
-    expect(responses[0].ok).toBe(false);
-    expect(responses[0].error?.code).toBe("failed");
-    expect(responses[0].error?.message).toBe("boom");
+    expect(responses[0]!.ok).toBe(false);
+    expect(responses[0]!.error?.code).toBe("failed");
+    expect(responses[0]!.error?.message).toBe("boom");
     router.dispose();
   });
 
@@ -93,8 +93,8 @@ describe("harness router", () => {
       },
     });
     expect(responses).toHaveLength(1);
-    expect(responses[0].ok).toBe(false);
-    expect(responses[0].error?.code).toBe("unavailable");
+    expect(responses[0]!.ok).toBe(false);
+    expect(responses[0]!.error?.code).toBe("unavailable");
     router.dispose();
   });
 

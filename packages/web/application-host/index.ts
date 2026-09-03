@@ -1030,7 +1030,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // coordinator.
   const harnessDiagnosticsProvider: DiagnosticsProvider | null = null; // TODO: wire to languageSupervisor in item 2
   const harnessServiceHost = createHarnessServiceHost({
-    search: async (request, options) => workspaceContentSearch(request, options),
+    search: async (request, options) => workspaceContentSearch.searchContent({ query: request.query, workspaceId: request.workspaceId, maxResults: request.maxResults }, options),
     resolveWorkspaceRoot: async (workspaceId) => {
       try {
         const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
@@ -1126,13 +1126,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', {
         requestId,
         sessionId,
+        ok: outcome.ok,
         ...(outcome.ok ? { result: outcome.result } : { error: outcome.error }),
-      });
+      } as never);
     },
     resolveWorkspace: async (sessionId) => {
       const snapshot = sessionSnapshots.get(sessionId);
-      if (snapshot?.workspace?.kind === 'workspace' && typeof snapshot.workspace.id === 'string') {
-        return snapshot.workspace.id;
+      const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
+      if (workspace?.kind === 'workspace' && typeof workspace.id === 'string') {
+        return workspace.id;
       }
       return null;
     },

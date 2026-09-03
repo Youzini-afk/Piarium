@@ -33,8 +33,8 @@ describe("harness settings", () => {
 
   it("deep-merges dispatch.askBefore", () => {
     const merged = mergeHarnessSettings(
-      { dispatch: { askBefore: { edit: true } } },
-      { dispatch: { askBefore: { write: true } } },
+      { dispatch: { concurrency: 12, askBefore: { edit: true } } },
+      { dispatch: { concurrency: 12, askBefore: { write: true } } },
     );
     assert.equal(merged.dispatch.askBefore.edit, true);
     assert.equal(merged.dispatch.askBefore.write, true);
@@ -42,8 +42,8 @@ describe("harness settings", () => {
 
   it("deep-merges knowledge.autoAcceptSuggestions", () => {
     const merged = mergeHarnessSettings(
-      { knowledge: { autoAcceptSuggestions: { workspace: true } } },
-      { knowledge: { autoAcceptSuggestions: { user: true } } },
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false } } },
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: false, user: true } } },
     );
     assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, true);
     assert.equal(merged.knowledge.autoAcceptSuggestions.user, true);

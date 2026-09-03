@@ -18,7 +18,7 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
       return supervisor.exec(params.command, {
-        cwd: params.cwd,
+        ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
         waitMs: params.waitMs ?? 60_000,
       });
     },

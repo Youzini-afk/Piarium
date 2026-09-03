@@ -89,6 +89,8 @@ function groupAndSort(
   return { files, totalHits, totalFiles };
 }
 
+export type HarnessSearchService = ReturnType<typeof createHarnessSearchService>;
+
 export function createHarnessSearchService(deps: HarnessSearchDeps) {
   return {
     async search(

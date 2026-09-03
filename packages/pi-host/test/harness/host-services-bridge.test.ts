@@ -15,9 +15,9 @@ describe("HostServicesBridge", () => {
     });
     const resultPromise = bridge.request("output.store", { text: "hello" });
     assert.equal(emitted.length, 1);
-    assert.equal(emitted[0].method, "output.store");
-    assert.equal(emitted[0].sessionId, "session-1");
-    const requestId = emitted[0].requestId;
+    assert.equal(emitted[0]!.method, "output.store");
+    assert.equal(emitted[0]!.sessionId, "session-1");
+    const requestId = emitted[0]!.requestId;
     bridge.respond("session-1", requestId, { ok: true, result: { handle: "out_abc", total: 5 } });
     const result = await resultPromise;
     assert.deepEqual(result, { handle: "out_abc", total: 5 });
@@ -94,7 +94,7 @@ describe("HostServicesBridge", () => {
     assert.equal(emitted.length, 50);
     // Respond to each with its own result
     for (let i = 0; i < 50; i++) {
-      const data = emitted[i];
+      const data = emitted[i]!;
       bridge.respond("session-1", data.requestId, { ok: true, result: { handle: `out_${i}`, total: i } });
     }
     const results = await Promise.all(promises);

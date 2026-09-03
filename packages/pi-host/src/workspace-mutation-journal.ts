@@ -118,10 +118,10 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
     toolName: options.toolName,
   });
   let succeeded = false;
+  let result: TResult | undefined;
   try {
-    const result = await options.execute();
+    result = await options.execute();
     succeeded = true;
-    return result;
   } finally {
     await options.bridge.request({
       path,
@@ -130,12 +130,10 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
       toolCallId: options.toolCallId,
       toolName: options.toolName,
     });
-    // Best-effort diagnostics after mutation
-    if (succeeded && options.hostServicesBridge) {
+    // Best-effort diagnostics after mutation — all three states written to text
+    if (succeeded && result && options.hostServicesBridge) {
       const diag = await fetchDiagnostics(options.hostServicesBridge, path);
-      if (diag && diag.status !== "clean") {
-        // Append diagnostics summary to the result content
-        // This is best-effort: if the result is immutable, we skip
+      if (diag) {
         try {
           const firstText = result.content.find((c: { type: string }) => c.type === "text");
           if (firstText && typeof firstText.text === "string") {
@@ -147,6 +145,7 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
       }
     }
   }
+  return result!;
 }
 
 export function createWorkspaceMutationJournalTools(

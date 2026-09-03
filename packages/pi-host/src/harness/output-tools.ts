@@ -165,7 +165,7 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, sessionId: str
   });
 }
 
-function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { content: Array<{ type: string; text: string }>; details: unknown } {
+function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { content: Array<{ type: "text"; text: string }>; details: unknown } {
   if (result.status === "unavailable") {
     return {
       content: [{ type: "text", text: `diagnostics unavailable for ${path}` }],

@@ -1,9 +1,9 @@
 import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
-import { createShellSupervisor, selectInterpreter, type ShellSupervisor, type ShellInterpreter } from "./shell-supervisor.js";
+import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import { createHarnessSearchService, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
-import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
+import type { WorkspaceContentSearchResult } from "../search/content.js";
 
 export interface HarnessSessionContext {
   sessionId: string;
