@@ -40,13 +40,23 @@ describe("harness settings", () => {
     assert.equal(merged.dispatch.askBefore.write, true);
   });
 
-  it("deep-merges knowledge.autoAcceptSuggestions", () => {
+  it("deep-merges knowledge.autoAcceptSuggestions with workspace overriding user", () => {
     const merged = mergeHarnessSettings(
       { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false } } },
       { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: false, user: true } } },
     );
-    assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, true);
+    // A workspace must be able to turn off auto-accept that the user enabled globally.
+    assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, false);
     assert.equal(merged.knowledge.autoAcceptSuggestions.user, true);
+  });
+
+  it("keeps user autoAcceptSuggestions when the workspace does not set them", () => {
+    const merged = mergeHarnessSettings(
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false } } },
+      {},
+    );
+    assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, true);
+    assert.equal(merged.knowledge.autoAcceptSuggestions.user, false);
   });
 
   it("workspace tools override user tools", () => {
