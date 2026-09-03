@@ -33,7 +33,7 @@ function formatShellResult(result: ShellExecResult): string {
   }
 }
 
-export function createBashTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createBashTool(bridge: HostServicesBridge, sessionId: string, cwd: string): ToolDefinition {
   return defineTool({
     name: "bash",
     label: "Bash",
@@ -50,6 +50,7 @@ export function createBashTool(bridge: HostServicesBridge, sessionId: string): T
       try {
         const result = await bridge.request("shell.exec", {
           command: params.command,
+          cwd,
           ...(params.waitMs !== undefined ? { waitMs: params.waitMs } : {}),
           ...(params.runMs !== undefined ? { runMs: params.runMs } : {}),
         });

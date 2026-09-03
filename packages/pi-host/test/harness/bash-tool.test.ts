@@ -11,7 +11,7 @@ function createFakeBridge(result: ShellExecResult): Pick<HostServicesBridge, "re
 }
 
 async function executeBash(bridge: HostServicesBridge, command: string): Promise<string> {
-  const tool = createBashTool(bridge, "s1");
+  const tool = createBashTool(bridge, "s1", "/workspace");
   const result = await tool.execute("call-1", { command }, undefined, undefined, undefined as never);
   return (result.content[0] as { type: "text"; text: string }).text;
 }

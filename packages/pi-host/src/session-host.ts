@@ -137,6 +137,11 @@ import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
 } from "./harness/counter-tracker.js";
+import { createBashTool } from "./harness/bash-tool.js";
+import { createGrepTool } from "./harness/grep-tool.js";
+import { createApplyPatchTool } from "./harness/apply-patch-tool.js";
+import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -2715,6 +2720,14 @@ export class SessionHost {
               hidden: true,
               name: "piarium-harness-counters",
             },
+            {
+              factory: createToolResultTruncationExtension({
+                bridge: hostServicesBridge,
+                sessionId: sessionManager.getSessionId(),
+              }),
+              hidden: true,
+              name: "piarium-tool-result-truncation",
+            },
           ],
         },
         settingsManager,
@@ -2739,11 +2752,20 @@ export class SessionHost {
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
       );
       const configured = await this.#configureServices?.(services);
+      // Build custom tools: workspace mutation journal tools + harness tools
+      const customTools: ToolDefinition[] = [];
+      if (workspaceMutationJournal !== undefined) {
+        customTools.push(...createWorkspaceMutationJournalTools(cwd, workspaceMutationJournal));
+      }
+      // Harness tools (bash, grep, apply_patch) — registered when host services bridge is available
+      customTools.push(
+        createBashTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
+        createGrepTool(hostServicesBridge, sessionManager.getSessionId()),
+        createApplyPatchTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
+      );
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
-        ...(workspaceMutationJournal === undefined
-          ? {}
-          : { customTools: createWorkspaceMutationJournalTools(cwd, workspaceMutationJournal) }),
+        customTools,
         services,
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),

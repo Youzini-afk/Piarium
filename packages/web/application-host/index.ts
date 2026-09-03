@@ -41,6 +41,11 @@ import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
+import { createHarnessRouter } from './lib/harness/router.js';
+import { createHarnessServiceHost } from './lib/harness/service-host.js';
+import { registerHarnessServices } from './lib/harness/harness-services.js';
+import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
+
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -1018,6 +1023,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     pathModule: path,
     env: process.env,
   });
+  // ── Harness service host ──────────────────────────────────────────
+  // Global services (output store, path locks, search, diagnostics) plus
+  // per-session shell supervisors. Registered with the harness router
+  // and wired into the broker event stream alongside the recovery turn
+  // coordinator.
+  const harnessDiagnosticsProvider: DiagnosticsProvider | null = null; // TODO: wire to languageSupervisor in item 2
+  const harnessServiceHost = createHarnessServiceHost({
+    search: async (request, options) => workspaceContentSearch(request, options),
+    resolveWorkspaceRoot: async (workspaceId) => {
+      try {
+        const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
+        return workspace.root;
+      } catch {
+        return null;
+      }
+    },
+    ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
+  });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -1094,6 +1117,27 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     writerTracker: piWriterTracker,
   });
+  // ── Harness router ─────────────────────────────────────────────────
+  // Consumes harness.request events from the broker stream (same
+  // subscription as recovery turn coordinator) and dispatches to the
+  // registered harness services.
+  const harnessRouter = createHarnessRouter({
+    respond: async (sessionId, requestId, outcome) => {
+      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', {
+        requestId,
+        sessionId,
+        ...(outcome.ok ? { result: outcome.result } : { error: outcome.error }),
+      });
+    },
+    resolveWorkspace: async (sessionId) => {
+      const snapshot = sessionSnapshots.get(sessionId);
+      if (snapshot?.workspace?.kind === 'workspace' && typeof snapshot.workspace.id === 'string') {
+        return snapshot.workspace.id;
+      }
+      return null;
+    },
+  });
+  registerHarnessServices(harnessRouter, harnessServiceHost);
   interface SessionNotificationRequest extends DesktopNotificationPayload {
     body: string;
     kind: 'completion' | 'error';
@@ -1148,6 +1192,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionRuntime.processBrokerEvent(event);
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
+    void harnessRouter.processEvent(event);
     if (event?.kind === 'worker.exit') return;
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
@@ -1157,6 +1202,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       sessionSnapshots.set(sessionId, envelopeData);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
+      // Register harness session when workspace is bound
+      const workspace = recordOf(envelopeData.workspace);
+      if (workspace?.kind === 'workspace' && typeof workspace.id === 'string' && typeof envelopeData.cwd === 'string') {
+        if (!harnessServiceHost.getInterpreter(sessionId)) {
+          harnessServiceHost.registerSession({
+            sessionId,
+            workspaceId: workspace.id,
+            workspaceRoot: envelopeData.cwd,
+          });
+        }
+      }
       return;
     }
     if (envelope.event !== 'agent.event' || !sessionId) return;
@@ -1354,6 +1410,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
+      harnessRouter.dispose();
+      harnessServiceHost.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
       realtimeProxyRuntime.stop();
