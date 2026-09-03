@@ -249,26 +249,24 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 å½±å“ï¼š`packages/ui/src/components/chat/message/parts/toolSummary.ts`ï¼ˆ`getToolSummary` + `groupToolCalls`ï¼‰ï¼›`packages/ui/src/components/chat/message/parts/toolSummary.test.ts`ï¼ˆ17 æµ‹è¯•ï¼‰ã€‚
 çŠ¶æ€ï¼šå·²å®æ–½ï¼ˆçº¯é€»è¾‘æ¨¡å—ï¼Œå°šæœªæ¥å…¥ PiTimelineEntries.tsx æ¸²æŸ“è·¯å¾„â€”â€”å¾…é˜¶æ®µ 2 UI é›†æˆï¼‰
 
-### D-019 ¡¤ 2026-09-03 ¡¤ 2.1
-ÀàĞÍ£ºÆ«Àë
-¾ö¶¨£ºTriviumDB TQL ²éÑ¯Óï·¨ÔÚ v0.8.5 ÉÏ²»ÎÈ¶¨£¨FIND Óï·¨¶Ô×Ö·û´®/Êı×Ö×ÖÃæÁ¿´¦Àí²»Ò»ÖÂ£¬WHERE ×Ó¾ä±¨ÀàĞÍ×ª»»´íÎó£©¡£ÖªÊ¶¿â store.ts ¸ÄÓÃ `allNodeIds()` + `getPayload()` ÔÚ JS ²ã¹ıÂË£¬²»Ê¹ÓÃ TQL¡£
-Ô­Òò£ºTQL µÄ `FIND {type: "block", sessionId: "s1"} RETURN *` ±¨ "Failed to convert napi value String into rust type `f64`" ´íÎó£¬ËµÃ÷ TQL ½âÎöÆ÷¶Ô payload ×Ö¶ÎÀàĞÍÍÆ¶ÏÓĞ bug¡£JS ²ã¹ıÂËËäÈ»ÔÚ´óÊı¾İ¼¯ÉÏ½ÏÂı£¬µ«½×¶Î 2 µÄÊı¾İ¹æÄ££¨µ¥»á»°Êı°Ù event£©ÍêÈ«¿É½ÓÊÜ¡£
-¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ĞŞ¸´ TriviumDB µÄ TQL ½âÎöÆ÷¡ª¡ªÊÇÍ¬Ò»Î¬»¤ÕßµÄÏîÄ¿£¬µ«ÓÅÏÈ¼¶µÍÓÚÍÆ½ø½×¶Î 2£»(2) ÓÃ `tql` µÄ MATCH Óï·¨¡ª¡ªÍ¬Ñù²»ÎÈ¶¨¡£
-Ó°Ïì£º`packages/web/application-host/lib/knowledge/store.ts`£¨scanNodes ¸¨Öúº¯ÊıÌæ´úËùÓĞ TQL ²éÑ¯£©¡£Ë÷Òı£¨createIndex/createOrderedIndex£©ÈÔ´´½¨µ«²»±» JS ²ãÊ¹ÓÃ£¬±£Áô¹©Î´À´ TQL ĞŞ¸´ºóÆôÓÃ¡£
-×´Ì¬£ºÒÑÊµÊ©
+### D-019 Â· 2026-09-03 Â· 2.1
+ç±»å‹ï¼šåç¦»
+å†³å®šï¼šTriviumDB TQL æŸ¥è¯¢è¯­æ³•åœ¨ v0.8.5 ä¸Šä¸ç¨³å®šï¼ˆFIND è¯­æ³•å¯¹å­—ç¬¦ä¸²/æ•°å­—å­—é¢é‡å¤„ç†ä¸ä¸€è‡´ï¼ŒWHERE å­å¥æŠ¥ç±»å‹è½¬æ¢é”™è¯¯ï¼‰ã€‚çŸ¥è¯†åº“ store.ts æ”¹ç”¨ `allNodeIds()` + `getPayload()` åœ¨ JS å±‚è¿‡æ»¤ï¼Œä¸ä½¿ç”¨ TQLã€‚
+åŸå› ï¼šTQL çš„ `FIND {type: "block", sessionId: "s1"} RETURN *` æŠ¥ "Failed to convert napi value String into rust type `f64`" é”™è¯¯ï¼Œè¯´æ˜ TQL è§£æå™¨å¯¹ payload å­—æ®µç±»å‹æ¨æ–­æœ‰ bugã€‚JS å±‚è¿‡æ»¤è™½ç„¶åœ¨å¤§æ•°æ®é›†ä¸Šè¾ƒæ…¢ï¼Œä½†é˜¶æ®µ 2 çš„æ•°æ®è§„æ¨¡ï¼ˆå•ä¼šè¯æ•°ç™¾ eventï¼‰å®Œå…¨å¯æ¥å—ã€‚
+è€ƒè™‘è¿‡çš„æ›¿ä»£ï¼š(1) ä¿®å¤ TriviumDB çš„ TQL è§£æå™¨â€”â€”æ˜¯åŒä¸€ç»´æŠ¤è€…çš„é¡¹ç›®ï¼Œä½†ä¼˜å…ˆçº§ä½äºæ¨è¿›é˜¶æ®µ 2ï¼›(2) ç”¨ `tql` çš„ MATCH è¯­æ³•â€”â€”åŒæ ·ä¸ç¨³å®šã€‚
+å½±å“ï¼š`packages/web/application-host/lib/knowledge/store.ts`ï¼ˆscanNodes è¾…åŠ©å‡½æ•°æ›¿ä»£æ‰€æœ‰ TQL æŸ¥è¯¢ï¼‰ã€‚ç´¢å¼•ï¼ˆcreateIndex/createOrderedIndexï¼‰ä»åˆ›å»ºä½†ä¸è¢« JS å±‚ä½¿ç”¨ï¼Œä¿ç•™ä¾›æœªæ¥ TQL ä¿®å¤åå¯ç”¨ã€‚
+çŠ¶æ€ï¼šå·²å®æ–½ï¼ˆæ¨¡å—å·²å†™ï¼Œå°šæœªæ¥è¿›ä¼šè¯ç”Ÿå‘½å‘¨æœŸâ€”â€”å¾…é˜¶æ®µ 2 æ¥çº¿ï¼‰
 
-### D-020 ¡¤ 2026-09-03 ¡¤ 2.1
-ÀàĞÍ£ºÆ«Àë
-¾ö¶¨£ºÕ¼Î»ÏòÁ¿Ä£Ê½ÏÂ `recall` ²»Ê¹ÓÃ `searchHybrid`£¬¸ÄÎª JS ²ãÉ¨Ãè accepted knowledge ½Úµã + ¼òµ¥´ÊÏîÆ¥ÅäÆÀ·Ö¡£`searchHybrid` µÄÈ«ÁãÏòÁ¿ÔÚ v0.8.5 ÉÏ·µ»Ø¿Õ½á¹û£¨ÓàÏÒÏàËÆ¶ÈÎª 0/NaN£©¡£
-Ô­Òò£º¼Æ»®ÒªÇó"ÊµÊ©Ç°ÏÈÔÚ TriviumDB ÉÏÑéÖ¤È«ÁãÏòÁ¿µÄ search ²»±¨´í"¡ª¡ªÑéÖ¤·¢ÏÖ²»±¨´íµ«·µ»Ø¿Õ½á¹û£¬ÎŞ·¨ÓÃÓÚÕÙ»Ø¡£JS ²ã´ÊÏîÆ¥ÅäËäÈ»´Ö²Ú£¬µ«Âú×ã½×¶Î 2 µÄ»ù±¾ĞèÇó£¨°´ trigger/content Æ¥Åä£©¡£
-¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ÓÃµ¥Î»ÏòÁ¿Õ¼Î»¡ª¡ª»áÒıÈëĞé¼ÙÏàËÆ¶È£»(2) Ö»×ß TQL ÎÄ±¾²éÑ¯¡ª¡ªTQL ²»ÎÈ¶¨£¨¼û D-019£©¡£
-Ó°Ïì£º`packages/web/application-host/lib/knowledge/store.ts`£¨recall ·½·¨ÔÚ `!embedding` ·ÖÖ§¸ÄÎª JS É¨Ãè£©¡£embedding Ä£Ê½ÈÔÊ¹ÓÃ `searchHybrid`¡£
-×´Ì¬£ºÒÑÊµÊ©
+### D-020 Â· 2026-09-03 Â· 2.1
+ç±»å‹ï¼šåç¦»
+å†³å®šï¼šå ä½å‘é‡æ¨¡å¼ä¸‹ `recall` ä¸ä½¿ç”¨ `searchHybrid`ï¼Œæ”¹ä¸º JS å±‚æ‰«æ accepted knowledge èŠ‚ç‚¹ + ç®€å•è¯é¡¹åŒ¹é…è¯„åˆ†ã€‚`searchHybrid` çš„å…¨é›¶å‘é‡åœ¨ v0.8.5 ä¸Šè¿”å›ç©ºç»“æœï¼ˆä½™å¼¦ç›¸ä¼¼åº¦ä¸º 0/NaNï¼‰ã€‚
+åŸå› ï¼šè®¡åˆ’è¦æ±‚"å®æ–½å‰å…ˆåœ¨ TriviumDB ä¸ŠéªŒè¯å…¨é›¶å‘é‡çš„ search ä¸æŠ¥é”™"â€”â€”éªŒè¯å‘ç°ä¸æŠ¥é”™ä½†è¿”å›ç©ºç»“æœï¼Œæ— æ³•ç”¨äºå¬å›ã€‚JS å±‚è¯é¡¹åŒ¹é…è™½ç„¶ç²—ç³™ï¼Œä½†æ»¡è¶³é˜¶æ®µ 2 çš„åŸºæœ¬éœ€æ±‚ï¼ˆæŒ‰ trigger/content åŒ¹é…ï¼‰ã€‚
+è€ƒè™‘è¿‡çš„æ›¿ä»£ï¼š(1) ç”¨å•ä½å‘é‡å ä½â€”â€”ä¼šå¼•å…¥è™šå‡ç›¸ä¼¼åº¦ï¼›(2) åªèµ° TQL æ–‡æœ¬æŸ¥è¯¢â€”â€”TQL ä¸ç¨³å®šï¼ˆè§ D-019ï¼‰ã€‚
+å½±å“ï¼š`packages/web/application-host/lib/knowledge/store.ts`ï¼ˆrecall æ–¹æ³•åœ¨ `!embedding` åˆ†æ”¯æ”¹ä¸º JS æ‰«æï¼‰ã€‚embedding æ¨¡å¼ä»ä½¿ç”¨ `searchHybrid`ã€‚
+çŠ¶æ€ï¼šå·²å®æ–½ï¼ˆæ¨¡å—å·²å†™ï¼Œå°šæœªæ¥è¿›ä¼šè¯ç”Ÿå‘½å‘¨æœŸâ€”â€”å¾…é˜¶æ®µ 2 æ¥çº¿ï¼‰
 
-### D-021 ¡¤ 2026-09-03 ¡¤ 3b.3
-ÀàĞÍ£ºÆ«Àë
-¾ö¶¨£º´Ó `FOUNDATIONAL_PI_PACKAGE_MANIFEST` ÒÆ³ı `@gotgenes/pi-permission-system`£¨revision 2¡ú3£©£¬µ«±£Áô `FoundationalPiPackageId` ÁªºÏÀàĞÍÖĞµÄ `"permission-system"` ×ÖÃæÁ¿£¬ÒÔ±ãÒÑ°²×°ÊµÀıµÄ×´Ì¬¿ìÕÕÈÔÄÜÕıÈ·±àÂë¡£
-Ô­Òò£º¼Æ»®ÒªÇó"ÒÑ°²×°ÊµÀı²»É¾²»Ç¨"¡£±£ÁôÀàĞÍ×ÖÃæÁ¿ÈÃ protocol Ïû·Ñ·½ÈÔÄÜ´¦Àí¾É¿ìÕÕÖĞµÄ permission-system ÌõÄ¿£¬µ«²»ÔÙ×Ô¶¯ provision¡£
-¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ÍêÈ«ÒÆ³ıÀàĞÍ¡ª¡ª»áµ¼ÖÂ¾É¿ìÕÕ·´ĞòÁĞ»¯Ê§°Ü£»(2) ±£Áô manifest ÌõÄ¿µ«±ê¼Ç deprecated¡ª¡ªmanifest ÊÇ `as const` ²»¿ÉÀ©Õ¹¡£
-Ó°Ïì£º`packages/protocol/src/foundational-pi-packages.ts`£¨manifest revision 3£¬IDS Êı×éÖ»º¬ mcp£©£»`packages/protocol/test/foundational-pi-packages.test.ts`£¨¸üĞÂ¶ÏÑÔ£©£»`packages/runtime-broker/test/foundational-package-provisioner.test.ts`£¨ÒÆ³ı permission-system Ïà¹Ø²âÊÔÓÃÀı£©¡£
-×´Ì¬£ºÒÑÊµÊ©
+### D-021 Â· 2026-09-03 Â· 3b.3
+ç±»å‹ï¼šåç¦»ï¼ˆå·²å›é€€ï¼‰
+å†³å®šï¼š~~ä» `FOUNDATIONAL_PI_PACKAGE_MANIFEST` ç§»é™¤ `@gotgenes/pi-permission-system`ï¼ˆrevision 2â†’3ï¼‰ã€‚~~
+åŸå› ï¼š~~è®¡åˆ’è¦æ±‚"å·²å®‰è£…å®ä¾‹ä¸åˆ ä¸è¿"ã€‚ä¿ç•™ç±»å‹å­—é¢é‡è®© protocol æ¶ˆè´¹æ–¹ä»èƒ½å¤„ç†æ—§å¿«ç…§ä¸­çš„ permission-system æ¡ç›®ï¼Œä½†ä¸å†è‡ªåŠ¨ provisionã€‚~~
+çŠ¶æ€ï¼šå·²å›é€€ã€‚åŸç”Ÿ tool_call é—¨æ§å°šæœªæ¥è¿› Pi ä¼šè¯ç”Ÿå‘½å‘¨æœŸï¼Œç§»é™¤æ—¢æœ‰æƒé™è¾¹ç•Œç•™ä¸‹æœªè¦†ç›–çš„å®‰å…¨ç¼ºå£ã€‚åœ¨ 3b.1/3b.2 e2e é€šè¿‡ä¹‹å‰ä¿æŒ revision 2 ä¸å˜ã€‚
