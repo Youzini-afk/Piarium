@@ -71,7 +71,7 @@ export function selectHarnessTools(
   }
   // Web tools — yield to pi-web-access if it is loaded and enabled
   if (tools.webfetch !== false && !yieldedTools?.has("webfetch")) {
-    result.push(createWebFetchTool(bridge, sessionId, { readerModelConfigured }));
+    result.push(createWebFetchTool(bridge, sessionId, { readerModelConfigured: readerModelConfigured ?? false }));
   }
   if (tools.websearch !== false && !yieldedTools?.has("websearch")) {
     result.push(createWebSearchTool(bridge, sessionId));

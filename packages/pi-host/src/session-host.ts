@@ -2777,8 +2777,16 @@ export class SessionHost {
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
-      // Check if pi-web-access is loaded and enabled → yield webfetch/websearch
-      const yieldedTools = computeYieldedTools(this.listPackages());
+      // Check if pi-web-access is loaded and enabled → yield webfetch/websearch.
+      // Read package list from settings directly (session not yet active).
+      const globalPkgs = (settingsManager.getGlobalSettings() as { packages?: Array<{ source?: string; enabled?: boolean }> }).packages ?? [];
+      const projectPkgs = (settingsManager.getProjectSettings() as { packages?: Array<{ source?: string; enabled?: boolean }> }).packages ?? [];
+      const allPkgs = [...globalPkgs, ...projectPkgs].map((p) => ({
+        name: p.source ?? "",
+        source: p.source ?? "",
+        enabled: p.enabled !== false,
+      }));
+      const yieldedTools = computeYieldedTools(allPkgs);
       // Check if models.reader is configured
       const readerModelConfigured = harnessSettings.models?.reader !== undefined;
       customTools.push(...selectHarnessTools(harnessSettings, {

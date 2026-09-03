@@ -22,6 +22,9 @@ export interface HarnessServiceHost {
   pathLockService: PathLockService;
   searchService: HarnessSearchService;
   diagnosticsProvider: DiagnosticsProvider | null;
+  webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
+  webReadService: import("./router.js").HarnessService<"web.read"> | null;
+  webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string): void;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
@@ -42,6 +45,12 @@ export interface HarnessServiceHostOptions {
    * with a close() method, or null if registration is not available.
    */
   registerWriter?: (sessionId: string, workspaceRoot: string) => Promise<{ close: () => Promise<void> } | null>;
+  /** Web fetch service (null on cloud/web hosts without fetch capability) */
+  webFetchService?: HarnessServiceHost["webFetchService"];
+  /** Web read service (null when no reader model configured) */
+  webReadService?: HarnessServiceHost["webReadService"];
+  /** Web search service (null when no search provider available) */
+  webSearchService?: HarnessServiceHost["webSearchService"];
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -52,6 +61,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
+  const webFetchService = options.webFetchService ?? null;
+  const webReadService = options.webReadService ?? null;
+  const webSearchService = options.webSearchService ?? null;
 
   const sessions = new Map<string, SessionEntry>();
 
@@ -118,6 +130,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     pathLockService,
     searchService,
     diagnosticsProvider,
+    webFetchService,
+    webReadService,
+    webSearchService,
     registerSession,
     dropSession,
     getShellSupervisor,

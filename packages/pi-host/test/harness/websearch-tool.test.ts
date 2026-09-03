@@ -32,8 +32,8 @@ describe("websearch tool", () => {
       },
     });
 
-    const result = await resultPromise;
-    const text = result.content[0]?.text as string;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }> };
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes('2 results for "hello world" (test-provider)'));
     assert.ok(text.includes("- Hello World"));
     assert.ok(text.includes("https://example.com/1"));
@@ -52,9 +52,9 @@ describe("websearch tool", () => {
       result: { providerId: "none", results: [] },
     });
 
-    const result = await resultPromise;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
     assert.equal(result.isError, true);
-    const text = result.content[0]?.text as string;
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("no search provider configured"));
     bridge.dispose();
   });
@@ -84,7 +84,7 @@ describe("websearch tool", () => {
       result: { providerId: "p", results: [] },
     });
 
-    const result = await resultPromise;
+    const result = await resultPromise as { isError?: boolean };
     assert.equal(result.isError, true); // 0 results → error
     bridge.dispose();
   });

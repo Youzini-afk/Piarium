@@ -96,7 +96,7 @@ export function createWebFetchTool(
           try {
             const readResult = await bridge.request("web.read", {
               url: params.url,
-              prompt: params.prompt,
+              prompt: params.prompt ?? "",
               ...(params.render !== undefined ? { render: params.render } : {}),
             });
             // web.read internally fetches and answers — we need the finalUrl for the text format

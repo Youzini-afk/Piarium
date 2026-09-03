@@ -93,17 +93,20 @@ export function createWebFetch(deps: WebFetchDeps) {
 
       const turndown = new Turndown({ headingStyle: "atx", codeBlockStyle: "fenced" });
       const markdown = turndown.turndown(article.content || html);
-      return { markdown, title: article.title };
+      const title = article.title ?? undefined;
+      return { markdown, ...(title !== undefined ? { title } : {}) };
     } catch {
       // Fallback: strip HTML tags
       const text = html.replace(/<[^>]*>/g, "").trim();
       const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-      return { markdown: text, title: titleMatch?.[1]?.trim() };
+      const title = titleMatch?.[1]?.trim();
+      return { markdown: text, ...(title !== undefined ? { title } : {}) };
     }
   };
 
   const extractPdfText = async (data: ArrayBuffer): Promise<string> => {
     try {
+      // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       const doc = await pdfjs.getDocument({ data }).promise;
       const pages: string[] = [];
@@ -111,7 +114,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         const page = await doc.getPage(i);
         const content = await page.getTextContent();
         const text = content.items
-          .map((item: unknown) => (item as { str?: string }).str ?? "")
+          .map((item) => item.str ?? "")
           .join(" ");
         pages.push(text);
       }

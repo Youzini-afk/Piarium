@@ -134,6 +134,26 @@ export function registerHarnessServices(
     router.register("lsp.diagnostics", createLspDiagnosticsService(host.diagnosticsProvider));
     router.register("lsp.diagnosticsSnapshot", createLspDiagnosticsSnapshotService(host.diagnosticsProvider));
   }
+  // Web services — registered only when available
+  if (host.webFetchService) {
+    router.register("web.fetch", {
+      handle: async (params, ctx) => {
+        if (!ctx.workspaceId) {
+          return { status: "failed", url: params.url, reason: "no workspace" };
+        }
+        return host.webFetchService!.fetch(params.url, {
+          workspaceId: ctx.workspaceId,
+          ...(params.render !== undefined ? { render: params.render } : {}),
+        });
+      },
+    });
+  }
+  if (host.webReadService) {
+    router.register("web.read", host.webReadService);
+  }
+  if (host.webSearchService) {
+    router.register("web.search", host.webSearchService);
+  }
 }
 
 export type { HarnessServiceMap };

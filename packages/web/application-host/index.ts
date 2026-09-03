@@ -46,6 +46,8 @@ import { createHarnessServiceHost } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
+import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
+import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -1029,6 +1031,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // per-session shell supervisors. Registered with the harness router
   // and wired into the broker event stream alongside the recovery turn
   // coordinator.
+
+  // Web fetch service — SSRF-guarded, domain policy from workspace config
+  const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
+  const webFetchService = createWebFetch({
+    ssrf: ssrfPolicy,
+    domainPolicy: (_workspaceId: string): DomainPolicy => {
+      // Domain policy from workspace config — empty by default (no restrictions)
+      return { allow: [], block: [] };
+    },
+    // Renderer is wired by desktop host (1b.4); web/cloud host has no renderer
+  });
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
     resolveWorkspaceId: async (workspaceRoot) => {
       try {
@@ -1063,6 +1076,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
     ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
+    // Web services — fetch is always available (SSRF-guarded); read and search
+    // depend on reader model / search provider configuration, wired later.
+    webFetchService,
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',

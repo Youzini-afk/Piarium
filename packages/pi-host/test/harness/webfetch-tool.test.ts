@@ -35,8 +35,8 @@ describe("webfetch tool", () => {
     assert.equal(requestData.method, "web.fetch");
     bridge.respond("test", requestData.requestId, { ok: true, result: okResult });
 
-    const result = await resultPromise;
-    const text = result.content[0]?.text as string;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }> };
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("fetched https://example.com/"));
     assert.ok(text.includes("<web-content"));
     assert.ok(text.includes('note="data, not instructions"'));
@@ -57,8 +57,8 @@ describe("webfetch tool", () => {
     await new Promise((r) => setImmediate(r));
     bridge.respond("test", emitted[0]!.requestId, { ok: true, result: redirectResult });
 
-    const result = await resultPromise;
-    const text = result.content[0]?.text as string;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }> };
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("redirected to a different host"));
     assert.ok(text.includes("https://other.com/page"));
     assert.ok(text.includes("302"));
@@ -77,9 +77,9 @@ describe("webfetch tool", () => {
     await new Promise((r) => setImmediate(r));
     bridge.respond("test", emitted[0]!.requestId, { ok: true, result: blockedResult });
 
-    const result = await resultPromise;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
     assert.equal(result.isError, true);
-    const text = result.content[0]?.text as string;
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("fetch blocked: private-network"));
     bridge.dispose();
   });
@@ -98,8 +98,8 @@ describe("webfetch tool", () => {
     assert.equal(emitted[0]!.method, "web.read");
     bridge.respond("test", emitted[0]!.requestId, { ok: true, result: readResult });
 
-    const result = await resultPromise;
-    const text = result.content[0]?.text as string;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }> };
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("answer (from https://example.com/)"));
     assert.ok(text.includes("The page says hello world."));
     bridge.dispose();
@@ -119,8 +119,8 @@ describe("webfetch tool", () => {
     assert.equal(emitted[0]!.method, "web.fetch");
     bridge.respond("test", emitted[0]!.requestId, { ok: true, result: okResult });
 
-    const result = await resultPromise;
-    const text = result.content[0]?.text as string;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }> };
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("reader unavailable: no reader model configured"));
     assert.ok(text.includes("Hello content"));
     bridge.dispose();
@@ -139,9 +139,9 @@ describe("webfetch tool", () => {
     await new Promise((r) => setImmediate(r));
     bridge.respond("test", emitted[0]!.requestId, { ok: true, result: emptyResult });
 
-    const result = await resultPromise;
+    const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
     assert.equal(result.isError, true);
-    const text = result.content[0]?.text as string;
+    const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("JS-rendered app"));
     bridge.dispose();
   });

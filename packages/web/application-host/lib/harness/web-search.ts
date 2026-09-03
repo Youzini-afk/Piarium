@@ -106,11 +106,11 @@ async function searchWithProvider(
 /**
  * Apply domain filtering to search results.
  */
-export function filterByDomainPolicy(
-  results: Array<{ url: string }>,
+export function filterByDomainPolicy<T extends { url: string }>(
+  results: T[],
   allowedDomains: string[] | undefined,
   blockedDomains: string[] | undefined,
-): Array<{ url: string }> {
+): T[] {
   return results.filter((r) => {
     try {
       const hostname = new URL(r.url).hostname.toLowerCase();

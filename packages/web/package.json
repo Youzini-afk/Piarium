@@ -96,6 +96,7 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/supertest": "^7.2.1",
+    "@types/turndown": "5.0.6",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "@types/yazl": "^3.3.1",
