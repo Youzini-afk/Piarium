@@ -93,11 +93,17 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 状态：已实施
 
 ### D-010 · 2026-09-03 · 1.3
+类型：偏离（已回退）
+决定：~~shell-supervisor 使用 `child_process.spawn` 而非 PTY 进行命令执行。~~
+原因：~~PTY 交互需要 `node-pty` 或 `bun-pty` 原生模块，增加了部署复杂度。~~
+状态：已回退——见 D-013。
+
+### D-013 · 2026-09-03 · 1.3
 类型：偏离
-决定：shell-supervisor 使用 `child_process.spawn` 而非 PTY 进行命令执行。sentinel-based 命令包装（B/C/E 标记 + 随机 token）替代 PTY 交互。长命令在 `waitMs` 后自动后台化。
-原因：PTY 交互需要 `node-pty` 或 `bun-pty` 原生模块，增加了部署复杂度。对于 agent harness 的非交互式命令执行场景，pipe-based stdin/stdout + sentinel 解析足够可靠且跨平台。交互式命令（如 `vim`、`top`）不在 harness 工具的目标范围内。
-考虑过的替代：(1) 复用 terminal runtime 的 PTY 基础设施——过于重量级，terminal runtime 面向用户交互而非 agent 自动化。(2) 直接用 Pi 内置的 bash 工具——不满足 harness 需要 host-side 控制的要求。
-影响：`packages/web/application-host/lib/harness/shell-supervisor.ts`。
+决定：shell-supervisor 回到决策表形状：复用 terminal runtime 的 PTY provider（`bun-pty` / `node-pty`），每个会话一个持久 login shell，命令用哨兵分隔，cwd/env/venv 在命令之间保持。后台 shell 保持 PTY 存活，stdin 开放，`write_to_process` 直接写入 PTY。每条命令执行期间通过 `registerWriter` 注册 `mode: 'process'` 的 writer。
+原因：决策表要求 shell 形态是边界——持久 shell 保持了 cwd/env/venv 状态，避免了每条命令重新初始化的开销。PTY 支持交互式命令和后台进程的 stdin 写入，这是 `child_process.spawn` 无法做到的。`node-pty` 和 `bun-pty` 已经是 Piarium 的现有依赖（terminal runtime 使用），不增加新的部署复杂度。
+考虑过的替代：(1) `child_process.spawn` + pipe——无法保持 shell 状态，无法写入后台进程 stdin（D-010，已回退）。(2) 每条命令创建新 shell——丢失 cwd/env 持续性。
+影响：`packages/web/application-host/lib/harness/shell-supervisor.ts`（完全重写）；`packages/web/application-host/lib/harness/service-host.ts`（`registerWriter` 选项）。
 状态：已实施
 
 ### D-011 · 2026-09-03 · 1.3
