@@ -140,6 +140,12 @@ import {
 import { createBashTool } from "./harness/bash-tool.js";
 import { createGrepTool } from "./harness/grep-tool.js";
 import { createApplyPatchTool } from "./harness/apply-patch-tool.js";
+import {
+  createGetOutputTool,
+  createWriteToProcessTool,
+  createKillShellTool,
+  createDiagnosticsTool,
+} from "./harness/output-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -2755,13 +2761,22 @@ export class SessionHost {
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];
       if (workspaceMutationJournal !== undefined) {
-        customTools.push(...createWorkspaceMutationJournalTools(cwd, workspaceMutationJournal));
+        customTools.push(...createWorkspaceMutationJournalTools(
+          cwd,
+          workspaceMutationJournal,
+          hostServicesBridge,
+          sessionManager.getSessionId(),
+        ));
       }
       // Harness tools (bash, grep, apply_patch) — registered when host services bridge is available
       customTools.push(
         createBashTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
         createGrepTool(hostServicesBridge, sessionManager.getSessionId()),
         createApplyPatchTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
+        createGetOutputTool(hostServicesBridge, sessionManager.getSessionId()),
+        createWriteToProcessTool(hostServicesBridge, sessionManager.getSessionId()),
+        createKillShellTool(hostServicesBridge, sessionManager.getSessionId()),
+        createDiagnosticsTool(hostServicesBridge, sessionManager.getSessionId()),
       );
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),

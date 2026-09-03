@@ -7,6 +7,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { HostEventData } from "@piarium/protocol";
+import type { HostServicesBridge } from "./harness/host-services-bridge.js";
 
 type WorkspaceMutationRequest = HostEventData<"workspace.mutation.request">;
 type WorkspaceMutationToolName = WorkspaceMutationRequest["toolName"];
@@ -85,9 +86,28 @@ interface JournaledExecutionOptions<TResult> {
   inputPath: string;
   toolCallId: string;
   toolName: WorkspaceMutationToolName;
+  hostServicesBridge?: HostServicesBridge;
+  sessionId?: string;
 }
 
-async function executeWithMutationJournal<TResult>(
+async function fetchDiagnostics(
+  bridge: HostServicesBridge,
+  path: string,
+): Promise<{ status: string; summary: string } | null> {
+  try {
+    const result = await bridge.request("lsp.diagnostics", { path, waitMs: 500 });
+    if (result.status === "unavailable") return { status: "unavailable", summary: "diagnostics unavailable" };
+    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean (0 diagnostics)" };
+    const errors = result.diagnostics.filter((d: { severity: string }) => d.severity === "error").length;
+    const warnings = result.diagnostics.filter((d: { severity: string }) => d.severity === "warning").length;
+    const summary = `${result.diagnostics.length} diagnostic(s)${errors > 0 ? `, ${errors} error(s)` : ""}${warnings > 0 ? `, ${warnings} warning(s)` : ""}`;
+    return { status: "pending", summary };
+  } catch {
+    return { status: "unavailable", summary: "diagnostics unavailable" };
+  }
+}
+
+async function executeWithMutationJournal<TResult extends { content: Array<{ type: string; text?: string }> }>(
   options: JournaledExecutionOptions<TResult>,
 ): Promise<TResult> {
   const path = resolve(options.cwd, options.inputPath);
@@ -110,12 +130,30 @@ async function executeWithMutationJournal<TResult>(
       toolCallId: options.toolCallId,
       toolName: options.toolName,
     });
+    // Best-effort diagnostics after mutation
+    if (succeeded && options.hostServicesBridge) {
+      const diag = await fetchDiagnostics(options.hostServicesBridge, path);
+      if (diag && diag.status !== "clean") {
+        // Append diagnostics summary to the result content
+        // This is best-effort: if the result is immutable, we skip
+        try {
+          const firstText = result.content.find((c: { type: string }) => c.type === "text");
+          if (firstText && typeof firstText.text === "string") {
+            firstText.text = `${firstText.text}\n\n[diagnostics: ${diag.summary}]`;
+          }
+        } catch {
+          // Result may be frozen; skip
+        }
+      }
+    }
   }
 }
 
 export function createWorkspaceMutationJournalTools(
   cwd: string,
   bridge: WorkspaceMutationJournalBridge,
+  hostServicesBridge?: HostServicesBridge,
+  sessionId?: string,
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
@@ -128,6 +166,8 @@ export function createWorkspaceMutationJournalTools(
       inputPath: params.path,
       toolCallId,
       toolName: "write",
+      ...(hostServicesBridge ? { hostServicesBridge } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
   });
   const journaledEdit = defineTool({
@@ -139,6 +179,8 @@ export function createWorkspaceMutationJournalTools(
       inputPath: params.path,
       toolCallId,
       toolName: "edit",
+      ...(hostServicesBridge ? { hostServicesBridge } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
   });
   return [journaledWrite, journaledEdit];

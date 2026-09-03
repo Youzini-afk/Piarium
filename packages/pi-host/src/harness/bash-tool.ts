@@ -23,7 +23,7 @@ function formatShellResult(result: ShellExecResult): string {
       return lines.join("\n");
     }
     case "background": {
-      return `[Command is still running. waited ${result.waitedMs}ms]\n${result.outputSoFar}\n\n[Continue: get_output("${result.id}") or write_output("${result.id}", "...")]`;
+      return `[Command is still running. waited ${result.waitedMs}ms]\n${result.outputSoFar}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
     }
     case "spawn-failed": {
       return `[spawn failed: ${result.reason}]\n${result.hint ?? ""}`;
