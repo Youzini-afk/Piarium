@@ -172,18 +172,41 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 | bash cwd | `session-host.ts`: cwd passed to createBashTool | ✓ |
 | mutation journal 诊断 | `workspace-mutation-journal.ts`: hostServicesBridge | ✓ |
 | apply_patch OpenAI-only | `session-host.ts`: isOpenAIFamily check | ✓ |
+| harness.respond ok 字段 | `index.ts`: respond callback + `router.ts` | ✓ |
+| Settings 门控 | `session-host.ts`: mergeHarnessSettings before customTools | ✓ |
+| registerWriter | `index.ts`: documents.registerWriterForScope | ✓ |
 
-### Smoke 测试（Windows, 6/6 pass）
+### E2E 集成测试（tool → bridge → router → service → content text, 6/6 pass）
 
-1. bash pwd (cwd=workspace root) — ✓
-2. cwd persistence (cd packages && pwd) — ✓
-3. background + get_output — ✓
-4. grep (hit + miss) — ✓
-5. read 5000-line file + pagination — ✓
-6. Settings (grep disable) — ✓
+测试文件：`packages/pi-host/test/harness/harness-e2e.test.ts`
+
+测试方式：真实 HostServicesBridge + 真实 HarnessRouter + 真实 HarnessServiceHost（ShellSupervisor 用 PTY、OutputStore 用真实存储），工具函数（createBashTool / createGrepTool / createGetOutputTool）经 bridge.request → router.processEvent → service.handle → bridge.respond 完整链路返回 content text。
+
+| # | 断言 | 状态 |
+|---|------|------|
+| 1 | bash pwd 输出包含工作区目录名 | ✓ |
+| 2 | bash cd packages && pwd 输出包含 "packages" | ✓ |
+| 3 | 超过 waitMs 的命令返回后台 shell id，get_output 取到输出 | ✓ |
+| 4 | grep 命中文本包含 "hello"，miss 返回 0 hits 指示 | ✓ |
+| 5 | cat big.txt (5000行) 返回截断文本含 out_ 句柄，get_output 分页取到 "line 1" | ✓ |
+| 6 | harness.tools.grep=false 时 grep 不注册（回退 Pi 内置） | ✓ |
+
+### Contract 测试（router respond → bridge, 3/3 pass）
+
+测试文件：`packages/pi-host/test/harness/router-bridge-contract.test.ts`
+
+| # | 断言 | 状态 |
+|---|------|------|
+| 1 | ok result 经 respondHarness 到达 bridge 等待方 | ✓ |
+| 2 | error result 经 respondHarness 到达 bridge 为 rejection | ✓ |
+| 3 | timeout error 经 respondHarness 到达 bridge 为 retryable rejection | ✓ |
 
 ### 决策回退
 
 - D-010 (child_process.spawn) → D-013 (PTY)
 - D-012 (unified diff) → D-014 (Codex syntax)
 - D-005 (mode: controlled) → 修正为 mode: process
+
+### 已知偏离（进入阶段 2 前完成）
+
+- D-013 偏离：复用 PTY 模块而非终端运行时，后台 shell 尚不是终端 tab。方案：在 `lib/terminal/runtime.ts` 暴露 `createTerminalSession` / `attachTerminalSession`，harness shell 经它创建。
