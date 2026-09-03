@@ -2,7 +2,7 @@
 
 Status: delivered; boundary revisions (per-path coverage, dirty buffers, barrier, lease) accepted 2026-09-02 and not yet implemented
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 ## Decision
 

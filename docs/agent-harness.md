@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 not yet started
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -1006,21 +1006,22 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 
 ### 12.1 顺序
 
-每一阶段是可单独 review 与提交的一组变更；阶段之间不共享半成品。
+每一阶段是可单独 review 与提交的一组变更；阶段之间不共享半成品。逐项的文件、契约、测试与完成标准在
+[agent-harness-plan.md](agent-harness-plan.md)（执行计划，交付后删除）。
 
 0. **前置**：对齐 Pi 版本（本检出 `node_modules` 为 0.83.0，security.md 基线为 0.84.3），在选定版本上复核第 4.1 节的
    钩子形状；恢复的 coverage 从计划级二值改为路径级（见
    [native-workspace-recovery-design.md](native-workspace-recovery-design.md) R1），否则 `bash` 注册为 `process`
    writer 后几乎每一轮都会被标为 incomplete，组合回滚在实践中消失。
 1. **工具与 host 服务**：`harness-tools.ts`（`bash` / `grep` / `edit` / `write` 覆盖，`apply_patch`、`get_output` /
-   `write_to_process` / `kill_shell`、`diagnostics`、`todo`）、shell 监督器（按环境选解释器、PTY、login 会话 shell、
-   自动转后台）、按路径的编辑锁、`tool_result` 层的通用句柄截断、worker→host 类型化请求、第 4.2 节违规修复、第 8.6 节
-   计数器。`bash` 优先——在 Windows 上一天内可感。
+   `write_to_process` / `kill_shell`、`diagnostics`）、shell 监督器（按环境选解释器、PTY、login 会话 shell、自动转
+   后台）、按路径的编辑锁、`tool_result` 层的通用句柄截断、worker→host 类型化请求、第 4.2 节违规修复、第 8.6 节计数器。
+   `bash` 优先——在 Windows 上一天内可感。（`todo` 依赖 `block` 存储，随第 2 阶段交付。）
 1b. **web**：`webfetch` / `websearch`、抓取服务（SSRF、提取、PDF 转文本、缓存、Electron 离屏渲染）、搜索 provider 抽象、
    来源面板。可与 2 并行。
-2. **上下文层**：输出句柄、Zone 2 组装、记忆 agent（fork 同前缀、门控与事件触发、块编辑操作）与计划面板、接管压缩、
-   知识库 v1（`event` / `session` / `block` / `knowledge` 四种节点，`recall`、知识建议托盘，稀疏 + 图模式先行）、
-   embedding provider 抽象（远端优先，本地选装其后）。
+2. **上下文层**：Zone 2 组装与 host 观察者、记忆 agent（fork 同前缀、门控与事件触发、块编辑操作）、`todo` 与计划面板、
+   接管压缩、知识库 v1（`event` / `session` / `block` / `knowledge` 四种节点，`recall`、知识建议托盘，稀疏 + 图模式
+   先行）、embedding provider 抽象（远端优先，本地选装其后）、模型槽位设置。
 3. **检索与子 agent 层**：`explore` 管线（查询扩展、rg 扇出、符号图与向量召回、多信号排序；先做纯算法模式，再接
    `models.explore` 的两小步）、`file` / `symbol` 节点与 LSP / Git 采集器、`related`；原生子会话 worker 运行时（`dispatch`
    / `wait`、角色目录与独立模型槽位、worktree 隔离、按 TTL 的唤醒、卡死检测）、review 传感器。
