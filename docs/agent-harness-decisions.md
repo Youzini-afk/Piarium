@@ -75,3 +75,43 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 考虑过的替代：(1) 在 host 层（application-host）构造 bridge——破坏了"worker 持有 bridge、host 持有 router"的对称性。(2) 用独立的事件名和 method 名——增加传输层适配成本，无收益。
 影响：`packages/pi-host/src/session-host.ts`（`#hostServicesBridge` 字段 + 构造/dispose + `respondHarness`）；`packages/pi-host/src/host-controller.ts`（`OUT_OF_BAND_METHODS` + `harness.respond` case）。
 状态：已实施
+
+### D-008 · 2026-09-03 · 1.4
+类型：默认值调整
+决定：output-store 默认 `maxBytesPerSession = 256 MiB`，tool-result-truncation 默认 `visibleBytes = 32768`，bash 工具使用 0.375 head/tail 比率（其他工具 0.5）。截断时回退到最近的换行符（最多 512 字节）。
+原因：256 MiB 足够存储一个典型长会话的所有大输出；32768 字节可见窗口在 4K 终端上约 200 行，足够上下文判断；bash 输出通常头部更重要（命令回显、错误信息），所以给头部更多空间。
+考虑过的替代：(1) 128 MiB / 16384——太小，常见构建输出会频繁截断。(2) 512 MiB / 65536——浪费内存，大多数会话用不到。
+影响：`packages/web/application-host/lib/harness/output-store.ts`；`packages/pi-host/src/harness/tool-result-truncation.ts`。
+状态：已实施
+
+### D-009 · 2026-09-03 · 1.8
+类型：问题与解法
+决定：`cacheHitRatio` 不在 extension 事件中实时追踪，而是在 `stats()` 查询时从 `getSessionStats().tokens.cacheRead` 和 `.input` 计算。`toolErrors`、`toolRetries`、`outputBytes` 通过 extension 事件实时累积。
+原因：Pi 的 `AfterProviderResponseEvent` 不包含 `usage` 字段（只有 `status` 和 `headers`），无法在事件中捕获模型 usage。但 `getSessionStats()` 已经聚合了 `cacheRead` 和 `input`，所以在查询时计算比率是唯一可行的方式。tool 相关计数器没有这个问题，`tool_result` 事件包含所有需要的信息。
+考虑过的替代：(1) 从 `TurnEndEvent.message` 中提取 usage——依赖 AgentMessage 内部结构，不稳定。(2) 不提供 cacheHitRatio——丢失重要指标。
+影响：`packages/pi-host/src/harness/counter-tracker.ts`；`packages/protocol/src/types.ts`（`SessionStats` 新增可选字段）。
+状态：已实施
+
+### D-010 · 2026-09-03 · 1.3
+类型：偏离
+决定：shell-supervisor 使用 `child_process.spawn` 而非 PTY 进行命令执行。sentinel-based 命令包装（B/C/E 标记 + 随机 token）替代 PTY 交互。长命令在 `waitMs` 后自动后台化。
+原因：PTY 交互需要 `node-pty` 或 `bun-pty` 原生模块，增加了部署复杂度。对于 agent harness 的非交互式命令执行场景，pipe-based stdin/stdout + sentinel 解析足够可靠且跨平台。交互式命令（如 `vim`、`top`）不在 harness 工具的目标范围内。
+考虑过的替代：(1) 复用 terminal runtime 的 PTY 基础设施——过于重量级，terminal runtime 面向用户交互而非 agent 自动化。(2) 直接用 Pi 内置的 bash 工具——不满足 harness 需要 host-side 控制的要求。
+影响：`packages/web/application-host/lib/harness/shell-supervisor.ts`。
+状态：已实施
+
+### D-011 · 2026-09-03 · 1.3
+类型：默认值调整
+决定：`typebox@1.3.7` 作为 pi-host 的直接依赖添加（与 pi-coding-agent 使用的版本一致）。tool schema 使用 `import { Type } from "typebox"` 而非 `@sinclair/typebox`。
+原因：pi-coding-agent 依赖 `typebox`（非 `@sinclair/typebox`），两者是不同的包。pi-host 的 harness 工具需要直接引用 TypeBox 构建参数 schema，但之前没有直接依赖。添加与 pi-coding-agent 相同版本避免兼容性问题。
+考虑过的替代：(1) 从 pi-coding-agent re-export TypeBox——修改上游包，不可控。(2) 使用 `@sinclair/typebox@0.34.x`——API 不兼容，schema 构建方式不同。
+影响：`packages/pi-host/package.json`；`packages/pi-host/src/harness/bash-tool.ts`；`packages/pi-host/src/harness/grep-tool.ts`。
+状态：已实施
+
+### D-012 · 2026-09-03 · 1.6
+类型：问题与解法
+决定：`apply_patch` 工具在 pi-host 进程内直接读写文件（`readFileSync`/`writeFileSync`），不通过 host 的 DocumentsAPI。诊断通过 `lsp.diagnostics` harness 服务获取。per-path 锁通过 `withPathLock` + `fs.lock` 服务获取。
+原因：apply_patch 需要原子性地读取-修改-写入文件，通过 host API 往返会增加延迟和竞态窗口。pi-host 进程已经在工作区内有文件系统访问权限。诊断是 best-effort 的——如果 LSP 不可用，补丁仍然应用成功。
+考虑过的替代：(1) 通过 host 的文件 API 读写——增加往返次数，无法保证原子性。(2) 不获取锁——并发编辑同一文件会导致数据丢失。
+影响：`packages/pi-host/src/harness/apply-patch-tool.ts`；`packages/web/application-host/lib/harness/diagnostics-service.ts`。
+状态：已实施
