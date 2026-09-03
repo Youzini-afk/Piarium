@@ -25,11 +25,11 @@ import { createPreloadBootstrapPayload } from './renderer-security-policy.js';
 
 // ---------------------------------------------------------------------------
 // 1. Command catalog completeness — every command in the catalog is known
-//    and the list has exactly 58 entries.
+//    and the list has exactly 59 entries.
 // ---------------------------------------------------------------------------
 
-test('desktop command catalog has exactly 58 commands', () => {
-  assert.equal(PIARIUM_DESKTOP_COMMAND_LIST.length, 58);
+test('desktop command catalog has exactly 59 commands', () => {
+  assert.equal(PIARIUM_DESKTOP_COMMAND_LIST.length, 59);
 });
 
 test('desktop command catalog has no duplicates', () => {

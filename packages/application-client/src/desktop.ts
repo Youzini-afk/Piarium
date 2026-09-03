@@ -334,7 +334,17 @@ export type PiariumDesktopEventArguments<E extends PiariumDesktopEvent> =
   PiariumDesktopEventMap[E] extends void ? [] : [detail: PiariumDesktopEventMap[E]];
 
 // ---------------------------------------------------------------------------
-// Command map — 58 desktop_* commands with typed args and results
+// Web render DTO (offscreen Chromium for harness webfetch)
+// ---------------------------------------------------------------------------
+
+export type DesktopWebRenderResult = {
+  html: string;
+  finalUrl: string;
+  timedOut: boolean;
+};
+
+// ---------------------------------------------------------------------------
+// Command map — desktop_* commands with typed args and results
 // ---------------------------------------------------------------------------
 
 export interface PiariumDesktopCommandMap {
@@ -448,6 +458,9 @@ export interface PiariumDesktopCommandMap {
   desktop_ssh_status: { args: { id?: string }; result: DesktopSshInstanceStatus[] };
   desktop_ssh_logs: { args: { id: string; limit?: number }; result: string[] };
   desktop_ssh_logs_clear: { args: { id: string }; result: null };
+
+  // --- web render (offscreen Chromium for harness webfetch) ---
+  desktop_web_render: { args: { url: string; timeoutMs?: number }; result: DesktopWebRenderResult };
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +561,7 @@ export const PIARIUM_DESKTOP_COMMAND_CATALOG = {
   desktop_ssh_status: true,
   desktop_ssh_logs: true,
   desktop_ssh_logs_clear: true,
+  desktop_web_render: true,
 } as const satisfies Record<PiariumDesktopCommand, true>;
 
 export const PIARIUM_DESKTOP_COMMAND_LIST = Object.freeze(

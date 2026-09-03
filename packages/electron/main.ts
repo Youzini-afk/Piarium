@@ -4919,6 +4919,73 @@ const handleInvoke = async (
       sshManager.clearLogsForInstance(String(args.id || '').trim());
       return null;
 
+    case 'desktop_web_render': {
+      const url = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!url) {
+        throw new Error('url is required');
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new Error('Invalid URL');
+      }
+      // Only http/https — block file: and custom protocols
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Only http(s) URLs are supported');
+      }
+      const timeoutMs = typeof args.timeoutMs === 'number' && args.timeoutMs > 0
+        ? Math.min(args.timeoutMs, 30_000)
+        : 20_000;
+
+      // Create a hidden BrowserWindow with an independent profile
+      // (no user cookies, separate partition)
+      const renderWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          partition: 'persist:piarium-web-agent',
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+        },
+      });
+
+      try {
+        await renderWindow.loadURL(url);
+
+        // Wait 1s for network idle after load
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Extract the rendered HTML
+        const html = await renderWindow.webContents.executeJavaScript(
+          'document.documentElement.outerHTML',
+          true,
+        );
+
+        const finalUrl = renderWindow.webContents.getURL();
+
+        return {
+          html: typeof html === 'string' ? html : '',
+          finalUrl: finalUrl || url,
+          timedOut: false,
+        };
+      } catch (error) {
+        // Check if it was a timeout
+        const timedOut = error instanceof Error && error.message.includes('timed out');
+        return {
+          html: '',
+          finalUrl: url,
+          timedOut,
+        };
+      } finally {
+        if (!renderWindow.isDestroyed()) {
+          renderWindow.destroy();
+        }
+      }
+    }
+
     default:
       command satisfies never;
       throw new Error(`Unknown desktop command: ${command}`);
