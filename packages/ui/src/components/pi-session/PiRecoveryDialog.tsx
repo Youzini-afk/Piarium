@@ -115,6 +115,13 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
                 ))}
               </ul>
             ) : null}
+            {plan.uncoveredReasons.length > 0 ? (
+              <ul className="mt-1 list-disc pl-4">
+                {plan.uncoveredReasons.map((reason) => (
+                  <li key={reason} className="break-all">{reason}</li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
 
@@ -130,6 +137,13 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
                       : entry.source === 'external' ? ` (${t('chat.recoveryDialog.sourceExternal')})`
                       : ''}
                   </li>
+                ))}
+              </ul>
+            ) : null}
+            {plan.uncoveredReasons.length > 0 ? (
+              <ul className="mt-1 list-disc pl-4">
+                {plan.uncoveredReasons.map((reason) => (
+                  <li key={reason} className="break-all">{reason}</li>
                 ))}
               </ul>
             ) : null}

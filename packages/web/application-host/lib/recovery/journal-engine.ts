@@ -1008,8 +1008,13 @@ export const createWorkspaceRecoveryEngine = (
     database: SqliteDatabase,
     sessionId: string,
     entryIds: string[],
-  ): { changes: SequencedRecoveryChange[]; uncoveredPaths: WorkspaceRecoveryUncoveredPath[] } => {
-    if (entryIds.length === 0) return { changes: [], uncoveredPaths: [] };
+  ): {
+    changes: SequencedRecoveryChange[];
+    hasIncompleteCheckpoint: boolean;
+    uncoveredPaths: WorkspaceRecoveryUncoveredPath[];
+    uncoveredReasons: string[];
+  } => {
+    if (entryIds.length === 0) return { changes: [], hasIncompleteCheckpoint: false, uncoveredPaths: [], uncoveredReasons: [] };
     const placeholders = entryIds.map(() => '?').join(', ');
     const checkpoints = database.prepare(`
       SELECT DISTINCT b.checkpoint_id, b.status, c.sequence
@@ -1041,19 +1046,22 @@ export const createWorkspaceRecoveryEngine = (
         }
       }
     }
-    // Expand incomplete checkpoints to per-path uncovered entries.
+    // Expand incomplete checkpoints to per-path uncovered entries and reasons.
     // For each incomplete checkpoint, read its binding's unrecorded_resource_ids
-    // (paths observed by the watcher but not journaled) and active_writer_scopes
-    // (to attribute the source: process writer → shell, no writer → external,
-    // indeterminate → unknown).
+    // (paths observed by the watcher but not journaled), active_writer_scopes
+    // (to attribute the source via the writerScope prefix), and failure_json
+    // (the human-readable reason the checkpoint is incomplete).
     const uncoveredMap = new Map<string, WorkspaceRecoveryUncoveredPath>();
+    const reasonsSet = new Set<string>();
+    const hasIncomplete = checkpoints.some((row) => row.status !== 'ready');
     for (const checkpoint of checkpoints.filter((row) => row.status !== 'ready')) {
       const bindingRow = database.prepare(`
-        SELECT unrecorded_resource_ids_json, active_writer_scopes_json
+        SELECT unrecorded_resource_ids_json, active_writer_scopes_json, failure_json
         FROM turn_bindings WHERE checkpoint_id = ?
       `).get(checkpoint.checkpoint_id) as {
         unrecorded_resource_ids_json: string;
         active_writer_scopes_json: string;
+        failure_json: string | null;
       } | undefined;
       if (!bindingRow) continue;
       let unrecorded: string[] = [];
@@ -1066,21 +1074,35 @@ export const createWorkspaceRecoveryEngine = (
         const parsed = JSON.parse(bindingRow.active_writer_scopes_json);
         if (Array.isArray(parsed)) scopes = parsed.filter((v): v is string => typeof v === 'string');
       } catch { /* malformed → treat as no scopes */ }
-      const hasProcessWriter = scopes.some((scope) => scope.startsWith('process:'));
+      // Source attribution via writerScope prefix: `${mode}/${kind}:${id}@gen`.
+      // process/ → shell, external/ → external, other or legacy → unknown.
+      const hasProcessWriter = scopes.some((scope) => scope.startsWith('process/'));
+      const hasExternalWriter = scopes.some((scope) => scope.startsWith('external/'));
       const source: WorkspaceRecoveryUncoveredPath['source'] = hasProcessWriter
         ? 'shell'
-        : scopes.length > 0
-          ? 'unknown'
-          : 'external';
+        : hasExternalWriter
+          ? 'external'
+          : 'unknown';
       for (const path of unrecorded) {
         if (!uncoveredMap.has(path)) {
           uncoveredMap.set(path, { path, source });
         }
       }
+      // Collect the failure message as an uncovered reason.
+      if (bindingRow.failure_json) {
+        try {
+          const failure = JSON.parse(bindingRow.failure_json) as { message?: unknown };
+          if (typeof failure.message === 'string' && failure.message) {
+            reasonsSet.add(failure.message);
+          }
+        } catch { /* malformed failure JSON → skip reason */ }
+      }
     }
     return {
       changes,
+      hasIncompleteCheckpoint: hasIncomplete,
       uncoveredPaths: [...uncoveredMap.values()].sort((a, b) => a.path.localeCompare(b.path)),
+      uncoveredReasons: [...reasonsSet].sort(),
     };
   };
 
@@ -1375,8 +1397,15 @@ export const createWorkspaceRecoveryEngine = (
         total + Math.max(stateByteLength(states.target), stateByteLength(states.expected))
       ), 0);
       const uncoveredPaths = loaded.uncoveredPaths;
+      const uncoveredReasons = loaded.uncoveredReasons;
       const hasRestorablePaths = affectedPaths.length > 0;
-      const coverage: WorkspaceCombinedRecoveryCoverage = uncoveredPaths.length === 0
+      // Coverage cannot be 'ready' if any checkpoint in range is incomplete
+      // (worker exit, host stop, observationComplete=false, or observed
+      // out-of-journal activity with no specific paths). An incomplete
+      // checkpoint with empty unrecorded_resource_ids still disqualifies
+      // 'ready' because the journal cannot prove it captured everything.
+      const hasCoverageGap = uncoveredPaths.length > 0 || loaded.hasIncompleteCheckpoint;
+      const coverage: WorkspaceCombinedRecoveryCoverage = !hasCoverageGap
         ? 'ready'
         : hasRestorablePaths
           ? 'partial'
@@ -1394,6 +1423,7 @@ export const createWorkspaceRecoveryEngine = (
         sessionId: input.sessionId,
         targetLeafId: navigation.targetLeafId,
         uncoveredPaths,
+        uncoveredReasons,
         workspaceId: input.workspaceId,
       };
       const plan: WorkspaceCombinedRecoveryPlan = { ...draft, revision: operationRevision(draft) };
@@ -1704,6 +1734,7 @@ export const createWorkspaceRecoveryEngine = (
         sessionId: original.plan.sessionId,
         targetLeafId: navigation.targetLeafId,
         uncoveredPaths: [],
+        uncoveredReasons: [],
         undoOf: original.id,
         workspaceId: original.plan.workspaceId,
       };

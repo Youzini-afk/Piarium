@@ -147,6 +147,7 @@ export interface WorkspaceCombinedRecoveryPlan {
   sessionId: string;
   targetLeafId: string | null;
   uncoveredPaths: WorkspaceRecoveryUncoveredPath[];
+  uncoveredReasons: string[];
   undoOf?: string;
   workspaceId: string;
 }
@@ -472,12 +473,14 @@ export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCom
   const raw = record(value, "Combined recovery plan");
   if (!Array.isArray(raw.conflicts)) throw new WorkspaceRecoveryContractError("plan.conflicts must be an array");
   if (!Array.isArray(raw.uncoveredPaths)) throw new WorkspaceRecoveryContractError("plan.uncoveredPaths must be an array");
+  if (!Array.isArray(raw.uncoveredReasons)) throw new WorkspaceRecoveryContractError("plan.uncoveredReasons must be an array");
   return {
     affectedPaths: stringList(raw.affectedPaths, "plan.affectedPaths"), changedBytes: count(raw.changedBytes, "plan.changedBytes"), conflicts: raw.conflicts.map(parseWorkspaceRecoveryConflict),
     coverage: oneOf(raw.coverage, ["ready", "partial", "none"] as const, "plan.coverage"), createdAt: isoTimestamp(raw.createdAt, "plan.createdAt"), entryId: text(raw.entryId, "plan.entryId"),
     expectedLeafId: raw.expectedLeafId === null ? null : text(raw.expectedLeafId, "plan.expectedLeafId"), id: text(raw.id, "plan.id"), removedEntryIds: stringList(raw.removedEntryIds, "plan.removedEntryIds"),
     revision: text(raw.revision, "plan.revision"), sessionId: text(raw.sessionId, "plan.sessionId"), targetLeafId: raw.targetLeafId === null ? null : text(raw.targetLeafId, "plan.targetLeafId"),
     uncoveredPaths: raw.uncoveredPaths.map(parseWorkspaceRecoveryUncoveredPath),
+    uncoveredReasons: stringList(raw.uncoveredReasons, "plan.uncoveredReasons"),
     workspaceId: text(raw.workspaceId, "plan.workspaceId"), ...(optionalText(raw.undoOf, "plan.undoOf") ? { undoOf: raw.undoOf as string } : {}),
   };
 };

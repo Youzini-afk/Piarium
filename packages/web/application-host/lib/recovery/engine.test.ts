@@ -96,7 +96,7 @@ const startTurn = (engine: WorkspaceRecoveryEngine, harness: DocumentAuthorityHa
 
 type SettleTurnOptions = Partial<Pick<
   WorkspaceRecoveryTurnSettledInput,
-  'assistantEntryId' | 'executionId' | 'mutationObserved' | 'observationComplete' | 'observedResourceIds'
+  'activeWriterScopes' | 'assistantEntryId' | 'executionId' | 'mutationObserved' | 'observationComplete' | 'observedResourceIds'
 >>;
 
 const settleTurn = (
@@ -104,7 +104,7 @@ const settleTurn = (
   harness: DocumentAuthorityHarness,
   options: SettleTurnOptions = {},
 ) => engine.recordTurnSettled({
-  activeWriterScopes: [],
+  activeWriterScopes: options.activeWriterScopes ?? [],
   assistantEntryId: options.assistantEntryId ?? 'assistant-1',
   executionId: options.executionId ?? 'execution-1',
   mutationObserved: options.mutationObserved ?? true,
@@ -493,7 +493,7 @@ describe('affected-file workspace recovery journal', () => {
     });
     expect(prepared.plan.coverage).toBe('none');
     expect(prepared.plan.uncoveredPaths).toEqual([
-      { path: 'shell.txt', source: 'external' },
+      { path: 'shell.txt', source: 'unknown' },
     ]);
     expect(prepared.plan.affectedPaths).toEqual([]);
     const applied = await engine.applyCombinedRecovery({
@@ -524,7 +524,7 @@ describe('affected-file workspace recovery journal', () => {
     expect(prepared.plan.coverage).toBe('partial');
     expect(prepared.plan.affectedPaths).toEqual(['note.txt']);
     expect(prepared.plan.uncoveredPaths).toEqual([
-      { path: 'shell.txt', source: 'external' },
+      { path: 'shell.txt', source: 'unknown' },
     ]);
     // Apply should succeed — the journaled path is restorable, the shell path is left as-is.
     const applied = await applyCombined(engine, {
@@ -538,6 +538,77 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
     // The shell path was not restored — it keeps the unjournaled change.
     expect(await fs.promises.readFile(shellTarget, 'utf8')).toBe('changed by shell');
+  });
+
+  it('does not claim ready coverage when a checkpoint is incomplete with no unrecorded paths (worker exit / observationComplete=false)', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(target, 'before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    // Settle with observationComplete=false to simulate a worker exit / host stop
+    // before the watcher finished. There are no unrecorded paths, but the
+    // checkpoint is incomplete because coverage was never confirmed.
+    await settleTurn(engine, harness, {
+      mutationObserved: true,
+      observationComplete: false,
+      observedResourceIds: ['note.txt'],
+    });
+    const prepared = await prepareCombined(engine, {
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    // The journaled write is still restorable, so coverage is 'partial', not 'ready'.
+    expect(prepared.plan.coverage).toBe('partial');
+    expect(prepared.plan.affectedPaths).toEqual(['note.txt']);
+    expect(prepared.plan.uncoveredPaths).toEqual([]);
+    expect(prepared.plan.uncoveredReasons.length).toBeGreaterThan(0);
+  });
+
+  it('does not claim ready coverage when an incomplete checkpoint has no unrecorded paths and no restorable paths', async () => {
+    const { engine, harness } = await createHarness();
+    // A turn with no journaled writes and observationComplete=false.
+    // mutationObserved=true with observationComplete=false makes the
+    // checkpoint incomplete. No paths are restorable and no paths are
+    // unrecorded, so coverage is 'none' with uncoveredReasons.
+    await startTurn(engine, harness);
+    await settleTurn(engine, harness, {
+      mutationObserved: true,
+      observationComplete: false,
+      observedResourceIds: [],
+    });
+    const prepared = await prepareCombined(engine, {
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared.plan.coverage).toBe('none');
+    expect(prepared.plan.affectedPaths).toEqual([]);
+    expect(prepared.plan.uncoveredPaths).toEqual([]);
+    expect(prepared.plan.uncoveredReasons.length).toBeGreaterThan(0);
+  });
+
+  it('attributes uncovered paths to shell source when a process writer is registered', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    const shellTarget = path.join(harness.workspaceRoot, 'shell.txt');
+    await fs.promises.writeFile(target, 'before');
+    await fs.promises.writeFile(shellTarget, 'shell-before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    await fs.promises.writeFile(shellTarget, 'changed by shell');
+    // Settle with a process writer scope active so source attribution
+    // resolves to 'shell' via the `process/` prefix.
+    await settleTurn(engine, harness, {
+      mutationObserved: true,
+      observationComplete: true,
+      observedResourceIds: ['note.txt', 'shell.txt'],
+      activeWriterScopes: ['process/pi-worker:worker-1@1'],
+    });
+    const prepared = await prepareCombined(engine, {
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared.plan.coverage).toBe('partial');
+    expect(prepared.plan.uncoveredPaths).toEqual([
+      { path: 'shell.txt', source: 'shell' },
+    ]);
   });
 
   it('stores affected-path safety state and can undo a completed combined rollback', async () => {

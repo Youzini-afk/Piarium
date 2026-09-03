@@ -12,6 +12,7 @@ interface WriterOwner {
 
 interface Writer {
   writerId: string;
+  mode?: string;
   owner?: WriterOwner;
 }
 
@@ -104,7 +105,8 @@ export interface TurnCoordinator {
 
 const writerScope = (writer: Writer): string => {
   const generation = writer.owner?.generation === undefined ? '' : `@${writer.owner.generation}`;
-  return `${writer.owner?.kind || 'writer'}:${writer.owner?.id || writer.writerId}${generation}`;
+  const mode = writer.mode || 'controlled';
+  return `${mode}/${writer.owner?.kind || 'writer'}:${writer.owner?.id || writer.writerId}${generation}`;
 };
 
 const incompleteFailure = (message: string) => ({

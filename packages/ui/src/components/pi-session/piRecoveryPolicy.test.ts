@@ -16,6 +16,7 @@ const plan = (input: Partial<WorkspaceCombinedRecoveryPlan> = {}): WorkspaceComb
   sessionId: 'session-1',
   targetLeafId: 'leaf-1',
   uncoveredPaths: [],
+  uncoveredReasons: [],
   workspaceId: 'workspace-1',
   ...input,
 });
