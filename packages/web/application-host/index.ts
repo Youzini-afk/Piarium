@@ -45,6 +45,7 @@ import { createHarnessRouter } from './lib/harness/router.js';
 import { createHarnessServiceHost } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
+import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -1028,7 +1029,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // per-session shell supervisors. Registered with the harness router
   // and wired into the broker event stream alongside the recovery turn
   // coordinator.
-  const harnessDiagnosticsProvider: DiagnosticsProvider | null = null; // TODO: wire to languageSupervisor in item 2
+  const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
+    resolveWorkspaceId: async (workspaceRoot) => {
+      try {
+        const workspace = await documentsAuthority.inspectWorkspace(workspaceRoot);
+        return workspace.workspaceId;
+      } catch {
+        return null;
+      }
+    },
+  });
   const harnessServiceHost = createHarnessServiceHost({
     search: async (request, options) => workspaceContentSearch.searchContent({ query: request.query, workspaceId: request.workspaceId, maxResults: request.maxResults }, options),
     resolveWorkspaceRoot: async (workspaceId) => {

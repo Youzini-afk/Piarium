@@ -95,15 +95,21 @@ async function fetchDiagnostics(
   path: string,
 ): Promise<{ status: string; summary: string } | null> {
   try {
-    const result = await bridge.request("lsp.diagnostics", { path, waitMs: 500 });
-    if (result.status === "unavailable") return { status: "unavailable", summary: "diagnostics unavailable" };
-    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean (0 diagnostics)" };
+    const result = await bridge.request("lsp.diagnostics", { path, waitMs: 5000 });
+    if (result.status === "unavailable") {
+      const reason = typeof (result as { reason?: string }).reason === "string" ? (result as { reason: string }).reason : "no language server";
+      return { status: "unavailable", summary: `unavailable — ${reason}` };
+    }
+    if (result.status === "pending") {
+      return { status: "pending", summary: `pending — call diagnostics("${path}")` };
+    }
+    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean" };
     const errors = result.diagnostics.filter((d: { severity: string }) => d.severity === "error").length;
     const warnings = result.diagnostics.filter((d: { severity: string }) => d.severity === "warning").length;
     const summary = `${result.diagnostics.length} diagnostic(s)${errors > 0 ? `, ${errors} error(s)` : ""}${warnings > 0 ? `, ${warnings} warning(s)` : ""}`;
-    return { status: "pending", summary };
+    return { status: "ready", summary };
   } catch {
-    return { status: "unavailable", summary: "diagnostics unavailable" };
+    return { status: "unavailable", summary: "unavailable — request failed" };
   }
 }
 
