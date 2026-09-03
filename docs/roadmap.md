@@ -670,13 +670,22 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
 - **3.4-3.5 ThreadRecord + Worker runtime**: Redesigned with
   host-persisted ThreadRegistry (`lib/harness/thread-registry.ts`).
   JSON persistence, in-memory cache, hidden threads, idempotent
-  completion, callbacks for protocol events. 20 unit tests. **Wired**:
+  completion, callbacks for protocol events. 27 unit tests. **Wired**:
   7 thread service methods (dispatch/list/wait/send/read/merge/kill),
   7 pi-host tools, protocol events (harness.thread.changed/done).
-  e2e: 6 tests. See D-024. Worker runtime (`worker-runtime.ts`) kept
-  as pure algorithm module. **TODO**: worktree management, activity
-  sensors (stalled/looping), observer cursors, Zone 2 threads section,
-  Fleet provider, broker child session integration.
+  e2e: 6 tests. See D-024/D-026. Worker runtime (`worker-runtime.ts`)
+  kept as pure algorithm module.
+  **§9.3 redo (D-026)**: blocking wait (subscribe + timeout, not
+  polling), incremental threads (observer cursors, `full` param),
+  read_thread `what: "blocks"|"report"|"steps"` with `since` cursor,
+  dispatch concurrency limit (maxConcurrency=12, `queued` result),
+  send wakes idle/waiting-for-input, eventSeq monotonic per thread,
+  kill `keepWorktree` (default true), TTL table + DEFAULT_WAIT_TIMEOUT_MS.
+  Protocol contract tests: 15. See D-026.
+  **TODO**: worktree management, activity sensors (stalled/looping),
+  Zone 2 threads section, Fleet provider, broker child session
+  integration, transcript slice ("steps") wiring to memory agent
+  blocksSnapshot, progress/decisions/errors blocks extraction.
 - **3.6 Role catalog**: Six roles, team prompt, slot-based resolution
   (`lib/harness/roles.ts`). 11 tests. **Not wired** (TODO).
 - **3.7 Review sensor**: Auto-dispatch review on diff, gate mode
@@ -710,6 +719,7 @@ in accept-edits. Shell tools (bash, write_to_process) always ask (except
 bypass). High-risk bash patterns (rm, sudo, git push, etc.) always ask.
 94/94 pi-host harness tests pass, 32/32 web permission tests pass.
 
-**Total**: 94 pi-host harness tests + 94 web harness/knowledge tests =
-188 tests, all passing. Type-check clean.
-Decisions D-019 through D-024 recorded in agent-harness-decisions.md.
+**Total**: 237 pi-host tests (1 skip) + 1362 web tests (1 skip) + 15
+protocol thread contract tests = 1614 tests, all passing. Type-check
+and lint clean.
+Decisions D-019 through D-026 recorded in agent-harness-decisions.md.
