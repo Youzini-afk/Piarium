@@ -120,6 +120,14 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 
 状态：已实施（PTY 模块复用）；终端 runtime 集成待完成（阶段 2 前置）
 
+### D-015 · 2026-09-03 · 1.9
+类型：决策
+决定：HarnessSettings 存储在 Pi settings 的 `harness` 键下，用户级（scope: `global`），不使用项目级覆盖。
+原因：harness 工具配置是用户偏好（shell 选择、输出截断大小、命令超时），不是项目协作约定。用户级存储确保同一用户在不同项目中有一致的 harness 行为。工具开关也放在用户级——如果某用户不想用 grep override，这个偏好应跨项目生效。
+考虑过的替代：(1) 项目级存储——harness 行为会随项目变化，造成困惑。(2) 混合（工具开关用户级，shell/output 项目级）——增加复杂度，没有实际用例驱动。
+影响：`packages/ui/src/components/sections/harness/HarnessSettingsPage.tsx`（写入 `scope: 'global'` 的 `harness` 键）；`packages/pi-host/src/session-host.ts`（从 Pi settings 读取 `harness` 键并 mergeHarnessSettings）。
+状态：已实施
+
 ### D-011 · 2026-09-03 · 1.3
 类型：默认值调整
 决定：`typebox@1.3.7` 作为 pi-host 的直接依赖添加（与 pi-coding-agent 使用的版本一致）。tool schema 使用 `import { Type } from "typebox"` 而非 `@sinclair/typebox`。
@@ -159,7 +167,7 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 | 1.10 | promptSnippet / promptGuidelines (via ToolDefinition) | — | ✓ |
 | 补齐 | get_output, write_to_process, kill_shell, diagnostics | 15 | ✓ |
 
-### 已接进运行系统并在真实会话里跑通
+### 已接进运行系统
 
 | 接线点 | 位置 | 状态 |
 |--------|------|------|
@@ -167,14 +175,16 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 | HarnessRouter | `index.ts`: after recoveryTurnCoordinator | ✓ |
 | Broker 事件消费 | `index.ts`: harnessRouter.processEvent in subscribe | ✓ |
 | 会话注册 | `index.ts`: session.snapshot event handler | ✓ |
-| pi-host 工具注册 | `session-host.ts`: customTools array | ✓ |
+| pi-host 工具注册 | `session-host.ts`: selectHarnessTools → customTools | ✓ |
 | 截断扩展 | `session-host.ts`: extensionFactories | ✓ |
-| bash cwd | `session-host.ts`: cwd passed to createBashTool | ✓ |
+| bash cwd | `service-host.ts`: env PWD for initial shell cwd | ✓ |
 | mutation journal 诊断 | `workspace-mutation-journal.ts`: hostServicesBridge | ✓ |
 | apply_patch OpenAI-only | `session-host.ts`: isOpenAIFamily check | ✓ |
 | harness.respond ok 字段 | `index.ts`: respond callback + `router.ts` | ✓ |
-| Settings 门控 | `session-host.ts`: mergeHarnessSettings before customTools | ✓ |
+| Settings 门控 | `session-host.ts`: mergeHarnessSettings → selectHarnessTools | ✓ |
 | registerWriter | `index.ts`: documents.registerWriterForScope | ✓ |
+| 诊断 provider | `index.ts`: createLanguageSupervisorDiagnosticsProvider | ✓ |
+| Settings 页控件 | `HarnessSettingsPage.tsx`: 工具开关 + shell + output + bash | ✓ |
 
 ### E2E 集成测试（tool → bridge → router → service → content text, 6/6 pass）
 
@@ -185,11 +195,11 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 | # | 断言 | 状态 |
 |---|------|------|
 | 1 | bash pwd 输出包含工作区目录名 | ✓ |
-| 2 | bash cd packages && pwd 输出包含 "packages" | ✓ |
-| 3 | 超过 waitMs 的命令返回后台 shell id，get_output 取到输出 | ✓ |
-| 4 | grep 命中文本包含 "hello"，miss 返回 0 hits 指示 | ✓ |
-| 5 | cat big.txt (5000行) 返回截断文本含 out_ 句柄，get_output 分页取到 "line 1" | ✓ |
-| 6 | harness.tools.grep=false 时 grep 不注册（回退 Pi 内置） | ✓ |
+| 2 | 两次独立调用：cd packages → pwd，pwd 行以 "packages" 结尾 | ✓ |
+| 3 | 超过 waitMs 的命令返回 sh_ id，get_output 取到非空输出 | ✓ |
+| 4 | grep 命中文本含 "hello"，miss 返回 "0 hits (searched" | ✓ |
+| 5 | cat big.txt (5000行) 返回 out_ 句柄，page1 含 "line 1"，page2 非空 | ✓ |
+| 6 | selectHarnessTools: grep=false 时无 grep，默认有 grep | ✓ |
 
 ### Contract 测试（router respond → bridge, 3/3 pass）
 
@@ -210,3 +220,4 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 ### 已知偏离（进入阶段 2 前完成）
 
 - D-013 偏离：复用 PTY 模块而非终端运行时，后台 shell 尚不是终端 tab。方案：在 `lib/terminal/runtime.ts` 暴露 `createTerminalSession` / `attachTerminalSession`，harness shell 经它创建。
+- 诊断 provider 已接线但未在 e2e 中验证（需要真实 LSP server）。语义已实现：unavailable/pending/ready + snapshot diff，但端到端证明待阶段 2。
