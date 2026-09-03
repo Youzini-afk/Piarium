@@ -26,7 +26,7 @@ export interface HarnessServiceHost {
   dropSession(sessionId: string): void;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 export interface HarnessServiceHostOptions {
@@ -70,6 +70,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         interpreter: interpreterResult,
         outputStore,
         sessionId: ctx.sessionId,
+        env: { PWD: ctx.workspaceRoot },
         ...(options.registerWriter ? {
           registerWriter: () => options.registerWriter!(ctx.sessionId, ctx.workspaceRoot),
         } : {}),
@@ -101,11 +102,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return sessions.get(sessionId)?.interpreter ?? null;
   };
 
-  const dispose = (): void => {
+  const dispose = async (): Promise<void> => {
+    const disposes: Promise<void>[] = [];
     for (const entry of sessions.values()) {
-      void entry.shellSupervisor?.dispose();
+      if (entry.shellSupervisor) disposes.push(entry.shellSupervisor.dispose());
     }
     sessions.clear();
+    await Promise.all(disposes);
     outputStore.dispose();
     pathLockService.dispose();
   };

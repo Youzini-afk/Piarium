@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import { spawn } from "node:child_process";
 import type { OutputSlice, ShellExecResult } from "@piarium/protocol";
 import type { OutputStore } from "./output-store.js";
 
@@ -54,7 +55,10 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
   if (setting === "git-bash") {
     if (platform !== "win32") return { unavailable: { reason: "Git Bash is only available on Windows", hint: "Use auto or bash setting on this platform." } };
     if (!discovered.gitBashPath) return { unavailable: { reason: "Git for Windows not found", hint: 'Install it from https://git-scm.com/download/win or set harness.shell to "powershell".' } };
-    return { kind: "git-bash", command: discovered.gitBashPath, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
+    // Use usr\bin\bash.exe directly (not the bin\bash.exe launcher) to avoid
+    // spawning an extra wrapper process that survives dispose().
+    const bashExe = discovered.gitBashPath.replace(/\\bin\\bash\.exe$/i, "\\usr\\bin\\bash.exe");
+    return { kind: "git-bash", command: bashExe, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
   }
 
   // Auto detection
@@ -65,7 +69,8 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
       return { kind: "wsl", command: "wsl.exe", args: ["-d", distro, "--", "bash", "-l"], env: {}, distro };
     }
     if (discovered.gitBashPath) {
-      return { kind: "git-bash", command: discovered.gitBashPath, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
+      const bashExe = discovered.gitBashPath.replace(/\\bin\\bash\.exe$/i, "\\usr\\bin\\bash.exe");
+      return { kind: "git-bash", command: bashExe, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
     }
     return { unavailable: { reason: "Git for Windows not found", hint: 'Install it from https://git-scm.com/download/win or set harness.shell to "powershell".' } };
   }
@@ -167,6 +172,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   let shellReady = false;
   let shellReadyResolve: (() => void) | null = null;
   const shellReadyPromise = new Promise<void>((resolve) => { shellReadyResolve = resolve; });
+  // Track disposables from onData/onExit to clean up on dispose
+  let dataDisposable: { dispose?(): void } | null = null;
+  let exitDisposable: { dispose?(): void } | null = null;
 
   // Pending command state
   interface PendingCommand {
@@ -204,7 +212,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const initMarker = `__PIARIUM_READY_${initToken}__`;
       let initBuffer = "";
 
-      ptyProcess.onData((data: string) => {
+      dataDisposable = ptyProcess.onData((data: string) => {
         // Route to pending command or init
         if (pendingCommand) {
           outputBuffer += data;
@@ -221,7 +229,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         }
       });
 
-      ptyProcess.onExit((event) => {
+      exitDisposable = ptyProcess.onExit((event) => {
         if (!shellReady) {
           reject(new Error(`Shell exited before ready (code ${event.exitCode})`));
           return;
@@ -423,9 +431,40 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       void bg.writer?.close();
     }
     backgroundShells.clear();
-    if (ptyProcess) {
-      try { ptyProcess.kill("SIGTERM"); } catch { /* already exited */ }
-      ptyProcess = null;
+    const proc = ptyProcess;
+    ptyProcess = null;
+    if (proc) {
+      await new Promise<void>((resolveDispose) => {
+        let settled = false;
+        const settle = () => { if (!settled) { settled = true; resolveDispose(); } };
+        // Wait for onExit, with a hard timeout
+        const hardTimeout = setTimeout(settle, 3000);
+        try {
+          proc.onExit(() => { clearTimeout(hardTimeout); settle(); });
+        } catch { clearTimeout(hardTimeout); settle(); return; }
+        // Kill the process
+        try { proc.kill(); } catch { /* already exited */ }
+      });
+      // node-pty on Windows leaves anonymous pipe handles (Sockets) open
+      // even after the process exits and handlers are disposed. unref() them
+      // so the event loop can exit naturally.
+      try { (proc as unknown as { destroy?: () => void }).destroy?.(); } catch { /* ignore */ }
+    }
+    // Dispose native handlers to release node-pty handles
+    try { dataDisposable?.dispose?.(); } catch { /* already disposed */ }
+    try { exitDisposable?.dispose?.(); } catch { /* already disposed */ }
+    dataDisposable = null;
+    exitDisposable = null;
+    // unref any lingering Socket handles from node-pty pipes
+    if (process.platform === "win32") {
+      try {
+        const handles = (process as unknown as { _getActiveHandles?: () => Array<{ unref?: () => void; constructor?: { name?: string } }> })._getActiveHandles?.() ?? [];
+        for (const h of handles) {
+          if (h?.constructor?.name === "Socket" && typeof h.unref === "function") {
+            h.unref();
+          }
+        }
+      } catch { /* _getActiveHandles not available */ }
     }
   };
 

@@ -1426,7 +1426,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       harnessRouter.dispose();
-      harnessServiceHost.dispose();
+      await harnessServiceHost.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
       realtimeProxyRuntime.stop();

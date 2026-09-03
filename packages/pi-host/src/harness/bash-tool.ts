@@ -50,7 +50,8 @@ export function createBashTool(bridge: HostServicesBridge, sessionId: string, cw
       try {
         const result = await bridge.request("shell.exec", {
           command: params.command,
-          cwd,
+          // Don't pass cwd on every call — the persistent shell maintains its
+          // own cwd across commands. Passing cwd would reset it each time.
           ...(params.waitMs !== undefined ? { waitMs: params.waitMs } : {}),
           ...(params.runMs !== undefined ? { runMs: params.runMs } : {}),
         });

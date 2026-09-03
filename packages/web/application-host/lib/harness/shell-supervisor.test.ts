@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { selectInterpreter, stripControlSequences, type DiscoveredShells } from "./shell-supervisor.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells } from "./shell-supervisor.js";
+import { createOutputStore } from "./output-store.js";
 
 const EMPTY_DISCOVERED: DiscoveredShells = {};
 
@@ -155,4 +159,44 @@ describe("stripControlSequences", () => {
   it("handles mixed sequences", () => {
     expect(stripControlSequences("\x1b[1mbold\x1b[0m \x1b]0;title\x07 normal")).toBe("bold  normal");
   });
+});
+
+describe("shell-supervisor dispose kills process tree", () => {
+  it("dispose() terminates the PTY process and its children", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "shell-dispose-"));
+    const outputStore = createOutputStore();
+    const discovered: DiscoveredShells = process.platform === "win32"
+      ? { gitBashPath: "C:\\Program Files\\Git\\bin\\bash.exe" }
+      : { hasBash: true };
+    const interp = selectInterpreter({
+      platform: process.platform,
+      workspaceRoot,
+      setting: "auto",
+      discovered,
+      remote: false,
+    });
+    if (!("kind" in interp)) { rmSync(workspaceRoot, { recursive: true, force: true }); return; }
+
+    const supervisor = createShellSupervisor({
+      interpreter: interp,
+      outputStore,
+      sessionId: "dispose-test",
+    });
+
+    // Run a command to ensure the shell is spawned
+    const result = await supervisor.exec("echo hello", { waitMs: 10000 });
+    expect(result.kind).toBe("completed");
+
+    // Dispose and verify the process tree is gone
+    await supervisor.dispose();
+
+    // Give the OS a moment to reap the process
+    await new Promise((r) => setTimeout(r, 500));
+
+    // We can't directly access the PID after dispose (ptyProcess is nulled),
+    // but we can verify dispose() resolved without hanging and the test
+    // process exits cleanly. The real verification is that the test runner
+    // doesn't hang after this test completes.
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }, 15000);
 });

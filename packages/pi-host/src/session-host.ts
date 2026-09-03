@@ -146,6 +146,7 @@ import {
   createKillShellTool,
   createDiagnosticsTool,
 } from "./harness/output-tools.js";
+import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
@@ -2764,7 +2765,6 @@ export class SessionHost {
       const userHarness = (piSettings.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
       const projectHarness = (piSettings.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
-      const toolsEnabled = harnessSettings.tools;
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];
       if (workspaceMutationJournal !== undefined) {
@@ -2775,40 +2775,16 @@ export class SessionHost {
           sessionManager.getSessionId(),
         ));
       }
-      // Harness tools — gated by HarnessSettings.tools flags.
-      // Override tools (bash, grep) fall back to Pi built-in when disabled.
-      // New tools (get_output, write_to_process, kill_shell, diagnostics) are not registered when disabled.
-      if (toolsEnabled.bash !== false) {
-        customTools.push(createBashTool(hostServicesBridge, sessionManager.getSessionId(), cwd));
-      }
-      if (toolsEnabled.grep !== false) {
-        customTools.push(createGrepTool(hostServicesBridge, sessionManager.getSessionId()));
-      }
-      if (toolsEnabled.get_output !== false) {
-        customTools.push(createGetOutputTool(hostServicesBridge, sessionManager.getSessionId()));
-      }
-      if (toolsEnabled.write_to_process !== false) {
-        customTools.push(createWriteToProcessTool(hostServicesBridge, sessionManager.getSessionId()));
-      }
-      if (toolsEnabled.kill_shell !== false) {
-        customTools.push(createKillShellTool(hostServicesBridge, sessionManager.getSessionId()));
-      }
-      if (toolsEnabled.diagnostics !== false) {
-        customTools.push(createDiagnosticsTool(hostServicesBridge, sessionManager.getSessionId()));
-      }
-      // apply_patch: only registered for OpenAI family models (Codex syntax)
+      // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
-      if (isOpenAIFamily && toolsEnabled.apply_patch !== false) {
-        customTools.push(
-          createApplyPatchTool(
-            hostServicesBridge,
-            sessionManager.getSessionId(),
-            cwd,
-            workspaceMutationJournal ?? undefined,
-          ),
-        );
-      }
+      customTools.push(...selectHarnessTools(harnessSettings, {
+        bridge: hostServicesBridge,
+        sessionId: sessionManager.getSessionId(),
+        cwd,
+        workspaceMutationJournal: workspaceMutationJournal ?? undefined,
+        isOpenAIFamily,
+      }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
         customTools,
