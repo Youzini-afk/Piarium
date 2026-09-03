@@ -58,8 +58,10 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
     }
   }, [onClose, onConversationOnly, phase, plan.id]);
 
+  const canRestoreFiles = plan.coverage === 'ready' || plan.coverage === 'partial';
+
   const runCombined = React.useCallback(async () => {
-    if (phase === 'applying' || plan.coverage !== 'ready') return;
+    if (phase === 'applying' || !canRestoreFiles) return;
     startedRef.current = true;
     setFailure(null);
     setPhase('applying');
@@ -84,7 +86,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
       setFailure(error instanceof Error ? error.message : String(error));
       setPhase('failed');
     }
-  }, [onClose, onCombinedResult, phase, plan]);
+  }, [canRestoreFiles, onClose, onCombinedResult, phase, plan]);
 
   const close = React.useCallback(() => {
     if (phase !== 'applying') onClose();
@@ -98,9 +100,39 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
           <DialogDescription>{t('chat.recoveryDialog.description')}</DialogDescription>
         </DialogHeader>
 
-        {plan.coverage === 'incomplete' ? (
+        {plan.coverage === 'partial' ? (
           <div className="rounded-xl border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-3 py-2 typography-meta text-[var(--status-warning)]">
-            {t('chat.recoveryDialog.incompleteCheckpoint')}
+            {t('chat.recoveryDialog.partialCoverage')}
+            {plan.uncoveredPaths.length > 0 ? (
+              <ul className="mt-1 list-disc pl-4">
+                {plan.uncoveredPaths.map((entry) => (
+                  <li key={entry.path} className="break-all">
+                    {entry.path}
+                    {entry.source === 'shell' ? ` (${t('chat.recoveryDialog.sourceShell')})`
+                      : entry.source === 'external' ? ` (${t('chat.recoveryDialog.sourceExternal')})`
+                      : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {plan.coverage === 'none' ? (
+          <div className="rounded-xl border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-3 py-2 typography-meta text-[var(--status-warning)]">
+            {t('chat.recoveryDialog.noCoverage')}
+            {plan.uncoveredPaths.length > 0 ? (
+              <ul className="mt-1 list-disc pl-4">
+                {plan.uncoveredPaths.map((entry) => (
+                  <li key={entry.path} className="break-all">
+                    {entry.path}
+                    {entry.source === 'shell' ? ` (${t('chat.recoveryDialog.sourceShell')})`
+                      : entry.source === 'external' ? ` (${t('chat.recoveryDialog.sourceExternal')})`
+                      : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
 
@@ -126,7 +158,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
           </div>
         ) : (
           <div className="grid gap-2">
-            {plan.coverage === 'ready' ? (
+            {canRestoreFiles ? (
               <button
                 type="button"
                 onClick={() => void runCombined()}
@@ -164,7 +196,7 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
         ) : null}
 
         <DialogFooter>
-          {phase === 'failed' && plan.coverage === 'ready' ? (
+          {phase === 'failed' && canRestoreFiles ? (
             <Button type="button" onClick={() => void runCombined()}>
               {t('chat.recoveryDialog.retry')}
             </Button>

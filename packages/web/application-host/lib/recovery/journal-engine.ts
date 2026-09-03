@@ -23,6 +23,7 @@ import {
   type RecoveryStorageWorkspaceListResult,
   type RecoveryRetentionStatusResult,
   type WorkspaceCombinedRecoveryApplyInput,
+  type WorkspaceCombinedRecoveryCoverage,
   type WorkspaceCombinedRecoveryListResult,
   type WorkspaceCombinedRecoveryOperation,
   type WorkspaceCombinedRecoveryOperationResult,
@@ -49,6 +50,7 @@ import {
   type WorkspaceRecoveryTurnBindingResult,
   type WorkspaceRecoveryTurnSettledInput,
   type WorkspaceRecoveryTurnStartInput,
+  type WorkspaceRecoveryUncoveredPath,
   type SetRecoveryStorageLocationInput,
 } from '@piarium/extension-contract';
 import {
@@ -1006,8 +1008,8 @@ export const createWorkspaceRecoveryEngine = (
     database: SqliteDatabase,
     sessionId: string,
     entryIds: string[],
-  ): { changes: SequencedRecoveryChange[]; incomplete: string[] } => {
-    if (entryIds.length === 0) return { changes: [], incomplete: [] };
+  ): { changes: SequencedRecoveryChange[]; uncoveredPaths: WorkspaceRecoveryUncoveredPath[] } => {
+    if (entryIds.length === 0) return { changes: [], uncoveredPaths: [] };
     const placeholders = entryIds.map(() => '?').join(', ');
     const checkpoints = database.prepare(`
       SELECT DISTINCT b.checkpoint_id, b.status, c.sequence
@@ -1022,7 +1024,12 @@ export const createWorkspaceRecoveryEngine = (
       status: string;
     }[];
     const changes: SequencedRecoveryChange[] = [];
-    for (const checkpoint of checkpoints.filter((row) => row.status === 'ready')) {
+    // Collect journaled changes from ALL checkpoints (both ready and incomplete).
+    // An incomplete checkpoint still has valid before-images for paths that were
+    // journaled via write/edit tools; only the unjournaled (shell/external) paths
+    // are uncovered. Skipping all changes from an incomplete checkpoint would
+    // incorrectly treat journaled paths as unrestorable.
+    for (const checkpoint of checkpoints) {
       for (const row of database.prepare(`
         SELECT * FROM checkpoint_changes WHERE checkpoint_id = ? AND after_json IS NOT NULL
         ORDER BY path
@@ -1034,9 +1041,46 @@ export const createWorkspaceRecoveryEngine = (
         }
       }
     }
+    // Expand incomplete checkpoints to per-path uncovered entries.
+    // For each incomplete checkpoint, read its binding's unrecorded_resource_ids
+    // (paths observed by the watcher but not journaled) and active_writer_scopes
+    // (to attribute the source: process writer → shell, no writer → external,
+    // indeterminate → unknown).
+    const uncoveredMap = new Map<string, WorkspaceRecoveryUncoveredPath>();
+    for (const checkpoint of checkpoints.filter((row) => row.status !== 'ready')) {
+      const bindingRow = database.prepare(`
+        SELECT unrecorded_resource_ids_json, active_writer_scopes_json
+        FROM turn_bindings WHERE checkpoint_id = ?
+      `).get(checkpoint.checkpoint_id) as {
+        unrecorded_resource_ids_json: string;
+        active_writer_scopes_json: string;
+      } | undefined;
+      if (!bindingRow) continue;
+      let unrecorded: string[] = [];
+      try {
+        const parsed = JSON.parse(bindingRow.unrecorded_resource_ids_json);
+        if (Array.isArray(parsed)) unrecorded = parsed.filter((v): v is string => typeof v === 'string');
+      } catch { /* malformed JSON → treat as no unrecorded paths */ }
+      let scopes: string[] = [];
+      try {
+        const parsed = JSON.parse(bindingRow.active_writer_scopes_json);
+        if (Array.isArray(parsed)) scopes = parsed.filter((v): v is string => typeof v === 'string');
+      } catch { /* malformed → treat as no scopes */ }
+      const hasProcessWriter = scopes.some((scope) => scope.startsWith('process:'));
+      const source: WorkspaceRecoveryUncoveredPath['source'] = hasProcessWriter
+        ? 'shell'
+        : scopes.length > 0
+          ? 'unknown'
+          : 'external';
+      for (const path of unrecorded) {
+        if (!uncoveredMap.has(path)) {
+          uncoveredMap.set(path, { path, source });
+        }
+      }
+    }
     return {
       changes,
-      incomplete: checkpoints.filter((row) => row.status !== 'ready').map((row) => row.checkpoint_id),
+      uncoveredPaths: [...uncoveredMap.values()].sort((a, b) => a.path.localeCompare(b.path)),
     };
   };
 
@@ -1330,11 +1374,18 @@ export const createWorkspaceRecoveryEngine = (
       const changedBytes = Object.values(targets).reduce((total, states) => (
         total + Math.max(stateByteLength(states.target), stateByteLength(states.expected))
       ), 0);
+      const uncoveredPaths = loaded.uncoveredPaths;
+      const hasRestorablePaths = affectedPaths.length > 0;
+      const coverage: WorkspaceCombinedRecoveryCoverage = uncoveredPaths.length === 0
+        ? 'ready'
+        : hasRestorablePaths
+          ? 'partial'
+          : 'none';
       const draft: Omit<WorkspaceCombinedRecoveryPlan, 'revision'> = {
         affectedPaths,
         changedBytes,
         conflicts,
-        coverage: targetBinding.status === 'ready' && loaded.incomplete.length === 0 ? 'ready' : 'incomplete',
+        coverage,
         createdAt,
         entryId: input.entryId,
         expectedLeafId: navigation.expectedLeafId,
@@ -1342,6 +1393,7 @@ export const createWorkspaceRecoveryEngine = (
         removedEntryIds,
         sessionId: input.sessionId,
         targetLeafId: navigation.targetLeafId,
+        uncoveredPaths,
         workspaceId: input.workspaceId,
       };
       const plan: WorkspaceCombinedRecoveryPlan = { ...draft, revision: operationRevision(draft) };
@@ -1446,8 +1498,8 @@ export const createWorkspaceRecoveryEngine = (
         });
       }
       if (TERMINAL_STATES.has(record.state)) return publicOperation(record);
-      if (record.plan.coverage !== 'ready') {
-        throw new RecoveryPrimitiveError('checkpoint-incomplete', 'This conversation range contains changes without an exact before-image', {
+      if (record.plan.coverage === 'none') {
+        throw new RecoveryPrimitiveError('checkpoint-incomplete', 'This conversation range has no restorable file paths', {
           origin: 'coverage',
         });
       }
@@ -1651,6 +1703,7 @@ export const createWorkspaceRecoveryEngine = (
         removedEntryIds: [],
         sessionId: original.plan.sessionId,
         targetLeafId: navigation.targetLeafId,
+        uncoveredPaths: [],
         undoOf: original.id,
         workspaceId: original.plan.workspaceId,
       };

@@ -128,11 +128,16 @@ export interface WorkspaceRecoveryConflict { fingerprint: string; kind: Workspac
 export interface WorkspaceRecoveryConfirmedConflict { fingerprint: string; path: string }
 export interface WorkspaceCombinedRecoveryPrepareInput { entryId: string; sessionId: string; workspaceId: string }
 
+export type WorkspaceRecoveryUncoveredSource = "shell" | "external" | "unknown";
+export interface WorkspaceRecoveryUncoveredPath { path: string; source: WorkspaceRecoveryUncoveredSource }
+
+export type WorkspaceCombinedRecoveryCoverage = "ready" | "partial" | "none";
+
 export interface WorkspaceCombinedRecoveryPlan {
   affectedPaths: string[];
   changedBytes: number;
   conflicts: WorkspaceRecoveryConflict[];
-  coverage: "ready" | "incomplete";
+  coverage: WorkspaceCombinedRecoveryCoverage;
   createdAt: string;
   entryId: string;
   expectedLeafId: string | null;
@@ -141,6 +146,7 @@ export interface WorkspaceCombinedRecoveryPlan {
   revision: string;
   sessionId: string;
   targetLeafId: string | null;
+  uncoveredPaths: WorkspaceRecoveryUncoveredPath[];
   undoOf?: string;
   workspaceId: string;
 }
@@ -455,13 +461,23 @@ export const parseWorkspaceRecoveryConflict = (value: unknown): WorkspaceRecover
 export const parseWorkspaceRecoveryConfirmedConflict = (value: unknown): WorkspaceRecoveryConfirmedConflict => {
   const raw = record(value, "Confirmed workspace recovery conflict"); return { fingerprint: text(raw.fingerprint, "confirmedConflict.fingerprint"), path: text(raw.path, "confirmedConflict.path") };
 };
+const parseWorkspaceRecoveryUncoveredPath = (value: unknown): WorkspaceRecoveryUncoveredPath => {
+  const raw = record(value, "Uncovered recovery path");
+  return {
+    path: text(raw.path, "uncoveredPath.path"),
+    source: oneOf(raw.source, ["shell", "external", "unknown"] as const, "uncoveredPath.source"),
+  };
+};
 export const parseWorkspaceCombinedRecoveryPlan = (value: unknown): WorkspaceCombinedRecoveryPlan => {
-  const raw = record(value, "Combined recovery plan"); if (!Array.isArray(raw.conflicts)) throw new WorkspaceRecoveryContractError("plan.conflicts must be an array");
+  const raw = record(value, "Combined recovery plan");
+  if (!Array.isArray(raw.conflicts)) throw new WorkspaceRecoveryContractError("plan.conflicts must be an array");
+  if (!Array.isArray(raw.uncoveredPaths)) throw new WorkspaceRecoveryContractError("plan.uncoveredPaths must be an array");
   return {
     affectedPaths: stringList(raw.affectedPaths, "plan.affectedPaths"), changedBytes: count(raw.changedBytes, "plan.changedBytes"), conflicts: raw.conflicts.map(parseWorkspaceRecoveryConflict),
-    coverage: oneOf(raw.coverage, ["ready", "incomplete"] as const, "plan.coverage"), createdAt: isoTimestamp(raw.createdAt, "plan.createdAt"), entryId: text(raw.entryId, "plan.entryId"),
+    coverage: oneOf(raw.coverage, ["ready", "partial", "none"] as const, "plan.coverage"), createdAt: isoTimestamp(raw.createdAt, "plan.createdAt"), entryId: text(raw.entryId, "plan.entryId"),
     expectedLeafId: raw.expectedLeafId === null ? null : text(raw.expectedLeafId, "plan.expectedLeafId"), id: text(raw.id, "plan.id"), removedEntryIds: stringList(raw.removedEntryIds, "plan.removedEntryIds"),
     revision: text(raw.revision, "plan.revision"), sessionId: text(raw.sessionId, "plan.sessionId"), targetLeafId: raw.targetLeafId === null ? null : text(raw.targetLeafId, "plan.targetLeafId"),
+    uncoveredPaths: raw.uncoveredPaths.map(parseWorkspaceRecoveryUncoveredPath),
     workspaceId: text(raw.workspaceId, "plan.workspaceId"), ...(optionalText(raw.undoOf, "plan.undoOf") ? { undoOf: raw.undoOf as string } : {}),
   };
 };

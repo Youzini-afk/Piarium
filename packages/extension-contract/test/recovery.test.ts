@@ -157,10 +157,12 @@ test("plans only affected paths and keeps conflict handling explicit", () => {
     revision: `sha256-${"a".repeat(64)}`,
     sessionId: "session-1",
     targetLeafId: "leaf-1",
+    uncoveredPaths: [],
     workspaceId: "workspace-1",
   });
   assert.deepEqual(plan.affectedPaths, ["src/a.ts"]);
   assert.equal(plan.conflicts[0]?.kind, "content-changed");
+  assert.deepEqual(plan.uncoveredPaths, []);
   assert.deepEqual(parseWorkspaceCombinedRecoveryApplyInput({
     confirmedConflicts: [{ fingerprint: plan.conflicts[0]?.fingerprint, path: "src/a.ts" }],
     conflictPolicy: "overwrite-confirmed",

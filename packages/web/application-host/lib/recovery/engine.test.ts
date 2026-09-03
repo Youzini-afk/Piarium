@@ -227,7 +227,7 @@ describe('affected-file workspace recovery journal', () => {
     });
     expect(prepared).toMatchObject({
       status: 'ready',
-      plan: { affectedPaths: ['note.txt'], conflicts: [], coverage: 'ready' },
+      plan: { affectedPaths: ['note.txt'], conflicts: [], coverage: 'ready', uncoveredPaths: [] },
     });
     const applied = await applyCombined(engine, {
       confirmedConflicts: [],
@@ -491,12 +491,53 @@ describe('affected-file workspace recovery journal', () => {
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
     });
-    expect(prepared.plan.coverage).toBe('incomplete');
+    expect(prepared.plan.coverage).toBe('none');
+    expect(prepared.plan.uncoveredPaths).toEqual([
+      { path: 'shell.txt', source: 'external' },
+    ]);
+    expect(prepared.plan.affectedPaths).toEqual([]);
     const applied = await engine.applyCombinedRecovery({
       confirmedConflicts: [],
       conflictPolicy: 'abort', expectedRevision: prepared.plan.revision, operationId: prepared.plan.id,
     });
     expect(applied).toMatchObject({ status: 'failed', failure: { code: 'checkpoint-incomplete' } });
+  });
+
+  it('reports partial coverage when a journaled write coexists with an unjournaled shell change', async () => {
+    const { engine, harness } = await createHarness();
+    const target = path.join(harness.workspaceRoot, 'note.txt');
+    const shellTarget = path.join(harness.workspaceRoot, 'shell.txt');
+    await fs.promises.writeFile(target, 'before');
+    await fs.promises.writeFile(shellTarget, 'shell-before');
+    await startTurn(engine, harness);
+    await recordWrite(engine, harness, 'after');
+    // Simulate a shell change that the watcher observes but the journal never captures.
+    await fs.promises.writeFile(shellTarget, 'changed by shell');
+    await settleTurn(engine, harness, {
+      mutationObserved: true,
+      observationComplete: true,
+      observedResourceIds: ['note.txt', 'shell.txt'],
+    });
+    const prepared = await prepareCombined(engine, {
+      entryId: 'user-1', sessionId: 'session-1', workspaceId: harness.identity.workspaceId,
+    });
+    expect(prepared.plan.coverage).toBe('partial');
+    expect(prepared.plan.affectedPaths).toEqual(['note.txt']);
+    expect(prepared.plan.uncoveredPaths).toEqual([
+      { path: 'shell.txt', source: 'external' },
+    ]);
+    // Apply should succeed — the journaled path is restorable, the shell path is left as-is.
+    const applied = await applyCombined(engine, {
+      confirmedConflicts: [],
+      conflictPolicy: 'abort', expectedRevision: prepared.plan.revision, operationId: prepared.plan.id,
+    });
+    expect(applied).toMatchObject({
+      status: 'ready',
+      operation: { conversationState: 'navigated', fileState: 'restored', state: 'complete' },
+    });
+    expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
+    // The shell path was not restored — it keeps the unjournaled change.
+    expect(await fs.promises.readFile(shellTarget, 'utf8')).toBe('changed by shell');
   });
 
   it('stores affected-path safety state and can undo a completed combined rollback', async () => {

@@ -1,6 +1,6 @@
 # Piarium native recovery journal
 
-Status: delivered; boundary revisions (per-path coverage, dirty buffers, barrier, lease) accepted 2026-09-02 and not yet implemented
+Status: delivered; R1 per-path coverage implemented 2026-09-03; remaining boundary revisions (dirty buffers, barrier, lease) accepted 2026-09-02 and not yet implemented
 
 Last updated: 2026-09-03
 
@@ -216,13 +216,22 @@ happy path — and the defensiveness concentrated at four boundaries where a fai
 refusal instead of partial success. The revisions below are accepted and ordered by delivery. None
 changes the per-file state machine, the catalog schema versioning rules, or the compensation model.
 
-### R1. Coverage is per path, not per plan
+### R1. Coverage is per path, not per plan (implemented 2026-09-03)
 
 The plan-level `coverage: 'ready' | 'incomplete'` binary is replaced by per-path coverage. A path with a
 contiguous journaled before/after chain is restorable. A path observed only by the watcher, or inferred
 from a `process` writer window, is reported in `uncoveredPaths` with its source (`shell`, `external`,
 `unknown`) and is not restored. The combined action remains available whenever at least one path is
 restorable; the direct-apply result and the chooser both list the uncovered paths.
+
+The `coverage` field is now `'ready' | 'partial' | 'none'`:
+- `ready` — all affected paths are restorable, no uncovered paths
+- `partial` — some paths are restorable, some are uncovered
+- `none` — no restorable paths (all changes were unjournaled)
+
+`applyLocatedOperation` rejects only when `coverage === 'none'`. The `PiRecoveryDialog` shows the
+uncovered paths list with source attribution and offers the combined action for `ready` and `partial`
+plans. The `piRecoveryPolicy.shouldOpenRecoveryDialog` opens the dialog for any non-`ready` plan.
 
 Rationale: the agent harness registers its `bash` tool as a `process` writer for every command
 ([agent-harness.md](agent-harness.md) §5.2). Under the binary rule nearly every turn that runs a

@@ -15,6 +15,7 @@ const plan = (input: Partial<WorkspaceCombinedRecoveryPlan> = {}): WorkspaceComb
   revision: `sha256-${'a'.repeat(64)}`,
   sessionId: 'session-1',
   targetLeafId: 'leaf-1',
+  uncoveredPaths: [],
   workspaceId: 'workspace-1',
   ...input,
 });
@@ -29,6 +30,14 @@ describe('Pi combined recovery policy', () => {
     expect(shouldOpenRecoveryDialog('both', plan({
       conflicts: [{ fingerprint: 'sha256-conflict-1', kind: 'content-changed', message: 'changed', path: 'note.txt' }],
     }))).toBe(true);
-    expect(shouldOpenRecoveryDialog('both', plan({ coverage: 'incomplete' }))).toBe(true);
+    expect(shouldOpenRecoveryDialog('both', plan({
+      coverage: 'partial',
+      uncoveredPaths: [{ path: 'shell.txt', source: 'shell' }],
+    }))).toBe(true);
+    expect(shouldOpenRecoveryDialog('both', plan({
+      coverage: 'none',
+      affectedPaths: [],
+      uncoveredPaths: [{ path: 'shell.txt', source: 'shell' }],
+    }))).toBe(true);
   });
 });
