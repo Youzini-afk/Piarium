@@ -146,7 +146,7 @@ import {
   createKillShellTool,
   createDiagnosticsTool,
 } from "./harness/output-tools.js";
-import { selectHarnessTools } from "./harness/select-tools.js";
+import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
@@ -2777,12 +2777,18 @@ export class SessionHost {
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
+      // Check if pi-web-access is loaded and enabled → yield webfetch/websearch
+      const yieldedTools = computeYieldedTools(this.listPackages());
+      // Check if models.reader is configured
+      const readerModelConfigured = harnessSettings.models?.reader !== undefined;
       customTools.push(...selectHarnessTools(harnessSettings, {
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
         cwd,
         workspaceMutationJournal: workspaceMutationJournal ?? undefined,
         isOpenAIFamily,
+        yieldedTools,
+        readerModelConfigured,
       }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
