@@ -13,6 +13,15 @@ import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
+import {
+  createDispatchTool,
+  createThreadsTool,
+  createWaitTool,
+  createSendTool,
+  createReadThreadTool,
+  createMergeTool,
+  createKillTool,
+} from "./thread-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
@@ -84,6 +93,28 @@ export function selectHarnessTools(
   }
   if (tools.recall !== false) {
     result.push(createRecallTool(bridge, sessionId));
+  }
+  // Phase 3 thread tools
+  if (tools.dispatch !== false) {
+    result.push(createDispatchTool(bridge, sessionId));
+  }
+  if (tools.threads !== false) {
+    result.push(createThreadsTool(bridge, sessionId));
+  }
+  if (tools.wait !== false) {
+    result.push(createWaitTool(bridge, sessionId));
+  }
+  if (tools.send !== false) {
+    result.push(createSendTool(bridge, sessionId));
+  }
+  if (tools.read_thread !== false) {
+    result.push(createReadThreadTool(bridge, sessionId));
+  }
+  if (tools.merge !== false) {
+    result.push(createMergeTool(bridge, sessionId));
+  }
+  if (tools.kill !== false) {
+    result.push(createKillTool(bridge, sessionId));
   }
 
   return result;

@@ -10,6 +10,7 @@ import type { Zone2Material } from "./zone2.js";
 import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
+import type { ThreadRegistry } from "./thread-registry.js";
 
 export interface HarnessSessionContext {
   sessionId: string;
@@ -41,6 +42,12 @@ export interface HarnessServiceHost {
   todoSettings: TodoToolSettings;
   recallDepsProvider: ((sessionId: string) => Promise<RecallToolDeps>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
+  // Phase 3: Thread registry
+  threadRegistry: ThreadRegistry | null;
+  threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string }) => Promise<{ sessionId: string }>) | null;
+  threadKillSession: ((threadId: string) => Promise<void>) | null;
+  threadApplyWorktreeDiff: ((threadId: string) => Promise<{ merged: number; conflicts: string[] }>) | null;
+  threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string): void;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
@@ -77,6 +84,12 @@ export interface HarnessServiceHostOptions {
   todoSettings?: TodoToolSettings;
   recallDepsProvider?: (sessionId: string) => Promise<RecallToolDeps>;
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
+  // Phase 3 options
+  threadRegistry?: ThreadRegistry;
+  threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string }) => Promise<{ sessionId: string }>;
+  threadKillSession?: (threadId: string) => Promise<void>;
+  threadApplyWorktreeDiff?: (threadId: string) => Promise<{ merged: number; conflicts: string[] }>;
+  threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -100,6 +113,12 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const todoSettings = options.todoSettings ?? { confirmBelow: 0.6 };
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
+  // Phase 3
+  const threadRegistry = options.threadRegistry ?? null;
+  const threadSpawnSession = options.threadSpawnSession ?? null;
+  const threadKillSession = options.threadKillSession ?? null;
+  const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
+  const threadSendToSession = options.threadSendToSession ?? null;
 
   const sessions = new Map<string, SessionEntry>();
 
@@ -182,6 +201,11 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     todoSettings,
     recallDepsProvider,
     todoDepsProvider,
+    threadRegistry,
+    threadSpawnSession,
+    threadKillSession,
+    threadApplyWorktreeDiff,
+    threadSendToSession,
     registerSession,
     dropSession,
     getShellSupervisor,

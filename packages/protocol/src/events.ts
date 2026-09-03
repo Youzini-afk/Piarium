@@ -97,6 +97,24 @@ export interface HostEventMap {
   };
   "workspace.mutation.request": WorkspaceMutationRequest;
   "harness.request": HarnessRequestData;
+  "harness.thread.changed": {
+    parentSessionId: string;
+    thread: {
+      id: string;
+      status: import("./harness-threads.js").ThreadStatus;
+      brief: string;
+      role: string | null;
+      steps: number;
+      lastActivityAt: string;
+      flags: { workerLost: boolean; stalled: boolean; looping: boolean };
+      waitingFor: { kind: "user" | "permission" | "thread"; text: string } | null;
+    };
+  };
+  "harness.thread.done": {
+    parentSessionId: string;
+    threadId: string;
+    report: import("./harness-threads.js").ThreadReport;
+  };
 }
 
 export const HOST_EVENTS = [
@@ -106,6 +124,8 @@ export const HOST_EVENTS = [
   "extension.ui.request",
   "extension.state",
   "harness.request",
+  "harness.thread.changed",
+  "harness.thread.done",
   "host.error",
   "host.log",
   "host.ready",

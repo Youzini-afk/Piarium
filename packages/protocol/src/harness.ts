@@ -8,6 +8,23 @@
  * worker holding host credentials.
  */
 
+import type {
+  ThreadListParams,
+  ThreadListResult,
+  ThreadWaitParams,
+  ThreadWaitResult,
+  ThreadSendParams,
+  ThreadSendResult,
+  ThreadReadParams,
+  ThreadReadResult,
+  ThreadMergeParams,
+  ThreadMergeResult,
+  ThreadKillParams,
+  ThreadKillResult,
+  ThreadDispatchParams,
+  ThreadDispatchResult,
+} from "./harness-threads.js";
+
 export interface OutputSlice {
   text: string;
   offset: number;
@@ -202,6 +219,14 @@ export interface HarnessServiceMap {
   "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
+  // Phase 3: Thread operations
+  "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
+  "thread.list": { params: ThreadListParams; result: ThreadListResult };
+  "thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult };
+  "thread.send": { params: ThreadSendParams; result: ThreadSendResult };
+  "thread.read": { params: ThreadReadParams; result: ThreadReadResult };
+  "thread.merge": { params: ThreadMergeParams; result: ThreadMergeResult };
+  "thread.kill": { params: ThreadKillParams; result: ThreadKillResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -225,6 +250,13 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "compaction.after",
   "todo.upsert",
   "recall.search",
+  "thread.dispatch",
+  "thread.list",
+  "thread.wait",
+  "thread.send",
+  "thread.read",
+  "thread.merge",
+  "thread.kill",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

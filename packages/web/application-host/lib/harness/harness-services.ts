@@ -26,6 +26,7 @@ import { assembleZone2Content } from "./zone2.js";
 import { handleBeforeCompact, assembleCompactionSummary } from "./compaction.js";
 import { executeTodoTool, DEFAULT_TODO_SETTINGS } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
+import { formatWaitResult } from "./worker-runtime.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -210,6 +211,212 @@ export function createRecallSearchService(host: HarnessServiceHost): HarnessServ
   };
 }
 
+// ── Phase 3 thread service factories ───────────────────────────────
+
+export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry || !host.threadSpawnSession) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const record = await host.threadRegistry.createThread({
+        parentSessionId: params.parentSessionId,
+        brief: params.task,
+        role: params.role,
+        kind: "implementation",
+        createdBy: "agent",
+        autoRun: true,
+        worktree: "isolated",
+        tools: [],
+        permissions: {},
+        ...(params.scope ? { scope: params.scope } : {}),
+      });
+      // Spawn the child session
+      const { sessionId } = await host.threadSpawnSession({
+        parentSessionId: params.parentSessionId,
+        brief: params.task,
+        role: params.role,
+        kind: "implementation",
+        createdBy: "agent",
+        autoRun: true,
+        worktree: "isolated",
+        tools: [],
+        permissions: {},
+        threadId: record.id,
+        ...(params.scope ? { scope: params.scope } : {}),
+      });
+      await host.threadRegistry.setSessionId(params.parentSessionId, record.id, sessionId);
+      return {
+        text: `dispatched ${record.id} (${params.role})`,
+        threadId: record.id,
+      };
+    },
+  };
+}
+
+export function createThreadListService(host: HarnessServiceHost): HarnessService<"thread.list"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const threads = await host.threadRegistry.listThreads(params.parentSessionId);
+      return {
+        threads: threads.map((t) => ({
+          id: t.id,
+          status: t.status,
+          brief: t.brief,
+          role: t.role,
+          steps: t.steps,
+          lastActivityAt: t.lastActivityAt,
+          flags: t.flags,
+          waitingFor: t.waitingFor,
+        })),
+      };
+    },
+  };
+}
+
+export function createThreadWaitService(host: HarnessServiceHost): HarnessService<"thread.wait"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const allThreads = await host.threadRegistry.listThreads(params.parentSessionId, true);
+      const targetIds = params.ids ?? allThreads.map((t) => t.id);
+      const done = allThreads.filter((t) => targetIds.includes(t.id) && (t.status === "done" || t.status === "failed" || t.status === "cancelled" || t.status === "merged"));
+      const running = allThreads.filter((t) => targetIds.includes(t.id) && t.status === "running");
+      const queued = allThreads.filter((t) => targetIds.includes(t.id) && t.status === "queued");
+      // Format result similar to worker-runtime's formatWaitResult
+      const lines: string[] = [];
+      lines.push(`${done.length} done · ${running.length} running · ${queued.length} queued`);
+      for (const t of done) {
+        const conclusion = t.report?.conclusion.split("\n")[0] ?? "completed";
+        const files = t.report?.changedFiles.length ?? 0;
+        const confidence = t.report?.confidence ?? 0;
+        lines.push(`\u2714 ${t.id} (${t.role ?? "unknown"}) \u2014 ${conclusion} \u00b7 files: ${files} \u00b7 confidence ${confidence}`);
+      }
+      for (const t of running) {
+        lines.push(`\u2026 ${t.id} (${t.role ?? "unknown"}) \u00b7 ${t.steps} steps`);
+      }
+      for (const t of queued) {
+        lines.push(`\u23f3 ${t.id} (${t.role ?? "unknown"}) \u00b7 queued`);
+      }
+      return {
+        text: lines.join("\n"),
+        done: done.length,
+        running: running.length,
+        queued: queued.length,
+      };
+    },
+  };
+}
+
+export function createThreadSendService(host: HarnessServiceHost): HarnessService<"thread.send"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry || !host.threadSendToSession) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      if (!thread) {
+        throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      }
+      await host.threadSendToSession(thread.sessionId, params.message, params.from);
+      return { accepted: true };
+    },
+  };
+}
+
+export function createThreadReadService(host: HarnessServiceHost): HarnessService<"thread.read"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      if (!thread) {
+        throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      }
+      const lines: string[] = [];
+      lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) \u2014 ${thread.status}`);
+      lines.push(`Brief: ${thread.brief}`);
+      lines.push(`Steps: ${thread.steps} \u00b7 Last activity: ${thread.lastActivityAt}`);
+      if (thread.report) {
+        lines.push("");
+        lines.push("Report:");
+        lines.push(`  Conclusion: ${thread.report.conclusion}`);
+        lines.push(`  Changed files: ${thread.report.changedFiles.join(", ") || "(none)"}`);
+        lines.push(`  Unresolved: ${thread.report.unresolved.join(", ") || "(none)"}`);
+        lines.push(`  Confidence: ${thread.report.confidence}`);
+      }
+      return {
+        text: lines.join("\n"),
+        report: thread.report,
+      };
+    },
+  };
+}
+
+export function createThreadMergeService(host: HarnessServiceHost): HarnessService<"thread.merge"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry || !host.threadApplyWorktreeDiff) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      if (!thread) {
+        throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      }
+      if (thread.status !== "done") {
+        return {
+          text: `thread ${params.threadId} is not done (status: ${thread.status})`,
+          merged: 0,
+          conflicts: [],
+        };
+      }
+      const result = await host.threadApplyWorktreeDiff(params.threadId);
+      if (result.conflicts.length > 0) {
+        return {
+          text: `merge has conflicts in ${result.conflicts.length} files (markers left in place):\n${result.conflicts.join("\n")}\nResolve them with edit; no further merge step is needed.`,
+          merged: 0,
+          conflicts: result.conflicts,
+        };
+      }
+      await host.threadRegistry.mergeThread(params.parentSessionId, params.threadId);
+      return {
+        text: `merged ${result.merged} files`,
+        merged: result.merged,
+        conflicts: [],
+      };
+    },
+  };
+}
+
+export function createThreadKillService(host: HarnessServiceHost): HarnessService<"thread.kill"> {
+  return {
+    handle: async (params, _ctx: HarnessServiceContext) => {
+      if (!host.threadRegistry) {
+        throw new HarnessServiceError("unavailable", "Thread registry not configured");
+      }
+      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      if (!thread) {
+        return { text: `unknown thread: ${params.threadId}` };
+      }
+      if (thread.status === "queued") {
+        await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
+        return { text: `killed ${params.threadId} (was queued)` };
+      }
+      if (host.threadKillSession) {
+        await host.threadKillSession(params.threadId);
+      }
+      await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
+      return { text: `killed ${params.threadId}` };
+    },
+  };
+}
+
 export function registerHarnessServices(
   router: { register: <M extends keyof HarnessServiceMap>(method: M, service: HarnessService<M>) => void },
   host: HarnessServiceHost,
@@ -261,6 +468,22 @@ export function registerHarnessServices(
   }
   if (host.recallDepsProvider) {
     router.register("recall.search", createRecallSearchService(host));
+  }
+  // Phase 3 thread services — registered only when thread registry is available
+  if (host.threadRegistry && host.threadSpawnSession) {
+    router.register("thread.dispatch", createThreadDispatchService(host));
+  }
+  if (host.threadRegistry) {
+    router.register("thread.list", createThreadListService(host));
+    router.register("thread.wait", createThreadWaitService(host));
+    router.register("thread.read", createThreadReadService(host));
+    router.register("thread.kill", createThreadKillService(host));
+  }
+  if (host.threadRegistry && host.threadSendToSession) {
+    router.register("thread.send", createThreadSendService(host));
+  }
+  if (host.threadRegistry && host.threadApplyWorktreeDiff) {
+    router.register("thread.merge", createThreadMergeService(host));
   }
 }
 
