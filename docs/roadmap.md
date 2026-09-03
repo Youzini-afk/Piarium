@@ -685,15 +685,31 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
   **Not wired** (TODO).
 
-### Phase 3b: Native permissions
+### Phase 3b: Native permissions (wired 2026-09-03)
 
 - **3b.1 Permission gate**: Policy file with mode/rules, high-risk
   patterns always ask, top-down rule evaluation
-  (`lib/harness/permission-gate.ts`). 22 tests.
+  (`lib/harness/permission-gate.ts`). 22 tests. **Wired**: pure types
+  and evaluation moved to `@piarium/protocol/permission-gate.ts` (shared
+  between pi-host and web host). `permission-gate-extension.ts` in
+  pi-host hooks `tool_call`, evaluates policy, blocks ask/deny with
+  `{ block: true, reason }`. Registered in `session-host.ts` with policy
+  built from `harnessSettings.dispatch.askBefore`. e2e: 12 tests.
 - **3b.2 Smart mode**: Model-judged permission decisions, high-risk
-  bypass (`lib/harness/smart-mode.ts`). 10 tests.
+  bypass (`lib/harness/smart-mode.ts`). 10 tests. **Not wired** (TODO:
+  wire permissionJudge model slot).
 - **3b.3 Stop provisioning**: Removed `@gotgenes/pi-permission-system`
   from manifest (revision 2→3). Protocol tests 3/3.
 
-**Total**: 288 tests across 25 test files, all passing. Type-check clean.
-Decisions D-019 through D-021 recorded in agent-harness-decisions.md.
+**Phase 3b wiring summary**: Permission gate extension registered in
+every session. Policy resolved from HarnessSettings at session creation
+(mode hardcoded to "normal" — TODO: resolve from settings). Read-only
+tools (read, grep, threads, send, read_thread, etc.) always allowed.
+Edit tools (edit, write, apply_patch, merge) ask in normal mode, allow
+in accept-edits. Shell tools (bash, write_to_process) always ask (except
+bypass). High-risk bash patterns (rm, sudo, git push, etc.) always ask.
+94/94 pi-host harness tests pass, 32/32 web permission tests pass.
+
+**Total**: 94 pi-host harness tests + 94 web harness/knowledge tests =
+188 tests, all passing. Type-check clean.
+Decisions D-019 through D-024 recorded in agent-harness-decisions.md.
