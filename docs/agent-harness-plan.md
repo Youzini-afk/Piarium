@@ -871,56 +871,128 @@ export const explore = async (input: { question: string; paths?: string[]; limit
   邻居列表；文本 `related to ${anchor} (${hops} hops):\n` + `- ${path}[:${symbol}] · rank ${score}`。
 - 测试：与直接 TQL 一致。
 
-### 3.4 原生子会话 worker 运行时
+### 3.4 线程运行时（原生子会话）
 
-- 设计：agent-harness.md 第 9.2.1、9.2.2 节。范例：broker 现有的 per-session worker 生命周期（`runtime-broker.ts`）。
-- broker：
+- 设计：agent-harness.md 第 9.2.1、9.2.2、**9.3** 节。范例：broker 现有的 per-session worker 生命周期（`runtime-broker.ts`）；
+  pi-host 已有的 child session 关系持久化（Pi header，见 `session-host` 的 parent sessions 测试）；恢复子系统对 worker 退出的
+  处理（`pi-writer-tracker.ts` / turn binding 的 incomplete 语义）。
+- **线程注册表（host 持久化，唯一真相）**：`PIARIUM_DATA_DIR/threads/<hostId>/<parentSessionId>.json` 或知识库 `session` 节点
+  （2.1 就位后优先后者，前者作为无知识库时的退化）。
 
 ```ts
-spawnChild(input: { parentSessionId: string; role: RoleId; task: string; scope?: string[]; worktree: { mode: 'shared' | 'isolated' }; model: { providerId; modelId }; tools: string[]; permissions: PermissionPolicy; systemPromptFragment: string; budget: { maxTurns: number; maxTokens: number } }): Promise<{ childId: string; sessionId: string }>;
-// 事件（protocol events.ts 新增）："harness.child.progress": { parentSessionId; childId; turnIndex; lastToolAt; summary? }；"harness.child.done": { parentSessionId; childId; result: ChildResult }；"harness.child.failed": { parentSessionId; childId; error }
-// ChildResult = { changedFiles: string[]; conclusion: string; unresolved: string[]; confidence: number; traceHandle: string; worktree?: { path; base: string /* 分出时的父 HEAD 或工作树快照 id */ } }
+interface ThreadRecord {
+  id: string; parentSessionId: string; sessionId: string /* 线程自己的 Pi 会话 */; forkPoint: { entryId: string } | null;
+  brief: string; role: RoleId | null /* null = 人开的线程 */; createdBy: 'user' | 'agent'; kind: 'discussion' | 'implementation';
+  worktree: { path: string; base: string } | null; status: 'queued' | 'running' | 'idle' | 'waiting-for-input' | 'done' | 'failed' | 'cancelled' | 'merged' | 'archived';
+  flags: { workerLost: boolean; stalled: boolean; looping: boolean }; waitingFor: { kind: 'user' | 'permission' | 'thread'; text: string } | null;
+  lastActivityAt: string; steps: number; tokens: { input: number; output: number; cacheRead: number }; costUsd: number | null;
+  lastToolCall: { name: string; at: string } | null; diffStats: { files: number; insertions: number; deletions: number } | null;
+  report: ThreadReport | null; exitReason: string | null; createdAt: string; updatedAt: string;
+}
+// ThreadReport = { conclusion: string; changedFiles: string[]; unresolved: string[]; deviations: string[] /* 相对简报的偏离，来自线程 decisions 块 */; confidence: number; traceHandle: string; blocksSnapshot: Record<string, string> }
 ```
 
-  子会话的 system + tools 前缀在同模型时与父逐字节相同（复用父的 Zone 0 组装 + 角色片段追加在 system **末尾**）；深度 1（子
-  会话不注册 `dispatch`）；父会话关闭 → 全部子 `kill`。
-- worktree（`isolated`）：`git worktree add <PIARIUM_DATA_DIR>/worktrees/<childId> --detach <父 HEAD>`，再把父工作树的
-  未提交改动以 patch 应用到子（`git diff` + `git apply`），使子从父的**工作树状态**出发；子的会话 cwd 指向该目录。
-- UI：Fleet 注册表新增 `harness-child` provider（卡片：角色、状态、步数、最后活动、`kill`）；父时间线折叠卡片链接到子会话。
-- 测试：生命周期；级联终止；同模型前缀断言；worktree 从工作树状态分出（父有未提交改动时子能看到）。
-- 判断要点：为什么原生而不是 `pi-subagents`——核心能力不依赖第三方，且 broker 本来就有"每会话一个 worker"这个原语，子
-  会话只是加了父子绑定、角色化的 Zone 0 和结果投影。最可能撞到的：(1) 子的 Zone 0 要与父逐字节相同才能吃缓存，但角色片段
-  必须追加——放在 system 末尾，前面部分保持父的原样；如果 Pi 的系统提示组装让"原样复用父的前缀"做不到，接受同模型子 agent
-  首轮全价，记录下来，不要为此改 Pi 的组装逻辑；(2) worktree 从父的**工作树状态**分出（未提交改动也带过去），`git worktree
-  add --detach` 后 `git apply` 父的 diff，二进制文件与未跟踪文件要单独处理（复制），这里容易漏；(3) 恢复日志按 worktree 记录，
-  子的编辑不应出现在父的回合日志里，`merge` 才是父的变更集。深度 1、父结束子终止、后台子只用预批准工具这三条是边界，
-  其余（budget 数字、Fleet 卡片样式）自己定。
+- broker / host：
 
-### 3.5 `dispatch` / `wait` / `merge` / `kill`
+```ts
+createThread(input: { parentSessionId; brief; role?; kind; createdBy; forkPoint?; carryBlocks: boolean /* 默认 true */; scope?: string[]; worktree: 'none' | 'shared' | 'isolated'; model?; tools: string[]; permissions: PermissionPolicy; systemPromptFragment?: string; autoRun: boolean; hidden?: boolean /* harness 自己开的线程（review 传感器、记忆 agent 不用此路径），不进父的 threads 列表 */ }): Promise<ThreadRecord>;
+sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread(threadId) /* worker-lost 后在同一会话与 worktree 上重启 */; cancelThread(threadId, { keepWorktree = true }); archiveThread(threadId); convertThread(threadId, { kind: 'implementation' }) /* 讨论线转实现线：挂 worktree、开写工具，对话延续 */
+// 事件（protocol events.ts 新增，一律只带状态不带正文）："harness.thread.changed": { parentSessionId; thread: ThreadRecord 的状态子集 }；"harness.thread.done": { parentSessionId; threadId; report: ThreadReport }
+```
 
-- 设计：agent-harness.md 第 5.7、9.2.5b、9.2.6 节。
+  线程的 system + tools 前缀在同模型时与父逐字节相同（复用父的 Zone 0 组装 + 角色片段追加在 system **末尾**）；开线时带走
+  父会话的记忆块快照（标注"这是快照，父可能已前进"）+ 简报，不带父对话。线程内也注册 `dispatch`（嵌套不限深）。
+- **生命周期解耦**：父回合结束、父 worker 退出，线程照跑。线程 worker 退出 → `flags.workerLost = true`，状态不变；host 用现有
+  的会话恢复路径在同一会话文件、同一 worktree 上重启 worker，线程 id 不变，Zone 2 给它一行"你被中断过，上一条工具结果可能
+  缺失"（沿用恢复子系统的 incomplete 语义）。用户删除父会话 → 运行中的线程 `cancelled`（worktree 保留）并归档。
+- **活性传感器（host 从线程事件流推导）**：`stalled` = 无事件 ≥ `harness.threads.stalledAfterMs`（默认按 3.5 的 TTL 表推，
+  未知 300 s）；`looping` = 连续 ≥ `harness.threads.loopWindow`（默认 6）次工具调用的 (name, 参数哈希) 完全相同；每次事件更新
+  `lastActivityAt` / `steps` / `tokens` / `lastToolCall`。线程调用权限询问或 `ask` → `waiting-for-input` + `waitingFor`。
+- **完成幂等**：线程 agent_settled 且无未决 `ask` → 生成 `ThreadReport`（`deviations` 直接取 decisions 块中标记为偏离的条目），与
+  记忆块快照、diffStats 一次事务写入注册表，发 `harness.thread.done`；之后任何 `wait` / `read_thread(report)` 返回同一份。
+- **进入父的 Zone 2**：2.2 的 Zone 2 组装新增 `threads` 段——每条活跃线程一行（状态 · 一句进度 · 最近活动），完成的线程一行
+  "完成：结论 · N 文件 · 偏离：…"，超过 `harness.threads.zone2Max`（默认 6）条折为"另有 K 条"。
+- worktree（`isolated`）：`git worktree add <PIARIUM_DATA_DIR>/worktrees/<threadId> --detach <父 HEAD>`，再把父工作树的
+  未提交改动以 patch 应用到线程（`git diff` + `git apply`；二进制与未跟踪文件复制），使线程从父的**工作树状态**出发；线程的
+  会话 cwd 指向该目录。**worktree 独立于线程寿命**：failed / cancelled / worker-lost 都不删。
+- **回收策略**（`harness.threads.*`）：merge 成功 → 删工作目录、保留分支引用 `keepBranchDays`（默认 7）；idle ≥ `archiveAfterDays`
+  （默认 14）→ 面板提示归档，归档删 worktree 不删会话；对话正文永不自动删除；报告与记忆块进知识库 `session` 节点并加
+  `spawned_from` 边（2.1 就位后）。
+- UI：Fleet 注册表新增 `harness-thread` provider（卡片：角色、状态、步数、最后活动、花费、`kill`）；父时间线折叠卡片链接到
+  线程会话；侧栏与讨论线见 3.10。
+- 测试：状态机每条迁移；worker 丢失后 `resumeThread` 在同一会话继续且 id 不变；父 worker 退出线程仍在跑；`stalled` /
+  `looping` 判定；`waiting-for-input` 由权限询问与 `ask` 触发；报告幂等（两次读取字节相同）；删除父会话 → cancelled + worktree
+  仍在；同模型前缀断言；worktree 从工作树状态分出（父有未提交改动时线程能看到）；Zone 2 `threads` 段折叠。
+- 判断要点：为什么原生而不是 `pi-subagents`——核心能力不依赖第三方，且 broker 本来就有"每会话一个 worker"这个原语，线程
+  只是加了父子绑定、角色化的 Zone 0、host 持有的状态和结果投影。**边界**：状态与游标归 host 而非任何一方的上下文；`dispatch`
+  永不阻塞；worker 丢失可恢复且 worktree 不删；失败分类不合并成"没返回"；后台线程只用预批准工具。最可能撞到的：(1) 线程的
+  Zone 0 要与父逐字节相同才能吃缓存，但角色片段必须追加——放在 system 末尾；如果 Pi 的系统提示组装让"原样复用父的前缀"
+  做不到，接受同模型线程首轮全价，记录下来，不要为此改 Pi 的组装逻辑；(2) worktree 从父的工作树状态分出，二进制与未跟踪
+  文件要单独处理，这里容易漏；(3) 恢复日志按 worktree 记录，线程的编辑不应出现在父的回合日志里，`merge` 才是父的变更集；
+  (4) 恢复 worker-lost 的线程时上一条未完成的工具调用可能已经产生副作用（写了一半文件、命令跑完了），不要试图重放，只在
+  Zone 2 说明；(5) `looping` 的阈值是传感器参数，调得保守一点（宁可漏报），误报会让父 agent 乱杀线程。budget 数字、Fleet
+  卡片样式、注册表存储位置自己定。
+
+### 3.5 `dispatch` / `threads` / `wait` / `send` / `read_thread` / `merge` / `kill`
+
+- 设计：agent-harness.md 第 5.7、8.7、9.2.5b、9.2.6、9.3.6、9.3.7 节。
+- **观察游标（host）**：`threadViewCursors[(observerSessionId, threadId)] = { eventSeq; status; progressVersion; decisionsCount;
+  diffStats; viewedAt }`。`threads` / `wait` / `read_thread(steps)` 读后推进游标；`session_compact` 钩子把压缩事件报给 host
+  （经 1.1 的通道，`harness.compacted` 方法）→ host 清空该会话的全部游标；用户面板是另一个观察者。
 - pi-host：
-  - `dispatch(role, task, { scope? })`：角色未注册 → isError `unknown role`；并发已满（默认 12，`harness.dispatch.concurrency`）
-    → 入队，返回 `queued as ${id}`；否则 `dispatched ${id} (${role})`。
-  - `wait(ids?, timeout_ms?)`：默认超时 = `ttlTable[providerId]`（Anthropic 300 s → 240 s；Anthropic 1 h 缓存 → 3300 s；OpenAI
-    → 240 s；Gemini → 240 s；未知 → 240 s；表可配置），任一完成或超时返回：
+  - `dispatch(role, task, { scope? })`：`createThread({ role, kind: 'implementation', createdBy: 'agent', autoRun: true, … })`。角色
+    未注册 → isError `unknown role`；并发已满（默认 12，`harness.dispatch.concurrency`）→ 入队，返回 `queued as ${id}`；否则
+    `dispatched ${id} (${role})`。立即返回，永不阻塞。
+  - `threads(ids?, { full? })`：非阻塞。每条线程一行头 + 增量：
 
 ```text
-${done.length} done · ${running.length} running · ${queued.length} queued
-${每个 done：`✔ ${id} (${role}) — ${conclusion first line} · files: ${changedFiles.length} · confidence ${confidence} · trace get_output("${traceHandle}")`}
-${每个 running：`… ${id} (${role}) · ${turns} steps · last activity ${ago}${stale ? ' ⚠ no activity for ' + minutes + ' min' : ''}`}
+${n} threads · ${changed} changed since last view (${ago})
+${每条：`${icon} ${id} (${role ?? 'user thread'}) ${status}${statusChanged ? ` (was ${prev})` : ''} · +${steps} steps · +${calls} tool calls (${topTools}) · last activity ${ago}`}
+${progress 块新增行，每行前缀 '  · '}
+${decisions 新增条目，每行前缀 '  ! '}
+${waitingFor ? `  ? waiting for ${kind}: ${text}` : ''}
+${diffStats 变化 ? `  Δ ${files} files (+${ins} −${del})` : ''}
 ```
 
-    `stale` = 无工具活动 ≥ 5 min（`harness.dispatch.staleAfterMs`）。
-  - `merge(child_id)`：host 在子 worktree 执行 `git diff <base>` 得到 patch，在父工作树 `git apply --3way`；成功 → 删除
-    worktree，返回 `merged ${n} files: …`；冲突 → 保留 worktree，返回 `merge has conflicts in ${k} files (markers left in place):\n${paths}\nResolve them with edit; no further merge step is needed.`；每个受影响路径走 mutation boundary（before / after）。
-  - `kill(child_id)`。
-- 测试：TTL 表；stale 标记；`merge` 干净 / 冲突；排队与出队；父关闭级联。
+    无变化的线程只有一行 `${id} — no change since last view (${ago}); still ${status}, last activity ${ago2}`。全部无变化时首行
+    改为 `no changes since last view (${ago}); use wait to block instead of polling`。`full: true` 忽略游标。
+  - `wait(ids?, timeout_ms?)`：与 `threads` 相同的表，阻塞到任一线程状态变化（含 `waiting-for-input`、`stalled` / `looping` 翻转、
+    `done` / `failed` / `worker-lost`）或超时；**超时是正常返回**，首行 `timed out after ${s}s — ${summary}`，不是 isError。
+    默认超时 = `ttlTable[providerId]`（Anthropic 300 s → 240 s；Anthropic 1 h 缓存 → 3300 s；OpenAI → 240 s；Gemini → 240 s；
+    未知 → 240 s；表可配置）。`done` 的线程附完整报告：
+
+```text
+✔ ${id} (${role}) — ${conclusion}
+  files: ${changedFiles.join(', ')} · confidence ${confidence}
+  deviations from brief: ${deviations.length ? deviations.join('; ') : 'none'}
+  unresolved: ${unresolved.join('; ') || 'none'} · notes: read_thread("${id}") · trace: read_thread("${id}", "steps")
+```
+
+  - `read_thread(id, what = 'blocks' | 'report' | 'steps', { since? })`：`blocks` 返回 progress / decisions / errors 块全文（这是
+    默认，够回答"它在干什么、决定了什么、卡在哪"）；`report` 返回 `ThreadReport`；`steps` 返回自游标以来的转录切片，引头
+    `[steps ${from}–${to} shown earlier; showing ${to+1}–${now}]`，全部入句柄。
+  - `send(id, message)`：`sendToThread(id, message, { from: 'parent-agent' })`，线程侧以数据标记包裹并注明来自父 agent；
+    唤醒 idle / waiting-for-input。返回 `sent to ${id} (${status})`。
+  - `merge(id)`：host 在线程 worktree 执行 `git diff <base>` 得到 patch，在父工作树 `git apply --3way`；成功 → 状态 `merged`、
+    按回收策略处理 worktree，返回 `merged ${n} files: …`；冲突 → 保留 worktree，返回 `merge has conflicts in ${k} files (markers
+    left in place):\n${paths}\nResolve them with edit; no further merge step is needed.`；每个受影响路径走 mutation boundary
+    （before / after）。Git 面板"合并这条线"调同一个 host 服务。
+  - `kill(id, { keepWorktree = true })`：`cancelThread`。
+  - 线程侧工具：`ask(question)` → 状态 `waiting-for-input`、`waitingFor = { kind: 'user', text }`，工具返回后线程回合结束等待；
+    报告不是工具，由 3.4 在 settled 时自动生成。
+  - `promptGuidelines`（`dispatch`）：`["Dispatch is asynchronous. Use wait to block until something changes; threads is a quick
+    non-blocking glance — do not call it in a loop.", "Teammates report deviations from your brief; trust the report over your
+    assumptions.", "read_thread shows a teammate's notes first; only read steps when the notes are not enough."]`。
+- 测试：TTL 表；增量视图（两次 `threads` 之间有 / 无变化的文本）；`wait` 超时非错误；`wait` 被 `waiting-for-input` 唤醒；游标在
+  `harness.compacted` 后重置为全量；`send` 唤醒 idle 线程；`read_thread` 三档；`merge` 干净 / 冲突；排队与出队；`kill` 保留
+  worktree；观察类调用计入计数器。
 - 判断要点：`wait` 的超时按缓存 TTL 推导是为了让父在缓存冷掉前醒一次——如果 pi-ai 或 provider 元数据里拿不到 TTL，用
-  240 s 保守值即可，不要为此加配置项让用户填。`merge` 用 `git apply --3way` 而不是 `git merge`，是因为父的工作树有未提交
-  改动且我们不想在用户历史里制造提交；如果 `--3way` 在某些情况（重命名、二进制）下表现不好，可以退回到"逐文件三方合并 +
-  未跟踪文件复制"的自实现，只要冲突时标记留在文件里、父能用 `edit` 解决这个体验不变。并发 12 是默认，排队而非拒绝是边界。
-  子 agent 结果 DTO 里的 `confidence` 由子自报，父可以不信——不要为它建校准机制。
+  240 s 保守值即可，不要为此加配置项让用户填。**边界**：`wait` 超时是正常结果；观察类工具默认增量、游标归 host、压缩重置；
+  `read_thread` 默认是块不是转录；`kill` 默认保留 worktree；并发 12 是默认，排队而非拒绝。`merge` 用 `git apply --3way` 而不是
+  `git merge`，是因为父的工作树有未提交改动且我们不想在用户历史里制造提交；如果 `--3way` 在某些情况（重命名、二进制）下
+  表现不好，可以退回到"逐文件三方合并 + 未跟踪文件复制"的自实现，只要冲突时标记留在文件里、父能用 `edit` 解决这个体验
+  不变。线程报告里的 `confidence` 由线程自报，父可以不信——不要为它建校准机制。增量文本的具体措辞可调，但"无变化"那一行
+  必须让模型读出"再查没意思"。
 
 ### 3.6 角色目录与团队提示
 
@@ -935,7 +1007,7 @@ interface RoleDefinition { id: RoleId; slot: SlotId; tools: string[]; worktree: 
   报告中标注）。团队提示片段（追加到 code profile 的静态提示，通过 `dispatch` 工具的 `promptGuidelines`）：
 
 ```text
-You can hand work to teammates with dispatch(role, task). Teammates: quick-implement (cheap model; mechanical, well-specified changes), hard-implement (strong model; ambiguous or cross-cutting work), frontend (UI specialist), review (strong model; independent review of a diff), check (cheap model; run tests/lint and report), retrieval (cheap model; multi-step code search). Judge by time and cost: if you can finish in a few tool calls yourself, do it yourself. Dispatch is asynchronous; use wait to collect results.
+You can hand work to teammates with dispatch(role, task). Teammates: quick-implement (cheap model; mechanical, well-specified changes), hard-implement (strong model; ambiguous or cross-cutting work), frontend (UI specialist), review (strong model; independent review of a diff), check (cheap model; run tests/lint and report), retrieval (cheap model; multi-step code search). Judge by time and cost: if you can finish in a few tool calls yourself, do it yourself. Dispatch is asynchronous: wait blocks until a teammate changes state, threads is a quick glance, send passes a teammate new information, read_thread shows their notes. The user may also open and talk to teammates directly; their final report tells you what actually happened.
 ```
 
   未配置槽位的角色从列表与片段中省略（片段随注册角色集静态生成）。**不实现**配额、准入、成本估算。
@@ -943,8 +1015,10 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 ### 3.7 review 传感器
 
-- host：`agent_settled` 后若本回合 journaled 变更非空 → 自动 `spawnChild(role:'review', task: diff)`；结果以 Zone 2 段
-  `<review>` 注入下一步（不阻断）；`harness.review.gate = true` 时改为在回合结束前等待并把发现作为回合结束提示。
+- host：`agent_settled` 后若本回合 journaled 变更非空 → 自动 `createThread({ role: 'review', kind: 'implementation', createdBy:
+  'agent', worktree: 'none', carryBlocks: false, autoRun: true, brief: diff })`——harness 自己开的线程，不出现在父的 `threads`
+  列表里（`hidden: true`），但在侧栏的"harness"分组可见；结果以 Zone 2 段 `<review>` 注入下一步（不阻断）；
+  `harness.review.gate = true` 时改为在回合结束前等待并把发现作为回合结束提示。
 - 测试：触发条件；不阻断路径；gate 路径。
 
 ### 3.8 LSP 导航工具
@@ -956,10 +1030,49 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
   `["Use hover to check a signature or type before reading the whole definition file."]`。
 - 测试：四个工具各三态（`ready` / `empty` / `unavailable`）。
 
+### 3.9 观察类工具的增量视图
+
+- 设计：agent-harness.md 第 5.5、8.7 节。3.5 的线程游标是同一机制，本项把它推到其余观察类工具。
+- host：通用 `ObservationCursorStore`——键 `(observerSessionId, objectKind, objectId)`，值由对象类型定义；`harness.compacted`
+  清空该会话全部游标；对象销毁（shell 退出且输出已读尽、线程归档）时删键。
+- `get_output(shellId)`（无 `offset`）：返回上次读取之后的新输出，引头 `[shell ${id} · +${bytes} since last read (${ago}) ·
+  ${running ? 'still running' : `exited ${code}`}]`；无新输出 → `[shell ${id} · no new output since last read (${ago}); ${running ?
+  'still running' : 'exited'}; last output ${ago2}]`。显式 `offset` / `length` 是随机访问，不动游标。已完成的 `out_` 句柄保持
+  `offset` / `length` 分页，无增量语义。
+- `diagnostics(path)` 重复查询：只报自上次以来新增与消失的条目，引头 `[${path} · +${added} −${resolved} since last check]`，全量加
+  `full: true`。
+- 计数器：观察类调用次数（`threads` / `wait` / `read_thread` / `get_output` 无 offset / `diagnostics`）按会话累计，进诊断面板。
+- 测试：两次读取之间有 / 无新输出的文本；显式 offset 不动游标；压缩后第一次读取为全量；shell 退出后最后一次增量含退出码。
+- 判断要点：这项的价值是让"再看一眼"几乎不占上下文，副作用是模型更愿意看——"无新输出"那一行的措辞和 `promptGuidelines`
+  里"要等就用 wait / 不要循环查看"是防轮询的全部手段，不要加频率限制之类的机制。1.4 已交付的 `get_output` 是显式 offset
+  语义，这里是加默认行为，不改已有参数。
+
+### 3.10 线程侧栏与讨论线
+
+- 设计：agent-harness.md 第 9.3.2、9.3.8 节。范例：Fleet 面板与 `pi-session` 组件的会话切换。
+- UI：父会话右侧线程栏——每条线程一行：角色 / "用户线程" 标记、状态、徽标（等输入、完成未读、卡住、worker 丢失）、花费、
+  diff 大小、最近活动；点开在同一窗口内切换到线程会话（完整聊天，可直接说话，消息带"来自你 / 来自父 agent"标记）；父对话
+  任意消息的操作菜单加"从这里开一条线"（默认讨论线、默认带记忆块，两个开关）；讨论线有"转为实现线程"按钮（`convertThread`）；
+  归档区列出可恢复的线程；全部读同一份线程注册表（`harness.thread.changed` 事件驱动，不轮询）。
+- 讨论线：`kind: 'discussion'`，工具集 = 只读（`read` / `grep` / `find` / `ls` / `explore` / `related` / `recall` / `webfetch` /
+  `websearch`），无 worktree，权限继承父；转换时挂 worktree、切到实现类工具集，同一会话延续（工具集变更是前缀失效操作，
+  在转换那一刻一次完成——会话边界之外唯一允许的工具集变更，因为它是用户显式动作）。
+- 子线程消息**绝不**进父对话正文；父那边只有 Zone 2 的 `threads` 段。
+- i18n：全部新 key 进 9 个 catalog。
+- 测试：侧栏按事件更新；徽标状态映射；"从这里开一条线"创建的记录含 `forkPoint` 与记忆块快照；转换后工具集变化且对话延续；
+  归档 / 恢复。
+- 判断要点：这是让线程模型对用户"存在"的那一半，没有它 9.3 只是 agent 之间的协议。侧栏样式、徽标形状自己定；**边界**是
+  子线程消息不进父正文、面板与 agent 读同一份状态、讨论线零成本可丢。
+
 ### 阶段 3 完成标准
 
 - `explore` 纯算法模式 10 问题快照通过；配置 `models.explore` 后 `usedLlm: true` 且可关。
-- fake provider：并发 `dispatch` 两个角色，`wait` 在 TTL 前唤醒，`merge` 干净；人为冲突由 `edit` 解决后无残留标记。
+- fake provider：并发 `dispatch` 两个角色，`wait` 在 TTL 前唤醒且超时返回非错误，`threads` 两次调用第二次只含增量，`merge`
+  干净；人为冲突由 `edit` 解决后无残留标记。
+- 线程韧性：杀掉一条运行中线程的 worker 进程 → 注册表 `workerLost`、父 `wait` 看到该状态、`resumeThread` 后同一会话继续、
+  worktree 未动；父 worker 退出后线程继续跑并在父恢复的下一回合以 Zone 2 一行出现。
+- 用户在线程会话里直接发消息并改变其方向后，父收到的报告 `deviations` 非空。
+- 讨论线开、聊、转实现线、merge 回父，全程一条会话。
 - review 传感器在 diff 非空回合后注入 `<review>`。
 
 ## 阶段 3b：原生权限（与阶段 3 并行）

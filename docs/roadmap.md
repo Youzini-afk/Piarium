@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -605,7 +605,7 @@ UI dependency-boundary and extension-contract governance is complete. Current ow
 and the [`@piarium/application-client` README](../packages/application-client/README.md); executable
 conformance remains in the package tests and architecture checks.
 
-## Agent harness ¡ª Phase 2/3/3b (2026-09-03)
+## Agent harness â€” Phase 2/3/3b (2026-09-03)
 
 ### Phase 2: Context layer
 
@@ -661,7 +661,7 @@ conformance remains in the package tests and architecture checks.
 - **3b.2 Smart mode**: Model-judged permission decisions, high-risk
   bypass (`lib/harness/smart-mode.ts`). 10 tests.
 - **3b.3 Stop provisioning**: Removed `@gotgenes/pi-permission-system`
-  from manifest (revision 2¡ú3). Protocol tests 3/3.
+  from manifest (revision 2â†’3). Protocol tests 3/3.
 
 **Total**: 288 tests across 25 test files, all passing. Type-check clean.
 Decisions D-019 through D-021 recorded in agent-harness-decisions.md.
