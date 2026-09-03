@@ -19,6 +19,7 @@
  */
 
 import type { KnowledgeStore, Block } from "../knowledge/store.js";
+import { HarnessServiceError } from "./harness-services.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -102,8 +103,8 @@ export interface CompactionHandlerDeps {
   settings: CompactionSettings;
   /** Get facts from host */
   getFacts: () => Promise<CompactionFacts>;
-  /** Get entry ID for K turns ago */
-  getEntryIdAtTurn: (turnsAgo: number) => string | null;
+  /** Get entry ID for K turns ago (async — may call session manager) */
+  getEntryIdAtTurn: (turnsAgo: number) => Promise<string | null>;
   /** Get tokens before compaction */
   getTokensBefore: () => number;
   /** Memory agent pre-compaction refresh */
@@ -122,6 +123,24 @@ export async function handleBeforeCompact(
   const plan = planBlock?.content ?? "";
   const facts = await getFacts();
 
+  // If there are no blocks and no facts, compaction has nothing to carry.
+  // Signal unavailable so the extension skips injecting a compaction section.
+  const hasNoMaterial = blocks.length === 0
+    && facts.touchedFiles.length === 0
+    && facts.unresolvedDiagnostics.length === 0
+    && facts.checkpoints.length === 0;
+
+  const firstKeptEntryId = await getEntryIdAtTurn(settings.keepTurns);
+
+  if (firstKeptEntryId === null || hasNoMaterial) {
+    throw new HarnessServiceError(
+      "unavailable",
+      firstKeptEntryId === null
+        ? "compaction.before: getEntryIdAtTurn returned null — session manager not wired"
+        : "compaction.before: no blocks and no facts to carry",
+    );
+  }
+
   let summary = assembleCompactionSummary({
     blocks,
     plan,
@@ -133,7 +152,6 @@ export async function handleBeforeCompact(
     summary += "\nnote: memory blocks may be stale";
   }
 
-  const firstKeptEntryId = getEntryIdAtTurn(settings.keepTurns) ?? "";
   const tokensBefore = getTokensBefore();
 
   return { summary, firstKeptEntryId, tokensBefore };

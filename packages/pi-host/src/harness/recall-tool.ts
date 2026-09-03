@@ -8,7 +8,7 @@ const RecallParams = Type.Object({
   k: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 });
 
-export function createRecallTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createRecallTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "recall",
     label: "Recall",

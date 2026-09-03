@@ -78,9 +78,20 @@ describe("evaluateGate", () => {
     expect(evaluateGate("bash", { command: "rm" }, policy).decision).toBe("ask");
   });
 
-  it("catch-all rule", () => {
+  it("non-harness tools pass through (allow)", () => {
     const policy: PermissionPolicy = { mode: "normal", rules: defaultRules("normal") };
-    expect(evaluateGate("unknown_tool", {}, policy).decision).toBe("ask");
+    // unknown_tool is not in HARNESS_TOOL_META → passthrough to Pi's permission system
+    expect(evaluateGate("unknown_tool", {}, policy).decision).toBe("allow");
+  });
+
+  it("find/get_output/diagnostics/webfetch/websearch/kill_shell are allow (mutation: none)", () => {
+    const policy: PermissionPolicy = { mode: "normal", rules: defaultRules("normal") };
+    expect(evaluateGate("find", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("get_output", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("diagnostics", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("webfetch", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("websearch", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("kill_shell", {}, policy).decision).toBe("allow");
   });
 });
 

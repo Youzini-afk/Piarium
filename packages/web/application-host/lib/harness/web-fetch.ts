@@ -1,5 +1,5 @@
 import type { FetchResult } from "@piarium/protocol";
-import { checkSsrf, isSameHost } from "./ssrf-policy.js";
+import { isSameHost } from "./ssrf-policy.js";
 
 export interface SsrfPolicy {
   check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" }>;

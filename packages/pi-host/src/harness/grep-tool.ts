@@ -50,7 +50,7 @@ function formatSearchResult(result: SearchContentResult, pattern: string): strin
   return lines.join("\n");
 }
 
-export function createGrepTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createGrepTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "grep",
     label: "Grep",

@@ -19,5 +19,12 @@ export default defineConfig({
   test: {
     hookTimeout: 45_000,
     testTimeout: 45_000,
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/dist-ssr/**',
+      // Node smoke tests use node:test, not vitest — run with `node --test` instead.
+      '**/*.smoke.test.ts',
+    ],
   },
 });

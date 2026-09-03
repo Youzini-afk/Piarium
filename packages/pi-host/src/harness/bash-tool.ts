@@ -33,7 +33,7 @@ function formatShellResult(result: ShellExecResult): string {
   }
 }
 
-export function createBashTool(bridge: HostServicesBridge, sessionId: string, cwd: string): ToolDefinition {
+export function createBashTool(bridge: HostServicesBridge, _sessionId: string, _cwd: string): ToolDefinition {
   return defineTool({
     name: "bash",
     label: "Bash",

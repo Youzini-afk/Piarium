@@ -45,10 +45,8 @@ async function setupP2E2E() {
   await knowledgeStore.putKnowledge({
     scope: "workspace",
     status: "accepted",
-    title: "Test decision",
     content: "Always use typebox for schemas",
     trigger: "schema typebox",
-    source: "agent",
   });
 
   // Zone 2 provider — returns material with a knowledge hit
@@ -74,7 +72,7 @@ async function setupP2E2E() {
         unresolvedDiagnostics: [],
         checkpoints: [],
       }),
-      getEntryIdAtTurn: (_turnsAgo: number) => "entry-1",
+      getEntryIdAtTurn: async (_turnsAgo: number) => "entry-1",
       getTokensBefore: () => 50000,
     };
   }

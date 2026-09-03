@@ -5,7 +5,7 @@ import {
   DEFAULT_REVIEW_SENSOR_SETTINGS,
 } from "./review-sensor.js";
 import { createWorkerRuntime } from "./worker-runtime.js";
-import { resolveRoles, type ResolvedRole } from "./roles.js";
+import { resolveRoles } from "./roles.js";
 import type { SlotResolution } from "./model-slots.js";
 
 const mainModel: SlotResolution = { providerId: "anthropic", modelId: "claude-sonnet-4" };

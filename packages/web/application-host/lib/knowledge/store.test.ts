@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { openWorkspaceKnowledge, type KnowledgeStore, type EventInput } from "./store.js";
+import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 
 const TEST_DIR = join(import.meta.dirname, ".test-tdb");
 

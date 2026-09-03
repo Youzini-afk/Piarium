@@ -4934,7 +4934,7 @@ const handleInvoke = async (
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error('Only http(s) URLs are supported');
       }
-      const timeoutMs = typeof args.timeoutMs === 'number' && args.timeoutMs > 0
+      const _timeoutMs = typeof args.timeoutMs === 'number' && args.timeoutMs > 0
         ? Math.min(args.timeoutMs, 30_000)
         : 20_000;
 

@@ -10,7 +10,6 @@ import {
   SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useI18n } from '@/lib/i18n';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -73,7 +72,7 @@ export const HarnessSettingsPage: React.FC = () => {
   }, [runtimeTarget]);
 
   const harness = readHarnessSettings(snapshot);
-  const tools = harness.tools ?? {};
+  const tools = React.useMemo(() => harness.tools ?? {}, [harness.tools]);
   const shell = harness.shell ?? 'auto';
   const visibleBytes = harness.output?.visibleBytes ?? 32768;
   const bashWaitMs = harness.bash?.waitMs ?? 30000;

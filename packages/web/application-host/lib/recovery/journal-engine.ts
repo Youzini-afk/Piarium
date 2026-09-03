@@ -1371,7 +1371,7 @@ export const createWorkspaceRecoveryEngine = (
     const removedEntryIds = [...new Set(navigation.removedEntryIds ?? [])];
     const database = await openWritableCatalog(storage.root);
     try {
-      const targetBinding = await resolveEntryInternal(input);
+      const _targetBinding = await resolveEntryInternal(input);
       const loaded = changesForEntries(database, input.sessionId, removedEntryIds);
       const merged = mergeInverseTargets(loaded.changes);
       const targets = Object.fromEntries(merged.byPath);

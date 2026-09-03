@@ -4,7 +4,6 @@ import type {
   HarnessMethod,
   HarnessRequestData,
   HarnessServiceMap,
-  HostEvent,
 } from "@piarium/protocol";
 
 interface PendingRequest {

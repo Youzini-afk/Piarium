@@ -115,7 +115,7 @@ export function assembleZone2Content(
   const budget = options?.budgetTokens ?? DEFAULT_BUDGET_TOKENS;
   const now = options?.now ?? Date.now();
 
-  let userEdits = material.userEdits;
+  const userEdits = material.userEdits;
   let userCommands = material.userCommands;
   let newDiagnostics = material.newDiagnostics;
   let knowledge = material.knowledge;

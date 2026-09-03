@@ -15,7 +15,7 @@ const WebSearchParams = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
 });
 
-export function createWebSearchTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "websearch",
     label: "Web Search",

@@ -12,7 +12,7 @@
  * No server → only maintain `file` nodes from Git list.
  */
 
-import type { KnowledgeStore, NodeId } from "../knowledge/store.js";
+import type { KnowledgeStore } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ export async function collectSymbols(
     if (!language) continue;
 
     // Write file node
-    const fileId = await store.putEvent({
+    const _fileId = await store.putEvent({
       kind: "source",
       at: Date.now(),
       sessionId: "symbol-collector",
@@ -82,7 +82,7 @@ export async function collectSymbols(
 
     // Write symbol nodes and file→defines→symbol edges
     for (const sym of symbols) {
-      const symId = await store.putEvent({
+      const _symId = await store.putEvent({
         kind: "source",
         at: Date.now(),
         sessionId: "symbol-collector",

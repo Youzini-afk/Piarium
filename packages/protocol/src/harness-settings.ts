@@ -4,6 +4,8 @@
  * Effective at next session creation; frozen into `session.harness` for the session lifetime.
  */
 
+import type { PermissionMode } from "./permission-gate.js";
+
 export interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
@@ -18,6 +20,9 @@ export interface HarnessSettings {
   web?: {
     maxFetchesPerTurn?: number;
     render?: boolean;
+  };
+  permissions?: {
+    mode?: PermissionMode;
   };
 }
 
@@ -81,6 +86,9 @@ export function mergeHarnessSettings(
     },
     ...(user.web || workspace.web
       ? { web: { ...user.web, ...workspace.web } }
+      : {}),
+    ...(user.permissions || workspace.permissions
+      ? { permissions: { ...user.permissions, ...workspace.permissions } }
       : {}),
   };
   return merged;

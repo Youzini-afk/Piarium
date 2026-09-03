@@ -37,12 +37,15 @@ export function createCompactionExtension(options: CompactionExtensionOptions): 
           tokensBefore: event.preparation.tokensBefore,
         }, { timeoutMs: 5_000, signal: event.signal });
         const compaction = result as CompactionBeforeResult;
-        if (compaction && compaction.summary) {
+        // Only return { compaction } when firstKeptEntryId is non-empty.
+        // If the host returns unavailable (empty firstKeptEntryId), let
+        // Pi do its own LLM summarization.
+        if (compaction && compaction.summary && compaction.firstKeptEntryId) {
           return { compaction };
         }
       } catch {
-        // If the host doesn't support compaction.before, let Pi do
-        // its own LLM summarization.
+        // If the host doesn't support compaction.before (unavailable or
+        // not wired), let Pi do its own LLM summarization.
       }
       return undefined;
     });

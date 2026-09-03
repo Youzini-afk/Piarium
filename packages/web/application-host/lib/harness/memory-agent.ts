@@ -17,7 +17,7 @@
  * - last run changed no blocks → interval = min(interval * 1.5, 20_000); changed → interval = 5_000
  */
 
-import type { KnowledgeStore, BlockInput, BlockUpdatedBy } from "../knowledge/store.js";
+import type { KnowledgeStore } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -345,7 +345,7 @@ export interface MemoryAgentRunnerDeps {
 
 export function createMemoryAgentRunner(deps: MemoryAgentRunnerDeps) {
   const { store, requestPrefix, callModel, now, settings } = deps;
-  let state = createInitialState(settings);
+  const state = createInitialState(settings);
 
   async function run(cursorTurn: number): Promise<void> {
     state.inFlight = true;
@@ -390,7 +390,7 @@ export function createMemoryAgentRunner(deps: MemoryAgentRunnerDeps) {
     }
   }
 
-  function onEvent(kind: MemoryEventKind): void {
+  function onEvent(_kind: MemoryEventKind): void {
     const decision = evaluateEventGate(state, settings, now());
     if (decision.shouldRun) {
       void run(0);

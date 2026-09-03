@@ -35,6 +35,9 @@ export interface SelectHarnessToolsDeps {
   yieldedTools?: ReadonlySet<string>;
   /** Whether models.reader is configured (enables webfetch prompt path). */
   readerModelConfigured?: boolean;
+  /** Whether the host provides a thread runtime (thread registry + spawn).
+   * When false, thread tools are not registered. */
+  threadRuntimeAvailable?: boolean;
 }
 
 /**
@@ -54,7 +57,7 @@ export function selectHarnessTools(
   deps: SelectHarnessToolsDeps,
 ): ToolDefinition[] {
   const tools = settings.tools;
-  const { bridge, sessionId, cwd, workspaceMutationJournal, isOpenAIFamily, yieldedTools, readerModelConfigured } = deps;
+  const { bridge, sessionId, cwd, workspaceMutationJournal, isOpenAIFamily, yieldedTools, readerModelConfigured, threadRuntimeAvailable } = deps;
   const result: ToolDefinition[] = [];
 
   if (tools.bash !== false) {
@@ -94,27 +97,30 @@ export function selectHarnessTools(
   if (tools.recall !== false) {
     result.push(createRecallTool(bridge, sessionId));
   }
-  // Phase 3 thread tools
-  if (tools.dispatch !== false) {
-    result.push(createDispatchTool(bridge, sessionId));
-  }
-  if (tools.threads !== false) {
-    result.push(createThreadsTool(bridge, sessionId));
-  }
-  if (tools.wait !== false) {
-    result.push(createWaitTool(bridge, sessionId));
-  }
-  if (tools.send !== false) {
-    result.push(createSendTool(bridge, sessionId));
-  }
-  if (tools.read_thread !== false) {
-    result.push(createReadThreadTool(bridge, sessionId));
-  }
-  if (tools.merge !== false) {
-    result.push(createMergeTool(bridge, sessionId));
-  }
-  if (tools.kill !== false) {
-    result.push(createKillTool(bridge, sessionId));
+  // Phase 3 thread tools — only registered when the host provides a
+  // thread runtime (thread registry + spawn capability).
+  if (threadRuntimeAvailable) {
+    if (tools.dispatch !== false) {
+      result.push(createDispatchTool(bridge, sessionId));
+    }
+    if (tools.threads !== false) {
+      result.push(createThreadsTool(bridge, sessionId));
+    }
+    if (tools.wait !== false) {
+      result.push(createWaitTool(bridge, sessionId));
+    }
+    if (tools.send !== false) {
+      result.push(createSendTool(bridge, sessionId));
+    }
+    if (tools.read_thread !== false) {
+      result.push(createReadThreadTool(bridge, sessionId));
+    }
+    if (tools.merge !== false) {
+      result.push(createMergeTool(bridge, sessionId));
+    }
+    if (tools.kill !== false) {
+      result.push(createKillTool(bridge, sessionId));
+    }
   }
 
   return result;

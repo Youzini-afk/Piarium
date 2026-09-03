@@ -7,7 +7,6 @@ export interface HarnessSearchDeps {
 }
 
 const DEFAULT_LIMIT = 100;
-const DEFAULT_CONTEXT = 2;
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 function fileScore(input: {

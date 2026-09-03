@@ -137,22 +137,13 @@ import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
 } from "./harness/counter-tracker.js";
-import { createBashTool } from "./harness/bash-tool.js";
-import { createGrepTool } from "./harness/grep-tool.js";
-import { createApplyPatchTool } from "./harness/apply-patch-tool.js";
-import {
-  createGetOutputTool,
-  createWriteToProcessTool,
-  createKillShellTool,
-  createDiagnosticsTool,
-} from "./harness/output-tools.js";
 import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
+import { mergeHarnessSettings, type HarnessSettings } from "@piarium/protocol";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -2762,7 +2753,7 @@ export class SessionHost {
             {
               factory: createPermissionGateExtension({
                 policy: buildPermissionPolicy(
-                  "normal", // TODO: resolve mode from harness settings
+                  harnessSettings.permissions?.mode ?? "normal",
                   Object.fromEntries(
                     Object.entries(harnessSettings.dispatch.askBefore)
                       .filter(([, v]) => v !== undefined),
@@ -2829,6 +2820,7 @@ export class SessionHost {
         isOpenAIFamily,
         yieldedTools,
         readerModelConfigured,
+        threadRuntimeAvailable: true, // Host always provides thread registry
       }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),

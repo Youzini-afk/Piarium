@@ -43,7 +43,6 @@ export interface OutputStore {
 export function createOutputStore(options: { maxBytesPerSession?: number } = {}): OutputStore {
   const maxBytesPerSession = options.maxBytesPerSession ?? DEFAULT_MAX_BYTES_PER_SESSION;
   const sessions = new Map<string, SessionStore>();
-  let counter = 0;
 
   const getOrCreateSession = (sessionId: string): SessionStore => {
     let session = sessions.get(sessionId);
@@ -78,7 +77,6 @@ export function createOutputStore(options: { maxBytesPerSession?: number } = {})
       const handle = `out_${id}`;
       session.outputs.set(handle, { text, ...(label !== undefined ? { label } : {}), total });
       session.totalBytes += total;
-      counter += 1;
       return { handle, total };
     },
 

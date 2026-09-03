@@ -24,7 +24,7 @@ interface CachedDiagnostics {
  */
 export function createLanguageSupervisorDiagnosticsProvider(
   supervisor: LanguageSupervisor,
-  options: { resolveWorkspaceId: (workspaceRoot: string) => Promise<string | null> },
+  _options: { resolveWorkspaceId: (workspaceRoot: string) => Promise<string | null> },
 ): DiagnosticsProvider {
   // workspaceId → resourceId → cached diagnostics
   const cache = new Map<string, Map<string, CachedDiagnostics>>();

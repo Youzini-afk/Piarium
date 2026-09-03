@@ -10,7 +10,7 @@ const GetOutputParams = Type.Object({
   length: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
-export function createGetOutputTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "get_output",
     label: "Get Output",
@@ -66,7 +66,7 @@ const WriteToProcessParams = Type.Object({
   text: Type.String(),
 });
 
-export function createWriteToProcessTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createWriteToProcessTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "write_to_process",
     label: "Write to Process",
@@ -104,7 +104,7 @@ const KillShellParams = Type.Object({
   shellId: Type.String(),
 });
 
-export function createKillShellTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createKillShellTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "kill_shell",
     label: "Kill Shell",
@@ -138,7 +138,7 @@ const DiagnosticsParams = Type.Object({
   path: Type.String(),
 });
 
-export function createDiagnosticsTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "diagnostics",
     label: "Diagnostics",

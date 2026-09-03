@@ -1,4 +1,4 @@
-import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessRespondParams, type HarnessServiceMap, buildHarnessRespondParams } from "@piarium/protocol";
+import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessServiceMap, buildHarnessRespondParams } from "@piarium/protocol";
 import { HarnessServiceError } from "./harness-services.js";
 
 export { buildHarnessRespondParams };
@@ -14,16 +14,6 @@ export interface HarnessService<M extends HarnessMethod> {
     params: HarnessServiceMap[M]["params"],
     ctx: HarnessServiceContext,
   ): Promise<HarnessServiceMap[M]["result"]>;
-}
-
-interface PendingRequest {
-  sessionId: string;
-  method: HarnessMethod;
-  params: unknown;
-  signal: AbortSignal;
-  timer: ReturnType<typeof setTimeout>;
-  resolve: (result: unknown) => void;
-  reject: (error: HarnessError) => void;
 }
 
 export interface HarnessRouterOptions {

@@ -59,13 +59,12 @@ export function createPathLockService(): PathLockService {
 
       // Queue this request
       return new Promise<boolean>((resolvePromise, rejectPromise) => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
         const entry = {
           resolve: () => resolvePromise(true),
           reject: (error: Error) => rejectPromise(error),
           timer: undefined as ReturnType<typeof setTimeout> | undefined,
         };
-        timer = setTimeout(() => {
+        const timer = setTimeout(() => {
           const idx = lockQueue.queue.indexOf(entry);
           if (idx !== -1) lockQueue.queue.splice(idx, 1);
           rejectPromise(new Error(`Lock timeout after ${timeoutMs}ms for path: ${normalizedPath}`));

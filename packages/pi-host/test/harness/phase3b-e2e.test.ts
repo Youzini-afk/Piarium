@@ -121,14 +121,27 @@ describe("Phase 3b permission gate", () => {
     assert.equal(evaluateGate("read_thread", { threadId: "t1" }, policy).decision, "allow");
   });
 
-  it("Phase 3 tools (dispatch, merge, kill) are gated", () => {
+  it("Phase 3 tools (merge) is gated, dispatch/kill are mutation:none → allow", () => {
     const policy = buildPermissionPolicy("normal");
-    // dispatch is gated by askBefore rules (none configured → catch-all ask)
-    assert.equal(evaluateGate("dispatch", { role: "check", task: "test" }, policy).decision, "ask");
-    // merge is an edit tool → ask in normal mode
+    // dispatch is mutation:none → allow (unless askBefore configured)
+    assert.equal(evaluateGate("dispatch", { role: "check", task: "test" }, policy).decision, "allow");
+    // merge is mutation:journaled → ask in normal mode
     assert.equal(evaluateGate("merge", { threadId: "t1" }, policy).decision, "ask");
-    // kill is not in read-only set → catch-all ask
-    assert.equal(evaluateGate("kill", { threadId: "t1" }, policy).decision, "ask");
+    // kill is mutation:none → allow
+    assert.equal(evaluateGate("kill", { threadId: "t1" }, policy).decision, "allow");
+  });
+
+  it("dispatch with askBefore can override mutation:none → ask", () => {
+    const policy = buildPermissionPolicy("normal", { check: true });
+    assert.equal(evaluateGate("dispatch", { role: "check", task: "test" }, policy).decision, "ask");
+    // Other roles still allow
+    assert.equal(evaluateGate("dispatch", { role: "explore", task: "test" }, policy).decision, "allow");
+  });
+
+  it("non-harness tools pass through (allow)", () => {
+    const policy = buildPermissionPolicy("normal");
+    assert.equal(evaluateGate("mcp_some_tool", {}, policy).decision, "allow");
+    assert.equal(evaluateGate("unknown_custom_tool", {}, policy).decision, "allow");
   });
 
   it("permission gate extension factory creates a valid extension", () => {

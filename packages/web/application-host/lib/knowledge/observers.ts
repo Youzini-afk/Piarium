@@ -12,7 +12,7 @@
  * - Terminal exit from user terminal tab → 'user'
  */
 
-import type { KnowledgeStore, EventInput, EventSource, EventKind } from "./store.js";
+import type { KnowledgeStore, EventInput, EventSource } from "./store.js";
 
 // ── Observer interfaces ────────────────────────────────────────────
 

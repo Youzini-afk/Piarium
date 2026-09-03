@@ -1,6 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { resolve } from "node:path";
-import { spawn } from "node:child_process";
 import type { OutputSlice, ShellExecResult } from "@piarium/protocol";
 import type { OutputStore } from "./output-store.js";
 
@@ -82,8 +80,11 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
   return { unavailable: { reason: "No suitable shell found", hint: "Install bash or set harness.shell explicitly." } };
 }
 
+// eslint-disable-next-line no-control-regex, no-useless-escape
 const CSI_PATTERN = /\x1b\[[0-?]*[ -\/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
+// eslint-disable-next-line no-control-regex
 const ESC_PATTERN = /\x1b./g;
 
 export function stripControlSequences(text: string): string {

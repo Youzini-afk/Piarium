@@ -45,13 +45,12 @@ import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/ro
 import { createHarnessServiceHost } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
-import { createMemoryAgentRunner, DEFAULT_MEMORY_AGENT_SETTINGS, type MemoryAgentRunner } from './lib/harness/memory-agent.js';
-import { createObservers, type Observers } from './lib/knowledge/observers.js';
-import { assembleZone2Content, type Zone2Material } from './lib/harness/zone2.js';
-import { handleBeforeCompact, DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
+import { type MemoryAgentRunner } from './lib/harness/memory-agent.js';
+
+import { type Zone2Material } from './lib/harness/zone2.js';
+import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { type RecallToolDeps } from './lib/harness/recall-tool.js';
-import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -1063,7 +1062,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // ── Phase 2: Knowledge store, memory agent, observers ────────────
   // Knowledge stores are opened lazily per workspace and cached.
   const knowledgeStores = new Map<string, KnowledgeStore>();
-  const sessionObservers = new Map<string, Observers>();
   const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
 
@@ -1130,7 +1128,27 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         unresolvedDiagnostics: [],
         checkpoints: [],
       }),
-      getEntryIdAtTurn: (_turnsAgo: number) => null, // TODO: wire to session manager
+      // Wire getEntryIdAtTurn to the Pi session entries via the broker.
+      // Fetch the session entries (branch scope) and pick the entry at
+      // position (length - turnsAgo) from the end. If the session has
+      // fewer entries than turnsAgo, or the broker call fails, return
+      // null — the compaction service will throw "unavailable" and Pi
+      // falls back to its own LLM summarization.
+      getEntryIdAtTurn: async (turnsAgo: number): Promise<string | null> => {
+        try {
+          const entriesResult = await piRuntimeBroker.requestForSession(
+            sessionId,
+            'session.entries',
+            { sessionId, scope: 'branch' },
+          ) as { entries: Array<{ id: string }>; leafId: string | null };
+          const entries = entriesResult.entries;
+          if (entries.length < turnsAgo) return null;
+          const targetIndex = entries.length - turnsAgo;
+          return entries[targetIndex]!.id ?? null;
+        } catch {
+          return null;
+        }
+      },
       getTokensBefore: () => 0,
     };
   }

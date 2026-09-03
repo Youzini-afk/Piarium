@@ -52,7 +52,14 @@ export function evaluateGate(
     return { decision: rule.decision, reason: `matched rule: tool=${rule.tool}` };
   }
 
-  return { decision: "ask", reason: "no matching rule" };
+  // No matching rule: if the tool is not in HARNESS_TOOL_META, it's a
+  // non-harness tool (MCP, Pi built-in) — pass through to Pi's own
+  // permission system (allow here, Pi will handle it).
+  // If it IS a harness tool but somehow has no rule, ask to be safe.
+  if (!HARNESS_TOOL_META[tool]) {
+    return { decision: "allow", reason: "non-harness tool (passthrough)" };
+  }
+  return { decision: "ask", reason: "no matching rule for harness tool" };
 }
 
 // ── High-risk detection ────────────────────────────────────────────
@@ -79,25 +86,14 @@ export function isHighRisk(tool: string, params: Record<string, unknown>): boole
   return false;
 }
 
-// ── Default rules ──────────────────────────────────────────────────
+// ── Default rules (mutation-based, from HARNESS_TOOL_META) ────────
 
-const READ_ONLY_TOOLS = new Set([
-  "read", "grep", "glob", "explore", "related", "recall",
-  "symbols", "definition", "references", "hover",
-  "todo", "wait", "ls", "threads", "send", "read_thread",
-]);
-
-const EDIT_TOOLS = new Set(["edit", "write", "apply_patch", "merge"]);
-const SHELL_TOOLS = new Set(["bash", "write_to_process"]);
+import { HARNESS_TOOL_META, type HarnessToolMutation } from "./harness-tools.js";
 
 export function defaultRules(mode: PermissionMode, askBefore: Record<string, boolean> = {}): PermissionRule[] {
   const rules: PermissionRule[] = [];
 
-  for (const tool of READ_ONLY_TOOLS) {
-    rules.push({ tool, decision: "allow" });
-  }
-
-  // High-risk bash patterns always ask (even in accept-edits)
+  // High-risk bash patterns always ask (even in accept-edits/bypass)
   for (const pattern of HIGH_RISK_PATTERNS) {
     rules.push({
       tool: pattern.tool,
@@ -106,26 +102,8 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
     });
   }
 
-  if (mode === "accept-edits" || mode === "bypass") {
-    for (const tool of EDIT_TOOLS) {
-      rules.push({ tool, decision: "allow" });
-    }
-  } else {
-    for (const tool of EDIT_TOOLS) {
-      rules.push({ tool, decision: "ask" });
-    }
-  }
-
-  if (mode === "bypass") {
-    for (const tool of SHELL_TOOLS) {
-      rules.push({ tool, decision: "allow" });
-    }
-  } else {
-    for (const tool of SHELL_TOOLS) {
-      rules.push({ tool, decision: "ask" });
-    }
-  }
-
+  // Dispatch askBefore rules (per-role) — must come BEFORE the
+  // mutation-based dispatch:allow rule so they match first.
   for (const [role, ask] of Object.entries(askBefore)) {
     rules.push({
       tool: "dispatch",
@@ -134,10 +112,25 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
     });
   }
 
+  // Build rules from HARNESS_TOOL_META mutation attribute
+  for (const [tool, meta] of Object.entries(HARNESS_TOOL_META)) {
+    const mutation: HarnessToolMutation = meta.mutation;
+    if (mutation === "none") {
+      // Read-only tools always allowed
+      rules.push({ tool, decision: "allow" });
+    } else if (mutation === "journaled") {
+      // Edit tools: allow in accept-edits/bypass, ask in normal
+      rules.push({ tool, decision: (mode === "accept-edits" || mode === "bypass") ? "allow" : "ask" });
+    } else if (mutation === "process") {
+      // Shell tools: allow in bypass, ask otherwise
+      rules.push({ tool, decision: mode === "bypass" ? "allow" : "ask" });
+    }
+  }
+
+  // Catch-all: only in bypass mode. Non-harness tools pass through
+  // (evaluateGate returns "allow" for tools not in HARNESS_TOOL_META).
   if (mode === "bypass") {
     rules.push({ tool: "*", decision: "allow" });
-  } else {
-    rules.push({ tool: "*", decision: "ask" });
   }
 
   return rules;

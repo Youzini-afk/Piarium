@@ -1,4 +1,4 @@
-import type { WebReadResult, FetchResult } from "@piarium/protocol";
+import type { FetchResult } from "@piarium/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 
 export interface ReaderModelRequest {

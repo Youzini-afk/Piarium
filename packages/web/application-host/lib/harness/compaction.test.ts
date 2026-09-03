@@ -144,7 +144,7 @@ describe("handleBeforeCompact", () => {
         unresolvedDiagnostics: [],
         checkpoints: ["2026-09-03T10:00Z"],
       }),
-      getEntryIdAtTurn: (n) => `entry-${n}`,
+      getEntryIdAtTurn: async (n) => `entry-${n}`,
       getTokensBefore: () => 50000,
     });
 
@@ -155,15 +155,49 @@ describe("handleBeforeCompact", () => {
   });
 
   it("adds stale note when requested", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "plan", content: "- [ ] Task",
+      updatedBy: "agent",
+    });
     const result = await handleBeforeCompact("s1", {
       store,
       settings: DEFAULT_COMPACTION_SETTINGS,
       getFacts: async () => emptyFacts,
-      getEntryIdAtTurn: () => "entry",
+      getEntryIdAtTurn: async () => "entry",
       getTokensBefore: () => 1000,
     }, { staleNote: true });
 
     expect(result.summary).toContain("memory blocks may be stale");
+  });
+
+  it("throws unavailable when getEntryIdAtTurn returns null", async () => {
+    try {
+      await handleBeforeCompact("s1", {
+        store,
+        settings: DEFAULT_COMPACTION_SETTINGS,
+        getFacts: async () => ({ touchedFiles: ["a.ts"], unresolvedDiagnostics: [], checkpoints: [] }),
+        getEntryIdAtTurn: async () => null,
+        getTokensBefore: () => 1000,
+      });
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
+    }
+  });
+
+  it("throws unavailable when no blocks and no facts", async () => {
+    try {
+      await handleBeforeCompact("s1", {
+        store,
+        settings: DEFAULT_COMPACTION_SETTINGS,
+        getFacts: async () => emptyFacts,
+        getEntryIdAtTurn: async () => "entry",
+        getTokensBefore: () => 1000,
+      });
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
+    }
   });
 });
 

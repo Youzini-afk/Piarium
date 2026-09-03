@@ -12,7 +12,6 @@ import {
   DEFAULT_MEMORY_AGENT_SETTINGS,
   type MemoryAgentState,
   type TurnEndMeta,
-  type MemoryEditOp,
 } from "./memory-agent.js";
 
 const TEST_DIR = join(import.meta.dirname, ".test-memory");

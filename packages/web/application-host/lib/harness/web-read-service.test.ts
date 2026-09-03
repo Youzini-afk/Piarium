@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createWebReadService } from "./web-read-service.js";
 import type { FetchResult } from "@piarium/protocol";
 

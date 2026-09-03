@@ -225,7 +225,7 @@ export async function explore(
   );
   const semanticPromise = deps.semanticRecall ? deps.semanticRecall(input.question, 20) : Promise.resolve([]);
 
-  const [rgResults, semanticResults] = await Promise.all([
+  const [rgResults, _semanticResults] = await Promise.all([
     Promise.all(rgPromises),
     semanticPromise,
   ]);

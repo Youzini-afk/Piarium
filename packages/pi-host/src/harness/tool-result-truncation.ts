@@ -22,7 +22,7 @@ export interface ToolResultTruncationOptions {
 export function createToolResultTruncationExtension(options: ToolResultTruncationOptions): ExtensionFactory {
   const visibleBytes = options.visibleBytes ?? DEFAULT_VISIBLE_BYTES;
   const bridge = options.bridge;
-  const sessionId = options.sessionId;
+  const _sessionId = options.sessionId;
 
   return (pi) => {
     pi.on("tool_result", async (event) => {

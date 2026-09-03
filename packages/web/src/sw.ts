@@ -9,7 +9,6 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<string | { url: string; revision?: string }>;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const __precacheManifest = self.__WB_MANIFEST;
 
 type PushPayload = {

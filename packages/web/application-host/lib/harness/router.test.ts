@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHarnessRouter, type HarnessService } from "./router.js";
 
 describe("harness router", () => {

@@ -1,4 +1,3 @@
-import type { DiagnosticsResult } from "@piarium/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 
 export interface DiagnosticsProvider {

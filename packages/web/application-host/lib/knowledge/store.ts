@@ -13,8 +13,14 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { TriviumDB, type Vector } from "triviumdb";
+import { join } from "node:path";
+import { createRequire } from "node:module";
+
+// triviumdb is a CJS package — use createRequire to avoid ESM named-import
+// issues when running under pure Node (outside vite-node/vitest).
+const require = createRequire(import.meta.url);
+const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
+type Vector = import("triviumdb").Vector;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -133,7 +139,6 @@ export interface KnowledgeStore {
 // ── Implementation ─────────────────────────────────────────────────
 
 const PLACEHOLDER_DIM = 8;
-const DEFAULT_DIM = 1024;
 const BLOCK_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_RETENTION_BATCH = 5000;
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   createWorkerRuntime,
   getTtl,
@@ -6,9 +6,8 @@ import {
   TTL_TABLE,
   DEFAULT_TTL,
   type SpawnChildInput,
-  type ChildResult,
 } from "./worker-runtime.js";
-import { resolveRoles, ROLE_DEFINITIONS } from "./roles.js";
+import { resolveRoles } from "./roles.js";
 import type { SlotResolution } from "./model-slots.js";
 
 const mainModel: SlotResolution = { providerId: "anthropic", modelId: "claude-sonnet-4" };

@@ -22,7 +22,7 @@ export interface Zone2ExtensionOptions {
 }
 
 export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionFactory {
-  const { bridge, sessionId } = options;
+  const { bridge, sessionId: _sessionId } = options;
 
   return (pi) => {
     pi.on("before_agent_start", async (_event, ctx) => {

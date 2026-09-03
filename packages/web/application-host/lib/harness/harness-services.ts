@@ -20,13 +20,11 @@ import type { OutputStore } from "./output-store.js";
 import type { PathLockService } from "./path-lock.js";
 import type { HarnessSearchService } from "./search-service.js";
 import type { HarnessServiceHost } from "./service-host.js";
-import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import { createLspDiagnosticsService, createLspDiagnosticsSnapshotService } from "./diagnostics-service.js";
 import { assembleZone2Content } from "./zone2.js";
-import { handleBeforeCompact, assembleCompactionSummary } from "./compaction.js";
-import { executeTodoTool, DEFAULT_TODO_SETTINGS } from "./todo-tool.js";
+import { handleBeforeCompact } from "./compaction.js";
+import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
-import { formatWaitResult } from "./worker-runtime.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -156,7 +154,7 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
 
 export function createCompactionAfterService(host: HarnessServiceHost): HarnessService<"compaction.after"> {
   return {
-    handle: async (_params, ctx: HarnessServiceContext) => {
+    handle: async (_params, _ctx: HarnessServiceContext) => {
       // Notify memory agent to do a pre-compaction refresh if needed.
       // The actual compaction has already happened; this is a post-hook.
       if (host.memoryAgent) {
@@ -215,7 +213,7 @@ export function createRecallSearchService(host: HarnessServiceHost): HarnessServ
 
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
   return {
-    handle: async (params, ctx: HarnessServiceContext) => {
+    handle: async (params, _ctx: HarnessServiceContext) => {
       if (!host.threadRegistry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
