@@ -17,6 +17,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { ThreadViewCursor } from "@piarium/protocol";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -95,6 +96,8 @@ export interface ThreadRecord {
   exitReason: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Monotonically increasing event sequence (incremented on every state change) */
+  eventSeq: number;
 }
 
 export interface CreateThreadInput {
@@ -124,6 +127,8 @@ export interface ThreadRegistryOptions {
   onThreadChanged?: (parentSessionId: string, thread: ThreadRecord) => void;
   /** Called when a thread completes with a report */
   onThreadDone?: (parentSessionId: string, threadId: string, report: ThreadReport) => void;
+  /** Max concurrent running threads per parent (default 12) */
+  maxConcurrency?: number;
 }
 
 function threadFilePath(dataDir: string, hostId: string, parentSessionId: string): string {
@@ -146,10 +151,17 @@ function makeTokens(): ThreadTokens {
 
 export function createThreadRegistry(options: ThreadRegistryOptions) {
   const { dataDir, hostId } = options;
+  const maxConcurrency = options.maxConcurrency ?? 12;
   // In-memory cache: parentSessionId → Map<threadId, ThreadRecord>
   const cache = new Map<string, Map<string, ThreadRecord>>();
   // hidden threads: not included in listThreads for the parent agent
   const hidden = new Set<string>();
+  // Observer cursors: `${observerSessionId}:${threadId}` → ThreadViewCursor
+  const cursors = new Map<string, ThreadViewCursor>();
+  // Wait wakeup: parentSessionId → array of resolve callbacks
+  const waiters = new Map<string, Array<() => void>>();
+  // Global event sequence counter
+  let globalEventSeq = 0;
 
   async function loadParent(parentSessionId: string): Promise<Map<string, ThreadRecord>> {
     const existing = cache.get(parentSessionId);
@@ -180,11 +192,26 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (thread.status === "done" && thread.report) {
       options.onThreadDone?.(thread.parentSessionId, thread.id, thread.report);
     }
+    // Wake up any waiters for this parent session
+    const sessionWaiters = waiters.get(thread.parentSessionId);
+    if (sessionWaiters) {
+      for (const resolve of sessionWaiters) {
+        resolve();
+      }
+      waiters.set(thread.parentSessionId, []);
+    }
   }
 
   async function createThread(input: CreateThreadInput): Promise<ThreadRecord> {
     const id = `thread-${randomUUID().slice(0, 8)}`;
     const now = nowISO();
+    globalEventSeq += 1;
+    // Check concurrency: if autoRun and running threads >= max, queue it
+    const map = await loadParent(input.parentSessionId);
+    const runningCount = [...map.values()].filter(
+      (t) => t.status === "running" || t.status === "queued",
+    ).length;
+    const shouldQueue = input.autoRun && runningCount >= maxConcurrency;
     const record: ThreadRecord = {
       id,
       parentSessionId: input.parentSessionId,
@@ -195,7 +222,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       createdBy: input.createdBy,
       kind: input.kind,
       worktree: null, // Filled when worktree is created
-      status: input.autoRun ? "queued" : "idle",
+      status: shouldQueue ? "queued" : (input.autoRun ? "queued" : "idle"),
       flags: makeFlags(),
       waitingFor: null,
       lastActivityAt: now,
@@ -208,8 +235,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       exitReason: null,
       createdAt: now,
       updatedAt: now,
+      eventSeq: globalEventSeq,
     };
-    const map = await loadParent(input.parentSessionId);
     map.set(id, record);
     if (input.hidden) hidden.add(id);
     await persist(input.parentSessionId);
@@ -235,10 +262,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const map = await loadParent(parentSessionId);
     const thread = map.get(threadId);
     if (!thread) return null;
+    globalEventSeq += 1;
     const updated: ThreadRecord = {
       ...thread,
       ...update,
       updatedAt: nowISO(),
+      eventSeq: globalEventSeq,
     };
     map.set(threadId, updated);
     await persist(parentSessionId);
@@ -375,9 +404,71 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const deleted = map.delete(threadId);
     if (deleted) {
       hidden.delete(threadId);
+      // Clean up cursors for this thread
+      for (const key of cursors.keys()) {
+        if (key.endsWith(`:${threadId}`)) {
+          cursors.delete(key);
+        }
+      }
       await persist(parentSessionId);
     }
     return deleted;
+  }
+
+  // ── Observer cursors (§9.3.7) ───────────────────────────────────
+
+  function cursorKey(observerSessionId: string, threadId: string): string {
+    return `${observerSessionId}:${threadId}`;
+  }
+
+  function getCursor(observerSessionId: string, threadId: string): ThreadViewCursor | null {
+    return cursors.get(cursorKey(observerSessionId, threadId)) ?? null;
+  }
+
+  function setCursor(observerSessionId: string, threadId: string, cursor: ThreadViewCursor): void {
+    cursors.set(cursorKey(observerSessionId, threadId), cursor);
+  }
+
+  function clearCursorsForSession(observerSessionId: string): void {
+    for (const key of cursors.keys()) {
+      if (key.startsWith(`${observerSessionId}:`)) {
+        cursors.delete(key);
+      }
+    }
+  }
+
+  // ── Wait subscription (blocking wait, §9.3.6) ───────────────────
+
+  /**
+   * Subscribe to thread state changes for a parent session.
+   * Returns an unsubscribe function. When any thread in the session
+   * changes state, the callback is called.
+   */
+  function subscribeToChanges(parentSessionId: string, callback: () => void): () => void {
+    if (!waiters.has(parentSessionId)) {
+      waiters.set(parentSessionId, []);
+    }
+    waiters.get(parentSessionId)!.push(callback);
+    return () => {
+      const arr = waiters.get(parentSessionId);
+      if (arr) {
+        const idx = arr.indexOf(callback);
+        if (idx !== -1) arr.splice(idx, 1);
+      }
+    };
+  }
+
+  /**
+   * Try to dequeue a queued thread (called when a running thread finishes).
+   * Returns the dequeued thread or null.
+   */
+  async function tryDequeue(parentSessionId: string): Promise<ThreadRecord | null> {
+    const map = await loadParent(parentSessionId);
+    const queued = [...map.values()]
+      .filter((t) => t.status === "queued")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (queued.length === 0) return null;
+    return queued[0] ?? null;
   }
 
   return {
@@ -399,6 +490,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setFlags,
     cancelAllForParent,
     deleteThread,
+    // Observer cursors
+    getCursor,
+    setCursor,
+    clearCursorsForSession,
+    // Wait subscription
+    subscribeToChanges,
+    tryDequeue,
+    // Concurrency
+    maxConcurrency,
   };
 }
 

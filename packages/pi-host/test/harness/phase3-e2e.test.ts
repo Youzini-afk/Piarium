@@ -143,8 +143,9 @@ describe("Phase 3 e2e integration", () => {
 
       const threadsTool = createThreadsTool(bridge, SESSION_ID);
       const { text } = await executeTool(threadsTool, {});
-      assert.match(text, /task 1/, "threads should list task 1");
-      assert.match(text, /task 2/, "threads should list task 2");
+      // threads text shows thread IDs and status (incremental format)
+      assert.match(text, /thread-\w+/, "threads should list at least one thread");
+      assert.match(text, /queued/, "threads should show queued status");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
@@ -168,14 +169,15 @@ describe("Phase 3 e2e integration", () => {
       });
 
       const waitTool = createWaitTool(bridge, SESSION_ID);
-      const { text, details } = await executeTool(waitTool, {});
+      // Use short timeout to avoid blocking the test
+      const { text, details } = await executeTool(waitTool, { timeout_ms: 500 });
       assert.match(text, /0 done/, "wait should report 0 done");
       assert.match(text, /1 queued/, "wait should report 1 queued");
-      const detailsObj = details as { done: number; running: number; queued: number };
+      const detailsObj = details as { done: number; running: number; queued: number; timedOut: boolean };
       assert.equal(detailsObj.queued, 1);
       assert.equal(detailsObj.done, 0);
 
-      // Complete the thread and wait again
+      // Complete the thread and wait again — should return immediately due to state change
       const report: ThreadReport = {
         conclusion: "all tests pass",
         changedFiles: ["test.ts"],
@@ -187,7 +189,7 @@ describe("Phase 3 e2e integration", () => {
       };
       await threadRegistry.completeThread(SESSION_ID, thread.id, report);
 
-      const { text: text2 } = await executeTool(waitTool, {});
+      const { text: text2 } = await executeTool(waitTool, { timeout_ms: 5000 });
       assert.match(text2, /1 done/, "wait should report 1 done after completion");
     } finally {
       await harnessServiceHost.dispose();
@@ -222,10 +224,13 @@ describe("Phase 3 e2e integration", () => {
       await threadRegistry.completeThread(SESSION_ID, thread.id, report);
 
       const readTool = createReadThreadTool(bridge, SESSION_ID);
-      const { text } = await executeTool(readTool, { threadId: thread.id });
-      assert.match(text, /completed successfully/, "read_thread should include conclusion");
-      assert.match(text, /a\.ts/, "read_thread should include changed files");
-      assert.match(text, /0\.85/, "read_thread should include confidence");
+      // Default what="blocks" shows status/notes; use what="report" for the full report
+      const { text: blocksText } = await executeTool(readTool, { threadId: thread.id });
+      assert.match(blocksText, /done/, "read_thread blocks should include status");
+      const { text } = await executeTool(readTool, { threadId: thread.id, what: "report" });
+      assert.match(text, /completed successfully/, "read_thread report should include conclusion");
+      assert.match(text, /a\.ts/, "read_thread report should include changed files");
+      assert.match(text, /0\.85/, "read_thread report should include confidence");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

@@ -1,5 +1,6 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
-import type { HarnessError, HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
+import type { HarnessError, HarnessServiceMap, ShellExecResultSpawnFailed, ThreadViewCursor, ThreadReadWhat } from "@piarium/protocol";
+import { DEFAULT_WAIT_TIMEOUT_MS } from "@piarium/protocol";
 
 /**
  * Error thrown by harness services to produce a specific HarnessError code
@@ -209,7 +210,86 @@ export function createRecallSearchService(host: HarnessServiceHost): HarnessServ
   };
 }
 
-// ── Phase 3 thread service factories ───────────────────────────────
+// ── Phase 3 thread service factories (§9.3 redo) ──────────────────
+
+/**
+ * Format a thread line for the threads/wait dashboard.
+ * Incremental: only shows changes since the observer's cursor.
+ */
+function formatThreadLine(
+  thread: import("./thread-registry.js").ThreadRecord,
+  cursor: ThreadViewCursor | null,
+  full: boolean,
+): string {
+  const icon = thread.status === "done" ? "\u2714"
+    : thread.status === "failed" ? "\u2718"
+    : thread.status === "cancelled" ? "\u2718"
+    : thread.status === "merged" ? "\u2714"
+    : thread.status === "queued" ? "\u23f3"
+    : thread.status === "waiting-for-input" ? "?"
+    : thread.flags.stalled ? "!"
+    : thread.flags.looping ? "\u21bb"
+    : "\u2026";
+
+  const role = thread.role ?? "user thread";
+  const statusChanged = cursor && cursor.status !== thread.status;
+  const statusStr = statusChanged
+    ? `${thread.status} (was ${cursor!.status})`
+    : thread.status;
+
+  if (full || !cursor) {
+    // Full view: show everything
+    let line = `${icon} ${thread.id} (${role}) ${statusStr} \u00b7 ${thread.steps} steps \u00b7 last activity ${thread.lastActivityAt}`;
+    if (thread.waitingFor) {
+      line += `\n  ? waiting for ${thread.waitingFor.kind}: ${thread.waitingFor.text}`;
+    }
+    if (thread.diffStats) {
+      line += `\n  \u0394 ${thread.diffStats.files} files (+${thread.diffStats.insertions} \u2212${thread.diffStats.deletions})`;
+    }
+    return line;
+  }
+
+  // Incremental: show only changes
+  const stepsStr = thread.steps > 0 ? `+${thread.steps} steps` : "";
+
+  let line = `${icon} ${thread.id} (${role}) ${statusStr}`;
+  if (stepsStr) line += ` \u00b7 ${stepsStr}`;
+  line += ` \u00b7 last activity ${thread.lastActivityAt}`;
+
+  // waitingFor is always shown if present (it's actionable)
+  if (thread.waitingFor) {
+    line += `\n  ? waiting for ${thread.waitingFor.kind}: ${thread.waitingFor.text}`;
+  }
+
+  // diffStats delta
+  if (thread.diffStats && (!cursor.diffStats ||
+    thread.diffStats.files !== cursor.diffStats.files ||
+    thread.diffStats.insertions !== cursor.diffStats.insertions ||
+    thread.diffStats.deletions !== cursor.diffStats.deletions)) {
+    line += `\n  \u0394 ${thread.diffStats.files} files (+${thread.diffStats.insertions} \u2212${thread.diffStats.deletions})`;
+  }
+
+  return line;
+}
+
+/**
+ * Advance the observer cursor for a thread after viewing it.
+ */
+function advanceCursor(
+  observerSessionId: string,
+  thread: import("./thread-registry.js").ThreadRecord,
+  registry: import("./thread-registry.js").ThreadRegistry,
+): void {
+  const cursor: ThreadViewCursor = {
+    eventSeq: thread.eventSeq,
+    status: thread.status,
+    progressVersion: 0, // TODO: track progress block version
+    decisionsCount: 0, // TODO: track decisions count
+    diffStats: thread.diffStats,
+    viewedAt: new Date().toISOString(),
+  };
+  registry.setCursor(observerSessionId, thread.id, cursor);
+}
 
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
   return {
@@ -217,6 +297,14 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!host.threadRegistry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
+      // Check concurrency: count running + queued threads
+      const existing = await host.threadRegistry.listThreads(params.parentSessionId);
+      const activeCount = existing.filter(
+        (t) => t.status === "running" || t.status === "queued",
+      ).length;
+      const maxConcurrency = host.threadRegistry.maxConcurrency ?? 12;
+      const isQueued = activeCount >= maxConcurrency;
+
       const record = await host.threadRegistry.createThread({
         parentSessionId: params.parentSessionId,
         brief: params.task,
@@ -229,6 +317,16 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: {},
         ...(params.scope ? { scope: params.scope } : {}),
       });
+
+      if (isQueued) {
+        // Thread is queued, don't spawn yet — will be dequeued when a running thread finishes
+        return {
+          text: `queued as ${record.id} (${params.role}) — ${activeCount} threads active, max ${maxConcurrency}`,
+          threadId: record.id,
+          queued: true,
+        };
+      }
+
       // Spawn the child session
       const { sessionId } = await host.threadSpawnSession({
         parentSessionId: params.parentSessionId,
@@ -247,6 +345,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       return {
         text: `dispatched ${record.id} (${params.role})`,
         threadId: record.id,
+        queued: false,
       };
     },
   };
@@ -254,12 +353,46 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
 
 export function createThreadListService(host: HarnessServiceHost): HarnessService<"thread.list"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
-      if (!host.threadRegistry) {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      const registry = host.threadRegistry;
+      if (!registry) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const threads = await host.threadRegistry.listThreads(params.parentSessionId);
+      const observerSessionId = ctx.sessionId;
+      let threads = await registry.listThreads(params.parentSessionId);
+      if (params.ids) {
+        threads = threads.filter((t) => params.ids!.includes(t.id));
+      }
+      const full = params.full ?? false;
+
+      // Build incremental view
+      const lines: string[] = [];
+      let changedCount = 0;
+      for (const thread of threads) {
+        const cursor = registry.getCursor(observerSessionId, thread.id);
+        const hasChanges = full || !cursor ||
+          cursor.status !== thread.status ||
+          cursor.eventSeq !== thread.eventSeq;
+        if (hasChanges) {
+          changedCount++;
+          lines.push(formatThreadLine(thread, cursor, full));
+        } else {
+          // No change — one line
+          lines.push(`${thread.id} \u2014 no change since last view; still ${thread.status}, last activity ${thread.lastActivityAt}`);
+        }
+        // Advance cursor
+        if (!full) {
+          advanceCursor(observerSessionId, thread, registry);
+        }
+      }
+
+      const header = changedCount === 0 && threads.length > 0
+        ? `no changes since last view; use wait to block instead of polling`
+        : `${threads.length} threads \u00b7 ${changedCount} changed since last view`;
+      const text = threads.length === 0 ? "no threads" : `${header}\n${lines.join("\n")}`;
+
       return {
+        text,
         threads: threads.map((t) => ({
           id: t.id,
           status: t.status,
@@ -269,6 +402,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
           lastActivityAt: t.lastActivityAt,
           flags: t.flags,
           waitingFor: t.waitingFor,
+          diffStats: t.diffStats,
         })),
       };
     },
@@ -277,35 +411,100 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
 
 export function createThreadWaitService(host: HarnessServiceHost): HarnessService<"thread.wait"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
-      if (!host.threadRegistry) {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      const registry = host.threadRegistry;
+      if (!registry) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const allThreads = await host.threadRegistry.listThreads(params.parentSessionId, true);
+      const observerSessionId = ctx.sessionId;
+      const timeoutMs = params.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
+
+      // Check if any target thread has changed since the observer's cursor
+      const checkForChanges = async (): Promise<boolean> => {
+        const allThreads = await registry.listThreads(params.parentSessionId, true);
+        const targetIds = params.ids ?? allThreads.map((t) => t.id);
+        for (const thread of allThreads) {
+          if (!targetIds.includes(thread.id)) continue;
+          const cursor = registry.getCursor(observerSessionId, thread.id);
+          if (!cursor || cursor.status !== thread.status || cursor.eventSeq !== thread.eventSeq) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Check for existing changes first
+      let hasChanges = await checkForChanges();
+      let timedOut = false;
+
+      if (!hasChanges) {
+        // Block until a change or timeout
+        let resolveWait: () => void;
+        const changePromise = new Promise<void>((resolve) => {
+          resolveWait = resolve;
+        });
+        const unsub = registry.subscribeToChanges(params.parentSessionId, () => {
+          resolveWait();
+        });
+        const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+        try {
+          await Promise.race([changePromise, timeoutPromise]);
+          hasChanges = await checkForChanges();
+          timedOut = !hasChanges;
+        } finally {
+          unsub();
+        }
+      }
+
+      // Format result
+      const allThreads = await registry.listThreads(params.parentSessionId, true);
       const targetIds = params.ids ?? allThreads.map((t) => t.id);
-      const done = allThreads.filter((t) => targetIds.includes(t.id) && (t.status === "done" || t.status === "failed" || t.status === "cancelled" || t.status === "merged"));
-      const running = allThreads.filter((t) => targetIds.includes(t.id) && t.status === "running");
-      const queued = allThreads.filter((t) => targetIds.includes(t.id) && t.status === "queued");
-      // Format result similar to worker-runtime's formatWaitResult
+      const targetThreads = allThreads.filter((t) => targetIds.includes(t.id));
+
+      const done = targetThreads.filter((t) =>
+        t.status === "done" || t.status === "failed" || t.status === "cancelled" || t.status === "merged",
+      );
+      const running = targetThreads.filter((t) => t.status === "running");
+      const queued = targetThreads.filter((t) => t.status === "queued");
+
       const lines: string[] = [];
-      lines.push(`${done.length} done · ${running.length} running · ${queued.length} queued`);
+      if (timedOut) {
+        lines.push(`timed out after ${Math.round(timeoutMs / 1000)}s \u2014 ${done.length} done \u00b7 ${running.length} running \u00b7 ${queued.length} queued`);
+      } else {
+        lines.push(`${done.length} done \u00b7 ${running.length} running \u00b7 ${queued.length} queued`);
+      }
+
       for (const t of done) {
-        const conclusion = t.report?.conclusion.split("\n")[0] ?? "completed";
-        const files = t.report?.changedFiles.length ?? 0;
-        const confidence = t.report?.confidence ?? 0;
-        lines.push(`\u2714 ${t.id} (${t.role ?? "unknown"}) \u2014 ${conclusion} \u00b7 files: ${files} \u00b7 confidence ${confidence}`);
+        if (t.report) {
+          const conclusion = t.report.conclusion.split("\n")[0] ?? "completed";
+          const deviations = t.report.deviations.length > 0
+            ? t.report.deviations.join("; ")
+            : "none";
+          lines.push(`\u2714 ${t.id} (${t.role ?? "unknown"}) \u2014 ${conclusion}`);
+          lines.push(`  files: ${t.report.changedFiles.join(", ") || "(none)"} \u00b7 confidence ${t.report.confidence}`);
+          lines.push(`  deviations from brief: ${deviations}`);
+          lines.push(`  unresolved: ${t.report.unresolved.join("; ") || "none"} \u00b7 notes: read_thread("${t.id}") \u00b7 trace: read_thread("${t.id}", "steps")`);
+        } else {
+          lines.push(`\u2714 ${t.id} (${t.role ?? "unknown"}) \u2014 ${t.status}`);
+        }
+        advanceCursor(observerSessionId, t, registry);
       }
       for (const t of running) {
-        lines.push(`\u2026 ${t.id} (${t.role ?? "unknown"}) \u00b7 ${t.steps} steps`);
+        const cursor = registry.getCursor(observerSessionId, t.id);
+        lines.push(formatThreadLine(t, cursor, false));
+        advanceCursor(observerSessionId, t, registry);
       }
       for (const t of queued) {
         lines.push(`\u23f3 ${t.id} (${t.role ?? "unknown"}) \u00b7 queued`);
+        advanceCursor(observerSessionId, t, registry);
       }
+
       return {
         text: lines.join("\n"),
         done: done.length,
         running: running.length,
         queued: queued.length,
+        timedOut,
       };
     },
   };
@@ -322,7 +521,16 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       }
       await host.threadSendToSession(thread.sessionId, params.message, params.from);
-      return { accepted: true };
+      // Wake idle or waiting-for-input threads
+      let newStatus = thread.status;
+      if (thread.status === "idle" || thread.status === "waiting-for-input") {
+        await host.threadRegistry.updateThread(params.parentSessionId, params.threadId, {
+          status: "running",
+          waitingFor: null,
+        });
+        newStatus = "running";
+      }
+      return { accepted: true, status: newStatus };
     },
   };
 }
@@ -337,22 +545,58 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
       if (!thread) {
         throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       }
+      const what: ThreadReadWhat = params.what ?? "blocks";
       const lines: string[] = [];
-      lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) \u2014 ${thread.status}`);
-      lines.push(`Brief: ${thread.brief}`);
-      lines.push(`Steps: ${thread.steps} \u00b7 Last activity: ${thread.lastActivityAt}`);
-      if (thread.report) {
-        lines.push("");
-        lines.push("Report:");
-        lines.push(`  Conclusion: ${thread.report.conclusion}`);
-        lines.push(`  Changed files: ${thread.report.changedFiles.join(", ") || "(none)"}`);
-        lines.push(`  Unresolved: ${thread.report.unresolved.join(", ") || "(none)"}`);
-        lines.push(`  Confidence: ${thread.report.confidence}`);
+
+      if (what === "blocks") {
+        // Default: progress / decisions / errors blocks (structured summary)
+        lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) \u2014 ${thread.status}`);
+        lines.push(`Brief: ${thread.brief}`);
+        lines.push(`Steps: ${thread.steps} \u00b7 Last activity: ${thread.lastActivityAt}`);
+        if (thread.lastToolCall) {
+          lines.push(`Last tool: ${thread.lastToolCall.name} at ${thread.lastToolCall.at}`);
+        }
+        if (thread.waitingFor) {
+          lines.push(`Waiting for: ${thread.waitingFor.kind} \u2014 ${thread.waitingFor.text}`);
+        }
+        if (thread.flags.stalled) lines.push("Flag: stalled");
+        if (thread.flags.looping) lines.push("Flag: looping");
+        if (thread.flags.workerLost) lines.push("Flag: worker-lost");
+        // TODO: extract progress/decisions/errors blocks from thread's memory agent
+        // For now, use report's blocksSnapshot if available
+        if (thread.report?.blocksSnapshot) {
+          for (const [blockName, content] of Object.entries(thread.report.blocksSnapshot)) {
+            lines.push(`\n[${blockName}]`);
+            lines.push(content);
+          }
+        }
+        return { text: lines.join("\n"), report: null, traceHandle: null };
       }
-      return {
-        text: lines.join("\n"),
-        report: thread.report,
-      };
+
+      if (what === "report") {
+        if (!thread.report) {
+          return {
+            text: `Thread ${thread.id} has no report yet (status: ${thread.status})`,
+            report: null,
+            traceHandle: null,
+          };
+        }
+        const r = thread.report;
+        lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) \u2014 Report`);
+        lines.push(`Conclusion: ${r.conclusion}`);
+        lines.push(`Changed files: ${r.changedFiles.join(", ") || "(none)"}`);
+        lines.push(`Deviations from brief: ${r.deviations.join("; ") || "none"}`);
+        lines.push(`Unresolved: ${r.unresolved.join("; ") || "none"}`);
+        lines.push(`Confidence: ${r.confidence}`);
+        return { text: lines.join("\n"), report: r, traceHandle: r.traceHandle };
+      }
+
+      // what === "steps" — transcript slice with cursor
+      const since = params.since ?? 0;
+      lines.push(`[steps ${since}\u2013${thread.steps} shown earlier; showing ${since + 1}\u2013${thread.steps}]`);
+      // TODO: fetch actual transcript slice from thread session
+      lines.push(`(transcript not yet available — thread ${thread.id}, ${thread.steps} steps total)`);
+      return { text: lines.join("\n"), report: null, traceHandle: null };
     },
   };
 }
@@ -384,7 +628,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       }
       await host.threadRegistry.mergeThread(params.parentSessionId, params.threadId);
       return {
-        text: `merged ${result.merged} files`,
+        text: `merged ${result.merged} files: ${thread.report?.changedFiles.join(", ") ?? ""}`,
         merged: result.merged,
         conflicts: [],
       };
@@ -402,15 +646,16 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       if (!thread) {
         return { text: `unknown thread: ${params.threadId}` };
       }
+      const keepWorktree = params.keepWorktree ?? true;
       if (thread.status === "queued") {
         await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
-        return { text: `killed ${params.threadId} (was queued)` };
+        return { text: `killed ${params.threadId} (was queued${keepWorktree ? ", worktree kept" : ""})` };
       }
       if (host.threadKillSession) {
         await host.threadKillSession(params.threadId);
       }
       await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
-      return { text: `killed ${params.threadId}` };
+      return { text: `killed ${params.threadId}${keepWorktree ? " (worktree kept)" : ""}` };
     },
   };
 }

@@ -414,4 +414,195 @@ describe("thread registry", () => {
     expect(updated!.flags.stalled).toBe(true);
     expect(updated!.flags.workerLost).toBe(false); // unchanged
   });
+
+  // ── New tests for §9.3 redo ───────────────────────────────────────
+
+  it("eventSeq increments on every state change", async () => {
+    const created = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "seq test",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(created.eventSeq).toBeGreaterThan(0);
+    const seq1 = created.eventSeq;
+    const updated = await registry.setSessionId("parent-1", created.id, "session-1");
+    expect(updated!.eventSeq).toBeGreaterThan(seq1);
+  });
+
+  it("observer cursor starts null and can be set/get", async () => {
+    const created = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "cursor test",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(registry.getCursor("observer-1", created.id)).toBeNull();
+    registry.setCursor("observer-1", created.id, {
+      eventSeq: created.eventSeq,
+      status: created.status,
+      progressVersion: 0,
+      decisionsCount: 0,
+      diffStats: null,
+      viewedAt: new Date().toISOString(),
+    });
+    const cursor = registry.getCursor("observer-1", created.id);
+    expect(cursor).not.toBeNull();
+    expect(cursor!.status).toBe("queued");
+  });
+
+  it("clearCursorsForSession removes all cursors for an observer", async () => {
+    const t1 = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "t1",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    const t2 = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "t2",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    registry.setCursor("observer-1", t1.id, {
+      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
+    });
+    registry.setCursor("observer-1", t2.id, {
+      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
+    });
+    expect(registry.getCursor("observer-1", t1.id)).not.toBeNull();
+    registry.clearCursorsForSession("observer-1");
+    expect(registry.getCursor("observer-1", t1.id)).toBeNull();
+    expect(registry.getCursor("observer-1", t2.id)).toBeNull();
+  });
+
+  it("subscribeToChanges is called when a thread changes", async () => {
+    let called = 0;
+    const unsub = registry.subscribeToChanges("parent-1", () => { called++; });
+    await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "sub test",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(called).toBeGreaterThan(0);
+    unsub();
+    const calledBefore = called;
+    await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "after unsub",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(called).toBe(calledBefore); // no more callbacks after unsubscribe
+  });
+
+  it("maxConcurrency limits active threads", async () => {
+    const reg = createThreadRegistry({ dataDir, hostId: "test-host", maxConcurrency: 2 });
+    // Create 2 running threads
+    const t1 = await reg.createThread({
+      parentSessionId: "parent-1",
+      brief: "t1",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    await reg.setSessionId("parent-1", t1.id, "sess-1");
+    const t2 = await reg.createThread({
+      parentSessionId: "parent-1",
+      brief: "t2",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    await reg.setSessionId("parent-1", t2.id, "sess-2");
+    // Third thread should still be queued (concurrency full)
+    const t3 = await reg.createThread({
+      parentSessionId: "parent-1",
+      brief: "t3",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(t3.status).toBe("queued");
+    expect(reg.maxConcurrency).toBe(2);
+  });
+
+  it("tryDequeue returns the oldest queued thread", async () => {
+    const t1 = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "first",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "second",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    const dequeued = await registry.tryDequeue("parent-1");
+    expect(dequeued).not.toBeNull();
+    expect(dequeued!.id).toBe(t1.id); // oldest first
+  });
+
+  it("deleteThread cleans up cursors", async () => {
+    const created = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "cleanup",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    registry.setCursor("observer-1", created.id, {
+      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
+    });
+    expect(registry.getCursor("observer-1", created.id)).not.toBeNull();
+    await registry.deleteThread("parent-1", created.id);
+    expect(registry.getCursor("observer-1", created.id)).toBeNull();
+  });
 });

@@ -81,13 +81,50 @@ export interface ThreadRecord {
   updatedAt: string;
 }
 
+// ── Observer cursor (incremental views, §9.3.7) ───────────────────
+
+export interface ThreadViewCursor {
+  /** Last event sequence number shown to this observer */
+  eventSeq: number;
+  /** Last status shown */
+  status: ThreadStatus;
+  /** Last progress block version shown */
+  progressVersion: number;
+  /** Last decisions count shown */
+  decisionsCount: number;
+  /** Last diff stats shown */
+  diffStats: ThreadDiffStats | null;
+  /** When this cursor was last advanced */
+  viewedAt: string;
+}
+
+// ── TTL table for default wait timeout (§9.3.6, §9.2.6) ────────────
+
+export interface TtlTable {
+  /** Default timeout in ms per provider ID. Unknown → fallback. */
+  [providerId: string]: number;
+}
+
+export const DEFAULT_TTL_TABLE: TtlTable = {
+  anthropic: 240_000,
+  "anthropic-1h": 3_300_000,
+  openai: 240_000,
+  gemini: 240_000,
+};
+export const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
+
 // ── Harness service methods for thread operations ──────────────────
 
 export interface ThreadListParams {
   parentSessionId: string;
+  /** Filter to specific thread IDs. Omit = all visible threads. */
+  ids?: string[];
+  /** Ignore observer cursor, return full snapshot. */
+  full?: boolean;
 }
 
 export interface ThreadListResult {
+  text: string;
   threads: Array<{
     id: string;
     status: ThreadStatus;
@@ -97,6 +134,7 @@ export interface ThreadListResult {
     lastActivityAt: string;
     flags: ThreadFlags;
     waitingFor: ThreadWaitingFor | null;
+    diffStats: ThreadDiffStats | null;
   }>;
 }
 
@@ -111,6 +149,8 @@ export interface ThreadWaitResult {
   done: number;
   running: number;
   queued: number;
+  /** Whether the wait timed out (normal result, not an error) */
+  timedOut: boolean;
 }
 
 export interface ThreadSendParams {
@@ -122,17 +162,26 @@ export interface ThreadSendParams {
 
 export interface ThreadSendResult {
   accepted: boolean;
+  /** Thread status after send (e.g. "running" if woken from idle) */
+  status: ThreadStatus;
 }
+
+export type ThreadReadWhat = "blocks" | "report" | "steps";
 
 export interface ThreadReadParams {
   parentSessionId: string;
   threadId: string;
-  steps?: number;
+  /** What to read: "blocks" (default), "report", or "steps" */
+  what?: ThreadReadWhat;
+  /** For steps: cursor to read since. Omit = since last cursor. */
+  since?: number;
 }
 
 export interface ThreadReadResult {
   text: string;
   report: ThreadReport | null;
+  /** For steps: the handle containing the transcript slice */
+  traceHandle: string | null;
 }
 
 export interface ThreadMergeParams {
@@ -149,6 +198,8 @@ export interface ThreadMergeResult {
 export interface ThreadKillParams {
   parentSessionId: string;
   threadId: string;
+  /** Keep worktree after kill (default true) */
+  keepWorktree?: boolean;
 }
 
 export interface ThreadKillResult {
@@ -165,4 +216,6 @@ export interface ThreadDispatchParams {
 export interface ThreadDispatchResult {
   text: string;
   threadId: string;
+  /** Whether the thread was queued (concurrency full) or started */
+  queued: boolean;
 }
