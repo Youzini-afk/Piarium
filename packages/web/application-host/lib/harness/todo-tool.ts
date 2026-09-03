@@ -71,7 +71,7 @@ export function parsePlanContent(content: string): TodoItem[] {
 
 export interface TodoToolResult {
   text: string;
-  confirmed?: boolean;
+  confirmed?: boolean | undefined;
   askedConfirmation: boolean;
 }
 

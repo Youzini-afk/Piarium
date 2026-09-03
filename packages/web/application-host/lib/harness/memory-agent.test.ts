@@ -165,7 +165,7 @@ describe("validateOp", () => {
   });
 
   it("mark_plan invalid status", () => {
-    expect(validateOp({ op: "mark_plan", item: 0, status: "invalid" }, existing, settings).valid).toBe(false);
+    expect(validateOp({ op: "mark_plan", item: 0, status: "invalid" as "done" }, existing, settings).valid).toBe(false);
   });
 
   it("invalid block name", () => {

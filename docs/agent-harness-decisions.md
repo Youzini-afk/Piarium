@@ -248,3 +248,27 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 è€ƒè™‘è¿‡çš„æ›¿ä»£ï¼š(1) ä» content ç”Ÿæˆæ‘˜è¦â€”â€”è¿å 5.1 åŸåˆ™ 2ï¼Œä¸” content å¯èƒ½è¢«æˆªæ–­ã€‚(2) æ‰€æœ‰å·¥å…·éƒ½åˆ†ç»„â€”â€”å†™å·¥å…·éœ€è¦ç‹¬ç«‹å±•ç¤º diff å’Œç¡®è®¤ã€‚(3) ä¸åˆ†ç»„â€”â€”å™ªéŸ³è¿‡å¤§ã€‚
 å½±å“ï¼š`packages/ui/src/components/chat/message/parts/toolSummary.ts`ï¼ˆ`getToolSummary` + `groupToolCalls`ï¼‰ï¼›`packages/ui/src/components/chat/message/parts/toolSummary.test.ts`ï¼ˆ17 æµ‹è¯•ï¼‰ã€‚
 çŠ¶æ€ï¼šå·²å®æ–½ï¼ˆçº¯é€»è¾‘æ¨¡å—ï¼Œå°šæœªæ¥å…¥ PiTimelineEntries.tsx æ¸²æŸ“è·¯å¾„â€”â€”å¾…é˜¶æ®µ 2 UI é›†æˆï¼‰
+
+### D-019 ¡¤ 2026-09-03 ¡¤ 2.1
+ÀàĞÍ£ºÆ«Àë
+¾ö¶¨£ºTriviumDB TQL ²éÑ¯Óï·¨ÔÚ v0.8.5 ÉÏ²»ÎÈ¶¨£¨FIND Óï·¨¶Ô×Ö·û´®/Êı×Ö×ÖÃæÁ¿´¦Àí²»Ò»ÖÂ£¬WHERE ×Ó¾ä±¨ÀàĞÍ×ª»»´íÎó£©¡£ÖªÊ¶¿â store.ts ¸ÄÓÃ `allNodeIds()` + `getPayload()` ÔÚ JS ²ã¹ıÂË£¬²»Ê¹ÓÃ TQL¡£
+Ô­Òò£ºTQL µÄ `FIND {type: "block", sessionId: "s1"} RETURN *` ±¨ "Failed to convert napi value String into rust type `f64`" ´íÎó£¬ËµÃ÷ TQL ½âÎöÆ÷¶Ô payload ×Ö¶ÎÀàĞÍÍÆ¶ÏÓĞ bug¡£JS ²ã¹ıÂËËäÈ»ÔÚ´óÊı¾İ¼¯ÉÏ½ÏÂı£¬µ«½×¶Î 2 µÄÊı¾İ¹æÄ££¨µ¥»á»°Êı°Ù event£©ÍêÈ«¿É½ÓÊÜ¡£
+¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ĞŞ¸´ TriviumDB µÄ TQL ½âÎöÆ÷¡ª¡ªÊÇÍ¬Ò»Î¬»¤ÕßµÄÏîÄ¿£¬µ«ÓÅÏÈ¼¶µÍÓÚÍÆ½ø½×¶Î 2£»(2) ÓÃ `tql` µÄ MATCH Óï·¨¡ª¡ªÍ¬Ñù²»ÎÈ¶¨¡£
+Ó°Ïì£º`packages/web/application-host/lib/knowledge/store.ts`£¨scanNodes ¸¨Öúº¯ÊıÌæ´úËùÓĞ TQL ²éÑ¯£©¡£Ë÷Òı£¨createIndex/createOrderedIndex£©ÈÔ´´½¨µ«²»±» JS ²ãÊ¹ÓÃ£¬±£Áô¹©Î´À´ TQL ĞŞ¸´ºóÆôÓÃ¡£
+×´Ì¬£ºÒÑÊµÊ©
+
+### D-020 ¡¤ 2026-09-03 ¡¤ 2.1
+ÀàĞÍ£ºÆ«Àë
+¾ö¶¨£ºÕ¼Î»ÏòÁ¿Ä£Ê½ÏÂ `recall` ²»Ê¹ÓÃ `searchHybrid`£¬¸ÄÎª JS ²ãÉ¨Ãè accepted knowledge ½Úµã + ¼òµ¥´ÊÏîÆ¥ÅäÆÀ·Ö¡£`searchHybrid` µÄÈ«ÁãÏòÁ¿ÔÚ v0.8.5 ÉÏ·µ»Ø¿Õ½á¹û£¨ÓàÏÒÏàËÆ¶ÈÎª 0/NaN£©¡£
+Ô­Òò£º¼Æ»®ÒªÇó"ÊµÊ©Ç°ÏÈÔÚ TriviumDB ÉÏÑéÖ¤È«ÁãÏòÁ¿µÄ search ²»±¨´í"¡ª¡ªÑéÖ¤·¢ÏÖ²»±¨´íµ«·µ»Ø¿Õ½á¹û£¬ÎŞ·¨ÓÃÓÚÕÙ»Ø¡£JS ²ã´ÊÏîÆ¥ÅäËäÈ»´Ö²Ú£¬µ«Âú×ã½×¶Î 2 µÄ»ù±¾ĞèÇó£¨°´ trigger/content Æ¥Åä£©¡£
+¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ÓÃµ¥Î»ÏòÁ¿Õ¼Î»¡ª¡ª»áÒıÈëĞé¼ÙÏàËÆ¶È£»(2) Ö»×ß TQL ÎÄ±¾²éÑ¯¡ª¡ªTQL ²»ÎÈ¶¨£¨¼û D-019£©¡£
+Ó°Ïì£º`packages/web/application-host/lib/knowledge/store.ts`£¨recall ·½·¨ÔÚ `!embedding` ·ÖÖ§¸ÄÎª JS É¨Ãè£©¡£embedding Ä£Ê½ÈÔÊ¹ÓÃ `searchHybrid`¡£
+×´Ì¬£ºÒÑÊµÊ©
+
+### D-021 ¡¤ 2026-09-03 ¡¤ 3b.3
+ÀàĞÍ£ºÆ«Àë
+¾ö¶¨£º´Ó `FOUNDATIONAL_PI_PACKAGE_MANIFEST` ÒÆ³ı `@gotgenes/pi-permission-system`£¨revision 2¡ú3£©£¬µ«±£Áô `FoundationalPiPackageId` ÁªºÏÀàĞÍÖĞµÄ `"permission-system"` ×ÖÃæÁ¿£¬ÒÔ±ãÒÑ°²×°ÊµÀıµÄ×´Ì¬¿ìÕÕÈÔÄÜÕıÈ·±àÂë¡£
+Ô­Òò£º¼Æ»®ÒªÇó"ÒÑ°²×°ÊµÀı²»É¾²»Ç¨"¡£±£ÁôÀàĞÍ×ÖÃæÁ¿ÈÃ protocol Ïû·Ñ·½ÈÔÄÜ´¦Àí¾É¿ìÕÕÖĞµÄ permission-system ÌõÄ¿£¬µ«²»ÔÙ×Ô¶¯ provision¡£
+¿¼ÂÇ¹ıµÄÌæ´ú£º(1) ÍêÈ«ÒÆ³ıÀàĞÍ¡ª¡ª»áµ¼ÖÂ¾É¿ìÕÕ·´ĞòÁĞ»¯Ê§°Ü£»(2) ±£Áô manifest ÌõÄ¿µ«±ê¼Ç deprecated¡ª¡ªmanifest ÊÇ `as const` ²»¿ÉÀ©Õ¹¡£
+Ó°Ïì£º`packages/protocol/src/foundational-pi-packages.ts`£¨manifest revision 3£¬IDS Êı×éÖ»º¬ mcp£©£»`packages/protocol/test/foundational-pi-packages.test.ts`£¨¸üĞÂ¶ÏÑÔ£©£»`packages/runtime-broker/test/foundational-package-provisioner.test.ts`£¨ÒÆ³ı permission-system Ïà¹Ø²âÊÔÓÃÀı£©¡£
+×´Ì¬£ºÒÑÊµÊ©

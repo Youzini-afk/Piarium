@@ -121,7 +121,7 @@ export interface KnowledgeStore {
   deleteBlock(sessionId: string, label: string): Promise<void>;
   putKnowledge(k: KnowledgeInput): Promise<NodeId>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
-  acceptKnowledge(id: NodeId, opts: { supersedes?: NodeId[] }): Promise<void>;
+  acceptKnowledge(id: NodeId, opts: { supersedes?: NodeId[] | undefined }): Promise<void>;
   dismissKnowledge(id: NodeId): Promise<void>;
   recordRecall(ids: NodeId[]): Promise<void>;
   recall(query: string, k: number): Promise<RecallResult[]>;

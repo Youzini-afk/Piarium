@@ -88,7 +88,7 @@ export function createObservers(deps: ObserverDeps) {
       at: Date.now(),
       sessionId,
       text: `exit ${event.exitCode} · ${event.command}`,
-      refs: event.sessionId ? { handle: event.sessionId } : undefined,
+      ...(event.sessionId ? { refs: { handle: event.sessionId } } : {}),
       source,
     };
     await store.putEvent(input);

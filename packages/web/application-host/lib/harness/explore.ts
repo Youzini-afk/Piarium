@@ -54,7 +54,7 @@ export interface SymbolCandidate {
 
 export interface ExploreDeps {
   /** Run ripgrep with a pattern, return hits */
-  rgSearch: (pattern: string, options: { fixedStrings: boolean; paths?: string[]; limit: number }) => Promise<RgHit[]>;
+  rgSearch: (pattern: string, options: { fixedStrings: boolean; paths?: string[] | undefined; limit: number }) => Promise<RgHit[]>;
   /** Search symbol candidates in knowledge base */
   searchSymbols: (query: string, k: number) => Promise<SymbolCandidate[]>;
   /** Semantic recall (embedding mode only) */

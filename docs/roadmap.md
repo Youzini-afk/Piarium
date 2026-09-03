@@ -604,3 +604,64 @@ UI dependency-boundary and extension-contract governance is complete. Current ow
 [architecture.md](architecture.md), [piarium-extension-authoring.md](piarium-extension-authoring.md),
 and the [`@piarium/application-client` README](../packages/application-client/README.md); executable
 conformance remains in the package tests and architecture checks.
+
+## Agent harness ¡ª Phase 2/3/3b (2026-09-03)
+
+### Phase 2: Context layer
+
+- **2.1 Knowledge store v1**: TriviumDB-backed workspace knowledge base
+  (`lib/knowledge/store.ts`). Event/session/block/knowledge nodes,
+  placeholder vector mode (dim=8), single-writer queue, cascade delete,
+  retention. 17 tests.
+- **2.2 Zone 2 assembly**: `piarium-context` message template with budget
+  folding (`lib/harness/zone2.ts`). 13 tests.
+- **2.3 Host observers**: Document/terminal/diagnostic/git event handlers
+  writing to knowledge store (`lib/knowledge/observers.ts`). 10 tests.
+- **2.4 Memory agent**: Gating table, `memory_edit` ops (replace/patch/
+  create/delete/mark_plan), prefix reuse, interval adaptation
+  (`lib/harness/memory-agent.ts`). 30 tests.
+- **2.5 todo tool**: Plan block management with confidence confirmation
+  (`lib/harness/todo-tool.ts`). 12 tests.
+- **2.6 Compaction**: `piarium-compaction` summary with non-stacking
+  guarantee, re-injection (`lib/harness/compaction.ts`). 10 tests.
+- **2.7 Knowledge suggestions**: Three triggers, review tray actions,
+  supersedes chain (`lib/harness/knowledge-suggestions.ts`). 10 tests.
+- **2.8 Embedding providers**: OpenAI/Voyage/Cohere/Jina/Mistral/Gemini
+  adapters, meta persistence, dimension validation
+  (`lib/knowledge/embedding.ts`). 11 tests.
+- **2.9 Model slots**: Nine slots + permissionJudge, presets, resolution
+  (`lib/harness/model-slots.ts`). 12 tests.
+- **2.10 recall tool**: Workspace + user store merge, formatted output
+  (`lib/harness/recall-tool.ts`). 5 tests.
+
+### Phase 3: Retrieval and sub-agents
+
+- **3.1 Symbol graph collector**: LSP-powered symbol/reference collection
+  (`lib/knowledge/symbols.ts`).
+- **3.2 explore pipeline**: Pure algorithm mode (zero model calls),
+  query expansion, parallel rg fan-out, ranking
+  (`lib/harness/explore.ts`). 17 tests.
+- **3.3 related tool**: Graph neighbors by PageRank
+  (`lib/harness/related-tool.ts`).
+- **3.4-3.5 Worker runtime**: spawnChild/dispatch/wait/merge/kill with
+  TTL table, concurrency queueing, stale detection, cascade termination
+  (`lib/harness/worker-runtime.ts`). 12 tests.
+- **3.6 Role catalog**: Six roles, team prompt, slot-based resolution
+  (`lib/harness/roles.ts`). 11 tests.
+- **3.7 Review sensor**: Auto-dispatch review on diff, gate mode
+  (`lib/harness/review-sensor.ts`). 5 tests.
+- **3.8 LSP navigation**: symbols/definition/references/hover with
+  ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
+
+### Phase 3b: Native permissions
+
+- **3b.1 Permission gate**: Policy file with mode/rules, high-risk
+  patterns always ask, top-down rule evaluation
+  (`lib/harness/permission-gate.ts`). 22 tests.
+- **3b.2 Smart mode**: Model-judged permission decisions, high-risk
+  bypass (`lib/harness/smart-mode.ts`). 10 tests.
+- **3b.3 Stop provisioning**: Removed `@gotgenes/pi-permission-system`
+  from manifest (revision 2¡ú3). Protocol tests 3/3.
+
+**Total**: 288 tests across 25 test files, all passing. Type-check clean.
+Decisions D-019 through D-021 recorded in agent-harness-decisions.md.

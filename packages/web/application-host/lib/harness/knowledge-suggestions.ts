@@ -129,7 +129,7 @@ export async function suggestSupersedes(
 export async function acceptSuggestion(
   id: NodeId,
   deps: SuggestionDeps,
-  options: { supersedes?: NodeId[] },
+  options: { supersedes?: NodeId[] | undefined },
 ): Promise<void> {
   await deps.store.acceptKnowledge(id, { supersedes: options.supersedes });
 }

@@ -285,19 +285,21 @@ export async function applyOps(
           break;
         }
         case "create": {
+          const blockName = op.block!;
           await store.upsertBlock({
-            sessionId, label: op.block!, content: op.content!,
+            sessionId, label: blockName, content: op.content!,
             updatedBy: "memory-agent", cursorTurn,
           });
-          existingNames.add(op.block);
-          blockTokens.set(op.block!, estimateTokens(op.content!));
+          existingNames.add(blockName);
+          blockTokens.set(blockName, estimateTokens(op.content!));
           changedBlocks = true;
           break;
         }
         case "delete": {
-          await store.deleteBlock(sessionId, op.block!);
-          existingNames.delete(op.block);
-          blockTokens.delete(op.block);
+          const blockName = op.block!;
+          await store.deleteBlock(sessionId, blockName);
+          existingNames.delete(blockName);
+          blockTokens.delete(blockName);
           changedBlocks = true;
           break;
         }
@@ -306,10 +308,11 @@ export async function applyOps(
           if (planBlock) {
             // Mark item in plan: replace - [ ] or - [x] or - [!] at line item
             const lines = planBlock.content.split("\n");
-            if (op.item! >= 0 && op.item! < lines.length) {
-              const line = lines[op.item!];
+            const itemIdx = op.item!;
+            if (itemIdx >= 0 && itemIdx < lines.length) {
+              const line = lines[itemIdx]!;
               const marker = op.status === "done" ? "[x]" : op.status === "blocked" ? "[!]" : "[ ]";
-              lines[op.item!] = line.replace(/- \[.\]/, `- ${marker}`);
+              lines[itemIdx] = line.replace(/- \[.\]/, `- ${marker}`);
               await store.upsertBlock({
                 sessionId, label: "plan", content: lines.join("\n"),
                 updatedBy: "memory-agent", cursorTurn,
