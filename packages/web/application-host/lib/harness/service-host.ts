@@ -4,6 +4,12 @@ import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type S
 import { createHarnessSearchService, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { WorkspaceContentSearchResult } from "../search/content.js";
+import type { KnowledgeStore } from "../knowledge/store.js";
+import type { MemoryAgentRunner } from "./memory-agent.js";
+import type { Zone2Material } from "./zone2.js";
+import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js";
+import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
+import type { RecallToolDeps } from "./recall-tool.js";
 
 export interface HarnessSessionContext {
   sessionId: string;
@@ -25,6 +31,16 @@ export interface HarnessServiceHost {
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webReadService: import("./router.js").HarnessService<"web.read"> | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
+  // Phase 2: knowledge, memory, zone2, compaction, todo, recall
+  knowledgeStore: KnowledgeStore | null;
+  userKnowledgeStore: KnowledgeStore | null;
+  memoryAgent: MemoryAgentRunner | null;
+  zone2Provider: ((sessionId: string, sinceTurn: number) => Promise<Zone2Material>) | null;
+  compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
+  compactionSettings: CompactionSettings;
+  todoSettings: TodoToolSettings;
+  recallDepsProvider: ((sessionId: string) => Promise<RecallToolDeps>) | null;
+  todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string): void;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
@@ -51,6 +67,16 @@ export interface HarnessServiceHostOptions {
   webReadService?: HarnessServiceHost["webReadService"];
   /** Web search service (null when no search provider available) */
   webSearchService?: HarnessServiceHost["webSearchService"];
+  // Phase 2 options
+  knowledgeStore?: KnowledgeStore;
+  userKnowledgeStore?: KnowledgeStore;
+  memoryAgent?: MemoryAgentRunner;
+  zone2Provider?: (sessionId: string, sinceTurn: number) => Promise<Zone2Material>;
+  compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
+  compactionSettings?: CompactionSettings;
+  todoSettings?: TodoToolSettings;
+  recallDepsProvider?: (sessionId: string) => Promise<RecallToolDeps>;
+  todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -64,6 +90,16 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const webFetchService = options.webFetchService ?? null;
   const webReadService = options.webReadService ?? null;
   const webSearchService = options.webSearchService ?? null;
+  // Phase 2
+  const knowledgeStore = options.knowledgeStore ?? null;
+  const userKnowledgeStore = options.userKnowledgeStore ?? null;
+  const memoryAgent = options.memoryAgent ?? null;
+  const zone2Provider = options.zone2Provider ?? null;
+  const compactionDepsProvider = options.compactionDepsProvider ?? null;
+  const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
+  const todoSettings = options.todoSettings ?? { confirmBelow: 0.6 };
+  const recallDepsProvider = options.recallDepsProvider ?? null;
+  const todoDepsProvider = options.todoDepsProvider ?? null;
 
   const sessions = new Map<string, SessionEntry>();
 
@@ -123,6 +159,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     await Promise.all(disposes);
     outputStore.dispose();
     pathLockService.dispose();
+    memoryAgent?.dispose();
+    if (knowledgeStore) disposes.push(knowledgeStore.close());
+    if (userKnowledgeStore) disposes.push(userKnowledgeStore.close());
+    await Promise.all(disposes);
   };
 
   return {
@@ -133,6 +173,15 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     webFetchService,
     webReadService,
     webSearchService,
+    knowledgeStore,
+    userKnowledgeStore,
+    memoryAgent,
+    zone2Provider,
+    compactionDepsProvider,
+    compactionSettings,
+    todoSettings,
+    recallDepsProvider,
+    todoDepsProvider,
     registerSession,
     dropSession,
     getShellSupervisor,

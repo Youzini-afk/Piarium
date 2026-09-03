@@ -121,6 +121,68 @@ export interface SearchResultItem {
   publishedAt?: string;
 }
 
+// ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
+
+export interface Zone2AssembleParams {
+  sinceTurn: number;
+}
+
+export interface Zone2AssembleResult {
+  content: string | null;
+}
+
+export interface CompactionBeforeParams {
+  sessionId: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+}
+
+export interface CompactionBeforeResult {
+  summary: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+}
+
+export interface CompactionAfterParams {
+  sessionId: string;
+  summary: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+}
+
+export interface CompactionAfterResult {
+  acknowledged: boolean;
+}
+
+export interface TodoUpsertParams {
+  sessionId: string;
+  items: Array<{ text: string; status: "open" | "done" | "blocked" }>;
+  confidence?: number;
+}
+
+export interface TodoUpsertResult {
+  text: string;
+  confirmed?: boolean;
+  askedConfirmation: boolean;
+}
+
+export interface RecallSearchParams {
+  query: string;
+  k?: number;
+}
+
+export interface RecallSearchResultItem {
+  scope: string;
+  title: string;
+  via: string;
+  id: number;
+}
+
+export interface RecallSearchResult {
+  text: string;
+  results: RecallSearchResultItem[];
+}
+
 export interface HarnessServiceMap {
   "shell.exec": { params: { command: string; cwd?: string; waitMs?: number }; result: ShellExecResult };
   "shell.read": { params: { id: string; offset?: number; length?: number }; result: ShellReadResult };
@@ -135,6 +197,11 @@ export interface HarnessServiceMap {
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.read": { params: { url: string; prompt: string; render?: boolean }; result: WebReadResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };
+  "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
+  "compaction.before": { params: CompactionBeforeParams; result: CompactionBeforeResult };
+  "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
+  "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
+  "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -153,6 +220,11 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.read",
   "web.search",
+  "zone2.assemble",
+  "compaction.before",
+  "compaction.after",
+  "todo.upsert",
+  "recall.search",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

@@ -148,6 +148,8 @@ import {
 } from "./harness/output-tools.js";
 import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
+import { createZone2Extension } from "./harness/zone2-extension.js";
+import { createCompactionExtension } from "./harness/compaction-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
 
@@ -2735,6 +2737,22 @@ export class SessionHost {
               }),
               hidden: true,
               name: "piarium-tool-result-truncation",
+            },
+            {
+              factory: createZone2Extension({
+                bridge: hostServicesBridge,
+                sessionId: sessionManager.getSessionId(),
+              }),
+              hidden: true,
+              name: "piarium-zone2",
+            },
+            {
+              factory: createCompactionExtension({
+                bridge: hostServicesBridge,
+                sessionId: sessionManager.getSessionId(),
+              }),
+              hidden: true,
+              name: "piarium-compaction",
             },
           ],
         },

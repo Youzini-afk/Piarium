@@ -44,6 +44,13 @@ import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
+import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
+import { createMemoryAgentRunner, DEFAULT_MEMORY_AGENT_SETTINGS, type MemoryAgentRunner } from './lib/harness/memory-agent.js';
+import { createObservers, type Observers } from './lib/knowledge/observers.js';
+import { assembleZone2Content, type Zone2Material } from './lib/harness/zone2.js';
+import { handleBeforeCompact, DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
+import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
+import { type RecallToolDeps } from './lib/harness/recall-tool.js';
 import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
@@ -1052,6 +1059,104 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
   });
+
+  // ── Phase 2: Knowledge store, memory agent, observers ────────────
+  // Knowledge stores are opened lazily per workspace and cached.
+  const knowledgeStores = new Map<string, KnowledgeStore>();
+  const sessionObservers = new Map<string, Observers>();
+  const sessionStores = new Map<string, KnowledgeStore>();
+  const hostId = extensionRuntime.services.hostId;
+
+  async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore | null> {
+    let store = knowledgeStores.get(workspaceId);
+    if (store) return store;
+    try {
+      store = await openWorkspaceKnowledge({
+        dataDir: PIARIUM_DATA_DIR,
+        hostId,
+        workspaceId,
+        embedding: null, // Placeholder vectors — see D-019/D-020
+      });
+      knowledgeStores.set(workspaceId, store);
+      return store;
+    } catch {
+      return null;
+    }
+  }
+
+  async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
+    const existing = sessionStores.get(sessionId);
+    if (existing) return existing;
+    const snapshot = sessionSnapshots.get(sessionId);
+    const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
+    if (workspace?.kind === 'workspace' && typeof workspace.id === 'string') {
+      const store = await getKnowledgeStoreForWorkspace(workspace.id);
+      if (store) sessionStores.set(sessionId, store);
+      return store ?? null;
+    }
+    return null;
+  }
+
+  // Memory agent — shared per host, uses the session's knowledge store
+  const memoryAgent: MemoryAgentRunner | null = null; // TODO: wire with model access when available
+
+  // Zone 2 provider — assembles material from the knowledge store
+  async function zone2Provider(sessionId: string, sinceTurn: number): Promise<Zone2Material> {
+    const store = await getKnowledgeStoreForSession(sessionId);
+    // TODO: gather real material from store events, git, diagnostics, blocks
+    // For now, return empty material — the assembler returns null when all
+    // sections are empty, so no message is sent.
+    void store; void sinceTurn;
+    return {
+      userEdits: [],
+      userCommands: [],
+      newDiagnostics: [],
+      git: null,
+      knowledge: [],
+      blocks: [],
+      contextUsage: null,
+    };
+  }
+
+  // Compaction deps provider
+  async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
+    const store = await getKnowledgeStoreForSession(sessionId);
+    if (!store) throw new Error('No knowledge store for session');
+    return {
+      store,
+      settings: DEFAULT_COMPACTION_SETTINGS,
+      getFacts: async (): Promise<CompactionFacts> => ({
+        touchedFiles: [],
+        unresolvedDiagnostics: [],
+        checkpoints: [],
+      }),
+      getEntryIdAtTurn: (_turnsAgo: number) => null, // TODO: wire to session manager
+      getTokensBefore: () => 0,
+    };
+  }
+
+  // Todo deps provider
+  async function todoDepsProvider(sessionId: string): Promise<TodoToolDeps> {
+    const store = await getKnowledgeStoreForSession(sessionId);
+    if (!store) throw new Error('No knowledge store for session');
+    return {
+      store,
+      sessionId,
+      settings: DEFAULT_TODO_SETTINGS,
+      askConfirmation: async (_message: string) => true, // TODO: wire to permission channel
+    };
+  }
+
+  // Recall deps provider
+  async function recallDepsProvider(sessionId: string): Promise<RecallToolDeps> {
+    const workspaceStore = await getKnowledgeStoreForSession(sessionId);
+    if (!workspaceStore) throw new Error('No knowledge store for session');
+    return {
+      workspaceStore,
+      userStore: null, // TODO: open user knowledge store
+    };
+  }
+
   const harnessServiceHost = createHarnessServiceHost({
     search: async (request, options) => workspaceContentSearch.searchContent({ query: request.query, workspaceId: request.workspaceId, maxResults: request.maxResults }, options),
     resolveWorkspaceRoot: async (workspaceId) => {
@@ -1079,6 +1184,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,
+    // Phase 2: knowledge, memory, zone2, compaction, todo, recall
+    zone2Provider,
+    compactionDepsProvider,
+    todoDepsProvider,
+    recallDepsProvider,
+    ...(memoryAgent ? { memoryAgent } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',

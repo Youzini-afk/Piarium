@@ -11,6 +11,8 @@ import {
 } from "./output-tools.js";
 import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
+import { createTodoTool } from "./todo-tool.js";
+import { createRecallTool } from "./recall-tool.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
@@ -75,6 +77,13 @@ export function selectHarnessTools(
   }
   if (tools.websearch !== false && !yieldedTools?.has("websearch")) {
     result.push(createWebSearchTool(bridge, sessionId));
+  }
+  // Phase 2 tools
+  if (tools.todo !== false) {
+    result.push(createTodoTool(bridge, sessionId));
+  }
+  if (tools.recall !== false) {
+    result.push(createRecallTool(bridge, sessionId));
   }
 
   return result;

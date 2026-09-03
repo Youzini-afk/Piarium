@@ -22,6 +22,10 @@ import type { HarnessSearchService } from "./search-service.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import { createLspDiagnosticsService, createLspDiagnosticsSnapshotService } from "./diagnostics-service.js";
+import { assembleZone2Content } from "./zone2.js";
+import { handleBeforeCompact, assembleCompactionSummary } from "./compaction.js";
+import { executeTodoTool, DEFAULT_TODO_SETTINGS } from "./todo-tool.js";
+import { executeRecall } from "./recall-tool.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -118,6 +122,94 @@ export function createFsLockService(locks: PathLockService): HarnessService<"fs.
   };
 }
 
+// ── Phase 2 service factories ──────────────────────────────────────
+
+export function createZone2AssembleService(host: HarnessServiceHost): HarnessService<"zone2.assemble"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.zone2Provider) {
+        return { content: null };
+      }
+      const material = await host.zone2Provider(ctx.sessionId, params.sinceTurn);
+      const content = assembleZone2Content(material);
+      return { content };
+    },
+  };
+}
+
+export function createCompactionBeforeService(host: HarnessServiceHost): HarnessService<"compaction.before"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.compactionDepsProvider) {
+        // Fallback: no custom compaction — return the raw params so Pi
+        // proceeds with its own LLM summarization (hook result is ignored
+        // when compaction field is absent).
+        throw new HarnessServiceError("unavailable", "Compaction deps not configured");
+      }
+      const deps = await host.compactionDepsProvider(ctx.sessionId);
+      const result = await handleBeforeCompact(ctx.sessionId, deps);
+      return result;
+    },
+  };
+}
+
+export function createCompactionAfterService(host: HarnessServiceHost): HarnessService<"compaction.after"> {
+  return {
+    handle: async (_params, ctx: HarnessServiceContext) => {
+      // Notify memory agent to do a pre-compaction refresh if needed.
+      // The actual compaction has already happened; this is a post-hook.
+      if (host.memoryAgent) {
+        await host.memoryAgent.requestPreCompactionRefresh();
+      }
+      return { acknowledged: true };
+    },
+  };
+}
+
+export function createTodoUpsertService(host: HarnessServiceHost): HarnessService<"todo.upsert"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.todoDepsProvider) {
+        throw new HarnessServiceError("unavailable", "Todo deps not configured");
+      }
+      const deps = await host.todoDepsProvider(ctx.sessionId);
+      const result = await executeTodoTool(
+        { items: params.items, ...(params.confidence !== undefined ? { confidence: params.confidence } : {}) },
+        deps,
+        false, // sessionConfirmed — TODO: track per-session confirmation state
+      );
+      return {
+        text: result.text,
+        ...(result.confirmed !== undefined ? { confirmed: result.confirmed } : {}),
+        askedConfirmation: result.askedConfirmation,
+      };
+    },
+  };
+}
+
+export function createRecallSearchService(host: HarnessServiceHost): HarnessService<"recall.search"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.recallDepsProvider) {
+        throw new HarnessServiceError("unavailable", "Recall deps not configured");
+      }
+      const deps = await host.recallDepsProvider(ctx.sessionId);
+      const k = params.k ?? 5;
+      const result = await executeRecall(params.query, k, deps);
+      return {
+        text: result.text,
+        results: result.results.map((r) => {
+          const payload = r.node.payload as Record<string, unknown>;
+          const scope = (payload["scope"] as string) ?? "workspace";
+          const content = (payload["content"] as string) ?? "";
+          const title = content.split("\n")[0] ?? content;
+          return { scope, title, via: r.via, id: r.node.id };
+        }),
+      };
+    },
+  };
+}
+
 export function registerHarnessServices(
   router: { register: <M extends keyof HarnessServiceMap>(method: M, service: HarnessService<M>) => void },
   host: HarnessServiceHost,
@@ -153,6 +245,22 @@ export function registerHarnessServices(
   }
   if (host.webSearchService) {
     router.register("web.search", host.webSearchService);
+  }
+  // Phase 2 services — registered only when the corresponding provider is available
+  if (host.zone2Provider) {
+    router.register("zone2.assemble", createZone2AssembleService(host));
+  }
+  if (host.compactionDepsProvider) {
+    router.register("compaction.before", createCompactionBeforeService(host));
+  }
+  if (host.memoryAgent || host.compactionDepsProvider) {
+    router.register("compaction.after", createCompactionAfterService(host));
+  }
+  if (host.todoDepsProvider) {
+    router.register("todo.upsert", createTodoUpsertService(host));
+  }
+  if (host.recallDepsProvider) {
+    router.register("recall.search", createRecallSearchService(host));
   }
 }
 
