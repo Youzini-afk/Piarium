@@ -1,136 +1,128 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { createApplyPatchTool } from "../../src/harness/apply-patch-tool.js";
-import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { createApplyPatchTool } from "../../src/harness/apply-patch-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 
-function createFakeBridge(diagnostics: unknown[]): Pick<HostServicesBridge, "request"> {
+function createFakeBridge(): Pick<HostServicesBridge, "request"> {
   return {
-    request: async (method: string) => {
-      if (method === "lsp.diagnostics") return { status: "ready", diagnostics };
+    request: async (method: string, _params: Record<string, unknown>) => {
       if (method === "fs.lock") return { held: true };
+      if (method === "fs.lock" || method === "fs.unlock") return { held: false };
+      if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
       throw new Error(`unexpected method: ${method}`);
     },
   } as unknown as Pick<HostServicesBridge, "request">;
 }
 
-async function executeApplyPatch(
-  bridge: HostServicesBridge,
-  cwd: string,
-  path: string,
-  patch: string,
-): Promise<{ text: string; details: unknown }> {
-  const tool = createApplyPatchTool(bridge, "s1", cwd);
-  const result = await tool.execute("call-1", { path, patch }, undefined, undefined, undefined as never);
-  return {
-    text: (result.content[0] as { type: "text"; text: string }).text,
-    details: result.details,
-  };
+async function executePatch(tool: ReturnType<typeof createApplyPatchTool>, patch: string): Promise<string> {
+  const result = await tool.execute("call-1", { patch } as never, undefined, undefined, undefined as never);
+  return (result.content[0] as { type: "text"; text: string }).text;
 }
 
-describe("apply_patch tool", () => {
-  it("applies a simple patch", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const filePath = join(tmpDir, "test.txt");
-      writeFileSync(filePath, "line1\nline2\nline3\n", "utf8");
+describe("apply_patch (Codex syntax)", () => {
+  let tmpDir: string;
 
-      const bridge = createFakeBridge([]) as HostServicesBridge;
-      const patch = `--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+line2 modified\n line3\n`;
-      const { text, details } = await executeApplyPatch(bridge, tmpDir, "test.txt", patch);
-
-      assert.match(text, /patch applied/);
-      assert.equal((details as { applied: boolean }).applied, true);
-      const newContent = readFileSync(filePath, "utf8");
-      assert.equal(newContent, "line1\nline2 modified\nline3\n");
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "apply-patch-"));
   });
 
-  it("returns error for missing headers", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const bridge = createFakeBridge([]) as HostServicesBridge;
-      const { text, details } = await executeApplyPatch(bridge, tmpDir, "test.txt", "@@ -1,1 +1,1 @@\n line1\n");
-      assert.match(text, /patch parse error/);
-      assert.match(text, /--- or \+\+\+ header/);
-      assert.equal((details as { applied: boolean }).applied, false);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("returns error for context mismatch", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const filePath = join(tmpDir, "test.txt");
-      writeFileSync(filePath, "line1\nline2\nline3\n", "utf8");
+  it("applies a simple update patch", async () => {
+    writeFileSync(join(tmpDir, "test.txt"), "line1\nline2\nline3\n");
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
 
-      const bridge = createFakeBridge([]) as HostServicesBridge;
-      const patch = `--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,3 @@\n line1\n-wrong line\n+line2 modified\n line3\n`;
-      const { text, details } = await executeApplyPatch(bridge, tmpDir, "test.txt", patch);
-
-      assert.match(text, /patch apply error/);
-      assert.match(text, /Context mismatch/);
-      assert.equal((details as { applied: boolean }).applied, false);
-      // File should be unchanged
-      const content = readFileSync(filePath, "utf8");
-      assert.equal(content, "line1\nline2\nline3\n");
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+    const patch = `*** Begin Patch
+*** Update File: test.txt
+@@ line1
+-line2
++line2 modified
+*** End Patch`;
+    const text = await executePatch(tool, patch);
+    assert.match(text, /applied successfully/);
+    const content = readFileSync(join(tmpDir, "test.txt"), "utf8");
+    assert.equal(content, "line1\nline2 modified\nline3\n");
   });
 
-  it("returns error for file not found", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const bridge = createFakeBridge([]) as HostServicesBridge;
-      const patch = `--- a/missing.txt\n+++ b/missing.txt\n@@ -1,1 +1,1 @@\n-line1\n+line1 modified\n`;
-      const { text } = await executeApplyPatch(bridge, tmpDir, "missing.txt", patch);
-      assert.match(text, /file not found/);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it("adds a new file", async () => {
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+
+    const patch = `*** Begin Patch
+*** Add File: new.txt
+hello world
+line2
+*** End Patch`;
+    const text = await executePatch(tool, patch);
+    assert.match(text, /applied successfully/);
+    const content = readFileSync(join(tmpDir, "new.txt"), "utf8");
+    assert.equal(content, "hello world\nline2");
   });
 
-  it("applies multiple hunks", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const filePath = join(tmpDir, "test.txt");
-      writeFileSync(filePath, "line1\nline2\nline3\nline4\nline5\n", "utf8");
+  it("deletes a file", async () => {
+    writeFileSync(join(tmpDir, "delete-me.txt"), "content");
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
 
-      const bridge = createFakeBridge([]) as HostServicesBridge;
-      const patch = `--- a/test.txt\n+++ b/test.txt\n@@ -1,2 +1,2 @@\n-line1\n+line1a\n line2\n@@ -4,2 +4,2 @@\n line4\n-line5\n+line5a\n`;
-      const { text, details } = await executeApplyPatch(bridge, tmpDir, "test.txt", patch);
-
-      assert.match(text, /patch applied/);
-      assert.equal((details as { applied: boolean; hunks: number }).hunks, 2);
-      const newContent = readFileSync(filePath, "utf8");
-      assert.equal(newContent, "line1a\nline2\nline3\nline4\nline5a\n");
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+    const patch = `*** Begin Patch
+*** Delete File: delete-me.txt
+*** End Patch`;
+    const text = await executePatch(tool, patch);
+    assert.match(text, /applied successfully/);
+    assert.equal(existsSync(join(tmpDir, "delete-me.txt")), false);
   });
 
-  it("includes diagnostics in output when present", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "patch-test-"));
-    try {
-      const filePath = join(tmpDir, "test.ts");
-      writeFileSync(filePath, "const x = 1\n", "utf8");
+  it("handles multiple files in one patch", async () => {
+    writeFileSync(join(tmpDir, "a.txt"), "aaa\n");
+    writeFileSync(join(tmpDir, "b.txt"), "bbb\n");
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
 
-      const bridge = createFakeBridge([
-        { line: 1, character: 1, severity: "error", message: "Type error", source: "tsc" },
-      ]) as HostServicesBridge;
-      const patch = `--- a/test.ts\n+++ b/test.ts\n@@ -1,1 +1,1 @@\n-const x = 1\n+const x = 2\n`;
-      const { text } = await executeApplyPatch(bridge, tmpDir, "test.ts", patch);
+    const patch = `*** Begin Patch
+*** Update File: a.txt
+@@
+-aaa
++AAA
+*** Add File: c.txt
+ccc
+*** Update File: b.txt
+@@
+-bbb
++BBB
+*** End Patch`;
+    const text = await executePatch(tool, patch);
+    assert.match(text, /applied successfully/);
+    assert.equal(readFileSync(join(tmpDir, "a.txt"), "utf8"), "AAA\n");
+    assert.equal(readFileSync(join(tmpDir, "b.txt"), "utf8"), "BBB\n");
+    assert.equal(readFileSync(join(tmpDir, "c.txt"), "utf8"), "ccc");
+  });
 
-      assert.match(text, /Diagnostics/);
-      assert.match(text, /Type error/);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+  it("reports error on missing *** Begin Patch", async () => {
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const text = await executePatch(tool, "just some text");
+    assert.match(text, /parse error/);
+    assert.match(text, /Begin Patch/);
+  });
+
+  it("reports error when context not found", async () => {
+    writeFileSync(join(tmpDir, "test.txt"), "line1\nline2\nline3\n");
+    const bridge = createFakeBridge();
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+
+    const patch = `*** Begin Patch
+*** Update File: test.txt
+@@ nonexistent_context
+-line2
++modified
+*** End Patch`;
+    const text = await executePatch(tool, patch);
+    assert.match(text, /Context not found/);
   });
 });

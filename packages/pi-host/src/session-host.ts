@@ -2772,12 +2772,24 @@ export class SessionHost {
       customTools.push(
         createBashTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
         createGrepTool(hostServicesBridge, sessionManager.getSessionId()),
-        createApplyPatchTool(hostServicesBridge, sessionManager.getSessionId(), cwd),
         createGetOutputTool(hostServicesBridge, sessionManager.getSessionId()),
         createWriteToProcessTool(hostServicesBridge, sessionManager.getSessionId()),
         createKillShellTool(hostServicesBridge, sessionManager.getSessionId()),
         createDiagnosticsTool(hostServicesBridge, sessionManager.getSessionId()),
       );
+      // apply_patch: only registered for OpenAI family models (Codex syntax)
+      const sessionModel = configured?.model;
+      const isOpenAIFamily = sessionModel?.provider === "openai" || sessionModel?.api === "openai";
+      if (isOpenAIFamily) {
+        customTools.push(
+          createApplyPatchTool(
+            hostServicesBridge,
+            sessionManager.getSessionId(),
+            cwd,
+            workspaceMutationJournal ?? undefined,
+          ),
+        );
+      }
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
         customTools,

@@ -115,9 +115,14 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 状态：已实施
 
 ### D-012 · 2026-09-03 · 1.6
-类型：问题与解法
-决定：`apply_patch` 工具在 pi-host 进程内直接读写文件（`readFileSync`/`writeFileSync`），不通过 host 的 DocumentsAPI。诊断通过 `lsp.diagnostics` harness 服务获取。per-path 锁通过 `withPathLock` + `fs.lock` 服务获取。
-原因：apply_patch 需要原子性地读取-修改-写入文件，通过 host API 往返会增加延迟和竞态窗口。pi-host 进程已经在工作区内有文件系统访问权限。诊断是 best-effort 的——如果 LSP 不可用，补丁仍然应用成功。
-考虑过的替代：(1) 通过 host 的文件 API 读写——增加往返次数，无法保证原子性。(2) 不获取锁——并发编辑同一文件会导致数据丢失。
-影响：`packages/pi-host/src/harness/apply-patch-tool.ts`；`packages/web/application-host/lib/harness/diagnostics-service.ts`。
+类型：偏离（已回退）
+决定：~~apply_patch 使用 unified diff 语法（--- / +++ / @@ -n,+m @@），单文件。~~
+状态：已回退——见 D-014。
+
+### D-014 · 2026-09-03 · 1.6
+类型：偏离
+决定：apply_patch 回到决策表形状：使用 Codex 语法（*** Begin Patch / *** Update File: / *** Add File: / *** Delete File: / @@ 上下文 / *** End Patch），支持多文件。每个文件的写入经与 edit / write 相同的 workspace.mutation.request before/after。只在会话模型为 OpenAI 家族（provider === "openai" || api === "openai"）时注册。
+原因：决策表要求 apply_patch 使用 Codex 语法以与 OpenAI 模型的训练数据对齐。多文件支持减少了工具调用次数。workspace.mutation 集成确保所有文件变更都经过 journal，与 edit/write 工具一致。OpenAI-only 限制避免了在不支持该语法的模型上注册无用工具。
+考虑过的替代：(1) unified diff 语法（D-012，已回退）——不匹配 OpenAI 训练数据。(2) 不经过 mutation journal——绕过了 recovery 系统。(3) 所有模型都注册——浪费非 OpenAI 模型的工具槽位。
+影响：`packages/pi-host/src/harness/apply-patch-tool.ts`（完全重写）；`packages/pi-host/src/session-host.ts`（OpenAI-only 条件注册 + 传入 mutationJournal）。
 状态：已实施
