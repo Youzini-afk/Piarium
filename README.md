@@ -316,6 +316,7 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the rep
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Composable workbench and IDE contract](docs/composable-workbench.md) (Chinese)
+- [Agent harness: tools, retrieval, knowledge store, cache contract](docs/agent-harness.md) (Chinese)
 - [Piarium extension platform](docs/piarium-extension-platform.md)
 - [VS Code companion migration](docs/vscode-companion.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)

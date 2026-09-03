@@ -234,6 +234,15 @@ the complete settings, package, model, extension event-bus, and custom UI surfac
 product. Pi's newer transport-neutral protocol is intentionally tracked, but its experimental
 server backend and current command set are not yet sufficient as the sole product foundation.
 
+Direct workers are also where Piarium's own agent harness lives. The session worker overrides Pi's
+built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
+recovery journal already uses, and mounts in-process extension hooks for tail-appended turn context,
+post-tool feedback, and Piarium-owned compaction. The heavy services behind those tools — shell
+supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
+store — run in the application host and are reached over typed worker-to-host requests, never by
+handing the worker host credentials. The harness contract, its cache rules, and the profile model
+are specified in [agent-harness.md](agent-harness.md).
+
 ### 4.5 Composable workbench and document authority
 
 The product UI is not a fixed shell. A Workbench Profile selects which extension provides

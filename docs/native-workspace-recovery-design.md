@@ -1,8 +1,8 @@
 # Piarium native recovery journal
 
-Status: delivered; cross-platform and external-writer coverage continue to harden
+Status: delivered; boundary revisions (per-path coverage, dirty buffers, barrier, lease) accepted 2026-09-02 and not yet implemented
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ## Decision
 
@@ -176,8 +176,9 @@ or platform liveness uncertainty keeps the fence.
 A generic native process can choose paths dynamically and bypass Piarium APIs. Portable filesystem
 watchers report those changes after the write and cannot recreate bytes that were never observed before
 the write. Piarium therefore does not claim exact combined rollback for an unjournalled `bash`, terminal,
-Git, extension, or unrelated-process change. The watcher records the affected path and marks that turn
-incomplete; conversation-only rollback remains immediate.
+Git, extension, or unrelated-process change. The watcher records the affected path; today that marks the
+whole turn incomplete, and under revision R1 it marks only that path uncovered while journaled paths stay
+restorable. Conversation-only rollback remains immediate in both cases.
 
 Improving this boundary requires a real mechanism—Documents/VFS pre-write integration, a tool-declared
 mutation intent, a copy-on-write filesystem provider, or operating-system interception. Reintroducing a
@@ -207,6 +208,80 @@ activate or migrate a catalog.
 Provider selection remains revisioned and scope-aware. Disabling a provider removes file recovery but
 never removes Pi-native conversation rollback.
 
+## Accepted boundary revisions
+
+A design review on 2026-09-02 found the core architecture sound — affected-file journal, tool-boundary
+before/after images, content-addressed objects, verify-after-write, compensation, direct apply on the
+happy path — and the defensiveness concentrated at four boundaries where a fail-closed default produces
+refusal instead of partial success. The revisions below are accepted and ordered by delivery. None
+changes the per-file state machine, the catalog schema versioning rules, or the compensation model.
+
+### R1. Coverage is per path, not per plan
+
+The plan-level `coverage: 'ready' | 'incomplete'` binary is replaced by per-path coverage. A path with a
+contiguous journaled before/after chain is restorable. A path observed only by the watcher, or inferred
+from a `process` writer window, is reported in `uncoveredPaths` with its source (`shell`, `external`,
+`unknown`) and is not restored. The combined action remains available whenever at least one path is
+restorable; the direct-apply result and the chooser both list the uncovered paths.
+
+Rationale: the agent harness registers its `bash` tool as a `process` writer for every command
+([agent-harness.md](agent-harness.md) §5.2). Under the binary rule nearly every turn that runs a
+command becomes incomplete and combined rollback disappears in practice. The host shell supervisor
+knows each command's execution window, so watcher changes inside that window are attributed to the
+command; attribution improves, restoration of those paths does not. This revision is a prerequisite
+for harness phase 1.
+
+### R2. Dirty buffers are conflicts, not refusals
+
+The `dirty-buffers` hard rejection in conflict confirmation is removed. A dirty buffer on an affected
+path becomes a `dirty-buffer` conflict the user confirms like a content conflict. On confirmation the
+buffer content published through the barrier is stored in the operation's safety set, so undo restores
+the unsaved text, and the path is then replaced on disk. Connected surfaces observe the disk change
+through the existing watch; the Document Registry presents its three-way conflict when the buffer was
+not discarded. The chooser may additionally offer "discard unsaved changes in these paths".
+
+Rationale: the current rejection is a shipped TODO ("not yet implemented") and duplicates protection
+the Document Registry already provides by modelling ancestor plus disk against the live buffer.
+
+### R3. The dirty barrier degrades per surface
+
+An unresponsive or disconnected document surface no longer fails the operation with
+`dirty-state-unavailable`. Surfaces that acknowledge are fenced as today. Each surface that does not
+acknowledge within the deadline contributes an `unknown-dirty-state` conflict for the affected paths it
+may hold, which the user can confirm. The retryable hard failure remains only when the barrier primitive
+itself is unavailable.
+
+Rationale: a mobile client that went to sleep while attached must not block a desktop rollback.
+
+### R4. The lease is scoped to shared storage
+
+The cross-process workspace lease applies only to storage modes that can be shared between Hosts:
+workspace local, workspace adjacent, and custom. The default application-data mode is single-Host and
+takes no lease. In shared modes, lease holders refresh a heartbeat; a lease whose PID liveness cannot be
+confirmed is reclaimed after the heartbeat window instead of being fenced indefinitely.
+
+Rationale: `process.kill(pid, 0)` commonly returns `EPERM` on Windows, which the current rule treats as
+"keep the fence". One crashed Host could pin a workspace until manual intervention, protecting against a
+two-Host overlap that cannot occur in the default mode.
+
+### R5. Retry re-prepares
+
+After a `stale-plan` failure the chooser's retry prepares a new plan and revision instead of re-applying
+the stale one, which cannot succeed.
+
+### R6. Scope freeze
+
+No further storage location modes, retention dimensions, or per-file phases are added. The six-phase
+file state machine, verified storage transfer, and retention with protected record classes stay as built
+and tested; they are not refactored for size.
+
+### R7. Single per-path edit record shared with the knowledge store
+
+The harness knowledge store's `edit` events reference journal before/after content objects instead of
+storing a second copy of the change ([agent-harness.md](agent-harness.md) §7.3). The journal remains
+the only per-path edit record. Knowledge-store references are registered in `object_references` so
+cleanup and retention never remove an object the knowledge store still points to.
+
 ## Verification
 
 Required evidence is based on affected paths, not synthetic full-workspace archives:
@@ -226,3 +301,16 @@ Required evidence is based on affected paths, not synthetic full-workspace archi
 - dirty revisions from all connected surfaces are acknowledged before file inspection and remain fenced
   through apply;
 - retention removes oldest eligible records while preserving named and nonterminal recovery evidence.
+
+Evidence required by the accepted revisions:
+
+- a turn with one journaled path and one shell-written path offers restoration of the journaled path and
+  reports the shell-written path as uncovered with its source (R1);
+- a dirty buffer on an affected path is presented as a confirmable conflict; after confirmation, undo
+  restores the unsaved text from the safety set (R2);
+- a surface that does not acknowledge the barrier produces an `unknown-dirty-state` conflict rather than
+  an operation failure; the operation completes for acknowledged surfaces (R3);
+- application-data storage creates no lease file; in a shared mode an uncertain PID is reclaimed after
+  the heartbeat window and a live holder is not (R4);
+- retry after `stale-plan` produces a new plan revision (R5);
+- an object referenced only by the knowledge store survives cleanup and retention (R7).
