@@ -661,21 +661,29 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
 ### Phase 3: Retrieval and sub-agents
 
 - **3.1 Symbol graph collector**: LSP-powered symbol/reference collection
-  (`lib/knowledge/symbols.ts`).
+  (`lib/knowledge/symbols.ts`). **Not wired** (TODO).
 - **3.2 explore pipeline**: Pure algorithm mode (zero model calls),
   query expansion, parallel rg fan-out, ranking
-  (`lib/harness/explore.ts`). 17 tests.
+  (`lib/harness/explore.ts`). 17 tests. **Not wired** (TODO).
 - **3.3 related tool**: Graph neighbors by PageRank
-  (`lib/harness/related-tool.ts`).
-- **3.4-3.5 Worker runtime**: spawnChild/dispatch/wait/merge/kill with
-  TTL table, concurrency queueing, stale detection, cascade termination
-  (`lib/harness/worker-runtime.ts`). 12 tests.
+  (`lib/harness/related-tool.ts`). **Not wired** (TODO).
+- **3.4-3.5 ThreadRecord + Worker runtime**: Redesigned with
+  host-persisted ThreadRegistry (`lib/harness/thread-registry.ts`).
+  JSON persistence, in-memory cache, hidden threads, idempotent
+  completion, callbacks for protocol events. 20 unit tests. **Wired**:
+  7 thread service methods (dispatch/list/wait/send/read/merge/kill),
+  7 pi-host tools, protocol events (harness.thread.changed/done).
+  e2e: 6 tests. See D-024. Worker runtime (`worker-runtime.ts`) kept
+  as pure algorithm module. **TODO**: worktree management, activity
+  sensors (stalled/looping), observer cursors, Zone 2 threads section,
+  Fleet provider, broker child session integration.
 - **3.6 Role catalog**: Six roles, team prompt, slot-based resolution
-  (`lib/harness/roles.ts`). 11 tests.
+  (`lib/harness/roles.ts`). 11 tests. **Not wired** (TODO).
 - **3.7 Review sensor**: Auto-dispatch review on diff, gate mode
-  (`lib/harness/review-sensor.ts`). 5 tests.
+  (`lib/harness/review-sensor.ts`). 5 tests. **Not wired** (TODO).
 - **3.8 LSP navigation**: symbols/definition/references/hover with
   ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
+  **Not wired** (TODO).
 
 ### Phase 3b: Native permissions
 
