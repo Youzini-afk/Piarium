@@ -190,4 +190,29 @@ describe('recovery turn coordinator', () => {
     await coordinator.admit({ ...admission, workspace: { kind: 'unbound' } });
     expect(writerTracker.admit).toHaveBeenCalledOnce();
   });
+
+  it('flags unjournalledTool for process and unknown tools but not for none or journaled tools', async () => {
+    const { calls, coordinator } = createHarness();
+    await coordinator.admit(admission);
+    await coordinator.processEvent(agentEvent('execution-1', {
+      entry: { id: 'user-1', message: { role: 'user' }, type: 'message' },
+      type: 'entry_appended',
+    }));
+    // none — should NOT flag
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'tool_execution_start', toolName: 'read' }));
+    // journaled — should NOT flag
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'tool_execution_start', toolName: 'write' }));
+    // process — SHOULD flag
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'tool_execution_start', toolName: 'bash' }));
+    // unknown — SHOULD flag
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'tool_execution_start', toolName: 'custom_tool' }));
+    await coordinator.processEvent(agentEvent('execution-1', {
+      entry: { id: 'assistant-1', message: { role: 'assistant' }, type: 'message' },
+      type: 'entry_appended',
+    }));
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'agent_settled' }));
+
+    const settledCall = calls.find((call) => call.method === 'recordTurnSettled');
+    expect(settledCall?.args[0]).toMatchObject({ mutationObserved: true });
+  });
 });

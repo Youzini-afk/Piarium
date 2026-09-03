@@ -1,4 +1,5 @@
 import { createWorkspaceRecoveryAPI } from '@piarium/extension-contract';
+import { toolMutation } from '@piarium/protocol';
 import type {
   PiSessionExecutionAdmissionRequest,
 } from '@piarium/runtime-broker';
@@ -337,11 +338,9 @@ export const createRecoveryTurnCoordinator = ({
         if (event.kind !== 'host' || event.envelope?.event !== 'agent.event') return;
         const agentEvent = recordOf(recordOf(event.envelope.data).event);
         if (agentEvent?.type === 'agent_start') turn.agentStarted = true;
-        if (
-          agentEvent?.type === 'tool_execution_start'
-          && !['read', 'grep', 'find', 'ls', 'write', 'edit'].includes(agentEvent.toolName as string)
-        ) {
-          turn.unjournalledTool = true;
+        if (agentEvent?.type === 'tool_execution_start') {
+          const mutation = toolMutation(agentEvent.toolName as string);
+          if (mutation === 'process' || mutation === 'unknown') turn.unjournalledTool = true;
         }
         if (agentEvent?.type === 'entry_appended' && (agentEvent.entry as Record<string, unknown>)?.type === 'message') {
           const entry = agentEvent.entry as Record<string, unknown>;
