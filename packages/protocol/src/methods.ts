@@ -50,6 +50,7 @@ import type {
 } from "./provider.js";
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
+import type { HarnessRespondParams } from "./harness.js";
 
 export interface HostMethodMap {
   "agentProvider.action": {
@@ -184,6 +185,10 @@ export interface HostMethodMap {
   };
   "workspace.mutation.respond": {
     params: { accepted: boolean; requestId: string; sessionId: string };
+    result: { accepted: boolean };
+  };
+  "harness.respond": {
+    params: HarnessRespondParams;
     result: { accepted: boolean };
   };
   "project.trust.respond": {

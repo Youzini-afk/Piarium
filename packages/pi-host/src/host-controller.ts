@@ -66,6 +66,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "agent.queue.clear",
   "config.unwatch",
   "extension.ui.respond",
+  "harness.respond",
   "provider.auth.respond",
   "project.trust.respond",
   "workspace.mutation.respond",
@@ -1004,6 +1005,14 @@ export class HostController {
             readString(params, "sessionId"),
             readString(params, "requestId"),
             readBoolean(params, "accepted"),
+          ),
+        };
+      case "harness.respond":
+        return {
+          accepted: this.#sessionHost.respondHarness(
+            readString(params, "sessionId"),
+            readString(params, "requestId"),
+            params as { ok: boolean; result?: unknown; error?: { code: string; message: string; retryable?: boolean } },
           ),
         };
       default:

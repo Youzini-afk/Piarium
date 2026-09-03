@@ -16,6 +16,7 @@ import type {
 } from "./auth.js";
 import type { PiAgentEvent } from "./session.js";
 import type { ProviderConfigDeleteScope } from "./provider.js";
+import type { HarnessRequestData } from "./harness.js";
 
 interface WorkspaceMutationRequestBase {
   path: string;
@@ -95,6 +96,7 @@ export interface HostEventMap {
     signal: string | null;
   };
   "workspace.mutation.request": WorkspaceMutationRequest;
+  "harness.request": HarnessRequestData;
 }
 
 export const HOST_EVENTS = [
@@ -103,6 +105,7 @@ export const HOST_EVENTS = [
   "extension.ui.dismiss",
   "extension.ui.request",
   "extension.state",
+  "harness.request",
   "host.error",
   "host.log",
   "host.ready",

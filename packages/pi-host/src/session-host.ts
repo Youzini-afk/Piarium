@@ -130,6 +130,9 @@ import {
   createWorkspaceMutationJournalTools,
   WorkspaceMutationJournalBridge,
 } from "./workspace-mutation-journal.js";
+import {
+  HostServicesBridge,
+} from "./harness/host-services-bridge.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -567,6 +570,7 @@ export class SessionHost {
   #unsubscribe: (() => void) | undefined;
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
+  #hostServicesBridge: HostServicesBridge | undefined;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -612,6 +616,26 @@ export class SessionHost {
     accepted: boolean,
   ): boolean {
     return this.#workspaceMutationJournal?.respond(sessionId, requestId, accepted) ?? false;
+  }
+
+  respondHarness(
+    sessionId: string,
+    requestId: string,
+    outcome: { ok: boolean; result?: unknown; error?: { code: string; message: string; retryable?: boolean } },
+  ): boolean {
+    if (!this.#hostServicesBridge) return false;
+    if (outcome.ok) {
+      return this.#hostServicesBridge.respond(sessionId, requestId, { ok: true, result: outcome.result });
+    }
+    if (!outcome.error) return false;
+    return this.#hostServicesBridge.respond(sessionId, requestId, {
+      ok: false,
+      error: {
+        code: outcome.error.code as "unavailable" | "timeout" | "invalid-params" | "not-found" | "denied" | "failed",
+        message: outcome.error.message,
+        ...(outcome.error.retryable !== undefined ? { retryable: outcome.error.retryable } : {}),
+      },
+    });
   }
 
   async create(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
@@ -2595,6 +2619,8 @@ export class SessionHost {
       this.auth.cancelAll();
       this.#workspaceMutationJournal?.dispose();
       this.#workspaceMutationJournal = undefined;
+      this.#hostServicesBridge?.dispose();
+      this.#hostServicesBridge = undefined;
     });
     await this.#bindSession();
   }
@@ -2609,6 +2635,11 @@ export class SessionHost {
           })
         : undefined;
       this.#workspaceMutationJournal = workspaceMutationJournal;
+      const hostServicesBridge = new HostServicesBridge({
+        emit: (event, data) => this.#emit(event, data),
+        sessionId: sessionManager.getSessionId(),
+      });
+      this.#hostServicesBridge = hostServicesBridge;
       const requiresTrust = hasPiariumTrustRequiringProjectResources(cwd);
       const storedDecision = this.#trustStore.get(cwd);
       const initialTrust =
@@ -2862,6 +2893,8 @@ export class SessionHost {
     this.auth.cancelAll();
     this.#workspaceMutationJournal?.dispose();
     this.#workspaceMutationJournal = undefined;
+    this.#hostServicesBridge?.dispose();
+    this.#hostServicesBridge = undefined;
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
