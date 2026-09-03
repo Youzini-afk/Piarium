@@ -133,6 +133,10 @@ import {
 import {
   HostServicesBridge,
 } from "./harness/host-services-bridge.js";
+import {
+  createHarnessCounterTracker,
+  type HarnessCounterTracker,
+} from "./harness/counter-tracker.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -571,6 +575,7 @@ export class SessionHost {
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
+  #harnessCounters: HarnessCounterTracker | undefined;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -814,6 +819,7 @@ export class SessionHost {
   stats(sessionId: string): SessionStats {
     this.assertSession(sessionId);
     const stats = this.session.getSessionStats();
+    const counters = this.#harnessCounters?.getCounters(stats.tokens.cacheRead, stats.tokens.input);
     return {
       assistantMessages: stats.assistantMessages,
       ...(stats.contextUsage === undefined
@@ -827,6 +833,12 @@ export class SessionHost {
       toolResults: stats.toolResults,
       totalMessages: stats.totalMessages,
       userMessages: stats.userMessages,
+      ...(counters === undefined ? {} : {
+        toolErrors: counters.toolErrors,
+        toolRetries: counters.toolRetries,
+        outputBytes: counters.outputBytes,
+        ...(counters.cacheHitRatio === null ? { cacheHitRatio: null } : { cacheHitRatio: counters.cacheHitRatio }),
+      }),
     };
   }
 
@@ -2621,6 +2633,8 @@ export class SessionHost {
       this.#workspaceMutationJournal = undefined;
       this.#hostServicesBridge?.dispose();
       this.#hostServicesBridge = undefined;
+      this.#harnessCounters?.reset();
+      this.#harnessCounters = undefined;
     });
     await this.#bindSession();
   }
@@ -2640,6 +2654,8 @@ export class SessionHost {
         sessionId: sessionManager.getSessionId(),
       });
       this.#hostServicesBridge = hostServicesBridge;
+      const harnessCounters = createHarnessCounterTracker();
+      this.#harnessCounters = harnessCounters;
       const requiresTrust = hasPiariumTrustRequiringProjectResources(cwd);
       const storedDecision = this.#trustStore.get(cwd);
       const initialTrust =
@@ -2693,6 +2709,11 @@ export class SessionHost {
               factory: createAgentProviderBridgeExtension(agentProviders),
               hidden: true,
               name: "piarium-agent-provider-bridge",
+            },
+            {
+              factory: harnessCounters.extension,
+              hidden: true,
+              name: "piarium-harness-counters",
             },
           ],
         },
@@ -2895,6 +2916,8 @@ export class SessionHost {
     this.#workspaceMutationJournal = undefined;
     this.#hostServicesBridge?.dispose();
     this.#hostServicesBridge = undefined;
+    this.#harnessCounters?.reset();
+    this.#harnessCounters = undefined;
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();

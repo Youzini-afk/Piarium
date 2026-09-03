@@ -569,6 +569,10 @@ export interface SessionStats {
   toolResults: number;
   assistantMessages: number;
   userMessages: number;
+  toolErrors?: number;
+  toolRetries?: number;
+  outputBytes?: number;
+  cacheHitRatio?: number | null;
 }
 
 export interface ProjectTrustRequest {
