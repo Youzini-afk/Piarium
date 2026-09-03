@@ -215,4 +215,53 @@ describe('recovery turn coordinator', () => {
     const settledCall = calls.find((call) => call.method === 'recordTurnSettled');
     expect(settledCall?.args[0]).toMatchObject({ mutationObserved: true });
   });
+
+  it('encodes writer mode into the writerScope as mode/kind:id@gen', async () => {
+    const calls: RecoveryServiceRequest[] = [];
+    const documents = {
+      inspectMutation: vi.fn(async () => ({
+        activeWriters: [
+          { writerId: 'w-1', mode: 'process', owner: { kind: 'pi-worker', id: 'worker-1', generation: 1 } },
+          { writerId: 'w-2', mode: 'external', owner: { kind: 'editor', id: 'vscode' } },
+          { writerId: 'w-3', owner: { kind: 'pi-worker', id: 'worker-2', generation: 3 } },
+        ],
+        epoch: 1, maintenance: false, mutationRevision: 1, writerRevision: 1,
+      })),
+    };
+    const invokeService = vi.fn(async (request: RecoveryServiceRequest): Promise<unknown> => {
+      calls.push(request);
+      const input = request.args[0] as BindingInput;
+      if (request.method === 'recordTurnStart') return { binding: binding(input), status: 'ready' };
+      if (request.method === 'recordTurnSettled') {
+        return { binding: binding({ ...input, runtimeGeneration: 1, sessionId: 'session-1', userEntryId: 'user-1', workerId: 'worker-1' }, 'ready'), status: 'ready' };
+      }
+      if (request.method === 'recordMutationBefore' || request.method === 'recordMutationAfter') {
+        return { recorded: true, status: 'ready' };
+      }
+      throw new Error(`unexpected service method ${request.method}`);
+    });
+    const coordinator = createRecoveryTurnCoordinator({
+      documents,
+      getSessionSnapshot: () => ({ workspace: { authorityId: 'workspace-1', id: 'project-1', kind: 'workspace' } }),
+      invokeService,
+      respondMutation: vi.fn(async () => undefined),
+      writerTracker: {
+        admit: vi.fn(async () => ({ close: vi.fn(async () => undefined) })),
+        waitForIdle: vi.fn(async () => ({ changedResourceIds: [], coverageComplete: true, mutationObserved: false })),
+      },
+    });
+    await coordinator.admit(admission);
+    await coordinator.processEvent(agentEvent('execution-1', {
+      entry: { id: 'user-1', message: { role: 'user' }, type: 'message' },
+      type: 'entry_appended',
+    }));
+    await coordinator.processEvent(agentEvent('execution-1', { type: 'agent_settled' }));
+
+    const settledCall = calls.find((call) => call.method === 'recordTurnSettled');
+    const scopes = (settledCall?.args[0] as { activeWriterScopes?: string[] }).activeWriterScopes ?? [];
+    // process/pi-worker:worker-1@1, external/editor:vscode, controlled/pi-worker:worker-2@3
+    expect(scopes).toContain('process/pi-worker:worker-1@1');
+    expect(scopes).toContain('external/editor:vscode');
+    expect(scopes).toContain('controlled/pi-worker:worker-2@3');
+  });
 });

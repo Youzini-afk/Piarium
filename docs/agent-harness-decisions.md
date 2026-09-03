@@ -52,3 +52,11 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 考虑过的替代：(1) 在 binding 里单独存 `active_writer_modes` 数组——冗余且需要额外存储字段。(2) 用 `kind === 'pi-worker'` 推断 shell——不准确，`kind` 标识 owner 类型而非 writer mode。
 影响：`packages/web/application-host/lib/recovery/turn-coordinator.ts`（`Writer.mode` + `writerScope` 格式）；`packages/web/application-host/lib/recovery/journal-engine.ts`（归因逻辑改为 `process/` / `external/` 前缀）；`engine.test.ts` 新增 process writer 注册后断言 `source: 'shell'` 的测试。
 状态：已实施
+
+### D-005 · 2026-09-03 · 0.2
+类型：问题与解法
+决定：pi-worker 运行期 lease 的 `mode` 是 `controlled`，不是 `process`。bash 命令级 process writer 是独立注册的第二个 writer，与 pi-worker lease 分开。source 归因只看 `writerScope` 前缀中的 `mode`，不看 `kind`。
+原因：`mutation-authority.ts` 的 `registerWriter` 默认 `mode: 'controlled'`，pi-worker 的 lease 走的就是这条路径。bash 命令执行时 shell 监督器会额外注册一个 `mode: 'process'` 的 writer，其 owner kind 可能也是 `pi-worker` 但 mode 不同。如果用 `kind` 做归因（如 `kind === 'pi-worker'` → shell），会把 pi-worker 自身的 controlled lease 错误地归因为 shell。用 `mode` 前缀做归因精确区分了"谁在写"（owner kind）和"怎么写"（writer mode）。
+考虑过的替代：(1) 用 `kind` 做归因——无法区分 pi-worker controlled lease 和 bash process writer。(2) 给 bash process writer 用不同的 `kind`（如 `bash`）——破坏了 owner 语义（owner 标识谁拥有这个写操作，mode 标识写的方式）。(3) 在 binding 里单独存 `active_writer_modes`——冗余，`writerScope` 前缀已编码了 mode。
+影响：阶段 1.3 的 bash 命令级 process writer 注册必须确保 `mode: 'process'`，不能复用 pi-worker 的 controlled lease。`turn-coordinator.test.ts` 的 writerScope 格式测试验证了三种 mode（process / external / controlled）各自产出正确的前缀。
+状态：已实施

@@ -225,13 +225,25 @@ from a `process` writer window, is reported in `uncoveredPaths` with its source 
 restorable; the direct-apply result and the chooser both list the uncovered paths.
 
 The `coverage` field is now `'ready' | 'partial' | 'none'`:
-- `ready` — all affected paths are restorable, no uncovered paths
-- `partial` — some paths are restorable, some are uncovered
-- `none` — no restorable paths (all changes were unjournaled)
+- `ready` — all checkpoints in range are `ready` (no incomplete checkpoint, no uncovered paths)
+- `partial` — some paths are restorable, but at least one checkpoint is incomplete or has uncovered paths
+- `none` — no restorable paths (all changes were unjournaled or no journaled changes exist)
+
+A checkpoint is `incomplete` when the turn settles without confirmed coverage (`observationComplete=false`,
+worker exit, host stop, or out-of-journal activity). An incomplete checkpoint with empty
+`unrecorded_resource_ids` still disqualifies `ready` because the journal cannot prove it captured
+everything. The failure message from each incomplete binding is collected into `uncoveredReasons: string[]`
+on the plan so the UI can show why coverage is not `ready`.
+
+Source attribution uses the `writerScope` format `${mode}/${kind}:${id}@gen`:
+- `process/` prefix → `shell`
+- `external/` prefix → `external`
+- any other prefix or legacy format without a mode → `unknown`
 
 `applyLocatedOperation` rejects only when `coverage === 'none'`. The `PiRecoveryDialog` shows the
-uncovered paths list with source attribution and offers the combined action for `ready` and `partial`
-plans. The `piRecoveryPolicy.shouldOpenRecoveryDialog` opens the dialog for any non-`ready` plan.
+uncovered paths list with source attribution and the uncovered reasons, and offers the combined action
+for `ready` and `partial` plans. The `piRecoveryPolicy.shouldOpenRecoveryDialog` opens the dialog for any
+non-`ready` plan.
 
 Rationale: the agent harness registers its `bash` tool as a `process` writer for every command
 ([agent-harness.md](agent-harness.md) §5.2). Under the binary rule nearly every turn that runs a
