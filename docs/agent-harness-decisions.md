@@ -225,3 +225,11 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 
 - D-013 偏离：复用 PTY 模块而非终端运行时，后台 shell 尚不是终端 tab。方案：在 `lib/terminal/runtime.ts` 暴露 `createTerminalSession` / `attachTerminalSession`，harness shell 经它创建。
 - 诊断 provider 已接线但未在 e2e 中验证（需要真实 LSP server）。语义已实现：unavailable/pending/ready + snapshot diff，但端到端证明待阶段 2。
+
+### D-016 · 2026-09-03 · 1b.1
+类型：决策
+决定：HTML 正文提取用 `@mozilla/readability@0.6.0` + `linkedom@0.18.13`（提供 DOM），HTML→Markdown 用 `turndown@7.2.4`。PDF 用 `pdfjs-dist`（动态 import，未加为直接依赖，运行时按需加载）。
+原因：`@mozilla/readability` 是 Firefox 阅读模式的实现，业界标准。`linkedom` 比 `jsdom` 轻量得多（无浏览器模拟），足以支撑 Readability 的 DOM 需求。turndown 是 HTML→Markdown 的事实标准。三者均在依赖树中不存在，新加。
+考虑过的替代：(1) jsdom——太重，会拉入大量浏览器 API，测试中导致 OOM。(2) cheerio——不支持 Readability 需要的 DOM API。(3) 手写提取——不可靠，无法处理真实页面的复杂性。
+影响：`packages/web/package.json`（+3 依赖）；`lib/harness/web-fetch.ts`（动态 import linkedom/readability/turndown）。
+状态：已实施
