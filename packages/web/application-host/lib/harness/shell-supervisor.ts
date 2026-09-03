@@ -85,11 +85,10 @@ export function stripControlSequences(text: string): string {
   return text.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "").replace(ESC_PATTERN, "");
 }
 
-const SENTINEL = "\x1f"; // ASCII 31
-const SHELL_PROMPT_SENTINEL = `__PIARIUM_SENTINEL_`;
+const SENTINEL = "__PIARIUM_SENTINEL_";
 
 function buildCommandWrapper(command: string, token: string): string {
-  return `printf '${SENTINEL}${token}:B\\n'; { ${command}\n}; __ec=$?; printf '\\n${SENTINEL}${token}:C:%s\\n' "$PWD"; printf '${SENTINEL}${token}:E:%d\\n' "$__ec"`;
+  return `echo '${SENTINEL}${token}:B'; { ${command}; }; __ec=$?; echo '${SENTINEL}${token}:C:'"$PWD"; echo '${SENTINEL}${token}:E:'"$__ec"`;
 }
 
 // ── PTY Provider ────────────────────────────────────────────────────
@@ -198,9 +197,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         return;
       }
 
-      // Wait for initial prompt by sending a sentinel
+      // Wait for initial prompt by sending a unique echo command
       const initToken = randomBytes(8).toString("hex");
-      const initSentinel = `${SENTINEL}${initToken}:B`;
+      const initMarker = `__PIARIUM_READY_${initToken}__`;
       let initBuffer = "";
 
       ptyProcess.onData((data: string) => {
@@ -210,7 +209,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           parsePendingOutput();
         } else {
           initBuffer += data;
-          if (initBuffer.includes(initSentinel)) {
+          // Strip control sequences for marker detection
+          const cleaned = stripControlSequences(initBuffer);
+          if (cleaned.includes(initMarker)) {
             shellReady = true;
             shellReadyResolve?.();
             resolve();
@@ -240,15 +241,15 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         }
       });
 
-      // Send init sentinel to detect shell readiness
-      ptyProcess.write(`printf '${SENTINEL}${initToken}:B\\n'\n`);
+      // Send init marker to detect shell readiness
+      ptyProcess.write(`echo ${initMarker}\n`);
     });
   };
 
   const parsePendingOutput = (): void => {
     if (!pendingCommand) return;
     const { token } = pendingCommand;
-    const sentinelPattern = new RegExp(`${SENTINEL}${token}:(B|C:[^\\n]*|E:\\d+)\\n?`, "g");
+    const sentinelPattern = new RegExp(`${SENTINEL}${token}:(B|C:[^\\n]*|E:\\d+)`, "g");
     let match: RegExpExecArray | null;
     sentinelPattern.lastIndex = 0;
     while ((match = sentinelPattern.exec(outputBuffer)) !== null) {
