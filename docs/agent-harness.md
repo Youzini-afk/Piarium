@@ -280,8 +280,9 @@ exit 0 · 1.2s · cwd packages/web
   `--glob !pattern` 传入。
 - 排序按文件分组；文件按命中密度、最近修改（mtime 与 Git status 中 modified 加权）、路径偏好（源码优先于测试、
   浅路径优先）三信号排序。目标是第一屏就是模型要的文件。
-- **不含符号模式。** 符号导航（定义、引用、工作区符号）是独立的 LSP 工具，第 3 阶段与 `related` 一起交付——Claude
-  Code 也把 LSP 与 Grep 分开。grep 的 schema 保持与 rg 一致，不混入 rg 没有的语义。
+- **不含符号模式。** 符号导航（定义、引用、工作区符号、悬停签名 `hover`）是独立的 LSP 工具，第 3 阶段与 `related` 一起
+  交付——Claude Code 也把 LSP 与 Grep 分开，Devin 的 `hover_symbol` 与定义、引用并列。grep 的 schema 保持与 rg 一致，
+  不混入 rg 没有的语义。
 - 超时（默认 20 s）时若已有部分输出，丢弃可能不完整的最后一行后返回部分结果并注明"未搜完"；零输出才报工具错误。
   模型必须能区分"没搜完"与"没搜到"。
 - v1 只搜磁盘；叠加未保存缓冲是 v2（恢复 v5 已有 host 向编辑器索取脏状态的先例）。
@@ -1023,7 +1024,8 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
    接管压缩、知识库 v1（`event` / `session` / `block` / `knowledge` 四种节点，`recall`、知识建议托盘，稀疏 + 图模式
    先行）、embedding provider 抽象（远端优先，本地选装其后）、模型槽位设置。
 3. **检索与子 agent 层**：`explore` 管线（查询扩展、rg 扇出、符号图与向量召回、多信号排序；先做纯算法模式，再接
-   `models.explore` 的两小步）、`file` / `symbol` 节点与 LSP / Git 采集器、`related`；原生子会话 worker 运行时（`dispatch`
+   `models.explore` 的两小步）、`file` / `symbol` 节点与 LSP / Git 采集器、`related`、LSP 导航工具（`symbols` / `definition` /
+   `references` / `hover`）；原生子会话 worker 运行时（`dispatch`
    / `wait`、角色目录与独立模型槽位、worktree 隔离、按 TTL 的唤醒、卡死检测）、review 传感器。
 3b. **原生权限**：进程内 `tool_call` 门控、策略文件、Settings 页、Smart 模式；停止 provisioning 插件。可与 3 并行。
 4. **默认 runtime**：内置钉住的 Pi。
@@ -1032,8 +1034,6 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 
 ### 12.2 待决问题
 
-| 问题 | 分叉 | 影响 |
-| --- | --- | --- |
 已于 2026-09-02 决定并移入正文的：`edit` v1 保持直接写盘 + 事后 reconcile，第 2 阶段后再评估 host 权威（第 5.4 节）；
 `piarium serve` 检测到桌面 host 在运行时复用它而不起第二个（第 7.1 节）；子 agent worktree 由父 agent 的 `merge` 工具
 合并、Git 面板可选审阅（第 9.2.5b 节）；`event` 默认保留 30 天（第 7.2.1 节）。
@@ -1046,7 +1046,8 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 | Pi 上游缺口 | `session_before_compact` 能否表达"保留最近 K 步原样"；`tool_result` 钩子的执行顺序 | 若不能，在 harness 扩展内补或向 Pi 提交 |
 | 模型槽位预设表 | 哪些 provider 给哪些槽位默认建议 | 只是 Settings 的便利，不影响规则本身 |
 | `explore` 无 LLM 时的查询扩展 | 启发式的具体规则（标识符提取、驼峰拆分、同义表、符号 BM25）与效果 | 决定零配置下 `explore` 的可用度；实现阶段用真实仓库调 |
-| 缓存保活请求 | 长时间委派时 harness 自行发送同前缀最小请求刷新 TTL / 只靪 `wait` 唤醒 | 前者零注意力成本但无监督价值；默认关，观察 `wait` 的实际开销后决定 |
+| 缓存保活请求 | 长时间委派时 harness 自行发送同前缀最小请求刷新 TTL / 只靠 `wait` 唤醒 | 前者零注意力成本但无监督价值；默认关，观察 `wait` 的实际开销后决定 |
+| 正则定位的批量修改工具 | 提供 `find_and_edit(pattern, path, glob?, instruction)`：正则定位全部匹配点，每个匹配点交给 `models.quickImplement` 独立判断改或不改（Devin 的 `find_and_edit` 形状，误报由小模型跳过）/ 不提供，跨文件同类修改由主 agent 用 `apply_patch` 或 `dispatch(quick-implement)` 完成 | 第 3 阶段子 agent 运行时就位后评估；若提供：槽位未配置则不注册，`HARNESS_TOOL_META` 记为 journaled 写入，走第 5.9 节按路径锁并行，每个匹配点的编辑经 `edit` 同一日志边界 |
 
 ## 13. 与其他文档的关系
 

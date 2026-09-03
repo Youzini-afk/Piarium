@@ -452,10 +452,25 @@ interface HarnessSettings {
   系统提示即静态。
 - 测试：1.2 的契约测试新增场景"注册全部 harness 工具后 5 步 system 逐字节不变"。
 
+### 1.11 工具卡片的紧凑渲染
+
+- 设计：agent-harness.md 第 5.1 节原则 2（`details` 为渲染而写，与 `content` 互不妥协）。范例：`toolRenderers.tsx`。参照
+  Devin 会话视图：每次工具调用默认只占一行，展开才看参数与结果。
+- 一行摘要（动词走 i18n，pattern / path / 数字是数据）：`grep` → `Searched <pattern> in <path|workspace> · N hits in M files`；
+  `read` → `Read <path>[:start-end]`；`find` / `ls` → `Found N files for <glob>` / `Listed <path>`；`bash` → 命令首行 +
+  `exit N · 1.2 s`（后台化时显示 `running · shell <id>`）；`edit` / `write` / `apply_patch` → `Edited <path> (+a −b)`；
+  `diagnostics` → `Diagnostics <path> · N new`；后续阶段的 `explore` → `Explored "<question>" · N snippets`，`dispatch` /
+  `wait` → 角色 + 状态。摘要全部来自 `details`，不解析 `content`。
+- 分组：同一 assistant 步内连续的只读调用（`grep` / `read` / `find` / `ls` / `diagnostics`，后续加 `explore` / `hover`）
+  折叠为一组，组头取第一条摘要加 `and N other queries`，展开逐条一行；写入类与 `bash` 不进组。用户可在设置里关掉
+  折叠（`harness.ui.compactToolCards`，默认开）。
+- 测试：每种工具的一行摘要文本；分组阈值（≥ 2 条连续只读调用即分组，被写入类调用打断）；`details.truncated` 与
+  `details.handle` 在展开态可见（1.4 的"展开全文"不受影响）。
+
 ### 阶段 1 完成标准
 
 - 1.3 的两平台 smoke 通过并记录；1.2 契约测试绿；`grep` 三态与排序；`edit` 附诊断三态；`read` 大文件走句柄；计数器在
-  诊断面板可见；Settings 页可关工具并在下一会话生效。
+  诊断面板可见；Settings 页可关工具并在下一会话生效；工具卡片默认一行、连续只读调用成组（1.11）。
 - 文档：`lib/harness/DOCUMENTATION.md`、`packages/pi-host/src/harness/README.md`、`packages/protocol` README 的事件 /
   方法表、`architecture.md` 第 5 节一句话记录 `harness.request` / `harness.respond`。
 
@@ -934,9 +949,12 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 ### 3.8 LSP 导航工具
 
-- pi-host `symbols(query)` / `definition(path, line, character)` / `references(path, line, character)` → host `lsp.*`；无服务器
-  → `unavailable (no language server for ${language})`。
-- 测试：三态。
+- pi-host `symbols(query)` / `definition(path, line, character)` / `references(path, line, character)` /
+  `hover(path, line, character)` → host `lsp.*`；无服务器 → `unavailable (no language server for ${language})`。
+- `hover` 返回签名与文档（`${signature}\n\n${documentation}`，无文档时只返回签名），是"看一个类型 / 参数是什么"最便宜的
+  路径，替代为此打开整个定义文件的 `read`（Devin 的 `hover_symbol` 同样与定义、引用并列）。`promptGuidelines`：
+  `["Use hover to check a signature or type before reading the whole definition file."]`。
+- 测试：四个工具各三态（`ready` / `empty` / `unavailable`）。
 
 ### 阶段 3 完成标准
 
