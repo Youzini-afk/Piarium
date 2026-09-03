@@ -150,6 +150,7 @@ import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
+import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
 
@@ -2681,6 +2682,10 @@ export class SessionHost {
       const settingsManager = SettingsManager.create(cwd, agentDir, {
         projectTrusted: initialTrust,
       });
+      // Read merged HarnessSettings from Pi settings (user + project)
+      const userHarness = (settingsManager.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const projectHarness = (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -2754,6 +2759,19 @@ export class SessionHost {
               hidden: true,
               name: "piarium-compaction",
             },
+            {
+              factory: createPermissionGateExtension({
+                policy: buildPermissionPolicy(
+                  "normal", // TODO: resolve mode from harness settings
+                  Object.fromEntries(
+                    Object.entries(harnessSettings.dispatch.askBefore)
+                      .filter(([, v]) => v !== undefined),
+                  ) as Record<string, boolean>,
+                ),
+              }),
+              hidden: true,
+              name: "piarium-permission-gate",
+            },
           ],
         },
         settingsManager,
@@ -2778,10 +2796,6 @@ export class SessionHost {
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
       );
       const configured = await this.#configureServices?.(services);
-      // Read merged HarnessSettings from Pi settings (user + project)
-      const userHarness = (settingsManager.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
-      const projectHarness = (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
-      const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];
       if (workspaceMutationJournal !== undefined) {
