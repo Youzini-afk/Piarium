@@ -15,16 +15,17 @@ import {
 } from "../src/index.js";
 
 describe("foundational Pi package manifest", () => {
-  it("publishes revision 3 with only the foundational runtime integrations", () => {
-    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION, 3);
-    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision, 3);
+  it("publishes revision 2 with only the foundational runtime integrations", () => {
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION, 2);
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision, 2);
     assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_IDS, [
       "mcp",
+      "permission-system",
     ]);
 
     const integrations = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations;
-    assert.equal(new Set(integrations.map((entry) => entry.id)).size, 1);
-    assert.equal(new Set(integrations.map((entry) => entry.source)).size, 1);
+    assert.equal(new Set(integrations.map((entry) => entry.id)).size, 2);
+    assert.equal(new Set(integrations.map((entry) => entry.source)).size, 2);
     const aliases = integrations.flatMap((entry) => [...entry.packageAliases]);
     assert.equal(new Set(aliases).size, aliases.length);
     assert.ok(integrations.every((entry) => entry.introducedRevision === 1));
@@ -32,18 +33,25 @@ describe("foundational Pi package manifest", () => {
       Object.fromEntries(integrations.map((entry) => [entry.id, entry.source])),
       {
         mcp: "npm:@piarium/pi-mcp-adapter",
+        "permission-system": "npm:@gotgenes/pi-permission-system",
       },
     );
     assert.deepEqual(
       Object.fromEntries(integrations.map((entry) => [entry.id, entry.packageName])),
       {
         mcp: "@piarium/pi-mcp-adapter",
+        "permission-system": "@gotgenes/pi-permission-system",
       },
     );
     assert.ok(
       integrations.every((entry) =>
         entry.packageAliases.some((alias) => alias === entry.packageName),
       ),
+    );
+    assert.ok(
+      integrations
+        .find((entry) => entry.id === "permission-system")
+        ?.packageAliases.includes("pi-permission-system"),
     );
   });
 
@@ -90,7 +98,7 @@ describe("foundational Pi package manifest", () => {
           source: "npm:pi-mcp-adapter",
         },
       ],
-      manifestRevision: 3,
+      manifestRevision: 2,
       revision: 3,
       state: "degraded",
     };
@@ -99,9 +107,16 @@ describe("foundational Pi package manifest", () => {
   });
 
   it("matches scoped npm versions and Git basenames without replacing the observed source", () => {
+    const permission = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1];
     const mcp = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0];
+    assert.ok(permission);
     assert.ok(mcp);
+    assert.equal(foundationalPackageIdentity("npm:@gotgenes/pi-permission-system@2.4.0"), "@gotgenes/pi-permission-system");
     assert.equal(foundationalPackageIdentity("git@github.com:fork/pi-mcp-adapter.git"), "pi-mcp-adapter");
+    assert.equal(matchesFoundationalPackage(permission, {
+      name: "@gotgenes/pi-permission-system",
+      source: "npm:@gotgenes/pi-permission-system@2.4.0",
+    }), true);
     assert.equal(matchesFoundationalPackage(mcp, {
       name: "pi-mcp-adapter",
       source: "https://github.com/example/pi-mcp-adapter.git",
