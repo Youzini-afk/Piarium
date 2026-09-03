@@ -37,7 +37,7 @@ export function createBashTool(bridge: HostServicesBridge, sessionId: string, cw
   return defineTool({
     name: "bash",
     label: "Bash",
-    description: "Execute a bash command and return stdout, stderr, and exit code. Long-running commands are backgrounded after waitMs.",
+    description: "Execute a bash command and return stdout, stderr, and exit code. Long-running commands are backgrounded after waitMs. Under PTY-based shells (git-bash, wsl), stdout and stderr are merged into a single stream.",
     promptSnippet: "bash: execute shell commands (bash family)",
     promptGuidelines: [
       "Use bash for shell commands. The tool handles timeouts and backgrounding automatically.",

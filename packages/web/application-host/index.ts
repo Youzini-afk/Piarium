@@ -41,7 +41,7 @@ import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
-import { createHarnessRouter } from './lib/harness/router.js';
+import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import type { DiagnosticsProvider } from './lib/harness/diagnostics-service.js';
@@ -1146,12 +1146,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // registered harness services.
   const harnessRouter = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
-      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', {
-        requestId,
-        sessionId,
-        ok: outcome.ok,
-        ...(outcome.ok ? { result: outcome.result } : { error: outcome.error }),
-      } as never);
+      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId, outcome));
     },
     resolveWorkspace: async (sessionId) => {
       const snapshot = sessionSnapshots.get(sessionId);

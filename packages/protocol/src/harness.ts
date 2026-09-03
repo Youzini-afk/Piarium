@@ -187,3 +187,18 @@ export type HarnessRespondParams = {
   | { ok: true; result: unknown }
   | { ok: false; error: HarnessError }
 );
+
+/**
+ * Build the typed `harness.respond` params from a router outcome.
+ * Callers pass this to `piRuntimeBroker.requestForSession(sessionId, 'harness.respond', params)`.
+ */
+export function buildHarnessRespondParams(
+  sessionId: string,
+  requestId: string,
+  outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
+): HarnessRespondParams {
+  if (outcome.ok) {
+    return { requestId, sessionId, ok: true, result: outcome.result };
+  }
+  return { requestId, sessionId, ok: false, error: outcome.error };
+}

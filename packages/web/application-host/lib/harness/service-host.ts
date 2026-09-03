@@ -70,7 +70,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         interpreter: interpreterResult,
         outputStore,
         sessionId: ctx.sessionId,
-        env: { PWD: ctx.workspaceRoot },
+        cwd: ctx.workspaceRoot ?? undefined,
         ...(options.registerWriter ? {
           registerWriter: () => options.registerWriter!(ctx.sessionId, ctx.workspaceRoot),
         } : {}),

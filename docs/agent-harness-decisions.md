@@ -201,15 +201,19 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 | 5 | cat big.txt (5000行) 返回 out_ 句柄，page1 含 "line 1"，page2 非空 | ✓ |
 | 6 | selectHarnessTools: grep=false 时无 grep，默认有 grep | ✓ |
 
-### Contract 测试（router respond → bridge, 3/3 pass）
+### Contract 测试（buildHarnessRespondParams → host-controller harness.respond → respondHarness → bridge, 3/3 pass）
 
 测试文件：`packages/pi-host/test/harness/router-bridge-contract.test.ts`
 
+测试方式：`buildHarnessRespondParams`（来自 `@piarium/protocol`，web application-host 同一函数）生成 `HarnessRespondParams`，经 host-controller 的 `harness.respond` 分支 → `sessionHost.respondHarness` → `bridge.respond` → bridge 等待方拿到结果。
+
 | # | 断言 | 状态 |
 |---|------|------|
-| 1 | ok result 经 respondHarness 到达 bridge 等待方 | ✓ |
-| 2 | error result 经 respondHarness 到达 bridge 为 rejection | ✓ |
-| 3 | timeout error 经 respondHarness 到达 bridge 为 retryable rejection | ✓ |
+| 1 | ok result: buildHarnessRespondParams → respondHarness → bridge 等待方 resolves | ✓ |
+| 2 | error result: buildHarnessRespondParams → respondHarness → bridge 为 rejection | ✓ |
+| 3 | timeout error: buildHarnessRespondParams → respondHarness → bridge 为 retryable rejection | ✓ |
+
+> **注**：read 工具的 tool_result 截断（`createToolResultTruncationExtension`）尚未在 e2e 中验证。该扩展在 session-host 注册，对所有工具结果生效，但其端到端行为（截断 + output.store + get_output 句柄）留待阶段 2 的 Pi 会话级 e2e 验证。
 
 ### 决策回退
 

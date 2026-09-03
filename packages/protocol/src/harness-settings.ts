@@ -74,9 +74,16 @@ export function mergeHarnessSettings(
       ...user.knowledge,
       ...workspace.knowledge,
       autoAcceptSuggestions: {
-        ...DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions,
-        ...user.knowledge?.autoAcceptSuggestions,
-        ...workspace.knowledge?.autoAcceptSuggestions,
+        workspace: Boolean(
+          DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace
+          || user.knowledge?.autoAcceptSuggestions?.workspace
+          || workspace.knowledge?.autoAcceptSuggestions?.workspace
+        ),
+        user: Boolean(
+          DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.user
+          || user.knowledge?.autoAcceptSuggestions?.user
+          || workspace.knowledge?.autoAcceptSuggestions?.user
+        ),
       },
     },
     ...(user.web || workspace.web

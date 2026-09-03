@@ -8,6 +8,11 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | Tool | Description | Host Service |
 |------|-------------|--------------|
 | `bash` | Execute shell commands (PTY, persistent shell) | `shell.exec` |
+
+> **Note**: Under PTY-based shells (git-bash, wsl, bash), stdout and stderr
+> are merged into a single stream. The `stderr` field in `ShellExecResult`
+> will be empty; all output appears in `stdout`. PowerShell is the only
+> interpreter that separates the streams (but it is not yet wired).
 | `grep` | Content search with hit grouping | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only) | `fs.lock` + `lsp.diagnostics` |
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |

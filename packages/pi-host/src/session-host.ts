@@ -2761,9 +2761,8 @@ export class SessionHost {
       );
       const configured = await this.#configureServices?.(services);
       // Read merged HarnessSettings from Pi settings (user + project)
-      const piSettings = this.runtime.services.settingsManager;
-      const userHarness = (piSettings.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
-      const projectHarness = (piSettings.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const userHarness = (settingsManager.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const projectHarness = (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];

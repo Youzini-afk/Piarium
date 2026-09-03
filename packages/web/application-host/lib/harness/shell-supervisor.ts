@@ -130,6 +130,7 @@ export interface ShellSupervisorOptions {
   outputStore: OutputStore;
   sessionId: string;
   env?: Record<string, string>;
+  cwd?: string;
   cols?: number;
   rows?: number;
   registerWriter?: () => Promise<{ close: () => Promise<void> } | null>;
@@ -198,7 +199,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         ptyProcess = ptyProvider.spawn(interpreter.command, interpreter.args, {
           cols,
           rows,
-          cwd: deps.env?.PWD ?? process.cwd(),
+          cwd: deps.cwd ?? process.cwd(),
           env: { ...process.env, ...baseEnv } as Record<string, string>,
           windowsHide: true,
         });

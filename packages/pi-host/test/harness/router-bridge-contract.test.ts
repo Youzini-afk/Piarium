@@ -1,20 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge, HarnessRequestError } from "../../src/harness/host-services-bridge.js";
-import type { HarnessRequestData, HarnessError } from "@piarium/protocol";
+import { buildHarnessRespondParams, type HarnessRequestData, type HarnessError, type HarnessRespondParams } from "@piarium/protocol";
 
 /**
- * Contract test: the respond payload format produced by HarnessRouter
- * (in @piarium/web application-host) flows through respondHarness to
- * the bridge's waiting caller.
+ * Contract test: buildHarnessRespondParams (from @piarium/protocol) produces
+ * a HarnessRespondParams that the host-controller's "harness.respond" handler
+ * forwards to SessionHost.respondHarness, which calls bridge.respond, which
+ * resolves the bridge's waiting caller.
  *
- * The router's respond callback produces:
- *   { ok: true, result } | { ok: false, error: HarnessError }
- * This test simulates that format and verifies respondHarness +
- * bridge.respond deliver it correctly.
+ * Real flow:
+ *   web application-host: buildHarnessRespondParams(sid, rid, outcome)
+ *     → piRuntimeBroker.requestForSession(sid, "harness.respond", params)
+ *     → pi-host host-controller: case "harness.respond"
+ *     → sessionHost.respondHarness(sid, rid, params)
+ *     → bridge.respond(sid, rid, { ok, result } | { ok: false, error })
+ *     → bridge waiting caller resolves/rejects
+ *
+ * This test exercises the params → respondHarness → bridge.respond → caller
+ * path, using buildHarnessRespondParams to produce the params (same function
+ * the web application-host uses).
  */
 describe("harness router → bridge contract", () => {
-  it("ok result reaches the bridge waiting caller", async () => {
+  it("ok result: buildHarnessRespondParams → respondHarness → bridge caller resolves", async () => {
     const emitted: HarnessRequestData[] = [];
     const sessionId = "contract-1";
 
@@ -24,14 +32,17 @@ describe("harness router → bridge contract", () => {
       defaultTimeoutMs: 5000,
     });
 
-    // Simulate the host-side respond function that calls bridge.respond
-    // with the same payload format the HarnessRouter produces
-    const simulateRouterRespond = (
+    // Simulate a session host that has this bridge registered
+    const respondHarness = (
       sid: string,
       requestId: string,
-      outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
-    ) => {
-      return bridge.respond(sid, requestId, outcome);
+      params: HarnessRespondParams,
+    ): boolean => {
+      if (params.ok) {
+        return bridge.respond(sid, requestId, { ok: true, result: params.result });
+      }
+      if (!params.error) return false;
+      return bridge.respond(sid, requestId, { ok: false, error: params.error });
     };
 
     // Make a request through the bridge
@@ -39,12 +50,18 @@ describe("harness router → bridge contract", () => {
     assert.equal(emitted.length, 1);
     const requestData = emitted[0]!;
 
-    // Simulate router dispatching to a service and responding
-    // (in real system: router.processEvent → service.handle → respond)
-    simulateRouterRespond(sessionId, requestData.requestId, {
+    // Build params with the same function the web application-host uses
+    const params = buildHarnessRespondParams(sessionId, requestData.requestId, {
       ok: true,
       result: { handle: "out_test", total: 5 },
     });
+    assert.equal(params.ok, true);
+    assert.equal(params.requestId, requestData.requestId);
+    assert.equal(params.sessionId, sessionId);
+
+    // Forward through respondHarness (mirrors host-controller's harness.respond handler)
+    const accepted = respondHarness(sessionId, requestData.requestId, params);
+    assert.equal(accepted, true);
 
     const result = await resultPromise;
     assert.deepEqual(result, { handle: "out_test", total: 5 });
@@ -52,7 +69,7 @@ describe("harness router → bridge contract", () => {
     bridge.dispose();
   });
 
-  it("error result reaches the bridge waiting caller as rejection", async () => {
+  it("error result: buildHarnessRespondParams → respondHarness → bridge caller rejects", async () => {
     const emitted: HarnessRequestData[] = [];
     const sessionId = "contract-2";
 
@@ -62,26 +79,33 @@ describe("harness router → bridge contract", () => {
       defaultTimeoutMs: 5000,
     });
 
-    const simulateRouterRespond = (
+    const respondHarness = (
       sid: string,
       requestId: string,
-      outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
-    ) => {
-      return bridge.respond(sid, requestId, outcome);
+      params: HarnessRespondParams,
+    ): boolean => {
+      if (params.ok) {
+        return bridge.respond(sid, requestId, { ok: true, result: params.result });
+      }
+      if (!params.error) return false;
+      return bridge.respond(sid, requestId, { ok: false, error: params.error });
     };
 
     const resultPromise = bridge.request("output.store", { text: "hello" });
     const requestData = emitted[0]!;
 
-    // Simulate router responding with an error (service threw)
     const harnessError: HarnessError = {
       code: "failed",
       message: "service unavailable",
     };
-    simulateRouterRespond(sessionId, requestData.requestId, {
+    const params = buildHarnessRespondParams(sessionId, requestData.requestId, {
       ok: false,
       error: harnessError,
     });
+    assert.equal(params.ok, false);
+    assert.equal(params.error.code, "failed");
+
+    respondHarness(sessionId, requestData.requestId, params);
 
     await assert.rejects(resultPromise, (error: unknown) => {
       assert.ok(error instanceof HarnessRequestError);
@@ -93,7 +117,7 @@ describe("harness router → bridge contract", () => {
     bridge.dispose();
   });
 
-  it("timeout error from router reaches bridge as retryable rejection", async () => {
+  it("timeout error: buildHarnessRespondParams → respondHarness → bridge rejects as retryable", async () => {
     const emitted: HarnessRequestData[] = [];
     const sessionId = "contract-3";
 
@@ -103,22 +127,29 @@ describe("harness router → bridge contract", () => {
       defaultTimeoutMs: 5000,
     });
 
-    const simulateRouterRespond = (
+    const respondHarness = (
       sid: string,
       requestId: string,
-      outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
-    ) => {
-      return bridge.respond(sid, requestId, outcome);
+      params: HarnessRespondParams,
+    ): boolean => {
+      if (params.ok) {
+        return bridge.respond(sid, requestId, { ok: true, result: params.result });
+      }
+      if (!params.error) return false;
+      return bridge.respond(sid, requestId, { ok: false, error: params.error });
     };
 
     const resultPromise = bridge.request("shell.exec", { command: "sleep 999" });
     const requestData = emitted[0]!;
 
-    // Simulate router timeout (AbortController fired)
-    simulateRouterRespond(sessionId, requestData.requestId, {
+    const params = buildHarnessRespondParams(sessionId, requestData.requestId, {
       ok: false,
       error: { code: "timeout", message: "harness request timed out", retryable: true },
     });
+    assert.equal(params.ok, false);
+    assert.equal(params.error.retryable, true);
+
+    respondHarness(sessionId, requestData.requestId, params);
 
     await assert.rejects(resultPromise, (error: unknown) => {
       assert.ok(error instanceof HarnessRequestError);

@@ -1,5 +1,7 @@
-import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessServiceMap } from "@piarium/protocol";
+import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessRespondParams, type HarnessServiceMap, buildHarnessRespondParams } from "@piarium/protocol";
 import { HarnessServiceError } from "./harness-services.js";
+
+export { buildHarnessRespondParams };
 
 export interface HarnessServiceContext {
   sessionId: string;
