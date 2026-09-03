@@ -101,21 +101,13 @@ export interface DiagnosticsResult {
   reason?: string;
 }
 
-export interface FetchResult {
-  status: "ok" | "redirect-cross-host" | "blocked" | "empty-shell" | "renderer-unavailable" | "failed";
-  url: string;
-  finalUrl?: string;
-  contentType?: string;
-  title?: string;
-  markdown?: string;
-  bytes?: number;
-  fromCache?: boolean;
-  rendered?: boolean;
-  location?: string;
-  statusCode?: number;
-  reason?: string;
-  hint?: string;
-}
+export type FetchResult =
+  | { status: "ok"; url: string; finalUrl: string; contentType: string; title?: string; markdown: string; bytes: number; fromCache: boolean; rendered: boolean }
+  | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
+  | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
+  | { status: "empty-shell"; url: string; hint: string }
+  | { status: "renderer-unavailable"; url: string }
+  | { status: "failed"; url: string; reason: string };
 
 export interface WebReadResult {
   answer: string;
