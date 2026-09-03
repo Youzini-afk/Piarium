@@ -4,6 +4,7 @@ import {
   PIARIUM_BUILTIN_AGENTS_EXTENSION,
   PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
   PIARIUM_BUILTIN_FLEET_EXTENSION,
+  PIARIUM_BUILTIN_HARNESS_EXTENSION,
   PIARIUM_BUILTIN_MCP_EXTENSION,
   PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
   PIARIUM_BUILTIN_RECOVERY_EXTENSION,
@@ -16,6 +17,7 @@ import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/exten
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
+import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { RecoverySettings } from '@/components/sections/piarium/RecoverySettings';
@@ -94,6 +96,8 @@ const pageImplementation = (definition: PiariumBuiltinExtensionDefinition): Sett
         renderContent: () => <PluginSettingsPage />,
         renderSidebar: (options) => <PluginSettingsSidebar onItemSelect={options.onItemSelect} />,
       };
+    case PIARIUM_BUILTIN_HARNESS_EXTENSION.manifest.id:
+      return { renderContent: () => <HarnessSettingsPage /> };
     default:
       throw new Error(`Built-in Pi integration does not own a settings page: ${definition.manifest.id}`);
   }

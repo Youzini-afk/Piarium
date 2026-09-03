@@ -4,6 +4,7 @@ export * from "./envelopes.js";
 export * from "./events.js";
 export * from "./foundational-pi-packages.js";
 export * from "./harness.js";
+export * from "./harness-settings.js";
 export * from "./harness-tools.js";
 export * from "./methods.js";
 export * from "./mcp.js";

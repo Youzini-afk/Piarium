@@ -207,6 +207,22 @@ export const PIARIUM_BUILTIN_RECOVERY_EXTENSION = definition({
   }],
 });
 
+export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
+  id: "piarium.builtin.pi-harness",
+  displayName: "Agent Harness",
+  contributions: [pageContribution({
+    group: "pi",
+    icon: "terminal",
+    id: "piarium.builtin.pi-harness.page.harness",
+    keywords: ["harness", "agent", "tools", "shell", "bash", "output", "web", "search"],
+    kind: "single",
+    order: 49,
+    slug: "harness",
+    title: "Agent Harness",
+    titleKey: "settings.page.harness.title",
+  })],
+});
+
 const AGENT_FEATURE_TARGETS = [
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
@@ -450,6 +466,7 @@ export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExten
   PIARIUM_BUILTIN_MCP_EXTENSION,
   PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
   PIARIUM_BUILTIN_RECOVERY_EXTENSION,
+  PIARIUM_BUILTIN_HARNESS_EXTENSION,
   ...PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
 ];
 
