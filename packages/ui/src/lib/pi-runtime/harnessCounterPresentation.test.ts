@@ -33,4 +33,17 @@ describe('harness counter presentation', () => {
     expect(formatHarnessOutputBytes(512, 'en-US')).toBe('512 B');
     expect(formatHarnessOutputBytes(1536, 'en-US')).toBe('1.5 KiB');
   });
+
+  it('projects only valid model slot usage in catalog order', () => {
+    expect(projectHarnessCounters(stats({
+      modelSlotUsage: {
+        permissionJudge: { calls: 2, cost: 0.01, tokens: { input: 2, output: 1, cacheRead: 4, cacheWrite: 0, total: 7 } },
+        reader: { calls: 1, cost: 0.02, tokens: { input: 3, output: 2, cacheRead: 5, cacheWrite: 0, total: 10 } },
+        suggestions: { calls: -1, cost: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      },
+    }))?.modelSlots).toEqual([
+      { slot: 'reader', calls: 1, cost: 0.02, totalTokens: 10 },
+      { slot: 'permissionJudge', calls: 2, cost: 0.01, totalTokens: 7 },
+    ]);
+  });
 });

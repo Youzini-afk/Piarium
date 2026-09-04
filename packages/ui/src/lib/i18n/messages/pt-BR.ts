@@ -1597,6 +1597,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.harness.outputBytes": "Saída das ferramentas",
   "contextSidebar.harness.observationCalls": "Verificações de observação",
   "contextSidebar.harness.cacheHitRatio": "Acerto do cache de prompt",
+  "contextSidebar.harness.modelSlots": "Uso por slot de modelo",
   "contextSidebar.section.lastAssistantMessage": "Última mensagem do assistente",
   "contextSidebar.section.rawMessages": "Mensagens brutas",
   "contextSidebar.context.percentUsed": "{percent}% usado",

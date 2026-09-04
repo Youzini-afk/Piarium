@@ -1,9 +1,14 @@
 import React from 'react';
 import {
   DEFAULT_HARNESS_SETTINGS,
+  HARNESS_MODEL_ROLES,
+  applyHarnessModelPreset,
   validatePermissionRule,
   type JsonValue,
   type HarnessWebSearchProvider,
+  type HarnessModelPreset,
+  type HarnessModelRole,
+  type ModelSelection,
   type PermissionMode,
   type PermissionRule,
   type PiSettingsSnapshot,
@@ -25,6 +30,8 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 
 const TOOL_KEYS = [
   'bash',
@@ -44,7 +51,7 @@ interface HarnessSettings {
   shell?: string;
   output?: { visibleBytes?: number };
   bash?: { waitMs?: number };
-  models?: Record<string, { providerId: string; modelId: string }>;
+  models?: Partial<Record<HarnessModelRole, ModelSelection>>;
   memory?: { shadowMode?: boolean };
   web?: {
     maxFetchesPerTurn?: number;
@@ -82,6 +89,8 @@ export const HarnessSettingsPage: React.FC = () => {
   const [searchApiKey, setSearchApiKey] = React.useState('');
   const [searchCredentialConfigured, setSearchCredentialConfigured] = React.useState(false);
   const [searchStatusLoading, setSearchStatusLoading] = React.useState(false);
+  const providers = usePiProviderStore((state) => state.providers);
+  const loadProviders = usePiProviderStore((state) => state.load);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -99,6 +108,11 @@ export const HarnessSettingsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [runtimeTarget]);
 
+  React.useEffect(() => {
+    if (!currentDirectory) return;
+    void loadProviders(currentDirectory).catch(() => undefined);
+  }, [currentDirectory, loadProviders]);
+
   const harness = readHarnessSettings(snapshot);
   const tools = React.useMemo(() => harness.tools ?? DEFAULT_HARNESS_SETTINGS.tools, [harness.tools]);
   const shell = harness.shell ?? DEFAULT_HARNESS_SETTINGS.shell;
@@ -107,6 +121,7 @@ export const HarnessSettingsPage: React.FC = () => {
   const permissionMode = harness.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? 'normal';
   const smartAvailable = Boolean(harness.models?.permissionJudge);
   const memoryShadowMode = harness.memory?.shadowMode ?? DEFAULT_HARNESS_SETTINGS.memory.shadowMode;
+  const models = React.useMemo(() => harness.models ?? {}, [harness.models]);
 
   React.useEffect(() => {
     setRulesDraft(JSON.stringify(harness.permissions?.rules ?? [], null, 2));
@@ -216,6 +231,32 @@ export const HarnessSettingsPage: React.FC = () => {
       memory: { ...harness.memory, shadowMode: enabled },
     });
   }, [harness, saveHarness]);
+
+  const handleModelSlotChange = React.useCallback((slot: HarnessModelRole, providerId: string, modelId: string) => {
+    const nextModels = { ...models };
+    if (providerId && modelId) nextModels[slot] = { providerId, modelId };
+    else delete nextModels[slot];
+    void saveHarness({ ...harness, models: nextModels });
+  }, [harness, models, saveHarness]);
+
+  const handleModelPreset = React.useCallback((preset: HarnessModelPreset) => {
+    const match = providers
+      .map((provider) => ({
+        provider,
+        slots: applyHarnessModelPreset(preset, {
+          providerId: provider.id,
+          modelIds: provider.models.filter((model) => model.available).map((model) => model.id),
+        }),
+      }))
+      .find((candidate) => Object.keys(candidate.slots).length > 0);
+    if (!match) {
+      setError(t('settings.page.harness.models.presetUnavailable'));
+      return;
+    }
+    // Presets fill empty auxiliary slots. Explicit per-slot choices remain the
+    // user's authority, even when their provider has a custom id.
+    void saveHarness({ ...harness, models: { ...match.slots, ...models } });
+  }, [harness, models, providers, saveHarness, t]);
 
   const handleSearchSave = React.useCallback(async () => {
     if (searchProvider === 'none') {
@@ -349,6 +390,47 @@ export const HarnessSettingsPage: React.FC = () => {
               </Button>
             </div>
           </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.models')}
+        description={t('settings.page.harness.section.models.description')}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t('settings.page.harness.models.presets')}</span>
+            {(['anthropic', 'openai', 'gemini'] as const).map((preset) => (
+              <Button key={preset} type="button" size="sm" variant="outline" disabled={isSaving} onClick={() => handleModelPreset(preset)}>
+                {preset === 'anthropic' ? 'Anthropic' : preset === 'openai' ? 'OpenAI' : 'Gemini'}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{t('settings.page.harness.models.presetDescription')}</p>
+          {HARNESS_MODEL_ROLES.map((slot) => {
+            const selected = models[slot];
+            const defaultsToMain = slot === 'hardImplement' || slot === 'review';
+            return (
+              <SettingsFieldRow
+                key={slot}
+                label={slot}
+                description={t(defaultsToMain
+                  ? 'settings.page.harness.models.slot.mainFallback'
+                  : 'settings.page.harness.models.slot.optional')}
+              >
+                <ModelSelector
+                  cwd={currentDirectory}
+                  providerId={selected?.providerId ?? ''}
+                  modelId={selected?.modelId ?? ''}
+                  allowNone
+                  placeholder={t(defaultsToMain
+                    ? 'settings.page.harness.models.mainModel'
+                    : 'settings.page.harness.models.notConfigured')}
+                  onChange={(providerId, modelId) => handleModelSlotChange(slot, providerId, modelId)}
+                />
+              </SettingsFieldRow>
+            );
+          })}
         </div>
       </SettingsSection>
 

@@ -1,4 +1,11 @@
-import type { SessionStats } from '@piarium/protocol';
+import { HARNESS_MODEL_ROLES, type HarnessModelRole, type SessionStats } from '@piarium/protocol';
+
+export interface HarnessModelSlotPresentation {
+  calls: number;
+  cost: number;
+  slot: HarnessModelRole;
+  totalTokens: number;
+}
 
 export interface HarnessCounterPresentation {
   cacheHitPercent?: number;
@@ -6,6 +13,7 @@ export interface HarnessCounterPresentation {
   observationCalls?: number;
   toolErrors?: number;
   toolRetries?: number;
+  modelSlots?: HarnessModelSlotPresentation[];
 }
 
 const nonNegative = (value: unknown): number | undefined => (
@@ -24,13 +32,22 @@ export const projectHarnessCounters = (stats: SessionStats | undefined): Harness
     && stats.cacheHitRatio <= 1
     ? stats.cacheHitRatio
     : undefined;
-  if (toolErrors === undefined && toolRetries === undefined && outputBytes === undefined && observationCalls === undefined && ratio === undefined) return null;
+  const modelSlots = HARNESS_MODEL_ROLES.flatMap((slot) => {
+    const usage = stats.modelSlotUsage?.[slot];
+    const calls = nonNegative(usage?.calls);
+    const cost = nonNegative(usage?.cost);
+    const totalTokens = nonNegative(usage?.tokens.total);
+    if (calls === undefined || cost === undefined || totalTokens === undefined) return [];
+    return [{ calls, cost, slot, totalTokens }];
+  });
+  if (toolErrors === undefined && toolRetries === undefined && outputBytes === undefined && observationCalls === undefined && ratio === undefined && modelSlots.length === 0) return null;
   return {
     ...(toolErrors === undefined ? {} : { toolErrors }),
     ...(toolRetries === undefined ? {} : { toolRetries }),
     ...(outputBytes === undefined ? {} : { outputBytes }),
     ...(observationCalls === undefined ? {} : { observationCalls }),
     ...(ratio === undefined ? {} : { cacheHitPercent: ratio * 100 }),
+    ...(modelSlots.length === 0 ? {} : { modelSlots }),
   };
 };
 

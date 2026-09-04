@@ -1369,6 +1369,7 @@ export const dict = {
   'contextSidebar.harness.outputBytes': 'Sortie des outils',
   'contextSidebar.harness.observationCalls': 'Vérifications d’observation',
   'contextSidebar.harness.cacheHitRatio': 'Cache de prompt',
+  'contextSidebar.harness.modelSlots': 'Utilisation par modèle',
   'contextSidebar.section.lastAssistantMessage': 'Dernier message de l\'assistant',
   'contextSidebar.section.rawMessages': 'Messages bruts',
   'contextSidebar.context.percentUsed': '{percent}% utilisé',

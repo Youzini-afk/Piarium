@@ -1038,6 +1038,26 @@ Harness Settings 与 session state 来源区；10 locale；设计 5.8、plan/sta
 
 状态：已实施并 proven（外部 live key smoke 需用户实际 provider 凭据，不是默认测试前提）
 
+### D-068 · 2026-09-05 · 2.9（模型槽位单一解析与真实用量归因）
+
+类型：实现澄清
+
+决定：(1) 槽位目录、仅 hardImplement/review 回退主模型的解析规则、Anthropic/OpenAI/Gemini 轻量预设归
+`@piarium/protocol`，角色解析复用同一函数，不在 Host 复制第二套默认规则。(2) 预设按已连接 provider 的实际 model id 匹配，
+不依赖 provider id 必须叫 openai/anthropic/google；只填尚未配置的辅助槽位，不覆盖用户逐槽选择。(3) reader 与
+permissionJudge 的每次真实 `completeSimple` 响应按槽位累计 calls、完整 token 分类与 cost，随 `SessionStats` 进入 Context
+sidebar；无调用的槽位不造零值。(4) 子线程已由 `ThreadRun` 持久化 role/model/tokens，不再向父会话重复记账；memory shadow
+继续按设计使用活动会话模型，不冒充某个槽位。
+
+原因：槽位规则同时被 pi-host、Host 与 Settings 消费，复制默认逻辑会漂移；自定义 API provider 常用用户自己的 id，按 provider
+名称猜系列会让有效模型无法使用；用量只有绑定到真实模型响应才可信，配置本身不能算调用；父会话重复累计 child token 会让总成本
+失真。
+
+影响：protocol `harness-model-slots.ts` / `harness-roles.ts` / `SessionStats`；pi-host counter 与 reader/Smart judge；Harness
+Settings、Context sidebar、10 locale；设计 8.5/8.6、plan/status 2.9。
+
+状态：已实施并 proven（protocol 单测、真实 Pi reader/Smart judge E2E、UI projection）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1111,3 +1131,4 @@ Harness Settings 与 session state 来源区；10 locale；设计 5.8、plan/sta
 | D-065 | implementation | — | status 1.4/1.6；Host diagnostics adapter/service、真实 LSP 与 Pi session E2E |
 | D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |
 | D-067 | implementation | — | agent-harness 5.8、plan/status 1b.3/1b.5；protocol / Host providers+auth / pi-host / UI sources |
+| D-068 | implementation | — | agent-harness 8.5/8.6、plan/status 2.9；protocol / pi-host / UI |

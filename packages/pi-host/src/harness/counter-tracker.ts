@@ -1,4 +1,6 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
+import type { HarnessModelRole, HarnessModelSlotUsage } from "@piarium/protocol";
 
 interface ToolCallRecord {
   name: string;
@@ -13,6 +15,7 @@ interface CounterState {
   observationCalls: number;
   currentStep: number;
   recentToolCalls: ToolCallRecord[];
+  modelSlotUsage: Partial<Record<HarnessModelRole, HarnessModelSlotUsage>>;
 }
 
 export interface HarnessCounters {
@@ -21,11 +24,13 @@ export interface HarnessCounters {
   outputBytes: number;
   observationCalls: number;
   cacheHitRatio: number | null;
+  modelSlotUsage: Partial<Record<HarnessModelRole, HarnessModelSlotUsage>>;
 }
 
 export interface HarnessCounterTracker {
   extension: ExtensionFactory;
   getCounters(cacheRead?: number, input?: number): HarnessCounters;
+  recordModelUsage(slot: HarnessModelRole, usage: Usage): void;
   reset(): void;
 }
 
@@ -69,6 +74,7 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
     observationCalls: 0,
     currentStep: 0,
     recentToolCalls: [],
+    modelSlotUsage: {},
   };
 
   const extension: ExtensionFactory = (pi) => {
@@ -108,6 +114,26 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
       outputBytes: state.outputBytes,
       observationCalls: state.observationCalls,
       cacheHitRatio,
+      modelSlotUsage: structuredClone(state.modelSlotUsage),
+    };
+  };
+
+  const recordModelUsage = (slot: HarnessModelRole, usage: Usage): void => {
+    const current = state.modelSlotUsage[slot] ?? {
+      calls: 0,
+      cost: 0,
+      tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+    };
+    state.modelSlotUsage[slot] = {
+      calls: current.calls + 1,
+      cost: current.cost + usage.cost.total,
+      tokens: {
+        cacheRead: current.tokens.cacheRead + usage.cacheRead,
+        cacheWrite: current.tokens.cacheWrite + usage.cacheWrite,
+        input: current.tokens.input + usage.input,
+        output: current.tokens.output + usage.output,
+        total: current.tokens.total + usage.totalTokens,
+      },
     };
   };
 
@@ -118,7 +144,8 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
     state.observationCalls = 0;
     state.currentStep = 0;
     state.recentToolCalls = [];
+    state.modelSlotUsage = {};
   };
 
-  return { extension, getCounters, reset };
+  return { extension, getCounters, recordModelUsage, reset };
 }

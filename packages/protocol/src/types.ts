@@ -1,4 +1,5 @@
 import type { PiSessionFeatureState } from "./session-features.js";
+import type { HarnessModelRole } from "./harness-settings.js";
 
 // Piarium is pre-release and all product surfaces ship in lockstep. Breaking
 // development changes replace this single contract instead of accumulating
@@ -560,6 +561,18 @@ export interface SessionSnapshot extends SessionRuntimeState {
   workspacePersistence?: "pending";
 }
 
+export interface HarnessModelSlotUsage {
+  calls: number;
+  cost: number;
+  tokens: {
+    cacheRead: number;
+    cacheWrite: number;
+    input: number;
+    output: number;
+    total: number;
+  };
+}
+
 export interface SessionStats {
   contextUsage?: JsonValue;
   cost: number;
@@ -582,6 +595,7 @@ export interface SessionStats {
   outputBytes?: number;
   observationCalls?: number;
   cacheHitRatio?: number | null;
+  modelSlotUsage?: Partial<Record<HarnessModelRole, HarnessModelSlotUsage>>;
 }
 
 export interface ProjectTrustRequest {

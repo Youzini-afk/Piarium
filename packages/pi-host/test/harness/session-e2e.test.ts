@@ -539,6 +539,9 @@ describe("session e2e — session-local web reader", () => {
         assert.match(JSON.stringify(readerContext?.messages), /answer is 42/);
         assert.match(finalToolResult, /answer \(from https:\/\/example\.com\/guide\)/);
         assert.match(finalToolResult, /The answer is 42/);
+        const stats = session.host.stats(snapshot.sessionId);
+        assert.equal(stats.modelSlotUsage?.reader?.calls, 1);
+        assert.ok((stats.modelSlotUsage?.reader?.tokens.total ?? 0) > 0);
       } finally {
         await session.dispose();
         faux.unregister();
@@ -1026,6 +1029,9 @@ describe("session e2e — permission gate extension", () => {
         assert.ok(existsSync(join(root, "smart.txt")));
         assert.equal(judgeContexts.length, 1);
         assert.match(judgeContexts[0]!.systemPrompt ?? "", /permission judge/i);
+        const stats = session.host.stats(snapshot.sessionId);
+        assert.equal(stats.modelSlotUsage?.permissionJudge?.calls, 1);
+        assert.ok((stats.modelSlotUsage?.permissionJudge?.tokens.total ?? 0) > 0);
       } finally {
         await session.dispose();
         faux.unregister();

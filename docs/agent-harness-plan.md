@@ -513,11 +513,16 @@ last checkpoint: 2026-09-03T10:12Z
 
 ### 2.9 模型槽位设置
 
+**状态（2026-09-05）**：槽位解析与 provider 目录驱动的三套轻量预设已归 `@piarium/protocol`；Settings 可逐槽位选择并只用
+预设填补空槽位；reader / permissionJudge 的真实 `completeSimple` 用量进入 `SessionStats.modelSlotUsage` 与 Context sidebar，
+委派角色用量由 `ThreadRun` 按 role/model 记录。未发生调用的槽位不造 0。
+
 - Settings `harness.models`（1.9 的 schema）：九个槽位 + `permissionJudge`（3b 用）；`hardImplement` 与 `review` 未设时
   解析为主模型，其余未设即未配置。预设：`applyPreset('anthropic' | 'openai' | 'gemini')` 填表——Anthropic：
   explore / retrievalAgent / quickImplement / check / reader / suggestions = 当前 provider 的 Haiku 系；OpenAI：mini / nano
   系；Gemini：Flash 系；具体型号从 provider 的模型目录里按名称匹配，匹配不到则不填。
-- host `resolveSlot(slot): { providerId; modelId } | null`；每槽位用量在计数器按 `slot` 归因。
+- protocol `resolveHarnessModelSlot(slot): { providerId; modelId } | null`；会话内辅助调用按 `slot` 进入计数器，委派角色由
+  `ThreadRun` 记录，避免在父会话重复累计。
 - 测试：解析规则；预设填充后可覆盖；未配置 → 依赖能力不注册（与 3.6、1b.2、2.7 联动）。
 
 ### 2.10 `recall` 与 `user.tdb`

@@ -9,13 +9,13 @@ import {
 } from "./review-sensor.js";
 import { createThreadRegistry } from "./thread-registry.js";
 import { resolveRoles } from "./roles.js";
-import type { SlotResolution } from "./model-slots.js";
+import type { ModelSelection } from "@piarium/protocol";
 
-const mainModel: SlotResolution = { providerId: "anthropic", modelId: "claude-sonnet-4" };
+const mainModel: ModelSelection = { providerId: "anthropic", modelId: "claude-sonnet-4" };
 const workspaceId = "workspace-1";
 const parent = { kind: "session", id: "p1" } as const;
 
-function reviewRoleFor(main: SlotResolution = mainModel) {
+function reviewRoleFor(main: ModelSelection = mainModel) {
   const roles = resolveRoles({ review: main }, main);
   return roles.find((r) => r.id === "review")!;
 }

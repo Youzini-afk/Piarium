@@ -16,6 +16,7 @@
  */
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
+import { resolveHarnessModelSlot } from "./harness-model-slots.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -117,17 +118,13 @@ export interface ResolvedRole {
   definition: RoleDefinition;
 }
 
-/** Slots that resolve to the session's main model when left unconfigured. */
-const SLOTS_DEFAULTING_TO_MAIN: ReadonlySet<HarnessModelRole> = new Set(["hardImplement", "review"]);
-
 export function resolveRoles(
   slots: Partial<Record<HarnessModelRole, ModelSelection | null>>,
   mainModel: ModelSelection | null,
 ): ResolvedRole[] {
   const resolved: ResolvedRole[] = [];
   for (const role of Object.values(ROLE_DEFINITIONS)) {
-    let model = slots[role.slot] ?? null;
-    if (!model && SLOTS_DEFAULTING_TO_MAIN.has(role.slot)) model = mainModel;
+    const model = resolveHarnessModelSlot(role.slot, slots, mainModel);
     if (model) resolved.push({ id: role.id, model, definition: role });
   }
   return resolved;

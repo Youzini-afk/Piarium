@@ -1596,6 +1596,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.outputBytes': '工具输出量',
   'contextSidebar.harness.observationCalls': '观察检查',
   'contextSidebar.harness.cacheHitRatio': '提示缓存命中率',
+  'contextSidebar.harness.modelSlots': '模型槽位用量',
   'contextSidebar.section.lastAssistantMessage': '最近一条助手消息',
   'contextSidebar.section.rawMessages': '原始消息',
   'contextSidebar.context.percentUsed': '已使用 {percent}%',

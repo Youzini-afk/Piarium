@@ -899,6 +899,9 @@ export class SessionHost {
         outputBytes: counters.outputBytes,
         observationCalls: counters.observationCalls,
         ...(counters.cacheHitRatio === null ? { cacheHitRatio: null } : { cacheHitRatio: counters.cacheHitRatio }),
+        ...(Object.keys(counters.modelSlotUsage).length === 0
+          ? {}
+          : { modelSlotUsage: counters.modelSlotUsage }),
       }),
     };
   }
@@ -2892,6 +2895,7 @@ export class SessionHost {
               timestamp: Date.now(),
             }],
           }, { reasoning: "minimal" });
+          harnessCounters.recordModelUsage("permissionJudge", response.usage);
           const text = response.content
             .filter((part) => part.type === "text")
             .map((part) => part.text)
@@ -2931,6 +2935,7 @@ export class SessionHost {
               ...(input.signal ? { signal: input.signal } : {}),
               toolChoice: "none",
             });
+            harnessCounters.recordModelUsage("reader", response.usage);
             const text = response.content
               .filter((part) => part.type === "text")
               .map((part) => part.text)

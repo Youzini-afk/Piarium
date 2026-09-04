@@ -1539,6 +1539,7 @@ export const dict = {
   'contextSidebar.harness.outputBytes': 'Tool output',
   'contextSidebar.harness.observationCalls': 'Observation checks',
   'contextSidebar.harness.cacheHitRatio': 'Prompt cache hit',
+  'contextSidebar.harness.modelSlots': 'Model slot usage',
   'contextSidebar.section.lastAssistantMessage': 'Last Assistant Message',
   'contextSidebar.section.rawMessages': 'Raw Messages',
   'contextSidebar.context.percentUsed': '{percent}% used',

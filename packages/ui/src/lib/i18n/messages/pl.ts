@@ -1630,6 +1630,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.outputBytes': 'Dane wyjściowe narzędzi',
   'contextSidebar.harness.observationCalls': 'Kontrole obserwacji',
   'contextSidebar.harness.cacheHitRatio': 'Trafienia pamięci promptów',
+  'contextSidebar.harness.modelSlots': 'Użycie slotów modeli',
   'contextSidebar.section.lastAssistantMessage': 'Ostatnia wiadomość asystenta',
   'contextSidebar.section.rawMessages': 'Surowe wiadomości',
   'contextSidebar.session.untitled': 'Nienazwana sesja',

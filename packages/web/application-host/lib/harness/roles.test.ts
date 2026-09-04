@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { resolveRoles, buildTeamPrompt, ROLE_DEFINITIONS } from "./roles.js";
-import type { SlotResolution } from "./model-slots.js";
+import type { ModelSelection } from "@piarium/protocol";
 
-const mainModel: SlotResolution = { providerId: "anthropic", modelId: "claude-sonnet-4" };
-const haiku: SlotResolution = { providerId: "anthropic", modelId: "claude-haiku" };
+const mainModel: ModelSelection = { providerId: "anthropic", modelId: "claude-sonnet-4" };
+const haiku: ModelSelection = { providerId: "anthropic", modelId: "claude-haiku" };
 
 describe("resolveRoles", () => {
   it("returns all roles when all slots configured", () => {
