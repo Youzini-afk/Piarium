@@ -53,6 +53,7 @@ import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type Compactio
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
+import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -1077,6 +1078,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   for (const failure of threadRegistryStartup.failures) {
     console.error(`[HarnessThreads] Startup reconciliation failed (${failure.code}) for ${failure.path}: ${failure.message}`);
   }
+  const threadTranscriptReader = createThreadTranscriptReader({
+    readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
+  });
 
   async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore | null> {
     let store = knowledgeStores.get(workspaceId);
@@ -1201,6 +1205,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     todoDepsProvider,
     recallDepsProvider,
     threadRegistry,
+    threadTranscriptReader,
     ...(memoryAgent ? { memoryAgent } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(

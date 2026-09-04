@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { OutputSlice, ShellExecResult } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@piarium/protocol";
 import type { OutputStore } from "./output-store.js";
 
 export type ShellInterpreterKind = "git-bash" | "bash" | "wsl" | "powershell" | "remote";
@@ -301,7 +301,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const totalBytes = Buffer.byteLength(cleanedOutput, "utf8");
     if (totalBytes > 32768) {
       const stored = outputStore.store(sessionId, cleanedOutput, "bash");
-      handle = stored.handle;
+      handle = stored.ref.handle;
       shown = { head: 0, tail: 0, total: stored.total };
     }
 
@@ -387,19 +387,17 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     // Check background shells
     const bg = backgroundShells.get(id);
     if (bg) {
-      const text = stripControlSequences(bg.output).slice(offset, offset + length);
+      const slice = sliceUtf8ByBytes(stripControlSequences(bg.output), offset, length);
       return {
-        text,
-        offset,
-        length: text.length,
-        total: Buffer.byteLength(bg.output, "utf8"),
+        ...slice,
         running: !bg.exited,
         ...(bg.exitCode !== null ? { exitCode: bg.exitCode } : {}),
       };
     }
     // Check output store (out_ handles)
-    const slice = outputStore.read(sessionId, id, offset, length);
-    if (slice) return { ...slice, running: false };
+    const result = outputStore.read(sessionId, id, offset, length);
+    if (result.status === "ready") return { ...result.slice, running: false };
+    if (result.status === "expired") throw new Error(`Output expired: ${id}`);
     throw new Error(`Shell not found: ${id}`);
   };
 

@@ -344,14 +344,14 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
             lines.push(content);
           }
         }
-        return { text: lines.join("\n"), report: null, traceHandle: null };
+        return { text: lines.join("\n"), report: null, transcriptRef: null };
       }
       if (what === "report") {
         if (!thread.report) {
           return {
             text: `Thread ${thread.id} has no report yet (state: ${thread.lifecycle}/${thread.attention}/${thread.integration})`,
             report: null,
-            traceHandle: null,
+            transcriptRef: null,
           };
         }
         lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
@@ -360,13 +360,20 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         lines.push(`Deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
         lines.push(`Unresolved: ${thread.report.unresolved.join("; ") || "none"}`);
         lines.push(`Confidence: ${thread.report.confidence}`);
-        return { text: lines.join("\n"), report: thread.report, traceHandle: thread.report.traceHandle };
+        return { text: lines.join("\n"), report: thread.report, transcriptRef: thread.report.transcriptRef };
       }
       const since = params.since ?? 0;
-      const steps = run?.steps ?? 0;
-      lines.push(`[steps ${since}–${steps} shown earlier; showing ${since + 1}–${steps}]`);
-      lines.push(`(transcript not yet available — thread ${thread.id}, ${steps} steps total)`);
-      return { text: lines.join("\n"), report: null, traceHandle: null };
+      if (!thread.report) {
+        return { text: `Thread ${thread.id} has no durable transcript reference yet`, report: null, transcriptRef: null };
+      }
+      if (!host.threadTranscriptReader) {
+        throw new HarnessServiceError("unavailable", "Thread transcript reader is not configured");
+      }
+      return {
+        text: await host.threadTranscriptReader.read(thread.report.transcriptRef, since),
+        report: null,
+        transcriptRef: thread.report.transcriptRef,
+      };
     },
   };
 }

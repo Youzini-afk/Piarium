@@ -48,7 +48,7 @@ const report = (conclusion = "all tests pass"): ThreadReport => ({
   unresolved: [],
   deviations: [],
   confidence: 0.9,
-  traceHandle: "trace-1",
+  transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
   blocksSnapshot: {},
 });
 
@@ -67,6 +67,9 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
     threadKillSession: async () => {},
     threadApplyWorktreeDiff: async () => ({ merged: 3, conflicts: [] }),
     threadSendToSession: async (sessionId, message) => { sent.push({ sessionId, message }); },
+    threadTranscriptReader: {
+      read: async (ref, since = 0) => `[entries ${since + 1}–2 of 2]\n${ref.sessionId}: durable transcript`,
+    },
   });
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
@@ -193,6 +196,8 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       await harness.threadRegistry.completeThread(WORKSPACE_ID, thread.id, report("completed successfully"));
       const readResult = await executeTool(createReadThreadTool(harness.bridge, SESSION_ID), { threadId: thread.id, what: "report" });
       assert.match(readResult.text, /completed successfully/);
+      const steps = await executeTool(createReadThreadTool(harness.bridge, SESSION_ID), { threadId: thread.id, what: "steps", since: 1 });
+      assert.match(steps.text, /child-1: durable transcript/);
       const mergeResult = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
       assert.match(mergeResult.text, /merged 3 files/);
       assert.equal((await harness.threadRegistry.getThread(WORKSPACE_ID, PARENT, thread.id))?.integration, "merged");

@@ -44,7 +44,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 1;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 2;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -68,6 +68,13 @@ export interface ThreadCatalogDocument {
   schemaVersion: typeof THREAD_REGISTRY_SCHEMA_VERSION;
   workspaceId: string;
   threads: Thread[];
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV1 {
+  schemaVersion: 1;
+  workspaceId: string;
+  threads: Array<Omit<Thread, "report"> & { report: LegacyThreadReport | null }>;
   runs: ThreadRun[];
 }
 
@@ -134,12 +141,22 @@ interface LegacyThreadRecord {
   costUsd: number | null;
   lastToolCall: { name: string; at: string } | null;
   diffStats: ThreadDiffStats | null;
-  report: ThreadReport | null;
+  report: LegacyThreadReport | null;
   exitReason: string | null;
   createdAt: string;
   updatedAt: string;
   eventSeq: number;
   hidden?: boolean;
+}
+
+interface LegacyThreadReport {
+  conclusion: string;
+  changedFiles: string[];
+  unresolved: string[];
+  deviations: string[];
+  confidence: number;
+  traceHandle: string;
+  blocksSnapshot: Record<string, string>;
 }
 
 interface MutationResult<T> {
@@ -192,7 +209,28 @@ const isDiffStats = (value: unknown): value is ThreadDiffStats | null => (
     && isFiniteNumber(value.deletions))
 );
 
+const isTranscriptRef = (value: unknown): value is ThreadReport["transcriptRef"] => (
+  isRecord(value)
+  && isString(value.runtimeId)
+  && isString(value.sessionId)
+  && isNullableString(value.fromEntryId)
+  && isNullableString(value.toEntryId)
+  && (value.branchLeafId === undefined || isString(value.branchLeafId))
+);
+
 const isReport = (value: unknown): value is ThreadReport | null => (
+  value === null
+  || (isRecord(value)
+    && isString(value.conclusion)
+    && Array.isArray(value.changedFiles) && value.changedFiles.every(isString)
+    && Array.isArray(value.unresolved) && value.unresolved.every(isString)
+    && Array.isArray(value.deviations) && value.deviations.every(isString)
+    && isFiniteNumber(value.confidence)
+    && isTranscriptRef(value.transcriptRef)
+    && isRecord(value.blocksSnapshot) && Object.values(value.blocksSnapshot).every(isString))
+);
+
+const isLegacyReport = (value: unknown): value is LegacyThreadReport | null => (
   value === null
   || (isRecord(value)
     && isString(value.conclusion)
@@ -227,6 +265,12 @@ const isThread = (value: unknown): value is Thread => {
     && Number.isSafeInteger(value.eventSeq)
     && typeof value.hidden === "boolean";
 };
+
+const isThreadV1 = (value: unknown): value is ThreadCatalogV1["threads"][number] => (
+  isRecord(value)
+  && isLegacyReport(value.report)
+  && isThread({ ...value, report: null })
+);
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
   if (!isRecord(value)) return false;
@@ -277,7 +321,7 @@ const isLegacyThread = (value: unknown): value is LegacyThreadRecord => (
   && (value.lastToolCall === null
     || (isRecord(value.lastToolCall) && isString(value.lastToolCall.name) && isString(value.lastToolCall.at)))
   && isDiffStats(value.diffStats)
-  && isReport(value.report)
+  && isLegacyReport(value.report)
 );
 
 const parentEquals = (left: ThreadParent, right: ThreadParent): boolean => (
@@ -320,6 +364,25 @@ const parseJson = (raw: string, path: string): unknown => {
   }
 };
 
+const migrateLegacyReport = (report: LegacyThreadReport | null, sessionId: string): ThreadReport | null => (
+  report
+    ? {
+        conclusion: report.conclusion,
+        changedFiles: report.changedFiles,
+        unresolved: report.unresolved,
+        deviations: report.deviations,
+        confidence: report.confidence,
+        transcriptRef: {
+          runtimeId: "pi",
+          sessionId,
+          fromEntryId: null,
+          toEntryId: null,
+        },
+        blocksSnapshot: report.blocksSnapshot,
+      }
+    : null
+);
+
 const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): ThreadCatalogDocument => {
   const value = parseJson(raw, path);
   if (!isRecord(value)) {
@@ -336,7 +399,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -345,10 +408,32 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
   if (expectedWorkspaceId !== undefined && value.workspaceId !== expectedWorkspaceId) {
     throw new ThreadRegistryError("corrupt", `Thread registry workspace identity does not match its catalog: ${path}`, path);
   }
-  if (!value.threads.every(isThread) || !value.runs.every(isThreadRun)) {
-    throw new ThreadRegistryError("corrupt", `Thread registry contains malformed thread or run records: ${path}`, path);
+  if (!value.runs.every(isThreadRun)) {
+    throw new ThreadRegistryError("corrupt", `Thread registry contains malformed run records: ${path}`, path);
   }
-  const catalog = value as unknown as ThreadCatalogDocument;
+  let catalog: ThreadCatalogDocument;
+  if (schemaVersion === 1) {
+    if (!value.threads.every(isThreadV1)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v1 thread records: ${path}`, path);
+    }
+    const v1 = value as unknown as ThreadCatalogV1;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: v1.workspaceId,
+      runs: structuredClone(v1.runs),
+      threads: v1.threads.map((thread) => {
+        const sessionId = thread.activeRunId === null
+          ? ""
+          : v1.runs.find((run) => run.id === thread.activeRunId)?.sessionId ?? "";
+        return { ...structuredClone(thread), report: migrateLegacyReport(thread.report, sessionId) };
+      }),
+    };
+  } else {
+    if (!value.threads.every(isThread)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed thread records: ${path}`, path);
+    }
+    catalog = value as unknown as ThreadCatalogDocument;
+  }
   const threadIds = new Set<string>();
   for (const thread of catalog.threads) {
     if (thread.workspaceId !== catalog.workspaceId || threadIds.has(thread.id)) {
@@ -432,6 +517,7 @@ const convertLegacy = (workspaceId: string, records: LegacyThreadRecord[]): { th
       : legacy.diffStats && legacy.diffStats.files > 0
         ? legacy.status === "done" ? "merge-ready" : "dirty"
         : "none";
+    const migratedReport = migrateLegacyReport(legacy.report, legacy.sessionId);
     threads.push({
       id: legacy.id,
       parent: { kind: "session", id: legacy.parentSessionId },
@@ -447,7 +533,7 @@ const convertLegacy = (workspaceId: string, records: LegacyThreadRecord[]): { th
       waitingFor: legacy.waitingFor ?? null,
       integration,
       diffStats: legacy.diffStats ?? null,
-      report: legacy.report ?? null,
+      report: migratedReport,
       activeRunId: runId,
       createdAt: legacy.createdAt,
       updatedAt: legacy.updatedAt,

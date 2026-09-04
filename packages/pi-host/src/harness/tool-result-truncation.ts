@@ -1,4 +1,5 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { sliceUtf8ByBytes, type OutputRef } from "@piarium/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const DEFAULT_VISIBLE_BYTES = 32768;
@@ -48,37 +49,34 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
       const headBytes = Math.floor(visibleBytes * headRatio);
       const tailBytes = visibleBytes - headBytes;
 
-      // Convert byte offsets to character offsets (approximate — works for BMP text)
-      const headCharOffset = Math.min(fullText.length, headBytes);
-      const tailCharStart = Math.max(0, fullText.length - tailBytes);
-
-      // Backtrack to nearest newline
-      const headCut = findNearestNewlineBefore(fullText, headCharOffset);
-      const tailCut = fullText.indexOf("\n", tailCharStart);
-      const tailStart = tailCut === -1 ? tailCharStart : tailCut + 1;
-
-      const head = fullText.slice(0, headCut);
-      const tail = fullText.slice(tailStart);
+      const headCandidate = sliceUtf8ByBytes(fullText, 0, headBytes).text;
+      const tailCandidate = sliceUtf8ByBytes(fullText, Math.max(0, byteLength - tailBytes), byteLength).text;
+      const headCut = findNearestNewlineBefore(headCandidate, headCandidate.length);
+      const tailCut = tailCandidate.indexOf("\n");
+      const head = headCandidate.slice(0, headCut);
+      const tail = tailCut === -1 ? tailCandidate : tailCandidate.slice(tailCut + 1);
+      const shownHeadBytes = Buffer.byteLength(head, "utf8");
+      const shownTailBytes = Buffer.byteLength(tail, "utf8");
 
       // Store full text via output.store
-      let handle: string;
+      let ref: OutputRef;
       let total: number;
       try {
         const stored = await bridge.request("output.store", { text: fullText, label: toolName });
-        handle = stored.handle;
+        ref = stored.ref;
         total = stored.total;
       } catch {
         // If output.store fails, leave the result untruncated
         return undefined;
       }
 
-      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${head.length} and last ${tail.length} — get_output("${handle}", offset, length) for more]`;
+      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output("${ref.handle}", offset, length) for more]`;
 
       // Replace text content
       const newContent = [{ type: "text" as const, text: truncatedText }];
       const newDetails = {
         ...(event.details ?? {}),
-        truncated: { handle, total, head: head.length, tail: tail.length },
+        truncated: { ref, total, head: shownHeadBytes, tail: shownTailBytes },
       };
 
       return {

@@ -24,8 +24,18 @@ export interface ThreadReport {
   unresolved: string[];
   deviations: string[];
   confidence: number;
-  traceHandle: string;
+  transcriptRef: TranscriptRef;
   blocksSnapshot: Record<string, string>;
+}
+
+export interface TranscriptRef {
+  runtimeId: string;
+  sessionId: string;
+  /** Null means the first entry on the referenced branch. */
+  fromEntryId: string | null;
+  /** Null means the current/referenced branch leaf. */
+  toEntryId: string | null;
+  branchLeafId?: string;
 }
 
 export interface ThreadWaitingFor {
@@ -181,7 +191,7 @@ export interface ThreadReadParams {
 export interface ThreadReadResult {
   text: string;
   report: ThreadReport | null;
-  traceHandle: string | null;
+  transcriptRef: TranscriptRef | null;
 }
 
 export interface ThreadMergeParams {

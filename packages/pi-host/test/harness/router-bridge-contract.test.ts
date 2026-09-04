@@ -53,7 +53,7 @@ describe("harness router → bridge contract", () => {
     // Build params with the same function the web application-host uses
     const params = buildHarnessRespondParams(sessionId, requestData.requestId, {
       ok: true,
-      result: { handle: "out_test", total: 5 },
+      result: { ref: { durability: "ephemeral", generation: "g", handle: "out_test" }, total: 5 },
     });
     assert.equal(params.ok, true);
     assert.equal(params.requestId, requestData.requestId);
@@ -64,7 +64,7 @@ describe("harness router → bridge contract", () => {
     assert.equal(accepted, true);
 
     const result = await resultPromise;
-    assert.deepEqual(result, { handle: "out_test", total: 5 });
+    assert.deepEqual(result, { ref: { durability: "ephemeral", generation: "g", handle: "out_test" }, total: 5 });
 
     bridge.dispose();
   });

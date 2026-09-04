@@ -43,11 +43,19 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
         const lines: string[] = [result.text];
         if (result.running) lines.push("\n[still running]");
         if (result.exitCode !== undefined) lines.push(`\n[exit ${result.exitCode}]`);
-        const shown = `${result.offset + result.length}/${result.total} bytes`;
+        const shown = `${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}`;
         lines.push(`\n[${shown}]`);
         return {
           content: [{ type: "text", text: lines.join("") }],
-          details: { handle: params.handle, offset: result.offset, length: result.length, total: result.total, running: result.running ?? false },
+          details: {
+            handle: params.handle,
+            offset: result.offset,
+            length: result.length,
+            nextOffset: result.nextOffset,
+            total: result.total,
+            eof: result.eof,
+            running: result.running ?? false,
+          },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

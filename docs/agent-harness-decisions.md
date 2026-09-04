@@ -466,6 +466,28 @@ architecture §5.1、plan P0.3–P0.4。
 
 状态：已实施
 
+### D-040 · 2026-09-04 · P0.5（输出句柄强度与旧报告迁移）
+
+类型：实现澄清
+
+决定：`OutputRef` 的 Host generation 与 HMAC 均采用 128 bit（32 hex），不是 plan 草稿里的 32 bit（8 hex）。句柄格式为
+`out_<generation>_<sequence-base36>_<mac>`；HMAC 输入含 sessionId 与十进制 sequence，错误 session、伪造 MAC 与从未签发的未来
+sequence 返回 `not-found`，旧 generation、FIFO 淘汰、dropSession、旧版 base32 handle 返回 `expired`。`dropSession` 不另建
+无依据上限的墓碑集合，而是保留该会话的 `nextSequence / evictedThrough` 水位并清正文。
+
+Thread catalog 因持久报告从 `traceHandle` 改为 `transcriptRef` 由 schema 1 升到 schema 2。schema 1 报告保留结论、文件、偏离与
+blocks，转换为 `{ runtimeId: "pi", sessionId, fromEntryId: null, toEntryId: null }`；null 端点明确表示该会话当前分支首项 / 叶项。
+读取 schema 1 本身不改盘，下一次真实 mutation 或启动对账需要写入时原子提交 schema 2；未来 schema 仍拒绝。
+
+原因：32-bit MAC 在有错误 oracle 的长期 Host 中不适合作为不可伪造句柄；128-bit 不增加有意义的传输成本。单独墓碑集合迟早还要
+猜一个淘汰上限，而单调 sequence 水位已经完整表达同一 Host generation 内的过期历史。旧 `traceHandle` 不能恢复原 entry 范围，
+但 Pi session 文件仍是耐久真相，因此显式“全分支”比丢报告或伪造范围诚实。
+
+影响：`packages/protocol/src/{harness,harness-threads,utf8}.ts`、Host `output-store.ts` / `thread-transcript.ts`、pi-host
+`tool-result-truncation.ts` / `output-tools.ts`、thread catalog schema 2。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -505,9 +527,10 @@ architecture §5.1、plan P0.3–P0.4。
 | D-031 | active-design（待实施） | — | agent-harness.md 5.10、plan 1.9 |
 | D-032 | folded-in | D-039（原子 catalog 文件形状） | agent-harness.md 9.3.1 / 9.3.4、plan P0、protocol / Host registry |
 | D-033 | folded-in | — | agent-harness.md 2 / 9.2.6 / 9.3.6 / 12.2、protocol 与 thread services |
-| D-034 | active-design（待实施） | — | agent-harness.md 5.1、plan P0 |
+| D-034 | folded-in | D-040（位强度与 schema 1 迁移） | agent-harness.md 5.1、plan P0、protocol / Host / pi-host |
 | D-035 | folded-in | — | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
 | D-036 | active-design（待实施） | — | plan 1.7 / P0 |
 | D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
 | D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |
 | D-039 | implementation | — | architecture §5.1、plan P0.3–P0.4、thread-registry.ts |
+| D-040 | implementation | — | agent-harness.md 5.1、plan P0.5、output-store / transcript reader |

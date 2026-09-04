@@ -11,7 +11,10 @@ function createFakeBridge(stored: Map<string, string>): Pick<HostServicesBridge,
       const text = params.text as string;
       const handle = `out_${counter++}`;
       stored.set(handle, text);
-      return { handle, total: Buffer.byteLength(text, "utf8") };
+      return {
+        ref: { durability: "ephemeral", generation: "test-generation", handle },
+        total: Buffer.byteLength(text, "utf8"),
+      };
     },
   } as unknown as Pick<HostServicesBridge, "request">;
 }
@@ -62,7 +65,7 @@ describe("tool-result-truncation", () => {
       details: undefined,
       isError: false,
     };
-    const result = await getHandler()!(event) as { content: Array<{ type: string; text: string }>; details: { truncated: { handle: string; total: number; head: number; tail: number } } };
+    const result = await getHandler()!(event) as { content: Array<{ type: string; text: string }>; details: { truncated: { ref: { handle: string }; total: number; head: number; tail: number } } };
     assert.ok(result);
     assert.equal(result.content.length, 1);
     assert.equal(result.content[0]!.type, "text");
@@ -73,7 +76,7 @@ describe("tool-result-truncation", () => {
     assert.equal(result.details.truncated.total, 200);
     // Full text stored
     assert.equal(stored.size, 1);
-    assert.equal(stored.get(result.details.truncated.handle), longText);
+    assert.equal(stored.get(result.details.truncated.ref.handle), longText);
   });
 
   it("uses 0.375 head ratio for bash", async () => {
@@ -96,6 +99,24 @@ describe("tool-result-truncation", () => {
     // head should be roughly 0.375 * 80 = 30 chars (before newline backtracking)
     // tail should be roughly 0.625 * 80 = 50 chars
     assert.ok(result.details.truncated.head < result.details.truncated.tail, "bash head should be smaller than tail");
+  });
+
+  it("counts the visible Unicode head and tail in bytes without broken characters", async () => {
+    const stored = new Map<string, string>();
+    const bridge = createFakeBridge(stored);
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 20, sessionId: "s1" })(pi as never);
+    const fullText = "你🙂界".repeat(20);
+    const result = await getHandler()!({
+      type: "tool_result",
+      toolName: "read",
+      content: [{ type: "text", text: fullText }],
+      details: undefined,
+      isError: false,
+    }) as { content: Array<{ text: string }>; details: { truncated: { head: number; tail: number } } };
+    assert.doesNotMatch(result.content[0]!.text, /�/);
+    assert.match(result.content[0]!.text, /界\n\[output:/, "tail must retain the final code point");
+    assert.match(result.content[0]!.text, new RegExp(`first ${result.details.truncated.head} and last ${result.details.truncated.tail}`));
   });
 
   it("returns undefined when output.store fails", async () => {

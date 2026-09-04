@@ -236,7 +236,7 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
           ...(params.since !== undefined ? { since: params.since } : {}),
         });
         const typed = result as ThreadReadResult;
-        return { content: [{ type: "text", text: typed.text }], details: { hasReport: typed.report !== null, traceHandle: typed.traceHandle } };
+        return { content: [{ type: "text", text: typed.text }], details: { hasReport: typed.report !== null, transcriptRef: typed.transcriptRef } };
       } catch (error) {
         return threadErrorResult("read_thread", error);
       }

@@ -29,7 +29,15 @@ export interface OutputSlice {
   text: string;
   offset: number;
   length: number;
+  nextOffset: number;
   total: number;
+  eof: boolean;
+}
+
+export interface OutputRef {
+  durability: "ephemeral";
+  generation: string;
+  handle: string;
 }
 
 export interface ShellExecResultCompleted {
@@ -205,7 +213,7 @@ export interface HarnessServiceMap {
   "shell.read": { params: { id: string; offset?: number; length?: number }; result: ShellReadResult };
   "shell.write": { params: { id: string; text: string }; result: { accepted: boolean } };
   "shell.kill": { params: { id: string }; result: { killed: boolean } };
-  "output.store": { params: { text: string; label?: string }; result: { handle: string; total: number } };
+  "output.store": { params: { text: string; label?: string }; result: { ref: OutputRef; total: number } };
   "output.read": { params: { handle: string; offset?: number; length?: number }; result: OutputSlice };
   "search.content": { params: SearchContentParams; result: SearchContentResult };
   "lsp.diagnostics": { params: { path: string; afterSnapshot?: string; waitMs?: number }; result: DiagnosticsResult };
@@ -322,7 +330,7 @@ export function isHarnessMethod(value: unknown): value is HarnessMethod {
 }
 
 export type HarnessError = {
-  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "denied" | "forbidden" | "failed";
+  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed";
   message: string;
   retryable?: boolean;
 };

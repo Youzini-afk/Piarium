@@ -197,11 +197,13 @@ research 与 knowledge-work profile 再评估）。
    工具生效，包括 Pi 原样保留的 `read` / `find` / `ls`——读一个 5,000 行文件不会整个进入窗口。
 
    句柄有两种耐久级别，不混用（D-034）。**`OutputRef` 是临时的**：只在 host 进程内、按会话预算 FIFO 淘汰，
-   不得写入任何持久记录；句柄编码 `out_<hostEpoch>_<sequence>_<mac>`，host 按会话记 `{ nextSequence, evictedThrough }`
+   不得写入任何持久记录；句柄编码 `out_<hostEpoch>_<sequence>_<mac>`，epoch 与截断后的 HMAC 均为 128 bit，host 按会话记
+   `{ nextSequence, evictedThrough }`
    两个水位，于是 host 重启（epoch 不同）或被淘汰（序号低于水位）都能返回 **`expired`**，从未签发的返回 `not-found`——
    两种"不在"不合并。**`TranscriptRef`（`{ runtimeId, sessionId, fromEntryId, toEntryId }`）是耐久的**：指向 Pi 会话
    文件本身，线程报告里引用的原始 trace 用它，不用 `OutputRef`。所有偏移与长度一律是 **UTF-8 字节**，切片在字节边界处
-   向最近的字符边界回退，分页返回 `nextOffset` 与 `eof`，调用方不得假设 `next = offset + length`。
+   向最近的字符边界回退，分页返回 `nextOffset` 与 `eof`，调用方不得假设 `next = offset + length`。从旧 catalog 迁移时
+   `fromEntryId / toEntryId` 可为 null，表示该 Pi 会话当前分支的首项 / 叶项，不再保留旧的临时 handle。
 4. **错误即指令。** 每条失败文本 = 发生了什么 + 一个具体的下一步。
 5. **shell 由 harness 决定。** 模型不选 shell、不选编码、不选交互模式。
 6. **非零退出不是工具错误。** 它是正常结果，给退出码与 stderr，不加错误框架；否则模型会把测试失败当成

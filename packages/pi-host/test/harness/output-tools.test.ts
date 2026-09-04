@@ -22,7 +22,7 @@ async function executeTool(tool: ReturnType<typeof createGetOutputTool>, params:
 describe("get_output tool", () => {
   it("reads stored output via output.read for out_ handles", async () => {
     const bridge = createFakeBridge((method) => {
-      if (method === "output.read") return { text: "stored content", offset: 0, length: 14, total: 14 };
+      if (method === "output.read") return { text: "stored content", offset: 0, length: 14, nextOffset: 14, total: 14, eof: true };
       throw new Error(`unexpected: ${method}`);
     });
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
@@ -33,7 +33,7 @@ describe("get_output tool", () => {
 
   it("reads background shell via shell.read for sh_ IDs", async () => {
     const bridge = createFakeBridge((method) => {
-      if (method === "shell.read") return { text: "shell output", offset: 0, length: 12, total: 100, running: true };
+      if (method === "shell.read") return { text: "shell output", offset: 0, length: 12, nextOffset: 12, total: 100, eof: false, running: true };
       throw new Error(`unexpected: ${method}`);
     });
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");

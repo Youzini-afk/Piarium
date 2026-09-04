@@ -193,9 +193,12 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
 
 ### P0.5 `OutputRef` / `TranscriptRef` 与 UTF-8 偏移
 
-- `OutputStore`：句柄 `out_<hostEpoch>_<sequence>_<mac>`（epoch = 进程启动时随机 8 hex；MAC = HMAC(epochKey, session:seq)
-  截 8 hex）；每会话 `{ nextSequence, evictedThrough }`；淘汰 **FIFO**（写进模块文档为契约）；`read` 三态判定见设计 5.1；
-  `dropSession` 把会话记入 `droppedSessions`。`OutputSlice` 加 `nextOffset`、`eof`；所有 offset / length 为 UTF-8 字节，
+**状态（2026-09-04）**：已实施。`OutputRef` 使用 128-bit Host generation 与 128-bit HMAC，FIFO 水位区分 expired / not-found；
+`TranscriptRef` 经 broker 的持久 Pi session entries 读取，catalog schema 1 报告方向性迁到 schema 2。
+
+- `OutputStore`：句柄 `out_<hostEpoch>_<sequence>_<mac>`（epoch = 进程启动时随机 128 bit；MAC = HMAC(epochKey,
+  session:seq) 截 128 bit）；每会话 `{ nextSequence, evictedThrough }`；淘汰 **FIFO**（写进模块文档为契约）；`read` 三态
+  判定见设计 5.1；`dropSession` 清内容并推进同一会话的水位。`OutputSlice` 加 `nextOffset`、`eof`；所有 offset / length 为 UTF-8 字节，
   切片用 `Buffer.subarray` 并向最近的字符边界回退（不切开多字节序列）。`HarnessError.code` 加 `'expired'`。
 - `ThreadReport.traceHandle` → `transcriptRef: TranscriptRef`；`read_thread(steps)` 经 broker `session.entries` 读
   `[fromEntryId, toEntryId]`。`tool-result-truncation` 与 `get_output` 文本里的 `[a-b of total]` 改为字节语义并带 `next`。

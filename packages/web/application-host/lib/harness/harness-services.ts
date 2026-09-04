@@ -75,7 +75,7 @@ export function createOutputStoreService(store: OutputStore): HarnessService<"ou
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const result = store.store(ctx.sessionId, params.text, params.label);
-      return { handle: result.handle, total: result.total };
+      return { ref: result.ref, total: result.total };
     },
   };
 }
@@ -84,10 +84,13 @@ export function createOutputReadService(store: OutputStore): HarnessService<"out
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const slice = store.read(ctx.sessionId, params.handle, params.offset, params.length);
-      if (!slice) {
+      if (slice.status === "expired") {
+        throw new HarnessServiceError("expired", `Output handle expired: ${params.handle}`);
+      }
+      if (slice.status === "not-found") {
         throw new HarnessServiceError("not-found", `Output handle not found: ${params.handle}`);
       }
-      return slice;
+      return slice.slice;
     },
   };
 }

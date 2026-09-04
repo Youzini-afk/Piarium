@@ -175,13 +175,13 @@ describe("thread protocol types (§9.3)", () => {
     assert.equal(params.since, 5);
   });
 
-  it("ThreadReadResult includes traceHandle", () => {
+  it("ThreadReadResult carries a durable transcript reference", () => {
     const result: ThreadReadResult = {
       text: "thread notes",
       report: null,
-      traceHandle: "out_abc123",
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: null, toEntryId: null },
     };
-    assert.equal(result.traceHandle, "out_abc123");
+    assert.equal(result.transcriptRef?.runtimeId, "pi");
   });
 
   it("ThreadKillParams supports keepWorktree", () => {

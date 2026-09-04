@@ -1,105 +1,154 @@
-import { randomBytes } from "node:crypto";
-
-const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
-
-function base32Handle(bytes: Buffer): string {
-  let bits = 0;
-  let value = 0;
-  let output = "";
-  for (const byte of bytes) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 0x1f];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) {
-    output += BASE32_ALPHABET[(value << (5 - bits)) & 0x1f];
-  }
-  return output;
-}
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { sliceUtf8ByBytes, type OutputRef, type OutputSlice } from "@piarium/protocol";
 
 interface StoredOutput {
-  text: string;
+  bytes: Buffer;
   label?: string;
-  total: number;
+  sequence: number;
 }
 
 interface SessionStore {
-  outputs: Map<string, StoredOutput>;
+  outputs: Map<number, StoredOutput>;
   totalBytes: number;
+  nextSequence: number;
+  evictedThrough: number;
 }
 
-const DEFAULT_MAX_BYTES_PER_SESSION = 256 * 1024 * 1024;
+export type OutputReadResult =
+  | { status: "ready"; slice: OutputSlice }
+  | { status: "expired" }
+  | { status: "not-found" };
 
 export interface OutputStore {
-  store(sessionId: string, text: string, label?: string): { handle: string; total: number };
-  read(sessionId: string, handle: string, offset?: number, length?: number): { text: string; offset: number; length: number; total: number } | null;
+  readonly generation: string;
+  store(sessionId: string, text: string, label?: string): { ref: OutputRef; total: number };
+  read(sessionId: string, handle: string, offset?: number, length?: number): OutputReadResult;
   dropSession(sessionId: string): void;
   dispose(): void;
 }
 
-export function createOutputStore(options: { maxBytesPerSession?: number } = {}): OutputStore {
+export interface OutputStoreOptions {
+  maxBytesPerSession?: number;
+  /** Test seam; production creates a fresh 128-bit generation per Host. */
+  generation?: string;
+  /** Test seam; production creates a fresh 256-bit MAC key per Host. */
+  macKey?: Buffer;
+}
+
+const DEFAULT_MAX_BYTES_PER_SESSION = 256 * 1024 * 1024;
+const HANDLE_PATTERN = /^out_([0-9a-f]{32})_([0-9a-z]+)_([0-9a-f]{32})$/;
+const LEGACY_HANDLE_PATTERN = /^out_[a-z2-7]+$/;
+
+const createSessionStore = (): SessionStore => ({
+  outputs: new Map(),
+  totalBytes: 0,
+  nextSequence: 1,
+  evictedThrough: 0,
+});
+
+export function createOutputStore(options: OutputStoreOptions = {}): OutputStore {
   const maxBytesPerSession = options.maxBytesPerSession ?? DEFAULT_MAX_BYTES_PER_SESSION;
+  if (!Number.isFinite(maxBytesPerSession) || maxBytesPerSession <= 0) {
+    throw new RangeError("maxBytesPerSession must be positive");
+  }
+  const generation = options.generation ?? randomBytes(16).toString("hex");
+  if (!/^[0-9a-f]{32}$/.test(generation)) throw new TypeError("Output generation must be 128-bit lowercase hex");
+  const macKey = Buffer.from(options.macKey ?? randomBytes(32));
+  if (macKey.byteLength < 16) throw new TypeError("Output MAC key must contain at least 128 bits");
   const sessions = new Map<string, SessionStore>();
 
   const getOrCreateSession = (sessionId: string): SessionStore => {
     let session = sessions.get(sessionId);
     if (!session) {
-      session = { outputs: new Map(), totalBytes: 0 };
+      session = createSessionStore();
       sessions.set(sessionId, session);
     }
     return session;
   };
 
+  const macFor = (sessionId: string, sequence: number): string => (
+    createHmac("sha256", macKey)
+      .update(sessionId)
+      .update("\0")
+      .update(String(sequence))
+      .digest("hex")
+      .slice(0, 32)
+  );
+
+  const handleFor = (sessionId: string, sequence: number): string => (
+    `out_${generation}_${sequence.toString(36)}_${macFor(sessionId, sequence)}`
+  );
+
+  const hasValidMac = (sessionId: string, sequence: number, observed: string): boolean => {
+    const expected = Buffer.from(macFor(sessionId, sequence), "hex");
+    const candidate = Buffer.from(observed, "hex");
+    return candidate.byteLength === expected.byteLength && timingSafeEqual(candidate, expected);
+  };
+
   const evictOldest = (session: SessionStore): void => {
-    // Evict the oldest entry (lowest counter embedded in handle is not tracked;
-    // Map preserves insertion order, so first entry is oldest)
-    const firstKey = session.outputs.keys().next().value;
-    if (firstKey === undefined) return;
-    const entry = session.outputs.get(firstKey);
-    if (entry) {
-      session.totalBytes -= entry.total;
-      session.outputs.delete(firstKey);
-    }
+    const sequence = session.outputs.keys().next().value as number | undefined;
+    if (sequence === undefined) return;
+    const entry = session.outputs.get(sequence);
+    if (!entry) return;
+    session.totalBytes -= entry.bytes.byteLength;
+    session.outputs.delete(sequence);
+    session.evictedThrough = Math.max(session.evictedThrough, sequence);
   };
 
   return {
-    store(sessionId: string, text: string, label?: string): { handle: string; total: number } {
+    generation,
+
+    store(sessionId, text, label) {
       const session = getOrCreateSession(sessionId);
-      const total = Buffer.byteLength(text, "utf8");
-      // Evict oldest entries until we have room
-      while (session.totalBytes + total > maxBytesPerSession && session.outputs.size > 0) {
+      const bytes = Buffer.from(text, "utf8");
+      while (session.totalBytes + bytes.byteLength > maxBytesPerSession && session.outputs.size > 0) {
         evictOldest(session);
       }
-      const id = base32Handle(randomBytes(8));
-      const handle = `out_${id}`;
-      session.outputs.set(handle, { text, ...(label !== undefined ? { label } : {}), total });
-      session.totalBytes += total;
-      return { handle, total };
-    },
-
-    read(sessionId: string, handle: string, offset: number = 0, length: number = 32768): { text: string; offset: number; length: number; total: number } | null {
-      const session = sessions.get(sessionId);
-      if (!session) return null;
-      const entry = session.outputs.get(handle);
-      if (!entry) return null;
-      const text = entry.text.slice(offset, offset + length);
+      const sequence = session.nextSequence;
+      session.nextSequence += 1;
+      const handle = handleFor(sessionId, sequence);
+      session.outputs.set(sequence, { bytes, sequence, ...(label === undefined ? {} : { label }) });
+      session.totalBytes += bytes.byteLength;
       return {
-        text,
-        offset,
-        length: text.length,
-        total: entry.total,
+        ref: { durability: "ephemeral", generation, handle },
+        total: bytes.byteLength,
       };
     },
 
-    dropSession(sessionId: string): void {
-      sessions.delete(sessionId);
+    read(sessionId, handle, offset = 0, length = 32_768): OutputReadResult {
+      if (LEGACY_HANDLE_PATTERN.test(handle)) return { status: "expired" };
+      const match = HANDLE_PATTERN.exec(handle);
+      if (!match) return { status: "not-found" };
+      const [, handleGeneration, encodedSequence, observedMac] = match;
+      if (handleGeneration !== generation) return { status: "expired" };
+      const sequence = Number.parseInt(encodedSequence!, 36);
+      if (!Number.isSafeInteger(sequence) || sequence < 1 || !hasValidMac(sessionId, sequence, observedMac!)) {
+        return { status: "not-found" };
+      }
+      const session = sessions.get(sessionId);
+      if (!session) return { status: "not-found" };
+      const entry = session.outputs.get(sequence);
+      if (entry) {
+        return {
+          status: "ready",
+          slice: sliceUtf8ByBytes(entry.bytes, offset, length),
+        };
+      }
+      if (sequence <= session.evictedThrough || sequence < session.nextSequence) return { status: "expired" };
+      return { status: "not-found" };
+    },
+
+    dropSession(sessionId): void {
+      const session = sessions.get(sessionId);
+      if (!session) return;
+      session.outputs.clear();
+      session.totalBytes = 0;
+      session.evictedThrough = Math.max(session.evictedThrough, session.nextSequence - 1);
     },
 
     dispose(): void {
       sessions.clear();
+      macKey.fill(0);
     },
   };
 }

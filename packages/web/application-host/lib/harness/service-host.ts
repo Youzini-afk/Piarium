@@ -11,6 +11,7 @@ import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js"
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { ThreadRegistry } from "./thread-registry.js";
+import type { ThreadTranscriptReader } from "./thread-transcript.js";
 import type {
   HarnessActorContext,
   HarnessActorIdentity,
@@ -82,6 +83,7 @@ export interface HarnessServiceHost {
   threadKillSession: ((threadId: string) => Promise<void>) | null;
   threadApplyWorktreeDiff: ((threadId: string) => Promise<{ merged: number; conflicts: string[] }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
+  threadTranscriptReader: ThreadTranscriptReader | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
   hasActor(identity: HarnessActorIdentity): boolean;
@@ -126,6 +128,7 @@ export interface HarnessServiceHostOptions {
   threadKillSession?: (threadId: string) => Promise<void>;
   threadApplyWorktreeDiff?: (threadId: string) => Promise<{ merged: number; conflicts: string[] }>;
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
+  threadTranscriptReader?: ThreadTranscriptReader;
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -155,6 +158,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadKillSession = options.threadKillSession ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
+  const threadTranscriptReader = options.threadTranscriptReader ?? null;
 
   const sessions = new Map<string, SessionEntry>();
 
@@ -277,6 +281,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadKillSession,
     threadApplyWorktreeDiff,
     threadSendToSession,
+    threadTranscriptReader,
     registerSession,
     dropSession,
     hasActor,

@@ -37,7 +37,7 @@ const report = (conclusion = "done"): ThreadReport => ({
   unresolved: [],
   deviations: [],
   confidence: 0.9,
-  traceHandle: "trace-1",
+  transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
   blocksSnapshot: {},
 });
 
@@ -222,6 +222,34 @@ describe("thread registry", () => {
     expect(thread).toMatchObject({ id: "thread-legacy", lifecycle: "active", activeRunId: expect.any(String) });
     expect(await registry.getActiveRun(WORKSPACE, thread!.id)).toMatchObject({ attempt: 1, sessionId: "child-legacy", workerState: "running" });
     expect(readFileSync(legacyPath, "utf8")).toBe(JSON.stringify(legacy));
+  });
+
+  it("migrates schema v1 reports from an ephemeral trace handle on the next write", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-v1");
+    await registry.completeThread(WORKSPACE, thread.id, report());
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v1 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<{ report: Record<string, unknown> | null }>;
+    };
+    v1.schemaVersion = 1;
+    const currentReport = v1.threads[0]!.report!;
+    delete currentReport.transcriptRef;
+    currentReport.traceHandle = "out_legacy";
+    await writeFile(path, JSON.stringify(v1), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.report?.transcriptRef).toEqual({
+      runtimeId: "pi",
+      sessionId: "child-v1",
+      fromEntryId: null,
+      toEntryId: null,
+    });
+    await registry.setAttention(WORKSPACE, thread.id, "stalled");
+    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
   });
 
   it("reconciles interrupted runs as lost while preserving pending attention", async () => {

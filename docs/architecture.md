@@ -454,6 +454,12 @@ method to a structural capability, and path-bearing shell/search/LSP/lock calls
 must remain within the actor workspace. User-facing allow/ask/deny policy stays
 in pi-host's `tool_call` gate; the two checks do not duplicate prompts.
 
+Large tool output uses an ephemeral `OutputRef` signed by the current Host
+generation. FIFO sequence watermarks distinguish `expired` from `not-found`,
+and `output.read` offsets, lengths, `nextOffset`, and totals are UTF-8 bytes.
+Durable thread reports instead carry a `TranscriptRef` into the Pi session file;
+`thread.read(steps)` resolves it through broker-owned session entry reads.
+
 ### 5.2 Thread protocol (§9.3)
 
 Thread operations use the harness service protocol. The thread registry
@@ -466,37 +472,32 @@ storage owners. Startup reconciliation marks interrupted `starting`/`running`
 attempts as `lost`, while malformed, unreadable, and future-schema catalogs
 remain distinct failures.
 
-Thread lifecycle:
-```
-queued → running → idle → waiting-for-input → done → merged → archived
-                 ↘ failed                    ↘ cancelled
-```
+`Thread` owns four independent dimensions: lifecycle
+(`queued|active|settled|archived`), attention, integration, and its parent edge.
+`ThreadRun` owns one execution attempt (`starting|running|lost|exited`) and its
+outcome, session, metrics, and exit reason. A restart ends the old Run as
+`lost`; resuming creates `attempt + 1` without rewriting history. Event
+sequences resume from the persisted workspace maximum.
 
-State transitions are validated by the registry; invalid transitions
-throw. The `globalEventSeq` counter is initialized from persisted
-records on `loadParent` and incremented on every state change.
-
-Thread params do not carry `parentSessionId` — the service resolves it
-from `ctx.sessionId`. Observer cursors (`ThreadViewCursor`) enable
+Thread params do not carry parent or workspace authority — the service resolves
+the session parent and workspace from the trusted ActorContext. Observer cursors (`ThreadViewCursor`) enable
 incremental views: `thread.list` and `thread.wait` only show changes
 since the observer's last cursor. `thread.wait` blocks until a thread
 changes state, the timeout fires, or the abort signal fires.
 
-Concurrency is enforced by the registry. A slot is occupied by a thread
-that has been spawned and has not finished (`running`, `idle`,
-`waiting-for-input`); `queued` means created but not yet spawned, so it
+Concurrency is enforced by the registry. A slot is occupied only by an active
+Thread whose current Run is `starting` or `running`; `queued` means created but not yet spawned, so it
 holds nothing. When `countActive >= maxConcurrency` a dispatch is
 queued, and any terminal transition promotes the oldest queued thread
-through the `onThreadDequeued` callback — the dequeue lives in
-`updateThread`, so every path that ends a thread frees its slot.
+through the `onThreadDequeued` callback whenever a Run ends or a queued Thread is cancelled.
 Tearing a parent down suppresses dequeue: promoting a queued thread
 there would resurrect work the user just deleted.
 
 `HarnessSettings` (in `harness-settings.ts`) configures shell
 interpreter selection, output truncation budgets, per-tool enable flags,
-the permission mode, and a `threadRuntime` flag that decides whether the
-thread tools are registered at all — a host without a thread registry
-leaves them out rather than offering tools that can only fail. The
+and the permission mode. `threadRuntime` remains a temporary pi-host setting,
+but the Host grants `control.thread` only when the registry and real spawn
+runtime both exist, so a setting cannot expose tools that only fail. The
 Settings page contribution lets users toggle tools like grep; when
 disabled, the next session does not register the tool and Pi falls back
 to its built-in equivalent.

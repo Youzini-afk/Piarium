@@ -7,6 +7,7 @@ import {
   isHostEvent,
   type HarnessMethod,
   type HarnessRequestData,
+  type HarnessError,
 } from "../src/index.js";
 
 describe("harness protocol", () => {
@@ -30,6 +31,11 @@ describe("harness protocol", () => {
     } satisfies HarnessRequestData;
     assert.equal("sessionId" in request, false);
     assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
+  });
+
+  it("keeps authorization, expiry, absence, and service failure distinct", () => {
+    const codes: HarnessError["code"][] = ["forbidden", "denied", "expired", "not-found", "unavailable", "failed"];
+    assert.equal(new Set(codes).size, codes.length);
   });
 
   it("isHarnessMethod rejects unknown methods", () => {

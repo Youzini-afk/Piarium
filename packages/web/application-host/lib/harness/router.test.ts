@@ -41,7 +41,7 @@ describe("harness router", () => {
     const echoService: HarnessService<"output.store"> = {
       handle: async (params, ctx) => {
         expect(ctx.actor).toMatchObject({ sessionId: "session-1", workspaceId: "workspace-1" });
-        return { handle: "out_echo", total: params.text.length };
+        return { ref: { durability: "ephemeral", generation: "test", handle: "out_echo" }, total: params.text.length };
       },
     };
     router.register("output.store", echoService);
@@ -53,7 +53,7 @@ describe("harness router", () => {
       sessionId: "session-1",
       requestId: "req-1",
       ok: true,
-      result: { handle: "out_echo", total: 5 },
+      result: { ref: { durability: "ephemeral", generation: "test", handle: "out_echo" }, total: 5 },
     }]);
     router.dispose();
   });

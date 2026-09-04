@@ -18,9 +18,9 @@ describe("HostServicesBridge", () => {
     assert.equal(emitted[0]!.method, "output.store");
     assert.ok(!("sessionId" in emitted[0]!));
     const requestId = emitted[0]!.requestId;
-    bridge.respond("session-1", requestId, { ok: true, result: { handle: "out_abc", total: 5 } });
+    bridge.respond("session-1", requestId, { ok: true, result: { ref: { durability: "ephemeral", generation: "g", handle: "out_abc" }, total: 5 } });
     const result = await resultPromise;
-    assert.deepEqual(result, { handle: "out_abc", total: 5 });
+    assert.deepEqual(result, { ref: { durability: "ephemeral", generation: "g", handle: "out_abc" }, total: 5 });
     bridge.dispose();
   });
 
@@ -95,11 +95,11 @@ describe("HostServicesBridge", () => {
     // Respond to each with its own result
     for (let i = 0; i < 50; i++) {
       const data = emitted[i]!;
-      bridge.respond("session-1", data.requestId, { ok: true, result: { handle: `out_${i}`, total: i } });
+      bridge.respond("session-1", data.requestId, { ok: true, result: { ref: { durability: "ephemeral", generation: "g", handle: `out_${i}` }, total: i } });
     }
     const results = await Promise.all(promises);
     for (let i = 0; i < 50; i++) {
-      assert.deepEqual(results[i], { handle: `out_${i}`, total: i });
+      assert.deepEqual(results[i], { ref: { durability: "ephemeral", generation: "g", handle: `out_${i}` }, total: i });
     }
     bridge.dispose();
   });
