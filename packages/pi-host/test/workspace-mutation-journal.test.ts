@@ -62,15 +62,34 @@ function isMutationEvent(envelope: WireEnvelope): envelope is EventEnvelope<"wor
   return envelope.kind === "event" && envelope.event === "workspace.mutation.request";
 }
 
+function serveHarnessRequest(host: SessionHost, event: HostEvent, data: HostEventData<HostEvent>): void {
+  if (event !== "harness.request") return;
+  const request = data as HostEventData<"harness.request">;
+  const sessionId = host.sessionId;
+  if (!sessionId) return;
+  const result = request.method === "fs.lock"
+    ? (request.params as { action?: string }).action === "acquire"
+      ? { held: true, leaseIds: ["lease-test"] }
+      : { held: false, released: true }
+    : request.method === "lsp.diagnostics"
+      ? { status: "ready", diagnostics: [] }
+      : null;
+  if (result !== null) host.respondHarness(sessionId, request.requestId, { ok: true, result });
+}
+
 describe("workspace mutation journal", () => {
   it("blocks write and edit around the original Pi tools when explicitly enabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-tools-"));
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
     const events = new MutationEventCollector();
-    const host = new SessionHost({
+    let host!: SessionHost;
+    host = new SessionHost({
       agentDir: join(root, "agent"),
-      emit: (event, data) => events.emit(event, data),
+      emit: (event, data) => {
+        events.emit(event, data);
+        if (host) serveHarnessRequest(host, event, data);
+      },
       projectTrustOverride: true,
     });
     host.setWorkspaceMutationJournalEnabled(true);
@@ -280,9 +299,13 @@ describe("workspace mutation journal", () => {
     await mkdir(firstCwd, { recursive: true });
     await mkdir(secondCwd, { recursive: true });
     const events = new MutationEventCollector();
-    const host = new SessionHost({
+    let host!: SessionHost;
+    host = new SessionHost({
       agentDir: join(root, "agent"),
-      emit: (event, data) => events.emit(event, data),
+      emit: (event, data) => {
+        events.emit(event, data);
+        if (host) serveHarnessRequest(host, event, data);
+      },
       projectTrustOverride: true,
     });
     host.setWorkspaceMutationJournalEnabled(true);

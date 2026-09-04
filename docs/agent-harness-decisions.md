@@ -488,6 +488,43 @@ blocks，转换为 `{ runtimeId: "pi", sessionId, fromEntryId: null, toEntryId: 
 
 状态：已实施
 
+### D-041 · 2026-09-04 · P0.6（批量规范路径租约）
+
+类型：实现澄清
+
+决定：D-036 的逐路径 `acquire` 落为一次 `fs.lock { action: "acquire", paths[] }`。Router 先让 Documents authority 为每条
+路径产出 `{ authorityId, workspaceId, canonicalResourceId }`，Host service 再去重并按三元组全序获取；整批共享一个 30 秒
+默认 deadline（显式 timeout 可覆盖），中途失败反向释放已得 lease。成功返回 `leaseIds[]`；release 请求只有 leaseId，Host
+另外用 broker Actor 的 session owner 校验令牌归属。`apply_patch` 在执行任何一个文件操作前一次拿齐整批租约。
+
+原因：让 worker 按原始路径逐个 acquire，即使每把锁本身正确，两个多文件调用仍可按相反顺序形成死锁；alias 还会让 worker
+无法自行稳定排序。规范化只能由握有 Documents identity 的 Host 做，因此批量请求是让“去重 + 全序”成为真实协议保证的最小形状。
+
+考虑过的替代：(a) worker 对原始字符串排序——Windows 大小写、`..`、符号链接和 alias 会得到不同顺序。(b) Host 提供先
+canonicalize 再逐个 acquire 两步——在两步之间引入新竞态，协议也更吵。(c) OS / 跨进程锁——当前威胁模型只要求同一
+Application Host 内 Harness 管理的写入互斥，不能借此声称管住终端、Git 或外部程序。
+
+影响：protocol `FsLockParams/FsLockResult`、Host `path-authority.ts` / `path-lock.ts` / `harness-services.ts`、pi-host
+`path-lock.ts` / `apply-patch-tool.ts`。
+
+状态：已实施
+
+### D-042 · 2026-09-04 · P0.2（静态 capability 取实际工具集）
+
+类型：实现澄清
+
+决定：RunManifest 尚未落地时，Host capability 从 broker 验证后的 `session.snapshot.activeTools` 与 Host 服务可用性推导，
+而不是从 `HarnessSettings.tools.*` 的覆盖开关直接推导。`tools.bash = false` 当前语义是“不注册 Piarium 同名覆盖、回退 Pi 内置
+bash”，因此实际 `activeTools` 仍有 bash 时必须保留 `process.shell`；只有会话真实没有 bash 才拒绝 `shell.*`。同理，
+`write.document` 在 active tools 含 `write`、`edit` 或 `apply_patch` 任一项时授予，因为三者都会使用 Host 路径租约。
+
+原因：把“关闭某个实现”误读成“撤销整个风险类别”会让内置 fallback 仍可写文件，却被 Host 拒绝其 mutation lease，最终表现为
+普通 edit/write 全部失败。能力必须描述当前 Run 实际能做什么，不是某个 UI toggle 的字面值。
+
+影响：`service-host.ts::deriveHarnessCapabilities`、设计 9.1.2、RunManifest 后续契约。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -528,9 +565,11 @@ blocks，转换为 `{ runtimeId: "pi", sessionId, fromEntryId: null, toEntryId: 
 | D-032 | folded-in | D-039（原子 catalog 文件形状） | agent-harness.md 9.3.1 / 9.3.4、plan P0、protocol / Host registry |
 | D-033 | folded-in | — | agent-harness.md 2 / 9.2.6 / 9.3.6 / 12.2、protocol 与 thread services |
 | D-034 | folded-in | D-040（位强度与 schema 1 迁移） | agent-harness.md 5.1、plan P0、protocol / Host / pi-host |
-| D-035 | folded-in | — | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
-| D-036 | active-design（待实施） | — | plan 1.7 / P0 |
+| D-035 | folded-in | D-042（过渡 capability 来源语义） | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
+| D-036 | folded-in | D-041（批量 acquire） | architecture §5.1、plan P0.6、Host / pi-host path lock |
 | D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
 | D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |
 | D-039 | implementation | — | architecture §5.1、plan P0.3–P0.4、thread-registry.ts |
 | D-040 | implementation | — | agent-harness.md 5.1、plan P0.5、output-store / transcript reader |
+| D-041 | implementation | — | architecture §5.1、plan P0.6、path authority / leases |
+| D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |

@@ -193,7 +193,7 @@ function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string;
 
 export function createApplyPatchTool(
   bridge: HostServicesBridge,
-  sessionId: string,
+  _sessionId: string,
   cwd: string,
   mutationJournal?: WorkspaceMutationJournalBridge,
 ): ToolDefinition {
@@ -220,15 +220,13 @@ export function createApplyPatchTool(
       const results: string[] = [];
       let allOk = true;
       let totalHunks = 0;
+      const filePaths = parsed.operations.map((operation) => resolve(cwd, operation.path));
+      const diagnosticPaths: string[] = [];
 
-      for (const op of parsed.operations) {
-        const filePath = resolve(cwd, op.path);
-
-        const opResult = await withPathLock(
-          bridge,
-          sessionId,
-          [filePath],
-          async () => {
+      const patchResult = await withPathLock(bridge, filePaths, async () => {
+        for (const [index, op] of parsed.operations.entries()) {
+          const filePath = filePaths[index]!;
+          const opResult = await (async () => {
             if (op.kind === "delete") {
               // before/after mutation journal
               if (mutationJournal) {
@@ -290,39 +288,38 @@ export function createApplyPatchTool(
               await mutationJournal.request({ path: filePath, phase: "after", succeeded: true, toolCallId, toolName: "apply_patch" });
             }
 
-            // Best-effort diagnostics
-            let diagText = "";
-            try {
-              const diagResult = await bridge.request("lsp.diagnostics", {
-                path: filePath,
-                afterSnapshot: applyResult.result,
-                waitMs: 500,
-              });
-              if (diagResult.diagnostics.length > 0) {
-                diagText = ` (${diagResult.diagnostics.length} diagnostics)`;
-              }
-            } catch { /* best-effort */ }
+            diagnosticPaths.push(filePath);
+            return { ok: true, message: `updated ${op.path}: ${applyResult.applied} hunk(s)`, hunks: applyResult.applied };
+          })();
 
-            return { ok: true, message: `updated ${op.path}: ${applyResult.applied} hunk(s)${diagText}`, hunks: applyResult.applied };
-          },
-        );
-
-        if (opResult.ok) {
-          results.push(`  ✓ ${opResult.message}`);
-          totalHunks += opResult.hunks ?? 0;
-        } else {
-          results.push(`  ✗ ${opResult.message}`);
-          allOk = false;
+          if (opResult.ok) {
+            results.push(`  ✓ ${opResult.message}`);
+            totalHunks += opResult.hunks ?? 0;
+          } else {
+            results.push(`  ✗ ${opResult.message}`);
+            allOk = false;
+          }
         }
-      }
 
-      const summary = allOk
-        ? `patch applied successfully (${parsed.operations.length} file(s), ${totalHunks} hunk(s))`
-        : `patch partially applied (${results.join("\n")})`;
-      return {
-        content: [{ type: "text", text: allOk ? summary : `${summary}\n${results.join("\n")}` }],
-        details: { applied: allOk, operations: parsed.operations.length, hunks: totalHunks },
-      };
+        const summary = allOk
+          ? `patch applied successfully (${parsed.operations.length} file(s), ${totalHunks} hunk(s))`
+          : `patch partially applied (${results.join("\n")})`;
+        return {
+          content: [{ type: "text" as const, text: allOk ? summary : `${summary}\n${results.join("\n")}` }],
+          details: { applied: allOk, operations: parsed.operations.length, hunks: totalHunks },
+        };
+      });
+      const diagnostics: string[] = [];
+      for (const filePath of diagnosticPaths) {
+        try {
+          const result = await bridge.request("lsp.diagnostics", { path: filePath, waitMs: 500 });
+          if (result.diagnostics.length > 0) diagnostics.push(`${filePath}: ${result.diagnostics.length}`);
+        } catch { /* Best-effort feedback runs outside the mutation leases. */ }
+      }
+      if (diagnostics.length > 0) {
+        patchResult.content[0]!.text += `\n\n[diagnostics: ${diagnostics.join("; ")}]`;
+      }
+      return patchResult;
     },
   });
 }

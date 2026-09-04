@@ -14,8 +14,16 @@ import { HarnessServiceError } from "./service-error.js";
 
 export { buildHarnessRespondParams };
 
+export interface HarnessAuthorizedPath {
+  authorityId: string;
+  workspaceId: string;
+  canonicalResourceId: string;
+  inputPath: string;
+}
+
 export interface HarnessServiceContext {
   actor: HarnessActorContext;
+  authorizedPaths: readonly HarnessAuthorizedPath[];
   sessionId: HarnessActorContext["sessionId"];
   workspaceId: HarnessActorContext["workspaceId"];
   signal: AbortSignal;
@@ -35,7 +43,7 @@ export interface HarnessRouterOptions {
     actor: HarnessActorContext,
     path: string,
     options: { allowMissing: boolean },
-  ) => Promise<boolean>;
+  ) => Promise<HarnessAuthorizedPath | null>;
   defaultTimeoutMs?: number;
 }
 
@@ -47,34 +55,42 @@ interface RouterHostEvent {
     kind?: string;
   } | undefined;
   kind: string;
-  sessionId?: string;
 }
 
-const requestPath = (
+const requestPaths = (
   method: HarnessMethod,
   params: unknown,
-): { allowMissing: boolean; path: string } | null | "invalid" => {
+): Array<{ allowMissing: boolean; path: string }> | "invalid" => {
   const record = params && typeof params === "object" && !Array.isArray(params)
     ? params as Record<string, unknown>
     : {};
   if (method === "search.content") {
-    if (record.path === undefined) return null;
+    if (record.path === undefined) return [];
     return typeof record.path === "string" && record.path.trim()
-      ? { allowMissing: false, path: record.path }
+      ? [{ allowMissing: false, path: record.path }]
       : "invalid";
   }
   if (method === "shell.exec") {
-    if (record.cwd === undefined) return null;
+    if (record.cwd === undefined) return [];
     return typeof record.cwd === "string" && record.cwd.trim()
-      ? { allowMissing: false, path: record.cwd }
+      ? [{ allowMissing: false, path: record.cwd }]
       : "invalid";
   }
-  if (method === "fs.lock" || method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {
+  if (method === "fs.lock") {
+    if (record.action === "release") {
+      return typeof record.leaseId === "string" && record.leaseId.length > 0 ? [] : "invalid";
+    }
+    if (record.action !== "acquire" || !Array.isArray(record.paths) || record.paths.length === 0) return "invalid";
+    return record.paths.every((path) => typeof path === "string" && path.trim())
+      ? record.paths.map((path) => ({ allowMissing: true, path: path as string }))
+      : "invalid";
+  }
+  if (method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {
     return typeof record.path === "string" && record.path.trim()
-      ? { allowMissing: method === "fs.lock", path: record.path }
+      ? [{ allowMissing: false, path: record.path }]
       : "invalid";
   }
-  return null;
+  return [];
 };
 
 const harnessError = (code: HarnessError["code"], message: string, retryable = false): HarnessError => ({
@@ -133,26 +149,29 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         });
         return;
       }
-      const scopedPath = requestPath(method, data.params);
-      if (scopedPath === "invalid") {
+      const scopedPaths = requestPaths(method, data.params);
+      if (scopedPaths === "invalid") {
         await respond({
           ok: false,
           error: harnessError("invalid-params", `Harness method ${method} requires a valid path`),
         });
         return;
       }
-      if (
-        scopedPath
-        && (
-          !options.authorizeWorkspacePath
-          || !await options.authorizeWorkspacePath(actor, scopedPath.path, { allowMissing: scopedPath.allowMissing })
-        )
-      ) {
-        await respond({
-          ok: false,
-          error: harnessError("forbidden", "Harness path is outside the actor workspace"),
-        });
-        return;
+      const authorizedPaths: HarnessAuthorizedPath[] = [];
+      for (const scopedPath of scopedPaths) {
+        const authorized = await options.authorizeWorkspacePath?.(
+          actor,
+          scopedPath.path,
+          { allowMissing: scopedPath.allowMissing },
+        ) ?? null;
+        if (!authorized) {
+          await respond({
+            ok: false,
+            error: harnessError("forbidden", "Harness path is outside the actor workspace"),
+          });
+          return;
+        }
+        authorizedPaths.push(authorized);
       }
       const service = services.get(method);
       if (!service) {
@@ -164,6 +183,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       }
       const result = await service.handle(data.params as never, {
         actor,
+        authorizedPaths,
         sessionId: actor.sessionId,
         workspaceId: actor.workspaceId,
         signal: controller.signal,

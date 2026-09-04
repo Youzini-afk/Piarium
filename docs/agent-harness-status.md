@@ -17,6 +17,10 @@ Last updated: 2026-09-04
 规则：只有 `proven` 算纵切完成；`Proven evidence` 列不接受 `yes`，只接受路径；`Blocker` 列写阻止升级到下一级的具体事项。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**P0 integrity（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned Thread/ThreadRun catalog 与启动对账、
+事件驱动 wait、OutputRef/TranscriptRef、UTF-8 字节分页、workspace canonical lease 均已进入生产链。下一交付目标是 T1
+真实 child session + worktree 纵切；在它完成前 `control.thread` 仍不授予普通会话。
+
 ## 矩阵
 
 Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
@@ -32,7 +36,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **1.5** `grep` 覆盖 | host / pi-host | ✓ | ✓ | `host/search-service.test.ts`；`harness-e2e.test.ts` #4、#6 | ✓ | Pi 内置 grep | — |
 | **1.6a** `edit` / `write` 编辑后诊断、`diagnostics` 工具 | host / pi-host | ✓ | ✓ | 单测：`lib/harness/diagnostics-service`；`output-tools.test.ts` | ✓ | 无诊断附注 | 未用真实 LSP server 端到端验证（`unavailable` / `pending` / `ready` 三态） |
 | **1.6b** `apply_patch`（Codex 语法，OpenAI 家族） | pi-host | ✓ | ✓ | `pi-host/test/harness/apply-patch-tool.test.ts`（12 解析用例） | ✓（仅 OpenAI） | 不注册 | 多文件回滚未在真会话验证 |
-| **1.7** 按路径编辑锁 | host / pi-host | ✓ | ✓ | `host/path-lock.test.ts`；`pi-host/test/harness/path-lock.test.ts` | ✓ | — | 键按 `sessionId` 分桶，两会话互不可见；`release` 无所有权 token（D-036，P0 ⑥） |
+| **1.7** workspace 规范路径租约 | host / pi-host / protocol | ✓ | ✓ | `host/path-authority.test.ts`（Documents identity / Windows）；`path-lock.test.ts`（跨会话、lease ownership、超时）；`apply-patch-tool.test.ts`（多文件单批） | ✓ | — | 保证仅覆盖同一 Application Host 内由 Harness 管理的写入，不覆盖终端、Git、外部进程或另一 Host（D-036/D-041） |
 | **1.8** 计数器（toolErrors / toolRetries / outputBytes / cacheHitRatio） | pi-host | ✓ | ✓（pi-host 聚合） | `pi-host/test/harness/counter-tracker.test.ts` | — | — | UI 诊断面板未显示（`packages/ui` 无引用）；plan 每阶段检查第 5 条一直未满足 |
 | **1.9** `HarnessSettings` + 设置页 | protocol / pi-host / ui | ✓ | ✓ | `protocol` 合并规则单测；`HarnessSettingsPage.tsx` | ✓ | — | 字段所有权矩阵未实现（D-031）；`autoAcceptSuggestions.user` 可被工作区覆盖是安全侧问题 |
 | **1.10** 静态提示片段 | pi-host | ✓ | ✓ | `zone0-stability.test.ts`（注册全部工具后 system 不变） | ✓ | — | — |

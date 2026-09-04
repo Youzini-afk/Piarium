@@ -12,7 +12,7 @@ import {
 } from "./thread-services.js";
 
 import type { OutputStore } from "./output-store.js";
-import type { PathLockService } from "./path-lock.js";
+import { DEFAULT_PATH_LOCK_TIMEOUT_MS, type PathLockService } from "./path-lock.js";
 import type { HarnessSearchService } from "./search-service.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { createLspDiagnosticsService, createLspDiagnosticsSnapshotService } from "./diagnostics-service.js";
@@ -107,14 +107,33 @@ export function createFsLockService(locks: PathLockService): HarnessService<"fs.
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (params.action === "acquire") {
-        const held = await locks.acquire(ctx.sessionId, params.path, params.timeoutMs);
-        return { held };
+        const resources = [...new Map(ctx.authorizedPaths.map((path) => [
+          `${path.authorityId}\0${path.workspaceId}\0${path.canonicalResourceId}`,
+          path,
+        ])).values()].toSorted((left, right) => (
+          left.authorityId.localeCompare(right.authorityId)
+          || left.workspaceId.localeCompare(right.workspaceId)
+          || left.canonicalResourceId.localeCompare(right.canonicalResourceId)
+        ));
+        const leaseIds: string[] = [];
+        const deadline = Date.now() + (params.timeoutMs ?? DEFAULT_PATH_LOCK_TIMEOUT_MS);
+        try {
+          for (const resource of resources) {
+            const remainingMs = Math.max(1, deadline - Date.now());
+            leaseIds.push(await locks.acquire(ctx.sessionId, resource, remainingMs));
+          }
+          return { held: true, leaseIds };
+        } catch (error) {
+          for (let index = leaseIds.length - 1; index >= 0; index -= 1) {
+            locks.release(ctx.sessionId, leaseIds[index]!);
+          }
+          throw error;
+        }
       }
       if (params.action === "release") {
-        const released = locks.release(ctx.sessionId, params.path);
-        return { held: !released };
+        return { held: false, released: locks.release(ctx.sessionId, params.leaseId) };
       }
-      throw new Error(`Unknown fs.lock action: ${params.action}`);
+      throw new Error("Unknown fs.lock action");
     },
   };
 }

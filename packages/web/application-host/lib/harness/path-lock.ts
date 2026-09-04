@@ -1,123 +1,139 @@
-import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+
+export interface PathLockResource {
+  authorityId: string;
+  workspaceId: string;
+  canonicalResourceId: string;
+}
+
+interface LockHolder {
+  leaseId: string;
+  ownerId: string;
+}
+
+interface LockWaiter extends LockHolder {
+  resolve: (leaseId: string) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
 
 interface LockQueue {
-  queue: Array<{
-    resolve: () => void;
-    reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout> | undefined;
-  }>;
-  held: boolean;
+  holder: LockHolder | null;
+  waiters: LockWaiter[];
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-
-function normalizePath(path: string): string {
-  const resolved = resolve(path);
-  // On Windows: lowercase drive letter and convert backslashes to forward slashes
-  if (process.platform === "win32") {
-    return resolved.replace(/\\/g, "/").replace(/^([a-z]):/i, (_, drive) => drive.toLowerCase() + ":");
-  }
-  return resolved;
+interface LeaseRecord extends LockHolder {
+  key: string;
 }
+
+export const DEFAULT_PATH_LOCK_TIMEOUT_MS = 30_000;
+
+const resourceKey = (resource: PathLockResource): string => (
+  `${resource.authorityId}\0${resource.workspaceId}\0${resource.canonicalResourceId}`
+);
 
 export interface PathLockService {
-  acquire(sessionId: string, path: string, timeoutMs?: number): Promise<boolean>;
-  release(sessionId: string, path: string): boolean;
-  dropSession(sessionId: string): void;
+  acquire(ownerId: string, resource: PathLockResource, timeoutMs?: number): Promise<string>;
+  release(ownerId: string, leaseId: string): boolean;
+  dropSession(ownerId: string): void;
   dispose(): void;
 }
 
+/**
+ * In-process mutual exclusion for Harness-managed writes in one Application
+ * Host authority. It does not claim to lock terminals, Git, external programs,
+ * or another Host process.
+ */
 export function createPathLockService(): PathLockService {
-  // Map<sessionId, Map<normalizedPath, LockQueue>>
-  const sessions = new Map<string, Map<string, LockQueue>>();
+  const queues = new Map<string, LockQueue>();
+  const leases = new Map<string, LeaseRecord>();
   let disposed = false;
 
-  const getOrCreateQueue = (sessionId: string, normalizedPath: string): LockQueue => {
-    let session = sessions.get(sessionId);
-    if (!session) {
-      session = new Map();
-      sessions.set(sessionId, session);
+  const cleanupQueue = (key: string, queue: LockQueue): void => {
+    if (!queue.holder && queue.waiters.length === 0) queues.delete(key);
+  };
+
+  const grantNext = (key: string, queue: LockQueue): void => {
+    const next = queue.waiters.shift();
+    if (!next) {
+      queue.holder = null;
+      cleanupQueue(key, queue);
+      return;
     }
-    let queue = session.get(normalizedPath);
-    if (!queue) {
-      queue = { queue: [], held: false };
-      session.set(normalizedPath, queue);
-    }
-    return queue;
+    if (next.timer) clearTimeout(next.timer);
+    queue.holder = { leaseId: next.leaseId, ownerId: next.ownerId };
+    leases.set(next.leaseId, { key, leaseId: next.leaseId, ownerId: next.ownerId });
+    next.resolve(next.leaseId);
   };
 
   return {
-    async acquire(sessionId: string, path: string, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<boolean> {
-      if (disposed) return false;
-      const normalizedPath = normalizePath(path);
-      const lockQueue = getOrCreateQueue(sessionId, normalizedPath);
-
-      if (!lockQueue.held) {
-        lockQueue.held = true;
-        return true;
+    async acquire(ownerId, resource, timeoutMs = DEFAULT_PATH_LOCK_TIMEOUT_MS) {
+      if (disposed) throw new Error("Path lock service is disposed");
+      const key = resourceKey(resource);
+      let queue = queues.get(key);
+      if (!queue) {
+        queue = { holder: null, waiters: [] };
+        queues.set(key, queue);
       }
-
-      // Queue this request
-      return new Promise<boolean>((resolvePromise, rejectPromise) => {
-        const entry = {
-          resolve: () => resolvePromise(true),
-          reject: (error: Error) => rejectPromise(error),
-          timer: undefined as ReturnType<typeof setTimeout> | undefined,
-        };
-        const timer = setTimeout(() => {
-          const idx = lockQueue.queue.indexOf(entry);
-          if (idx !== -1) lockQueue.queue.splice(idx, 1);
-          rejectPromise(new Error(`Lock timeout after ${timeoutMs}ms for path: ${normalizedPath}`));
+      const leaseId = `lease-${randomUUID()}`;
+      if (!queue.holder) {
+        queue.holder = { leaseId, ownerId };
+        leases.set(leaseId, { key, leaseId, ownerId });
+        return leaseId;
+      }
+      return new Promise<string>((resolve, reject) => {
+        const waiter: LockWaiter = { leaseId, ownerId, resolve, reject, timer: undefined };
+        waiter.timer = setTimeout(() => {
+          const index = queue!.waiters.indexOf(waiter);
+          if (index >= 0) queue!.waiters.splice(index, 1);
+          cleanupQueue(key, queue!);
+          reject(new Error(`Lock timeout after ${timeoutMs}ms for resource: ${resource.canonicalResourceId}`));
         }, timeoutMs);
-        entry.timer = timer;
-        lockQueue.queue.push(entry);
+        queue!.waiters.push(waiter);
       });
     },
 
-    release(sessionId: string, path: string): boolean {
-      const normalizedPath = normalizePath(path);
-      const session = sessions.get(sessionId);
-      if (!session) return false;
-      const lockQueue = session.get(normalizedPath);
-      if (!lockQueue || !lockQueue.held) return false;
-
-      // Dequeue next waiter
-      const next = lockQueue.queue.shift();
-      if (next) {
-        if (next.timer) clearTimeout(next.timer);
-        next.resolve();
-        // Lock remains held by the next waiter
-      } else {
-        lockQueue.held = false;
-      }
+    release(ownerId, leaseId) {
+      const lease = leases.get(leaseId);
+      if (!lease || lease.ownerId !== ownerId) return false;
+      const queue = queues.get(lease.key);
+      if (!queue || queue.holder?.leaseId !== leaseId) return false;
+      leases.delete(leaseId);
+      queue.holder = null;
+      grantNext(lease.key, queue);
       return true;
     },
 
-    dropSession(sessionId: string): void {
-      const session = sessions.get(sessionId);
-      if (!session) return;
-      for (const lockQueue of session.values()) {
-        for (const entry of lockQueue.queue) {
-          if (entry.timer) clearTimeout(entry.timer);
-          entry.reject(new Error("Session dropped"));
+    dropSession(ownerId) {
+      for (const [key, queue] of queues) {
+        for (let index = queue.waiters.length - 1; index >= 0; index -= 1) {
+          const waiter = queue.waiters[index]!;
+          if (waiter.ownerId !== ownerId) continue;
+          queue.waiters.splice(index, 1);
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.reject(new Error("Session dropped"));
         }
-        lockQueue.queue.length = 0;
-        lockQueue.held = false;
+        if (queue.holder?.ownerId === ownerId) {
+          leases.delete(queue.holder.leaseId);
+          queue.holder = null;
+          grantNext(key, queue);
+        } else {
+          cleanupQueue(key, queue);
+        }
       }
-      sessions.delete(sessionId);
     },
 
-    dispose(): void {
+    dispose() {
+      if (disposed) return;
       disposed = true;
-      for (const session of sessions.values()) {
-        for (const lockQueue of session.values()) {
-          for (const entry of lockQueue.queue) {
-            if (entry.timer) clearTimeout(entry.timer);
-            entry.reject(new Error("Disposed"));
-          }
+      for (const queue of queues.values()) {
+        for (const waiter of queue.waiters) {
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.reject(new Error("Path lock service is disposed"));
         }
       }
-      sessions.clear();
+      queues.clear();
+      leases.clear();
     },
   };
 }

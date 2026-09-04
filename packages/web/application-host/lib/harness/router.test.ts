@@ -86,17 +86,17 @@ describe("harness router", () => {
   });
 
   it("rejects an out-of-workspace path before dispatch", async () => {
-    const handle = vi.fn(async () => ({ held: true }));
+    const handle = vi.fn(async () => ({ held: true as const, leaseIds: ["lease-1"] }));
     const responses: Array<{ ok: boolean; code?: string }> = [];
     const router = createHarnessRouter({
       respond: async (_sessionId, _requestId, outcome) => {
         responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
       },
       resolveActor: async () => resolvedActor(["write.document"]),
-      authorizeWorkspacePath: async () => false,
+      authorizeWorkspacePath: async () => null,
     });
     router.register("fs.lock", { handle });
-    await router.processEvent(harnessEvent("fs.lock", { action: "acquire", path: "../outside.txt" }));
+    await router.processEvent(harnessEvent("fs.lock", { action: "acquire", paths: ["../outside.txt"] }));
     expect(handle).not.toHaveBeenCalled();
     expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
     router.dispose();

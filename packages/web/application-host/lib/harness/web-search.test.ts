@@ -8,6 +8,7 @@ import {
 import type { HarnessServiceContext } from "./router.js";
 
 const SERVICE_CONTEXT: HarnessServiceContext = {
+  authorizedPaths: [],
   actor: {
     authorityInstanceId: "test-authority",
     sessionId: "s1",

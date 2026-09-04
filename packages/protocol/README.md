@@ -21,10 +21,10 @@ Piarium protocol types, schemas, and event/method definitions.
 | `shell.read` | `{ id, offset?, length? }` | `OutputSlice & { running, exitCode? }` | Read background shell output |
 | `shell.write` | `{ id, text }` | `{ accepted }` | Write to background shell stdin |
 | `shell.kill` | `{ id }` | `{ killed }` | Kill a background shell |
-| `output.store` | `{ text, label? }` | `{ handle, total }` | Store large output |
+| `output.store` | `{ text, label? }` | `{ ref: OutputRef, total }` | Store large output for the current Host generation |
 | `output.read` | `{ handle, offset?, length? }` | `OutputSlice` | Read stored output |
 | `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` | Content search |
-| `fs.lock` | `{ path, action, timeoutMs? }` | `{ held }` | Acquire/release path lock |
+| `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |
 | `lsp.diagnostics` | `{ path, afterSnapshot?, waitMs? }` | `DiagnosticsResult` | Get diagnostics (sync + wait) |
 | `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |

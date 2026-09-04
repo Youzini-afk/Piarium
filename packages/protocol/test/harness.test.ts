@@ -8,6 +8,8 @@ import {
   type HarnessMethod,
   type HarnessRequestData,
   type HarnessError,
+  type FsLockParams,
+  type FsLockResult,
 } from "../src/index.js";
 
 describe("harness protocol", () => {
@@ -36,6 +38,15 @@ describe("harness protocol", () => {
   it("keeps authorization, expiry, absence, and service failure distinct", () => {
     const codes: HarnessError["code"][] = ["forbidden", "denied", "expired", "not-found", "unavailable", "failed"];
     assert.equal(new Set(codes).size, codes.length);
+  });
+
+  it("uses a batch acquire and lease-only release contract for path locks", () => {
+    const acquire = { action: "acquire", paths: ["a.ts", "b.ts"] } satisfies FsLockParams;
+    const release = { action: "release", leaseId: "lease-1" } satisfies FsLockParams;
+    const acquired = { held: true, leaseIds: ["lease-1", "lease-2"] } satisfies FsLockResult;
+    assert.equal(acquire.paths.length, 2);
+    assert.equal(release.leaseId, "lease-1");
+    assert.equal(acquired.leaseIds.length, 2);
   });
 
   it("isHarnessMethod rejects unknown methods", () => {

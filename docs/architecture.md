@@ -460,6 +460,14 @@ and `output.read` offsets, lengths, `nextOffset`, and totals are UTF-8 bytes.
 Durable thread reports instead carry a `TranscriptRef` into the Pi session file;
 `thread.read(steps)` resolves it through broker-owned session entry reads.
 
+`fs.lock` acquires a complete path batch. The Host resolves every path through
+the Documents authority, de-duplicates canonical identities, orders them by
+`{authorityId, workspaceId, canonicalResourceId}`, and returns owner-bound
+lease IDs. Release carries only a lease ID; a stale path or another session
+cannot release the current holder. This is in-process coordination for
+Harness-managed writes, not an OS lock over terminals, Git, external programs,
+or another Piarium Host.
+
 ### 5.2 Thread protocol (§9.3)
 
 Thread operations use the harness service protocol. The thread registry

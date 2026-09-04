@@ -4,6 +4,7 @@ import type { FetchResult } from "@piarium/protocol";
 import type { HarnessServiceContext } from "./router.js";
 
 const context = (workspaceId: string | null): HarnessServiceContext => ({
+  authorizedPaths: [],
   actor: {
     authorityInstanceId: "test-authority",
     sessionId: "s1",

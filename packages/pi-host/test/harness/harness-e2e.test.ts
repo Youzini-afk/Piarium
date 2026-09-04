@@ -103,7 +103,12 @@ async function setupE2E() {
       bridge.respond(sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
-    authorizeWorkspacePath: async () => true,
+    authorizeWorkspacePath: async (actor, inputPath) => ({
+      authorityId: "test-host",
+      workspaceId: actor.workspaceId!,
+      canonicalResourceId: inputPath,
+      inputPath,
+    }),
   });
   registerHarnessServices(router, harnessServiceHost);
 

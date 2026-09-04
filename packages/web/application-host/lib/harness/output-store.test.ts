@@ -110,6 +110,7 @@ describe("output store", () => {
     store.dropSession("session-1");
     const service = createOutputReadService(store);
     await expect(service.handle({ handle: ref.handle }, {
+      authorizedPaths: [],
       actor: {
         authorityInstanceId: "authority",
         sessionId: "session-1",

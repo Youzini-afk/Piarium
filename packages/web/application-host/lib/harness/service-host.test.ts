@@ -27,6 +27,7 @@ describe("harness service host authorization", () => {
     ]);
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: false })).not.toContain("control.thread");
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: true })).toContain("control.thread");
+    expect(deriveHarnessCapabilities(["edit"], { threadRuntime: false })).toContain("write.document");
   });
 
   it("accepts only the registered broker principal and preserves the current run", async () => {

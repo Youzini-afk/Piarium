@@ -40,7 +40,6 @@ import {
 import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
-import { assertAbsolutePathInWorkspace, WorkspacePathError } from './lib/workspace/path-safety.js';
 
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
@@ -54,6 +53,7 @@ import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-too
 import { type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
+import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -916,6 +916,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
+  const harnessPathAuthority = createHarnessPathAuthority({
+    authorityId: extensionRuntime.services.hostId,
+    documents: documentsAuthority,
+    fsPromises,
+    pathModule: path,
+  });
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
   const assertRecoverySessionWorkspace = async (sessionId: string, workspaceId: string): Promise<void> => {
@@ -1293,25 +1299,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId, outcome));
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
-    authorizeWorkspacePath: async (actor, candidate, { allowMissing }) => {
-      if (!actor.workspaceId) return false;
-      try {
-        const workspace = await documentsAuthority.inspectWorkspace(actor.workspaceId);
-        const absolutePath = path.isAbsolute(candidate)
-          ? candidate
-          : path.resolve(workspace.root, candidate);
-        await assertAbsolutePathInWorkspace(absolutePath, {
-          root: workspace.root,
-          fsPromises,
-          pathModule: path,
-          allowMissing,
-        });
-        return true;
-      } catch (error) {
-        if (error instanceof WorkspacePathError) return false;
-        throw error;
-      }
-    },
+    authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
   interface SessionNotificationRequest extends DesktopNotificationPayload {

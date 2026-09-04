@@ -149,7 +149,7 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
   `HarnessError.code` 加 `'forbidden'`。
 - Router：只从信封取 `actor`；`HarnessServiceContext` 用 `actor` 替代 `sessionId` / `workspaceId`。每个方法声明所需
   capability（表放 protocol：`HARNESS_METHOD_CAPABILITY`），router 在分派前检查 `actor.grantedCapabilities`，缺 →
-  `forbidden`（不是 `denied`——`denied` 留给用户策略）。`fs.lock`、`lsp.*`、`search.content` 的 `path` 参数须在
+  `forbidden`（不是 `denied`——`denied` 留给用户策略）。`fs.lock.paths[]`、`lsp.*`、`search.content` 的路径参数须在
   `actor.workspaceId` 的根内（复用 Documents 的 `allowed-roots` 判定），越界 → `forbidden`。
 - 能力集来源（过渡）：host 在收到 broker 验证后的首次 `session.snapshot` 时，从该会话已经冻结的 `activeTools` 与 Host
   实际服务可用性推导并注册；例如真实存在 `bash` 才给 `process.shell`，线程工具与线程运行时同时存在才给
@@ -164,9 +164,9 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
 **状态（2026-09-04）**：已实施。每 workspace 一个原子 catalog，旧 parent 数组在 workspace 关系已知时导入且原文件保留；
 启动对账逐 workspace 返回失败，不把损坏或权限错误读成空表。
 
-- `loadParent` 只吞 `ENOENT`；`JSON.parse` 失败、`EACCES`、`schemaVersion > 当前` 一律抛 `HarnessServiceError('failed', …)`
-  且**不写入 cache**，之后的 `persist` 不会用空表覆盖。文件带 `{ schemaVersion: 1, threads: [...], runs: [...] }`；无版本
-  的旧文件按 0 读并迁移。
+- catalog 读取只吞 `ENOENT`；`JSON.parse` 失败、`EACCES`、`schemaVersion > 当前` 返回独立 typed failure，且**不写入
+  cache**，之后的 persist 不会用空表覆盖。当前文件带 `{ schemaVersion: 2, workspaceId, threads, runs }`；无版本旧 parent
+  数组按 0 在 workspace 关系已知时导入，schema 1 的 `traceHandle` 报告方向性迁入 `TranscriptRef`。
 - 启动对账：host 起来后遍历已知工作区的注册表，所有 `workerState ∈ { starting, running }` 的 Run 标 `lost`
   （`outcome: lost`，`exitReason: "host restarted"`），线程 `attention` 按是否有未答问题保留；与 broker 当前 worker 列表
   交叉——broker 里有而注册表里没有的会话不属线程系统，忽略。
@@ -207,14 +207,22 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
 
 ### P0.6 工作区级规范路径锁
 
+**状态（2026-09-04）**：已实施。worker 一次提交完整 paths 批次；Host 用 Documents identity 规范化、去重、全序获取，
+返回 owner-bound leaseId，`apply_patch` 的多文件操作共用一批租约。
+
 - 键 `{ authorityId, workspaceId, canonicalResourceId }`，规范化复用 Documents authority 的路径身份（realpath、Windows
-  大小写与 alias）；`fs.lock acquire` 返回 `{ leaseId }`，`release({ leaseId })` 只凭 leaseId；`withPathLock` 持 leaseId
+  大小写与 alias）；`fs.lock acquire` 接收 `paths[]` 并返回 `{ leaseIds[] }`，`release({ leaseId })` 不再携带路径；Host
+  仍用 broker actor 的 ownerId 校验令牌归属，`withPathLock` 持 leaseId
   释放。进程内实现；模块文档写明保证："同一 Application Host authority 内，所有 Harness 管理的写操作按 workspace / resource
   互斥"，不声称阻止其他 host、终端、Git 或外部进程。
 - 测试：两个会话同一文件串行、不同文件并行；`D:\A\..\B\f.ts` 与 `D:\B\F.TS`（Windows）归一；无 leaseId 的 release 失败；
   超时；异常释放。
 
 ### P0.7 故障注入与契约测试
+
+**状态（2026-09-04）**：已实施。四类证据分别落在 runtime-broker identity、thread registry schema/reconcile、
+OutputRef/UTF-8、path authority/lease 与三段 bridge E2E；本轮 protocol 59、Host harness 275、pi-host 245（另 1 个既有
+平台 skip）通过。
 
 - 覆盖上面六项的四类：**崩溃**（host 重启后注册表对账、句柄 expired、transcriptRef 可读）、**损坏**（注册表 JSON 损坏 /
   权限错误 / 未来版本）、**跨会话**（伪造 snapshot、伪造载荷、A 请求不能碰 B 的 shell / 线程 / 锁）、**Unicode**（输出分页）。

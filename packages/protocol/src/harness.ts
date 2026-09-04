@@ -126,6 +126,14 @@ export interface DiagnosticsResult {
   reason?: string;
 }
 
+export type FsLockParams =
+  | { action: "acquire"; paths: string[]; timeoutMs?: number }
+  | { action: "release"; leaseId: string };
+
+export type FsLockResult =
+  | { held: true; leaseIds: string[] }
+  | { held: false; released: boolean };
+
 export type FetchResult =
   | { status: "ok"; url: string; finalUrl: string; contentType: string; title?: string; markdown: string; bytes: number; fromCache: boolean; rendered: boolean }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
@@ -218,7 +226,7 @@ export interface HarnessServiceMap {
   "search.content": { params: SearchContentParams; result: SearchContentResult };
   "lsp.diagnostics": { params: { path: string; afterSnapshot?: string; waitMs?: number }; result: DiagnosticsResult };
   "lsp.diagnosticsSnapshot": { params: { path: string }; result: DiagnosticsResult };
-  "fs.lock": { params: { path: string; action: "acquire" | "release"; timeoutMs?: number }; result: { held: boolean } };
+  "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.read": { params: { url: string; prompt: string; render?: boolean }; result: WebReadResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };

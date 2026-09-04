@@ -6,11 +6,15 @@ import { tmpdir } from "node:os";
 import { createApplyPatchTool } from "../../src/harness/apply-patch-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 
-function createFakeBridge(): Pick<HostServicesBridge, "request"> {
+function createFakeBridge(lockBatches?: string[][]): Pick<HostServicesBridge, "request"> {
   return {
-    request: async (method: string, _params: Record<string, unknown>) => {
-      if (method === "fs.lock") return { held: true };
-      if (method === "fs.lock" || method === "fs.unlock") return { held: false };
+    request: async (method: string, params: Record<string, unknown>) => {
+      if (method === "fs.lock" && params.action === "acquire") {
+        const paths = params.paths as string[];
+        lockBatches?.push(paths);
+        return { held: true, leaseIds: paths.map((_, index) => `lease-${index}`) };
+      }
+      if (method === "fs.lock" && params.action === "release") return { held: false, released: true };
       if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
       throw new Error(`unexpected method: ${method}`);
     },
@@ -81,7 +85,8 @@ line2
   it("handles multiple files in one patch", async () => {
     writeFileSync(join(tmpDir, "a.txt"), "aaa\n");
     writeFileSync(join(tmpDir, "b.txt"), "bbb\n");
-    const bridge = createFakeBridge();
+    const lockBatches: string[][] = [];
+    const bridge = createFakeBridge(lockBatches);
     const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
 
     const patch = `*** Begin Patch
@@ -101,6 +106,8 @@ ccc
     assert.equal(readFileSync(join(tmpDir, "a.txt"), "utf8"), "AAA\n");
     assert.equal(readFileSync(join(tmpDir, "b.txt"), "utf8"), "BBB\n");
     assert.equal(readFileSync(join(tmpDir, "c.txt"), "utf8"), "ccc");
+    assert.equal(lockBatches.length, 1, "a multi-file patch must acquire one ordered Host lease batch");
+    assert.equal(lockBatches[0]!.length, 3);
   });
 
   it("reports error on missing *** Begin Patch", async () => {

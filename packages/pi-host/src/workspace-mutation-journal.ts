@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { HostEventData } from "@piarium/protocol";
 import type { HostServicesBridge } from "./harness/host-services-bridge.js";
+import { withPathLock } from "./harness/path-lock.js";
 
 type WorkspaceMutationRequest = HostEventData<"workspace.mutation.request">;
 type WorkspaceMutationToolName = WorkspaceMutationRequest["toolName"];
@@ -87,7 +88,6 @@ interface JournaledExecutionOptions<TResult> {
   toolCallId: string;
   toolName: WorkspaceMutationToolName;
   hostServicesBridge?: HostServicesBridge;
-  sessionId?: string;
 }
 
 async function fetchDiagnostics(
@@ -117,48 +117,55 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
   options: JournaledExecutionOptions<TResult>,
 ): Promise<TResult> {
   const path = resolve(options.cwd, options.inputPath);
-  await options.bridge.request({
-    path,
-    phase: "before",
-    toolCallId: options.toolCallId,
-    toolName: options.toolName,
-  });
-  let succeeded = false;
-  let result: TResult | undefined;
-  try {
-    result = await options.execute();
-    succeeded = true;
-  } finally {
+  const executeMutation = async (): Promise<TResult> => {
     await options.bridge.request({
       path,
-      phase: "after",
-      succeeded,
+      phase: "before",
       toolCallId: options.toolCallId,
       toolName: options.toolName,
     });
-    // Best-effort diagnostics after mutation — all three states written to text
-    if (succeeded && result && options.hostServicesBridge) {
-      const diag = await fetchDiagnostics(options.hostServicesBridge, path);
-      if (diag) {
-        try {
-          const firstText = result.content.find((c: { type: string }) => c.type === "text");
-          if (firstText && typeof firstText.text === "string") {
-            firstText.text = `${firstText.text}\n\n[diagnostics: ${diag.summary}]`;
-          }
-        } catch {
-          // Result may be frozen; skip
+    let succeeded = false;
+    let result: TResult | undefined;
+    try {
+      result = await options.execute();
+      succeeded = true;
+    } finally {
+      await options.bridge.request({
+        path,
+        phase: "after",
+        succeeded,
+        toolCallId: options.toolCallId,
+        toolName: options.toolName,
+      });
+    }
+    return result!;
+  };
+  const result = options.hostServicesBridge
+    ? await withPathLock(options.hostServicesBridge, [path], executeMutation)
+    : await executeMutation();
+  // Diagnostics can wait on a language server, so run them after releasing the
+  // mutation lease. They are feedback, not part of the write critical section.
+  if (options.hostServicesBridge) {
+    const diag = await fetchDiagnostics(options.hostServicesBridge, path);
+    if (diag) {
+      try {
+        const firstText = result.content.find((content) => content.type === "text");
+        if (firstText && typeof firstText.text === "string") {
+          firstText.text = `${firstText.text}\n\n[diagnostics: ${diag.summary}]`;
         }
+      } catch {
+        // Result may be frozen; skip
       }
     }
   }
-  return result!;
+  return result;
 }
 
 export function createWorkspaceMutationJournalTools(
   cwd: string,
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
-  sessionId?: string,
+  _sessionId?: string,
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
@@ -172,7 +179,6 @@ export function createWorkspaceMutationJournalTools(
       toolCallId,
       toolName: "write",
       ...(hostServicesBridge ? { hostServicesBridge } : {}),
-      ...(sessionId ? { sessionId } : {}),
     }),
   });
   const journaledEdit = defineTool({
@@ -185,7 +191,6 @@ export function createWorkspaceMutationJournalTools(
       toolCallId,
       toolName: "edit",
       ...(hostServicesBridge ? { hostServicesBridge } : {}),
-      ...(sessionId ? { sessionId } : {}),
     }),
   });
   return [journaledWrite, journaledEdit];

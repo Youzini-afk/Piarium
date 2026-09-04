@@ -3,106 +3,57 @@ import { describe, it } from "node:test";
 import { withPathLock } from "../../src/harness/path-lock.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 
-function createFakeBridge(acquired: string[], released: string[], failOn?: string): Pick<HostServicesBridge, "request"> {
-  return {
+function createFakeBridge(options: { failAcquire?: boolean } = {}) {
+  const acquisitions: string[][] = [];
+  const releases: string[] = [];
+  const bridge = {
     request: async (method: string, params: Record<string, unknown>) => {
       if (method !== "fs.lock") throw new Error(`unexpected method: ${method}`);
-      const path = params.path as string;
-      const action = params.action as string;
-      if (action === "acquire") {
-        if (failOn === path) return { held: false };
-        acquired.push(path);
-        return { held: true };
+      if (params.action === "acquire") {
+        const paths = params.paths as string[];
+        acquisitions.push(paths);
+        if (options.failAcquire) return { held: false, released: false };
+        return { held: true, leaseIds: paths.map((_, index) => `lease-${index + 1}`) };
       }
-      if (action === "release") {
-        released.push(path);
-        return { held: false };
-      }
-      throw new Error(`unknown action: ${action}`);
+      releases.push(params.leaseId as string);
+      return { held: false, released: true };
     },
-  } as unknown as Pick<HostServicesBridge, "request">;
+  } as unknown as HostServicesBridge;
+  return { bridge, acquisitions, releases };
 }
 
 describe("withPathLock", () => {
-  it("acquires and releases a single path lock", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released);
-
-    const result = await withPathLock(bridge as HostServicesBridge, "s1", ["/file.txt"], async () => 42);
+  it("acquires a path set in one Host request and releases opaque leases", async () => {
+    const harness = createFakeBridge();
+    const result = await withPathLock(harness.bridge, ["/a.txt", "/b.txt"], async () => 42);
     assert.equal(result, 42);
-    assert.deepEqual(acquired, ["/file.txt"]);
-    assert.deepEqual(released, ["/file.txt"]);
+    assert.deepEqual(harness.acquisitions, [["/a.txt", "/b.txt"]]);
+    assert.deepEqual(harness.releases, ["lease-2", "lease-1"]);
   });
 
-  it("acquires and releases multiple paths in order", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released);
-
-    await withPathLock(bridge as HostServicesBridge, "s1", ["/a.txt", "/b.txt"], async () => "ok");
-    assert.deepEqual(acquired, ["/a.txt", "/b.txt"]);
-    // Released in reverse order
-    assert.deepEqual(released, ["/b.txt", "/a.txt"]);
-  });
-
-  it("releases locks even when fn throws", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released);
-
+  it("releases every lease when the protected operation throws", async () => {
+    const harness = createFakeBridge();
     await assert.rejects(
-      withPathLock(bridge as HostServicesBridge, "s1", ["/file.txt"], async () => { throw new Error("boom"); }),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.equal(error.message, "boom");
-        return true;
-      },
+      withPathLock(harness.bridge, ["/a.txt", "/b.txt"], async () => { throw new Error("boom"); }),
+      /boom/,
     );
-    assert.deepEqual(acquired, ["/file.txt"]);
-    assert.deepEqual(released, ["/file.txt"]);
+    assert.deepEqual(harness.releases, ["lease-2", "lease-1"]);
   });
 
-  it("throws when acquire fails", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released, "/locked.txt");
-
-    await assert.rejects(
-      withPathLock(bridge as HostServicesBridge, "s1", ["/locked.txt"], async () => "should not run"),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /Failed to acquire lock/);
-        return true;
-      },
-    );
-    // Nothing acquired, nothing released
-    assert.deepEqual(acquired, []);
-    assert.deepEqual(released, []);
+  it("does not run the operation or release invented leases when acquire fails", async () => {
+    const harness = createFakeBridge({ failAcquire: true });
+    let ran = false;
+    await assert.rejects(withPathLock(harness.bridge, ["/locked.txt"], async () => {
+      ran = true;
+    }), /Failed to acquire/);
+    assert.equal(ran, false);
+    assert.deepEqual(harness.releases, []);
   });
 
-  it("releases already-acquired locks when a later acquire fails", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released, "/second.txt");
-
-    await assert.rejects(
-      withPathLock(bridge as HostServicesBridge, "s1", ["/first.txt", "/second.txt"], async () => "should not run"),
-    );
-    // First was acquired, second failed
-    assert.deepEqual(acquired, ["/first.txt"]);
-    // First should be released
-    assert.deepEqual(released, ["/first.txt"]);
-  });
-
-  it("skips locking for empty paths array", async () => {
-    const acquired: string[] = [];
-    const released: string[] = [];
-    const bridge = createFakeBridge(acquired, released);
-
-    const result = await withPathLock(bridge as HostServicesBridge, "s1", [], async () => "no locks");
-    assert.equal(result, "no locks");
-    assert.deepEqual(acquired, []);
-    assert.deepEqual(released, []);
+  it("skips the Host round trip for an empty path set", async () => {
+    const harness = createFakeBridge();
+    const result = await withPathLock(harness.bridge, [], async () => "ok");
+    assert.equal(result, "ok");
+    assert.deepEqual(harness.acquisitions, []);
   });
 });

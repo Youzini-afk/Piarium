@@ -4,38 +4,38 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
  * Acquires a path lock via the host's `fs.lock` service, executes the
  * function, and releases the lock in a finally block.
  *
- * The lock is per-session, per-path. Concurrent calls to the same path
- * from the same session will queue. Different paths acquire independently.
+ * The Host canonicalizes, de-duplicates, and orders the whole path set before
+ * granting opaque leases. Session identity comes from the broker actor.
  */
 export async function withPathLock<T>(
   bridge: HostServicesBridge,
-  sessionId: string,
   paths: string[],
   fn: () => Promise<T>,
   options?: { timeoutMs?: number },
 ): Promise<T> {
   if (paths.length === 0) return fn();
 
-  // Acquire all locks in order
-  const acquired: string[] = [];
+  let leaseIds: string[] = [];
   try {
-    for (const path of paths) {
-      const result = await bridge.request("fs.lock", {
-        path,
-        action: "acquire",
-        ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-      });
-      if (!result.held) {
-        throw new Error(`Failed to acquire lock for path: ${path}`);
-      }
-      acquired.push(path);
+    const result = await bridge.request("fs.lock", {
+      paths,
+      action: "acquire",
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
+    if (
+      !result.held
+      || result.leaseIds.length === 0
+      || result.leaseIds.some((leaseId) => typeof leaseId !== "string" || leaseId.length === 0)
+      || new Set(result.leaseIds).size !== result.leaseIds.length
+    ) {
+      throw new Error("Failed to acquire path lock leases");
     }
+    leaseIds = result.leaseIds;
     return await fn();
   } finally {
-    // Release all acquired locks in reverse order
-    for (let i = acquired.length - 1; i >= 0; i--) {
+    for (let index = leaseIds.length - 1; index >= 0; index -= 1) {
       try {
-        await bridge.request("fs.lock", { path: acquired[i]!, action: "release" });
+        await bridge.request("fs.lock", { leaseId: leaseIds[index]!, action: "release" });
       } catch {
         // Best-effort release; ignore errors
       }

@@ -49,7 +49,7 @@ export function deriveHarnessCapabilities(
   if (tools.has("grep")) capabilities.add("read.search");
   if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
-  if (tools.has("apply_patch")) capabilities.add("write.document");
+  if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
   if (
     availability.threadRuntime
     && ["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"].some((name) => tools.has(name))

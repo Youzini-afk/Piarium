@@ -920,8 +920,9 @@ accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（
    this session / Deny）。它也是 `edit` / `write` / `apply_patch` 这类**在 worker 进程内直接写文件**的工具目前唯一可阻断
    的门——host 对这些写入只能观察（mutation journal），不能阻止。
 2. **Host 服务授权**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态能力集、workspace / path 包含，
-   覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `thread.*` / `fs.lock` / `lsp.*`）。用户关掉 `bash`
-   后本次 Run 的能力集不含 `process.shell`，绕过工具直接到达的 `shell.exec` 必须被拒——这不是第二套用户策略，是防止
+   覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `thread.*` / `fs.lock` / `lsp.*`）。能力按会话实际冻结的
+   `activeTools` 推导：只有没有任何 `bash` 工具时才不含 `process.shell`；关闭 Piarium 的同名覆盖若会回退到 Pi 内置 bash，
+   仍然具有 process 能力。缺少该能力时绕过工具直接到达的 `shell.exec` 必须被拒——这不是第二套用户策略，是防止
    绕过工具入口。按风险类别授权：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill /
    merge）、`write`（未来经 host 中介的文档写入）。
 3. **OS 沙箱**（第 9.1.1 节）：限制 worker 绕过工具直接访问文件与网络。当前不具备。
@@ -1269,9 +1270,9 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 交付后删除）。
 
 2026-09-04 复审后的顺序调整：阶段 0–1b 已交付（详见状态矩阵）；阶段 2、3、3b 的模块大部分处于 `implemented`，接线部分
-`wired`，真实 child session 尚未接通。下一步不是继续按阶段铺模块，而是：**P0 integrity 纵切**（broker 身份 pin、Host
-静态授权、注册表错误分类与对账、Thread + ThreadRun、两级输出引用、工作区级锁，共七项，见 plan）→ 一条**真实 child
-session 的线程纵切** → 权限纵切（Host enforcement + 插件并存）→ 上下文 shadow mode + 最小回放集 → 由回放数据决定压缩
+`wired`。**P0 integrity 纵切已完成**（broker 身份 pin、Host 静态授权、注册表错误分类与对账、Thread + ThreadRun、两级输出
+引用、工作区级规范租约及故障注入）。下一步是一条**真实 child session 的线程纵切** → 权限纵切（Host enforcement +
+插件并存）→ 上下文 shadow mode + 最小回放集 → 由回放数据决定压缩
 接管与记忆 agent 是否开启。阶段 4 与内核正交，并行推进；阶段 5、6 暂停到线程纵切 `proven` 之后——是顺序，不是取消。
 下面的阶段列表保留为原始规划。
 
