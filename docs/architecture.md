@@ -505,12 +505,23 @@ The Web/Application Host advertises `harnessThreads` during the private Host
 handshake. Only then does pi-host register thread tools. Dispatch atomically
 persists a Thread and `starting` Run and returns before worktree/session setup;
 the background runtime creates a real persisted Pi child. Its
-`ThreadLaunchManifest` freezes scope, worktree mode, role prompt fragment, and
-active tool names, while the resolved model is supplied at `session.create`
+`ThreadLaunchManifest` freezes scope, worktree mode, role prompt fragment,
+whether the parent block snapshot is carried, and active tool names, while the resolved model is supplied at `session.create`
 time. Pi therefore constructs the child with the correct model-family tools
 and a read-only role cannot regain write tools merely because the global
 settings expose them. Opening the child from the UI supplies the same frozen
 launch values again.
+
+User-created discussions use authenticated, session-scoped Host routes: the
+caller supplies only a persisted message entry and the block-snapshot choice;
+the Host derives the parent edge and workspace from the broker-owned session.
+The child receives only read-only tools that are actually active in the parent
+and remains attached after each `agent_settled`, with `user` attention meaning
+it is ready for the next message. Converting a discussion creates an isolated
+worktree, ends the discussion Run, starts a new implementation Run, and
+reopens the same durable Pi session with the parent's implementation-capable
+tools. The conversation therefore continues while the worker/tool boundary is
+rebuilt at the only point where a tool-set change is allowed.
 
 Isolated work starts from the parent's full working state. A private baseline
 commit inside the child worktree separates pre-existing parent dirt from the

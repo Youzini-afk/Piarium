@@ -8,7 +8,8 @@ import { subscribePiariumEvents } from '@/lib/piariumEvents';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
-  parseHarnessThreadList,
+  parseHarnessThreadMutation,
+  parseHarnessThreadProjection,
   projectHarnessThreadState,
   type HarnessThreadSnapshot,
   type HarnessThreadState,
@@ -87,13 +88,16 @@ export const HarnessThreadsPanel: React.FC<{
   const [blockDraft, setBlockDraft] = React.useState('');
   const [savingBlock, setSavingBlock] = React.useState(false);
   const [narrowOpen, setNarrowOpen] = React.useState(false);
+  const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
   const eventRevision = React.useRef(0);
-  const parent = React.useMemo<ThreadParent>(() => ({ kind: 'session', id: parentSessionId }), [parentSessionId]);
+  const scopeRef = React.useRef<{ workspaceId: string; parent: ThreadParent }>({
+    workspaceId,
+    parent: { kind: 'session', id: parentSessionId },
+  });
 
   const reload = React.useCallback(async (signal?: AbortSignal) => {
     const revisionAtStart = eventRevision.current;
-    const query = new URLSearchParams({ workspaceId, parentId: parent.id, parentKind: parent.kind });
-    const response = await runtimeFetch(`/api/harness/threads?${query.toString()}`, {
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
@@ -101,12 +105,41 @@ export const HarnessThreadsPanel: React.FC<{
       if (response.status === 404) return;
       throw new Error(`Unable to load threads (${response.status})`);
     }
-    const incoming = parseHarnessThreadList(await response.json());
+    const projection = parseHarnessThreadProjection(await response.json());
+    scopeRef.current = { workspaceId: projection.workspaceId, parent: projection.parent };
+    const incoming = projection.threads;
     setThreads((current) => {
       if (eventRevision.current === revisionAtStart) return incoming;
       return incoming.reduce(mergeSnapshot, current);
     });
-  }, [parent, workspaceId]);
+  }, [parentSessionId]);
+
+  const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
+    if (convertingThreadId) return;
+    setConvertingThreadId(entry.thread.id);
+    try {
+      const response = await runtimeFetch(
+        `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(entry.thread.id)}/convert`,
+        { method: 'POST' },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+            ? body.error
+            : `Unable to convert discussion thread (${response.status})`,
+        );
+      }
+      const converted = parseHarnessThreadMutation(body);
+      scopeRef.current = { workspaceId: converted.workspaceId, parent: converted.parent };
+      eventRevision.current += 1;
+      setThreads((current) => mergeSnapshot(current, converted));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('harness.threads.convertFailed'));
+    } finally {
+      setConvertingThreadId(null);
+    }
+  }, [convertingThreadId, parentSessionId, t]);
 
   const reloadBlocks = React.useCallback(async (signal?: AbortSignal) => {
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/blocks`, {
@@ -264,12 +297,14 @@ export const HarnessThreadsPanel: React.FC<{
   React.useEffect(() => {
     const controller = new AbortController();
     eventRevision.current = 0;
+    scopeRef.current = { workspaceId, parent: { kind: 'session', id: parentSessionId } };
     setThreads([]);
     setBlocks([]);
     setSuggestions([]);
     setKnowledgeDrafts({});
     setEditingBlock(null);
     setNarrowOpen(false);
+    setConvertingThreadId(null);
     void reload(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load threads:', error);
     });
@@ -296,8 +331,8 @@ export const HarnessThreadsPanel: React.FC<{
       }
       if (
         event.type !== 'harness-thread-changed'
-        || event.workspaceId !== workspaceId
-        || !scopeMatches(event.parent, parent)
+        || event.workspaceId !== scopeRef.current.workspaceId
+        || !scopeMatches(event.parent, scopeRef.current.parent)
       ) return;
       eventRevision.current += 1;
       setThreads((current) => mergeSnapshot(current, { thread: event.thread, activeRun: event.activeRun }));
@@ -306,7 +341,7 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parent, parentSessionId, reload, reloadBlocks, reloadKnowledge, workspaceId]);
+  }, [parentSessionId, reload, reloadBlocks, reloadKnowledge, workspaceId]);
 
   if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0) return null;
 
@@ -383,50 +418,71 @@ export const HarnessThreadsPanel: React.FC<{
           const state = projectHarnessThreadState(entry);
           const sessionId = entry.activeRun?.sessionId;
           const cwd = entry.thread.worktree?.path ?? fallbackCwd;
+          const converting = convertingThreadId === entry.thread.id;
+          const label = entry.thread.role ?? (
+            entry.thread.kind === 'discussion'
+              ? t('harness.threads.discussion')
+              : t('harness.threads.userThread')
+          );
           return (
-            <button
-              key={entry.thread.id}
-              type="button"
-              disabled={!sessionId}
-              title={sessionId ? t('harness.threads.open') : undefined}
-              onClick={() => {
-                if (!sessionId) return;
-                void openSession({
-                  sessionId,
-                  ...(cwd ? { cwd } : {}),
-                  ...(entry.thread.model ? { model: entry.thread.model } : {}),
-                  ...(entry.thread.manifest.scope.length > 0 ? { scope: entry.thread.manifest.scope } : {}),
-                  tools: entry.thread.manifest.tools,
-                }).catch((error) => {
-                  toast.error(error instanceof Error ? error.message : String(error));
-                });
-              }}
-              className="group w-full rounded-lg border border-transparent px-2.5 py-2 text-left transition-colors hover:border-border/60 hover:bg-interactive-hover disabled:cursor-default disabled:opacity-80"
-            >
-              <div className="flex items-center gap-2">
-                {state === 'running' || state === 'starting' ? (
-                  <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-[var(--status-info)]" />
-                ) : (
-                  <span className={cn('size-2 shrink-0 rounded-full', stateTone[state])} aria-hidden="true" />
-                )}
-                <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">
-                  {entry.thread.role ?? entry.thread.id}
-                </span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">{t(stateKey[state])}</span>
-              </div>
-              <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{entry.thread.brief}</p>
-              {entry.thread.waitingFor ? (
-                <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--status-warning)]">
-                  ? {entry.thread.waitingFor.text}
-                </p>
-              ) : null}
-              <div className="mt-1.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground/80">
-                <span>↳ {entry.activeRun?.steps ?? 0}</span>
-                {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (
-                  <span>Δ {entry.thread.diffStats.files} · +{entry.thread.diffStats.insertions} −{entry.thread.diffStats.deletions}</span>
+            <div key={entry.thread.id} className="overflow-hidden rounded-lg border border-transparent transition-colors hover:border-border/60 hover:bg-interactive-hover">
+              <button
+                type="button"
+                disabled={!sessionId}
+                title={sessionId ? t('harness.threads.open') : undefined}
+                onClick={() => {
+                  if (!sessionId) return;
+                  void openSession({
+                    sessionId,
+                    ...(cwd ? { cwd } : {}),
+                    ...(entry.thread.model ? { model: entry.thread.model } : {}),
+                    ...(entry.thread.manifest.scope.length > 0 ? { scope: entry.thread.manifest.scope } : {}),
+                    tools: entry.thread.manifest.tools,
+                  }).catch((error) => {
+                    toast.error(error instanceof Error ? error.message : String(error));
+                  });
+                }}
+                className="group w-full px-2.5 py-2 text-left disabled:cursor-default disabled:opacity-80"
+              >
+                <div className="flex items-center gap-2">
+                  {state === 'running' || state === 'starting' ? (
+                    <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-[var(--status-info)]" />
+                  ) : (
+                    <span className={cn('size-2 shrink-0 rounded-full', stateTone[state])} aria-hidden="true" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{label}</span>
+                  <span className="rounded bg-muted/60 px-1 py-0.5 text-[9px] text-muted-foreground">
+                    {t(entry.thread.kind === 'discussion' ? 'harness.threads.kind.discussion' : 'harness.threads.kind.implementation')}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{t(stateKey[state])}</span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{entry.thread.brief}</p>
+                {entry.thread.waitingFor ? (
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--status-warning)]">
+                    ? {entry.thread.waitingFor.text}
+                  </p>
                 ) : null}
-              </div>
-            </button>
+                <div className="mt-1.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground/80">
+                  <span>↳ {entry.activeRun?.steps ?? 0}</span>
+                  {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (
+                    <span>Δ {entry.thread.diffStats.files} · +{entry.thread.diffStats.insertions} −{entry.thread.diffStats.deletions}</span>
+                  ) : null}
+                </div>
+              </button>
+              {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
+                <div className="flex justify-end border-t border-border/40 px-2 py-1">
+                  <button
+                    type="button"
+                    disabled={convertingThreadId !== null}
+                    onClick={() => { void convertDiscussion(entry); }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    <Icon name={converting ? 'loader-4' : 'git-branch'} className={cn('size-3', converting && 'animate-spin')} />
+                    {t(converting ? 'harness.threads.converting' : 'harness.threads.convert')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           );
         })}
             </div>

@@ -1118,6 +1118,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           ...(thread.role ? { role: thread.role } : {}),
           kind: thread.kind,
           createdBy: thread.createdBy,
+          carryBlocks: thread.manifest.carryBlocks,
           concurrency: thread.manifest.concurrency,
           autoRun: true,
           worktree: thread.manifest.worktree,
@@ -1220,9 +1221,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       abort: async (sessionId) => { await piRuntimeBroker.requestForSession(sessionId, 'agent.abort', { sessionId }); },
       close: async (sessionId) => { await piRuntimeBroker.closeSession(sessionId); },
-      summary: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId }),
+      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
+      summary: async (sessionId) => {
+        try {
+          return await piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId });
+        } catch (activeError) {
+          const summary = (await piRuntimeBroker.listSessions()).find((candidate) => candidate.id === sessionId);
+          if (summary) return summary;
+          throw activeError;
+        }
+      },
       stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
-      entries: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope: 'branch' }),
+      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
     },
     onError: (error) => {
       console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
@@ -1230,6 +1240,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
+    runtime: threadRuntime,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerHarnessContextRoutes(app, {

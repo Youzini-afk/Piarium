@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Thread, ThreadRun } from '@piarium/protocol';
-import { parseHarnessThreadList, projectHarnessThreadState } from './harnessThreadPresentation';
+import { parseHarnessThreadList, parseHarnessThreadMutation, projectHarnessThreadState } from './harnessThreadPresentation';
 
 const thread = (overrides: Partial<Thread> = {}): Thread => ({
   id: 'thread-1',
@@ -10,7 +10,7 @@ const thread = (overrides: Partial<Thread> = {}): Thread => ({
   brief: 'Check the implementation',
   role: 'check',
   model: null,
-  manifest: { concurrency: 12, scope: [], systemPromptFragment: 'Run checks.', tools: ['read', 'bash'], worktree: 'shared' },
+  manifest: { carryBlocks: true, concurrency: 12, scope: [], systemPromptFragment: 'Run checks.', tools: ['read', 'bash'], worktree: 'shared' },
   createdBy: 'agent',
   kind: 'implementation',
   worktree: null,
@@ -63,6 +63,19 @@ describe('HarnessThreadsPanel projection', () => {
 
   test('rejects malformed API responses instead of showing empty success', () => {
     expect(() => parseHarnessThreadList({ threads: [{ thread: { id: 'thread-1' }, activeRun: null }] })).toThrow(/Malformed/);
-    expect(parseHarnessThreadList({ threads: [{ thread: thread(), activeRun: run() }] })).toHaveLength(1);
+    const response = {
+      workspaceId: 'workspace-1',
+      parent: { kind: 'session', id: 'parent-1' },
+      threads: [{ thread: thread(), activeRun: run() }],
+    };
+    expect(parseHarnessThreadList(response)).toHaveLength(1);
+    const mutation = parseHarnessThreadMutation({
+      ...response,
+      thread: thread({ kind: 'discussion' }),
+      activeRun: run(),
+    });
+    expect(mutation.workspaceId).toBe('workspace-1');
+    expect(mutation.parent).toEqual({ kind: 'session', id: 'parent-1' });
+    expect(mutation.thread.kind).toBe('discussion');
   });
 });

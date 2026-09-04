@@ -83,9 +83,11 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   item,
   liveUserStatus,
   onFork,
+  onOpenThread,
   onRecover,
   recoveryBusyEntryId,
   sessionId,
+  threadBusyEntryId,
 }) => {
   const toolCallIds = React.useMemo(() => toolCallIdsForItem(item), [item]);
   const itemExecutions = usePiSessionStore(useShallow((state) => {
@@ -108,10 +110,12 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           hiddenThinkingLabel={hiddenThinkingLabel}
           liveAssistant={item.message}
           onFork={onFork}
+          onOpenThread={onOpenThread}
           onRecover={onRecover}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
+          threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
         <PiTurnUsageFooter entries={[]} liveAssistant={item.message} />
@@ -128,10 +132,12 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           forkBusyEntryId={forkBusyEntryId}
           hiddenThinkingLabel={hiddenThinkingLabel}
           onFork={onFork}
+          onOpenThread={onOpenThread}
           onRecover={onRecover}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
+          threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
         <PiTurnUsageFooter entries={[item.entry]} />
@@ -155,9 +161,11 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           forkBusyEntryId={forkBusyEntryId}
           message={turn.user}
           onFork={onFork}
+          onOpenThread={onOpenThread}
           onRecover={onRecover}
           recoveryBusyEntryId={recoveryBusyEntryId}
           status={turn.liveUser ? liveUserStatus : undefined}
+          threadBusyEntryId={threadBusyEntryId}
         />
       </div>
       <PiTurnAssistantChrome turn={turn} waiting={assistantWaiting} />
@@ -168,10 +176,12 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         hiddenThinkingLabel={hiddenThinkingLabel}
         liveAssistant={turn.liveAssistant}
         onFork={onFork}
+        onOpenThread={onOpenThread}
         onRecover={onRecover}
         projectedResultByCallId={item.turn.resultByCallId}
         recoveryBusyEntryId={recoveryBusyEntryId}
         sessionId={sessionId}
+        threadBusyEntryId={threadBusyEntryId}
         toolExecutions={toolExecutions}
       />
       <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} />
@@ -453,8 +463,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     isMobile,
     liveUserStatus: props.liveUserStatus,
     onFork: props.onFork,
+    onOpenThread: props.onOpenThread,
     onRecover: props.onRecover,
     recoveryBusyEntryId: props.recoveryBusyEntryId,
+    threadBusyEntryId: props.threadBusyEntryId,
   }), [
     props.assistantWaiting,
     assistantWaitingTurnId,
@@ -463,8 +475,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     isMobile,
     props.liveUserStatus,
     props.onFork,
+    props.onOpenThread,
     props.onRecover,
     props.recoveryBusyEntryId,
+    props.threadBusyEntryId,
   ]);
   const renderItem = React.useCallback(({ item }: { item: PiTimelineItem }) => (
     <PiTimelineItemView
@@ -478,9 +492,11 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       item={item}
       liveUserStatus={props.liveUserStatus}
       onFork={props.onFork}
+      onOpenThread={props.onOpenThread}
       onRecover={props.onRecover}
       recoveryBusyEntryId={props.recoveryBusyEntryId}
       sessionId={props.sessionId}
+      threadBusyEntryId={props.threadBusyEntryId}
     />
   ), [
     props.assistantWaiting,
@@ -491,9 +507,11 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     isMobile,
     props.liveUserStatus,
     props.onFork,
+    props.onOpenThread,
     props.onRecover,
     props.recoveryBusyEntryId,
     props.sessionId,
+    props.threadBusyEntryId,
   ]);
 
   return (

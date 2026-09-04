@@ -76,7 +76,7 @@ ThreadRun.outcome: success | failure | cancelled | lost
 These axes are intentionally independent: a successful Run may leave its
 Thread `merge-ready` or `conflict`, while a lost Run leaves durable work and
 attention intact. `ThreadLaunchManifest` freezes the role's tool allowlist,
-worktree mode, scope, prompt fragment, and parent concurrency so a restart cannot silently gain
+worktree mode, scope, prompt fragment, parent-block snapshot choice, and parent concurrency so a restart cannot silently gain
 different capabilities. Reaching a terminal Run frees a concurrency slot and
 may promote the oldest queued Thread.
 

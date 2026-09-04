@@ -927,6 +927,36 @@ positioning context，按钮不会相对整个应用漂移。移动端没有第�
 
 状态：已实施并 proven（响应式触发器 SSR + 既有 panel/overlay 生产链）
 
+### D-063 · 2026-09-05 · 3.10（用户讨论线与同会话转实现）
+
+类型：实现澄清
+
+决定：(1) 时间线只在已持久化且有文本的 user/assistant message 上显示“从这里开一条线”；菜单默认携父 blocks，也提供显式不携带
+入口。创建走鉴权的 session-scoped Host route，UI 不提交 workspace 或 parent 身份；Host 从 broker session snapshot 和 registry
+反查权威 workspace/父边，并要求 fork point 仍在活动分支。(2) 讨论线只从父会话**实际活跃**的工具里取
+`read/grep/find/ls/glob/explore/related/recall/webfetch/websearch` 交集，`worktree:none`；`carryBlocks` 加入冻结的
+`ThreadLaunchManifest`，catalog schema 5 将旧 schema 4 明确迁为历史默认 `true`。(3) 讨论线每次 `agent_settled` 只刷新 Run metrics 并
+标为等待用户，不生成终态 report、不关闭 worker；空闲讨论不占 implementation dispatch 的并发槽。(4) 用户转实现前要求当前回答已结束，
+从父会话当前真实 active tools 中去掉线程控制工具并确认至少有一种 mutation 工具；创建 isolated worktree 后，旧讨论 Run 以
+`converted to implementation` 成功结束，新 Run 沿用同一个 sessionId。worker 必须 close/open 才能在 AgentSession 构造边界切换 cwd 与
+tool allowlist；随后自动发送转换说明并按普通实现线结算。(5) conversion 的新 Run 在落盘时已经带原 sessionId，Host 若在
+registry commit、worker reopen 之间崩溃，现有 lost-Run 对账仍能从同一 transcript 恢复。
+
+原因：只在 UI 增加按钮会立刻撞上两个事实：原 ThreadRuntime 把第一次 `agent_settled` 当整个线程完成并关闭，而已有 worker 的
+`session.open` 不会重建工具 allowlist。前者让讨论线无法继续说话，后者会让“转实现”只改标签却仍拿不到写工具。把转换定义为同一
+Thread/session 上的新 Run，既保留对话，又让一次执行尝试和一次能力边界对应；session-scoped route 则避免重新引入由 UI 自报
+workspace/parent 的身份问题。
+
+考虑过的替代：(a) 复制父完整对话——违背 blocks + brief 的低污染上下文设计；fork point 只记录来源并把该消息作为明确 data prompt。
+(b) 讨论回答后直接 settle，再靠 resume 续聊——会伪造多个“崩溃恢复”并产生终态报告。(c) 在现有 worker 上改 manifest——Pi 工具在
+AgentSession 构造时冻结，registry 与实际能力会分叉。(d) 给讨论线沿用父全部工具、只靠提示词说别写——不是能力边界。(e) 转换时
+另建 session——对话不再延续。
+
+影响：protocol `ThreadLaunchManifest`；Thread catalog schema 5；Host ThreadRuntime/registry/session-scoped routes 与真实 Pi E2E；UI
+timeline action、session state conversion、10 locale；设计 9.3.2、plan/status 3.10、architecture 5.2。
+
+状态：已实施并 proven（真实 Pi faux-provider 纵切；时间线线程卡片与归档/恢复 UI 仍待实现）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -995,3 +1025,4 @@ positioning context，按钮不会相对整个应用漂移。移动端没有第�
 | D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |
 | D-061 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / decision suggestion runtime |
 | D-062 | implementation | — | agent-harness 9.3.8、plan/status 3.10；session state rail / mobile overlay |
+| D-063 | implementation | — | agent-harness 9.3.2/9.3.8、architecture 5.2、plan/status 3.10；protocol / Host / pi-host E2E / UI |

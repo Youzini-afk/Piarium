@@ -183,6 +183,7 @@ describe("thread registry", () => {
       modelId: "test-model",
     });
     expect((await restarted.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
+      carryBlocks: true,
       concurrency: 12,
       tools: [],
       worktree: "isolated",
@@ -320,9 +321,57 @@ describe("thread registry", () => {
 
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
+      carryBlocks: true,
       tools: expect.arrayContaining(["read", "bash", "grep"]),
       worktree: "shared",
     });
+  });
+
+  it("upgrades schema v4 manifests with the historical carry-block default", async () => {
+    const thread = await registry.createThread(createInput({ carryBlocks: false }));
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v4 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<{ manifest: Record<string, unknown> }>;
+    };
+    v4.schemaVersion = 4;
+    delete v4.threads[0]!.manifest.carryBlocks;
+    await writeFile(path, JSON.stringify(v4), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.carryBlocks).toBe(true);
+  });
+
+  it("converts a live discussion by ending its old Run and starting a same-session implementation Run atomically", async () => {
+    const thread = await registry.createThread(createInput({
+      autoRun: true,
+      carryBlocks: false,
+      createdBy: "user",
+      kind: "discussion",
+      tools: ["read", "grep"],
+      worktree: "none",
+    }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "child-discussion");
+    await registry.setAttention(WORKSPACE, thread.id, "user", { kind: "user", text: "Continue" });
+
+    const converted = await registry.convertThread(WORKSPACE, thread.id, {
+      scope: [],
+      tools: ["read", "edit", "bash"],
+      worktree: { path: "D:/worktrees/thread", base: "base" },
+    });
+    expect(converted?.thread).toMatchObject({
+      kind: "implementation",
+      attention: "none",
+      activeRunId: converted?.run.id,
+      manifest: { carryBlocks: false, tools: ["read", "edit", "bash"], worktree: "isolated" },
+      worktree: { path: "D:/worktrees/thread", base: "base" },
+    });
+    expect(await registry.listRuns(WORKSPACE, thread.id)).toMatchObject([
+      { id: first.id, outcome: "success", workerState: "exited", exitReason: "converted to implementation" },
+      { id: converted?.run.id, attempt: 2, outcome: null, workerState: "starting", sessionId: "child-discussion" },
+    ]);
   });
 
   it("reconciles interrupted runs as lost while preserving pending attention", async () => {

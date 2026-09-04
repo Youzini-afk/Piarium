@@ -32,7 +32,11 @@ const liveAssistant: PiAssistantMessage = {
 
 const runtimeAPIs = { editor: undefined } as unknown as RuntimeAPIs;
 
-const renderTimeline = (assistant: PiAssistantMessage = liveAssistant, entries: PiSessionEntry[] = []): string => {
+const renderTimeline = (
+  assistant: PiAssistantMessage = liveAssistant,
+  entries: PiSessionEntry[] = [],
+  onOpenThread?: (entry: Extract<PiSessionEntry, { type: 'message' }>, options: { carryBlocks: boolean }) => void,
+): string => {
   // Zustand deliberately exposes the creation snapshot during SSR. Mirror the
   // selected fields into that snapshot so this server render exercises them.
   const serverState = useUIStore.getInitialState();
@@ -54,6 +58,7 @@ const renderTimeline = (assistant: PiAssistantMessage = liveAssistant, entries: 
             cwd="C:\\workspace"
             entries={entries}
             liveAssistant={assistant}
+            onOpenThread={onOpenThread}
             sessionId="session"
             toolExecutions={{}}
           />
@@ -120,7 +125,8 @@ describe('Pi timeline chat render mode', () => {
       id: 'tool-entry', parentId: 'assistant-entry', timestamp: '2026-09-04T00:00:02.000Z', type: 'message',
       message: { role: 'toolResult', toolCallId: 'tool-1', toolName: 'read', content: [{ type: 'text', text: 'Remember the result' }], isError: false, timestamp: 3 },
     }] as PiSessionEntry[];
-    const markup = renderTimeline(liveAssistant, entries);
+    const markup = renderTimeline(liveAssistant, entries, () => undefined);
     expect(markup.match(/aria-label="Add to knowledge review"/g)?.length).toBe(3);
+    expect(markup.match(/aria-label="Open a discussion thread from this message"/g)?.length).toBe(2);
   });
 });

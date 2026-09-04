@@ -1,31 +1,42 @@
 import type { Express, Request, RequestHandler, Response } from "express";
-import type { ThreadParent } from "@piarium/protocol";
 import type { ThreadRegistry } from "./thread-registry.js";
+import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession">;
   requireAuth?: RequestHandler;
 }
 
-const queryString = (request: Request, key: string): string => {
-  const value = request.query[key];
-  return typeof value === "string" ? value.trim() : "";
+const noAuth: RequestHandler = (_request, _response, next) => next();
+const sessionIdOf = (request: Request): string => String(request.params.sessionId ?? "").trim();
+const threadIdOf = (request: Request): string => String(request.params.threadId ?? "").trim();
+
+const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof ThreadRuntimeError) {
+    const status = error.code === "invalid-request" ? 400
+      : error.code === "not-found" ? 404
+      : error.code === "conflict" ? 409
+      : 503;
+    response.status(status).json({ code: error.code, error: error.message });
+    return;
+  }
+  response.status(500).json({ error: error instanceof Error ? error.message : fallback });
 };
 
-const noAuth: RequestHandler = (_request, _response, next) => next();
-
-export function registerHarnessThreadRoutes(app: Express, { registry, requireAuth = noAuth }: HarnessThreadRoutesOptions): void {
-  app.get("/api/harness/threads", requireAuth, async (request: Request, response: Response) => {
+export function registerHarnessThreadRoutes(
+  app: Express,
+  { registry, runtime, requireAuth = noAuth }: HarnessThreadRoutesOptions,
+): void {
+  app.get("/api/harness/sessions/:sessionId/threads", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
-    const workspaceId = queryString(request, "workspaceId");
-    const parentId = queryString(request, "parentId");
-    const parentKind = queryString(request, "parentKind") || "session";
-    if (!workspaceId || !parentId || (parentKind !== "session" && parentKind !== "thread")) {
-      response.status(400).json({ error: "workspaceId, parentId, and a valid parentKind are required" });
+    const sessionId = sessionIdOf(request);
+    if (!sessionId) {
+      response.status(400).json({ error: "sessionId is required" });
       return;
     }
-    const parent: ThreadParent = { kind: parentKind, id: parentId };
     try {
+      const { workspaceId, parent } = await runtime.scopeForSession(sessionId);
       const threads = await registry.listThreads(workspaceId, parent);
       const projected = await Promise.all(threads.map(async (thread) => ({
         thread,
@@ -33,9 +44,47 @@ export function registerHarnessThreadRoutes(app: Express, { registry, requireAut
       })));
       response.json({ workspaceId, parent, threads: projected });
     } catch (error) {
-      response.status(500).json({
-        error: error instanceof Error ? error.message : "Unable to read harness threads",
-      });
+      sendError(response, error, "Unable to read harness threads");
     }
   });
+
+  app.post("/api/harness/sessions/:sessionId/threads", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const parentSessionId = sessionIdOf(request);
+    const entryId = typeof request.body?.entryId === "string" ? request.body.entryId.trim() : "";
+    const carryBlocks = request.body?.carryBlocks;
+    if (!parentSessionId || !entryId || (carryBlocks !== undefined && typeof carryBlocks !== "boolean")) {
+      response.status(400).json({ error: "sessionId, entryId, and an optional boolean carryBlocks are required" });
+      return;
+    }
+    try {
+      const created = await runtime.createDiscussion({
+        parentSessionId,
+        entryId,
+        ...(carryBlocks === undefined ? {} : { carryBlocks }),
+      });
+      response.status(201).json(created);
+    } catch (error) {
+      sendError(response, error, "Unable to create discussion thread");
+    }
+  });
+
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/convert",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      try {
+        response.json(await runtime.convertDiscussion({ parentSessionId, threadId }));
+      } catch (error) {
+        sendError(response, error, "Unable to convert discussion thread");
+      }
+    },
+  );
 }

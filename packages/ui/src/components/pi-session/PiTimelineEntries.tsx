@@ -16,6 +16,12 @@ import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
 import type { EditorAPI } from '@piarium/application-client';
@@ -68,9 +74,11 @@ export interface PiTimelineProps {
   liveUser?: PiUserMessage;
   liveUserStatus?: PiSessionSubmissionStatus;
   onFork?(entry: PiSessionMessageEntry): void;
+  onOpenThread?(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
   onRecover?(entry: PiSessionMessageEntry): void;
   recoveryBusyEntryId?: string | null;
   sessionId: string;
+  threadBusyEntryId?: string | null;
   toolExecutions: Record<string, PiToolExecutionState>;
 }
 
@@ -161,6 +169,44 @@ const RawJsonDetails: React.FC<{
     </pre>
   </details>
 );
+
+const OpenThreadButton: React.FC<{
+  busy: boolean;
+  disabled: boolean;
+  entry: PiSessionMessageEntry;
+  onOpen(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
+}> = ({ busy, disabled, entry, onOpen }) => {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={disabled}
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+              aria-label={t('chat.messageBody.actions.openThreadAria')}
+            >
+              <Icon name={busy ? 'loader-4' : 'chat-new'} className={cn('size-3.5', busy && 'animate-spin')} />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t('chat.messageBody.actions.openThread')}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuItem onClick={() => onOpen(entry, { carryBlocks: true })}>
+          <Icon name="chat-new" className="mr-2 size-3.5" />
+          {t('chat.messageBody.actions.openThread')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onOpen(entry, { carryBlocks: false })}>
+          <Icon name="chat-1" className="mr-2 size-3.5" />
+          {t('chat.messageBody.actions.openThreadWithoutBlocks')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
 
 const statusIcon = (status: SubagentStatus): React.ComponentProps<typeof Icon>['name'] => {
   if (status === 'running') return 'loader-4';
@@ -765,17 +811,21 @@ export const PiTurnUserMessage: React.FC<{
   forkBusyEntryId?: string | null;
   message: PiUserMessage;
   onFork?(entry: PiSessionMessageEntry): void;
+  onOpenThread?(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
   onRecover?(entry: PiSessionMessageEntry): void;
   recoveryBusyEntryId?: string | null;
   status?: PiSessionSubmissionStatus;
+  threadBusyEntryId?: string | null;
 }> = ({
   entry,
   forkBusyEntryId,
   message,
   onFork,
+  onOpenThread,
   onRecover,
   recoveryBusyEntryId,
   status,
+  threadBusyEntryId,
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
@@ -816,7 +866,7 @@ export const PiTurnUserMessage: React.FC<{
           {t(`chat.piComposer.submission.${status}`)}
         </div>
       ) : null}
-      {messageText || (entry && (onFork || onRecover)) ? (
+      {messageText || (entry && (onFork || onOpenThread || onRecover)) ? (
         <div className={cn(
           'mt-1 flex h-6 items-center justify-end transition-opacity',
           isMobile
@@ -839,6 +889,14 @@ export const PiTurnUserMessage: React.FC<{
             </Tooltip>
           ) : null}
           {entry && messageText ? <RememberKnowledgeButton content={messageText} kind="message:user" /> : null}
+          {entry && messageText && onOpenThread ? (
+            <OpenThreadButton
+              busy={threadBusyEntryId === entry.id}
+              disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
+              entry={entry}
+              onOpen={onOpenThread}
+            />
+          ) : null}
           {entry && onFork ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -895,10 +953,12 @@ export const PiTimelineEntryList: React.FC<Omit<
   hiddenThinkingLabel,
   liveAssistant,
   onFork,
+  onOpenThread,
   onRecover,
   projectedResultByCallId,
   recoveryBusyEntryId,
   sessionId,
+  threadBusyEntryId,
   toolExecutions,
 }) => {
   const { t } = useI18n();
@@ -951,8 +1011,10 @@ export const PiTimelineEntryList: React.FC<Omit<
                   forkBusyEntryId={forkBusyEntryId}
                   message={message}
                   onFork={onFork}
+                  onOpenThread={onOpenThread}
                   onRecover={onRecover}
                   recoveryBusyEntryId={recoveryBusyEntryId}
+                  threadBusyEntryId={threadBusyEntryId}
                 />
               );
             }
@@ -991,7 +1053,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                       resultByCallId={resultByCallId}
                     />
                   ) : null}
-                  {displayedMessage && (assistantText || onFork) ? (
+                  {displayedMessage && (assistantText || onFork || onOpenThread) ? (
                   <div className={cn(
                     'flex h-6 items-center transition-opacity',
                     isMobile
@@ -1019,6 +1081,14 @@ export const PiTimelineEntryList: React.FC<Omit<
                       </Tooltip>
                     ) : null}
                     {assistantText ? <RememberKnowledgeButton content={assistantText} kind="message:assistant" /> : null}
+                    {assistantText && onOpenThread ? (
+                      <OpenThreadButton
+                        busy={threadBusyEntryId === entry.id}
+                        disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
+                        entry={entry}
+                        onOpen={onOpenThread}
+                      />
+                    ) : null}
                     {onFork ? (
                     <Tooltip>
                       <TooltipTrigger asChild>

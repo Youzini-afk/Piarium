@@ -46,7 +46,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 4;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 5;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -91,6 +91,15 @@ interface ThreadCatalogV3 {
   schemaVersion: 3;
   workspaceId: string;
   threads: Array<Omit<Thread, "manifest">>;
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV4 {
+  schemaVersion: 4;
+  workspaceId: string;
+  threads: Array<Omit<Thread, "manifest"> & {
+    manifest: Omit<ThreadLaunchManifest, "carryBlocks">;
+  }>;
   runs: ThreadRun[];
 }
 
@@ -237,6 +246,16 @@ const isTranscriptRef = (value: unknown): value is ThreadReport["transcriptRef"]
 
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
+  && typeof value.carryBlocks === "boolean"
+  && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
+  && Array.isArray(value.scope) && value.scope.every(isString)
+  && isNullableString(value.systemPromptFragment)
+  && Array.isArray(value.tools) && value.tools.every(isString)
+  && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
+);
+
+const isLaunchManifestV4 = (value: unknown): value is Omit<ThreadLaunchManifest, "carryBlocks"> => (
+  isRecord(value)
   && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
@@ -308,6 +327,7 @@ const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManif
       ? "none" as const
       : "isolated" as const;
   return {
+    carryBlocks: true,
     concurrency: 12,
     scope: [],
     systemPromptFragment: role?.systemPromptFragment ?? null,
@@ -328,6 +348,12 @@ const isThreadV2 = (value: unknown): value is ThreadCatalogV2["threads"][number]
 
 const isThreadV3 = (value: unknown): value is ThreadCatalogV3["threads"][number] => (
   isRecord(value) && isThread({ ...value, manifest: legacyLaunchManifest(value) })
+);
+
+const isThreadV4 = (value: unknown): value is ThreadCatalogV4["threads"][number] => (
+  isRecord(value)
+  && isLaunchManifestV4(value.manifest)
+  && isThread({ ...value, manifest: { ...value.manifest, carryBlocks: true } })
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -457,7 +483,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -518,6 +544,20 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       threads: v3.threads.map((thread) => ({
         ...structuredClone(thread),
         manifest: legacyLaunchManifest(thread as unknown as Record<string, unknown>),
+      })),
+    };
+  } else if (schemaVersion === 4) {
+    if (!value.threads.every(isThreadV4)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v4 thread records: ${path}`, path);
+    }
+    const v4 = value as unknown as ThreadCatalogV4;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: v4.workspaceId,
+      runs: structuredClone(v4.runs),
+      threads: v4.threads.map((thread) => ({
+        ...structuredClone(thread),
+        manifest: { ...structuredClone(thread.manifest), carryBlocks: true },
       })),
     };
   } else {
@@ -860,6 +900,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         role: input.role ?? null,
         model: input.model ?? null,
         manifest: {
+          carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
           scope: [...(input.scope ?? [])],
           systemPromptFragment: input.systemPromptFragment ?? null,
@@ -933,7 +974,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const countActive = async (workspaceId: string, parent: ThreadParent): Promise<number> => {
     const catalog = await catalogForScope(workspaceId, parent);
     return catalog.threads.filter((thread) => {
-      if (!parentEquals(thread.parent, parent) || thread.lifecycle !== "active") return false;
+      // User discussion threads keep an idle worker attached between messages;
+      // they are not delegated model work and must not permanently occupy the
+      // parent's implementation concurrency slots.
+      if (!parentEquals(thread.parent, parent) || thread.kind !== "implementation" || thread.lifecycle !== "active") return false;
       const run = activeRunFor(catalog, thread);
       return run?.workerState === "starting" || run?.workerState === "running";
     }).length;
@@ -1219,15 +1263,78 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return archived;
   };
 
-  const convertThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
-    mutateWorkspace(workspaceId, (catalog) => {
-      const thread = findThread(catalog, threadId);
-      if (!thread) return { value: null, changed: [], write: false };
-      thread.kind = "implementation";
-      touchThread(catalog, thread);
-      return { value: thread, changed: [thread] };
-    })
-  );
+  const convertThread = async (
+    workspaceId: string,
+    threadId: string,
+    input: {
+      model?: { providerId: string; modelId: string };
+      scope: string[];
+      systemPromptFragment?: string;
+      tools: string[];
+      worktree: ThreadWorktree;
+    },
+  ): Promise<{ run: ThreadRun; thread: Thread } | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    if (thread.kind !== "discussion") throw new Error(`Thread is already an implementation thread: ${threadId}`);
+    if (thread.lifecycle !== "active") throw new Error(`Cannot convert ${thread.lifecycle} thread: ${threadId}`);
+    const previous = activeRunFor(catalog, thread);
+    if (!previous || previous.outcome !== null || !previous.sessionId) {
+      throw new Error(`Discussion thread has no live Pi session: ${threadId}`);
+    }
+
+    const timestamp = nowISO();
+    previous.workerState = "exited";
+    previous.outcome = "success";
+    previous.exitReason = "converted to implementation";
+    previous.endedAt = timestamp;
+    previous.lastActivityAt = timestamp;
+
+    const attempt = catalog.runs
+      .filter((candidate) => candidate.threadId === threadId)
+      .reduce((maximum, candidate) => Math.max(maximum, candidate.attempt), 0) + 1;
+    const run: ThreadRun = {
+      id: `run-${randomUUID()}`,
+      threadId,
+      attempt,
+      runtimeId: previous.runtimeId,
+      // The conversation is intentionally retained across the worker restart.
+      // Persisting its id here also makes a host crash in the conversion window
+      // recoverable through the ordinary lost-Run reconciliation path.
+      sessionId: previous.sessionId,
+      workerState: "starting",
+      outcome: null,
+      exitReason: null,
+      tokens: { input: 0, output: 0, cacheRead: 0 },
+      costUsd: null,
+      steps: 0,
+      lastToolCall: null,
+      startedAt: timestamp,
+      lastActivityAt: timestamp,
+      endedAt: null,
+    };
+    catalog.runs.push(run);
+
+    thread.kind = "implementation";
+    thread.model = input.model ?? thread.model;
+    thread.manifest = {
+      ...thread.manifest,
+      scope: [...input.scope],
+      systemPromptFragment: input.systemPromptFragment ?? null,
+      tools: [...new Set(input.tools)],
+      worktree: "isolated",
+    };
+    thread.worktree = structuredClone(input.worktree);
+    thread.lifecycle = "active";
+    thread.attention = "none";
+    thread.waitingFor = null;
+    thread.integration = "none";
+    thread.diffStats = null;
+    thread.report = null;
+    thread.activeRunId = run.id;
+    touchThread(catalog, thread);
+    return { value: { thread, run }, changed: [thread] };
+  });
 
   const mergeThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
     setIntegration(workspaceId, threadId, "merged")

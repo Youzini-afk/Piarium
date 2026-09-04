@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
-import { createThreadRuntime, type ThreadSessionAdapter } from "./thread-runtime.js";
+import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
@@ -93,6 +93,7 @@ describe("thread runtime", () => {
   let runtime: ReturnType<typeof createThreadRuntime>;
   let sent: string[];
   let blocksBySession: Map<string, Array<{ label: string; content: string }> | null>;
+  let prepareWorktree: ThreadRuntimeOptions["worktrees"]["prepare"];
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "thread-runtime-"));
@@ -112,11 +113,25 @@ describe("thread runtime", () => {
       send: vi.fn(async (_sessionId, text) => { sent.push(text); }),
       abort: vi.fn(async () => {}),
       close: vi.fn(async () => {}),
+      snapshot: vi.fn(async (sessionId) => ({
+        ...snapshot(sessionId, sessionId === "parent-1" ? "/workspace" : "/workspace/thread"),
+        activeTools: sessionId === "parent-1"
+          ? ["read", "grep", "edit", "write", "bash", "dispatch"]
+          : ["read", "grep"],
+      })),
       summary: vi.fn(async (sessionId) => summary(sessionId)),
       stats: vi.fn(async () => stats),
-      entries: vi.fn(async (): Promise<SessionEntriesResult> => ({
+      entries: vi.fn(async (sessionId, scope = "branch"): Promise<SessionEntriesResult> => sessionId === "parent-1" ? ({
+        sessionId,
+        scope,
+        leafId: "parent-entry-2",
+        entries: [
+          { id: "parent-entry-1", parentId: null, timestamp: "2026-09-04T00:00:00.000Z", type: "message", message: { role: "user", content: "Could this use the existing seam?", timestamp: 0 } },
+          { id: "parent-entry-2", parentId: "parent-entry-1", timestamp: "2026-09-04T00:01:00.000Z", type: "message", message: assistantMessage("Yes, preserve the seam.") },
+        ],
+      }) : ({
         sessionId: "child-1",
-        scope: "branch",
+        scope,
         leafId: "entry-2",
         entries: [
           { id: "entry-1", parentId: null, timestamp: "2026-09-04T00:00:00.000Z", type: "message", message: { role: "user", content: "task", timestamp: 0 } },
@@ -124,6 +139,9 @@ describe("thread runtime", () => {
         ],
       })),
     };
+    prepareWorktree = vi.fn(async (input: { mode: string }) => input.mode === "none"
+      ? { cwd: "/workspace", worktree: null }
+      : { cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }) as ThreadRuntimeOptions["worktrees"]["prepare"];
     runtime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
@@ -131,7 +149,7 @@ describe("thread runtime", () => {
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       readBlocks: async (sessionId) => blocksBySession.get(sessionId) ?? null,
       worktrees: {
-        prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
+        prepare: prepareWorktree,
         snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
         merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
@@ -178,6 +196,125 @@ describe("thread runtime", () => {
     blocksBySession.set("parent-1", null);
     await start();
     expect(sent[0]).toContain('<parent-blocks status="unavailable" />');
+  });
+
+  it("opens a read-only discussion from a persisted parent message and keeps the session alive between turns", async () => {
+    const created = await runtime.createDiscussion({
+      parentSessionId: "parent-1",
+      entryId: "parent-entry-2",
+    });
+
+    expect(created.thread).toMatchObject({
+      parent: PARENT,
+      forkPoint: { entryId: "parent-entry-2" },
+      brief: "Yes, preserve the seam.",
+      kind: "discussion",
+      createdBy: "user",
+      lifecycle: "active",
+      manifest: { carryBlocks: true, tools: ["read", "grep"], worktree: "none" },
+      worktree: null,
+    });
+    expect(prepareWorktree).toHaveBeenCalledWith(expect.objectContaining({ mode: "none", sourceRoot: "/workspace" }));
+    expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/workspace",
+      parentSession: "/sessions/parent-1.jsonl",
+      tools: ["read", "grep"],
+    }));
+    expect(sent[0]).toContain("Yes, preserve the seam.");
+    expect(sent[0]).toContain("- [ ] finish the feature");
+
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Let's discuss it")], willRetry: false } } },
+    });
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await runtime.drain();
+
+    expect(await registry.getThread(WORKSPACE, PARENT, created.thread.id)).toMatchObject({
+      lifecycle: "active",
+      attention: "user",
+      waitingFor: { kind: "user", text: "Ready for the next discussion message" },
+      report: null,
+    });
+    expect(await registry.getActiveRun(WORKSPACE, created.thread.id)).toMatchObject({
+      workerState: "running",
+      outcome: null,
+      tokens: { input: 100, output: 20, cacheRead: 30 },
+    });
+    expect(sessionAdapter.close).not.toHaveBeenCalled();
+    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(0);
+
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "message_start" } } },
+    });
+    await runtime.drain();
+    expect(await registry.getThread(WORKSPACE, PARENT, created.thread.id)).toMatchObject({
+      attention: "none",
+      waitingFor: null,
+    });
+  });
+
+  it("can omit the parent memory-block snapshot from a user discussion", async () => {
+    const created = await runtime.createDiscussion({
+      parentSessionId: "parent-1",
+      entryId: "parent-entry-1",
+      carryBlocks: false,
+    });
+    expect(created.thread.manifest.carryBlocks).toBe(false);
+    expect(sent[0]).not.toContain("parent-blocks");
+    expect(sent[0]).not.toContain("finish the feature");
+  });
+
+  it("does not create a thread from a stale or off-branch message id", async () => {
+    await expect(runtime.createDiscussion({
+      parentSessionId: "parent-1",
+      entryId: "entry-from-another-branch",
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(await registry.listThreads(WORKSPACE, PARENT)).toEqual([]);
+  });
+
+  it("converts an idle discussion into a new implementation Run on the same durable session", async () => {
+    const created = await runtime.createDiscussion({
+      parentSessionId: "parent-1",
+      entryId: "parent-entry-2",
+    });
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await runtime.drain();
+
+    const converted = await runtime.convertDiscussion({
+      parentSessionId: "parent-1",
+      threadId: created.thread.id,
+    });
+    const runs = await registry.listRuns(WORKSPACE, created.thread.id);
+
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toMatchObject({ outcome: "success", exitReason: "converted to implementation", sessionId: "child-1" });
+    expect(runs[1]).toMatchObject({ attempt: 2, outcome: null, workerState: "running", sessionId: "child-1" });
+    expect(converted.thread).toMatchObject({
+      kind: "implementation",
+      lifecycle: "active",
+      attention: "none",
+      worktree: { path: "/workspace/thread", base: "base" },
+      manifest: { tools: ["read", "grep", "edit", "write", "bash"], worktree: "isolated" },
+    });
+    expect(sessionAdapter.close).toHaveBeenCalledWith("child-1");
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/workspace/thread",
+      sessionId: "child-1",
+      tools: ["read", "grep", "edit", "write", "bash"],
+    }));
+    expect(sent.at(-1)).toContain("converted this discussion into an implementation thread");
   });
 
   it("projects agent settlement into metrics, a durable transcript ref, and a report", async () => {

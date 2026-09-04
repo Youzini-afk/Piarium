@@ -542,7 +542,8 @@ last checkpoint: 2026-09-03T10:12Z
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
 已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor；父 Zone 2 已接 queued/active 快照与
 settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快照，settle 持久化 child blocks 与结构化 deviations/unresolved。
-未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收的 UI/归档纵切、窄屏与讨论线。child 结果已先提交到持久分支；
+未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收的 UI/归档纵切与时间线线程卡片。窄屏投影、用户讨论线及转实现
+纵切已接通；child 结果已先提交到持久分支；
 旧 role budget 数字没有执行原语或定标依据，
 已按 D-056 删除而非升级成硬停止。
 3.1 的 file/symbol/defines 已从 Documents/LSP 写入真实图；3.2 / 3.3 / 3.7 仍只是 `implemented`。
@@ -803,9 +804,11 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
   归档 / 恢复。
 - 判断要点：这是让线程模型对用户"存在"的那一半，没有它 9.3 只是 agent 之间的协议。侧栏样式、徽标形状自己定；**边界**是
   子线程消息不进父正文、面板与 agent 读同一份状态、讨论线零成本可丢。
-- **状态（2026-09-04）**：父 session state 已包含 threads/blocks/knowledge review；桌面用右 rail，`xl` 以下用现有
-  `MobileOverlayPanel` 和带实时数量的入口，共用同一加载/SSE/draft/action 状态。仍缺时间线线程卡片、用户“从这里开线”与讨论线
-  转实现线（D-062）。
+- **状态（2026-09-05）**：父 session state 已包含 threads/blocks/knowledge review；桌面用右 rail，`xl` 以下用现有
+  `MobileOverlayPanel` 和带实时数量的入口，共用同一加载/SSE/draft/action 状态。持久 user/assistant 消息菜单可创建默认携 blocks
+  的只读讨论线，也可显式不携带；Host 从可信 session 解析 workspace/父边/fork point。讨论回答后保持同一会话等待用户，侧栏可将
+  空闲讨论线转换为 isolated 实现线；转换新建 Run、重构工具边界但沿用同一 session/transcript。真实 Pi faux-provider 测试覆盖
+  “开、聊、转实现、继续回答”。仍缺时间线线程卡片和归档/恢复 UI（D-063）。
 
 ### 阶段 3 完成标准
 

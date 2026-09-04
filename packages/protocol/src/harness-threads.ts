@@ -54,6 +54,7 @@ export interface ThreadWorktree {
 
 /** Immutable launch inputs captured when the Thread is created. */
 export interface ThreadLaunchManifest {
+  carryBlocks: boolean;
   concurrency: number;
   scope: string[];
   systemPromptFragment: string | null;

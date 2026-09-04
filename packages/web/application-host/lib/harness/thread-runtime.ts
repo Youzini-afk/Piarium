@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto";
 import type {
   PiMessage,
+  PiSessionMessageEntry,
   SessionEntriesResult,
   SessionSnapshot,
   SessionStats,
   SessionSummary,
+  Thread,
   ThreadParent,
   ThreadReport,
+  ThreadRun,
   ThreadRunOutcome,
 } from "@piarium/protocol";
+import { HARNESS_TOOL_META } from "@piarium/protocol";
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 
@@ -27,9 +31,10 @@ export interface ThreadSessionAdapter {
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
   close(sessionId: string): Promise<void>;
+  snapshot(sessionId: string): Promise<SessionSnapshot>;
   summary(sessionId: string): Promise<SessionSummary>;
   stats(sessionId: string): Promise<SessionStats>;
-  entries(sessionId: string): Promise<SessionEntriesResult>;
+  entries(sessionId: string, scope?: "branch" | "all"): Promise<SessionEntriesResult>;
 }
 
 export interface ThreadRuntimeOptions {
@@ -57,12 +62,38 @@ interface RuntimeBinding {
   runId: string;
   sessionId: string;
   cwd: string;
+  kind: Thread["kind"];
   providerId: string | null;
   baseline: {
     cost: number;
     toolCalls: number;
     tokens: { input: number; output: number; cacheRead: number };
   };
+}
+
+export type ThreadRuntimeErrorCode = "conflict" | "invalid-request" | "not-found" | "unavailable";
+
+export class ThreadRuntimeError extends Error {
+  readonly code: ThreadRuntimeErrorCode;
+
+  constructor(code: ThreadRuntimeErrorCode, message: string, options: { cause?: unknown } = {}) {
+    super(message, options);
+    this.name = "ThreadRuntimeError";
+    this.code = code;
+  }
+}
+
+export interface ThreadSessionScope {
+  parent: ThreadParent;
+  snapshot: SessionSnapshot | null;
+  workspaceId: string;
+}
+
+export interface ThreadMutationSnapshot {
+  activeRun: ThreadRun;
+  parent: ThreadParent;
+  thread: Thread;
+  workspaceId: string;
 }
 
 interface AgentEndState {
@@ -87,6 +118,19 @@ const recordOf = (value: unknown): Record<string, unknown> => (
 
 const LOOP_WINDOW = 6;
 const DEFAULT_STALLED_AFTER_MS = 300_000;
+const DISCUSSION_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "glob",
+  "explore",
+  "related",
+  "recall",
+  "webfetch",
+  "websearch",
+]);
+const THREAD_CONTROL_TOOLS = new Set(["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"]);
 
 const toolSignature = (name: unknown, args: unknown): string => createHash("sha256")
   .update(typeof name === "string" ? name : "unknown")
@@ -177,6 +221,26 @@ const parentBlocksText = (blocks: Array<{ label: string; content: string }> | nu
   ].join("\n");
 };
 
+const entryText = (entry: PiSessionMessageEntry): string => {
+  if (entry.message.role === "user" || entry.message.role === "custom") {
+    const content = entry.message.content;
+    if (typeof content === "string") return content.trim();
+    return content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (entry.message.role === "assistant") {
+    return entry.message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+};
+
 const initialPrompt = (
   input: SpawnThreadRunInput,
   parentBlocks?: Array<{ label: string; content: string }> | null,
@@ -191,6 +255,18 @@ const initialPrompt = (
   "",
   "Task:",
   input.brief,
+].filter((line): line is string => line !== null).join("\n");
+
+const discussionPrompt = (
+  input: SpawnThreadRunInput,
+  parentBlocks?: Array<{ label: string; content: string }> | null,
+): string => [
+  "Piarium opened a user discussion thread from one persisted parent-conversation message.",
+  "Discuss the starting point with the user. This thread is read-only: inspect material when useful, but do not change workspace files or start implementation work.",
+  parentBlocksText(parentBlocks),
+  `<parent-message entry-id="${input.forkPoint?.entryId ?? "unknown"}" note="Snapshot from the parent conversation; the parent may have progressed.">`,
+  input.brief,
+  "</parent-message>",
 ].filter((line): line is string => line !== null).join("\n");
 
 export function createThreadRuntime(options: ThreadRuntimeOptions) {
@@ -221,7 +297,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     eventTails.set(threadId, tracked);
   };
 
-  const parentSession = async (workspaceId: string, parent: ThreadParent): Promise<{ id: string; file: string }> => {
+  const parentSession = async (workspaceId: string, parent: ThreadParent): Promise<{ id: string; file: string; cwd: string }> => {
     let sessionId: string;
     if (parent.kind === "session") sessionId = parent.id;
     else {
@@ -231,7 +307,40 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     const summary = await options.sessions.summary(sessionId);
     if (!summary.sessionFile) throw new Error(`Parent Pi session is not persisted: ${sessionId}`);
-    return { id: sessionId, file: summary.sessionFile };
+    return { id: sessionId, file: summary.sessionFile, cwd: summary.cwd };
+  };
+
+  const scopeForSession = async (sessionId: string): Promise<ThreadSessionScope> => {
+    let snapshot: SessionSnapshot | null = null;
+    let summary: SessionSummary | null = null;
+    try {
+      snapshot = await options.sessions.snapshot(sessionId);
+    } catch (snapshotError) {
+      try {
+        summary = await options.sessions.summary(sessionId);
+      } catch {
+        throw snapshotError;
+      }
+    }
+    const bound = bindingsBySession.get(sessionId);
+    if (bound) {
+      return {
+        workspaceId: bound.workspaceId,
+        parent: { kind: "thread", id: bound.threadId },
+        snapshot,
+      };
+    }
+    const workspace = snapshot?.workspace ?? summary?.workspace;
+    if (workspace?.kind !== "workspace") {
+      throw new ThreadRuntimeError("unavailable", "Discussion threads require a project workspace");
+    }
+    const workspaceId = workspace.authorityId ?? workspace.id;
+    const ownerThread = await options.registry.getThreadForSession(workspaceId, sessionId);
+    return {
+      workspaceId,
+      parent: ownerThread ? { kind: "thread", id: ownerThread.id } : { kind: "session", id: sessionId },
+      snapshot,
+    };
   };
 
   const bind = (binding: RuntimeBinding): void => {
@@ -311,7 +420,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const spawn = async (input: SpawnThreadRunInput): Promise<{ sessionId: string }> => {
     const parent = await parentSession(input.workspaceId, input.parent);
     let parentBlocks: Array<{ label: string; content: string }> | null | undefined;
-    if (options.readBlocks) {
+    if (input.carryBlocks !== false && options.readBlocks) {
       try {
         parentBlocks = await options.readBlocks(parent.id);
       } catch (error) {
@@ -319,7 +428,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         reportError(error);
       }
     }
-    const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+    const sourceRoot = input.kind === "discussion"
+      ? parent.cwd
+      : await options.resolveWorkspaceRoot(input.workspaceId);
     const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     const prepared = existing?.worktree
       ? { cwd: existing.worktree.path, worktree: existing.worktree }
@@ -350,13 +461,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         runId: input.runId,
         sessionId,
         cwd: prepared.cwd,
+        kind: input.kind,
         providerId: input.model?.providerId ?? null,
         baseline: { cost: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0 } },
       };
       bind(binding);
       scheduleStallTimer(binding);
       await options.registry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
-      await options.sessions.prompt(sessionId, initialPrompt(input, parentBlocks));
+      await options.sessions.prompt(
+        sessionId,
+        input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks),
+      );
       return { sessionId };
     } catch (error) {
       if (sessionId) {
@@ -371,6 +486,99 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (binding) await closeBinding(binding, false);
       }
       throw error;
+    }
+  };
+
+  const updateRunMetrics = async (binding: RuntimeBinding): Promise<void> => {
+    const stats = await options.sessions.stats(binding.sessionId);
+    await options.registry.updateRunProgress(binding.workspaceId, binding.threadId, {
+      steps: Math.max(0, stats.toolCalls - binding.baseline.toolCalls),
+      tokens: {
+        input: Math.max(0, stats.tokens.input - binding.baseline.tokens.input),
+        output: Math.max(0, stats.tokens.output - binding.baseline.tokens.output),
+        cacheRead: Math.max(0, stats.tokens.cacheRead - binding.baseline.tokens.cacheRead),
+      },
+      costUsd: Math.max(0, stats.cost - binding.baseline.cost),
+    });
+  };
+
+  const createDiscussion = async (input: {
+    carryBlocks?: boolean;
+    entryId: string;
+    parentSessionId: string;
+  }): Promise<ThreadMutationSnapshot> => {
+    const scope = await scopeForSession(input.parentSessionId);
+    if (!scope.snapshot) {
+      throw new ThreadRuntimeError("unavailable", "Open the parent Pi session before creating a discussion thread");
+    }
+    const parentEntries = await options.sessions.entries(input.parentSessionId, "branch");
+    const selected = parentEntries.entries.find((entry) => entry.id === input.entryId);
+    if (!selected) {
+      throw new ThreadRuntimeError("conflict", "The selected message is no longer on the active conversation branch");
+    }
+    if (selected.type !== "message" || (selected.message.role !== "user" && selected.message.role !== "assistant")) {
+      throw new ThreadRuntimeError("invalid-request", "A discussion thread can only start from a user or assistant message");
+    }
+    const brief = entryText(selected);
+    if (!brief) throw new ThreadRuntimeError("invalid-request", "The selected message has no text to discuss");
+    const tools = scope.snapshot.activeTools.filter((tool) => DISCUSSION_TOOLS.has(tool));
+    const model = scope.snapshot.model
+      ? { providerId: scope.snapshot.model.provider, modelId: scope.snapshot.model.id }
+      : undefined;
+    const createInput: CreateThreadInput = {
+      workspaceId: scope.workspaceId,
+      parent: scope.parent,
+      brief,
+      kind: "discussion",
+      createdBy: "user",
+      forkPoint: { entryId: input.entryId },
+      carryBlocks: input.carryBlocks ?? true,
+      concurrency: options.registry.maxConcurrency,
+      worktree: "none",
+      ...(model ? { model } : {}),
+      tools,
+      permissions: {},
+      autoRun: true,
+    };
+    const thread = await options.registry.createThread(createInput);
+    const run = await options.registry.startRun(scope.workspaceId, thread.id);
+    try {
+      await spawn({ ...createInput, threadId: thread.id, runId: run.id });
+    } catch (error) {
+      await options.registry.endRun(
+        scope.workspaceId,
+        thread.id,
+        run.id,
+        "failure",
+        `discussion start failed: ${error instanceof Error ? error.message : String(error)}`,
+      ).catch(reportError);
+      throw error;
+    }
+    const [current, activeRun] = await Promise.all([
+      options.registry.getThread(scope.workspaceId, scope.parent, thread.id),
+      options.registry.getActiveRun(scope.workspaceId, thread.id),
+    ]);
+    if (!current || !activeRun) throw new Error(`Discussion thread disappeared after creation: ${thread.id}`);
+    return { workspaceId: scope.workspaceId, parent: scope.parent, thread: current, activeRun };
+  };
+
+  const settleDiscussionTurn = async (binding: RuntimeBinding): Promise<void> => {
+    clearStallTimer(binding.sessionId);
+    lastAgentEnd.delete(binding.sessionId);
+    try {
+      await updateRunMetrics(binding);
+    } catch (error) {
+      reportError(error);
+    }
+    const thread = await options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId);
+    if (thread?.lifecycle === "active" && thread.attention === "none") {
+      waitingSessions.add(binding.sessionId);
+      await options.registry.setAttention(
+        binding.workspaceId,
+        binding.threadId,
+        "user",
+        { kind: "user", text: "Ready for the next discussion message" },
+      );
     }
   };
 
@@ -594,7 +802,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       });
       return;
     }
-    if (agentEvent.type === "agent_settled") enqueue(binding.threadId, () => settle(binding));
+    if (agentEvent.type === "agent_settled") {
+      enqueue(
+        binding.threadId,
+        () => binding.kind === "discussion" ? settleDiscussionTurn(binding) : settle(binding),
+      );
+    }
   };
 
   const resumeLostForParent = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
@@ -618,6 +831,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               ...(thread.role ? { role: thread.role } : {}),
               kind: thread.kind,
               createdBy: thread.createdBy,
+              carryBlocks: thread.manifest.carryBlocks,
               concurrency: thread.manifest.concurrency,
               autoRun: true,
               worktree: thread.manifest.worktree,
@@ -654,6 +868,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             runId: run.id,
             sessionId: snapshot.sessionId,
             cwd,
+            kind: thread.kind,
             providerId: thread.model?.providerId ?? null,
             baseline: {
               cost: baselineStats?.cost ?? 0,
@@ -666,12 +881,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             },
           };
           bind(binding);
-          scheduleStallTimer(binding);
+          if (thread.attention === "user" || thread.attention === "permission") {
+            waitingSessions.add(snapshot.sessionId);
+          }
           await options.registry.markRunRunning(workspaceId, thread.id, run.id, snapshot.sessionId);
-          await options.sessions.send(
-            snapshot.sessionId,
-            "The previous worker was interrupted. Continue from the last completed session entry; do not replay an uncertain tool side effect. Re-check the workspace before acting.",
-          );
+          if (thread.kind === "implementation") {
+            scheduleStallTimer(binding);
+            await options.sessions.prompt(
+              snapshot.sessionId,
+              "The previous worker was interrupted. Continue from the last completed session entry; do not replay an uncertain tool side effect. Re-check the workspace before acting.",
+            );
+          }
         } catch (error) {
           await options.registry.endRun(
             workspaceId,
@@ -696,8 +916,164 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  const convertDiscussion = async (input: {
+    parentSessionId: string;
+    threadId: string;
+  }): Promise<ThreadMutationSnapshot> => {
+    const scope = await scopeForSession(input.parentSessionId);
+    if (!scope.snapshot) {
+      throw new ThreadRuntimeError("unavailable", "Open the parent Pi session before converting its discussion thread");
+    }
+    const thread = await options.registry.getThread(scope.workspaceId, scope.parent, input.threadId);
+    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
+    if (thread.kind !== "discussion") {
+      throw new ThreadRuntimeError("conflict", "This thread is already an implementation thread");
+    }
+    if (thread.lifecycle !== "active") {
+      throw new ThreadRuntimeError("conflict", `Only an active discussion can be converted (current state: ${thread.lifecycle})`);
+    }
+    const currentRun = await options.registry.getActiveRun(scope.workspaceId, thread.id);
+    if (!currentRun?.sessionId || currentRun.workerState !== "running" || currentRun.outcome !== null) {
+      throw new ThreadRuntimeError("conflict", "The discussion session is not currently available for conversion");
+    }
+    const binding = bindingsBySession.get(currentRun.sessionId);
+    if (!binding || binding.runId !== currentRun.id || binding.kind !== "discussion") {
+      throw new ThreadRuntimeError("unavailable", "The discussion worker must be restored before it can be converted");
+    }
+    const childSnapshot = await options.sessions.snapshot(currentRun.sessionId);
+    if (childSnapshot.busy || childSnapshot.isStreaming || childSnapshot.isCompacting) {
+      throw new ThreadRuntimeError("conflict", "Wait for the current discussion response to finish before converting it");
+    }
+
+    const tools = scope.snapshot.activeTools.filter((tool) => !THREAD_CONTROL_TOOLS.has(tool));
+    const hasMutationTool = tools.some((tool) => {
+      const mutation = HARNESS_TOOL_META[tool]?.mutation;
+      return mutation === "journaled" || mutation === "process";
+    });
+    if (!hasMutationTool) {
+      throw new ThreadRuntimeError(
+        "unavailable",
+        "The parent session has no implementation-capable tools to grant this thread",
+      );
+    }
+
+    try {
+      await updateRunMetrics(binding);
+    } catch (error) {
+      reportError(error);
+    }
+    const prepared = await options.worktrees.prepare({
+      mode: "isolated",
+      sourceRoot: childSnapshot.cwd,
+      threadId: thread.id,
+      signal: abortController.signal,
+    });
+    if (!prepared.worktree) throw new Error("Implementation conversion did not create an isolated worktree");
+    const model = thread.model ?? (childSnapshot.model
+      ? { providerId: childSnapshot.model.provider, modelId: childSnapshot.model.id }
+      : undefined);
+    const converted = await options.registry.convertThread(scope.workspaceId, thread.id, {
+      ...(model ? { model } : {}),
+      scope: thread.manifest.scope,
+      tools,
+      worktree: prepared.worktree,
+    });
+    if (!converted) throw new ThreadRuntimeError("not-found", `Thread not found: ${thread.id}`);
+
+    terminatingSessions.add(binding.sessionId);
+    try {
+      await options.sessions.close(binding.sessionId);
+    } catch (error) {
+      await options.registry.endRun(
+        scope.workspaceId,
+        thread.id,
+        converted.run.id,
+        "lost",
+        `worker restart failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
+      ).catch(reportError);
+      throw error;
+    } finally {
+      if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
+      if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
+      lastAgentEnd.delete(binding.sessionId);
+      clearStallTimer(binding.sessionId);
+      stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
+      waitingSessions.delete(binding.sessionId);
+      terminatingSessions.delete(binding.sessionId);
+    }
+
+    let opened: SessionSnapshot;
+    try {
+      const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
+      opened = await options.sessions.open({
+        cwd: prepared.cwd,
+        ...(model ? { model } : {}),
+        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+        sessionId: currentRun.sessionId,
+        tools,
+        workspaceId: runtimeWorkspaceId,
+      });
+    } catch (error) {
+      await options.registry.endRun(
+        scope.workspaceId,
+        thread.id,
+        converted.run.id,
+        "lost",
+        `worker reopen failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
+      ).catch(reportError);
+      void resumeLostForParent(scope.workspaceId, scope.parent).catch(reportError);
+      throw error;
+    }
+
+    const baselineStats = await options.sessions.stats(opened.sessionId).catch((error) => {
+      reportError(error);
+      return null;
+    });
+    const implementationBinding: RuntimeBinding = {
+      workspaceId: scope.workspaceId,
+      parent: scope.parent,
+      threadId: thread.id,
+      runId: converted.run.id,
+      sessionId: opened.sessionId,
+      cwd: prepared.cwd,
+      kind: "implementation",
+      providerId: model?.providerId ?? null,
+      baseline: {
+        cost: baselineStats?.cost ?? 0,
+        toolCalls: baselineStats?.toolCalls ?? 0,
+        tokens: {
+          input: baselineStats?.tokens.input ?? 0,
+          output: baselineStats?.tokens.output ?? 0,
+          cacheRead: baselineStats?.tokens.cacheRead ?? 0,
+        },
+      },
+    };
+    bind(implementationBinding);
+    await options.registry.markRunRunning(scope.workspaceId, thread.id, converted.run.id, opened.sessionId);
+    try {
+      scheduleStallTimer(implementationBinding);
+      await options.sessions.prompt(
+        opened.sessionId,
+        "The user converted this discussion into an implementation thread. Implement the approach agreed in the conversation, re-checking the current worktree before making changes.",
+      );
+    } catch (error) {
+      clearStallTimer(opened.sessionId);
+      reportError(error);
+    }
+
+    const [current, activeRun] = await Promise.all([
+      options.registry.getThread(scope.workspaceId, scope.parent, thread.id),
+      options.registry.getActiveRun(scope.workspaceId, thread.id),
+    ]);
+    if (!current || !activeRun) throw new Error(`Converted thread disappeared: ${thread.id}`);
+    return { workspaceId: scope.workspaceId, parent: scope.parent, thread: current, activeRun };
+  };
+
   const send = async (sessionId: string, message: string, from: "user" | "parent-agent"): Promise<void> => {
-    await options.sessions.send(sessionId, `${from === "user" ? "Message from the user" : "Message from the parent agent"}:\n${message}`);
+    const text = `${from === "user" ? "Message from the user" : "Message from the parent agent"}:\n${message}`;
+    const snapshot = await options.sessions.snapshot(sessionId);
+    if (snapshot.busy || snapshot.isStreaming || snapshot.isCompacting) await options.sessions.send(sessionId, text);
+    else await options.sessions.prompt(sessionId, text);
   };
 
   const kill = async (threadId: string): Promise<void> => {
@@ -762,7 +1138,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     waitingSessions.clear();
   };
 
-  return { spawn, processEvent, resumeLostForParent, send, kill, merge, drain, isThreadSession, dispose };
+  return {
+    spawn,
+    createDiscussion,
+    convertDiscussion,
+    scopeForSession,
+    processEvent,
+    resumeLostForParent,
+    send,
+    kill,
+    merge,
+    drain,
+    isThreadSession,
+    dispose,
+  };
 }
 
 export type ThreadRuntime = ReturnType<typeof createThreadRuntime>;

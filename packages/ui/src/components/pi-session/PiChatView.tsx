@@ -4,6 +4,7 @@ import type {
   WorkspaceCombinedRecoveryPlan,
 } from '@piarium/extension-contract';
 import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
+import { runtimeFetch } from '@piarium/application-client';
 import type {
   ModelDescriptor,
   PiSessionMessageEntry,
@@ -70,6 +71,7 @@ import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
+import { parseHarnessThreadMutation } from './harnessThreadPresentation';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -170,6 +172,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const createSession = usePiSessionStore((state) => state.createSession);
+  const openSession = usePiSessionStore((state) => state.openSession);
   const beginSubmission = usePiSessionStore((state) => state.beginSubmission);
   const clearQueue = usePiSessionStore((state) => state.clearQueue);
   const clearSubmission = usePiSessionStore((state) => state.clearSubmission);
@@ -229,6 +232,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [recoveryPlan, setRecoveryPlan] = React.useState<WorkspaceCombinedRecoveryPlan | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
+  const [threadBusyEntryId, setThreadBusyEntryId] = React.useState<string | null>(null);
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const submission = currentRecord?.submission;
@@ -583,6 +587,51 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     }
   }, [currentSessionId, forkBusyEntryId, forkSession, t]);
 
+  const handleOpenThread = React.useCallback(async (
+    entry: PiSessionMessageEntry,
+    options: { carryBlocks: boolean },
+  ) => {
+    const parentSessionId = currentSessionId;
+    const parentSnapshot = currentRecord?.snapshot;
+    if (!parentSessionId || !parentSnapshot || parentSnapshot.workspace?.kind !== 'workspace' || threadBusyEntryId) return;
+    setThreadBusyEntryId(entry.id);
+    try {
+      const response = await runtimeFetch(
+        `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryId: entry.id, carryBlocks: options.carryBlocks }),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+            ? body.error
+            : t('chat.messageBody.actions.openThreadFailed'),
+        );
+      }
+      const created = parseHarnessThreadMutation(body);
+      const childSessionId = created.activeRun?.sessionId;
+      if (!childSessionId) throw new Error(t('chat.messageBody.actions.openThreadFailed'));
+      // Do not steal focus if the user navigated elsewhere while the child
+      // session was being created. The thread remains visible in session state.
+      if (usePiSessionStore.getState().currentSessionId !== parentSessionId) return;
+      await openSession({
+        cwd: parentSnapshot.cwd,
+        sessionId: childSessionId,
+        ...(created.thread.model ? { model: created.thread.model } : {}),
+        ...(created.thread.manifest.scope.length > 0 ? { scope: created.thread.manifest.scope } : {}),
+        tools: created.thread.manifest.tools,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('chat.messageBody.actions.openThreadFailed'));
+    } finally {
+      setThreadBusyEntryId(null);
+    }
+  }, [currentRecord?.snapshot, currentSessionId, openSession, t, threadBusyEntryId]);
+
   const sentMessageHistory = React.useMemo(() => (
     projectPiMessageHistory(currentRecord?.branchEntries?.entries ?? [])
   ), [currentRecord?.branchEntries?.entries]);
@@ -782,9 +831,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
                   forkBusyEntryId={forkBusyEntryId}
                   onFork={previewOnly ? undefined : handleFork}
+                  onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                   sessionId={currentSessionId}
+                  threadBusyEntryId={threadBusyEntryId}
                   toolExecutions={currentRecord.toolExecutions}
                 />
               </React.Suspense>
