@@ -99,6 +99,23 @@ describe("harness counter tracker", () => {
     assert.equal(counters.cacheHitRatio, null);
   });
 
+  it("counts default observation views without counting explicit output slices", () => {
+    const tracker = createHarnessCounterTracker();
+    const { pi, emit } = createFakePi();
+    tracker.extension(pi);
+    const result = { type: "tool_result", content: [], isError: false };
+    emit("tool_result", { ...result, toolName: "threads", input: {} });
+    emit("tool_result", { ...result, toolName: "wait", input: {} });
+    emit("tool_result", { ...result, toolName: "read_thread", input: { id: "t1" } });
+    emit("tool_result", { ...result, toolName: "diagnostics", input: { path: "a.ts" } });
+    emit("tool_result", { ...result, toolName: "diagnostics", input: { path: "a.ts", full: true } });
+    emit("tool_result", { ...result, toolName: "get_output", input: { handle: "sh_1" } });
+    emit("tool_result", { ...result, toolName: "get_output", input: { handle: "sh_1", offset: 0 } });
+    emit("tool_result", { ...result, toolName: "get_output", input: { handle: "out_static" } });
+    emit("tool_result", { ...result, toolName: "read", input: { path: "a.ts" } });
+    assert.equal(tracker.getCounters().observationCalls, 5);
+  });
+
   it("reset clears all counters", () => {
     const tracker = createHarnessCounterTracker();
     const { pi, emit } = createFakePi();
@@ -112,6 +129,7 @@ describe("harness counter tracker", () => {
     const counters = tracker.getCounters();
     assert.equal(counters.toolErrors, 0);
     assert.equal(counters.outputBytes, 0);
+    assert.equal(counters.observationCalls, 0);
     assert.equal(counters.toolRetries, 0);
   });
 });

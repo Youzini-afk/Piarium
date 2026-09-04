@@ -76,6 +76,12 @@ export type ShellExecResult =
 export interface ShellReadResult extends OutputSlice {
   running: boolean;
   exitCode?: number;
+  observation?: {
+    mode: "incremental";
+    first: boolean;
+    sinceMs?: number;
+    lastOutputAgoMs?: number;
+  };
 }
 
 export interface SearchContentParams {
@@ -114,17 +120,27 @@ export interface SearchContentResult {
   handle?: string;
 }
 
+export interface DiagnosticItem {
+  line: number;
+  character: number;
+  severity: string;
+  code?: string;
+  message: string;
+  source: string;
+}
+
 export interface DiagnosticsResult {
   status: "ready" | "pending" | "unavailable";
   snapshot?: string;
-  diagnostics: Array<{
-    line: number;
-    character: number;
-    severity: string;
-    code?: string;
-    message: string;
-    source: string;
-  }>;
+  diagnostics: DiagnosticItem[];
+  resolvedDiagnostics?: DiagnosticItem[];
+  observation?: {
+    mode: "incremental";
+    first: boolean;
+    sinceMs?: number;
+    added: number;
+    resolved: number;
+  };
   reason?: string;
 }
 
@@ -237,7 +253,7 @@ export interface HarnessServiceMap {
   "output.read": { params: { handle: string; offset?: number; length?: number }; result: OutputSlice };
   "search.content": { params: SearchContentParams; result: SearchContentResult };
   "lsp.diagnostics": { params: { path: string; afterSnapshot?: string; waitMs?: number }; result: DiagnosticsResult };
-  "lsp.diagnosticsSnapshot": { params: { path: string }; result: DiagnosticsResult };
+  "lsp.diagnosticsSnapshot": { params: { path: string; full?: boolean }; result: DiagnosticsResult };
   "lsp.symbols": { params: { path: string; query: string }; result: LspNavigationResult };
   "lsp.definition": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "lsp.references": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };

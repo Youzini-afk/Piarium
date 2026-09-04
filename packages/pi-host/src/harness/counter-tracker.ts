@@ -10,6 +10,7 @@ interface CounterState {
   toolErrors: number;
   toolRetries: number;
   outputBytes: number;
+  observationCalls: number;
   currentStep: number;
   recentToolCalls: ToolCallRecord[];
 }
@@ -18,6 +19,7 @@ export interface HarnessCounters {
   toolErrors: number;
   toolRetries: number;
   outputBytes: number;
+  observationCalls: number;
   cacheHitRatio: number | null;
 }
 
@@ -46,11 +48,25 @@ function textContentBytes(content: unknown): number {
   return total;
 }
 
+function isIncrementalObservation(toolName: string, input: unknown): boolean {
+  const params = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : null;
+  if (toolName === "threads" || toolName === "diagnostics") return params?.full !== true;
+  if (toolName === "wait" || toolName === "read_thread") return true;
+  if (toolName !== "get_output") return false;
+  return typeof params?.handle === "string"
+    && params.handle.startsWith("sh_")
+    && params.offset === undefined
+    && params.length === undefined;
+}
+
 export function createHarnessCounterTracker(): HarnessCounterTracker {
   const state: CounterState = {
     toolErrors: 0,
     toolRetries: 0,
     outputBytes: 0,
+    observationCalls: 0,
     currentStep: 0,
     recentToolCalls: [],
   };
@@ -67,6 +83,7 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
       if (event.isError) state.toolErrors += 1;
       // Count output bytes (pre-truncation)
       state.outputBytes += textContentBytes(event.content);
+      if (isIncrementalObservation(event.toolName, event.input)) state.observationCalls += 1;
 
       // Check for retries: same tool name + same args hash within 3 steps
       const argsHash = hashArgs(event.input);
@@ -89,6 +106,7 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
       toolErrors: state.toolErrors,
       toolRetries: state.toolRetries,
       outputBytes: state.outputBytes,
+      observationCalls: state.observationCalls,
       cacheHitRatio,
     };
   };
@@ -97,6 +115,7 @@ export function createHarnessCounterTracker(): HarnessCounterTracker {
     state.toolErrors = 0;
     state.toolRetries = 0;
     state.outputBytes = 0;
+    state.observationCalls = 0;
     state.currentStep = 0;
     state.recentToolCalls = [];
   };

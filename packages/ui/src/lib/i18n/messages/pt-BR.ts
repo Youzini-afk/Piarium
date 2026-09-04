@@ -1564,6 +1564,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.harness.toolErrors": "Erros de ferramentas",
   "contextSidebar.harness.toolRetries": "Chamadas repetidas",
   "contextSidebar.harness.outputBytes": "Saída das ferramentas",
+  "contextSidebar.harness.observationCalls": "Verificações de observação",
   "contextSidebar.harness.cacheHitRatio": "Acerto do cache de prompt",
   "contextSidebar.section.lastAssistantMessage": "Última mensagem do assistente",
   "contextSidebar.section.rawMessages": "Mensagens brutas",

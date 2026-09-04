@@ -1563,6 +1563,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.toolErrors': '工具错误',
   'contextSidebar.harness.toolRetries': '重复调用',
   'contextSidebar.harness.outputBytes': '工具输出量',
+  'contextSidebar.harness.observationCalls': '观察检查',
   'contextSidebar.harness.cacheHitRatio': '提示缓存命中率',
   'contextSidebar.section.lastAssistantMessage': '最近一条助手消息',
   'contextSidebar.section.rawMessages': '原始消息',

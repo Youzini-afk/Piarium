@@ -708,6 +708,31 @@ buffer ownership；直接给它补 pi-host 工具仍会是休眠实现。真实 
 
 状态：已实施
 
+### D-052 · 2026-09-04 · 3.9（Host 观察游标与后台 shell 持续采集）
+
+类型：实现澄清
+
+决定：(1) Host 以 `ObservationCursorStore` 持有 `(observerSessionId, objectKind, objectId)` 游标；会话结束与
+`compaction.after` 清该观察者的游标，后者同时清线程观察游标。Host 重启天然回到全量基线。(2) `get_output(sh_*)` 仅在
+`offset` 和 `length` 都缺席时采用增量语义；`shell.exec` 以已经返回给模型的 `outputSoFar` 字节数预置基线；任一显式分页参数都是
+随机访问且不推进游标，静态 `out_*` 始终保持分页语义。同一对象的观察原子串行，压缩/会话清理会使在途旧 epoch 失效，不能在完成后
+写回已经重置的游标。
+(3) `diagnostics(path)` 首次返回当前基线，此后按完整诊断指纹的多重集差分新增与消失项；`full: true` 返回完整快照且不推进
+增量游标。对象身份使用 Router/Documents 已授权的 canonical resource，而不是调用方原始路径。(4) 会话计数器新增
+`observationCalls`，只统计实际进入默认观察语义的调用并投影到既有 Context 侧栏。(5) PTY 命令转后台后仍由同一 supervisor
+持续收集输出、解析 cwd/exit 哨兵并关闭 writer；同一持久 shell 上仍有后台命令运行时不接受第二条命令，因为该 PTY 无法并发
+执行两个前台命令。
+
+原因：仅加游标不足以形成真实能力。旧 supervisor 在 timeout 后把 `pendingCommand` 清空，后续 PTY data 落入初始化缓冲，
+`sh_*` 的内容永远停在转后台那一刻，退出哨兵也不会再解析；旧 E2E 又把 `id` 误传给只接受 `handle` 的工具，并仅断言错误文本
+非空，形成假绿。增量状态放在 Host 而非 worker，能活过 worker 重载又不写进模型上下文；显式读取不动游标，使调试回看不会改变
+下一次默认观察的基线。
+
+影响：protocol `ShellReadResult` / `DiagnosticsResult` / `SessionStats`；Host observation store、shell supervisor、diagnostics 与 compaction
+services；pi-host 工具格式与计数器；Context sidebar；plan/status 3.9。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -765,3 +790,4 @@ buffer ownership；直接给它补 pi-host 工具仍会是休眠实现。真实 
 | D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |
 | D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |
 | D-051 | implementation | — | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |
+| D-052 | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI |

@@ -1507,6 +1507,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.toolErrors': 'ツールエラー',
   'contextSidebar.harness.toolRetries': '重複呼び出し',
   'contextSidebar.harness.outputBytes': 'ツール出力量',
+  'contextSidebar.harness.observationCalls': '観測チェック',
   'contextSidebar.harness.cacheHitRatio': 'プロンプトキャッシュ命中率',
   'contextSidebar.section.lastAssistantMessage': '最後のアシスタントメッセージ',
   'contextSidebar.section.rawMessages': '生メッセージ',

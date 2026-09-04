@@ -1514,6 +1514,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.toolErrors': '도구 오류',
   'contextSidebar.harness.toolRetries': '반복 호출',
   'contextSidebar.harness.outputBytes': '도구 출력량',
+  'contextSidebar.harness.observationCalls': '관찰 확인',
   'contextSidebar.harness.cacheHitRatio': '프롬프트 캐시 적중률',
   'contextSidebar.section.lastAssistantMessage': '마지막 어시스턴트 메시지',
   'contextSidebar.section.rawMessages': '원본 메시지',

@@ -24,8 +24,9 @@ describe('harness counter presentation', () => {
       toolErrors: 0,
       toolRetries: 2,
       outputBytes: 1536,
+      observationCalls: 4,
       cacheHitRatio: 0.8,
-    }))).toEqual({ toolErrors: 0, toolRetries: 2, outputBytes: 1536, cacheHitPercent: 80 });
+    }))).toEqual({ toolErrors: 0, toolRetries: 2, outputBytes: 1536, observationCalls: 4, cacheHitPercent: 80 });
   });
 
   it('formats byte totals with binary units', () => {

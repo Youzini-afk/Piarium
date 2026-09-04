@@ -580,6 +580,7 @@ export interface SessionStats {
   toolErrors?: number;
   toolRetries?: number;
   outputBytes?: number;
+  observationCalls?: number;
   cacheHitRatio?: number | null;
 }
 

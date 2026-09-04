@@ -1506,6 +1506,7 @@ export const dict = {
   'contextSidebar.harness.toolErrors': 'Tool errors',
   'contextSidebar.harness.toolRetries': 'Repeated calls',
   'contextSidebar.harness.outputBytes': 'Tool output',
+  'contextSidebar.harness.observationCalls': 'Observation checks',
   'contextSidebar.harness.cacheHitRatio': 'Prompt cache hit',
   'contextSidebar.section.lastAssistantMessage': 'Last Assistant Message',
   'contextSidebar.section.rawMessages': 'Raw Messages',

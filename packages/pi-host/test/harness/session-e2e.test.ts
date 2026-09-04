@@ -422,12 +422,13 @@ describe("session e2e — memory shadow extension", () => {
 });
 
 describe("session e2e — Harness counters", () => {
-  it("publishes real tool failures, retries, output bytes, and cache ratio through session stats", async () => {
+  it("publishes real tool failures, retries, output bytes, observations, and cache ratio through session stats", async () => {
     await withTempRoot("piarium-s-counters-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
+        () => fauxAssistantMessage([fauxToolCall("diagnostics", { path: "missing-counter-file.txt" })]),
         () => fauxAssistantMessage("done"),
       ]);
       const session = await setupSession({ root, faux });
@@ -439,6 +440,7 @@ describe("session e2e — Harness counters", () => {
         assert.ok((stats.toolErrors ?? 0) >= 2);
         assert.ok((stats.toolRetries ?? 0) >= 1);
         assert.ok((stats.outputBytes ?? 0) > 0);
+        assert.ok((stats.observationCalls ?? 0) >= 1);
         assert.equal(typeof stats.cacheHitRatio, "number");
       } finally {
         await session.dispose();

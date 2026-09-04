@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells } from "./shell-supervisor.js";
+import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells, type PtyProcess, type PtyProvider } from "./shell-supervisor.js";
 import { createOutputStore } from "./output-store.js";
 
 const EMPTY_DISCOVERED: DiscoveredShells = {};
@@ -158,6 +158,52 @@ describe("stripControlSequences", () => {
 
   it("handles mixed sequences", () => {
     expect(stripControlSequences("\x1b[1mbold\x1b[0m \x1b]0;title\x07 normal")).toBe("bold  normal");
+  });
+});
+
+describe("background shell output", () => {
+  it("keeps collecting output and observes the exit sentinel after a command backgrounds", async () => {
+    const dataHandlers = new Set<(data: string) => void>();
+    const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const process: PtyProcess = {
+      kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
+      onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+      onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+      resize: () => undefined,
+      write: (data) => {
+        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        if (ready) {
+          queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
+          return;
+        }
+        const token = data.match(/__PIARIUM_SENTINEL_([0-9a-f]+):B/)?.[1];
+        if (!token) return;
+        queueMicrotask(() => { for (const handler of dataHandlers) handler(`__PIARIUM_SENTINEL_${token}:B\nfirst`); });
+        setTimeout(() => {
+          for (const handler of dataHandlers) handler(` second\n__PIARIUM_SENTINEL_${token}:C:/workspace\n__PIARIUM_SENTINEL_${token}:E:0\n`);
+        }, 30);
+      },
+    };
+    const ptyProvider: PtyProvider = { backend: "fake", spawn: () => process };
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "background-test",
+      ptyProvider,
+    });
+    try {
+      const result = await supervisor.exec("slow command", { waitMs: 5 });
+      expect(result).toMatchObject({ kind: "background", id: "sh_1", outputSoFar: expect.stringContaining("first") });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const read = await supervisor.read("sh_1");
+      expect(read.text).toContain("first second");
+      expect(read).toMatchObject({ running: false, exitCode: 0 });
+      expect(read.text).not.toContain("PIARIUM_SENTINEL");
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
   });
 });
 

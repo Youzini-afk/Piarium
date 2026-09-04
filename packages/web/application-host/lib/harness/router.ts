@@ -106,6 +106,7 @@ const requestPaths = (
       : "invalid";
   }
   if (method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {
+    if (method === "lsp.diagnosticsSnapshot" && record.full !== undefined && typeof record.full !== "boolean") return "invalid";
     return typeof record.path === "string" && record.path.trim()
       ? [{ allowMissing: false, path: record.path }]
       : "invalid";

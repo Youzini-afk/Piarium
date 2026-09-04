@@ -13,6 +13,7 @@ import type { RecallToolDeps } from "./recall-tool.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { ThreadTranscriptReader } from "./thread-transcript.js";
+import { createObservationCursorStore, type ObservationCursorStore } from "./observation-cursors.js";
 import type {
   HarnessActorContext,
   HarnessActorIdentity,
@@ -63,6 +64,7 @@ export function deriveHarnessCapabilities(
 
 export interface HarnessServiceHost {
   outputStore: OutputStore;
+  observationCursors: ObservationCursorStore;
   pathLockService: PathLockService;
   searchService: HarnessSearchService;
   diagnosticsProvider: DiagnosticsProvider | null;
@@ -143,6 +145,7 @@ export interface HarnessServiceHostOptions {
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
   const outputStore = createOutputStore();
+  const observationCursors = createObservationCursorStore();
   const pathLockService = createPathLockService();
   const searchService = createHarnessSearchService({
     search: options.search,
@@ -176,7 +179,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const registerSession = (ctx: HarnessSessionContext): void => {
     const sessionId = ctx.actor.sessionId;
     const previous = sessions.get(sessionId);
-    if (previous) void previous.shellSupervisor?.dispose();
+    if (previous) {
+      void previous.shellSupervisor?.dispose();
+      observationCursors.clearKind(sessionId, "shell");
+    }
     const interpreterResult = selectInterpreter({
       platform: process.platform,
       workspaceRoot: ctx.workspaceRoot,
@@ -225,6 +231,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       sessions.delete(sessionId);
     }
     outputStore.dropSession(sessionId);
+    observationCursors.clearObserver(sessionId);
+    threadRegistry?.clearCursorsForSession(sessionId);
     pathLockService.dropSession(sessionId);
   };
 
@@ -265,6 +273,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     sessions.clear();
     await Promise.all(disposes);
     outputStore.dispose();
+    observationCursors.dispose();
     pathLockService.dispose();
     if (knowledgeStore) disposes.push(knowledgeStore.close());
     if (userKnowledgeStore) disposes.push(userKnowledgeStore.close());
@@ -273,6 +282,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   return {
     outputStore,
+    observationCursors,
     pathLockService,
     searchService,
     diagnosticsProvider,

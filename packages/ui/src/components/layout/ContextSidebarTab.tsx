@@ -290,6 +290,12 @@ export const ContextPanelContent: React.FC = () => {
                   <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatHarnessOutputBytes(harnessCounters.outputBytes, getCurrentIntlLocale())}</div>
                 </div>
               ) : null}
+              {harnessCounters.observationCalls !== undefined ? (
+                <div>
+                  <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.observationCalls')}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatNumber(harnessCounters.observationCalls)}</div>
+                </div>
+              ) : null}
               {harnessCounters.cacheHitPercent !== undefined ? (
                 <div>
                   <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.cacheHitRatio')}</div>

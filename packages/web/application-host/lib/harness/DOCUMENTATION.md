@@ -28,6 +28,7 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 Global singleton that owns:
 - `OutputStore` — large output storage with per-session isolation
+- `ObservationCursorStore` — atomic per-observer shell/diagnostics baselines, reset by compaction
 - `PathLockService` — owner-bound canonical-resource leases
 - `HarnessSearchService` — wraps `createWorkspaceContentSearch`
 - `DiagnosticsProvider` — LSP diagnostics (optional)
@@ -48,6 +49,7 @@ PTY-based persistent shell per session:
 - Commands separated by sentinel markers (`__PIARIUM_SENTINEL_`)
 - cwd/env/venv maintained between commands
 - Background shells keep PTY alive, stdin open
+- Data and cwd/exit sentinels continue to be consumed after a command moves to the background
 - `registerWriter` callback for `mode: 'process'` writer registration
 
 ### OutputStore (`output-store.ts`)
@@ -106,6 +108,10 @@ the block body. Thread metadata routes use the same UI-auth middleware.
 Provides `lsp.diagnostics` (sync document + wait) and
 `lsp.diagnosticsSnapshot` (immediate snapshot). Uses `DiagnosticsProvider`
 interface to abstract the LSP supervisor.
+Snapshot calls are incremental per observer and canonical resource by default;
+`full: true` is a non-mutating full view. `shell.read` follows the same rule when
+neither `offset` nor `length` is supplied, while static `out_*` handles remain
+explicit UTF-8 byte slices.
 
 ## Wiring (index.ts)
 
@@ -127,6 +133,6 @@ The harness is wired in `packages/web/application-host/index.ts`:
   triggers `harnessServiceHost.registerSession()` which creates a
   `ShellSupervisor` for the session.
 - **Drop**: `harnessServiceHost.dropSession()` disposes the shell supervisor
-  and clears session-scoped output store entries.
+  and clears session-scoped output entries and observation cursors.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.

@@ -32,10 +32,16 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         const hint = interpreter && "unavailable" in interpreter ? interpreter.unavailable.hint : "Session not registered";
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
-      return supervisor.exec(params.command, {
+      const result = await supervisor.exec(params.command, {
         ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
         waitMs: params.waitMs ?? 60_000,
       });
+      if (result.kind === "background") {
+        host.observationCursors.set(ctx.sessionId, "shell", result.id, {
+          offset: Buffer.byteLength(result.outputSoFar, "utf8"),
+        });
+      }
+      return result;
     },
   };
 }
@@ -45,7 +51,27 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
     handle: async (params, ctx: HarnessServiceContext) => {
       const supervisor = host.getShellSupervisor(ctx.sessionId);
       if (!supervisor) throw new Error("No shell supervisor for session");
-      return supervisor.read(params.id, params.offset, params.length);
+      const randomAccess = params.id.startsWith("out_") || params.offset !== undefined || params.length !== undefined;
+      if (randomAccess) return supervisor.read(params.id, params.offset, params.length);
+
+      return host.observationCursors.observe<{ offset: number }, Awaited<ReturnType<typeof supervisor.read>> & {
+        observation: NonNullable<import("@piarium/protocol").ShellReadResult["observation"]>;
+      }>(ctx.sessionId, "shell", params.id, async (previous) => {
+        const result = await supervisor.read(params.id, previous?.value.offset ?? 0);
+        const now = host.observationCursors.now();
+        return {
+          cursor: { offset: result.nextOffset },
+          result: {
+            ...result,
+            observation: {
+              mode: "incremental",
+              first: previous === null,
+              ...(previous === null ? {} : { sinceMs: Math.max(0, now - previous.observedAt) }),
+              ...(result.lastOutputAt === undefined ? {} : { lastOutputAgoMs: Math.max(0, now - result.lastOutputAt) }),
+            },
+          },
+        };
+      });
     },
   };
 }
@@ -182,9 +208,11 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
   };
 }
 
-export function createCompactionAfterService(_host: HarnessServiceHost): HarnessService<"compaction.after"> {
+export function createCompactionAfterService(host: HarnessServiceHost): HarnessService<"compaction.after"> {
   return {
-    handle: async (_params, _ctx: HarnessServiceContext) => {
+    handle: async (_params, ctx: HarnessServiceContext) => {
+      host.observationCursors.clearObserver(ctx.sessionId);
+      host.threadRegistry?.clearCursorsForSession(ctx.sessionId);
       return { acknowledged: true };
     },
   };
@@ -278,7 +306,7 @@ export function registerHarnessServices(
   router.register("fs.lock", createFsLockService(host.pathLockService));
   if (host.diagnosticsProvider) {
     router.register("lsp.diagnostics", createLspDiagnosticsService(host.diagnosticsProvider));
-    router.register("lsp.diagnosticsSnapshot", createLspDiagnosticsSnapshotService(host.diagnosticsProvider));
+    router.register("lsp.diagnosticsSnapshot", createLspDiagnosticsSnapshotService(host.diagnosticsProvider, host.observationCursors));
   }
   if (host.lspNavigationServices) {
     router.register("lsp.symbols", host.lspNavigationServices.symbols);
@@ -313,9 +341,9 @@ export function registerHarnessServices(
   if (host.compactionDepsProvider) {
     router.register("compaction.before", createCompactionBeforeService(host));
   }
-  if (host.compactionDepsProvider) {
-    router.register("compaction.after", createCompactionAfterService(host));
-  }
+  // Every Host can acknowledge compaction and reset observer baselines even
+  // when custom compaction takeover is unavailable.
+  router.register("compaction.after", createCompactionAfterService(host));
   if (host.memoryDepsProvider) {
     router.register("memory.blocks.get", createMemoryBlocksGetService(host));
     router.register("memory.blocks.apply", createMemoryBlocksApplyService(host));

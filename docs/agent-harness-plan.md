@@ -653,7 +653,7 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
 - 设计：agent-harness.md 第 5.7、8.7、9.2.5b、9.2.6、9.3.6、9.3.7 节。
 - **观察游标（host）**：`threadViewCursors[(observerSessionId, threadId)] = { eventSeq; status; progressVersion; decisionsCount;
   diffStats; viewedAt }`。`threads` / `wait` / `read_thread(steps)` 读后推进游标；`session_compact` 钩子把压缩事件报给 host
-  （经 1.1 的通道，`harness.compacted` 方法）→ host 清空该会话的全部游标；用户面板是另一个观察者。
+  （经 1.1 的通道，`compaction.after` 方法）→ host 清空该会话的全部游标；用户面板是另一个观察者。
 - pi-host：
   - `dispatch(role, task, { scope? })`：`createThread({ role, kind: 'implementation', createdBy: 'agent', autoRun: true, … })`。角色
     未注册 → isError `unknown role`；并发已满（默认 12，`harness.dispatch.concurrency`）→ 入队，返回 `queued as ${id}`；否则
@@ -699,7 +699,7 @@ ${diffStats 变化 ? `  Δ ${files} files (+${ins} −${del})` : ''}
     non-blocking glance — do not call it in a loop.", "Teammates report deviations from your brief; trust the report over your
     assumptions.", "read_thread shows a teammate's notes first; only read steps when the notes are not enough."]`。
 - 测试：TTL 表；增量视图（两次 `threads` 之间有 / 无变化的文本）；`wait` 超时非错误；`wait` 被 `waiting-for-input` 唤醒；游标在
-  `harness.compacted` 后重置为全量；`send` 唤醒 idle 线程；`read_thread` 三档；`merge` 干净 / 冲突；排队与出队；`kill` 保留
+  `compaction.after` 后重置为全量；`send` 唤醒 idle 线程；`read_thread` 三档；`merge` 干净 / 冲突；排队与出队；`kill` 保留
   worktree；观察类调用计入计数器。
 - 判断要点：`wait` 的超时按缓存 TTL 推导是为了让父在缓存冷掉前醒一次——如果 pi-ai 或 provider 元数据里拿不到 TTL，用
   240 s 保守值即可，不要为此加配置项让用户填。**边界**：`wait` 超时是正常结果；观察类工具默认增量、游标归 host、压缩重置；
@@ -751,8 +751,8 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 ### 3.9 观察类工具的增量视图
 
 - 设计：agent-harness.md 第 5.5、8.7 节。3.5 的线程游标是同一机制，本项把它推到其余观察类工具。
-- host：通用 `ObservationCursorStore`——键 `(observerSessionId, objectKind, objectId)`，值由对象类型定义；`harness.compacted`
-  清空该会话全部游标；对象销毁（shell 退出且输出已读尽、线程归档）时删键。
+- host：通用 `ObservationCursorStore`——键 `(observerSessionId, objectKind, objectId)`，值由对象类型定义；`compaction.after`
+  清空该会话全部游标。游标随对象实际销毁清理；当前 shell 为保留显式历史回看，退出且读尽后仍存活，到会话结束才与输出一起释放。
 - `get_output(shellId)`（无 `offset`）：返回上次读取之后的新输出，引头 `[shell ${id} · +${bytes} since last read (${ago}) ·
   ${running ? 'still running' : `exited ${code}`}]`；无新输出 → `[shell ${id} · no new output since last read (${ago}); ${running ?
   'still running' : 'exited'}; last output ${ago2}]`。显式 `offset` / `length` 是随机访问，不动游标。已完成的 `out_` 句柄保持
@@ -764,6 +764,9 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 - 判断要点：这项的价值是让"再看一眼"几乎不占上下文，副作用是模型更愿意看——"无新输出"那一行的措辞和 `promptGuidelines`
   里"要等就用 wait / 不要循环查看"是防轮询的全部手段，不要加频率限制之类的机制。1.4 已交付的 `get_output` 是显式 offset
   语义，这里是加默认行为，不改已有参数。
+- **状态（2026-09-04）**：已接通并 proven。通用 Host 游标覆盖 shell/diagnostics，会话结束与压缩清理；后台 PTY 在 timeout 后
+  继续采集并识别退出；`harness-e2e.test.ts` 已改掉旧的错误参数假绿，验证默认增量、退出码与诊断新增/消失。观察调用数进入现有
+  Context 侧栏。对象自动销毁尚无独立保留策略，当前随会话生命周期统一释放，不为此猜测额外上限（D-052）。
 
 ### 3.10 线程侧栏与讨论线
 

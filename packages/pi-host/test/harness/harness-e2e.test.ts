@@ -26,15 +26,17 @@ import { registerHarnessServices } from "../../../web/application-host/lib/harne
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createBashTool } from "../../src/harness/bash-tool.js";
 import { createGrepTool } from "../../src/harness/grep-tool.js";
-import { createGetOutputTool } from "../../src/harness/output-tools.js";
+import { createDiagnosticsTool, createGetOutputTool } from "../../src/harness/output-tools.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { DiagnosticItem } from "@piarium/protocol";
+import type { DiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-service.js";
 
 const SESSION_ID = "e2e-session";
 const WORKSPACE_ID = "e2e-workspace";
 const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
 const CAPABILITIES = ["context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document"] as const;
 
-async function setupE2E() {
+async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "harness-e2e-"));
 
   // Create test files
@@ -88,6 +90,7 @@ async function setupE2E() {
       return { status: "ready" as const, generation: undefined, hits };
     },
     resolveWorkspaceRoot: async () => workspaceRoot,
+    ...(options.diagnosticsProvider ? { diagnosticsProvider: options.diagnosticsProvider } : {}),
     discoveredShells: {
       hasBash: process.platform !== "win32",
       hasPowerShell: process.platform === "win32",
@@ -191,8 +194,15 @@ describe("harness e2e integration", () => {
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // get_output must retrieve non-empty output
-      const outputText = await executeTool(getOutputTool, { id: shellId });
-      assert.ok(outputText.length > 0, `get_output should retrieve non-empty output: got "${outputText}"`);
+      const outputText = await executeTool(getOutputTool, { handle: shellId });
+      assert.match(outputText, /done/, `get_output should retrieve the output produced after backgrounding: got "${outputText}"`);
+      assert.match(outputText, /\+\d+ bytes since last read.*exited 0/s, `final incremental read should include only new bytes and the exit state: got "${outputText}"`);
+      const unchanged = await executeTool(getOutputTool, { handle: shellId });
+      assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
+      await bridge.request("compaction.after", { summary: "compacted", firstKeptEntryId: "entry", tokensBefore: 10 });
+      const reset = await executeTool(getOutputTool, { handle: shellId });
+      assert.match(reset, /initial read.*exited 0/s, `compaction should restore a full shell baseline with its exit state: got "${reset}"`);
+      assert.match(reset, /done/, `the reset baseline should contain the complete shell output: got "${reset}"`);
     } finally {
       bridge.dispose();
       router.dispose();
@@ -269,5 +279,40 @@ describe("harness e2e integration", () => {
     // default settings → grep present
     const defaultTools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, deps);
     assert.ok(defaultTools.some((t) => t.name === "grep"), "default settings should include grep tool");
+  });
+
+  it("7. diagnostics returns added and resolved changes through the complete bridge", async () => {
+    const issue: DiagnosticItem = {
+      line: 2,
+      character: 4,
+      severity: "error",
+      code: "TS1000",
+      message: "broken",
+      source: "ts",
+    };
+    let diagnostics = [issue];
+    const provider: DiagnosticsProvider = {
+      getDiagnostics: async () => diagnostics,
+      getSnapshot: async () => "1",
+      isAvailable: async () => true,
+      syncDocument: async () => ({ status: "ready" }),
+    };
+    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E({ diagnosticsProvider: provider });
+    try {
+      const tool = createDiagnosticsTool(bridge, SESSION_ID);
+      const first = await executeTool(tool, { path: join(workspaceRoot, "searchable.ts") });
+      assert.match(first, /broken/);
+      diagnostics = [];
+      const second = await executeTool(tool, { path: join(workspaceRoot, "searchable.ts") });
+      assert.match(second, /\+0 −1 since last check/);
+      assert.match(second, /resolved error.*broken/);
+      const third = await executeTool(tool, { path: join(workspaceRoot, "searchable.ts") });
+      assert.match(third, /no diagnostic changes/);
+    } finally {
+      bridge.dispose();
+      router.dispose();
+      await harnessServiceHost.dispose();
+      try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
+    }
   });
 });

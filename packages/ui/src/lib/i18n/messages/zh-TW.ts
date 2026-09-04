@@ -1487,6 +1487,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.toolErrors': '工具錯誤',
   'contextSidebar.harness.toolRetries': '重複呼叫',
   'contextSidebar.harness.outputBytes': '工具輸出量',
+  'contextSidebar.harness.observationCalls': '觀察檢查',
   'contextSidebar.harness.cacheHitRatio': '提示快取命中率',
   'contextSidebar.section.lastAssistantMessage': '最近一條助理訊息',
   'contextSidebar.section.rawMessages': '原始訊息',

@@ -1,14 +1,9 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
+import type { DiagnosticItem } from "@piarium/protocol";
+import type { ObservationCursorStore } from "./observation-cursors.js";
 
 export interface DiagnosticsProvider {
-  getDiagnostics(workspaceId: string, path: string): Promise<Array<{
-    line: number;
-    character: number;
-    severity: string;
-    code?: string;
-    message: string;
-    source: string;
-  }>>;
+  getDiagnostics(workspaceId: string, path: string): Promise<DiagnosticItem[]>;
   syncDocument(workspaceId: string, path: string, content: string, reason: "change" | "save"): Promise<{ status: string }>;
   getSnapshot(workspaceId: string, path: string): Promise<string | null>;
   /** Check if a language server is available for the given workspace + path. */
@@ -80,7 +75,39 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
   };
 }
 
-export function createLspDiagnosticsSnapshotService(provider: DiagnosticsProvider): HarnessService<"lsp.diagnosticsSnapshot"> {
+interface DiagnosticsCursor {
+  diagnostics: DiagnosticItem[];
+}
+
+const diagnosticFingerprint = (diagnostic: DiagnosticItem): string => JSON.stringify([
+  diagnostic.line,
+  diagnostic.character,
+  diagnostic.severity,
+  diagnostic.code ?? null,
+  diagnostic.message,
+  diagnostic.source,
+]);
+
+const subtractDiagnostics = (left: readonly DiagnosticItem[], right: readonly DiagnosticItem[]): DiagnosticItem[] => {
+  const remaining = new Map<string, number>();
+  for (const diagnostic of right) {
+    const key = diagnosticFingerprint(diagnostic);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  return left.filter((diagnostic) => {
+    const key = diagnosticFingerprint(diagnostic);
+    const count = remaining.get(key) ?? 0;
+    if (count === 0) return true;
+    if (count === 1) remaining.delete(key);
+    else remaining.set(key, count - 1);
+    return false;
+  });
+};
+
+export function createLspDiagnosticsSnapshotService(
+  provider: DiagnosticsProvider,
+  cursors: ObservationCursorStore,
+): HarnessService<"lsp.diagnosticsSnapshot"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (!ctx.workspaceId) {
@@ -91,13 +118,49 @@ export function createLspDiagnosticsSnapshotService(provider: DiagnosticsProvide
         return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
       }
       try {
-        const diagnostics = await provider.getDiagnostics(ctx.workspaceId, params.path);
-        const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
-        return {
-          status: "ready",
-          ...(snapshot !== null ? { snapshot } : {}),
-          diagnostics,
-        };
+        if (params.full === true) {
+          const diagnostics = await provider.getDiagnostics(ctx.workspaceId, params.path);
+          const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
+          return {
+            status: "ready",
+            ...(snapshot !== null ? { snapshot } : {}),
+            diagnostics,
+          };
+        }
+        const canonicalResourceId = ctx.authorizedPaths[0]?.canonicalResourceId ?? params.path;
+        const objectId = `${ctx.workspaceId}\0${canonicalResourceId}`;
+        return cursors.observe<DiagnosticsCursor, import("@piarium/protocol").DiagnosticsResult>(
+          ctx.sessionId,
+          "diagnostics",
+          objectId,
+          async (previous) => {
+            const diagnostics = await provider.getDiagnostics(ctx.workspaceId!, params.path);
+            const snapshot = await provider.getSnapshot(ctx.workspaceId!, params.path);
+            const added = previous === null
+              ? diagnostics
+              : subtractDiagnostics(diagnostics, previous.value.diagnostics);
+            const resolved = previous === null
+              ? []
+              : subtractDiagnostics(previous.value.diagnostics, diagnostics);
+            const now = cursors.now();
+            return {
+              cursor: { diagnostics },
+              result: {
+                status: "ready",
+                ...(snapshot !== null ? { snapshot } : {}),
+                diagnostics: added,
+                resolvedDiagnostics: resolved,
+                observation: {
+                  mode: "incremental",
+                  first: previous === null,
+                  ...(previous === null ? {} : { sinceMs: Math.max(0, now - previous.observedAt) }),
+                  added: added.length,
+                  resolved: resolved.length,
+                },
+              },
+            };
+          },
+        );
       } catch {
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }

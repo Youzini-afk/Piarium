@@ -42,6 +42,16 @@ describe("harness service host authorization", () => {
         workspaceId: "workspace-1",
         workspaceRoot: "D:/workspace",
       });
+      host.observationCursors.set(ACTOR.sessionId, "shell", "sh_1", { offset: 10 });
+      host.observationCursors.set(ACTOR.sessionId, "diagnostics", "D:/workspace/a.ts", { diagnostics: [] });
+      host.registerSession({
+        actor: { ...ACTOR, workspaceScope: ["packages/web"] },
+        grantedCapabilities: ["read.output"],
+        workspaceId: "workspace-1",
+        workspaceRoot: "D:/workspace",
+      });
+      expect(host.observationCursors.get(ACTOR.sessionId, "shell", "sh_1")).toBeNull();
+      expect(host.observationCursors.get(ACTOR.sessionId, "diagnostics", "D:/workspace/a.ts")).not.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, runId: "run-2" })).resolves.toEqual({
         ...ACTOR,
         runId: "run-2",
@@ -52,8 +62,10 @@ describe("harness service host authorization", () => {
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, workerGeneration: 2 })).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, authorityInstanceId: "stale-authority" })).resolves.toBeNull();
+      host.observationCursors.set(ACTOR.sessionId, "shell", "sh_1", { offset: 10 });
       host.dropSession(ACTOR.sessionId);
       await expect(host.resolveActor(ACTOR)).resolves.toBeNull();
+      expect(host.observationCursors.get(ACTOR.sessionId, "shell", "sh_1")).toBeNull();
     } finally {
       await host.dispose();
     }

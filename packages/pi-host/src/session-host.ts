@@ -896,6 +896,7 @@ export class SessionHost {
         toolErrors: counters.toolErrors,
         toolRetries: counters.toolRetries,
         outputBytes: counters.outputBytes,
+        observationCalls: counters.observationCalls,
         ...(counters.cacheHitRatio === null ? { cacheHitRatio: null } : { cacheHitRatio: counters.cacheHitRatio }),
       }),
     };

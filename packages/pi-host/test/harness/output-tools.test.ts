@@ -43,6 +43,20 @@ describe("get_output tool", () => {
     assert.match(text, /12\/100 bytes/);
   });
 
+  it("renders incremental shell changes and discourages empty polling", async () => {
+    let reads = 0;
+    const bridge = createFakeBridge((method) => {
+      if (method !== "shell.read") throw new Error(`unexpected: ${method}`);
+      reads += 1;
+      return reads === 1
+        ? { text: "new output", offset: 10, length: 10, nextOffset: 20, total: 20, eof: true, running: true, observation: { mode: "incremental", first: false, sinceMs: 2_000, lastOutputAgoMs: 100 } }
+        : { text: "", offset: 20, length: 0, nextOffset: 20, total: 20, eof: true, running: false, exitCode: 0, observation: { mode: "incremental", first: false, sinceMs: 3_000, lastOutputAgoMs: 1_000 } };
+    });
+    const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
+    assert.match(await executeTool(tool, { handle: "sh_1" }), /\+10 bytes since last read \(2s ago\).*still running/s);
+    assert.match(await executeTool(tool, { handle: "sh_1" }), /no new output since last read \(3s ago\).*exited 0.*last output 1s ago/s);
+  });
+
   it("handles errors gracefully", async () => {
     const bridge = createFakeBridge(() => { throw new Error("not found"); });
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
@@ -127,5 +141,25 @@ describe("diagnostics tool", () => {
     const tool = createDiagnosticsTool(bridge as HostServicesBridge, "s1");
     const text = await executeTool(tool, { path: "/src/test.ts" });
     assert.match(text, /unavailable/);
+  });
+
+  it("formats added and resolved diagnostics and forwards full snapshots", async () => {
+    let observedParams: Record<string, unknown> | undefined;
+    const bridge = createFakeBridge((method, params) => {
+      observedParams = params;
+      if (method === "lsp.diagnosticsSnapshot") return {
+        status: "ready",
+        diagnostics: [{ line: 2, character: 1, severity: "error", code: "NEW", message: "new error", source: "ts" }],
+        resolvedDiagnostics: [{ line: 1, character: 1, severity: "warning", code: "OLD", message: "old warning", source: "ts" }],
+        observation: { mode: "incremental", first: false, sinceMs: 1_000, added: 1, resolved: 1 },
+      };
+      throw new Error(`unexpected: ${method}`);
+    });
+    const tool = createDiagnosticsTool(bridge as HostServicesBridge, "s1");
+    const text = await executeTool(tool, { path: "/src/test.ts", full: true });
+    assert.deepEqual(observedParams, { path: "/src/test.ts", full: true });
+    assert.match(text, /\+1 −1 since last check/);
+    assert.match(text, /\+ error.*new error/);
+    assert.match(text, /− resolved warning.*old warning/);
   });
 });

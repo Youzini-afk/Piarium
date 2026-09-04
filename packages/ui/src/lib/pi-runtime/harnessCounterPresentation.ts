@@ -3,6 +3,7 @@ import type { SessionStats } from '@piarium/protocol';
 export interface HarnessCounterPresentation {
   cacheHitPercent?: number;
   outputBytes?: number;
+  observationCalls?: number;
   toolErrors?: number;
   toolRetries?: number;
 }
@@ -16,17 +17,19 @@ export const projectHarnessCounters = (stats: SessionStats | undefined): Harness
   const toolErrors = nonNegative(stats.toolErrors);
   const toolRetries = nonNegative(stats.toolRetries);
   const outputBytes = nonNegative(stats.outputBytes);
+  const observationCalls = nonNegative(stats.observationCalls);
   const ratio = typeof stats.cacheHitRatio === 'number'
     && Number.isFinite(stats.cacheHitRatio)
     && stats.cacheHitRatio >= 0
     && stats.cacheHitRatio <= 1
     ? stats.cacheHitRatio
     : undefined;
-  if (toolErrors === undefined && toolRetries === undefined && outputBytes === undefined && ratio === undefined) return null;
+  if (toolErrors === undefined && toolRetries === undefined && outputBytes === undefined && observationCalls === undefined && ratio === undefined) return null;
   return {
     ...(toolErrors === undefined ? {} : { toolErrors }),
     ...(toolRetries === undefined ? {} : { toolRetries }),
     ...(outputBytes === undefined ? {} : { outputBytes }),
+    ...(observationCalls === undefined ? {} : { observationCalls }),
     ...(ratio === undefined ? {} : { cacheHitPercent: ratio * 100 }),
   };
 };

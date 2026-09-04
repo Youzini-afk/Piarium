@@ -1336,6 +1336,7 @@ export const dict = {
   'contextSidebar.harness.toolErrors': 'Erreurs d’outils',
   'contextSidebar.harness.toolRetries': 'Appels répétés',
   'contextSidebar.harness.outputBytes': 'Sortie des outils',
+  'contextSidebar.harness.observationCalls': 'Vérifications d’observation',
   'contextSidebar.harness.cacheHitRatio': 'Cache de prompt',
   'contextSidebar.section.lastAssistantMessage': 'Dernier message de l\'assistant',
   'contextSidebar.section.rawMessages': 'Messages bruts',

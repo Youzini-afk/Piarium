@@ -99,7 +99,7 @@ function buildCommandWrapper(command: string, token: string): string {
 
 // ── PTY Provider ────────────────────────────────────────────────────
 
-interface PtyProcess {
+export interface PtyProcess {
   kill(signal?: NodeJS.Signals): void;
   onData(handler: (data: string) => void): { dispose?(): void };
   onExit(handler: (event: { exitCode: number; signal: number }) => void): { dispose?(): void };
@@ -108,7 +108,7 @@ interface PtyProcess {
   write(data: string): void;
 }
 
-interface PtyProvider {
+export interface PtyProvider {
   backend: string;
   spawn(executable: string, args: string[], options: Record<string, unknown>): PtyProcess;
 }
@@ -135,6 +135,8 @@ export interface ShellSupervisorOptions {
   cols?: number;
   rows?: number;
   registerWriter?: () => Promise<{ close: () => Promise<void> } | null>;
+  /** Deterministic test seam; production loads bun-pty or node-pty. */
+  ptyProvider?: PtyProvider;
 }
 
 interface BackgroundShell {
@@ -144,6 +146,7 @@ interface BackgroundShell {
   cwd: string;
   exited: boolean;
   exitCode: number | null;
+  lastOutputAt: number | null;
   writer: { close: () => Promise<void> } | null;
 }
 
@@ -166,10 +169,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   if (process.platform === "linux") baseEnv.DEBIAN_FRONTEND = "noninteractive";
 
   const backgroundShells = new Map<string, BackgroundShell>();
+  let activeBackground: BackgroundShell | null = null;
   let shellCounter = 0;
   let disposed = false;
   let ptyProcess: PtyProcess | null = null;
-  let ptyProvider: PtyProvider | null = null;
+  let ptyProvider: PtyProvider | null = deps.ptyProvider ?? null;
   let outputBuffer = "";
   let shellReady = false;
   let shellReadyResolve: (() => void) | null = null;
@@ -188,6 +192,12 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     startedAt: number;
   }
   let pendingCommand: PendingCommand | null = null;
+
+  const closeBackgroundWriter = (background: BackgroundShell): void => {
+    const writer = background.writer;
+    background.writer = null;
+    void writer?.close();
+  };
 
   const ensureShell = async (): Promise<void> => {
     if (shellReady) return;
@@ -219,6 +229,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         if (pendingCommand) {
           outputBuffer += data;
           parsePendingOutput();
+        } else if (activeBackground) {
+          const background = activeBackground;
+          background.output += data;
+          parseBackgroundOutput(background);
+          background.lastOutputAt = Date.now();
         } else {
           initBuffer += data;
           // Strip control sequences for marker detection
@@ -251,6 +266,12 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           });
           pendingCommand = null;
         }
+        if (activeBackground) {
+          activeBackground.exited = true;
+          activeBackground.exitCode = event.exitCode;
+          closeBackgroundWriter(activeBackground);
+          activeBackground = null;
+        }
       });
 
       // Send init marker to detect shell readiness
@@ -279,6 +300,30 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         // Remove the sentinel from output
         outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
         completeCommand(exitCode);
+        return;
+      }
+    }
+  };
+
+  const parseBackgroundOutput = (background: BackgroundShell): void => {
+    const sentinelPattern = new RegExp(`${SENTINEL}${background.token}:(B|C:[^\\n]*|E:\\d+)`, "g");
+    let match: RegExpExecArray | null;
+    sentinelPattern.lastIndex = 0;
+    while ((match = sentinelPattern.exec(background.output)) !== null) {
+      const sentinelLine = match[1];
+      if (sentinelLine === "B") {
+        background.output = background.output.slice(match.index + match[0].length);
+        sentinelPattern.lastIndex = 0;
+      } else if (sentinelLine?.startsWith("C:")) {
+        background.cwd = sentinelLine.slice(2).trim();
+        background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
+        sentinelPattern.lastIndex = 0;
+      } else if (sentinelLine?.startsWith("E:")) {
+        background.exitCode = parseInt(sentinelLine.slice(2), 10);
+        background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
+        background.exited = true;
+        closeBackgroundWriter(background);
+        if (activeBackground === background) activeBackground = null;
         return;
       }
     }
@@ -320,6 +365,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const exec = async (command: string, options: { cwd?: string; waitMs: number }): Promise<ShellExecResult> => {
     if (disposed) return { kind: "spawn-failed", reason: "disposed", interpreter: interpreter.command, hint: "Shell supervisor has been disposed" };
     if (pendingCommand) throw new Error("Another command is already running");
+    if (activeBackground && !activeBackground.exited) throw new Error(`Background shell ${activeBackground.id} is still running`);
 
     await ensureShell();
     if (!ptyProcess) return { kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" };
@@ -343,9 +389,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           cwd: pendingCommand?.cwd ?? cwd,
           exited: false,
           exitCode: null,
+          lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
           writer,
         };
         backgroundShells.set(id, bgShell);
+        activeBackground = bgShell;
         pendingCommand = null;
         outputBuffer = "";
 
@@ -383,7 +431,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     });
   };
 
-  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number }> => {
+  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number; lastOutputAt?: number }> => {
     // Check background shells
     const bg = backgroundShells.get(id);
     if (bg) {
@@ -392,6 +440,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         ...slice,
         running: !bg.exited,
         ...(bg.exitCode !== null ? { exitCode: bg.exitCode } : {}),
+        ...(bg.lastOutputAt !== null ? { lastOutputAt: bg.lastOutputAt } : {}),
       };
     }
     // Check output store (out_ handles)
@@ -416,7 +465,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     // Send Ctrl+C to the PTY
     if (ptyProcess) ptyProcess.write("\x03");
     bg.exited = true;
-    void bg.writer?.close();
+    bg.exitCode = 130;
+    if (activeBackground === bg) activeBackground = null;
+    closeBackgroundWriter(bg);
     return true;
   };
 
@@ -428,9 +479,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       pendingCommand = null;
     }
     for (const bg of backgroundShells.values()) {
-      void bg.writer?.close();
+      closeBackgroundWriter(bg);
     }
     backgroundShells.clear();
+    activeBackground = null;
     const proc = ptyProcess;
     ptyProcess = null;
     if (proc) {

@@ -162,6 +162,23 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("rejects a non-boolean diagnostics full selector before calling the service", async () => {
+    const handle = vi.fn(async () => ({ status: "ready" as const, diagnostics: [] }));
+    const responses: Array<{ ok: boolean; code?: string }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.lsp"]),
+      authorizeWorkspacePath: async (_actor, path) => ({ authorityId: "host", workspaceId: "workspace-1", canonicalResourceId: path, inputPath: path, resourceId: path }),
+    });
+    router.register("lsp.diagnosticsSnapshot", { handle });
+    await router.processEvent(harnessEvent("lsp.diagnosticsSnapshot", { path: "src/a.ts", full: "yes" }));
+    expect(handle).not.toHaveBeenCalled();
+    expect(responses).toEqual([{ ok: false, code: "invalid-params" }]);
+    router.dispose();
+  });
+
   it("responds with failed when a service throws", async () => {
     const responses: Array<{ ok: boolean; code?: string; message?: string }> = [];
     const router = createHarnessRouter({
