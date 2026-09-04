@@ -259,6 +259,44 @@ describe("KnowledgeStore", () => {
     });
   });
 
+  describe("file and symbol graph", () => {
+    const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 };
+
+    it("atomically replaces one file's active symbols and removes stale nodes", async () => {
+      const first = await store.replaceFileSymbols("src/a.ts", "typescript", [
+        { name: "Alpha", kind: "function", range },
+        { name: "Beta", kind: "class", range: { ...range, startLine: 2, endLine: 4 } },
+      ]);
+      expect(first).toMatchObject({ symbols: 2, edges: 2 });
+      expect(await store.searchSymbols("Alpha", 10)).toEqual([
+        expect.objectContaining({ name: "Alpha", path: "src/a.ts", score: expect.any(Number) }),
+      ]);
+      expect((await store.getDefinedSymbols("src/a.ts")).map((symbol) => symbol.name)).toEqual(["Alpha", "Beta"]);
+
+      await store.touchFile("src/a.ts", "typescript");
+      expect(await store.searchSymbols("Beta", 10)).toHaveLength(1);
+      await store.replaceFileSymbols("src/a.ts", "typescript", [
+        { name: "Gamma", kind: "variable", range },
+      ]);
+      expect(await store.searchSymbols("Alpha", 10)).toEqual([]);
+      expect(await store.searchSymbols("Gamma", 10)).toHaveLength(1);
+      expect((await store.getDefinedSymbols("src/a.ts")).map((symbol) => symbol.name)).toEqual(["Gamma"]);
+
+      await expect(store.removeFileSymbols("src/a.ts")).resolves.toEqual({ removedFiles: 1, removedSymbols: 1 });
+      expect(await store.searchSymbols("Gamma", 10)).toEqual([]);
+    });
+
+    it("rejects malformed ranges before replacing the previous graph", async () => {
+      await store.replaceFileSymbols("src/a.ts", "typescript", [{ name: "Stable", kind: "class", range }]);
+      await expect(store.replaceFileSymbols("src/a.ts", "typescript", [{
+        name: "Broken",
+        kind: "class",
+        range: { startLine: 2, startCharacter: 0, endLine: 1, endCharacter: 0 },
+      }])).rejects.toMatchObject({ code: "invalid" });
+      expect(await store.searchSymbols("Stable", 10)).toHaveLength(1);
+    });
+  });
+
   describe("recall", () => {
     it("returns results in placeholder vector mode", async () => {
       await store.putKnowledge({

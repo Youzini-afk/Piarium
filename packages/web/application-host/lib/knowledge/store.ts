@@ -15,12 +15,14 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 
 // triviumdb is a CJS package — use createRequire to avoid ESM named-import
 // issues when running under pure Node (outside vite-node/vitest).
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 type Vector = import("triviumdb").Vector;
+type TransactionOperation = import("triviumdb").TransactionOperation;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -142,6 +144,25 @@ export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>;
 }
 
+export interface SymbolGraphRange {
+  startLine: number;
+  startCharacter: number;
+  endLine: number;
+  endCharacter: number;
+}
+
+export interface SymbolGraphSymbolInput {
+  name: string;
+  kind: string;
+  range: SymbolGraphRange;
+}
+
+export interface SymbolGraphSearchResult extends SymbolGraphSymbolInput {
+  id: NodeId;
+  path: string;
+  score: number;
+}
+
 // ── Store interface ────────────────────────────────────────────────
 
 export interface KnowledgeStore {
@@ -168,6 +189,11 @@ export interface KnowledgeStore {
   dismissKnowledge(id: NodeId, expectedScope?: KnowledgeScope): Promise<void>;
   recordRecall(ids: NodeId[]): Promise<void>;
   recall(query: string, k: number): Promise<RecallResult[]>;
+  touchFile(path: string, language: string): Promise<NodeId>;
+  replaceFileSymbols(path: string, language: string, symbols: SymbolGraphSymbolInput[]): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
+  removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
+  searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
+  getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score">>>;
   deleteSession(sessionId: string): Promise<void>;
   runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }>;
   close(): Promise<void>;
@@ -212,6 +238,8 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createOrderedIndex("at");
   db.createIndex("status");
   db.createIndex("scope");
+  db.createIndex("path");
+  db.createIndex("active");
 
   const placeholderVec = zeroVector(dim);
   const publishBlocksChanged = (sessionId: string): void => {
@@ -235,6 +263,36 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     }
     return results;
   }
+
+  const graphFileIds = new Map<string, Set<number>>();
+  const graphSymbolIds = new Map<string, Set<number>>();
+  for (const id of db.allNodeIds()) {
+    const payload = db.getPayload(id) as Record<string, unknown> | null;
+    if (!payload || typeof payload["path"] !== "string") continue;
+    const target = payload["type"] === "file" ? graphFileIds : payload["type"] === "symbol" ? graphSymbolIds : null;
+    if (!target) continue;
+    const ids = target.get(payload["path"]) ?? new Set<number>();
+    ids.add(id);
+    target.set(payload["path"], ids);
+  }
+  const graphNodes = (index: Map<string, Set<number>>, path: string) => (
+    [...(index.get(path) ?? [])].flatMap((id) => {
+      const payload = db.getPayload(id) as Record<string, unknown> | null;
+      return payload ? [{ id, payload }] : [];
+    })
+  );
+  const fileNodes = (path: string) => graphNodes(graphFileIds, path);
+  const symbolNodes = (path: string) => graphNodes(graphSymbolIds, path);
+  const assertGraphText = (value: string, label: string): string => {
+    const text = value.trim();
+    if (!text) throw new KnowledgeMutationError("invalid", `${label} is required`);
+    return text;
+  };
+  const validRange = (range: SymbolGraphRange): boolean => (
+    [range.startLine, range.startCharacter, range.endLine, range.endCharacter]
+      .every((value) => Number.isSafeInteger(value) && value >= 0)
+    && (range.endLine > range.startLine || (range.endLine === range.startLine && range.endCharacter >= range.startCharacter))
+  );
 
   // Write queue — all writes go through this to ensure single-writer ordering
   const writeQueue: Promise<unknown> = Promise.resolve();
@@ -590,7 +648,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
       // With embedding: use searchHybrid
       const alpha = 0.7;
-      const hits = db.searchHybrid(placeholderVec, query, k, 2, 0.0, alpha);
+      const hits = db.searchHybrid(placeholderVec, query, k, 2, 0.0, alpha).filter((hit) => {
+        const payload = hit.payload as Record<string, unknown>;
+        return payload["type"] === "knowledge" && payload["status"] === "accepted" && payload["invalidAt"] === undefined;
+      });
       const results: RecallResult[] = hits.map((hit) => {
         const payload = hit.payload as Record<string, unknown>;
         const type = payload["type"] as "knowledge" | "event";
@@ -608,6 +669,165 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         await store.recordRecall(knowledgeIds);
       }
       return results;
+    },
+
+    async touchFile(path, language): Promise<NodeId> {
+      return enqueueWrite(() => {
+        const normalizedPath = assertGraphText(path, "File path");
+        const normalizedLanguage = assertGraphText(language, "File language");
+        const existing = fileNodes(normalizedPath);
+        const payload = {
+          type: "file",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          modifiedAt: Date.now(),
+          active: true,
+        };
+        const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
+        graphFileIds.set(normalizedPath, new Set([fileId, ...existing.slice(1).map(({ id }) => id)]));
+        const operations: TransactionOperation[] = [
+          { type: "updatePayload", id: fileId, payload },
+          ...existing.slice(1).map(({ id }) => ({ type: "delete" as const, id })),
+        ];
+        db.commitTransaction(operations);
+        graphFileIds.set(normalizedPath, new Set([fileId]));
+        db.indexText(fileId, normalizedPath);
+        db.flush();
+        return fileId;
+      });
+    },
+
+    async replaceFileSymbols(path, language, symbols) {
+      return enqueueWrite(() => {
+        const normalizedPath = assertGraphText(path, "File path");
+        const normalizedLanguage = assertGraphText(language, "File language");
+        for (const symbol of symbols) {
+          assertGraphText(symbol.name, "Symbol name");
+          assertGraphText(symbol.kind, "Symbol kind");
+          if (!validRange(symbol.range)) throw new KnowledgeMutationError("invalid", `Invalid range for symbol ${symbol.name}`);
+        }
+        const generation = randomUUID();
+        const previousFiles = fileNodes(normalizedPath);
+        const previousSymbols = symbolNodes(normalizedPath);
+        const fileId = previousFiles[0]?.id ?? db.insert(placeholderVec, {
+          type: "file",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          modifiedAt: Date.now(),
+          active: true,
+          generation,
+        });
+        graphFileIds.set(normalizedPath, new Set([fileId, ...previousFiles.slice(1).map(({ id }) => id)]));
+        const pendingPayloads = symbols.map((symbol) => ({
+          type: "symbol",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          name: symbol.name,
+          kind: symbol.kind,
+          range: { ...symbol.range },
+          generation,
+          active: false,
+        }));
+        const symbolIds = pendingPayloads.length > 0
+          ? db.batchInsert(pendingPayloads.map(() => placeholderVec), pendingPayloads)
+          : [];
+        graphSymbolIds.set(normalizedPath, new Set([...previousSymbols.map(({ id }) => id), ...symbolIds]));
+        const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
+        const filePayload = {
+          type: "file",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          modifiedAt: Date.now(),
+          active: true,
+          generation,
+        };
+        const operations: TransactionOperation[] = [
+          { type: "updatePayload", id: fileId, payload: filePayload },
+          ...previousFiles.slice(1).map(({ id }) => ({ type: "delete" as const, id })),
+          ...previousSymbols.map(({ id }) => ({ type: "delete" as const, id })),
+          ...symbolIds.flatMap((id, index): TransactionOperation[] => [
+            { type: "updatePayload", id, payload: activePayloads[index] },
+            { type: "upsertEdge", src: fileId, dst: id, label: "defines", weight: 1 },
+          ]),
+        ];
+        db.commitTransaction(operations);
+        graphFileIds.set(normalizedPath, new Set([fileId]));
+        if (symbolIds.length > 0) graphSymbolIds.set(normalizedPath, new Set(symbolIds));
+        else graphSymbolIds.delete(normalizedPath);
+        db.indexText(fileId, normalizedPath);
+        for (let index = 0; index < symbolIds.length; index += 1) {
+          const id = symbolIds[index]!;
+          const symbol = symbols[index]!;
+          db.indexText(id, `${symbol.name} ${normalizedPath}`);
+          db.indexKeyword(id, symbol.name);
+        }
+        db.flush();
+        return { fileId, symbols: symbolIds.length, edges: symbolIds.length };
+      });
+    },
+
+    async removeFileSymbols(path) {
+      return enqueueWrite(() => {
+        const normalizedPath = assertGraphText(path, "File path");
+        const files = fileNodes(normalizedPath);
+        const symbols = symbolNodes(normalizedPath);
+        const operations: TransactionOperation[] = [
+          ...symbols.map(({ id }) => ({ type: "delete" as const, id })),
+          ...files.map(({ id }) => ({ type: "delete" as const, id })),
+        ];
+        if (operations.length > 0) db.commitTransaction(operations);
+        graphFileIds.delete(normalizedPath);
+        graphSymbolIds.delete(normalizedPath);
+        db.flush();
+        return { removedFiles: files.length, removedSymbols: symbols.length };
+      });
+    },
+
+    async searchSymbols(query, k) {
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (terms.length === 0 || !Number.isSafeInteger(k) || k <= 0) return [];
+      return scanNodes((payload) => payload["type"] === "symbol" && payload["active"] === true)
+        .flatMap(({ id, payload }) => {
+          const name = typeof payload["name"] === "string" ? payload["name"] : "";
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
+          const range = payload["range"] as SymbolGraphRange | undefined;
+          if (!name || !path || !range || !validRange(range)) return [];
+          const normalizedName = name.toLowerCase();
+          const haystack = `${normalizedName} ${path.toLowerCase()}`;
+          const score = terms.reduce((total, term) => total + (normalizedName === term ? 4 : normalizedName.includes(term) ? 2 : haystack.includes(term) ? 1 : 0), 0);
+          return score > 0 ? [{ id, name, path, kind, range: { ...range }, score }] : [];
+        })
+        .toSorted((left, right) => right.score - left.score || left.name.localeCompare(right.name) || left.path.localeCompare(right.path))
+        .slice(0, k);
+    },
+
+    async getDefinedSymbols(path) {
+      const normalizedPath = assertGraphText(path, "File path");
+      const file = fileNodes(normalizedPath)[0];
+      if (!file) return [];
+      return db.getEdges(file.id)
+        .filter((edge) => edge.label === "defines")
+        .flatMap((edge) => {
+          const payload = db.getPayload(edge.targetId) as Record<string, unknown> | null;
+          const range = payload?.["range"] as SymbolGraphRange | undefined;
+          return payload?.["type"] === "symbol"
+            && payload["active"] === true
+            && typeof payload["name"] === "string"
+            && typeof payload["path"] === "string"
+            && typeof payload["kind"] === "string"
+            && range
+            && validRange(range)
+            ? [{
+                id: edge.targetId,
+                name: payload["name"],
+                path: payload["path"],
+                kind: payload["kind"],
+                range: { ...range },
+              }]
+            : [];
+        })
+        .toSorted((left, right) => left.range.startLine - right.range.startLine || left.range.startCharacter - right.range.startCharacter || left.name.localeCompare(right.name));
     },
 
     async deleteSession(sessionId: string): Promise<void> {

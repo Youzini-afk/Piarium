@@ -853,6 +853,30 @@ SSE 只广播 `{sessionId,scope}` 失效通知，正文重新走鉴权 GET。(5)
 
 状态：已实施并 proven（block user-mark）；其他两类触发与完整 Settings 知识管理仍待实现
 
+### D-059 · 2026-09-04 · 3.1（Documents 驱动的真实 file/symbol/defines 图）
+
+类型：设计修正
+
+决定：(1) 删除旧 collector 的伪实现：不再用 `event` 节点冒充 file/symbol，不再用 `edgesCreated++` 冒充图边，也不保留无依据的
+`maxFiles=200`。(2) KnowledgeStore 新增真实 `file` / `symbol` payload 与 `defines` edge 原语。单文件替换先 batch insert
+`active:false` 新符号，再用 TriviumDB `commitTransaction` 同批更新 file generation、删旧符号、激活新符号并建边；崩溃窗口最多留下
+不可检索的 inactive staging，下次替换回收。(3) Documents 权威写后 observation 是唯一触发：created/modified 按 path 串行，deleted
+删 file graph；不做启动时全仓扫描或额外 watcher。未知语言只 touch file；LSP unavailable 保留最后已知 symbols，`ready + []` 才是
+权威清空。(4) 若 LanguageSupervisor 已有 document buffer，直接用其 version，绝不以磁盘覆盖；尚未同步才从 Documents 读取并 open。
+(5) workspace store 暴露关键词 symbol search 与按 file 读取真实 defines edge；`user.tdb` 拒绝 file/symbol 写。(6) embedding recall 同批
+修正为只返回 accepted、未失效的 knowledge，图节点或 suggested/dismissed 不能混进长期记忆。(7) references/calls/imports 边尚未接；
+不能为每个 symbol 无界扇出 references 请求，需在 LSP 能力与实际文件分布上定批处理/背压后单独实现。
+Store 打开时一次建立 path→file/symbol ids 的内存索引，后续写后替换不遍历全部 event/knowledge 历史；只有显式 symbol search 扫描
+当前 active symbol 集。
+
+原因：旧代码只有看似完整的接口和计数器，接生产会把“采集成功”写成假事实；固定前 200 个 Git 文件还会因排序偶然性永久漏图。
+写后单文件替换只为真实变化付费，且沿现有 Documents/LSP 权威边界，不新增扫描成本。
+
+影响：KnowledgeStore graph contract、`symbols.ts`、`symbol-runtime.ts`、Documents mutation fan-out、Application Host lifecycle、user store；
+设计 6.2 / 7.2，plan/status 3.1。
+
+状态：已实施并 proven（file/symbol/defines）；跨文件 references/calls/imports 未实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -917,3 +941,4 @@ SSE 只广播 `{sessionId,scope}` 失效通知，正文重新走鉴权 GET。(5)
 | D-056 | implementation | — | plan/status 3.6；protocol role catalog |
 | D-057 | active-design | — | agent-harness 9.2/9.3、plan/status 3.4；Thread worktree/runtime |
 | D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |
+| D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |

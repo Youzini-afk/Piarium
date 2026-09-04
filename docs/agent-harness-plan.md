@@ -544,7 +544,7 @@ settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快�
 未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收的 UI/归档纵切、窄屏与讨论线。child 结果已先提交到持久分支；
 旧 role budget 数字没有执行原语或定标依据，
 已按 D-056 删除而非升级成硬停止。
-3.1 / 3.2 / 3.3 / 3.7 仍只是 `implemented`。
+3.1 的 file/symbol/defines 已从 Documents/LSP 写入真实图；3.2 / 3.3 / 3.7 仍只是 `implemented`。
 
 **3.4 / 3.5 的对象模型已由 P0.4 替代**：下文两节里的 `ThreadRecord` 单枚举 `status` + flags 的形状**不再有效**，以设计
 9.3.1 的 Thread + ThreadRun 与正交维度为准；`wait` 不再有 TTL 默认唤醒（D-033）；报告里的 `traceHandle` 改为
@@ -558,12 +558,13 @@ report / merge；worker 与 host 崩溃恢复；最小侧栏"，嵌套与自动 
 
 ### 3.1 符号图采集器
 
-- host `lib/knowledge/symbols.ts`：仅当某语言的服务器已在运行时，对该语言的打开文件与最近改动文件请求
-  `textDocument/documentSymbol` 与 `textDocument/references`（有界：每次采集 ≤ 200 文件，可配置），写 `file` 节点
-  （payload `{ type:'file', path, language, modified_at, dirty }`）与 `symbol` 节点（`{ type:'symbol', name, kind, path,
-  range }`），边 `file → defines → symbol`（weight 1）、`symbol → references → symbol`（weight = 引用计数）；符号名
-  `indexKeyword`。增量：文件 watch 事件后对该文件重采（去重旧节点）。无服务器 → 只维护 `file` 节点（来自 Git 列表）。
+- host `lib/knowledge/symbols.ts`：Documents created/modified 后，仅当对应 LanguageSupervisor 已 ready/degraded 时请求
+  `textDocument/documentSymbol`，写 `file` 节点与 `symbol` 节点，边 `file → defines → symbol`（weight 1）；符号名
+  `indexKeyword`。每个文件独立换代，delete 删除该文件图。无服务器/未知语言只 touch file 并保留最后可用图；不做 Git 全量扫描。
 - 测试：小仓库快照（用 fixture 语言服务器）；增量；无 LSP 退化。
+- **状态（2026-09-04）**：真实 file/symbol/defines 在单文件 transaction 中换代，复用 LanguageSupervisor 当前 buffer/version，
+  unavailable 与权威空结果分开；关键词 symbol search 已可供后续 explore 使用。references/calls/imports 尚未接，不能把每 symbol 的
+  无界 LSP 扇出藏进写后 observer（D-059）。
 
 ### 3.2 `explore` 管线
 

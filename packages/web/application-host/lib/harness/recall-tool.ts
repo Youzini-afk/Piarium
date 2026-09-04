@@ -99,6 +99,15 @@ export async function openUserKnowledgeStore(
       if (input.scope !== "user") throw new Error("user.tdb only allows user-scoped knowledge");
       return origPutKnowledge(input);
     },
+    async touchFile() {
+      throw new Error("user.tdb does not allow file graph nodes");
+    },
+    async replaceFileSymbols() {
+      throw new Error("user.tdb does not allow symbol graph nodes");
+    },
+    async removeFileSymbols() {
+      throw new Error("user.tdb does not allow file graph nodes");
+    },
   };
   // Suppress unused var warnings
   void origPutEvent; void origPutSession; void origUpsertBlock;

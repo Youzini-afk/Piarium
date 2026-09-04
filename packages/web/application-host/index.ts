@@ -47,6 +47,7 @@ import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
+import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
@@ -1315,12 +1316,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getStore: getKnowledgeStoreForWorkspace,
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
+  const symbolGraphRuntime = createSymbolGraphRuntime({
+    getStore: getKnowledgeStoreForWorkspace,
+    documents: documentsAuthority,
+    supervisor: languageSupervisor,
+    onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
+  });
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
     onError: (error) => console.error('[HarnessKnowledge] Git status observer failed:', errorMessage(error)),
   });
-  observeKnowledgeDocumentMutation = (event) => knowledgeContextRuntime.observeDocumentMutation(event);
+  observeKnowledgeDocumentMutation = (event) => {
+    knowledgeContextRuntime.observeDocumentMutation(event);
+    symbolGraphRuntime.observeDocumentMutation(event);
+  };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
     knowledgeContextRuntime.bindSession(sessionId, workspaceId);
@@ -1848,6 +1858,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
+      await symbolGraphRuntime.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));
       knowledgeStores.clear();

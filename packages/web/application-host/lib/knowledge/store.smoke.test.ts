@@ -42,6 +42,15 @@ describe("knowledge store — Node smoke (built artifact)", () => {
       assert.ok(results.length > 0, "recall should find the seeded node");
       assert.equal(results[0]!.node.id, id);
 
+      const graph = await store.replaceFileSymbols("src/example.ts", "typescript", [{
+        name: "Example",
+        kind: "class",
+        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
+      }]);
+      assert.equal(graph.symbols, 1);
+      assert.equal((await store.getDefinedSymbols("src/example.ts"))[0]?.name, "Example");
+      assert.equal((await store.searchSymbols("Example", 5))[0]?.path, "src/example.ts");
+
       await store.close();
     } finally {
       try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }

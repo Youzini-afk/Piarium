@@ -101,6 +101,10 @@ also embedded in the durable hidden Pi message so a worker reload can resume.
 Successful Git status reads from both workbench APIs pass through Documents
 workspace resolution and a per-session deduplicating observer; this reuses the
 existing SCM refresh boundary and does not add a second Git poller.
+The same Documents post-commit boundary drives an event-based symbol graph:
+known languages reuse the live LanguageSupervisor buffer/version to replace one
+file's real `file -> defines -> symbol` graph, unavailable servers preserve the
+last graph, and deletes remove it. There is no startup repository scan.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
 Active child threads are added to every parent Zone 2 turn, while settled

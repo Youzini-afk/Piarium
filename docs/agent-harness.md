@@ -522,6 +522,10 @@ RETURN scored, graph_score(scored) AS rank ORDER BY rank DESC LIMIT 15
 
 暴露为工具 `related(anchor, hops?, labels?)`。
 
+当前已交付的第一纵切（D-059）只在 Documents 权威写后事件上，复用已运行的 LanguageSupervisor 建立真实
+`file → defines → symbol` 图；不做启动全仓扫描，LSP 暂不可用时保留最后图，权威空结果才清旧符号。`references` / `calls` /
+`imports` 边与 `related` 工具仍未接生产；它们不能通过对每个 symbol 无界请求 references 来伪装完成。
+
 ### 6.3 第三层：我们之前做过什么
 
 由知识库拥有。轨迹信号（编辑 diff、终端命令与退出码、诊断、会话决定）**不追加进对话**，存为可检索事件；
