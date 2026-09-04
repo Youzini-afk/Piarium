@@ -1,6 +1,5 @@
 import React from 'react';
 import { runtimeFetch } from '@piarium/application-client';
-import type { ThreadParent } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
@@ -9,7 +8,6 @@ import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   parseHarnessThreadMutation,
-  parseHarnessThreadProjection,
   projectHarnessThreadState,
   type HarnessThreadSnapshot,
   type HarnessThreadState,
@@ -24,6 +22,7 @@ import {
 import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKnowledgeReviewSection';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
+import { useHarnessThreadState } from './HarnessThreadStateContext';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -57,21 +56,6 @@ const stateTone: Record<HarnessThreadState, string> = {
   merged: 'bg-[var(--status-success)]',
 };
 
-const scopeMatches = (left: ThreadParent, right: ThreadParent): boolean => (
-  left.kind === right.kind && left.id === right.id
-);
-
-const mergeSnapshot = (
-  current: HarnessThreadSnapshot[],
-  incoming: HarnessThreadSnapshot,
-): HarnessThreadSnapshot[] => {
-  const existing = current.find((entry) => entry.thread.id === incoming.thread.id);
-  if (existing && existing.thread.eventSeq > incoming.thread.eventSeq) return current;
-  const next = current.filter((entry) => entry.thread.id !== incoming.thread.id);
-  if (!incoming.thread.hidden && incoming.thread.lifecycle !== 'archived') next.push(incoming);
-  return next.sort((left, right) => right.thread.updatedAt.localeCompare(left.thread.updatedAt));
-};
-
 export const HarnessThreadsPanel: React.FC<{
   workspaceId: string;
   parentSessionId: string;
@@ -79,7 +63,8 @@ export const HarnessThreadsPanel: React.FC<{
 }> = ({ workspaceId, parentSessionId, fallbackCwd }) => {
   const { t } = useI18n();
   const openSession = usePiSessionStore((state) => state.openSession);
-  const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
+  const threadState = useHarnessThreadState();
+  const threads = threadState.threads;
   const [blocks, setBlocks] = React.useState<HarnessSessionBlock[]>([]);
   const [suggestions, setSuggestions] = React.useState<HarnessKnowledgeSuggestion[]>([]);
   const [knowledgeDrafts, setKnowledgeDrafts] = React.useState<Record<string, KnowledgeDraft>>({});
@@ -89,30 +74,6 @@ export const HarnessThreadsPanel: React.FC<{
   const [savingBlock, setSavingBlock] = React.useState(false);
   const [narrowOpen, setNarrowOpen] = React.useState(false);
   const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
-  const eventRevision = React.useRef(0);
-  const scopeRef = React.useRef<{ workspaceId: string; parent: ThreadParent }>({
-    workspaceId,
-    parent: { kind: 'session', id: parentSessionId },
-  });
-
-  const reload = React.useCallback(async (signal?: AbortSignal) => {
-    const revisionAtStart = eventRevision.current;
-    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads`, {
-      cache: 'no-store',
-      ...(signal ? { signal } : {}),
-    });
-    if (!response.ok) {
-      if (response.status === 404) return;
-      throw new Error(`Unable to load threads (${response.status})`);
-    }
-    const projection = parseHarnessThreadProjection(await response.json());
-    scopeRef.current = { workspaceId: projection.workspaceId, parent: projection.parent };
-    const incoming = projection.threads;
-    setThreads((current) => {
-      if (eventRevision.current === revisionAtStart) return incoming;
-      return incoming.reduce(mergeSnapshot, current);
-    });
-  }, [parentSessionId]);
 
   const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
     if (convertingThreadId) return;
@@ -131,15 +92,13 @@ export const HarnessThreadsPanel: React.FC<{
         );
       }
       const converted = parseHarnessThreadMutation(body);
-      scopeRef.current = { workspaceId: converted.workspaceId, parent: converted.parent };
-      eventRevision.current += 1;
-      setThreads((current) => mergeSnapshot(current, converted));
+      threadState.merge(converted);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('harness.threads.convertFailed'));
     } finally {
       setConvertingThreadId(null);
     }
-  }, [convertingThreadId, parentSessionId, t]);
+  }, [convertingThreadId, parentSessionId, t, threadState]);
 
   const reloadBlocks = React.useCallback(async (signal?: AbortSignal) => {
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/blocks`, {
@@ -296,18 +255,12 @@ export const HarnessThreadsPanel: React.FC<{
 
   React.useEffect(() => {
     const controller = new AbortController();
-    eventRevision.current = 0;
-    scopeRef.current = { workspaceId, parent: { kind: 'session', id: parentSessionId } };
-    setThreads([]);
     setBlocks([]);
     setSuggestions([]);
     setKnowledgeDrafts({});
     setEditingBlock(null);
     setNarrowOpen(false);
     setConvertingThreadId(null);
-    void reload(controller.signal).catch((error) => {
-      if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load threads:', error);
-    });
     void reloadBlocks(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load session blocks:', error);
     });
@@ -316,7 +269,6 @@ export const HarnessThreadsPanel: React.FC<{
     });
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'stream-ready') {
-        void reload(controller.signal).catch(() => undefined);
         void reloadBlocks(controller.signal).catch(() => undefined);
         void reloadKnowledge(controller.signal).catch(() => undefined);
         return;
@@ -329,19 +281,12 @@ export const HarnessThreadsPanel: React.FC<{
         void reloadKnowledge(controller.signal).catch(() => undefined);
         return;
       }
-      if (
-        event.type !== 'harness-thread-changed'
-        || event.workspaceId !== scopeRef.current.workspaceId
-        || !scopeMatches(event.parent, scopeRef.current.parent)
-      ) return;
-      eventRevision.current += 1;
-      setThreads((current) => mergeSnapshot(current, { thread: event.thread, activeRun: event.activeRun }));
     });
     return () => {
       controller.abort();
       unsubscribe();
     };
-  }, [parentSessionId, reload, reloadBlocks, reloadKnowledge, workspaceId]);
+  }, [parentSessionId, reloadBlocks, reloadKnowledge, workspaceId]);
 
   if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0) return null;
 

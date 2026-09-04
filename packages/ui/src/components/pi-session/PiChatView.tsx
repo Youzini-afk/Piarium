@@ -71,6 +71,7 @@ import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
+import { HarnessThreadStateProvider } from './HarnessThreadState';
 import { parseHarnessThreadMutation } from './harnessThreadPresentation';
 
 const LazyPiTimeline = React.lazy(async () => {
@@ -800,6 +801,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     : null;
   return (
     <TooltipProvider>
+      <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
       <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
         <WorkbenchReplacement
@@ -948,6 +950,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           onConversationOnly={() => runConversationRecovery(recoveryEntry)}
         />
       ) : null}
+      </HarnessThreadStateProvider>
     </TooltipProvider>
   );
 };

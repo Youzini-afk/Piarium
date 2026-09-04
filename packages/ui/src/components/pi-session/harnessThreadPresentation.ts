@@ -45,6 +45,26 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
   return 'running';
 };
 
+export const sameHarnessThreadParent = (left: ThreadParent, right: ThreadParent): boolean => (
+  left.kind === right.kind && left.id === right.id
+);
+
+export const mergeHarnessThreadSnapshot = (
+  current: HarnessThreadSnapshot[],
+  incoming: HarnessThreadSnapshot,
+): HarnessThreadSnapshot[] => {
+  const existing = current.find((entry) => entry.thread.id === incoming.thread.id);
+  if (existing && existing.thread.eventSeq > incoming.thread.eventSeq) return current;
+  const next = current.filter((entry) => entry.thread.id !== incoming.thread.id);
+  if (!incoming.thread.hidden && incoming.thread.lifecycle !== 'archived') next.push(incoming);
+  return next.sort((left, right) => right.thread.updatedAt.localeCompare(left.thread.updatedAt));
+};
+
+export const harnessThreadsAtEntry = (
+  threads: readonly HarnessThreadSnapshot[],
+  entryId: string,
+): HarnessThreadSnapshot[] => threads.filter(({ thread }) => thread.forkPoint?.entryId === entryId);
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );

@@ -62,6 +62,7 @@ import {
   type PiSortedTurnProjection,
 } from './piSortedTurnProjection';
 import { RememberKnowledgeButton } from './RememberKnowledgeButton';
+import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 
 export interface PiTimelineProps {
   assistantWaiting?: PiAssistantWaitingPresentation;
@@ -807,6 +808,7 @@ const PiSortedActivityGroup: React.FC<{
 };
 
 export const PiTurnUserMessage: React.FC<{
+  cwd: string;
   entry?: PiSessionMessageEntry;
   forkBusyEntryId?: string | null;
   message: PiUserMessage;
@@ -817,6 +819,7 @@ export const PiTurnUserMessage: React.FC<{
   status?: PiSessionSubmissionStatus;
   threadBusyEntryId?: string | null;
 }> = ({
+  cwd,
   entry,
   forkBusyEntryId,
   message,
@@ -937,6 +940,7 @@ export const PiTurnUserMessage: React.FC<{
           ) : null}
         </div>
       ) : null}
+      {entry ? <HarnessThreadMarkers cwd={cwd} entryId={entry.id} /> : null}
     </article>
   );
 };
@@ -1007,6 +1011,7 @@ export const PiTimelineEntryList: React.FC<Omit<
               return (
                 <PiTurnUserMessage
                   key={entry.id}
+                  cwd={cwd}
                   entry={entry}
                   forkBusyEntryId={forkBusyEntryId}
                   message={message}
@@ -1110,6 +1115,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                     ) : null}
                   </div>
                   ) : null}
+                  <HarnessThreadMarkers cwd={cwd} entryId={entry.id} />
                 </article>
               );
             }

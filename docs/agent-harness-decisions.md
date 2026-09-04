@@ -957,6 +957,23 @@ timeline action、session state conversion、10 locale；设计 9.3.2、plan/sta
 
 状态：已实施并 proven（真实 Pi faux-provider 纵切；时间线线程卡片与归档/恢复 UI 仍待实现）
 
+### D-064 · 2026-09-05 · 3.10（时间线线程标记复用 session feed）
+
+类型：实现澄清
+
+决定：把线程 GET、SSE scope 与 eventSeq 合并从 `HarnessThreadsPanel` 提取为会话级 React provider；右 rail、窄屏 overlay 与父时间线
+都消费这一个内存投影。每个带 `forkPoint` 的线程在来源消息下显示紧凑状态标记，点击沿冻结的 model/tools/scope 和记录的 worktree
+打开 child session。旧事件不能覆盖较新的 `eventSeq`，archived/hidden 不进入活动投影。时间线本身不发第二次请求、不建轮询器，
+也不复制 thread action 状态。
+
+原因：若时间线另建 store 或独立 fetch/SSE，用户会看到侧栏已完成而消息卡仍运行，且 D-062 的单实例约束失效；若只在创建成功时
+向时间线塞临时卡，刷新后即丢。会话级 provider 让所有表面共享 Host registry 的同一投影，同时不把 blocks/knowledge 的独立数据
+所有权混入线程状态。
+
+影响：UI `HarnessThreadState`、`HarnessThreadMarkers`、`HarnessThreadsPanel`、`PiChatView` 与 timeline SSR；plan/status 3.10。
+
+状态：已实施并 proven（SSR + eventSeq/fork-point 单测；归档/恢复 UI 仍待）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1026,3 +1043,4 @@ timeline action、session state conversion、10 locale；设计 9.3.2、plan/sta
 | D-061 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / decision suggestion runtime |
 | D-062 | implementation | — | agent-harness 9.3.8、plan/status 3.10；session state rail / mobile overlay |
 | D-063 | implementation | — | agent-harness 9.3.2/9.3.8、architecture 5.2、plan/status 3.10；protocol / Host / pi-host E2E / UI |
+| D-064 | implementation | — | agent-harness 9.3.8、plan/status 3.10；UI shared thread state / timeline markers |

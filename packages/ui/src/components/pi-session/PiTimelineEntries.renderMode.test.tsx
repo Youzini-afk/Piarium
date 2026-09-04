@@ -1,13 +1,15 @@
 import React from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
+import type { PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@piarium/protocol';
 import type { RuntimeAPIs } from '@piarium/application-client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { I18nProvider } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { PiTimelineEntryList } from './PiTimelineEntries';
+import { HarnessThreadStateContext } from './HarnessThreadStateContext';
+import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
 const liveAssistant: PiAssistantMessage = {
   api: 'messages',
@@ -36,6 +38,7 @@ const renderTimeline = (
   assistant: PiAssistantMessage = liveAssistant,
   entries: PiSessionEntry[] = [],
   onOpenThread?: (entry: Extract<PiSessionEntry, { type: 'message' }>, options: { carryBlocks: boolean }) => void,
+  threads: HarnessThreadSnapshot[] = [],
 ): string => {
   // Zustand deliberately exposes the creation snapshot during SSR. Mirror the
   // selected fields into that snapshot so this server render exercises them.
@@ -54,14 +57,21 @@ const renderTimeline = (
     return renderToStaticMarkup(
       <RuntimeAPIContext.Provider value={runtimeAPIs}>
         <I18nProvider>
-          <PiTimelineEntryList
-            cwd="C:\\workspace"
-            entries={entries}
-            liveAssistant={assistant}
-            onOpenThread={onOpenThread}
-            sessionId="session"
-            toolExecutions={{}}
-          />
+          <HarnessThreadStateContext.Provider value={{
+            merge: () => {},
+            parent: { kind: 'session', id: 'session' },
+            threads,
+            workspaceId: 'workspace',
+          }}>
+            <PiTimelineEntryList
+              cwd="C:\\workspace"
+              entries={entries}
+              liveAssistant={assistant}
+              onOpenThread={onOpenThread}
+              sessionId="session"
+              toolExecutions={{}}
+            />
+          </HarnessThreadStateContext.Provider>
         </I18nProvider>
       </RuntimeAPIContext.Provider>,
     );
@@ -125,8 +135,29 @@ describe('Pi timeline chat render mode', () => {
       id: 'tool-entry', parentId: 'assistant-entry', timestamp: '2026-09-04T00:00:02.000Z', type: 'message',
       message: { role: 'toolResult', toolCallId: 'tool-1', toolName: 'read', content: [{ type: 'text', text: 'Remember the result' }], isError: false, timestamp: 3 },
     }] as PiSessionEntry[];
-    const markup = renderTimeline(liveAssistant, entries, () => undefined);
+    const markerThread: Thread = {
+      id: 'thread-1', parent: { kind: 'session', id: 'session' }, workspaceId: 'workspace',
+      forkPoint: { entryId: 'assistant-entry' }, brief: 'Discuss the answer', role: null, model: null,
+      manifest: { carryBlocks: true, concurrency: 12, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
+      createdBy: 'user', kind: 'discussion', worktree: null, lifecycle: 'active', attention: 'user',
+      waitingFor: { kind: 'user', text: 'Ready' }, integration: 'none', diffStats: null, report: null,
+      activeRunId: 'run-1', createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z', eventSeq: 1, hidden: false,
+    };
+    const markerRun: ThreadRun = {
+      id: 'run-1', threadId: markerThread.id, attempt: 1, runtimeId: 'pi', sessionId: 'child-1',
+      workerState: 'running', outcome: null, exitReason: null, tokens: { input: 0, output: 0, cacheRead: 0 },
+      costUsd: null, steps: 0, lastToolCall: null, startedAt: markerThread.createdAt,
+      lastActivityAt: markerThread.updatedAt, endedAt: null,
+    };
+    const markup = renderTimeline(
+      liveAssistant,
+      entries,
+      () => undefined,
+      [{ thread: markerThread, activeRun: markerRun }],
+    );
     expect(markup.match(/aria-label="Add to knowledge review"/g)?.length).toBe(3);
     expect(markup.match(/aria-label="Open a discussion thread from this message"/g)?.length).toBe(2);
+    expect(markup).toContain('data-harness-thread-markers="assistant-entry"');
+    expect(markup).toContain('aria-label="Open thread: Discussion thread"');
   });
 });

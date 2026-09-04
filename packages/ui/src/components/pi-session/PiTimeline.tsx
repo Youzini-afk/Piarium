@@ -157,6 +157,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         !isMobile && 'sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
       )}>
         <PiTurnUserMessage
+          cwd={cwd}
           entry={turn.userEntry}
           forkBusyEntryId={forkBusyEntryId}
           message={turn.user}

@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { Thread, ThreadRun } from '@piarium/protocol';
-import { parseHarnessThreadList, parseHarnessThreadMutation, projectHarnessThreadState } from './harnessThreadPresentation';
+import {
+  harnessThreadsAtEntry,
+  mergeHarnessThreadSnapshot,
+  parseHarnessThreadList,
+  parseHarnessThreadMutation,
+  projectHarnessThreadState,
+} from './harnessThreadPresentation';
 
 const thread = (overrides: Partial<Thread> = {}): Thread => ({
   id: 'thread-1',
@@ -77,5 +83,13 @@ describe('HarnessThreadsPanel projection', () => {
     expect(mutation.workspaceId).toBe('workspace-1');
     expect(mutation.parent).toEqual({ kind: 'session', id: 'parent-1' });
     expect(mutation.thread.kind).toBe('discussion');
+  });
+
+  test('keeps the newest event projection and locates its source-message marker', () => {
+    const original = { thread: thread({ forkPoint: { entryId: 'entry-1' }, eventSeq: 2 }), activeRun: run() };
+    const stale = { thread: thread({ forkPoint: { entryId: 'entry-1' }, eventSeq: 1, brief: 'stale' }), activeRun: run() };
+    expect(mergeHarnessThreadSnapshot([original], stale)).toEqual([original]);
+    expect(harnessThreadsAtEntry([original], 'entry-1')).toEqual([original]);
+    expect(harnessThreadsAtEntry([original], 'entry-2')).toEqual([]);
   });
 });

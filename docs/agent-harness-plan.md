@@ -2,7 +2,7 @@
 
 Status: execution plan for agent-harness.md; delete when all slices are delivered
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 这是 [agent-harness.md](agent-harness.md) 的执行计划。设计决定在设计文档里，那是**边界**；本文给出每个工作项的
 **参考形状**——接口、算法、文本模板、测试要点——省掉从零设计的时间，但实施中遇到的实际情况由执行者临场判断，在边界内
@@ -542,7 +542,7 @@ last checkpoint: 2026-09-03T10:12Z
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
 已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor；父 Zone 2 已接 queued/active 快照与
 settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快照，settle 持久化 child blocks 与结构化 deviations/unresolved。
-未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收的 UI/归档纵切与时间线线程卡片。窄屏投影、用户讨论线及转实现
+未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收与归档/恢复 UI。窄屏投影、时间线线程标记、用户讨论线及转实现
 纵切已接通；child 结果已先提交到持久分支；
 旧 role budget 数字没有执行原语或定标依据，
 已按 D-056 删除而非升级成硬停止。
@@ -808,7 +808,8 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
   `MobileOverlayPanel` 和带实时数量的入口，共用同一加载/SSE/draft/action 状态。持久 user/assistant 消息菜单可创建默认携 blocks
   的只读讨论线，也可显式不携带；Host 从可信 session 解析 workspace/父边/fork point。讨论回答后保持同一会话等待用户，侧栏可将
   空闲讨论线转换为 isolated 实现线；转换新建 Run、重构工具边界但沿用同一 session/transcript。真实 Pi faux-provider 测试覆盖
-  “开、聊、转实现、继续回答”。仍缺时间线线程卡片和归档/恢复 UI（D-063）。
+  “开、聊、转实现、继续回答”。父消息下的线程标记与 rail/overlay 共用同一个 session-scoped feed，并随 SSE 更新；仍缺
+  归档/恢复 UI（D-063/D-064）。
 
 ### 阶段 3 完成标准
 
