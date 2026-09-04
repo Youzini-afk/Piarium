@@ -78,7 +78,7 @@ export interface HarnessServiceHost {
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
-  threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string }) => Promise<{ sessionId: string }>) | null;
+  threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   threadKillSession: ((threadId: string) => Promise<void>) | null;
   threadApplyWorktreeDiff: ((threadId: string) => Promise<{ merged: number; conflicts: string[] }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
@@ -122,7 +122,7 @@ export interface HarnessServiceHostOptions {
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
-  threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string }) => Promise<{ sessionId: string }>;
+  threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
   threadKillSession?: (threadId: string) => Promise<void>;
   threadApplyWorktreeDiff?: (threadId: string) => Promise<{ merged: number; conflicts: string[] }>;
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;

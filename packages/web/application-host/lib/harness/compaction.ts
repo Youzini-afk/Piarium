@@ -19,7 +19,7 @@
  */
 
 import type { KnowledgeStore, Block } from "../knowledge/store.js";
-import { HarnessServiceError } from "./harness-services.js";
+import { HarnessServiceError } from "./service-error.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 

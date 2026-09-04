@@ -49,7 +49,7 @@ Two host events, both carrying state only — never message bodies.
 
 | Event | Direction | Description |
 |-------|-----------|-------------|
-| `harness.thread.changed` | host → clients | Thread record changed (status, steps, flags, `waitingFor`) |
+| `harness.thread.changed` | host → clients | Thread projection changed (`Thread` plus its current `ThreadRun`) |
 | `harness.thread.done` | host → clients | Thread completed; carries the `ThreadReport` |
 
 The registry raises them through its `onThreadChanged` / `onThreadDone`
@@ -104,7 +104,7 @@ interface HarnessSettings {
 - `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `ShellExecResult`, `OutputSlice`, `DiagnosticsResult`
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
 - `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
-- `harness-threads.ts` — Thread protocol types: `ThreadRecord`, `ThreadStatus`, `ThreadViewCursor`, `ThreadDispatchParams`, `ThreadListParams`, `ThreadWaitParams`, `ThreadSendParams`, `ThreadReadParams`, `ThreadMergeParams`, `ThreadKillParams`, `DEFAULT_TTL_TABLE`, `DEFAULT_WAIT_TIMEOUT_MS`
+- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` protocol types, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
 - `types.ts` — `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)

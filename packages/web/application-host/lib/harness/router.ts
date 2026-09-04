@@ -10,7 +10,7 @@ import {
   buildHarnessRespondParams,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
 } from "@piarium/protocol";
-import { HarnessServiceError } from "./harness-services.js";
+import { HarnessServiceError } from "./service-error.js";
 
 export { buildHarnessRespondParams };
 

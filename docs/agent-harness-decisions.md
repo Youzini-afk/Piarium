@@ -444,6 +444,28 @@ worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt
 影响：`agent-harness-plan.md` 0.1 / 0.4 / 验收节重写；`agent-harness-status.md` 新建。
 状态：已实施（文档）
 
+### D-039 · 2026-09-04 · P0.3–P0.4（线程 catalog 的原子存储形状）
+
+类型：实现澄清
+
+决定：D-032 的 `{threads,runs}.json` 概念形状落为**每 workspace 一个原子 catalog**：
+`PIARIUM_DATA_DIR/threads/<hostId>/<sha256(workspaceId)>.json`，正文为
+`{ schemaVersion, workspaceId, threads, runs }`。文件名用 workspace identity 的哈希，避免把外部 identity 当路径片段；Thread 与
+ThreadRun 在同一次 temp-file + rename 中提交，避免两文件提交窗口。无版本的旧 parent 数组只有在 Host 已知
+`(workspaceId, parentSessionId)` 关系时才导入，新 catalog 提交后保留旧文件，不猜 workspace、不静默删除。启动对账逐 catalog
+报告 `corrupt / read-failed / future-schema`，健康 workspace 继续收敛；观察回调失败不能把已经落盘的提交伪装成失败。
+
+原因：Thread 与 active Run 的变化是同一个逻辑提交；拆成两个文件需要额外 journal 或补偿协议，却没有带来读取或规模收益。
+workspace id 当前通常是 UUID，但协议未来允许其他 runtime，持久路径不应依赖这一偶然格式。
+
+考虑过的替代：(a) 两个 JSON 文件——存在一边 rename 成功、另一边失败的窗口。(b) SQLite——当前是单 Host、几十条记录，成本
+高于收益。(c) 原样使用 workspaceId 作为文件名——把未来 adapter 提供的 identity 直接变成路径，不必要。
+
+影响：`packages/web/application-host/lib/harness/thread-registry.ts`、`packages/protocol/src/harness-threads.ts`、设计 9.3.1、
+architecture §5.1、plan P0.3–P0.4。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -481,10 +503,11 @@ worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt
 | D-029 | implementation | — | — |
 | D-030 | active-design | — | 本文件治理规则 |
 | D-031 | active-design（待实施） | — | agent-harness.md 5.10、plan 1.9 |
-| D-032 | active-design（待实施） | — | agent-harness.md 9.3.1 / 9.3.4、plan P0 |
-| D-033 | active-design（待实施） | — | agent-harness.md 2 / 9.2.6 / 12.2、plan P0 |
+| D-032 | folded-in | D-039（原子 catalog 文件形状） | agent-harness.md 9.3.1 / 9.3.4、plan P0、protocol / Host registry |
+| D-033 | folded-in | — | agent-harness.md 2 / 9.2.6 / 9.3.6 / 12.2、protocol 与 thread services |
 | D-034 | active-design（待实施） | — | agent-harness.md 5.1、plan P0 |
 | D-035 | folded-in | — | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
 | D-036 | active-design（待实施） | — | plan 1.7 / P0 |
 | D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
 | D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |
+| D-039 | implementation | — | architecture §5.1、plan P0.3–P0.4、thread-registry.ts |

@@ -161,6 +161,9 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
 
 ### P0.3 注册表错误分类、schema 版本、启动对账
 
+**状态（2026-09-04）**：已实施。每 workspace 一个原子 catalog，旧 parent 数组在 workspace 关系已知时导入且原文件保留；
+启动对账逐 workspace 返回失败，不把损坏或权限错误读成空表。
+
 - `loadParent` 只吞 `ENOENT`；`JSON.parse` 失败、`EACCES`、`schemaVersion > 当前` 一律抛 `HarnessServiceError('failed', …)`
   且**不写入 cache**，之后的 `persist` 不会用空表覆盖。文件带 `{ schemaVersion: 1, threads: [...], runs: [...] }`；无版本
   的旧文件按 0 读并迁移。
@@ -171,6 +174,9 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
   标 lost。
 
 ### P0.4 最小 Thread + ThreadRun 与正交状态
+
+**状态（2026-09-04）**：已实施。协议、Host registry、7 个 service 与 pi-host 工具已迁移；生产 Host 已创建 registry，
+但 `control.thread` 在真实 child runtime 接通前仍不授予，避免再次暴露只会返回 unavailable 的休眠工具。
 
 - 契约按设计 9.3.1 的两个类型替换 `ThreadRecord`；`parent: { kind: 'session' | 'thread', id }`；事件
   `harness.thread.changed` 载荷改为 `{ thread: 状态子集, activeRun?: 状态子集 }`；`harness.thread.done` 不变。

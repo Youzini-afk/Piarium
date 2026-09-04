@@ -9,8 +9,8 @@ import { describe, it } from "node:test";
 import {
   isHarnessMethod,
   DEFAULT_TTL_TABLE,
-  DEFAULT_WAIT_TIMEOUT_MS,
-  type ThreadStatus,
+  type Thread,
+  type ThreadRun,
   type ThreadReadWhat,
   type ThreadViewCursor,
   type ThreadListParams,
@@ -28,6 +28,7 @@ import {
   type ThreadDispatchParams,
   type ThreadDispatchResult,
   type HarnessServiceMap,
+  type HostEventData,
 } from "../src/index.js";
 
 describe("thread protocol types (§9.3)", () => {
@@ -46,12 +47,24 @@ describe("thread protocol types (§9.3)", () => {
     }
   });
 
-  it("ThreadStatus covers all states from §9.3.1", () => {
-    const statuses: ThreadStatus[] = [
-      "queued", "running", "idle", "waiting-for-input",
-      "done", "failed", "cancelled", "merged", "archived",
-    ];
-    assert.equal(statuses.length, 9);
+  it("separates durable work from an execution attempt", () => {
+    const run: ThreadRun = {
+      id: "run-1", threadId: "thread-1", attempt: 1, runtimeId: "pi", sessionId: "session-child",
+      workerState: "lost", outcome: "lost", exitReason: "host restarted",
+      tokens: { input: 1, output: 2, cacheRead: 3 }, costUsd: null, steps: 4, lastToolCall: null,
+      startedAt: "2026-01-01T00:00:00Z", lastActivityAt: "2026-01-01T00:01:00Z", endedAt: "2026-01-01T00:01:00Z",
+    };
+    const thread: Thread = {
+      id: "thread-1", parent: { kind: "session", id: "parent-1" }, workspaceId: "workspace-1",
+      forkPoint: null, brief: "test", role: "check", createdBy: "agent", kind: "implementation",
+      worktree: null, lifecycle: "active", attention: "permission", waitingFor: { kind: "permission", text: "allow?" },
+      integration: "conflict", diffStats: null, report: null, activeRunId: run.id,
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:01:00Z", eventSeq: 2, hidden: false,
+    };
+    assert.equal(thread.lifecycle, "active");
+    assert.equal(thread.attention, "permission");
+    assert.equal(thread.integration, "conflict");
+    assert.equal(run.outcome, "lost");
   });
 
   it("ThreadReadWhat has exactly three options", () => {
@@ -70,21 +83,22 @@ describe("thread protocol types (§9.3)", () => {
     assert.ok(anthropic1hTtl > anthropicTtl);
   });
 
-  it("DEFAULT_WAIT_TIMEOUT_MS is 240 seconds (conservative fallback)", () => {
-    assert.equal(DEFAULT_WAIT_TIMEOUT_MS, 240_000);
-  });
-
   it("ThreadViewCursor has all required fields", () => {
     const cursor: ThreadViewCursor = {
       eventSeq: 0,
-      status: "queued",
+      lifecycle: "queued",
+      attention: "none",
+      integration: "none",
+      activeRunId: null,
+      workerState: null,
+      outcome: null,
       progressVersion: 0,
       decisionsCount: 0,
       diffStats: null,
       viewedAt: "2026-01-01T00:00:00Z",
     };
     assert.ok(typeof cursor.eventSeq === "number");
-    assert.ok(typeof cursor.status === "string");
+    assert.equal(cursor.lifecycle, "queued");
     assert.ok(typeof cursor.viewedAt === "string");
   });
 
@@ -102,12 +116,12 @@ describe("thread protocol types (§9.3)", () => {
       text: "2 threads · 1 changed",
       threads: [{
         id: "t1",
-        status: "running",
+        lifecycle: "active",
+        attention: "none",
+        integration: "dirty",
         brief: "test",
         role: "check",
-        steps: 5,
-        lastActivityAt: "2026-01-01T00:00:00Z",
-        flags: { workerLost: false, stalled: false, looping: false },
+        activeRun: null,
         waitingFor: null,
         diffStats: { files: 2, insertions: 10, deletions: 3 },
       }],
@@ -131,12 +145,24 @@ describe("thread protocol types (§9.3)", () => {
     assert.equal(result.waiting, 1);
   });
 
-  it("ThreadSendResult includes status", () => {
+  it("ThreadSendResult reports orthogonal state", () => {
     const result: ThreadSendResult = {
       accepted: true,
-      status: "running",
+      lifecycle: "active",
+      attention: "none",
     };
-    assert.equal(result.status, "running");
+    assert.equal(result.lifecycle, "active");
+  });
+
+  it("thread change events carry workspace, parent edge, and active Run separately", () => {
+    const event = {
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "parent-1" },
+      thread: {} as Thread,
+      activeRun: {} as ThreadRun,
+    } satisfies HostEventData<"harness.thread.changed">;
+    assert.equal(event.workspaceId, "workspace-1");
+    assert.equal(event.parent.kind, "session");
   });
 
   it("ThreadReadParams supports what and since", () => {

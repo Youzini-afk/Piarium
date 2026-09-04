@@ -1116,7 +1116,8 @@ ThreadRun {
 `waiting-for-input + permission pending` 都是合法组合，一条状态机表达不了。worker 崩溃 = 当前 Run 以 `lost` 结束，
 恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；**不在同一条记录上把 worker-lost 清掉、改回 running**——那是把
 第二次尝试伪装成第一次没中断，与恢复子系统"标 incomplete、不说谎"的原则相悖。`parent` 是一条图边（根会话或嵌套线程），
-不是存储目录的所有者；注册表按工作区持久化，带 schema 版本，读取只吞"文件不存在"，损坏、权限错误、未来版本都抛出且绝不
+不是存储目录的所有者；注册表按工作区用一个同时包含 threads/runs 的原子 catalog 持久化（D-039），带 schema 版本，读取只吞
+"文件不存在"，损坏、权限错误、未来版本都抛出且绝不
 用空表覆盖；host 启动时对账——所有 `starting` / `running` 的 Run 标 `lost`。注册表是 host 的协调记录：它记录 host
 知道的事，worker 是否活着由 broker 事实说了算，二者靠对账一致，注册表不凭自己宣布 worker 在跑。这份状态是父 agent、
 用户面板、Zone 2 共同读的一份。将来接其他 runtime（ACP、Codex、Claude）换的是 `ThreadRun.runtimeId` 对应的 adapter，
@@ -1141,7 +1142,8 @@ ThreadRun {
 #### 9.3.4 生命周期与回收
 
 - **与父的回合、worker 进程解耦。** 线程是持久会话，会话文件每步落盘。父回合结束它继续跑；父 worker 死了它不受影响；
-  线程自己的 worker 死了只是 `worker-lost`：host 在同一会话文件、同一 worktree 上重启 worker，线程 id 不变，从最后一个
+  线程自己的 worker 死了会把当前 `ThreadRun` 结束为 `outcome: lost`：host 在同一会话文件、同一 worktree 上创建下一次
+  `attempt`，线程 id 不变，从最后一个
   完成的步继续，Zone 2 告诉它"你被中断过，上一条工具结果可能缺失"。这是恢复子系统"worker 退出 → 标 incomplete、不说谎"
   的推广。
 - **完成进入父的下一回合。** 线程完成是一个事件；父在 `wait` 里就立即返回，不在就以 Zone 2 一行进入下一回合（通道 A）：
@@ -1162,8 +1164,9 @@ ThreadRun {
 上下文增长、花费。停滞 = 超过 T 没有事件（T 默认按 provider 缓存 TTL 推，与第 9.2.6 节一致）；循环 = 重复模式。这是
 传感器，允许机械判定（它决定的是"提醒谁"，不是"什么重要"）。
 
-失败有分类，没有"没结果"：`done` 带报告；`failed` 是线程自己的结论加原因；`worker-lost` 可恢复；`stalled` 活着没动；
-`looping` 有模式；`cancelled`。每种是不同的结果（不变量 3）。`waiting-for-input` 是一等状态——实践里最常见的"卡死"其实
+失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
+user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等
+attention——实践里最常见的"卡死"其实
 是在等一个没人看见的权限确认或澄清问题：它出现在 `threads` / `wait` 结果和用户面板里，附问题正文，父 `send` 或人直接
 答；权限请求走原生权限 UI 并带线程徽标，永远不会静默等待。完成报告幂等：报告、记忆块快照、diff 统计原子写进注册表，
 `done` 之后再 `wait` 仍返回同一份。
@@ -1173,7 +1176,8 @@ ThreadRun {
 - `threads(ids?)`：非阻塞快照，一张小表——id、角色、状态、最近活动距今、步数、花费、一行进度（取线程 progress 块最后
   一条）、在等输入则附问题正文、diff 统计。**默认增量**（第 8.7 节），一次约两百 token。
 - `wait(ids?, timeout_ms?)`：同一张表的阻塞版本，任一线程状态变化或超时返回，超时是正常结果；`done` 的线程附完整报告。
-  默认截止按缓存 TTL 推（第 9.2.6 节），这是父"让出去等"的唯一方式。
+  未显式给截止时只使用 Host 请求上限（当前 1 小时，服务会提前 5 秒正常返回 `timedOut`），不按缓存 TTL 唤醒；这是父
+  "让出去等"的唯一方式。
 - `read_thread(id, what?)`：`what` 默认 `blocks`（progress / decisions / errors 块），其次 `report`，最后 `steps`（转录切片，
   带游标，走句柄）。默认值决定用法：父想知道"它在干什么、决定了什么、卡在哪"时拿到的是结构化摘要，不是十万字对话。
 - `send(id, message)`：带"来自父 agent"标记进线程，能唤醒 idle 或 waiting 状态。

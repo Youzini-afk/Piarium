@@ -12,7 +12,7 @@ import type {
   ThreadMergeResult,
   ThreadKillResult,
 } from "@piarium/protocol";
-import { DEFAULT_WAIT_TIMEOUT_MS, buildTeamPrompt } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, buildTeamPrompt } from "@piarium/protocol";
 
 /**
  * Build an error result for a thread tool failure.
@@ -163,13 +163,16 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
-        const waitTimeout = params.timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS;
+        const waitTimeout = Math.min(
+          params.timeout_ms ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
+          HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
+        );
         // Pass timeout + 5s buffer to bridge so the bridge/router don't
         // time out before the service's internal wait timeout fires.
         const result = await bridge.request<"thread.wait">("thread.wait", {
           ...(params.ids !== undefined ? { ids: params.ids } : {}),
           timeoutMs: waitTimeout,
-        }, { timeoutMs: waitTimeout + 5_000, ...(signal ? { signal } : {}) });
+        }, { timeoutMs: Math.min(waitTimeout + 5_000, HARNESS_MAX_REQUEST_TIMEOUT_MS), ...(signal ? { signal } : {}) });
         const typed = result as ThreadWaitResult;
         return {
           content: [{ type: "text", text: typed.text }],
@@ -205,7 +208,8 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
           from: "parent-agent",
         });
         const typed = result as ThreadSendResult;
-        return { content: [{ type: "text", text: typed.accepted ? `sent to ${params.threadId} (${typed.status})` : "not accepted" }], details: { accepted: typed.accepted, status: typed.status } };
+        const state = `${typed.lifecycle}/${typed.attention}`;
+        return { content: [{ type: "text", text: typed.accepted ? `sent to ${params.threadId} (${state})` : "not accepted" }], details: { accepted: typed.accepted, lifecycle: typed.lifecycle, attention: typed.attention } };
       } catch (error) {
         return threadErrorResult("send", error);
       }

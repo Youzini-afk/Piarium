@@ -52,6 +52,7 @@ import { type Zone2Material } from './lib/harness/zone2.js';
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { type RecallToolDeps } from './lib/harness/recall-tool.js';
+import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -1065,6 +1066,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const knowledgeStores = new Map<string, KnowledgeStore>();
   const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
+  const threadRegistry = createThreadRegistry({
+    dataDir: PIARIUM_DATA_DIR,
+    hostId,
+    onObserverError: (error) => {
+      console.error('[HarnessThreads] Observer failed:', errorMessage(error));
+    },
+  });
+  const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
+  for (const failure of threadRegistryStartup.failures) {
+    console.error(`[HarnessThreads] Startup reconciliation failed (${failure.code}) for ${failure.path}: ${failure.message}`);
+  }
 
   async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore | null> {
     let store = knowledgeStores.get(workspaceId);
@@ -1188,6 +1200,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     compactionDepsProvider,
     todoDepsProvider,
     recallDepsProvider,
+    threadRegistry,
     ...(memoryAgent ? { memoryAgent } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
@@ -1391,7 +1404,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           harnessServiceHost.registerSession({
             actor: event.actor,
             grantedCapabilities: deriveHarnessCapabilities(activeTools, {
-              threadRuntime: Boolean(harnessServiceHost.threadRegistry),
+              threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
             }),
             workspaceId: harnessWorkspaceId,
             workspaceRoot: envelopeData.cwd,
@@ -1597,6 +1610,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await piWriterTracker.dispose();
       harnessRouter.dispose();
       await harnessServiceHost.dispose();
+      await threadRegistry.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
       realtimeProxyRuntime.stop();

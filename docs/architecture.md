@@ -458,8 +458,13 @@ in pi-host's `tool_call` gate; the two checks do not duplicate prompts.
 
 Thread operations use the harness service protocol. The thread registry
 is the single source of truth for thread state, persisted to
-`PIARIUM_DATA_DIR/threads/<hostId>/<parentSessionId>.json` with atomic
-temp-file + rename writes.
+one versioned, atomic catalog per workspace under
+`PIARIUM_DATA_DIR/threads/<hostId>/`. The filename is the SHA-256 of the
+workspace identity and the document stores `{ schemaVersion, workspaceId,
+threads, runs }`; parent sessions and nested threads are graph edges, not
+storage owners. Startup reconciliation marks interrupted `starting`/`running`
+attempts as `lost`, while malformed, unreadable, and future-schema catalogs
+remain distinct failures.
 
 Thread lifecycle:
 ```

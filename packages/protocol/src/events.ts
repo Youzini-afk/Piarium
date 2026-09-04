@@ -17,6 +17,7 @@ import type {
 import type { PiAgentEvent } from "./session.js";
 import type { ProviderConfigDeleteScope } from "./provider.js";
 import type { HarnessRequestData } from "./harness.js";
+import type { Thread, ThreadReport, ThreadRun } from "./harness-threads.js";
 
 interface WorkspaceMutationRequestBase {
   path: string;
@@ -98,22 +99,16 @@ export interface HostEventMap {
   "workspace.mutation.request": WorkspaceMutationRequest;
   "harness.request": HarnessRequestData;
   "harness.thread.changed": {
-    parentSessionId: string;
-    thread: {
-      id: string;
-      status: import("./harness-threads.js").ThreadStatus;
-      brief: string;
-      role: string | null;
-      steps: number;
-      lastActivityAt: string;
-      flags: { workerLost: boolean; stalled: boolean; looping: boolean };
-      waitingFor: { kind: "user" | "permission" | "thread"; text: string } | null;
-    };
+    workspaceId: string;
+    parent: import("./harness-threads.js").ThreadParent;
+    thread: Thread;
+    activeRun: ThreadRun | null;
   };
   "harness.thread.done": {
-    parentSessionId: string;
+    workspaceId: string;
+    parent: import("./harness-threads.js").ThreadParent;
     threadId: string;
-    report: import("./harness-threads.js").ThreadReport;
+    report: ThreadReport;
   };
 }
 

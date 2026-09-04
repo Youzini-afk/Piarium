@@ -1,12 +1,45 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import fs from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  THREAD_REGISTRY_SCHEMA_VERSION,
+  ThreadRegistryError,
   createThreadRegistry,
-  type ThreadRecord,
+  threadCatalogPath,
+  type CreateThreadInput,
+  type ThreadParent,
   type ThreadReport,
 } from "./thread-registry.js";
+
+const WORKSPACE = "workspace-1";
+const PARENT: ThreadParent = { kind: "session", id: "parent-1" };
+
+const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
+  workspaceId: WORKSPACE,
+  parent: PARENT,
+  brief: "write tests",
+  role: "check",
+  kind: "implementation",
+  createdBy: "agent",
+  autoRun: true,
+  worktree: "isolated",
+  tools: [],
+  permissions: {},
+  ...overrides,
+});
+
+const report = (conclusion = "done"): ThreadReport => ({
+  conclusion,
+  changedFiles: ["a.ts"],
+  unresolved: [],
+  deviations: [],
+  confidence: 0.9,
+  traceHandle: "trace-1",
+  blocksSnapshot: {},
+});
 
 describe("thread registry", () => {
   let dataDir: string;
@@ -17,674 +50,287 @@ describe("thread registry", () => {
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await registry.dispose();
     try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
   });
 
-  it("createThread creates a queued thread", async () => {
-    const record = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "write tests",
-      role: "check",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(record.id).toMatch(/^thread-/);
-    expect(record.status).toBe("queued");
-    expect(record.brief).toBe("write tests");
-    expect(record.role).toBe("check");
-    expect(record.flags).toEqual({ workerLost: false, stalled: false, looping: false });
+  it("creates durable work separately from its first execution attempt", async () => {
+    const thread = await registry.createThread(createInput());
+    expect(thread.lifecycle).toBe("queued");
+    expect(thread.activeRunId).toBeNull();
+    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(0);
+
+    const starting = await registry.startRun(WORKSPACE, thread.id);
+    expect(starting.attempt).toBe(1);
+    expect(starting.workerState).toBe("starting");
+    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(1);
+
+    const running = await registry.markRunRunning(WORKSPACE, thread.id, starting.id, "child-session-1");
+    expect(running.sessionId).toBe("child-session-1");
+    expect(running.workerState).toBe("running");
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
   });
 
-  it("createThread with autoRun=false creates an idle thread", async () => {
-    const record = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "discuss approach",
-      kind: "discussion",
-      createdBy: "user",
-      autoRun: false,
-      worktree: "none",
-      tools: [],
-      permissions: {},
-    });
-    expect(record.status).toBe("idle");
-    expect(record.role).toBeNull();
+  it("records a lost attempt and starts attempt two without erasing history or attention", async () => {
+    const thread = await registry.createThread(createInput());
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "child-session-1");
+    await registry.setAttention(WORKSPACE, thread.id, "permission", { kind: "permission", text: "allow bash?" });
+    await registry.endRun(WORKSPACE, thread.id, first.id, "lost", "worker exited");
+
+    const second = await registry.startRun(WORKSPACE, thread.id);
+    const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    const runs = await registry.listRuns(WORKSPACE, thread.id);
+    expect(second.attempt).toBe(2);
+    expect(current?.activeRunId).toBe(second.id);
+    expect(current?.attention).toBe("permission");
+    expect(runs.map((run) => [run.attempt, run.outcome, run.workerState])).toEqual([
+      [1, "lost", "lost"],
+      [2, null, "starting"],
+    ]);
   });
 
-  it("getThread returns the thread by id", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const fetched = await registry.getThread("parent-1", created.id);
-    expect(fetched).not.toBeNull();
-    expect(fetched!.id).toBe(created.id);
+  it("allows lifecycle, attention, and integration to change independently", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    await registry.setAttention(WORKSPACE, thread.id, "stalled");
+    await registry.setIntegration(WORKSPACE, thread.id, "conflict", { files: 2, insertions: 3, deletions: 1 });
+    const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(current).toMatchObject({ lifecycle: "active", attention: "stalled", integration: "conflict" });
   });
 
-  it("getThread returns null for unknown id", async () => {
-    const fetched = await registry.getThread("parent-1", "nonexistent");
-    expect(fetched).toBeNull();
+  it("completes a run idempotently and retains merge state as a Thread concern", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    const first = await registry.completeThread(WORKSPACE, thread.id, report());
+    const second = await registry.completeThread(WORKSPACE, thread.id, report("ignored"));
+    expect(first?.lifecycle).toBe("settled");
+    expect(first?.integration).toBe("merge-ready");
+    expect(second).toEqual(first);
+    await registry.mergeThread(WORKSPACE, thread.id);
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.integration).toBe("merged");
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.outcome).toBe("success");
   });
 
-  it("listThreads returns all non-hidden threads", async () => {
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "task 1",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "task 2",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-      hidden: true,
-    });
-    const visible = await registry.listThreads("parent-1");
-    expect(visible.length).toBe(1);
-    const all = await registry.listThreads("parent-1", true);
-    expect(all.length).toBe(2);
+  it("supports a thread parent edge without mixing nested and root children", async () => {
+    const root = await registry.createThread(createInput());
+    const nestedParent: ThreadParent = { kind: "thread", id: root.id };
+    const nested = await registry.createThread(createInput({ parent: nestedParent, brief: "nested" }));
+    expect(await registry.listThreads(WORKSPACE, PARENT)).toEqual([root]);
+    expect(await registry.listThreads(WORKSPACE, nestedParent)).toEqual([nested]);
+    expect(await registry.getThread(WORKSPACE, PARENT, nested.id)).toBeNull();
   });
 
-  it("setSessionId updates status to running", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.setSessionId("parent-1", created.id, "session-123");
-    expect(updated!.status).toBe("running");
-    expect(updated!.sessionId).toBe("session-123");
-  });
-
-  it("markWorkerLost sets the workerLost flag", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.markWorkerLost("parent-1", created.id);
-    expect(updated!.flags.workerLost).toBe(true);
-  });
-
-  it("resumeThread clears workerLost and sets running", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.markWorkerLost("parent-1", created.id);
-    const updated = await registry.resumeThread("parent-1", created.id);
-    expect(updated!.flags.workerLost).toBe(false);
-    expect(updated!.status).toBe("running");
-  });
-
-  it("cancelThread sets status to cancelled", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.cancelThread("parent-1", created.id, "user cancelled");
-    expect(updated!.status).toBe("cancelled");
-    expect(updated!.exitReason).toBe("user cancelled");
-  });
-
-  it("completeThread is idempotent", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.setSessionId("parent-1", created.id, "session-1");
-    const report: ThreadReport = {
-      conclusion: "done",
-      changedFiles: ["a.ts"],
-      unresolved: [],
-      deviations: [],
-      confidence: 0.9,
-      traceHandle: "trace-1",
-      blocksSnapshot: {},
-    };
-    const first = await registry.completeThread("parent-1", created.id, report);
-    expect(first!.status).toBe("done");
-    expect(first!.report).toEqual(report);
-    // Second call should return the same record without changing
-    const second = await registry.completeThread("parent-1", created.id, report);
-    expect(second!.status).toBe("done");
-    expect(second!.updatedAt).toBe(first!.updatedAt);
-  });
-
-  it("mergeThread sets status to merged", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.setSessionId("parent-1", created.id, "session-1");
-    const report: ThreadReport = {
-      conclusion: "done",
-      changedFiles: [],
-      unresolved: [],
-      deviations: [],
-      confidence: 1,
-      traceHandle: "t",
-      blocksSnapshot: {},
-    };
-    await registry.completeThread("parent-1", created.id, report);
-    const merged = await registry.mergeThread("parent-1", created.id);
-    expect(merged!.status).toBe("merged");
-  });
-
-  it("convertThread changes kind to implementation", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "discuss",
-      kind: "discussion",
-      createdBy: "user",
-      autoRun: false,
-      worktree: "none",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.convertThread("parent-1", created.id);
-    expect(updated!.kind).toBe("implementation");
-  });
-
-  it("updateProgress updates steps and tokens", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.updateProgress("parent-1", created.id, {
+  it("stores metrics on the active run and diff integration on the Thread", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.updateRunProgress(WORKSPACE, thread.id, {
       steps: 5,
-      tokens: { input: 1000, output: 500 },
-      lastToolCall: { name: "bash", at: "2026-09-03T12:00:00Z" },
+      tokens: { input: 100, output: 20 },
+      costUsd: 0.01,
+      lastToolCall: { name: "bash", at: "2026-09-04T00:00:00.000Z" },
+      diffStats: { files: 1, insertions: 2, deletions: 0 },
     });
-    expect(updated!.steps).toBe(5);
-    expect(updated!.tokens.input).toBe(1000);
-    expect(updated!.tokens.output).toBe(500);
-    expect(updated!.lastToolCall!.name).toBe("bash");
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({
+      id: run.id,
+      steps: 5,
+      tokens: { input: 100, output: 20, cacheRead: 0 },
+      costUsd: 0.01,
+    });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      integration: "dirty",
+      diffStats: { files: 1, insertions: 2, deletions: 0 },
+    });
   });
 
-  it("setWaitingFor sets status to waiting-for-input", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.setSessionId("parent-1", created.id, "session-1");
-    const updated = await registry.setWaitingFor("parent-1", created.id, {
-      kind: "permission",
-      text: "allow bash?",
-    });
-    expect(updated!.status).toBe("waiting-for-input");
-    expect(updated!.waitingFor!.kind).toBe("permission");
-    // Clear it
-    const cleared = await registry.setWaitingFor("parent-1", created.id, null);
-    expect(cleared!.status).toBe("running");
-    expect(cleared!.waitingFor).toBeNull();
+  it("persists one versioned atomic catalog per workspace", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const document = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    expect(document.schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+    expect(document.workspaceId).toBe(WORKSPACE);
+    expect(document.threads).toHaveLength(1);
+    expect(document.runs).toHaveLength(1);
+
+    const restarted = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await restarted.getActiveRun(WORKSPACE, thread.id))?.id).toBe(run.id);
+    await restarted.dispose();
   });
 
-  it("rejects invalid state transitions", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    // queued → done is invalid (must go through running first)
-    await expect(
-      registry.completeThread("parent-1", created.id, {
-        conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
-        confidence: 1, traceHandle: "t", blocksSnapshot: {},
-      }),
-    ).rejects.toThrow(/Invalid thread state transition/);
-    // queued → running is valid
-    const running = await registry.setSessionId("parent-1", created.id, "session-1");
-    expect(running!.status).toBe("running");
-    // running → done is valid
-    const done = await registry.completeThread("parent-1", created.id, {
-      conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
-      confidence: 1, traceHandle: "t", blocksSnapshot: {},
-    });
-    expect(done!.status).toBe("done");
-    // done → running is invalid
-    await expect(
-      registry.updateThread("parent-1", created.id, { status: "running" }),
-    ).rejects.toThrow(/Invalid thread state transition/);
+  it("treats only ENOENT as an empty catalog", async () => {
+    expect(await registry.listThreads(WORKSPACE, PARENT)).toEqual([]);
+    expect(fs.existsSync(threadCatalogPath(dataDir, "test-host", WORKSPACE))).toBe(false);
   });
 
-  it("cancelAllForParent cancels all running threads", async () => {
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "task 1",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "task 2",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.cancelAllForParent("parent-1");
-    const threads = await registry.listThreads("parent-1", true);
-    expect(threads.every((t) => t.status === "cancelled")).toBe(true);
+  it("does not cache or overwrite malformed JSON", async () => {
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "{broken", "utf8");
+    await expect(registry.listThreads(WORKSPACE, PARENT)).rejects.toMatchObject({ code: "corrupt" });
+    await expect(registry.createThread(createInput())).rejects.toMatchObject({ code: "corrupt" });
+    expect(await readFile(path, "utf8")).toBe("{broken");
   });
 
-  it("persists across registry instances", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "persist test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    // Create a new registry pointing to the same data dir
-    const registry2 = createThreadRegistry({ dataDir, hostId: "test-host" });
-    const fetched = await registry2.getThread("parent-1", created.id);
-    expect(fetched).not.toBeNull();
-    expect(fetched!.brief).toBe("persist test");
+  it("rejects a future schema without changing it", async () => {
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    await mkdir(dirname(path), { recursive: true });
+    const future = JSON.stringify({ schemaVersion: 999, workspaceId: WORKSPACE, threads: [], runs: [] });
+    await writeFile(path, future, "utf8");
+    await expect(registry.listThreads(WORKSPACE, PARENT)).rejects.toMatchObject({ code: "future-schema" });
+    expect(await readFile(path, "utf8")).toBe(future);
   });
 
-  it("onThreadChanged callback is called on updates", async () => {
-    const changes: ThreadRecord[] = [];
-    const reg = createThreadRegistry({
+  it("keeps permission errors distinct from an absent file", async () => {
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ schemaVersion: 1, workspaceId: WORKSPACE, threads: [], runs: [] }), "utf8");
+    const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+    const failing = createThreadRegistry({
       dataDir,
       hostId: "test-host",
-      onThreadChanged: (_parentId, thread) => changes.push(thread),
+      fsPromises: {
+        mkdir: fs.promises.mkdir,
+        readFile: vi.fn(async () => { throw denied; }) as typeof fs.promises.readFile,
+        readdir: fs.promises.readdir,
+        rename: fs.promises.rename,
+        rm: fs.promises.rm,
+        writeFile: fs.promises.writeFile,
+      },
     });
-    const created = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "callback test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(changes.length).toBe(1);
-    expect(changes[0]!.id).toBe(created.id);
-    await reg.cancelThread("parent-1", created.id);
-    expect(changes.length).toBe(2);
-    expect(changes[1]!.status).toBe("cancelled");
+    await expect(failing.listThreads(WORKSPACE, PARENT)).rejects.toMatchObject({ code: "read-failed" });
+    expect(await readFile(path, "utf8")).toContain(`"workspaceId":"${WORKSPACE}"`);
+    await failing.dispose();
   });
 
-  it("onThreadDone callback is called when thread completes", async () => {
-    const doneCalls: Array<{ threadId: string; report: ThreadReport }> = [];
-    const reg = createThreadRegistry({
+  it("imports a legacy parent array once the workspace relation is known", async () => {
+    const legacyPath = join(dataDir, "threads", "test-host", `${PARENT.id}.json`);
+    await mkdir(dirname(legacyPath), { recursive: true });
+    const legacy = [{
+      id: "thread-legacy", parentSessionId: PARENT.id, sessionId: "child-legacy", forkPoint: null,
+      brief: "legacy", role: "check", createdBy: "agent", kind: "implementation", worktree: null,
+      status: "running", flags: { workerLost: false, stalled: false, looping: false }, waitingFor: null,
+      lastActivityAt: "2026-09-04T00:01:00.000Z", steps: 2, tokens: { input: 1, output: 2, cacheRead: 3 },
+      costUsd: null, lastToolCall: null, diffStats: null, report: null, exitReason: null,
+      createdAt: "2026-09-04T00:00:00.000Z", updatedAt: "2026-09-04T00:01:00.000Z", eventSeq: 4, hidden: false,
+    }];
+    writeFileSync(legacyPath, JSON.stringify(legacy), "utf8");
+    const [thread] = await registry.listThreads(WORKSPACE, PARENT);
+    expect(thread).toMatchObject({ id: "thread-legacy", lifecycle: "active", activeRunId: expect.any(String) });
+    expect(await registry.getActiveRun(WORKSPACE, thread!.id)).toMatchObject({ attempt: 1, sessionId: "child-legacy", workerState: "running" });
+    expect(readFileSync(legacyPath, "utf8")).toBe(JSON.stringify(legacy));
+  });
+
+  it("reconciles interrupted runs as lost while preserving pending attention", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    await registry.setAttention(WORKSPACE, thread.id, "user", { kind: "user", text: "Which file?" });
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    const result = await registry.reconcileAfterHostRestart();
+    expect(result).toMatchObject({ reconciledRuns: 1, workspaces: 1, failures: [] });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({
+      workerState: "lost",
+      outcome: "lost",
+      exitReason: "host restarted",
+    });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      lifecycle: "active",
+      attention: "user",
+      waitingFor: { text: "Which file?" },
+    });
+  });
+
+  it("reports one corrupt workspace without hiding successful reconciliation of another", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.startRun(WORKSPACE, thread.id);
+    const badPath = threadCatalogPath(dataDir, "test-host", "workspace-bad");
+    await mkdir(dirname(badPath), { recursive: true });
+    await writeFile(badPath, "not json", "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    const result = await registry.reconcileAfterHostRestart();
+    expect(result.reconciledRuns).toBe(1);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ code: "corrupt", path: badPath });
+  });
+
+  it("does not publish a failed mutation into cache or disk", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.dispose();
+    const failing = createThreadRegistry({
       dataDir,
       hostId: "test-host",
-      onThreadDone: (_parentId, threadId, report) => doneCalls.push({ threadId, report }),
+      fsPromises: {
+        mkdir: fs.promises.mkdir,
+        readFile: fs.promises.readFile,
+        readdir: fs.promises.readdir,
+        rename: vi.fn(async () => { throw Object.assign(new Error("locked"), { code: "EBUSY" }); }) as typeof fs.promises.rename,
+        rm: fs.promises.rm,
+        writeFile: fs.promises.writeFile,
+      },
     });
-    const created = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "done test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await reg.setSessionId("parent-1", created.id, "session-1");
-    const report: ThreadReport = {
-      conclusion: "all done",
-      changedFiles: ["a.ts"],
-      unresolved: [],
-      deviations: [],
-      confidence: 0.95,
-      traceHandle: "trace-1",
-      blocksSnapshot: {},
-    };
-    await reg.completeThread("parent-1", created.id, report);
-    expect(doneCalls.length).toBe(1);
-    expect(doneCalls[0]!.threadId).toBe(created.id);
-    expect(doneCalls[0]!.report.conclusion).toBe("all done");
+    await expect(failing.setAttention(WORKSPACE, thread.id, "stalled")).rejects.toBeInstanceOf(ThreadRegistryError);
+    expect((await failing.getThread(WORKSPACE, PARENT, thread.id))?.attention).toBe("none");
+    await failing.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.attention).toBe("none");
   });
 
-  it("deleteThread removes the thread", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "delete me",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const deleted = await registry.deleteThread("parent-1", created.id);
-    expect(deleted).toBe(true);
-    const fetched = await registry.getThread("parent-1", created.id);
-    expect(fetched).toBeNull();
-  });
-
-  it("setFlags updates individual flags", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "flag test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const updated = await registry.setFlags("parent-1", created.id, { stalled: true });
-    expect(updated!.flags.stalled).toBe(true);
-    expect(updated!.flags.workerLost).toBe(false); // unchanged
-  });
-
-  // ── New tests for §9.3 redo ───────────────────────────────────────
-
-  it("eventSeq increments on every state change", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "seq test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(created.eventSeq).toBeGreaterThan(0);
-    const seq1 = created.eventSeq;
-    const updated = await registry.setSessionId("parent-1", created.id, "session-1");
-    expect(updated!.eventSeq).toBeGreaterThan(seq1);
-  });
-
-  it("observer cursor starts null and can be set/get", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "cursor test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(registry.getCursor("observer-1", created.id)).toBeNull();
-    registry.setCursor("observer-1", created.id, {
-      eventSeq: created.eventSeq,
-      status: created.status,
-      progressVersion: 0,
-      decisionsCount: 0,
-      diffStats: null,
-      viewedAt: new Date().toISOString(),
-    });
-    const cursor = registry.getCursor("observer-1", created.id);
-    expect(cursor).not.toBeNull();
-    expect(cursor!.status).toBe("queued");
-  });
-
-  it("clearCursorsForSession removes all cursors for an observer", async () => {
-    const t1 = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "t1",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const t2 = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "t2",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    registry.setCursor("observer-1", t1.id, {
-      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
-    });
-    registry.setCursor("observer-1", t2.id, {
-      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
-    });
-    expect(registry.getCursor("observer-1", t1.id)).not.toBeNull();
-    registry.clearCursorsForSession("observer-1");
-    expect(registry.getCursor("observer-1", t1.id)).toBeNull();
-    expect(registry.getCursor("observer-1", t2.id)).toBeNull();
-  });
-
-  it("subscribeToChanges is called when a thread changes", async () => {
-    let called = 0;
-    const unsub = registry.subscribeToChanges("parent-1", () => { called++; });
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "sub test",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(called).toBeGreaterThan(0);
-    unsub();
-    const calledBefore = called;
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "after unsub",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(called).toBe(calledBefore); // no more callbacks after unsubscribe
-  });
-
-  it("maxConcurrency limits active threads", async () => {
-    const reg = createThreadRegistry({ dataDir, hostId: "test-host", maxConcurrency: 2 });
-    // Create 2 running threads
-    const t1 = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "t1",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await reg.setSessionId("parent-1", t1.id, "sess-1");
-    const t2 = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "t2",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await reg.setSessionId("parent-1", t2.id, "sess-2");
-    // Third thread should still be queued (concurrency full)
-    const t3 = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "t3",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(t3.status).toBe("queued");
-    expect(reg.maxConcurrency).toBe(2);
-  });
-
-  it("tryDequeue returns the oldest queued thread", async () => {
-    const t1 = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "first",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "second",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    const dequeued = await registry.tryDequeue("parent-1");
-    expect(dequeued).not.toBeNull();
-    expect(dequeued!.id).toBe(t1.id); // oldest first
-  });
-
-  it("completeThread dequeues next queued thread", async () => {
-    const dequeuedThreads: ThreadRecord[] = [];
-    const reg = createThreadRegistry({
+  it("dequeues only after an active run frees a concurrency slot", async () => {
+    const dequeued: string[] = [];
+    await registry.dispose();
+    registry = createThreadRegistry({
       dataDir,
       hostId: "test-host",
       maxConcurrency: 1,
-      onThreadDequeued: async (_parentId, thread) => {
-        dequeuedThreads.push(thread);
-        await reg.setSessionId(thread.parentSessionId, thread.id, `sess-${thread.id}`);
-      },
+      onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
     });
-    // Create first thread (autoRun with maxConcurrency=1 → queued)
-    const t1 = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "first",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    // Manually promote t1 to running
-    await reg.setSessionId("parent-1", t1.id, "sess-1");
-    // Create second thread (should be queued because t1 is running)
-    const t2 = await reg.createThread({
-      parentSessionId: "parent-1",
-      brief: "second",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
-    });
-    expect(t2.status).toBe("queued");
-    // Complete t1 — should trigger dequeue of t2
-    await reg.completeThread("parent-1", t1.id, {
-      conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
-      confidence: 1, traceHandle: "t", blocksSnapshot: {},
-    });
-    expect(dequeuedThreads.length).toBe(1);
-    expect(dequeuedThreads[0]!.id).toBe(t2.id);
+    const first = await registry.createThread(createInput({ brief: "first" }));
+    const firstRun = await registry.startRun(WORKSPACE, first.id);
+    await registry.markRunRunning(WORKSPACE, first.id, firstRun.id, "child-1");
+    const second = await registry.createThread(createInput({ brief: "second" }));
+    await registry.endRun(WORKSPACE, first.id, firstRun.id, "success", null, report());
+    expect(dequeued).toEqual([second.id]);
   });
 
-  it("deleteThread cleans up cursors", async () => {
-    const created = await registry.createThread({
-      parentSessionId: "parent-1",
-      brief: "cleanup",
-      kind: "implementation",
-      createdBy: "agent",
-      autoRun: true,
-      worktree: "isolated",
-      tools: [],
-      permissions: {},
+  it("wakes scoped waiters and keeps observer cursors isolated", async () => {
+    const thread = await registry.createThread(createInput());
+    const wake = vi.fn();
+    const unsubscribe = registry.subscribeToChanges(WORKSPACE, PARENT, wake);
+    registry.setCursor("observer-1", thread.id, {
+      eventSeq: thread.eventSeq,
+      lifecycle: thread.lifecycle,
+      attention: thread.attention,
+      integration: thread.integration,
+      activeRunId: null,
+      workerState: null,
+      outcome: null,
+      progressVersion: 0,
+      decisionsCount: 0,
+      diffStats: null,
+      viewedAt: "2026-09-04T00:00:00.000Z",
     });
-    registry.setCursor("observer-1", created.id, {
-      eventSeq: 0, status: "queued", progressVersion: 0, decisionsCount: 0, diffStats: null, viewedAt: "",
-    });
-    expect(registry.getCursor("observer-1", created.id)).not.toBeNull();
-    await registry.deleteThread("parent-1", created.id);
-    expect(registry.getCursor("observer-1", created.id)).toBeNull();
+    await registry.startRun(WORKSPACE, thread.id);
+    expect(wake).toHaveBeenCalledOnce();
+    expect(registry.getCursor("observer-1", thread.id)?.eventSeq).toBe(thread.eventSeq);
+    registry.clearCursorsForSession("observer-1");
+    expect(registry.getCursor("observer-1", thread.id)).toBeNull();
+    unsubscribe();
+  });
+
+  it("archives active children when their parent session is deleted", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-1");
+    await registry.cancelAllForParent(WORKSPACE, PARENT);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "cancelled" });
   });
 });

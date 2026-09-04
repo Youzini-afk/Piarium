@@ -15,7 +15,7 @@
  */
 
 import type { ResolvedRole } from "./roles.js";
-import type { ThreadRecord, ThreadRegistry } from "./thread-registry.js";
+import type { Thread, ThreadRegistry } from "./thread-registry.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ export const DEFAULT_REVIEW_SENSOR_SETTINGS: ReviewSensorSettings = {
 
 export interface ReviewSensorDeps {
   registry: ThreadRegistry;
+  workspaceId: string;
   reviewRole: ResolvedRole | null;
   settings: ReviewSensorSettings;
   /** Journaled paths changed during the turn that just settled. */
@@ -50,7 +51,7 @@ export async function onAgentSettled(
   sessionId: string,
   deps: ReviewSensorDeps,
 ): Promise<ReviewResult> {
-  const { registry, reviewRole, settings, getJournaledChanges, getDiff } = deps;
+  const { registry, reviewRole, settings, workspaceId, getJournaledChanges, getDiff } = deps;
 
   const changes = await getJournaledChanges(sessionId);
   if (changes.length === 0) {
@@ -65,8 +66,9 @@ export async function onAgentSettled(
 
   const diff = await getDiff(sessionId);
 
-  const thread: ThreadRecord = await registry.createThread({
-    parentSessionId: sessionId,
+  const thread: Thread = await registry.createThread({
+    workspaceId,
+    parent: { kind: "session", id: sessionId },
     brief: `Review this diff:\n${diff}`,
     role: reviewRole.id,
     kind: "implementation",

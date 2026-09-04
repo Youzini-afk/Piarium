@@ -56,7 +56,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✗ | `knowledge/symbols`（单测） | — | 只维护 file 节点 | 未接 LSP / watch |
 | **3.2** `explore` 管线 | host | ✓ | ✗ | `host/explore.test.ts`（17） | — | — | pi-host 无 `explore` 工具定义；10 问题快照未做 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
-| **3.4 / 3.5** 线程注册表与 7 个工具 | protocol / host / pi-host | ✓ | **✗（生产 host 未创建注册表；`threadRuntime` 默认 false，工具不注册）** | `host/thread-registry.test.ts`（31）；`phase3-e2e.test.ts`（9：含 wait 越过传输默认超时、被 `waiting-for-input` 唤醒、超时透传）；`protocol/test/harness-threads.test.ts`（15） | ✗ | 不注册 | P0 ③④⑤：错误分类、Thread/ThreadRun、对账、TranscriptRef；spawn / kill / send / applyWorktreeDiff 为 mock；worktree、活性传感器、Zone 2 threads 段、Fleet provider、侧栏均未做 |
+| **3.4 / 3.5** 线程注册表与 7 个工具 | protocol / host / pi-host | ✓ | 部分（生产 Host 已创建 versioned registry 并启动对账；无 child runtime 时不授予 `control.thread`） | `host/thread-registry.test.ts`（损坏/权限/未来 schema、旧格式迁移、崩溃对账、正交状态）；`phase3-e2e.test.ts`（7：ThreadRun、事件 wait、transport deadline）；`protocol/test/harness-threads.test.ts` | ✗ | 不注册 | P0 ⑤ TranscriptRef；真实 spawn / kill / send / merge、worktree、活性传感器、Zone 2 threads 段、Fleet provider、侧栏属于 T1 |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
 | **3.7** review 传感器 | host | ✓ | ✗ | `host/review-sensor.test.ts`（6，含对父不可见） | — | — | 未挂 `agent_settled`；`<review>` Zone 2 注入未做 |
 | **3.8** LSP 导航工具 | host | ✓ | ✗ | `host/lsp-nav.test.ts`（13） | — | — | pi-host 无工具定义 |

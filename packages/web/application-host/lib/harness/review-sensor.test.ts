@@ -12,6 +12,8 @@ import { resolveRoles } from "./roles.js";
 import type { SlotResolution } from "./model-slots.js";
 
 const mainModel: SlotResolution = { providerId: "anthropic", modelId: "claude-sonnet-4" };
+const workspaceId = "workspace-1";
+const parent = { kind: "session", id: "p1" } as const;
 
 function reviewRoleFor(main: SlotResolution = mainModel) {
   const roles = resolveRoles({ review: main }, main);
@@ -34,30 +36,33 @@ describe("onAgentSettled", () => {
   it("does not open a thread when no journaled changes", async () => {
     const result = await onAgentSettled("p1", {
       registry,
+      workspaceId,
       reviewRole: reviewRoleFor(),
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
       getJournaledChanges: async () => [],
       getDiff: async () => "",
     });
     expect(result.reviewDispatched).toBe(false);
-    expect(await registry.listThreads("p1", true)).toHaveLength(0);
+    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(0);
   });
 
   it("does not open a thread when no review role configured", async () => {
     const result = await onAgentSettled("p1", {
       registry,
+      workspaceId,
       reviewRole: null,
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
       getJournaledChanges: async () => ["a.ts"],
       getDiff: async () => "diff",
     });
     expect(result.reviewDispatched).toBe(false);
-    expect(await registry.listThreads("p1", true)).toHaveLength(0);
+    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(0);
   });
 
   it("opens a review thread when changes exist and role configured", async () => {
     const result = await onAgentSettled("p1", {
       registry,
+      workspaceId,
       reviewRole: reviewRoleFor(),
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
       getJournaledChanges: async () => ["a.ts", "b.ts"],
@@ -67,7 +72,7 @@ describe("onAgentSettled", () => {
     expect(result.threadId).toBeDefined();
     expect(result.blocking).toBe(false);
 
-    const thread = await registry.getThread("p1", result.threadId!);
+    const thread = await registry.getThread(workspaceId, parent, result.threadId!);
     expect(thread?.role).toBe("review");
     expect(thread?.brief).toContain("diff content");
     expect(thread?.worktree).toBeNull();
@@ -76,6 +81,7 @@ describe("onAgentSettled", () => {
   it("the review thread is hidden from the parent agent's list", async () => {
     const result = await onAgentSettled("p1", {
       registry,
+      workspaceId,
       reviewRole: reviewRoleFor(),
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
       getJournaledChanges: async () => ["a.ts"],
@@ -84,9 +90,9 @@ describe("onAgentSettled", () => {
     expect(result.reviewDispatched).toBe(true);
 
     // §9.2.3: the harness's own agents are invisible to the main agent.
-    expect(await registry.listThreads("p1")).toHaveLength(0);
+    expect(await registry.listThreads(workspaceId, parent)).toHaveLength(0);
     // …but the host still tracks them.
-    const all = await registry.listThreads("p1", true);
+    const all = await registry.listThreads(workspaceId, parent, true);
     expect(all).toHaveLength(1);
     expect(all[0]!.hidden).toBe(true);
   });
@@ -94,6 +100,7 @@ describe("onAgentSettled", () => {
   it("gate mode is blocking", async () => {
     const result = await onAgentSettled("p1", {
       registry,
+      workspaceId,
       reviewRole: reviewRoleFor(),
       settings: { gate: true },
       getJournaledChanges: async () => ["a.ts"],
