@@ -659,6 +659,21 @@ assistant message 中连续的已知只读工具（read/grep/find/glob/ls/diagno
 
 状态：已实施
 
+### D-049 · 2026-09-04 · 1.8（Harness 计数器进入现有 Context 侧栏）
+
+类型：实现澄清
+
+决定：不新建诊断面板。pi-host 已随 `session.stats` 发布的 `toolErrors/toolRetries/outputBytes/cacheHitRatio` 投影到现有 Context
+sidebar 的独立 Agent harness 区块。只有至少一个字段真实存在才显示；缺失字段不补 0。输出按二进制单位显示，cache ratio 显示
+百分比。真 Pi 会话 E2E 必须证明失败、重复调用和输出字节确实穿过 stats 边界。
+
+原因：计数器的消费者本来就是会话诊断视图；另造 store/route/panel 会复制 SessionStats，并让其他 runtime 的“不支持”看起来像
+“全为零”。
+
+影响：UI `ContextSidebarTab` / `harnessCounterPresentation`、pi-host session E2E、设计 8.6、状态矩阵 1.8。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -713,3 +728,4 @@ assistant message 中连续的已知只读工具（read/grep/find/glob/ls/diagno
 | D-046 | implementation | — | agent-harness.md 8.4.1、status 2.4/2.5；Host routes / SSE / session state sidebar |
 | D-047 | implementation | — | agent-harness.md 8.6、plan/status T4；evaluation/harness / replay script |
 | D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |
+| D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |

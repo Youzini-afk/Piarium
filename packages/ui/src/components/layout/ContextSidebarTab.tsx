@@ -8,6 +8,7 @@ import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
+import { formatHarnessOutputBytes, projectHarnessCounters } from '@/lib/pi-runtime/harnessCounterPresentation';
 import {
   latestAssistantTurnUsage,
   projectPiUsagePresentation,
@@ -165,6 +166,7 @@ export const ContextPanelContent: React.FC = () => {
   const usagePresentation = projectPiUsagePresentation(latestAssistantTurnUsage(entries));
   const tokens = usagePresentation?.values ?? EMPTY_USAGE_VALUES;
   const contextUsage = piSessionContextUsage(stats, record?.snapshot);
+  const harnessCounters = projectHarnessCounters(stats);
   const contextLimit = contextUsage?.contextLimit ?? null;
   const contextTokens = contextUsage?.totalTokens ?? 0;
   const usagePercent = Math.min(100, contextUsage?.percentage ?? 0);
@@ -265,6 +267,38 @@ export const ContextPanelContent: React.FC = () => {
             </div>
           ))}
         </div>
+
+        {harnessCounters ? (
+          <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+            <div className="mb-2.5 typography-micro text-muted-foreground">{t('contextSidebar.section.harness')}</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+              {harnessCounters.toolErrors !== undefined ? (
+                <div>
+                  <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.toolErrors')}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatNumber(harnessCounters.toolErrors)}</div>
+                </div>
+              ) : null}
+              {harnessCounters.toolRetries !== undefined ? (
+                <div>
+                  <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.toolRetries')}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatNumber(harnessCounters.toolRetries)}</div>
+                </div>
+              ) : null}
+              {harnessCounters.outputBytes !== undefined ? (
+                <div>
+                  <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.outputBytes')}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{formatHarnessOutputBytes(harnessCounters.outputBytes, getCurrentIntlLocale())}</div>
+                </div>
+              ) : null}
+              {harnessCounters.cacheHitPercent !== undefined ? (
+                <div>
+                  <div className="typography-micro text-muted-foreground/70">{t('contextSidebar.harness.cacheHitRatio')}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{harnessCounters.cacheHitPercent.toFixed(1)}%</div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {messageUsageRows.length > 0 ? (
           <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">

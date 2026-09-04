@@ -421,6 +421,33 @@ describe("session e2e — memory shadow extension", () => {
   });
 });
 
+describe("session e2e — Harness counters", () => {
+  it("publishes real tool failures, retries, output bytes, and cache ratio through session stats", async () => {
+    await withTempRoot("piarium-s-counters-", async (root) => {
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "try the same missing file twice");
+        await session.host.session.waitForIdle();
+        const stats = session.host.stats(snapshot.sessionId);
+        assert.ok((stats.toolErrors ?? 0) >= 2);
+        assert.ok((stats.toolRetries ?? 0) >= 1);
+        assert.ok((stats.outputBytes ?? 0) > 0);
+        assert.equal(typeof stats.cacheHitRatio, "number");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
 // ── Compaction ─────────────────────────────────────────────────────
 
 /**
