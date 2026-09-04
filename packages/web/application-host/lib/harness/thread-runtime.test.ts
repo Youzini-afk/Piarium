@@ -132,6 +132,7 @@ describe("thread runtime", () => {
       readBlocks: async (sessionId) => blocksBySession.get(sessionId) ?? null,
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
         merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
       },
@@ -209,6 +210,7 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       lifecycle: "settled",
       integration: "merge-ready",
+      worktree: { branch: "piarium/thread", resultCommit: "result" },
       report: {
         conclusion: "Implemented it",
         changedFiles: ["a.ts"],
@@ -335,6 +337,7 @@ describe("thread runtime", () => {
       stalledAfterMs: () => 20,
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },

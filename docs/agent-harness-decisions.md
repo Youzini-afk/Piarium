@@ -810,6 +810,28 @@ transcript bounds、worktree diff、blocks 与结构化最终回答收齐后，�
 
 状态：已实施
 
+### D-057 · 2026-09-04 · 3.4（结果分支先耐久化，live worktree 暂不自动删除）
+
+类型：设计修正
+
+决定：(1) isolated worktree 创建时把内部 `piarium/thread-*` branch 写入持久 `ThreadWorktree`；settle 时将 child 的 staged、tracked 与
+untracked 最终状态用 `--no-verify --no-gpg-sign` 提交为内部 result commit，并记录 `resultCommit`。merge 前再次 snapshot，确保等待期间
+的新改动也进入分支；snapshot 失败则 merge 不开始，worktree 保留。(2) `base → resultCommit/working tree` 仍是 child delta，既有
+plain apply → `--3way` 和 untracked 预检不变。(3) merge 成功暂不自动删除 live worktree，也不启动“默认 7 天”分支计时器；当前线程
+侧栏重新打开完整 child session 仍依赖该 cwd，删除会导致打不开，或更危险地把后续对话重定向到父工作区。(4) 真正回收要与“从持久
+transcript 只读打开”或显式归档/rehome 同批交付；届时 result commit 是删除前可验证的恢复锚点。没有用户策略或磁盘数据前不猜期限。
+(5) registry 已是 `merged` 时再次调用 merge 返回明确 no-op，不重放 patch。
+(6) result commit 中相对 base 新增的路径继续走 new-file 预检并从 tracked patch 排除；同路径不同内容时父树保持零写入。复制相对
+symlink 时保留 link，自 child worktree 指出的绝对 symlink 不复制，避免父树依赖将来会回收的 child 路径。
+
+原因：旧文档说 merge 后删目录、留分支，但旧分支只有父工作区 baseline，child 结果完全未提交，直接删除会丢唯一独立副本；补上
+提交后，又发现 UI 的 thread open 仍使用 `thread.worktree.path`。所以本轮先消除数据丢失前提，不用磁盘回收换取会话生命周期回归。
+
+影响：protocol `ThreadWorktree.branch/resultCommit`（向后兼容可选字段）、ThreadRegistry parser、ThreadWorktreeRuntime snapshot、
+ThreadRuntime settle/merge、真实 Git tests；设计 9.2.5b / 9.3.4、plan/status 3.4。
+
+状态：已实施（结果耐久化）；目录/分支回收仍待产品纵切
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -872,3 +894,4 @@ transcript bounds、worktree diff、blocks 与结构化最终回答收齐后，�
 | D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |
 | D-055 | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report |
 | D-056 | implementation | — | plan/status 3.6；protocol role catalog |
+| D-057 | active-design | — | agent-harness 9.2/9.3、plan/status 3.4；Thread worktree/runtime |

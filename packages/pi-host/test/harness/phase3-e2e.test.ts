@@ -58,6 +58,7 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "p3-e2e-data-"));
   const threadRegistry = createThreadRegistry({ dataDir, hostId: "test-host" });
   let sessionCounter = 0;
+  let mergeCalls = 0;
   const sent: Array<{ sessionId: string; message: string }> = [];
   const harnessServiceHost = createHarnessServiceHost({
     search: async () => ({ status: "empty" as const, generation: undefined }),
@@ -70,7 +71,7 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
       return { sessionId };
     },
     threadKillSession: async () => {},
-    threadApplyWorktreeDiff: async () => ({ merged: 3, conflicts: [] }),
+    threadApplyWorktreeDiff: async () => { mergeCalls += 1; return { merged: 3, conflicts: [] }; },
     threadSendToSession: async (sessionId, message) => { sent.push({ sessionId, message }); },
     threadTranscriptReader: {
       read: async (ref, since = 0) => `[entries ${since + 1}–2 of 2]\n${ref.sessionId}: durable transcript`,
@@ -115,7 +116,7 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
     try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
   };
-  return { bridge, threadRegistry, sent, emittedRequests, dispose };
+  return { bridge, threadRegistry, sent, emittedRequests, getMergeCalls: () => mergeCalls, dispose };
 }
 
 async function executeTool(tool: ToolDefinition, params: Record<string, unknown>) {
@@ -251,6 +252,9 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       const mergeResult = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
       assert.match(mergeResult.text, /merged 3 files/);
       assert.equal((await harness.threadRegistry.getThread(WORKSPACE_ID, PARENT, thread.id))?.integration, "merged");
+      const repeated = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
+      assert.match(repeated.text, /already merged/);
+      assert.equal(harness.getMergeCalls(), 1);
     } finally {
       await harness.dispose();
     }

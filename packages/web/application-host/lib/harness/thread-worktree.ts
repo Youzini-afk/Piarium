@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { ThreadDiffStats, ThreadWorktree } from "@piarium/protocol";
 import type { WorktreeBootstrapState } from "../git/types.js";
+import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
 
 export interface ThreadWorktreeCreateResult {
   path: string;
@@ -16,7 +17,7 @@ export interface ThreadWorktreeRuntimeOptions {
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
-  fsPromises?: Pick<typeof fs.promises, "copyFile" | "lstat" | "mkdir" | "readFile" | "readlink" | "realpath" | "symlink">;
+  fsPromises?: Pick<typeof fs.promises, "copyFile" | "lstat" | "mkdir" | "readFile" | "readlink" | "realpath" | "stat" | "symlink">;
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string }>;
 }
@@ -125,11 +126,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       const relative = normalizeRelative(relativeValue, pathModule);
       const source = pathModule.resolve(sourceRoot, relative);
       const destination = pathModule.resolve(destinationRoot, relative);
-      const sourceRootReal = await fsPromises.realpath(sourceRoot);
-      const sourceReal = await fsPromises.realpath(source);
-      if (sourceReal !== sourceRootReal && !sourceReal.startsWith(`${sourceRootReal}${pathModule.sep}`)) {
-        throw new Error(`Untracked source escapes workspace: ${relativeValue}`);
-      }
+      await assertAbsolutePathInWorkspace(source, { root: sourceRoot, fsPromises, pathModule });
+      await assertAbsolutePathInWorkspace(destination, { root: destinationRoot, fsPromises, pathModule, allowMissing: true });
       const info = await fsPromises.lstat(source);
       await fsPromises.mkdir(pathModule.dirname(destination), { recursive: true });
       if (info.isSymbolicLink()) {
@@ -169,43 +167,107 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       ]);
       base = (await runGit(created.path, ["rev-parse", "HEAD"])).stdout.trim();
     }
-    return { cwd: created.path, worktree: { path: created.path, base } };
+    return {
+      cwd: created.path,
+      worktree: { path: created.path, base, branch: `piarium/${threadId}` },
+    };
   };
 
   const inspect = async (worktree: ThreadWorktree): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
-    const [{ stdout: patch }, { stdout: changed }, { stdout: untracked }, { stdout: numstat }] = await Promise.all([
-      runGit(worktree.path, ["diff", "--binary", worktree.base]),
-      runGit(worktree.path, ["diff", "--name-only", "-z", worktree.base]),
+    const [{ stdout: added }, { stdout: untracked }] = await Promise.all([
+      runGit(worktree.path, ["diff", "--name-only", "--diff-filter=A", "-z", worktree.base]),
       runGit(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"]),
+    ]);
+    // A result snapshot commits formerly-untracked files onto the internal
+    // branch. They must retain new-file preflight semantics during merge, not
+    // silently become part of the tracked patch.
+    const newPaths = [...new Set([...parseNullList(added), ...parseNullList(untracked)])];
+    const trackedPatchArgs = [
+      "diff", "--binary", worktree.base, "--", ".",
+      ...newPaths.map((relative) => `:(exclude,literal)${normalizeRelative(relative, pathModule).replace(/\\/g, "/")}`),
+    ];
+    const [{ stdout: patch }, { stdout: changed }, { stdout: numstat }] = await Promise.all([
+      runGit(worktree.path, trackedPatchArgs),
+      runGit(worktree.path, ["diff", "--name-only", "-z", worktree.base]),
       runGit(worktree.path, ["diff", "--numstat", worktree.base]),
     ]);
-    const untrackedPaths = parseNullList(untracked);
-    const changedFiles = [...new Set([...parseNullList(changed), ...untrackedPaths])];
+    const changedFiles = [...new Set([...parseNullList(changed), ...newPaths])];
     const diffStats = parseNumstat(numstat);
     diffStats.files = changedFiles.length;
-    return { patch, untracked: untrackedPaths, changedFiles, diffStats };
+    return { patch, untracked: newPaths, changedFiles, diffStats };
+  };
+
+  const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
+    const status = (await runGit(worktree.path, ["status", "--porcelain", "-z"])).stdout;
+    if (status.length > 0) {
+      await runGit(worktree.path, ["add", "-A"]);
+      await runGit(worktree.path, [
+        "-c", "user.name=Piarium Thread Result",
+        "-c", "user.email=thread-result@piarium.local",
+        "commit", "--no-verify", "--no-gpg-sign", "-m", "Piarium thread result",
+      ]);
+    }
+    const [commitResult, branchResult, cleanResult] = await Promise.all([
+      runGit(worktree.path, ["rev-parse", "HEAD"]),
+      runGit(worktree.path, ["branch", "--show-current"]),
+      runGit(worktree.path, ["status", "--porcelain", "-z"]),
+    ]);
+    const resultCommit = commitResult.stdout.trim();
+    const branch = branchResult.stdout.trim() || worktree.branch;
+    if (!resultCommit) throw new Error("Unable to resolve the thread result commit");
+    if (!branch) throw new Error("Thread worktree is not attached to a retained branch");
+    if (cleanResult.stdout.length > 0) throw new Error("Thread worktree changed while its result was being snapshotted");
+    return { ...worktree, branch, resultCommit };
   };
 
   const merge = async (parentRoot: string, worktree: ThreadWorktree): Promise<MergeThreadWorktreeResult> => {
     const state = await inspect(worktree);
-    const untrackedToCopy: Array<{ source: string; destination: string }> = [];
+    const untrackedToCopy: Array<
+      | { kind: "file"; source: string; destination: string }
+      | { kind: "symlink"; target: string; destination: string }
+    > = [];
     const untrackedConflicts: string[] = [];
     for (const relativeValue of state.untracked) {
       const relative = normalizeRelative(relativeValue, pathModule);
       const source = pathModule.resolve(worktree.path, relative);
       const destination = pathModule.resolve(parentRoot, relative);
       try {
-        const [sourceBytes, destinationBytes] = await Promise.all([
-          fsPromises.readFile(source),
-          fsPromises.readFile(destination),
-        ]);
-        if (!sourceBytes.equals(destinationBytes)) untrackedConflicts.push(relativeValue);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          untrackedConflicts.push(relativeValue);
-          continue;
+        await assertAbsolutePathInWorkspace(source, { root: worktree.path, fsPromises, pathModule });
+        await assertAbsolutePathInWorkspace(destination, { root: parentRoot, fsPromises, pathModule, allowMissing: true });
+        const sourceInfo = await fsPromises.lstat(source);
+        try {
+          const destinationInfo = await fsPromises.lstat(destination);
+          if (sourceInfo.isSymbolicLink() && destinationInfo.isSymbolicLink()) {
+            const [sourceTarget, destinationTarget] = await Promise.all([
+              fsPromises.readlink(source),
+              fsPromises.readlink(destination),
+            ]);
+            if (sourceTarget !== destinationTarget) untrackedConflicts.push(relativeValue);
+          } else if (sourceInfo.isFile() && destinationInfo.isFile()) {
+            const [sourceBytes, destinationBytes] = await Promise.all([
+              fsPromises.readFile(source),
+              fsPromises.readFile(destination),
+            ]);
+            if (!sourceBytes.equals(destinationBytes)) untrackedConflicts.push(relativeValue);
+          } else {
+            untrackedConflicts.push(relativeValue);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          if (sourceInfo.isSymbolicLink()) {
+            const target = await fsPromises.readlink(source);
+            if (pathModule.isAbsolute(target) || path.win32.isAbsolute(target)) untrackedConflicts.push(relativeValue);
+            else untrackedToCopy.push({ kind: "symlink", target, destination });
+          } else if (sourceInfo.isFile()) {
+            untrackedToCopy.push({ kind: "file", source, destination });
+          } else {
+            untrackedConflicts.push(relativeValue);
+          }
         }
-        untrackedToCopy.push({ source, destination });
+      } catch {
+        // Missing/changed source, unsafe aliases, and unreadable destinations
+        // all preserve the parent and surface the exact path as a conflict.
+        untrackedConflicts.push(relativeValue);
       }
     }
     if (untrackedConflicts.length > 0) {
@@ -249,9 +311,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         }
       }
     }
-    for (const { source, destination } of untrackedToCopy) {
-      await fsPromises.mkdir(pathModule.dirname(destination), { recursive: true });
-      await fsPromises.copyFile(source, destination);
+    for (const entry of untrackedToCopy) {
+      await fsPromises.mkdir(pathModule.dirname(entry.destination), { recursive: true });
+      if (entry.kind === "symlink") await fsPromises.symlink(entry.target, entry.destination);
+      else await fsPromises.copyFile(entry.source, entry.destination);
     }
     return {
       merged: state.changedFiles.length,
@@ -262,7 +325,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     };
   };
 
-  return { prepare, inspect, merge };
+  return { prepare, inspect, snapshot, merge };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

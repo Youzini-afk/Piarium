@@ -46,6 +46,10 @@ export interface ThreadWaitingFor {
 export interface ThreadWorktree {
   path: string;
   base: string;
+  /** Internal branch that retains the baseline and, after settlement, the result. */
+  branch?: string;
+  /** Commit containing the complete child delta, suitable for later recovery or cleanup. */
+  resultCommit?: string;
 }
 
 /** Immutable launch inputs captured when the Thread is created. */

@@ -108,6 +108,7 @@ describe("thread runtime with real Pi sessions", () => {
           ],
       worktrees: {
         prepare: async () => ({ cwd: workspace, worktree: null }),
+        snapshot: async (worktree) => worktree,
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },

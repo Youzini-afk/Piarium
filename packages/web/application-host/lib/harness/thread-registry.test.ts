@@ -74,6 +74,24 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
   });
 
+  it("persists the retained branch and result commit", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "D:/worktrees/thread-1",
+      base: "base-commit",
+      branch: "piarium/thread-1",
+      resultCommit: "result-commit",
+    });
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toEqual({
+      path: "D:/worktrees/thread-1",
+      base: "base-commit",
+      branch: "piarium/thread-1",
+      resultCommit: "result-commit",
+    });
+  });
+
   it("records a lost attempt and starts attempt two without erasing history or attention", async () => {
     const thread = await registry.createThread(createInput());
     const first = await registry.startRun(WORKSPACE, thread.id);

@@ -111,6 +111,11 @@ Thread launch includes a tagged snapshot of the parent's current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
+An isolated child is snapshotted to its retained `piarium/thread-*` branch at
+settlement and again immediately before merge. The live directory remains in
+place after merge because reopening the full child session still depends on its
+cwd; deletion is deferred until the UI has a read-only transcript or explicit
+rehome path.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

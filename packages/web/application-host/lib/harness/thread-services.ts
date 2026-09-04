@@ -393,6 +393,9 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       const workspaceId = workspaceFor(ctx);
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      if (thread.integration === "merged") {
+        return { text: `thread ${thread.id} is already merged`, merged: 0, conflicts: [] };
+      }
       const run = await registry.getActiveRun(workspaceId, thread.id);
       if (thread.lifecycle !== "settled" || run?.outcome !== "success") {
         return { text: `thread ${thread.id} is not complete (state: ${thread.lifecycle}/${run?.outcome ?? "none"})`, merged: 0, conflicts: [] };

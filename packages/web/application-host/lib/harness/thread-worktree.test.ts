@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -50,18 +50,23 @@ describe("thread worktree runtime", () => {
 
       writeFileSync(join(childPath, "tracked.txt"), "child result\n");
       writeFileSync(join(childPath, "child-note.txt"), "new child file\n");
-      const inspected = await runtime.inspect(prepared.worktree!);
-      expect(inspected.changedFiles).toEqual(["tracked.txt", "child-note.txt"]);
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted).toMatchObject({ branch: "piarium/thread-one", resultCommit: expect.stringMatching(/^[0-9a-f]{40}$/) });
+      expect(git(childPath, ["status", "--porcelain"])).toBe("");
+      const inspected = await runtime.inspect(snapshotted);
+      expect(inspected.changedFiles.toSorted()).toEqual(["child-note.txt", "tracked.txt"]);
 
-      const merged = await runtime.merge(fixture.repo, prepared.worktree!);
+      const merged = await runtime.merge(fixture.repo, snapshotted);
       expect(merged.conflicts).toEqual([]);
       expect(merged.conflictState).toBe("none");
       expect(merged.merged).toBe(2);
       expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("child result\n");
       expect(readFileSync(join(fixture.repo, "child-note.txt"), "utf8")).toBe("new child file\n");
       expect(readFileSync(join(fixture.repo, "parent-note.txt"), "utf8")).toBe("untracked baseline\n");
+      expect(git(fixture.repo, ["rev-parse", `${snapshotted.branch}^{commit}`])).toBe(snapshotted.resultCommit);
+      expect(existsSync(childPath)).toBe(true);
     } finally {
-      if (childPath) {
+      if (childPath && existsSync(childPath)) {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });
@@ -85,6 +90,27 @@ describe("thread worktree runtime", () => {
     }
   });
 
+  it.skipIf(process.platform === "win32")("preserves a relative child symlink without dereferencing it into the parent", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    let childPath = "";
+    try {
+      const prepared = await runtime.prepare({ mode: "isolated", sourceRoot: fixture.repo, threadId: "thread-symlink" });
+      childPath = prepared.cwd;
+      fs.symlinkSync("tracked.txt", join(childPath, "linked.txt"));
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      const merged = await runtime.merge(fixture.repo, snapshotted);
+      expect(merged).toMatchObject({ conflicts: [], merged: 1 });
+      expect(fs.lstatSync(join(fixture.repo, "linked.txt")).isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(join(fixture.repo, "linked.txt"))).toBe("tracked.txt");
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("does not overwrite a different parent untracked file during merge", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
@@ -99,7 +125,7 @@ describe("thread worktree runtime", () => {
       expect(merged.conflictState).toBe("parent-unchanged");
       expect(readFileSync(join(fixture.repo, "new.txt"), "utf8")).toBe("parent\n");
     } finally {
-      if (childPath) {
+      if (childPath && existsSync(childPath)) {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });
@@ -117,12 +143,13 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(childPath, "new.txt"), "child untracked\n");
       writeFileSync(join(fixture.repo, "new.txt"), "parent untracked\n");
 
-      const merged = await runtime.merge(fixture.repo, prepared.worktree!);
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      const merged = await runtime.merge(fixture.repo, snapshotted);
       expect(merged).toMatchObject({ conflicts: ["new.txt"], conflictState: "parent-unchanged", merged: 0 });
       expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
       expect(readFileSync(join(fixture.repo, "new.txt"), "utf8")).toBe("parent untracked\n");
     } finally {
-      if (childPath) {
+      if (childPath && existsSync(childPath)) {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });
@@ -143,7 +170,7 @@ describe("thread worktree runtime", () => {
       expect(merged).toMatchObject({ conflicts: ["tracked.txt"], conflictState: "parent-unchanged", merged: 0 });
       expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("parent\n");
     } finally {
-      if (childPath) {
+      if (childPath && existsSync(childPath)) {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });

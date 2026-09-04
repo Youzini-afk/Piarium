@@ -35,7 +35,7 @@ export interface ThreadSessionAdapter {
 export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
-  worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "merge">;
+  worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge">;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -415,9 +415,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     } else if (blocks === null) {
       unresolved.push("Thread block storage was unavailable at settlement");
     }
-    if (thread.worktree) {
+    let currentWorktree = thread.worktree;
+    if (currentWorktree) {
       try {
-        const inspected = await options.worktrees.inspect(thread.worktree);
+        currentWorktree = await options.worktrees.snapshot(currentWorktree);
+        await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
+      } catch (error) {
+        unresolved.push(`Unable to snapshot thread result: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      try {
+        const inspected = await options.worktrees.inspect(currentWorktree);
         changedFiles = inspected.changedFiles;
         diffStats = inspected.diffStats;
         await options.registry.setIntegration(
@@ -721,8 +728,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree) return { merged: 0, conflicts: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } };
+    const snapshotted = await options.worktrees.snapshot(thread.worktree);
+    await options.registry.setWorktree(workspaceId, threadId, snapshotted);
     const parentRoot = await options.resolveWorkspaceRoot(workspaceId);
-    const operation = () => options.worktrees.merge(parentRoot, thread.worktree!);
+    const operation = () => options.worktrees.merge(parentRoot, snapshotted);
     return options.withMergeWriter
       ? options.withMergeWriter(workspaceId, threadId, operation)
       : operation();

@@ -537,7 +537,8 @@ last checkpoint: 2026-09-03T10:12Z
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
 已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor；父 Zone 2 已接 queued/active 快照与
 settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快照，settle 持久化 child blocks 与结构化 deviations/unresolved。
-未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收、窄屏与讨论线。旧 role budget 数字没有执行原语或定标依据，
+未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收的 UI/归档纵切、窄屏与讨论线。child 结果已先提交到持久分支；
+旧 role budget 数字没有执行原语或定标依据，
 已按 D-056 删除而非升级成硬停止。
 3.1 / 3.2 / 3.3 / 3.7 仍只是 `implemented`。
 
@@ -640,10 +641,11 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
 - worktree（`isolated`）：复用 Git 服务创建受管分支/worktree，从父 HEAD 分出，再把父工作树的 tracked patch 与未跟踪文件复制
   进去；若父起点非 clean，在子 worktree 内提交一笔仅用于界定基线的内部 commit。这样最终 `base → child` diff 只包含子线程增量，
   不会把父原有脏改动重复合并。合并先预检未跟踪文件碰撞，再尝试 plain `git apply` 与 `--3way`；失败明确区分“父未改动”和
-  “Git 已留下冲突项”。**worktree 独立于线程寿命**：failed / cancelled / worker-lost 都不删。
-- **回收策略**（`harness.threads.*`）：merge 成功 → 删工作目录、保留分支引用 `keepBranchDays`（默认 7）；idle ≥ `archiveAfterDays`
-  （默认 14）→ 面板提示归档，归档删 worktree 不删会话；对话正文永不自动删除；报告与记忆块进知识库 `session` 节点并加
-  `spawned_from` 边（2.1 就位后）。
+  “Git 已留下冲突项”。settle 与 merge 前把 child 最终状态提交到内部结果分支并记录 commit。**worktree 独立于线程寿命**：
+  failed / cancelled / worker-lost 都不删。
+- **回收策略**：当前不自动删除 merge 后的 live worktree，也不设置无依据的天数；线程 UI 重新打开 session 仍依赖该 cwd。
+  后续以“持久 transcript 只读打开或显式 rehome + 用户归档动作 + result commit 校验”为一个纵切再删目录；分支保留策略由用户
+  选择或磁盘数据定标。对话正文永不自动删除；报告与记忆块进知识库 `session` 节点并加 `spawned_from` 边（2.1 就位后）。
 - UI：Fleet 注册表新增 `piarium-harness` provider（卡片：角色、状态、步数、最后活动、花费、`kill`）；父时间线折叠卡片链接到
   线程会话；侧栏与讨论线见 3.10。
 - 测试：状态机每条迁移；worker 丢失后 `resumeThread` 在同一会话继续且 id 不变；父 worker 退出线程仍在跑；`stalled` /
@@ -699,8 +701,8 @@ ${diffStats 变化 ? `  Δ ${files} files (+${ins} −${del})` : ''}
     `[steps ${from}–${to} shown earlier; showing ${to+1}–${now}]`，全部入句柄。
   - `send(id, message)`：`sendToThread(id, message, { from: 'parent-agent' })`，线程侧以数据标记包裹并注明来自父 agent；
     唤醒 idle / waiting-for-input。返回 `sent to ${id} (${status})`。
-  - `merge(id)`：host 在线程 worktree 执行 `git diff <base>` 得到 patch，在父工作树 `git apply --3way`；成功 → 状态 `merged`、
-    按回收策略处理 worktree，返回 `merged ${n} files: …`；冲突 → 保留 worktree，返回 `merge has conflicts in ${k} files (markers
+  - `merge(id)`：host 先把线程当前状态提交到结果分支，再执行 `git diff <base>` 得到 patch，在父工作树 `git apply --3way`；成功 →
+    状态 `merged` 并保留当前仍可打开的 worktree，返回 `merged ${n} files: …`；冲突 → 保留 worktree，返回 `merge has conflicts in ${k} files (markers
     left in place):\n${paths}\nResolve them with edit; no further merge step is needed.`；每个受影响路径走 mutation boundary
     （before / after）。Git 面板"合并这条线"调同一个 host 服务。
   - `kill(id, { keepWorktree = true })`：`cancelThread`。
