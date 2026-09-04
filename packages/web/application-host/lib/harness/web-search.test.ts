@@ -1,14 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  resolveSearchProvider,
-  filterByDomainPolicy,
+  createConfiguredSearchProvider,
   createWebSearchService,
-  type SearchProviderConfig,
+  filterByDomainPolicy,
+  parseSearchProviderSettings,
+  resolveConfiguredSearchProvider,
+  resolveSearchCredential,
 } from "./web-search.js";
 import type { HarnessServiceContext } from "./router.js";
 
-const SERVICE_CONTEXT: HarnessServiceContext = {
-  authorizedPaths: [],
+const context: HarnessServiceContext = {
   actor: {
     authorityInstanceId: "test-authority",
     sessionId: "s1",
@@ -17,169 +18,118 @@ const SERVICE_CONTEXT: HarnessServiceContext = {
     workspaceId: "ws",
     grantedCapabilities: ["read.web"],
   },
+  authorizedPaths: [],
   sessionId: "s1",
   workspaceId: "ws",
   signal: new AbortController().signal,
 };
 
-describe("resolveSearchProvider", () => {
-  it("returns Anthropic adapter when model provider has webSearch capability", () => {
-    const result = resolveSearchProvider({
-      modelProviderId: "anthropic",
-      modelProviderCapabilities: { webSearch: true },
-      configured: null,
-    });
-    expect("unavailable" in result).toBe(false);
-    if (!("unavailable" in result)) {
-      expect(result.id).toBe("anthropic-web-search");
-    }
-  });
-
-  it("returns OpenAI adapter for openai provider with webSearch", () => {
-    const result = resolveSearchProvider({
-      modelProviderId: "openai",
-      modelProviderCapabilities: { webSearch: true },
-      configured: null,
-    });
-    expect("unavailable" in result).toBe(false);
-    if (!("unavailable" in result)) {
-      expect(result.id).toBe("openai-web-search");
-    }
-  });
-
-  it("returns Gemini adapter for google provider with webSearch", () => {
-    const result = resolveSearchProvider({
-      modelProviderId: "google",
-      modelProviderCapabilities: { webSearch: true },
-      configured: null,
-    });
-    expect("unavailable" in result).toBe(false);
-    if (!("unavailable" in result)) {
-      expect(result.id).toBe("gemini-grounding");
-    }
-  });
-
-  it("returns configured provider when model provider has no webSearch", () => {
-    const config: SearchProviderConfig = {
-      type: "brave",
-      endpoint: "https://api.search.brave.com/res/v1/web/search",
-      credentialRef: "brave-api-key",
-    };
-    const result = resolveSearchProvider({
-      modelProviderId: "some-other",
-      modelProviderCapabilities: {},
-      configured: config,
-    });
-    expect("unavailable" in result).toBe(false);
-    if (!("unavailable" in result)) {
-      expect(result.id).toBe("configured-brave");
-    }
-  });
-
-  it("returns unavailable when no provider and no config", () => {
-    const result = resolveSearchProvider({
-      modelProviderId: "some-other",
-      modelProviderCapabilities: {},
-      configured: null,
-    });
-    expect("unavailable" in result).toBe(true);
-    if ("unavailable" in result) {
-      expect(result.hint).toContain("no search provider configured");
-    }
-  });
-
-  it("returns unavailable when model provider has no webSearch even with known id", () => {
-    const result = resolveSearchProvider({
-      modelProviderId: "anthropic",
-      modelProviderCapabilities: {}, // webSearch not set
-      configured: null,
-    });
-    expect("unavailable" in result).toBe(true);
-  });
+const jsonResponse = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
+  status,
+  headers: { "Content-Type": "application/json" },
 });
 
-describe("filterByDomainPolicy", () => {
-  it("filters out blocked domains", () => {
-    const results = [
-      { url: "https://good.com/page" },
-      { url: "https://evil.com/page" },
-      { url: "https://sub.evil.com/page" },
-    ];
-    const filtered = filterByDomainPolicy(results, undefined, ["evil.com"]);
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]?.url).toBe("https://good.com/page");
+describe("configured web search providers", () => {
+  it("calls Brave with its documented header, freshness, and result shape", async () => {
+    const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({
+      web: { results: [{ title: "Brave result", url: "https://docs.example/a", description: "snippet" }] },
+    }));
+    const provider = createConfiguredSearchProvider({ provider: "brave" }, { apiKey: "brave-secret", fetch });
+    await expect(provider.search("query", { limit: 50, recency: "week" })).resolves.toEqual([
+      { title: "Brave result", url: "https://docs.example/a", snippet: "snippet" },
+    ]);
+    const [requestUrl, init] = fetch.mock.calls[0]!;
+    const url = new URL(String(requestUrl));
+    expect(url.origin + url.pathname).toBe("https://api.search.brave.com/res/v1/web/search");
+    expect(url.searchParams.get("q")).toBe("query");
+    expect(url.searchParams.get("count")).toBe("20");
+    expect(url.searchParams.get("freshness")).toBe("pw");
+    expect((init?.headers as Record<string, string>)["X-Subscription-Token"]).toBe("brave-secret");
   });
 
-  it("filters to allowed domains only (whitelist mode)", () => {
-    const results = [
-      { url: "https://allowed.com/page" },
-      { url: "https://other.com/page" },
-    ];
-    const filtered = filterByDomainPolicy(results, ["allowed.com"], undefined);
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]?.url).toBe("https://allowed.com/page");
+  it("maps Exa domain and recency options without exposing its credential", async () => {
+    const fetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({
+      results: [{ title: "Exa result", url: "https://exa.example/a", highlights: ["first", "second"], publishedDate: "2026-09-01" }],
+    }));
+    const provider = createConfiguredSearchProvider({ provider: "exa", credentialRef: "exa-search" }, {
+      apiKey: "exa-secret",
+      fetch,
+      now: () => Date.parse("2026-09-05T00:00:00.000Z"),
+    });
+    const results = await provider.search("query", {
+      allowedDomains: ["exa.example"],
+      blockedDomains: ["blocked.example"],
+      recency: "day",
+      limit: 4,
+    });
+    expect(results[0]).toMatchObject({ snippet: "first … second", publishedAt: "2026-09-01" });
+    const [, init] = fetch.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      query: "query",
+      numResults: 4,
+      includeDomains: ["exa.example"],
+      excludeDomains: ["blocked.example"],
+      startPublishedDate: "2026-09-04T00:00:00.000Z",
+    });
+    expect(JSON.stringify(init)).not.toContain("credentialRef");
   });
 
-  it("passes all when no policy set", () => {
-    const results = [
-      { url: "https://a.com/page" },
-      { url: "https://b.com/page" },
-    ];
-    const filtered = filterByDomainPolicy(results, undefined, undefined);
-    expect(filtered).toHaveLength(2);
+  it("supports Tavily, Jina, and credential-optional SearXNG response shapes", async () => {
+    const tavilyFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ results: [{ title: "T", url: "https://t.example", content: "T body" }] }));
+    const tavily = createConfiguredSearchProvider({ provider: "tavily" }, { apiKey: "tvly", fetch: tavilyFetch });
+    expect((await tavily.search("q", { recency: "month" }))[0]?.snippet).toBe("T body");
+    expect(JSON.parse(String(tavilyFetch.mock.calls[0]![1]?.body))).toMatchObject({ time_range: "month" });
+
+    const jinaFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ data: [{ title: "J", url: "https://j.example", content: "J body" }] }));
+    const jina = createConfiguredSearchProvider({ provider: "jina" }, { apiKey: "jina", fetch: jinaFetch });
+    expect(await jina.search("q", {})).toEqual([{ title: "J", url: "https://j.example", snippet: "J body" }]);
+    expect(new URL(String(jinaFetch.mock.calls[0]![0])).searchParams.get("q")).toBe("q");
+
+    const searxFetch = vi.fn(async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) => jsonResponse({ results: [{ title: "S", url: "https://s.example", content: "S body" }] }));
+    const searx = createConfiguredSearchProvider({ provider: "searxng", endpoint: "http://127.0.0.1:8080" }, { fetch: searxFetch });
+    expect(await searx.search("q", { recency: "month" })).toHaveLength(1);
+    const searxUrl = new URL(String(searxFetch.mock.calls[0]![0]));
+    expect(searxUrl.pathname).toBe("/search");
+    expect(searxUrl.searchParams.get("format")).toBe("json");
+    expect(searxUrl.searchParams.get("time_range")).toBe("month");
+    await expect(searx.search("q", { recency: "week" })).rejects.toThrow("exact week");
   });
 
-  it("handles invalid URLs by filtering them out", () => {
-    const results = [
+  it("parses public settings and resolves only the named Pi auth entry", () => {
+    expect(parseSearchProviderSettings({ provider: "brave", credentialRef: "brave-search", unknown: true })).toEqual({
+      provider: "brave",
+      credentialRef: "brave-search",
+    });
+    expect(parseSearchProviderSettings({ provider: "unknown" })).toBeNull();
+    expect(resolveSearchCredential({
+      brave: { type: "api_key", key: "secret" },
+      other: { token: "other-secret" },
+    }, "brave")).toBe("secret");
+    expect(resolveSearchCredential({ brave: { key: "secret" } }, "missing")).toBeNull();
+    expect(resolveConfiguredSearchProvider({
+      settings: { provider: "brave", credentialRef: "missing" },
+      auth: {},
+    })).toEqual({ unavailable: true, hint: "search credential is unavailable: missing" });
+    expect(resolveConfiguredSearchProvider({
+      settings: { provider: "searxng", endpoint: "http://localhost:8080" },
+      auth: {},
+      fetch: vi.fn(),
+    })).toMatchObject({ id: "configured-searxng" });
+  });
+
+  it("filters returned domains and surfaces provider failure instead of reporting empty success", async () => {
+    expect(filterByDomainPolicy([
+      { url: "https://docs.example/a" },
+      { url: "https://blocked.example/b" },
       { url: "not-a-url" },
-      { url: "https://good.com/page" },
-    ];
-    const filtered = filterByDomainPolicy(results, undefined, undefined);
-    expect(filtered).toHaveLength(1);
-  });
-});
+    ], ["example"], ["blocked.example"])).toEqual([{ url: "https://docs.example/a" }]);
 
-describe("createWebSearchService", () => {
-  it("returns empty results with providerId 'none' when unavailable", async () => {
-    const service = createWebSearchService(async () => ({ unavailable: true, hint: "no provider" }));
-    const result = await service.handle(
-      { query: "test" },
-      SERVICE_CONTEXT,
-    );
-    expect(result.providerId).toBe("none");
-    expect(result.results).toEqual([]);
-  });
-
-  it("returns results from provider", async () => {
     const service = createWebSearchService(async () => ({
-      id: "test-provider",
-      search: async () => [
-        { title: "Result 1", url: "https://example.com/1", snippet: "Snippet 1" },
-        { title: "Result 2", url: "https://example.com/2", snippet: "Snippet 2" },
-      ],
+      id: "broken",
+      search: async () => { throw new Error("provider unavailable"); },
     }));
-    const result = await service.handle(
-      { query: "test" },
-      SERVICE_CONTEXT,
-    );
-    expect(result.providerId).toBe("test-provider");
-    expect(result.results).toHaveLength(2);
-    expect(result.results[0]?.title).toBe("Result 1");
-  });
-
-  it("applies domain filtering to results", async () => {
-    const service = createWebSearchService(async () => ({
-      id: "test-provider",
-      search: async () => [
-        { title: "Good", url: "https://good.com/1", snippet: "S" },
-        { title: "Bad", url: "https://bad.com/1", snippet: "S" },
-      ],
-    }));
-    const result = await service.handle(
-      { query: "test", blockedDomains: ["bad.com"] },
-      SERVICE_CONTEXT,
-    );
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0]?.title).toBe("Good");
+    await expect(service.handle({ query: "q" }, context)).rejects.toThrow("provider unavailable");
+    const unavailable = createWebSearchService(async () => ({ unavailable: true, hint: "configure search" }));
+    await expect(unavailable.handle({ query: "q" }, context)).rejects.toThrow("configure search");
   });
 });

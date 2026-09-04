@@ -105,7 +105,7 @@ export function createWebFetchTool(
             });
             return {
               content: [{ type: "text", text: `answer (from ${result.finalUrl}):\n${answer}` }],
-              details: { kind: "webfetch", status: "ok", reader: true, sources: [result.finalUrl] },
+              details: { kind: "webfetch", status: "ok", reader: true, sources: [{ url: result.finalUrl, title: result.finalUrl }] },
             };
           } catch {
             // A reader failure must not discard a successfully fetched page.
@@ -115,7 +115,12 @@ export function createWebFetchTool(
         const { text, isError } = formatFetchResult(result, hasPrompt);
         return {
           content: [{ type: "text", text }],
-          details: { kind: "webfetch", status: result.status, reader: false },
+          details: {
+            kind: "webfetch",
+            status: result.status,
+            reader: false,
+            ...(result.status === "ok" ? { sources: [{ url: result.finalUrl, title: result.finalUrl }] } : {}),
+          },
           ...(isError ? { isError: true } : {}),
         };
       } catch (error) {

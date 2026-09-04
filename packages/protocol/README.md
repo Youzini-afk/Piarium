@@ -105,7 +105,11 @@ interface HarnessSettings {
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
   memory: { shadowMode: boolean };           // user-only, default false
-  web?: { maxFetchesPerTurn?: number; render?: boolean };
+  web?: {
+    maxFetchesPerTurn?: number;
+    render?: boolean;
+    search?: { provider: "brave" | "exa" | "tavily" | "jina" | "searxng"; endpoint?: string; credentialRef?: string };
+  };
   permissions?: { mode?: PermissionMode };   // default "normal"
 }
 ```

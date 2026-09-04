@@ -73,6 +73,8 @@ import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateProvider } from './HarnessThreadState';
 import { parseHarnessThreadMutation } from './harnessThreadPresentation';
+import { projectHarnessWebSources } from './harnessWebSources';
+import { useWebSourcesStore } from '@/stores/useWebSourcesStore';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -636,6 +638,15 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const sentMessageHistory = React.useMemo(() => (
     projectPiMessageHistory(currentRecord?.branchEntries?.entries ?? [])
   ), [currentRecord?.branchEntries?.entries]);
+  const projectedWebSources = React.useMemo(() => (
+    currentSessionId
+      ? projectHarnessWebSources(currentSessionId, currentRecord?.branchEntries?.entries ?? [])
+      : []
+  ), [currentRecord?.branchEntries?.entries, currentSessionId]);
+  React.useEffect(() => {
+    const addSource = useWebSourcesStore.getState().addSource;
+    for (const source of projectedWebSources) addSource(source);
+  }, [projectedWebSources]);
   const transientUser = currentRecord?.liveUser ?? (
     submission?.mode === 'prompt'
       ? submission.message

@@ -12,6 +12,16 @@ export interface ModelSelection {
   modelId: string;
 }
 
+export type HarnessWebSearchProvider = "brave" | "exa" | "tavily" | "jina" | "searxng";
+
+export interface HarnessWebSearchSettings {
+  provider: HarnessWebSearchProvider;
+  /** Required for SearXNG; optional override for hosted providers. */
+  endpoint?: string;
+  /** Pi auth.json entry name. SearXNG may omit it for an unauthenticated instance. */
+  credentialRef?: string;
+}
+
 export interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
@@ -27,6 +37,7 @@ export interface HarnessSettings {
   web?: {
     maxFetchesPerTurn?: number;
     render?: boolean;
+    search?: HarnessWebSearchSettings;
   };
   permissions?: {
     mode?: PermissionMode;
@@ -119,7 +130,18 @@ export function mergeHarnessSettings(
       ...user.memory,
     },
     ...(user.web || workspace.web
-      ? { web: { ...user.web, ...workspace.web } }
+      ? {
+          web: {
+            ...user.web,
+            // A repository may tune fetch behavior, but cannot redirect web
+            // searches or select a credential from the user's auth store.
+            ...(workspace.web?.maxFetchesPerTurn === undefined
+              ? {}
+              : { maxFetchesPerTurn: workspace.web.maxFetchesPerTurn }),
+            ...(workspace.web?.render === undefined ? {} : { render: workspace.web.render }),
+            ...(user.web?.search ? { search: { ...user.web.search } } : {}),
+          },
+        }
       : {}),
     permissions,
   };

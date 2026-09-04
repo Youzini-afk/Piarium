@@ -19,7 +19,7 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
   return defineTool({
     name: "websearch",
     label: "Web Search",
-    description: "Search the web and return results. Uses the session model's built-in search if available, otherwise a configured search API provider. Returns title, URL, and snippet for each result. Does not fetch page content — use webfetch for that.",
+    description: "Search the web through the configured search API provider. Returns title, URL, and snippet for each result. Does not fetch page content — use webfetch for that.",
     promptSnippet: "websearch: search the web for current information",
     promptGuidelines: [
       "Use websearch to find current information. Follow up with webfetch to read specific pages.",
@@ -59,7 +59,12 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
 
         return {
           content: [{ type: "text", text: lines.join("\n") }],
-          details: { kind: "websearch", providerId: result.providerId, count: result.results.length },
+          details: {
+            kind: "websearch",
+            providerId: result.providerId,
+            count: result.results.length,
+            sources: result.results.map((item) => ({ title: item.title, url: item.url })),
+          },
         };
       } catch (error) {
         return {

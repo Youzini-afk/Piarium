@@ -13,6 +13,7 @@ export interface WebSource {
 
 interface WebSourcesState {
   sources: WebSource[];
+  dismissedIds: string[];
   addSource: (source: Omit<WebSource, 'id' | 'pinned'>) => void;
   pinSource: (id: string) => void;
   unpinSource: (id: string) => void;
@@ -20,14 +21,18 @@ interface WebSourcesState {
   clearSession: (sessionId: string) => void;
 }
 
-let idCounter = 0;
-const nextId = (): string => `ws_${++idCounter}`;
+const sourceId = (source: Pick<WebSource, 'sessionId' | 'toolCallId' | 'url'>): string => (
+  `${source.sessionId}\0${source.toolCallId}\0${source.url}`
+);
 
 export const useWebSourcesStore = create<WebSourcesState>()((set) => ({
   sources: [],
-  addSource: (source) => set((state) => ({
-    sources: [...state.sources, { ...source, id: nextId(), pinned: false }],
-  })),
+  dismissedIds: [],
+  addSource: (source) => set((state) => {
+    const id = sourceId(source);
+    if (state.dismissedIds.includes(id) || state.sources.some((entry) => entry.id === id)) return state;
+    return { sources: [...state.sources, { ...source, id, pinned: false }] };
+  }),
   pinSource: (id) => set((state) => ({
     sources: state.sources.map((s) => s.id === id ? { ...s, pinned: true } : s),
   })),
@@ -36,9 +41,11 @@ export const useWebSourcesStore = create<WebSourcesState>()((set) => ({
   })),
   deleteSource: (id) => set((state) => ({
     sources: state.sources.filter((s) => s.id !== id),
+    dismissedIds: state.dismissedIds.includes(id) ? state.dismissedIds : [...state.dismissedIds, id],
   })),
   clearSession: (sessionId) => set((state) => ({
     sources: state.sources.filter((s) => s.sessionId !== sessionId),
+    dismissedIds: state.dismissedIds.filter((id) => !id.startsWith(`${sessionId}\0`)),
   })),
 }));
 

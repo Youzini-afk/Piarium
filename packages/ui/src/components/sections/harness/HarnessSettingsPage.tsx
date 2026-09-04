@@ -3,13 +3,16 @@ import {
   DEFAULT_HARNESS_SETTINGS,
   validatePermissionRule,
   type JsonValue,
+  type HarnessWebSearchProvider,
   type PermissionMode,
   type PermissionRule,
   type PiSettingsSnapshot,
   type RuntimeContextTarget,
 } from '@piarium/protocol';
+import { runtimeFetch } from '@piarium/application-client';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SettingsSection,
@@ -34,6 +37,7 @@ const TOOL_KEYS = [
 ] as const;
 
 const SHELL_OPTIONS = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
+const SEARCH_PROVIDERS = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const satisfies readonly HarnessWebSearchProvider[];
 
 interface HarnessSettings {
   tools?: Partial<Record<string, boolean>>;
@@ -42,6 +46,11 @@ interface HarnessSettings {
   bash?: { waitMs?: number };
   models?: Record<string, { providerId: string; modelId: string }>;
   memory?: { shadowMode?: boolean };
+  web?: {
+    maxFetchesPerTurn?: number;
+    render?: boolean;
+    search?: { provider: HarnessWebSearchProvider; endpoint?: string; credentialRef?: string };
+  };
   permissions?: { mode?: PermissionMode; rules?: PermissionRule[] };
 }
 
@@ -68,6 +77,11 @@ export const HarnessSettingsPage: React.FC = () => {
   const [error, setError] = React.useState<string | null>(null);
   const [rulesDraft, setRulesDraft] = React.useState('[]');
   const [rulesIssue, setRulesIssue] = React.useState<string | null>(null);
+  const [searchProvider, setSearchProvider] = React.useState<HarnessWebSearchProvider | 'none'>('none');
+  const [searchEndpoint, setSearchEndpoint] = React.useState('');
+  const [searchApiKey, setSearchApiKey] = React.useState('');
+  const [searchCredentialConfigured, setSearchCredentialConfigured] = React.useState(false);
+  const [searchStatusLoading, setSearchStatusLoading] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -98,6 +112,38 @@ export const HarnessSettingsPage: React.FC = () => {
     setRulesDraft(JSON.stringify(harness.permissions?.rules ?? [], null, 2));
     setRulesIssue(null);
   }, [harness.permissions?.rules, snapshot?.globalRevision]);
+
+  React.useEffect(() => {
+    setSearchProvider(harness.web?.search?.provider ?? 'none');
+    setSearchEndpoint(harness.web?.search?.endpoint ?? '');
+    setSearchApiKey('');
+  }, [harness.web?.search?.endpoint, harness.web?.search?.provider, snapshot?.globalRevision]);
+
+  React.useEffect(() => {
+    if (searchProvider === 'none') {
+      setSearchCredentialConfigured(false);
+      setSearchStatusLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSearchStatusLoading(true);
+    void runtimeFetch(`/api/harness/web-search/credentials/${searchProvider}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`Unable to read search credential status (${response.status})`);
+      const value = await response.json() as { configured?: unknown };
+      if (!controller.signal.aborted) setSearchCredentialConfigured(value.configured === true);
+    }).catch((statusError) => {
+      if (!controller.signal.aborted) {
+        setSearchCredentialConfigured(false);
+        setError(statusError instanceof Error ? statusError.message : String(statusError));
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setSearchStatusLoading(false);
+    });
+    return () => controller.abort();
+  }, [searchProvider]);
 
   const saveHarness = React.useCallback(async (newHarness: HarnessSettings) => {
     if (isSaving || !snapshot) return;
@@ -170,6 +216,48 @@ export const HarnessSettingsPage: React.FC = () => {
       memory: { ...harness.memory, shadowMode: enabled },
     });
   }, [harness, saveHarness]);
+
+  const handleSearchSave = React.useCallback(async () => {
+    if (searchProvider === 'none') {
+      const web = { ...harness.web };
+      delete web.search;
+      const next = { ...harness };
+      if (Object.keys(web).length > 0) next.web = web;
+      else delete next.web;
+      await saveHarness(next);
+      return;
+    }
+    if (searchProvider === 'searxng' && !searchEndpoint.trim()) {
+      setError(t('settings.page.harness.web.search.endpointRequired'));
+      return;
+    }
+    if (searchProvider !== 'searxng' && !searchCredentialConfigured && !searchApiKey.trim()) {
+      setError(t('settings.page.harness.web.search.apiKeyRequired'));
+      return;
+    }
+    const credentialRef = `piarium-web-search-${searchProvider}`;
+    if (searchApiKey.trim()) {
+      const response = await runtimeFetch(`/api/harness/web-search/credentials/${searchProvider}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: searchApiKey.trim() }),
+      });
+      if (!response.ok) throw new Error(`Unable to save search credential (${response.status})`);
+      setSearchCredentialConfigured(true);
+      setSearchApiKey('');
+    }
+    await saveHarness({
+      ...harness,
+      web: {
+        ...harness.web,
+        search: {
+          provider: searchProvider,
+          ...(searchProvider === 'searxng' && searchEndpoint.trim() ? { endpoint: searchEndpoint.trim() } : {}),
+          ...((searchProvider !== 'searxng' || searchCredentialConfigured || searchApiKey.trim()) ? { credentialRef } : {}),
+        },
+      },
+    });
+  }, [harness, saveHarness, searchApiKey, searchCredentialConfigured, searchEndpoint, searchProvider, t]);
 
   if (isLoading) {
     return (
@@ -274,6 +362,84 @@ export const HarnessSettingsPage: React.FC = () => {
           label={t('settings.page.harness.memory.shadow.label')}
           description={t('settings.page.harness.memory.shadow.description')}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.web')}
+        description={t('settings.page.harness.section.web.description')}
+      >
+        <div className="space-y-4">
+          <SettingsFieldRow
+            label={t('settings.page.harness.web.search.provider')}
+            description={t('settings.page.harness.web.search.provider.description')}
+          >
+            <Select value={searchProvider} onValueChange={(value) => setSearchProvider(value as HarnessWebSearchProvider | 'none')}>
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className={SETTINGS_OPTION_STACK_CLASS}>
+                <SelectItem value="none">{t('settings.page.harness.web.search.none')}</SelectItem>
+                {SEARCH_PROVIDERS.map((provider) => <SelectItem key={provider} value={provider}>{provider === 'searxng' ? 'SearXNG' : provider[0]!.toUpperCase() + provider.slice(1)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+          {searchProvider === 'searxng' ? (
+            <SettingsFieldRow
+              label={t('settings.page.harness.web.search.endpoint')}
+              description={t('settings.page.harness.web.search.endpoint.description')}
+            >
+              <Input
+                value={searchEndpoint}
+                onChange={(event) => setSearchEndpoint(event.target.value)}
+                placeholder="http://127.0.0.1:8080"
+                className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
+          ) : null}
+          {searchProvider !== 'none' ? (
+            <SettingsFieldRow
+              label={t('settings.page.harness.web.search.apiKey')}
+              description={t('settings.page.harness.web.search.apiKey.description')}
+            >
+              <div className="space-y-1.5">
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={searchApiKey}
+                  onChange={(event) => setSearchApiKey(event.target.value)}
+                  placeholder={searchCredentialConfigured
+                    ? t('settings.page.harness.web.search.configured')
+                    : t('settings.page.harness.web.search.notConfigured')}
+                  className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {searchStatusLoading
+                    ? t('common.loading')
+                    : t(searchCredentialConfigured
+                        ? 'settings.page.harness.web.search.configured'
+                        : 'settings.page.harness.web.search.notConfigured')}
+                </p>
+              </div>
+            </SettingsFieldRow>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">{t('settings.page.harness.web.search.restart')}</p>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isSaving || searchStatusLoading}
+              onClick={() => {
+                void handleSearchSave().catch((saveError) => {
+                  const message = saveError instanceof Error ? saveError.message : String(saveError);
+                  setError(message);
+                  toast.error(t('settings.common.status.saveFailed'));
+                });
+              }}
+            >
+              {t('settings.page.harness.web.search.save')}
+            </Button>
+          </div>
+        </div>
       </SettingsSection>
 
       {/* Shell selection */}

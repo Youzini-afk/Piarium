@@ -64,7 +64,10 @@ import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
+import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
+import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
+import { readPiAuthFile, readPiConfigLayers } from './lib/pi-config/storage.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -825,6 +828,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
   let piWriterTracker: PiWriterTracker | null = null;
   let recoveryTurnCoordinator: RecoveryTurnCoordinator | null = null;
+  let configuredWebSearchProvider: SearchProvider | null = null;
+  try {
+    const userConfig = readPiConfigLayers(process.cwd()).userConfig;
+    const searchSettings = recordOf(recordOf(userConfig.harness).web).search;
+    const resolvedSearch = resolveConfiguredSearchProvider({
+      settings: searchSettings,
+      auth: readPiAuthFile(),
+    });
+    if ('unavailable' in resolvedSearch) {
+      if (searchSettings !== undefined) {
+        console.warn(`[HarnessWebSearch] ${resolvedSearch.hint}`);
+      }
+    } else {
+      configuredWebSearchProvider = resolvedSearch;
+    }
+  } catch (error) {
+    console.warn(`[HarnessWebSearch] Unable to load provider configuration: ${errorMessage(error)}`);
+  }
   const admitPiSessionExecution = (request: PiAdmissionRequest) => {
     if (!piWriterTracker) {
       throw new PiRuntimeBrokerError(
@@ -843,6 +864,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // execution stays inside pi-host so it uses the session's credential and
     // model authority rather than creating a second model stack in the Host.
     harnessWebRead: true,
+    harnessWebSearch: configuredWebSearchProvider !== null,
     ...brokerOptions,
   }));
   const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(
@@ -1072,6 +1094,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     // Renderer is wired by desktop host (1b.4); web/cloud host has no renderer
   });
+  const webSearchService = configuredWebSearchProvider
+    ? createWebSearchService(async () => configuredWebSearchProvider!)
+    : null;
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
     resolveWorkspaceId: async (workspaceRoot) => {
       try {
@@ -1256,6 +1281,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { sessionId, scope },
       });
     },
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerWebSearchCredentialRoutes(app, {
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
@@ -1466,6 +1494,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,
+    ...(webSearchService ? { webSearchService } : {}),
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),

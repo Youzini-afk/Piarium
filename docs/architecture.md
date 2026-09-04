@@ -446,6 +446,10 @@ The `HarnessServiceMap` defines the following method groups:
 - **Web**: `web.fetch`, `web.search` (registered when available). A configured
   reader model runs inside pi-host over the `web.fetch` result, so credentials
   and model resolution remain session-local; there is no second Host model stack.
+  Web search adapters run in the Host for Brave, Exa, Tavily, Jina, or a
+  user-selected SearXNG endpoint. Provider identity is user-owned, keys live in
+  fixed search-only Pi auth entries, and the Host advertises `web.search` only
+  when startup configuration is usable.
 - **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`, `memory.blocks.get`, `memory.blocks.apply`
 - **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
 

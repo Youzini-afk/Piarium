@@ -3,7 +3,7 @@ import { useWebSourcesStore } from './useWebSourcesStore.js';
 
 describe('useWebSourcesStore', () => {
   beforeEach(() => {
-    useWebSourcesStore.setState({ sources: [] });
+    useWebSourcesStore.setState({ sources: [], dismissedIds: [] });
   });
 
   it('adds a source', () => {
@@ -43,6 +43,21 @@ describe('useWebSourcesStore', () => {
 
     useWebSourcesStore.getState().deleteSource(id);
     expect(useWebSourcesStore.getState().sources).toHaveLength(0);
+    useWebSourcesStore.getState().addSource({
+      sessionId: 's1', url: 'https://example.com', title: 'Test',
+      fetchedAt: 0, toolCallId: 'tc1', tool: 'webfetch',
+    });
+    expect(useWebSourcesStore.getState().sources).toHaveLength(0);
+  });
+
+  it('deduplicates a persisted tool source during transcript re-projection', () => {
+    const source = {
+      sessionId: 's1', url: 'https://example.com', title: 'Test',
+      fetchedAt: 0, toolCallId: 'tc1', tool: 'webfetch' as const,
+    };
+    useWebSourcesStore.getState().addSource(source);
+    useWebSourcesStore.getState().addSource(source);
+    expect(useWebSourcesStore.getState().sources).toHaveLength(1);
   });
 
   it('clears sources for a session', () => {

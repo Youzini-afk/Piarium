@@ -87,6 +87,22 @@ describe("harness settings", () => {
     ).memory.shadowMode, true);
   });
 
+  it("keeps web search provider and credential selection user-owned", () => {
+    const merged = mergeHarnessSettings({
+      web: {
+        search: { provider: "brave", credentialRef: "brave-search" },
+        render: false,
+      },
+    }, {
+      web: {
+        search: { provider: "searxng", endpoint: "http://workspace.invalid" },
+        render: true,
+      },
+    });
+    assert.deepEqual(merged.web?.search, { provider: "brave", credentialRef: "brave-search" });
+    assert.equal(merged.web?.render, true);
+  });
+
   it("only accepts stricter workspace permission modes and ask/deny rules", () => {
     const tightened = mergeHarnessSettings(
       { permissions: { mode: "accept-edits", rules: [{ tool: "bash", decision: "allow" }] } },

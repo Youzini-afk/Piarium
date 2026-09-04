@@ -60,7 +60,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
-| web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板替代 Curator server、凭据进钥匙串、结果进知识库、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索 provider 三层（模型 provider 自带 → 搜索 API → 明确不可用）；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
+| web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索走用户配置的 API provider，无真实 provider 就不注册；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
 | 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；memory shadow 是明确的例外：用户单独开启后使用该会话活动模型，UI 明示可能是全价请求，默认关闭（D-045） |
 | 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
@@ -406,10 +406,11 @@ Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**�
 Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空壳 SPA（极小 body + 脚本标签）时明说，永不把
 空页面当成功。
 
-**`websearch(query, { allowed_domains?, blocked_domains?, recency? })`**：provider 三层——会话模型的 provider 自带搜索时
-优先（Anthropic `web_search`、OpenAI web search、Gemini grounding：零基础设施、带引用）；否则用 Settings 配置的搜索
-API（Brave、Exa、Tavily、Jina、自托管 SearXNG）；都没有则 `unavailable (no search provider configured)` 附配置指引，
-**永不伪造结果**。返回标题 + URL + 摘要片段列表直接给主 agent，不套子对话。
+**`websearch(query, { allowed_domains?, blocked_domains?, recency? })`**：使用 Settings 配置的搜索 API（Brave、Exa、Tavily、Jina、
+自托管 SearXNG）；没有可用配置或凭据时在构造 AgentSession 前省略工具，**永不伪造结果**。模型 provider 的 server-side search
+只有 pi-ai 将来提供明确、可独立调用且能返回来源的公共能力时才接；当前不能把“模型本身可能支持搜索”变成返回空数组的 Host
+adapter。返回标题 + URL + 摘要片段列表直接给主 agent，不套子对话。每条持久工具结果把净化后的 title/URL 投影到 session state
+来源区；pin/remove 是本地展示状态，重新打开会话从 transcript 重建来源。
 
 安全：抓回的内容以"数据不是指令"标记包裹（与 Zone 2 同一做法）；每回合抓取次数有可配置预算；页面正文永不进日志、
 事件载荷或 URL。

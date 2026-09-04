@@ -23,6 +23,7 @@ import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKno
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
 import { useHarnessThreadState } from './HarnessThreadStateContext';
+import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -65,6 +66,10 @@ export const HarnessThreadsPanel: React.FC<{
   const openSession = usePiSessionStore((state) => state.openSession);
   const threadState = useHarnessThreadState();
   const threads = threadState.threads;
+  const webSources = useWebSources(parentSessionId);
+  const pinSource = useWebSourcesStore((state) => state.pinSource);
+  const unpinSource = useWebSourcesStore((state) => state.unpinSource);
+  const deleteSource = useWebSourcesStore((state) => state.deleteSource);
   const [blocks, setBlocks] = React.useState<HarnessSessionBlock[]>([]);
   const [suggestions, setSuggestions] = React.useState<HarnessKnowledgeSuggestion[]>([]);
   const [knowledgeDrafts, setKnowledgeDrafts] = React.useState<Record<string, KnowledgeDraft>>({});
@@ -288,9 +293,9 @@ export const HarnessThreadsPanel: React.FC<{
     };
   }, [parentSessionId, reloadBlocks, reloadKnowledge, workspaceId]);
 
-  if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0) return null;
+  if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0) return null;
 
-  const itemCount = blocks.length + threads.length + suggestions.length;
+  const itemCount = blocks.length + threads.length + suggestions.length + webSources.length;
   const content = (
     <div className="min-h-0 flex-1 overflow-y-auto">
         <HarnessKnowledgeReviewSection
@@ -352,6 +357,38 @@ export const HarnessThreadsPanel: React.FC<{
                   </div>
                 );
               })}
+            </div>
+          </section>
+        ) : null}
+        {webSources.length > 0 ? (
+          <section className="border-b border-border/50 p-2" aria-label={t('harness.sources.title')}>
+            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.sources.title')}</h3>
+            <div className="space-y-1">
+              {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
+                <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
+                  <Icon name={source.tool === 'websearch' ? 'search' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                  <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
+                    <span className="block truncate text-[11px] text-foreground">{source.title}</span>
+                    <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => source.pinned ? unpinSource(source.id) : pinSource(source.id)}
+                    aria-label={t(source.pinned ? 'harness.sources.unpin' : 'harness.sources.pin')}
+                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100"
+                  >
+                    <Icon name={source.pinned ? 'pushpin-2-fill' : 'pushpin'} className="size-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteSource(source.id)}
+                    aria-label={t('harness.sources.remove')}
+                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-[var(--status-error)] group-hover/source:opacity-100"
+                  >
+                    <Icon name="close" className="size-3" />
+                  </button>
+                </div>
+              ))}
             </div>
           </section>
         ) : null}

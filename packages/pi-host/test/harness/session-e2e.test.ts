@@ -35,6 +35,7 @@ import { createDocumentAuthorityHarness } from "../../../web/application-host/li
 import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
+import { createWebSearchService } from "../../../web/application-host/lib/harness/web-search.js";
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 
@@ -58,6 +59,7 @@ async function setupSession(options: {
   faux: ReturnType<typeof registerFauxProvider>;
   workspaceId?: string;
   harnessWebRead?: boolean;
+  harnessWebSearch?: boolean;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
   authorizeWorkspacePath?: NonNullable<Parameters<typeof createHarnessRouter>[0]["authorizeWorkspacePath"]>;
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
@@ -163,7 +165,12 @@ async function setupSession(options: {
     emit,
     projectTrustOverride: true,
   });
-  if (options.harnessWebRead) host.setHarnessWebCapabilities({ read: true, search: false });
+  if (options.harnessWebRead || options.harnessWebSearch) {
+    host.setHarnessWebCapabilities({
+      read: options.harnessWebRead === true,
+      search: options.harnessWebSearch === true,
+    });
+  }
 
   return {
     host,
@@ -532,6 +539,51 @@ describe("session e2e — session-local web reader", () => {
         assert.match(JSON.stringify(readerContext?.messages), /answer is 42/);
         assert.match(finalToolResult, /answer \(from https:\/\/example\.com\/guide\)/);
         assert.match(finalToolResult, /The answer is 42/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — configured web search", () => {
+  it("carries a configured Host provider result through websearch into a real Pi turn", async () => {
+    await withTempRoot("piarium-s-web-search-", async (root) => {
+      const faux = registerFauxProvider();
+      let finalToolResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("websearch", {
+          query: "Piarium architecture",
+          allowed_domains: ["docs.example"],
+        })]),
+        (context) => {
+          finalToolResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const webSearchService = createWebSearchService(async () => ({
+        id: "configured-test",
+        search: async () => [{
+          title: "Piarium architecture",
+          url: "https://docs.example/piarium",
+          snippet: "Host and pi-host have separate authority boundaries.",
+        }],
+      }));
+      const session = await setupSession({
+        root,
+        faux,
+        harnessWebSearch: true,
+        serviceHostOptions: { webSearchService },
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        assert.ok(snapshot.activeTools.includes("websearch"));
+        await session.host.prompt(snapshot.sessionId, "search for the architecture");
+        await session.host.session.waitForIdle();
+        assert.match(finalToolResult, /configured-test/);
+        assert.match(finalToolResult, /https:\/\/docs\.example\/piarium/);
+        assert.match(finalToolResult, /authority boundaries/);
       } finally {
         await session.dispose();
         faux.unregister();

@@ -1012,6 +1012,32 @@ web-read service；真实 Pi session E2E；architecture、plan/status 1b.2。
 
 状态：已实施并 proven
 
+### D-067 · 2026-09-05 · 1b.3 / 1b.5（真实搜索 provider 与 transcript 来源投影）
+
+类型：设计修正与实现澄清
+
+决定：(1) 删除会话模型 provider 的三个“search 返回空数组”占位适配器；pi-ai 没有可独立调用并返回来源的 server-side search
+契约时，模型可能具备搜索能力不等于 Host 有搜索服务。(2) 实装 Settings 可选的 Brave、Exa、Tavily、Jina 与 SearXNG HTTP adapter；
+请求形状分别对照其官方契约（[Brave](https://api-dashboard.search.brave.com/api-reference/web/search/get)、
+[Exa](https://exa.ai/docs/reference/search)、[Tavily](https://docs.tavily.com/documentation/api-reference/endpoint/search)、
+[Jina](https://jina.ai/reader/)、[SearXNG](https://docs.searxng.org/dev/search_api.html)）。provider 的非 2xx、畸形 JSON 与调用错误向上
+传播，不能压成“0 results”。domain policy 在 provider 参数之后仍由 Host 对返回 URL 再过滤。(3) 搜索 provider、endpoint 与
+credentialRef 为 user-owned；workspace 只能覆盖 fetch 的非身份行为，不能把搜索重定向到仓库指定端点。(4) API key 写入
+`piarium-web-search-<provider>` 固定命名的 Pi auth.json 条目，鉴权 route 只返回 configured 布尔值；请求 body 即使伪造
+credentialRef 也不能覆盖模型凭据。SearXNG 可显式使用无认证实例，其余 provider 缺 key 时 Host 不声明能力。(5) Host 启动时解析
+有效配置并据此握手；因此更改 provider 后 UI 明示需重启，新 session 才构造 `websearch`。(6) webfetch/websearch 的持久 tool result
+details 携净化后的 title/URL；PiChatView 从 transcript 投影到现有 session state，稳定键去重，pin/remove 只属本地展示，正文与 key
+都不进 UI store。
+
+原因：旧 resolver 把“模型供应商声称支持搜索”变成永远空结果，正是项目禁止的失败→空成功；配置 API 的 adapter 也全部只返回空。
+凭据若直接写 Harness settings 会进入普通设置 JSON，若允许 route 接收任意 credentialRef 又可误覆盖模型 key。来源直接从持久
+transcript 重建，比让一个未接线的 Zustand store 成为第二真相更可靠。
+
+影响：protocol Harness web settings ownership；Host search adapters、启动 wiring 与 credential routes；pi-host websearch details/真实 Pi E2E；
+Harness Settings 与 session state 来源区；10 locale；设计 5.8、plan/status 1b.3/1b.5。
+
+状态：已实施并 proven（外部 live key smoke 需用户实际 provider 凭据，不是默认测试前提）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1084,3 +1110,4 @@ web-read service；真实 Pi session E2E；architecture、plan/status 1b.2。
 | D-064 | implementation | — | agent-harness 9.3.8、plan/status 3.10；UI shared thread state / timeline markers |
 | D-065 | implementation | — | status 1.4/1.6；Host diagnostics adapter/service、真实 LSP 与 Pi session E2E |
 | D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |
+| D-067 | implementation | — | agent-harness 5.8、plan/status 1b.3/1b.5；protocol / Host providers+auth / pi-host / UI sources |
