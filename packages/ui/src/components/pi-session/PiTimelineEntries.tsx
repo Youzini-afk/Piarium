@@ -14,6 +14,7 @@ import { toast } from '@/components/ui';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
+import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -353,6 +354,11 @@ const PiToolCard: React.FC<{
   const applyPatchFiles = call.name === 'apply_patch'
     ? getApplyPatchFileEntries(result?.details ?? transientOutput)
     : [];
+  const compactSummary = getToolSummary({
+    toolName: call.name,
+    arguments: call.arguments,
+    details: result?.details ?? transientOutput,
+  }).text;
   return (
     <details
       className={cn(
@@ -372,7 +378,10 @@ const PiToolCard: React.FC<{
             status === 'success' && 'text-[var(--status-success)]',
           )}
         />
-        <span className="min-w-0 flex-1 truncate font-mono font-medium text-foreground">{call.name}</span>
+        <span className="shrink-0 font-mono font-medium text-foreground">{call.name}</span>
+        {compactSummary && compactSummary !== call.name ? (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/85">· {compactSummary}</span>
+        ) : <span className="flex-1" />}
         <span className="typography-micro">{status}</span>
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
@@ -451,6 +460,60 @@ const PiToolCard: React.FC<{
   );
 };
 
+const PiReadOnlyToolGroup: React.FC<{
+  calls: PiToolCall[];
+  cwd: string;
+  editor?: EditorAPI;
+  executionById: Record<string, PiToolExecutionState>;
+  resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
+}> = ({ calls, cwd, editor, executionById, resultByCallId }) => {
+  const states = calls.map((call) => {
+    const result = resultByCallId.get(call.id);
+    return result ? (result.isError ? 'error' : 'success') : executionById[call.id]?.status ?? 'running';
+  });
+  const status = calls.some((call) => !resultByCallId.has(call.id))
+    ? 'running'
+    : states.includes('error') ? 'error' : 'success';
+  const first = calls[0]!;
+  const firstResult = resultByCallId.get(first.id);
+  const firstExecution = executionById[first.id];
+  const firstSummary = getToolSummary({
+    toolName: first.name,
+    arguments: first.arguments,
+    details: firstResult?.details ?? firstExecution?.result ?? firstExecution?.partialResult,
+  }).text;
+  return (
+    <details className={cn('group/tools my-1', status === 'error' && 'text-[var(--status-error)]')} open={status === 'running'}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+        <Icon
+          name={status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
+          className={cn(
+            'size-3.5 shrink-0',
+            status === 'running' && 'animate-spin text-primary',
+            status === 'error' && 'text-[var(--status-error)]',
+            status === 'success' && 'text-[var(--status-success)]',
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate">{firstSummary || first.name} · +{calls.length - 1}</span>
+        <span className="typography-micro">{status}</span>
+        <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open/tools:rotate-180" />
+      </summary>
+      <div className="ml-2 border-l border-border/60 py-1 pl-3">
+        {calls.map((call) => (
+          <PiToolCard
+            key={call.id}
+            call={call}
+            cwd={cwd}
+            editor={editor}
+            execution={executionById[call.id]}
+            result={resultByCallId.get(call.id)}
+          />
+        ))}
+      </div>
+    </details>
+  );
+};
+
 const MetaEntry: React.FC<{
   children: React.ReactNode;
   icon: React.ComponentProps<typeof Icon>['name'];
@@ -470,23 +533,70 @@ const AssistantMessage: React.FC<{
   message: PiAssistantMessage;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   streaming?: boolean;
-}> = ({ cwd, editor, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => (
-  <div className="max-w-full">
-    {message.content.map((content, index) => {
+}> = ({ cwd, editor, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => {
+  const rendered: React.ReactNode[] = [];
+  for (let index = 0; index < message.content.length;) {
+    const content = message.content[index]!;
+    if (content.type === 'toolCall') {
+      const consecutive: PiToolCall[] = [];
+      while (index < message.content.length && message.content[index]?.type === 'toolCall') {
+        consecutive.push(message.content[index] as PiToolCall);
+        index += 1;
+      }
+      const projected = groupToolCalls(consecutive.map((call) => ({
+        toolName: call.name,
+        toolCallId: call.id,
+        arguments: call.arguments,
+        details: resultByCallId.get(call.id)?.details
+          ?? executionById[call.id]?.result
+          ?? executionById[call.id]?.partialResult,
+      })));
+      const byId = new Map(consecutive.map((call) => [call.id, call]));
+      for (const group of projected) {
+        if (group.type === 'single') {
+          const call = byId.get(group.entry.toolCallId)!;
+          rendered.push(
+            <PiToolCard
+              key={`${entryId}:tool:${call.id}`}
+              call={call}
+              cwd={cwd}
+              editor={editor}
+              execution={executionById[call.id]}
+              result={resultByCallId.get(call.id)}
+            />,
+          );
+        } else {
+          const calls = group.entries.map((entry) => byId.get(entry.toolCallId)!).filter(Boolean);
+          rendered.push(
+            <PiReadOnlyToolGroup
+              key={`${entryId}:tools:${calls[0]!.id}`}
+              calls={calls}
+              cwd={cwd}
+              editor={editor}
+              executionById={executionById}
+              resultByCallId={resultByCallId}
+            />,
+          );
+        }
+      }
+      continue;
+    }
       if (content.type === 'text') {
-        return (
+        rendered.push(
           <MarkdownRenderer
             key={`${entryId}:text:${index}`}
             content={content.text}
             messageId={`${entryId}:text:${index}`}
             isStreaming={streaming}
             enableFileReferences
-          />
+          />,
         );
+        index += 1;
+        continue;
       }
       if (content.type === 'thinking') {
         const preview = content.redacted ? '' : thinkingPreview(content.thinking);
-        return (
+        rendered.push(
           <details
             key={`${entryId}:thinking:${index}`}
             className="group/thinking my-1"
@@ -512,27 +622,22 @@ const AssistantMessage: React.FC<{
                 />
               </div>
             )}
-          </details>
+          </details>,
         );
+        index += 1;
+        continue;
       }
-      return (
-        <PiToolCard
-          key={`${entryId}:tool:${content.id}`}
-          call={content}
-          cwd={cwd}
-          editor={editor}
-          execution={executionById[content.id]}
-          result={resultByCallId.get(content.id)}
-        />
-      );
-    })}
+    index += 1;
+  }
+  return <div className="max-w-full">
+    {rendered}
     {message.errorMessage && (
       <div className="mt-2 rounded-md bg-[var(--status-error)]/10 px-3 py-2 typography-meta text-[var(--status-error)]">
         {message.errorMessage}
       </div>
     )}
-  </div>
-);
+  </div>;
+};
 
 const PiSortedActivityGroup: React.FC<{
   cwd: string;

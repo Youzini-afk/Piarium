@@ -31,7 +31,7 @@ const liveAssistant: PiAssistantMessage = {
 
 const runtimeAPIs = { editor: undefined } as unknown as RuntimeAPIs;
 
-const renderTimeline = (): string => {
+const renderTimeline = (assistant: PiAssistantMessage = liveAssistant): string => {
   // Zustand deliberately exposes the creation snapshot during SSR. Mirror the
   // selected fields into that snapshot so this server render exercises them.
   const serverState = useUIStore.getInitialState();
@@ -49,7 +49,7 @@ const renderTimeline = (): string => {
           <PiTimelineEntryList
             cwd="C:\\workspace"
             entries={[]}
-            liveAssistant={liveAssistant}
+            liveAssistant={assistant}
             sessionId="session"
             toolExecutions={{}}
           />
@@ -84,5 +84,22 @@ describe('Pi timeline chat render mode', () => {
 
     expect(markup).not.toContain('data-pi-sorted-activity="true"');
     expect(markup).toContain('group/thinking');
+  });
+
+  test('live mode folds consecutive known read-only tools but keeps writes separate', () => {
+    useUIStore.setState({ chatRenderMode: 'live' });
+    const assistant: PiAssistantMessage = {
+      ...liveAssistant,
+      content: [
+        { type: 'toolCall', id: 'grep-1', name: 'grep', arguments: { pattern: 'TODO', path: 'src' } },
+        { type: 'toolCall', id: 'read-1', name: 'read', arguments: { path: 'src/a.ts' } },
+        { type: 'toolCall', id: 'write-1', name: 'write', arguments: { path: 'src/a.ts' } },
+      ],
+    };
+
+    const markup = renderTimeline(assistant);
+    expect(markup).toContain('Searched TODO in src · +1');
+    expect(markup).toContain('Edited src/a.ts');
+    expect(markup).toContain('group/tools my-1');
   });
 });

@@ -643,6 +643,22 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 
 状态：已实施（清单与记录器）；真实 paired runs 尚未执行
 
+### D-048 · 2026-09-04 · 1.11（工具摘要接入真实时间线）
+
+类型：实现澄清
+
+决定：`toolSummary.ts` 接入 `PiTimelineEntries` 的真实 live 渲染。每张卡标题显示 tool name + arguments/details 派生摘要；同一
+assistant message 中连续的已知只读工具（read/grep/find/glob/ls/diagnostics/web）2 个以上折叠为一组，写入、shell、thinking/text
+与未知扩展工具均打断。组在任一调用运行时展开，结束后可折叠，内部仍是原有完整工具卡与 extension renderer。sorted 模式已有
+统一 activity 容器，不再叠一层默认折叠。
+
+原因：原实现只有纯函数和 17 个测试，没有生产 import；同时其“未知且不在写工具名单 = 只读”会把第三方变更工具错误折叠。
+未知工具改为不分组，宁可多一行也不伪造 mutation 属性。
+
+影响：UI `toolSummary.ts`、`PiTimelineEntries.tsx` 与 SSR/render tests；设计 5.1、状态矩阵 1.11。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -696,3 +712,4 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 | D-045 | implementation | D-046（面板项） | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |
 | D-046 | implementation | — | agent-harness.md 8.4.1、status 2.4/2.5；Host routes / SSE / session state sidebar |
 | D-047 | implementation | — | agent-harness.md 8.6、plan/status T4；evaluation/harness / replay script |
+| D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |

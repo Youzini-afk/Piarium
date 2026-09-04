@@ -45,7 +45,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **1.8** 计数器（toolErrors / toolRetries / outputBytes / cacheHitRatio） | pi-host | ✓ | ✓（pi-host 聚合） | `pi-host/test/harness/counter-tracker.test.ts` | — | — | UI 诊断面板未显示（`packages/ui` 无引用）；plan 每阶段检查第 5 条一直未满足 |
 | **1.9** `HarnessSettings` + 设置页 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（Smart 设置进入真会话） | ✓ | — | 模型槽位与 user memory auto-accept 为用户所有；工作区权限/派发只可收紧（D-031） |
 | **1.10** 静态提示片段 | pi-host | ✓ | ✓ | `zone0-stability.test.ts`（注册全部工具后 system 不变） | ✓ | — | — |
-| **1.11** 工具卡片紧凑渲染 | ui | ✓ | ✗ | `toolSummary.test.ts`（17，纯逻辑） | — | 现有卡片 | `toolSummary.ts` 无任何渲染组件引用（D-018） |
+| **1.11** 工具卡片紧凑渲染 | ui | ✓ | ✓ | `toolSummary.test.ts`（摘要、已知只读分组、未知工具不猜只读）；`PiTimelineEntries.renderMode.test.tsx`（真实 SSR：grep+read 折叠、write 独立） | ✓（live 模式） | 每组/每卡仍可展开完整 arguments/result/details | sorted 模式已有整段 activity 容器，不做第二层默认折叠（D-048） |
 | **1b.1** 抓取服务（SSRF、重定向、提取、PDF、缓存） | host | ✓ | ✓ | `host/web-fetch.test.ts` | ✓ | — | — |
 | **1b.2** `webfetch` 工具 / 阅读子 agent | pi-host / host | ✓ | ✓（fetch）/ ✗（read） | `pi-host/test/harness/webfetch-tool.test.ts`；`host/web-read-service.test.ts` | ✓（fetch） | 无 `models.reader` 时返回提取内容 | `webReadService` 在 `index.ts` 未注入 |
 | **1b.3** 搜索 provider 抽象 / `websearch` | host / pi-host | ✓ | **✗（工具已注册，服务未注入）** | `host/web-search.test.ts`；`pi-host/test/harness/websearch-tool.test.ts` | — | 应为不注册 | `index.ts` 未注入 `webSearchService`，真实会话里 `websearch` 每次返回 unavailable——与线程工具曾有的问题同类，应在服务缺失时不注册 |

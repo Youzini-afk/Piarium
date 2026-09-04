@@ -25,12 +25,7 @@ export interface ToolSummary {
 
 /** Tool names that are read-only and can be grouped */
 const READ_ONLY_TOOLS = new Set([
-  "grep", "read", "find", "ls", "diagnostics", "webfetch", "websearch",
-]);
-
-/** Tool names that are write-type (never grouped) */
-const WRITE_TOOLS = new Set([
-  "bash", "edit", "write", "apply_patch", "multiedit",
+  "grep", "read", "find", "glob", "ls", "diagnostics", "webfetch", "websearch",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -136,8 +131,9 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
       return { text: `Searched "${query}"${countStr}`, readOnly };
     }
     default: {
-      // Unknown tool — use name only
-      return { text: name, readOnly: !WRITE_TOOLS.has(name) };
+      // Unknown tools have no declared mutation metadata on the renderer side;
+      // keeping them separate is the only honest default.
+      return { text: name, readOnly: false };
     }
   }
 }

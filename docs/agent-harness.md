@@ -210,6 +210,9 @@ research 与 knowledge-work profile 再评估）。
    工具损坏。
 7. **两种"空"不合并。** `0 hits (searched 1,204 files)` 与 `search unavailable: ...` 是两条不同文本。这是
    仓库既有不变量在工具层的体现。
+8. **紧凑不删证据。** 工具卡标题从 arguments/details 投影一行摘要；同一 assistant step 内连续 2 个以上、且名称明确列入
+   只读集合的调用折叠成一组，写入、shell 与未知扩展工具都打断分组。组和单卡始终可展开原始 arguments/result/details；
+   renderer 不根据“未知工具看起来像查询”猜它只读（D-048）。sorted 模式已有整段 activity 折叠，不再套第二层默认分组。
 
 阈值、超时、并行度均为默认值，可由设置覆盖；本文档不设硬上限。默认值偏向可见性而非节省：在前缀缓存下，
 一个大的工具结果只在进入时支付一次写缓存成本，之后每轮按 0.1× 计费；真正的约束是窗口耗尽，那由句柄与压缩

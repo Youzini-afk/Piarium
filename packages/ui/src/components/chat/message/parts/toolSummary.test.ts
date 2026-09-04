@@ -103,6 +103,7 @@ describe('getToolSummary', () => {
   it('unknown tool returns name only', () => {
     const result = getToolSummary({ toolName: 'custom_tool' });
     expect(result.text).toBe('custom_tool');
+    expect(result.readOnly).toBe(false);
   });
 });
 
@@ -154,6 +155,15 @@ describe('groupToolCalls', () => {
     expect(results).toHaveLength(2);
     expect(results[0]?.type).toBe('single');
     expect(results[1]?.type).toBe('single');
+  });
+
+  it('does not guess that unknown extension tools are read-only', () => {
+    const results = groupToolCalls([
+      entry('custom_one', 'c1'),
+      entry('custom_two', 'c2'),
+    ]);
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.type === 'single')).toBe(true);
   });
 
   it('empty input returns empty', () => {
