@@ -51,7 +51,10 @@ async function loadRoutesModule() {
 
 async function createApp(
   env: Record<string, string> = {},
-  options: { documents?: DocumentAuthority | undefined } = {},
+  options: {
+    documents?: DocumentAuthority | undefined;
+    onGitStatus?: ((scope: string, status: unknown) => void | Promise<void>) | undefined;
+  } = {},
 ): Promise<Express> {
   const { registerWorkspaceRoutes } = await loadRoutesModule();
   const app = express();
@@ -70,6 +73,7 @@ async function createApp(
     persistSettings: vi.fn(async (changes) => ({ ...changes })),
     sanitizeProjects: () => [],
     documents: options.documents,
+    onGitStatus: options.onGitStatus,
   });
   return app;
 }
@@ -114,6 +118,22 @@ describe('workspace routes', () => {
         archivePreviewLimit: 500,
       },
     });
+  });
+
+  it('publishes a successful workspace Git status snapshot', async () => {
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    execFileSync('git', ['init'], { cwd: workspaceRoot, stdio: 'ignore' });
+    fs.writeFileSync(path.join(workspaceRoot, 'note.txt'), 'changed\n');
+    const onGitStatus = vi.fn();
+    const app = await createApp({}, { onGitStatus });
+
+    const response = await request(app)
+      .get('/api/workspace/git/status')
+      .query({ path: '.', mode: 'light' });
+    await Promise.resolve();
+    expect(response.status).toBe(200);
+    expect(response.body.isGitRepository).toBe(true);
+    expect(onGitStatus).toHaveBeenCalledWith(workspaceRoot, expect.objectContaining({ files: expect.any(Array) }));
   });
 
   it('creates folders, lists them as projects, and soft-deletes entries into trash', async () => {

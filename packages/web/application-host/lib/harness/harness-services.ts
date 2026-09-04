@@ -232,6 +232,7 @@ export function createCompactionAfterService(host: HarnessServiceHost): HarnessS
     handle: async (_params, ctx: HarnessServiceContext) => {
       host.observationCursors.clearObserver(ctx.sessionId);
       host.threadRegistry?.clearCursorsForSession(ctx.sessionId);
+      host.onSessionCompacted?.(ctx.sessionId);
       return { acknowledged: true };
     },
   };

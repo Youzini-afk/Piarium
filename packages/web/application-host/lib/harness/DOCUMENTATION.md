@@ -98,6 +98,9 @@ workspace, keeps agent-authored changes out of Zone 2, correlates LSP
 diagnostics only with pending user edits, and projects event-cursor deltas,
 blocks, context usage, and prompt-relevant accepted knowledge. The cursor is
 also embedded in the durable hidden Pi message so a worker reload can resume.
+Successful Git status reads from both workbench APIs pass through Documents
+workspace resolution and a per-session deduplicating observer; this reuses the
+existing SCM refresh boundary and does not add a second Git poller.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
 Active child threads are added to every parent Zone 2 turn, while settled

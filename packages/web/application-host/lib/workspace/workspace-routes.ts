@@ -77,6 +77,7 @@ interface RouteContext {
   pathModule: typeof path;
   osModule: typeof os;
   documents?: DocumentsAPI | undefined;
+  onGitStatus?: ((scope: string, status: unknown) => void | Promise<void>) | undefined;
 }
 
 interface RouteDependencies extends WorkspaceDependencies {
@@ -86,6 +87,7 @@ interface RouteDependencies extends WorkspaceDependencies {
   env?: NodeJS.ProcessEnv | undefined;
   cwd?: string | undefined;
   documents?: DocumentsAPI | undefined;
+  onGitStatus?: ((scope: string, status: unknown) => void | Promise<void>) | undefined;
   readSettingsFromDisk?: (() => Promise<WorkspaceSettings>) | undefined;
   persistSettings?: ((changes: Partial<WorkspaceSettings>) => Promise<WorkspaceSettings>) | undefined;
   sanitizeProjects?: ((value: unknown) => ProjectEntry[] | undefined) | undefined;
@@ -166,7 +168,7 @@ const createRouteContext = (dependencies: RouteDependencies): RouteContext => {
     osModule,
   }) as WorkspaceConfig;
 
-  return { config, fsPromises, pathModule, osModule, documents: dependencies.documents };
+  return { config, fsPromises, pathModule, osModule, documents: dependencies.documents, onGitStatus: dependencies.onGitStatus };
 };
 
 const runWorkspaceMutation = <T,>(
@@ -470,7 +472,11 @@ export const registerWorkspaceRoutes = (app: Express, dependencies: RouteDepende
   app.get('/api/workspace/git/status', async (req, res) => {
     try {
       const mode = req.query?.mode === 'light' ? { mode: 'light' } : {};
-      res.json(await getWorkspaceGitStatus(getRequestPath(req), context.config, { ...context, options: mode }));
+      const status = await getWorkspaceGitStatus(getRequestPath(req), context.config, { ...context, options: mode });
+      res.json(status);
+      void Promise.resolve().then(() => context.onGitStatus?.(context.config.root, status)).catch((error) => {
+        console.warn('[workspace] Failed to observe Git status:', error instanceof Error ? error.message : error);
+      });
     } catch (error) {
       sendError(res, error);
     }

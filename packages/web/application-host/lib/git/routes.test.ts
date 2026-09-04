@@ -326,6 +326,28 @@ describe('git routes index mutations', () => {
     expect(documents.registerWriterForScope).not.toHaveBeenCalled();
   });
 
+  it('publishes successful status snapshots without letting observer failures change the response', async () => {
+    gitLibraries.isGitRepository.mockResolvedValue(true);
+    const status = { current: 'main', files: [{ path: 'a.ts' }], ahead: 0, behind: 0 };
+    gitLibraries.getStatus.mockResolvedValue(status);
+    const onStatus = vi.fn(() => { throw new Error('observer failed'); });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app as unknown as Express, { onStatus });
+    const response = createMockResponse();
+    try {
+      await getRoute('GET', '/api/git/status')({ query: { directory: '/repo' } }, response);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual(status);
+      expect(onStatus).toHaveBeenCalledWith('/repo', status);
+      expect(warn).toHaveBeenCalledWith('Failed to observe Git status:', 'observer failed');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('lets worktree create own and hand off one writer lease', async () => {
     const input = {
       worktreeName: 'feature',

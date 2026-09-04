@@ -46,6 +46,7 @@ import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harne
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
+import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
@@ -1302,6 +1303,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getStore: getKnowledgeStoreForWorkspace,
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
+  const observeKnowledgeGitStatus = createGitStatusObserver({
+    resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
+    observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
+    onError: (error) => console.error('[HarnessKnowledge] Git status observer failed:', errorMessage(error)),
+  });
   observeKnowledgeDocumentMutation = (event) => knowledgeContextRuntime.observeDocumentMutation(event);
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
@@ -1411,6 +1417,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     webFetchService,
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
+    onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
     memoryDepsProvider,
     compactionDepsProvider,
     todoDepsProvider,
@@ -1726,6 +1733,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     extensionRuntime,
     uiAuthController,
     documents: documentsAuthority,
+    onGitStatus: observeKnowledgeGitStatus,
     languageSupervisor,
     runRuntime,
     reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },

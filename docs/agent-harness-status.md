@@ -22,7 +22,7 @@ Thread/ThreadRun catalog 与启动对账、事件驱动 wait、OutputRef/Transcr
 以及异步 dispatch → 真实 Pi child session → 冻结角色模型/工具 → worktree → report/transcript → merge 均已进入 Web/Application
 Host 生产链。Host 通过握手声明真实线程能力，pi-host 才注册七个工具；无能力的 Host 不暴露休眠工具。
 
-**T3 上下文 shadow 第一条纵切（2026-09-04）已交付**：Documents 提交 → 会话事件库 → 增量游标 → Zone 2 → 真实 Pi
+**T3 上下文 shadow 第一条纵切（2026-09-04）已交付**：Documents 提交与现有 Git 状态刷新 → 会话事件库 → 增量游标 → Zone 2 → 真实 Pi
 provider 请求；用户改动后的 LSP 诊断、当前 blocks、context usage 与相关 accepted knowledge 进入同一路径。memory keeper
 由用户显式开启，复用活动会话模型在后台写块，默认关闭且不接管 Pi compaction。
 
@@ -54,7 +54,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **1b.6** 对 `pi-web-access` 让位 | pi-host | ✓ | ✓ | `pi-host/test/harness/select-tools-web.test.ts` | ✓ | — | — |
 | **2.1** 知识库 v1（TriviumDB） | host knowledge | ✓ | ✓（按工作区懒加载） | `knowledge/store.test.ts`；`store.smoke.test.ts`（Node 加载构建产物，CI `test:node-smoke`） | ✓（仅被 todo / recall 使用） | — | TQL 与全零向量两条 TriviumDB 约束（D-019 / D-020）待写进设计 7.5；Electron asar 打包 smoke 未做 |
 | **2.2** Zone 2 组装 | host / pi-host | ✓ | ✓ | `host/zone2.test.ts`；`knowledge/context-runtime.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（Documents 用户写入在下一真实 Pi turn 出现、event cursor 不重复、system 不变） | ✓ | 无材料时不追加消息 | user terminal / Git 事件尚未接；用户知识当前仅由显式 `recall` 合并 |
-| **2.3** host 观察者 | host knowledge | ✓ | ✓（Documents + user-change LSP） | `documents/authority.test.ts`（提交后通知且观察失败不反噬写入）；`knowledge/context-runtime.test.ts`（多会话 fan-out、agent 过滤、诊断因果）；`session-e2e.test.ts`（纵切） | ✓（已接部分） | 观察失败只降级本轮上下文并记录 Host 错误 | user terminal 无逐命令退出事件；Git 无中心订阅；Harness shell / agent 自身事件只入轨迹、不重复进 Zone 2 |
+| **2.3** host 观察者 | host knowledge | ✓ | ✓（Documents + user-change LSP + Git status） | `documents/authority.test.ts`（提交后通知且观察失败不反噬写入）；`knowledge/context-runtime.test.ts`（多会话 fan-out、agent 过滤、诊断因果、raw Git status → workspace → event → Zone 2 与去重）；`git-status.test.ts` / `git-status-runtime.test.ts`（最小投影与 Documents workspace 解析）；`git/routes.test.ts` / `workspace-routes.test.ts`（两个生产刷新边界且 observer 失败不反噬）；`session-e2e.test.ts`（Documents 纵切） | ✓（已接部分） | 观察失败只降级本轮上下文并记录 Host 错误；不新增 Git 轮询 | user terminal 需要 shell integration 才有可靠的逐命令/退出码；Git 外部变化在现有 status 下一次刷新时可见，不声称后台实时；Harness shell / agent 自身事件不重复进 Zone 2（D-054） |
 | **2.4** 记忆 agent shadow | protocol / pi-host / host / ui | ✓ | ✓（用户显式开启） | `memory-agent-extension.test.ts`；`phase2-e2e.test.ts`（Host 校验并顺序 apply）；`session-e2e.test.ts`（当前模型真实后台调用、块落盘且 `memory_edit` 不进主对话）；`context-routes.test.ts` / `harnessBlockPresentation.test.ts`（鉴权、用户编辑、UI 投影） | ✗（Settings 默认关闭） | 不维护块，Pi 行为不变 | tools 块不同，缓存命中与成本未验证；事件加速触发、回放对比未做（D-037/D-045） |
 | **2.5** `todo` / `plan` 块 | host / pi-host / ui | ✓ | ✓ | `host/todo-tool.test.ts`；`pi-host/test/harness/todo-tool.test.ts`（低置信度真 UI、同会话只问一次、取消不写 Host）；`phase2-e2e.test.ts`；session state 侧栏经 authenticated block routes + SSE 可见可编辑（D-046） | ✓ | 不注册 | — |
 | **2.6** 接管压缩 | host / pi-host | ✓ | ✓（能力存在，生产门禁关闭） | `host/compaction.test.ts`（shadow 即使有 keeper block 也交还 Pi；显式 takeover 才接管）；`session-e2e.test.ts`（只有显式测试设置才接管）；`pi-hooks-contract.test.ts`（D-022） | ✗ | Pi 默认压缩 | `takeoverEnabled` 默认 false；需回放对比后才讨论开启（D-037/D-045）；压缩后重注入最近文件未实现 |

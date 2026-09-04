@@ -159,7 +159,13 @@ const sendGitError = (res: Response, error: unknown, fallback: string): Response
   return res.status(statusCode).json({ error: errorMessage(error, fallback) });
 };
 
-export function registerGitRoutes(app: Express, { documents }: { documents?: GitDocumentAuthority } = {}): void {
+export function registerGitRoutes(app: Express, {
+  documents,
+  onStatus,
+}: {
+  documents?: GitDocumentAuthority;
+  onStatus?: (directory: string, status: unknown) => void | Promise<void>;
+} = {}): void {
   let gitLibraries: GitLibraries | null = null;
   const getGitLibraries = async (): Promise<GitLibraries> => {
     if (!gitLibraries) {
@@ -501,6 +507,9 @@ export function registerGitRoutes(app: Express, { documents }: { documents?: Git
       const mode = req.query.mode === 'light' ? 'light' : undefined;
       const status = await getStatus(directory, mode ? { mode } : {});
       res.json(status);
+      void Promise.resolve().then(() => onStatus?.(directory, status)).catch((error) => {
+        console.warn('Failed to observe Git status:', errorMessage(error, 'Unknown observer error'));
+      });
     } catch (error) {
       const errorText = extractGitErrorText(error);
       if (/not a git repository/i.test(errorText)) {

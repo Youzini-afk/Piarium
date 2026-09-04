@@ -4,6 +4,7 @@ import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observ
 import type { KnowledgeStore, StoredEvent } from "./store.js";
 
 interface SessionBinding {
+  gitFingerprint: string | null;
   observers: Promise<Observers | null> | null;
   pendingUserPaths: Set<string>;
   sessionId: string;
@@ -61,6 +62,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     if (current?.workspaceId === workspaceId) return;
     sessions.set(sessionId, {
       observers: null,
+      gitFingerprint: null,
       pendingUserPaths: new Set(),
       sessionId,
       tail: current?.tail ?? Promise.resolve(),
@@ -136,10 +138,15 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const observeGitStatus = (event: GitStatusEvent): void => {
     if (disposed) return;
-    track(forWorkspace(event.workspaceId, (observers, binding) => observers.onGitStatus({
-      ...event,
-      turnIndex: binding.turnIndex,
-    })));
+    const fingerprint = JSON.stringify([event.branch ?? null, event.changed ?? null, event.note ?? null]);
+    track(forWorkspace(event.workspaceId, async (observers, binding) => {
+      if (binding.gitFingerprint === fingerprint) return;
+      await observers.onGitStatus({
+        ...event,
+        turnIndex: binding.turnIndex,
+      });
+      binding.gitFingerprint = fingerprint;
+    }));
   };
 
   const zone2Material = async (request: Zone2MaterialRequest): Promise<Zone2MaterialResult> => {
@@ -216,6 +223,11 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     sessions.delete(sessionId);
   };
 
+  const resetSessionObservationBaselines = (sessionId: string): void => {
+    const binding = sessions.get(sessionId);
+    if (binding) binding.gitFingerprint = null;
+  };
+
   const drain = async (): Promise<void> => {
     while (pending.size > 0) await Promise.allSettled([...pending]);
   };
@@ -235,6 +247,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     observeDocumentMutation,
     observeGitStatus,
     observeTerminalExit,
+    resetSessionObservationBaselines,
     zone2Material,
   };
 }

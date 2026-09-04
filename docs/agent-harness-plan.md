@@ -243,8 +243,8 @@ T2 **权限纵切（2026-09-04 已交付）**（Host capability / scope enforcem
 
 **状态（2026-09-04）**：T3 核心 shadow 纵切已交付：Documents 与用户修改后的 LSP 诊断写入事件库，Zone 2 用耐久会话消息中的
 event cursor 增量投影；blocks、context usage 与 prompt-relevant accepted knowledge 已接；memory shadow 由用户显式开启、使用
-活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。仍缺 user terminal / Git
-观察、知识建议审阅 UI 与 memory 事件加速；session block 已通过鉴权路由 + SSE 接进会话状态侧栏。这些剩余产品面不阻塞先建立
+活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。Git 已复用两个现有 status
+刷新边界并按 session 去重；仍缺 user terminal 的 shell integration、知识建议审阅 UI 与 memory 事件加速；session block 已通过鉴权路由 + SSE 接进会话状态侧栏。这些剩余产品面不阻塞先建立
 T4 回放基线。
 
 **T4 当前状态（2026-09-04）**：`evaluation/harness/cases.json` 已固定 6 个来自 Piarium 历史的任务、base/reference commit、原始任务

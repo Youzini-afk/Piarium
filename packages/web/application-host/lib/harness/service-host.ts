@@ -77,6 +77,7 @@ export interface HarnessServiceHost {
   userKnowledgeStore: KnowledgeStore | null;
   memoryDepsProvider: ((sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>) | null;
   zone2Provider: ((request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>) | null;
+  onSessionCompacted: ((sessionId: string) => void) | null;
   compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
   compactionSettings: CompactionSettings;
   todoSettings: TodoToolSettings;
@@ -129,6 +130,7 @@ export interface HarnessServiceHostOptions {
   userKnowledgeStore?: KnowledgeStore;
   memoryDepsProvider?: (sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>;
   zone2Provider?: (request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>;
+  onSessionCompacted?: (sessionId: string) => void;
   compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
   compactionSettings?: CompactionSettings;
   todoSettings?: TodoToolSettings;
@@ -161,6 +163,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
   const memoryDepsProvider = options.memoryDepsProvider ?? null;
   const zone2Provider = options.zone2Provider ?? null;
+  const onSessionCompacted = options.onSessionCompacted ?? null;
   const compactionDepsProvider = options.compactionDepsProvider ?? null;
   const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
   const todoSettings = options.todoSettings ?? { confirmBelow: 0.6 };
@@ -294,6 +297,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     userKnowledgeStore,
     memoryDepsProvider,
     zone2Provider,
+    onSessionCompacted,
     compactionDepsProvider,
     compactionSettings,
     todoSettings,

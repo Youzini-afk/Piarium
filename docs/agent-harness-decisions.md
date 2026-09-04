@@ -754,6 +754,26 @@ plan/status 3.4/3.5。
 
 状态：已实施
 
+### D-054 · 2026-09-04 · 2.3（Git 状态观察复用现有刷新边界）
+
+类型：实现澄清
+
+决定：(1) `/api/git/status` 与 `/api/workspace/git/status` 每次成功取得状态后，以 best-effort 回调交给 knowledge runtime；回调失败
+不得改变已经成功的 HTTP 响应。(2) adapter 通过 Documents `resolveScopeId` 找包含该 repo/cwd 的已注册 workspace，再投影为
+branch、changed file count，以及 ahead/behind/merge/rebase 摘要；不把文件名或 diff 正文复制进事件库。(3) 每个已绑定 session 对
+相同摘要做指纹去重，状态真正变化后才写新 event；首次观察作为基线事实进入下一轮 Zone 2，压缩后只清该 session 的去重基线，
+下一次现有刷新可重新交付当前事实。(4) 不新增 Git 轮询器或 watcher：复用
+IDE/Workspace 已有状态刷新，外部 Git 变化会在下一次状态刷新时被观察；UI 未刷新期间不声称实时。(5) user terminal 暂不接：现有
+terminal 是持久 PTY，process exit 只代表整个 shell 退出，不能冒充单条命令完成；命令与 exit code 要等 shell integration 协议。
+
+原因：Git API 已经是当前两个工作台读取 SCM 真相的共同边界，挂一次轻量投影即可获得准确状态且没有额外扫描成本。直接监听文件
+变化再运行 Git 会复制现有刷新机制；把终端键盘输入按换行猜成命令则无法处理多行、交互程序、shell quoting 和退出码，会制造假事实。
+
+影响：Platform routes、Git/Workspace Git status routes、Documents workspace resolution、knowledge Git adapter/context runtime、Zone 2；
+plan/status 2.3。
+
+状态：已实施（Git）；user terminal 仍待 shell integration
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -813,3 +833,4 @@ plan/status 3.4/3.5。
 | D-051 | implementation | — | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |
 | D-052 | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI |
 | D-053 | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors |
+| D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |

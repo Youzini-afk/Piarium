@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createKnowledgeContextRuntime } from "./context-runtime.js";
+import { createGitStatusObserver } from "./git-status-runtime.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 
 const TEST_DIR = join(tmpdir(), "piarium-knowledge-context-runtime");
@@ -149,6 +150,68 @@ describe("knowledge context runtime", () => {
       contextUsage: null,
     });
     expect(result.material.newDiagnostics).toEqual([{ path: "src/user.ts", count: 2, worst: "error" }]);
+    await runtime.dispose();
+  });
+
+  it("records Git state changes once per session instead of repeating status polls", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    runtime.observeGitStatus({ workspaceId: "workspace-1", branch: "main", changed: 0 });
+    await runtime.drain();
+    const first = await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, contextUsage: null });
+    expect(first.material.git).toEqual({ branch: "main", changed: 0 });
+
+    runtime.observeGitStatus({ workspaceId: "workspace-1", branch: "main", changed: 0 });
+    await runtime.drain();
+    const duplicate = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      afterEventId: first.eventCursor,
+      contextUsage: null,
+    });
+    expect(duplicate.material.git).toBeNull();
+    expect(duplicate.eventCursor).toBe(first.eventCursor);
+
+    runtime.resetSessionObservationBaselines("session-a");
+    runtime.observeGitStatus({ workspaceId: "workspace-1", branch: "main", changed: 0 });
+    await runtime.drain();
+    const reset = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      afterEventId: first.eventCursor,
+      contextUsage: null,
+    });
+    expect(reset.material.git).toEqual({ branch: "main", changed: 0 });
+
+    runtime.observeGitStatus({ workspaceId: "workspace-1", branch: "feature", changed: 2, note: "1 ahead" });
+    await runtime.drain();
+    const changed = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      afterEventId: reset.eventCursor,
+      contextUsage: null,
+    });
+    expect(changed.material.git).toEqual({ branch: "feature", changed: 2, note: "1 ahead" });
+    await runtime.dispose();
+  });
+
+  it("carries a raw Git route snapshot through workspace resolution into Zone 2", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    const observer = createGitStatusObserver({
+      resolveWorkspaceId: async (scope) => scope === "/workspace/repo" ? "workspace-1" : null,
+      observe: (event) => runtime.observeGitStatus(event),
+    });
+    observer("/workspace/repo", {
+      current: "feature/git-observation",
+      files: [{ path: "a.ts" }, { path: "b.ts" }],
+      ahead: 1,
+      behind: 0,
+    });
+    await Promise.resolve();
+    await runtime.drain();
+    const result = await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, contextUsage: null });
+    expect(result.material.git).toEqual({ branch: "feature/git-observation", changed: 2, note: "1 ahead" });
     await runtime.dispose();
   });
 });

@@ -64,6 +64,7 @@ export interface PlatformRouteDependencies {
   getPiariumEventClients: PiariumEventDependencies['getPiariumEventClients'];
   languageSupervisor?: LanguageRouteDependencies['language'];
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
+  onGitStatus?: (scope: string, status: unknown) => void | Promise<void>;
   openFilesystemPath?: RuntimeManagerDependencies['openFilesystemPath'];
   os: typeof osModule;
   path: typeof pathModule;
@@ -151,6 +152,7 @@ export const createPlatformRoutesRuntime = ({
       remoteClientAuthRuntime,
       __dirname,
       normalizeDirectoryPath,
+      onGitStatus,
       resolveProjectDirectory,
       readCustomThemesFromDisk,
       formatSettingsResponse,
@@ -264,7 +266,7 @@ export const createPlatformRoutesRuntime = ({
     registerSmallModelRoutes(app, { getSmallModelService });
     registerWalkthroughRoutes(app, { getWalkthroughService });
     registerGitHubRoutes(app);
-    registerGitRoutes(app, { ...(documents ? { documents } : {}) });
+    registerGitRoutes(app, { ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
     registerWorkspaceRoutes(app, {
       fsPromises,
       pathModule: path,
@@ -274,6 +276,7 @@ export const createPlatformRoutesRuntime = ({
       persistSettings,
       sanitizeProjects,
       ...(documents ? { documents } : {}),
+      ...(onGitStatus ? { onGitStatus } : {}),
     });
     registerMagicPromptRoutes(app, { fsPromises, path, piariumDataDir });
     registerSessionFoldersRoutes(app, { fsPromises, path, piariumDataDir });
