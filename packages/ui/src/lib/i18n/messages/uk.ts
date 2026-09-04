@@ -2319,6 +2319,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.fork": "Відгалузити звідси",
   "chat.messageBody.actions.forkFailed": "Не вдалося відгалузитися від цього повідомлення",
   "chat.messageBody.actions.copyMessageAria": "Копіювати текст повідомлення",
+  "chat.messageBody.actions.remember": "Додати до перегляду знань",
   "chat.messageBody.actions.copyMessage": "Копіювати повідомлення",
   "chat.messageBody.actions.openPreviewAria": "Відкрити попередній перегляд",
   "chat.messageBody.actions.openPreview": "Відкрити попередній перегляд",

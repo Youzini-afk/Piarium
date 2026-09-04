@@ -2009,6 +2009,7 @@ export const dict = {
   'chat.messageBody.actions.fork': 'Fourche d\'ici',
   'chat.messageBody.actions.forkFailed': 'Impossible de créer une branche depuis ce message',
   'chat.messageBody.actions.copyMessageAria': 'Copier le texte du message',
+  'chat.messageBody.actions.remember': 'Ajouter à la révision des connaissances',
   'chat.messageBody.actions.copyMessage': 'Copier le message',
   'chat.messageBody.actions.openPreviewAria': 'Ouvrir l\'aperçu',
   'chat.messageBody.actions.openPreview': 'Ouvrir l\'aperçu',

@@ -495,9 +495,9 @@ last checkpoint: 2026-09-03T10:12Z
 - UI：会话状态侧栏审阅区：编辑 / 接受 / 驳回；Settings 知识页：
   当前有效列表、取代链展开、`recallCount` / `recalledAt` 排序、删除。
 - 测试：三类触发；草拟有无模型两路；取代链；默认不自动接受；召回计数（配合 2.2）。
-- **状态（2026-09-04）**：block 上“记到项目/记到用户”→ authenticated routes → scope store → 审阅卡 → 冲突检查编辑/接受/
-  驳回 → SSE 失效通知已 proven。接受把最终草稿、打开时原值和 supersedes 在同一 store 写任务内处理。message/tool-result 动作、
-  memory decisions 与 suggestions model 两种自动提议、Settings 全量管理尚未接；未接部分不调模型、不写知识（D-058）。
+- **状态（2026-09-04）**：block 与持久 user/assistant/tool result 上“记到项目/记到用户”→ authenticated routes → scope store →
+  审阅卡 → 冲突检查编辑/接受/驳回 → SSE 失效通知已 proven。接受把最终草稿、打开时原值和 supersedes 在同一 store 写任务内处理。
+  memory decisions 与 suggestions model 两种自动提议、Settings 全量管理尚未接；未接部分不调模型、不写知识（D-058/D-060）。
 
 ### 2.8 embedding provider 抽象
 

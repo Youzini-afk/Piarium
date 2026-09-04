@@ -2307,6 +2307,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': '从此处分叉',
   'chat.messageBody.actions.forkFailed': '无法从这条消息分叉',
   'chat.messageBody.actions.copyMessageAria': '复制消息文本',
+  'chat.messageBody.actions.remember': '加入知识审阅',
   'chat.messageBody.actions.copyMessage': '复制消息',
   'chat.messageBody.actions.openPreviewAria': '打开预览',
   'chat.messageBody.actions.openPreview': '打开预览',

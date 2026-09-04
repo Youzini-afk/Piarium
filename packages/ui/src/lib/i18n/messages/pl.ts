@@ -908,6 +908,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': 'Rozwidl od tego miejsca',
   'chat.messageBody.actions.forkFailed': 'Nie udało się utworzyć odgałęzienia od tej wiadomości',
   'chat.messageBody.actions.copyMessageAria': 'Kopiuj tekst wiadomości',
+  'chat.messageBody.actions.remember': 'Dodaj do przeglądu wiedzy',
   'chat.messageBody.actions.copyMessage': 'Kopiuj wiadomość',
   'chat.messageBody.actions.openPreviewAria': 'Otwórz podgląd',
   'chat.messageBody.actions.openPreview': 'Otwórz podgląd',

@@ -2220,6 +2220,7 @@ export const dict = {
   'chat.messageBody.actions.fork': 'Fork from here',
   'chat.messageBody.actions.forkFailed': 'Could not fork from this message',
   'chat.messageBody.actions.copyMessageAria': 'Copy message text',
+  'chat.messageBody.actions.remember': 'Add to knowledge review',
   'chat.messageBody.actions.copyMessage': 'Copy message',
   'chat.messageBody.actions.openPreviewAria': 'Open preview',
   'chat.messageBody.actions.openPreview': 'Open preview',

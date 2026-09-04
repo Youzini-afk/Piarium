@@ -2191,6 +2191,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': '從此處分支',
   'chat.messageBody.actions.forkFailed': '無法從這條訊息分支',
   'chat.messageBody.actions.copyMessageAria': '複製訊息文字',
+  'chat.messageBody.actions.remember': '加入知識審閱',
   'chat.messageBody.actions.copyMessage': '複製訊息',
   'chat.messageBody.actions.openPreviewAria': '開啟預覽',
   'chat.messageBody.actions.openPreview': '開啟預覽',

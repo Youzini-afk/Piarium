@@ -55,6 +55,7 @@ import {
   projectPiSortedTurn,
   type PiSortedTurnProjection,
 } from './piSortedTurnProjection';
+import { RememberKnowledgeButton } from './RememberKnowledgeButton';
 
 export interface PiTimelineProps {
   assistantWaiting?: PiAssistantWaitingPresentation;
@@ -343,7 +344,13 @@ const PiToolCard: React.FC<{
   const workspaceId = useWorkbenchWorkspaceId();
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, editor, execution, result });
-  if (extensionRendered !== undefined) return <>{extensionRendered}</>;
+  const resultText = result ? piContentText(result.content).trim() : '';
+  if (extensionRendered !== undefined) return (
+    <>
+      {extensionRendered}
+      {resultText ? <div className="flex justify-end"><RememberKnowledgeButton content={resultText} kind={`tool-result:${call.name}`} /></div> : null}
+    </>
+  );
   const status = result
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
@@ -402,6 +409,15 @@ const PiToolCard: React.FC<{
             <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
               {jsonText(transientOutput)}
             </pre>
+          </div>
+        ) : null}
+        {resultText ? (
+          <div className="flex justify-end">
+            <RememberKnowledgeButton
+              content={resultText}
+              kind={`tool-result:${call.name}`}
+              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            />
           </div>
         ) : null}
         {applyPatchFiles.length > 0 ? (
@@ -822,6 +838,7 @@ export const PiTurnUserMessage: React.FC<{
               <TooltipContent side="bottom">{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
             </Tooltip>
           ) : null}
+          {entry && messageText ? <RememberKnowledgeButton content={messageText} kind="message:user" /> : null}
           {entry && onFork ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1001,6 +1018,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                         <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
                       </Tooltip>
                     ) : null}
+                    {assistantText ? <RememberKnowledgeButton content={assistantText} kind="message:assistant" /> : null}
                     {onFork ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -1026,25 +1044,31 @@ export const PiTimelineEntryList: React.FC<Omit<
               );
             }
             if (message.role === 'toolResult') {
+              const resultText = piContentText(message.content).trim();
               return (
                 <article key={entry.id} className="w-full rounded-lg border border-border/60 bg-muted/15 px-3 py-2">
                   <div className="mb-2 flex items-center gap-2 typography-ui-label text-foreground">
                     <Icon name={message.isError ? 'error-warning' : 'check'} className="size-3.5" />
                     <span className="font-mono">{message.toolName}</span>
+                    <span className="flex-1" />
+                    {resultText ? <RememberKnowledgeButton content={resultText} kind={`tool-result:${message.toolName}`} /> : null}
                   </div>
                   <ToolResultContent messageId={entry.id} result={message} />
                 </article>
               );
             }
             if (message.role === 'bashExecution') {
+              const renderedOutput = renderTerminalOutput(message.output);
+              const outputText = renderedOutput.trim();
               return (
                 <article key={entry.id} className="w-full rounded-lg border border-border/60 bg-muted/15">
                   <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 typography-ui-label text-foreground">
                     <Icon name="terminal" className="size-3.5" />
                     <code className="min-w-0 flex-1 break-all">{message.command}</code>
                     {message.cancelled ? <span>cancelled</span> : message.exitCode !== undefined ? <span>exit {message.exitCode}</span> : null}
+                    {outputText ? <RememberKnowledgeButton content={outputText} kind="tool-result:bash" /> : null}
                   </div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono typography-meta text-foreground">{renderTerminalOutput(message.output)}</pre>
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono typography-meta text-foreground">{renderedOutput}</pre>
                   {message.truncated && (
                     <p className="border-t border-border/60 px-3 py-1.5 typography-micro text-[var(--status-warning)]">
                       Output was truncated by Pi; the complete output path is shown below when available.

@@ -2217,6 +2217,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': 'ここからフォーク',
   'chat.messageBody.actions.forkFailed': 'このメッセージから分岐できませんでした',
   'chat.messageBody.actions.copyMessageAria': 'メッセージテキストをコピー',
+  'chat.messageBody.actions.remember': 'ナレッジレビューに追加',
   'chat.messageBody.actions.copyMessage': 'メッセージをコピー',
   'chat.messageBody.actions.openPreviewAria': 'プレビューを開く',
   'chat.messageBody.actions.openPreview': 'プレビューを開く',

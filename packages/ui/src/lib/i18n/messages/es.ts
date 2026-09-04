@@ -2319,6 +2319,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.fork": "Bifurcar desde aquí",
   "chat.messageBody.actions.forkFailed": "No se pudo bifurcar desde este mensaje",
   "chat.messageBody.actions.copyMessageAria": "Copiar texto del mensaje",
+  "chat.messageBody.actions.remember": "Añadir a revisión de conocimiento",
   "chat.messageBody.actions.copyMessage": "Copiar mensaje",
   "chat.messageBody.actions.openPreviewAria": "Abrir vista previa",
   "chat.messageBody.actions.openPreview": "Abrir vista previa",

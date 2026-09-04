@@ -877,6 +877,22 @@ Store 打开时一次建立 path→file/symbol ids 的内存索引，后续写�
 
 状态：已实施并 proven（file/symbol/defines）；跨文件 references/calls/imports 未实施
 
+### D-060 · 2026-09-04 · 2.7（持久消息与工具结果的显式知识标记）
+
+类型：实现澄清
+
+决定：时间线现有 hover action 区新增一个 knowledge 图标菜单，用户明确选择“记到项目”或“记到用户”；覆盖持久 user message、
+assistant answer、配对/独立 tool result、extension-rendered tool result 与 legacy bash output。live 尚未落盘的消息不显示，空文本不显示。
+动作只 POST 原文、空 recall trigger 和来源 kind 到 D-058 的 suggested API，不直接接受、不调模型；成功后沿同一 SSE 让审阅侧栏刷新。
+scope 在菜单中显式选择，不以当前页面或模型猜测。工具卡的动作放在展开结果尾部，消息动作与复制/分叉同层，不占正文空间。
+
+原因：D-058 只接了 block，设计列出的三个人工来源尚不完整；另建浮层会复制现有消息操作与 scope 选择。只允许持久项避免用户把
+尚可能重试/变化的 streaming 文本写成长期建议。
+
+影响：UI `RememberKnowledgeButton` / request projection、`PiTimelineEntries`、10 locale 与 SSR；status/plan 2.7。
+
+状态：已实施并 proven（全部人工 user-mark 来源）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -942,3 +958,4 @@ Store 打开时一次建立 path→file/symbol ids 的内存索引，后续写�
 | D-057 | active-design | — | agent-harness 9.2/9.3、plan/status 3.4；Thread worktree/runtime |
 | D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |
 | D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
+| D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |

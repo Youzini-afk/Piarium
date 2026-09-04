@@ -1,11 +1,12 @@
 import React from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiAssistantMessage } from '@piarium/protocol';
+import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
 import type { RuntimeAPIs } from '@piarium/application-client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { I18nProvider } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { PiTimelineEntryList } from './PiTimelineEntries';
 
 const liveAssistant: PiAssistantMessage = {
@@ -31,24 +32,27 @@ const liveAssistant: PiAssistantMessage = {
 
 const runtimeAPIs = { editor: undefined } as unknown as RuntimeAPIs;
 
-const renderTimeline = (assistant: PiAssistantMessage = liveAssistant): string => {
+const renderTimeline = (assistant: PiAssistantMessage = liveAssistant, entries: PiSessionEntry[] = []): string => {
   // Zustand deliberately exposes the creation snapshot during SSR. Mirror the
   // selected fields into that snapshot so this server render exercises them.
   const serverState = useUIStore.getInitialState();
   const currentState = useUIStore.getState();
+  const piServerState = usePiSessionStore.getInitialState();
   const previous = {
     activityRenderMode: serverState.activityRenderMode,
     chatRenderMode: serverState.chatRenderMode,
   };
   serverState.activityRenderMode = currentState.activityRenderMode;
   serverState.chatRenderMode = currentState.chatRenderMode;
+  const previousSessionId = piServerState.currentSessionId;
+  piServerState.currentSessionId = 'session';
   try {
     return renderToStaticMarkup(
       <RuntimeAPIContext.Provider value={runtimeAPIs}>
         <I18nProvider>
           <PiTimelineEntryList
             cwd="C:\\workspace"
-            entries={[]}
+            entries={entries}
             liveAssistant={assistant}
             sessionId="session"
             toolExecutions={{}}
@@ -59,6 +63,7 @@ const renderTimeline = (assistant: PiAssistantMessage = liveAssistant): string =
   } finally {
     serverState.activityRenderMode = previous.activityRenderMode;
     serverState.chatRenderMode = previous.chatRenderMode;
+    piServerState.currentSessionId = previousSessionId;
   }
 };
 
@@ -101,5 +106,21 @@ describe('Pi timeline chat render mode', () => {
     expect(markup).toContain('Searched TODO in src · +1');
     expect(markup).toContain('Edited src/a.ts');
     expect(markup).toContain('group/tools my-1');
+  });
+
+  test('persisted messages and tool results expose the scoped knowledge review action', () => {
+    useUIStore.setState({ chatRenderMode: 'live' });
+    const entries = [{
+      id: 'user-entry', parentId: null, timestamp: '2026-09-04T00:00:00.000Z', type: 'message',
+      message: { role: 'user', content: 'Remember the user preference', timestamp: 1 },
+    }, {
+      id: 'assistant-entry', parentId: 'user-entry', timestamp: '2026-09-04T00:00:01.000Z', type: 'message',
+      message: { ...liveAssistant, stopReason: 'stop', content: [{ type: 'text', text: 'Remember the answer' }] },
+    }, {
+      id: 'tool-entry', parentId: 'assistant-entry', timestamp: '2026-09-04T00:00:02.000Z', type: 'message',
+      message: { role: 'toolResult', toolCallId: 'tool-1', toolName: 'read', content: [{ type: 'text', text: 'Remember the result' }], isError: false, timestamp: 3 },
+    }] as PiSessionEntry[];
+    const markup = renderTimeline(liveAssistant, entries);
+    expect(markup.match(/aria-label="Add to knowledge review"/g)?.length).toBe(3);
   });
 });

@@ -2223,6 +2223,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': '여기서 분기 시작',
   'chat.messageBody.actions.forkFailed': '이 메시지에서 분기하지 못했습니다',
   'chat.messageBody.actions.copyMessageAria': '메시지 텍스트 복사',
+  'chat.messageBody.actions.remember': '지식 검토에 추가',
   'chat.messageBody.actions.copyMessage': '메시지 복사',
   'chat.messageBody.actions.copyAnswer': '답변 복사',
   'chat.messageBody.actions.savingImage': '이미지 저장 중…',
