@@ -415,10 +415,11 @@ pre-release development every product surface changes in lockstep; no historical
 accepted. UI disables unavailable actions instead of guessing from runtime versions.
 
 The application Host side of that handshake also declares optional Harness services.
-`harnessThreads`, `harnessLspNavigation`, `harnessWebRead`, and `harnessWebSearch` gate tool construction before an
+`harnessThreads`, `harnessLspNavigation`, `harnessWebRead`, and `harnessWebSearch` gate capability paths before an
 AgentSession is created; a dormant provider module or configured model slot is not enough. The Web
-Host currently declares threads but not reader/search, so `websearch` is absent and prompted
-`webfetch` falls back directly to extracted content instead of making a guaranteed-failing request.
+Host declares its guarded fetch path for `harnessWebRead`; when a reader slot is configured, pi-host
+uses the session's own model runtime over that fetched content. Search remains absent until a real
+provider exists, so `websearch` is not exposed as a dormant tool.
 
 ### 5.1 Agent harness protocol
 
@@ -442,7 +443,9 @@ The `HarnessServiceMap` defines the following method groups:
 - **Search**: `search.content`
 - **Filesystem**: `fs.lock`
 - **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`, `lsp.symbols`, `lsp.definition`, `lsp.references`, `lsp.hover`
-- **Web**: `web.fetch`, `web.read`, `web.search` (registered when available)
+- **Web**: `web.fetch`, `web.search` (registered when available). A configured
+  reader model runs inside pi-host over the `web.fetch` result, so credentials
+  and model resolution remain session-local; there is no second Host model stack.
 - **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`, `memory.blocks.get`, `memory.blocks.apply`
 - **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
 

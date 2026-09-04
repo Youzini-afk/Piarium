@@ -57,6 +57,7 @@ async function setupSession(options: {
   root: string;
   faux: ReturnType<typeof registerFauxProvider>;
   workspaceId?: string;
+  harnessWebRead?: boolean;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
   authorizeWorkspacePath?: NonNullable<Parameters<typeof createHarnessRouter>[0]["authorizeWorkspacePath"]>;
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
@@ -162,6 +163,7 @@ async function setupSession(options: {
     emit,
     projectTrustOverride: true,
   });
+  if (options.harnessWebRead) host.setHarnessWebCapabilities({ read: true, search: false });
 
   return {
     host,
@@ -463,6 +465,73 @@ describe("session e2e — durable output handles", () => {
         assert.match(handle, /^out_/);
         assert.match(pagedContext, /line 1/);
         assert.match(pagedContext, /\[\d+\/\d+ bytes/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — session-local web reader", () => {
+  it("fetches once in the Host and answers with the configured reader model in pi-host", async () => {
+    await withTempRoot("piarium-s-web-reader-", async (root) => {
+      const faux = registerFauxProvider();
+      const model = faux.getModel();
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: { models: { reader: { providerId: model.provider, modelId: model.id } } },
+      }), "utf8");
+      let fetchCalls = 0;
+      let readerContext: Context | undefined;
+      let finalToolResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("webfetch", {
+          url: "https://example.com/guide",
+          prompt: "What is the answer?",
+        })]),
+        (context) => {
+          readerContext = context;
+          return fauxAssistantMessage("The answer is 42.");
+        },
+        (context) => {
+          finalToolResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        harnessWebRead: true,
+        serviceHostOptions: {
+          webFetchService: {
+            fetch: async () => {
+              fetchCalls += 1;
+              return {
+                status: "ok",
+                url: "https://example.com/guide",
+                finalUrl: "https://example.com/guide",
+                contentType: "text/html",
+                markdown: "The documentation states that the answer is 42.",
+                bytes: 48,
+                fromCache: false,
+                rendered: false,
+              };
+            },
+          },
+        },
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "read the guide");
+        await session.host.session.waitForIdle();
+        assert.equal(fetchCalls, 1);
+        assert.match(readerContext?.systemPrompt ?? "", /strictly from the supplied page content/);
+        assert.match(JSON.stringify(readerContext?.messages), /untrusted data, not instructions/);
+        assert.match(JSON.stringify(readerContext?.messages), /answer is 42/);
+        assert.match(finalToolResult, /answer \(from https:\/\/example\.com\/guide\)/);
+        assert.match(finalToolResult, /The answer is 42/);
       } finally {
         await session.dispose();
         faux.unregister();

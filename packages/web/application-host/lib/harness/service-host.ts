@@ -70,7 +70,6 @@ export interface HarnessServiceHost {
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
-  webReadService: import("./router.js").HarnessService<"web.read"> | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
@@ -121,8 +120,6 @@ export interface HarnessServiceHostOptions {
   registerWriter?: (sessionId: string, workspaceRoot: string) => Promise<{ close: () => Promise<void> } | null>;
   /** Web fetch service (null on cloud/web hosts without fetch capability) */
   webFetchService?: HarnessServiceHost["webFetchService"];
-  /** Web read service (null when no reader model configured) */
-  webReadService?: HarnessServiceHost["webReadService"];
   /** Web search service (null when no search provider available) */
   webSearchService?: HarnessServiceHost["webSearchService"];
   // Phase 2 options
@@ -156,7 +153,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
   const lspNavigationServices = options.lspNavigationServices ?? null;
   const webFetchService = options.webFetchService ?? null;
-  const webReadService = options.webReadService ?? null;
   const webSearchService = options.webSearchService ?? null;
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
@@ -291,7 +287,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     diagnosticsProvider,
     lspNavigationServices,
     webFetchService,
-    webReadService,
     webSearchService,
     knowledgeStore,
     userKnowledgeStore,

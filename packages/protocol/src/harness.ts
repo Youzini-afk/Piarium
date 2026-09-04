@@ -166,11 +166,6 @@ export type FetchResult =
   | { status: "renderer-unavailable"; url: string }
   | { status: "failed"; url: string; reason: string };
 
-export interface WebReadResult {
-  answer: string;
-  sources: string[];
-}
-
 export interface SearchResultItem {
   title: string;
   url: string;
@@ -260,7 +255,6 @@ export interface HarnessServiceMap {
   "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
-  "web.read": { params: { url: string; prompt: string; render?: boolean }; result: WebReadResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "compaction.before": { params: CompactionBeforeParams; result: CompactionBeforeResult };
@@ -312,7 +306,6 @@ export const HARNESS_METHOD_CAPABILITY = {
   "lsp.hover": "read.lsp",
   "fs.lock": "write.document",
   "web.fetch": "read.web",
-  "web.read": "read.web",
   "web.search": "read.web",
   "zone2.assemble": "context.session",
   "compaction.before": "context.session",
@@ -363,7 +356,6 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "lsp.hover",
   "fs.lock",
   "web.fetch",
-  "web.read",
   "web.search",
   "zone2.assemble",
   "compaction.before",

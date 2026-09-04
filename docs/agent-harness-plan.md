@@ -119,7 +119,8 @@ bun run test:docs && bun run docs:validate   # 触碰 docs/ 后
 [agent-harness-status.md](agent-harness-status.md)；契约在 `packages/protocol/README.md`、`lib/harness/DOCUMENTATION.md`、
 `packages/pi-host/src/harness/README.md`；理由在决策日志 D-001–D-018。仍开着的缺口（都在状态矩阵 Blocker 列）：
 harness shell 未接进 terminal runtime（D-013 的前置条件）；`websearch` provider 适配器仍是 placeholder，但 Host 不声明能力时
-工具现已不注册；macOS / Linux 的 bash smoke 未做。1.4 大文件句柄与 1.6 诊断已分别经真实 Pi agent loop、真实 fixture LSP
+工具现已不注册；reader 已改为 pi-host session-local model 路径并经真实 Pi 回合验证，不再依赖休眠的 Host `web.read`；macOS /
+Linux 的 bash smoke 未做。1.4 大文件句柄与 1.6 诊断已分别经真实 Pi agent loop、真实 fixture LSP
 进程验证并修正 publication/version 时序（D-065）。其余缺口随相关纵切一起收，不单独立项。
 
 ## P0：integrity 纵切（一切新功能之前）
@@ -495,7 +496,7 @@ last checkpoint: 2026-09-03T10:12Z
 - UI：会话状态侧栏审阅区：编辑 / 接受 / 驳回；Settings 知识页：
   当前有效列表、取代链展开、`recallCount` / `recalledAt` 排序、删除。
 - 测试：三类触发；草拟有无模型两路；取代链；默认不自动接受；召回计数（配合 2.2）。
-- **状态（2026-09-04）**：block 与持久 user/assistant/tool result 上“记到项目/记到用户”→ authenticated routes → scope store →
+  - **状态（2026-09-04）**：block 与持久 user/assistant/tool result 上“记到项目/记到用户”→ authenticated routes → scope store →
   审阅卡 → 冲突检查编辑/接受/驳回 → SSE 失效通知已 proven。接受把最终草稿、打开时原值和 supersedes 在同一 store 写任务内处理。
   memory decisions 的结构化新增已机械提议并对全部历史状态去重；suggestions model 的用户消息提议与 Settings 全量管理尚未接；
   未接部分不调模型、不写知识（D-058/D-060/D-061）。

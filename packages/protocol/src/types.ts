@@ -485,7 +485,7 @@ export interface HostHandshakeParams {
     harnessThreads?: boolean;
     /** The application Host can serve LSP navigation tools. */
     harnessLspNavigation?: boolean;
-    /** The application Host has a real reader-model web service. */
+    /** The application Host permits session-local reader models over its guarded web.fetch service. */
     harnessWebRead?: boolean;
     /** The application Host has a real web-search provider. */
     harnessWebSearch?: boolean;

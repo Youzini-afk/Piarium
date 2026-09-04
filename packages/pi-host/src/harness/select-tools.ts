@@ -36,8 +36,8 @@ export interface SelectHarnessToolsDeps {
   lspNavigationAvailable?: boolean;
   /** Tools to yield (not register) because a Pi package provides them. */
   yieldedTools?: ReadonlySet<string>;
-  /** Whether models.reader is configured (enables webfetch prompt path). */
-  readerModelConfigured?: boolean;
+  /** Session-local reader model path; absent keeps webfetch extraction-only. */
+  readPage?: NonNullable<Parameters<typeof createWebFetchTool>[2]>["readPage"];
   /** Whether the host registered a real web.search service. */
   webSearchAvailable?: boolean;
   /** Whether the host provides a thread runtime (thread registry + spawn).
@@ -73,7 +73,7 @@ export function selectHarnessTools(
     isOpenAIFamily,
     lspNavigationAvailable,
     yieldedTools,
-    readerModelConfigured,
+    readPage,
     webSearchAvailable,
     threadRuntimeAvailable,
     resolvedRoles,
@@ -111,7 +111,7 @@ export function selectHarnessTools(
   }
   // Web tools — yield to pi-web-access if it is loaded and enabled
   if (tools.webfetch !== false && !yieldedTools?.has("webfetch")) {
-    result.push(createWebFetchTool(bridge, sessionId, { readerModelConfigured: readerModelConfigured ?? false }));
+    result.push(createWebFetchTool(bridge, sessionId, readPage ? { readPage } : undefined));
   }
   if (webSearchAvailable && tools.websearch !== false && !yieldedTools?.has("websearch")) {
     result.push(createWebSearchTool(bridge, sessionId));

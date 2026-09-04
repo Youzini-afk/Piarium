@@ -32,7 +32,6 @@ Piarium protocol types, schemas, and event/method definitions.
 | `lsp.references` | `{ path, line, character? }` | `LspNavigationResult` | Find references at a one-based position |
 | `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
-| `web.read` | `{ url }` | `WebReadResult` | Read a URL with reader model |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
 | `zone2.assemble` | `{ sinceTurn, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble cursor-based Zone 2 context |
 | `compaction.before` | `{ firstKeptEntryId, tokensBefore }` | `CompactionBeforeResult` | Pre-compaction hook |
@@ -116,9 +115,11 @@ advertises `capabilities.harnessThreads` in the private Host handshake; only
 then does pi-host register the seven thread tools. Child sessions receive their
 frozen role model and active tool list in `session.create/open`.
 The same handshake owns `harnessLspNavigation`, `harnessWebRead`, and
-`harnessWebSearch`: a configured model slot or dormant provider module does not
-make a tool available. If the Host does not advertise a real service, pi-host
-omits the corresponding tools before constructing the AgentSession.
+`harnessWebSearch`. `harnessWebRead` means the Host permits a configured
+session-local reader model to consume its guarded `web.fetch` result; model and
+credential execution remains in pi-host. `harnessWebSearch` is advertised only
+for a real search provider. A configured slot or dormant provider module alone
+does not make those paths available.
 
 ## Exports
 

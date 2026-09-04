@@ -348,9 +348,6 @@ export function registerHarnessServices(
       },
     });
   }
-  if (host.webReadService) {
-    router.register("web.read", host.webReadService);
-  }
   if (host.webSearchService) {
     router.register("web.search", host.webSearchService);
   }

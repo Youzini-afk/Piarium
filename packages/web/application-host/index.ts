@@ -839,6 +839,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     agentDir: process.env.PIARIUM_AGENT_DIR,
     clientVersion: PIARIUM_VERSION,
     cwd: process.cwd(),
+    // The official Host always provides SSRF-guarded web.fetch. Reader-model
+    // execution stays inside pi-host so it uses the session's credential and
+    // model authority rather than creating a second model stack in the Host.
+    harnessWebRead: true,
     ...brokerOptions,
   }));
   const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(

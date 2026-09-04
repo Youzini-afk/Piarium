@@ -993,6 +993,25 @@ baseline，可能把同步发布的新诊断吞进旧基线，并且永远观察
 
 状态：已实施并 proven
 
+### D-066 · 2026-09-05 · 1b.2（reader 模型归 session，Host 只负责安全抓取）
+
+类型：设计修正
+
+决定：`webfetch(url, prompt)` 始终先且只先调用一次 Host `web.fetch`。配置 `models.reader` 且官方 Host 声明受保护抓取可用时，
+pi-host 用本会话的 `ModelRuntime`、provider 配置与凭据对提取正文做一次 `completeSimple(toolChoice:none)`；网页正文明确标为不可信数据。
+reader 未配置、模型不存在、调用失败或返回空文本时，保留成功抓取的 Markdown 作为 fallback，不二次请求 URL。删除没有生产调用方的
+Host `web.read` service、协议方法和测试；`harnessWebRead` 握手位改为“Host 允许在其 guarded `web.fetch` 结果上使用 session-local
+reader”，不再声称 Host 拥有模型栈。
+
+原因：Application Host 不拥有活动 Pi 会话的模型 provider、API 凭据或模型运行时；把 `readerRequest` 放在那里只能继续留桩，或复制
+一套最敏感的模型/凭据权威。pi-host 已经为 permission judge 与 memory shadow 使用同一个 `ModelRuntime`，reader 也应在这里。
+旧工具先调 `web.read`，失败后再 `web.fetch`，真实接线后还会重复下载页面；单 fetch + 本地 reader 同时解决所有权与重复 I/O。
+
+影响：protocol 删除私有 `web.read` Harness method；pi-host webfetch/select-tools/SessionHost；官方 Web broker capability；Host 删除
+web-read service；真实 Pi session E2E；architecture、plan/status 1b.2。
+
+状态：已实施并 proven
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1064,3 +1083,4 @@ baseline，可能把同步发布的新诊断吞进旧基线，并且永远观察
 | D-063 | implementation | — | agent-harness 9.3.2/9.3.8、architecture 5.2、plan/status 3.10；protocol / Host / pi-host E2E / UI |
 | D-064 | implementation | — | agent-harness 9.3.8、plan/status 3.10；UI shared thread state / timeline markers |
 | D-065 | implementation | — | status 1.4/1.6；Host diagnostics adapter/service、真实 LSP 与 Pi session E2E |
+| D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |

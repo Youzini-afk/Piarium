@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createWebFetchTool } from "../../src/harness/webfetch-tool.js";
-import type { HarnessRequestData, FetchResult, WebReadResult } from "@piarium/protocol";
+import type { HarnessRequestData, FetchResult } from "@piarium/protocol";
 
 /**
  * Helper: create a bridge that captures emitted requests and provides
@@ -84,24 +84,37 @@ describe("webfetch tool", () => {
     bridge.dispose();
   });
 
-  it("uses web.read when prompt provided and reader configured", async () => {
+  it("fetches once and uses the session-local reader when configured", async () => {
     const { bridge, emitted } = createTestBridge("test");
-    const readResult: WebReadResult = {
-      answer: "The page says hello world.",
-      sources: ["https://example.com/"],
+    const okResult: FetchResult = {
+      status: "ok", url: "https://example.com/", finalUrl: "https://example.com/",
+      contentType: "text/html", markdown: "Hello content", bytes: 12, fromCache: false, rendered: false,
     };
+    let readerInput: unknown;
 
-    const tool = createWebFetchTool(bridge, "test", { readerModelConfigured: true });
+    const tool = createWebFetchTool(bridge, "test", {
+      readPage: async (input) => {
+        readerInput = input;
+        return "The page says hello world.";
+      },
+    });
     const resultPromise = tool.execute("tc4", { url: "https://example.com/", prompt: "What does the page say?" } as never, undefined as never, undefined as never, undefined as never);
 
     await new Promise((r) => setImmediate(r));
-    assert.equal(emitted[0]!.method, "web.read");
-    bridge.respond("test", emitted[0]!.requestId, { ok: true, result: readResult });
+    assert.equal(emitted[0]!.method, "web.fetch");
+    bridge.respond("test", emitted[0]!.requestId, { ok: true, result: okResult });
 
     const result = await resultPromise as { content: Array<{ type: string; text: string }> };
     const text = result.content[0]?.text ?? "";
     assert.ok(text.includes("answer (from https://example.com/)"));
     assert.ok(text.includes("The page says hello world."));
+    assert.deepEqual(readerInput, {
+      finalUrl: "https://example.com/",
+      markdown: "Hello content",
+      prompt: "What does the page say?",
+      signal: undefined,
+    });
+    assert.equal(emitted.length, 1);
     bridge.dispose();
   });
 
@@ -112,7 +125,7 @@ describe("webfetch tool", () => {
       contentType: "text/html", markdown: "Hello content", bytes: 12, fromCache: false, rendered: false,
     };
 
-    const tool = createWebFetchTool(bridge, "test", { readerModelConfigured: false });
+    const tool = createWebFetchTool(bridge, "test");
     const resultPromise = tool.execute("tc5", { url: "https://example.com/", prompt: "What?" } as never, undefined as never, undefined as never, undefined as never);
 
     await new Promise((r) => setImmediate(r));
