@@ -57,6 +57,7 @@ import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
+import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -1217,7 +1218,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
     },
   });
-  registerHarnessThreadRoutes(app, { registry: threadRegistry });
+  registerHarnessThreadRoutes(app, {
+    registry: threadRegistry,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerHarnessContextRoutes(app, {
+    getStore: getKnowledgeStoreForSession,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
     await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
     if (summary.workspace?.kind !== 'workspace') return;
@@ -1239,6 +1247,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       hostId,
       workspaceId,
       embedding: null, // Placeholder vectors — see D-019/D-020
+      onBlocksChanged: (sessionId) => {
+        broadcastGlobalUiEvent?.({
+          type: 'piarium:harness-blocks-changed',
+          properties: { workspaceId, sessionId },
+        });
+      },
     }).then((store) => {
       knowledgeStores.set(workspaceId, store);
       return store;

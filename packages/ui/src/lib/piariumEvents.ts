@@ -14,6 +14,12 @@ export type HarnessThreadChangedEvent = {
   activeRun: ThreadRun | null;
 };
 
+export type HarnessBlocksChangedEvent = {
+  type: 'harness-blocks-changed';
+  workspaceId: string;
+  sessionId: string;
+};
+
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
   projectId: string;
@@ -33,7 +39,7 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent;
+export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent;
 type Listener = (event: PiariumEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -178,6 +184,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'piarium:harness-thread-changed') {
     const nextEvent = parseHarnessThreadChanged(envelope.properties);
     if (nextEvent) for (const listener of listeners) listener(nextEvent);
+    return;
+  }
+
+  if (envelope.type === 'piarium:harness-blocks-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    if (workspaceId && sessionId) {
+      for (const listener of listeners) listener({ type: 'harness-blocks-changed', workspaceId, sessionId });
+    }
     return;
   }
 

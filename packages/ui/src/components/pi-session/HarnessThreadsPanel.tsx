@@ -13,6 +13,7 @@ import {
   type HarnessThreadSnapshot,
   type HarnessThreadState,
 } from './harnessThreadPresentation';
+import { parseHarnessSessionBlocks, type HarnessSessionBlock } from './harnessBlockPresentation';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -69,6 +70,10 @@ export const HarnessThreadsPanel: React.FC<{
   const { t } = useI18n();
   const openSession = usePiSessionStore((state) => state.openSession);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
+  const [blocks, setBlocks] = React.useState<HarnessSessionBlock[]>([]);
+  const [editingBlock, setEditingBlock] = React.useState<string | null>(null);
+  const [blockDraft, setBlockDraft] = React.useState('');
+  const [savingBlock, setSavingBlock] = React.useState(false);
   const eventRevision = React.useRef(0);
   const parent = React.useMemo<ThreadParent>(() => ({ kind: 'session', id: parentSessionId }), [parentSessionId]);
 
@@ -90,16 +95,68 @@ export const HarnessThreadsPanel: React.FC<{
     });
   }, [parent, workspaceId]);
 
+  const reloadBlocks = React.useCallback(async (signal?: AbortSignal) => {
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/blocks`, {
+      cache: 'no-store',
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        setBlocks([]);
+        return;
+      }
+      throw new Error(`Unable to load session blocks (${response.status})`);
+    }
+    setBlocks(parseHarnessSessionBlocks(await response.json()));
+  }, [parentSessionId]);
+
+  const saveBlock = React.useCallback(async (block: HarnessSessionBlock) => {
+    if (savingBlock) return;
+    setSavingBlock(true);
+    try {
+      const response = await runtimeFetch(
+        `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/blocks/${encodeURIComponent(block.label)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: blockDraft, expectedUpdatedAt: block.updatedAt }),
+        },
+      );
+      if (response.status === 409) {
+        setEditingBlock(null);
+        await reloadBlocks();
+        throw new Error(t('harness.blocks.conflict'));
+      }
+      if (!response.ok) throw new Error(`Unable to save session block (${response.status})`);
+      await reloadBlocks();
+      setEditingBlock(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingBlock(false);
+    }
+  }, [blockDraft, parentSessionId, reloadBlocks, savingBlock, t]);
+
   React.useEffect(() => {
     const controller = new AbortController();
     eventRevision.current = 0;
     setThreads([]);
+    setBlocks([]);
+    setEditingBlock(null);
     void reload(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load threads:', error);
+    });
+    void reloadBlocks(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load session blocks:', error);
     });
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'stream-ready') {
         void reload(controller.signal).catch(() => undefined);
+        void reloadBlocks(controller.signal).catch(() => undefined);
+        return;
+      }
+      if (event.type === 'harness-blocks-changed' && event.workspaceId === workspaceId && event.sessionId === parentSessionId) {
+        void reloadBlocks(controller.signal).catch(() => undefined);
         return;
       }
       if (
@@ -114,17 +171,70 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parent, reload, workspaceId]);
+  }, [parent, parentSessionId, reload, reloadBlocks, workspaceId]);
 
-  if (threads.length === 0) return null;
+  if (threads.length === 0 && blocks.length === 0) return null;
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.threads.title')}>
+    <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
-        <span className="typography-meta font-medium text-foreground">{t('harness.threads.title')}</span>
-        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{threads.length}</span>
+        <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
+        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{blocks.length + threads.length}</span>
       </div>
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {blocks.length > 0 ? (
+          <section className="border-b border-border/50 p-2" aria-label={t('harness.blocks.title')}>
+            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.blocks.title')}</h3>
+            <div className="space-y-1.5">
+              {blocks.map((block) => {
+                const editing = editingBlock === block.label;
+                return (
+                  <div key={block.label} className="rounded-lg border border-border/50 bg-background/45 p-2">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{block.label}</span>
+                      <span className="text-[9px] text-muted-foreground">{block.updatedBy}</span>
+                      <button
+                        type="button"
+                        title={t('harness.blocks.edit')}
+                        aria-label={t('harness.blocks.edit')}
+                        onClick={() => {
+                          setEditingBlock(editing ? null : block.label);
+                          setBlockDraft(block.content);
+                        }}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                      >
+                        <Icon name={editing ? 'close' : 'edit'} className="size-3" />
+                      </button>
+                    </div>
+                    {editing ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea
+                          value={blockDraft}
+                          onChange={(event) => setBlockDraft(event.target.value)}
+                          className="min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                          <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
+                            {t('harness.blocks.cancel')}
+                          </button>
+                          <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(block)}>
+                            {t('harness.blocks.save')}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[10px] leading-4 text-muted-foreground">{block.content}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+        {threads.length > 0 ? (
+          <section className="p-2" aria-label={t('harness.threads.title')}>
+            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.threads.title')}</h3>
+            <div className="space-y-1.5">
         {threads.map((entry) => {
           const state = projectHarnessThreadState(entry);
           const sessionId = entry.activeRun?.sessionId;
@@ -175,6 +285,9 @@ export const HarnessThreadsPanel: React.FC<{
             </button>
           );
         })}
+            </div>
+          </section>
+        ) : null}
       </div>
     </aside>
   );

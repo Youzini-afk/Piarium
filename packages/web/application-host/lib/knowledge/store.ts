@@ -76,6 +76,17 @@ export interface BlockInput {
   content: string;
   updatedBy: BlockUpdatedBy;
   cursorTurn?: number;
+  expectedUpdatedAt?: number | null;
+}
+
+export class KnowledgeBlockConflictError extends Error {
+  readonly current: Block | null;
+
+  constructor(current: Block | null) {
+    super("Session block changed after it was opened");
+    this.name = "KnowledgeBlockConflictError";
+    this.current = current;
+  }
 }
 
 export type KnowledgeScope = "workspace" | "user";
@@ -157,6 +168,7 @@ export interface OpenWorkspaceKnowledgeDeps {
   hostId: string;
   workspaceId: string;
   embedding: EmbeddingProvider | null;
+  onBlocksChanged?: (sessionId: string) => void;
 }
 
 export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): Promise<KnowledgeStore> {
@@ -182,6 +194,14 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("scope");
 
   const placeholderVec = zeroVector(dim);
+  const publishBlocksChanged = (sessionId: string): void => {
+    try {
+      deps.onBlocksChanged?.(sessionId);
+    } catch {
+      // UI projection is observational and cannot turn a committed block write
+      // into a reported storage failure.
+    }
+  };
 
   // Helper: scan all nodes and filter in JS (avoids TQL syntax fragility)
   function scanNodes(filter: (payload: Record<string, unknown>) => boolean): Array<{ id: number; payload: Record<string, unknown> }> {
@@ -281,13 +301,28 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       if (!BLOCK_NAME_RE.test(b.label)) {
         throw new Error(`Invalid block name: ${b.label}`);
       }
-      return enqueueWrite(() => {
-        const now = Date.now();
+      const result = await enqueueWrite(() => {
         // Find existing block by sessionId + label
         const existing = scanNodes((p) =>
           p["type"] === "block" && p["sessionId"] === b.sessionId && p["label"] === b.label,
         );
         const existingNode = existing[0] ?? null;
+        const current = existingNode ? {
+          sessionId: existingNode.payload["sessionId"] as string,
+          label: existingNode.payload["label"] as string,
+          content: existingNode.payload["content"] as string,
+          updatedBy: existingNode.payload["updatedBy"] as BlockUpdatedBy,
+          ...(existingNode.payload["cursorTurn"] !== undefined ? { cursorTurn: existingNode.payload["cursorTurn"] as number } : {}),
+          updatedAt: existingNode.payload["updatedAt"] as number,
+        } satisfies Block : null;
+        if (
+          b.expectedUpdatedAt !== undefined
+          && ((b.expectedUpdatedAt === null && current !== null)
+            || (typeof b.expectedUpdatedAt === "number" && current?.updatedAt !== b.expectedUpdatedAt))
+        ) {
+          throw new KnowledgeBlockConflictError(current);
+        }
+        const now = Math.max(Date.now(), (current?.updatedAt ?? 0) + 1);
 
         const payload = {
           type: "block",
@@ -318,10 +353,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           updatedAt: now,
         };
       });
+      publishBlocksChanged(b.sessionId);
+      return result;
     },
 
     async deleteBlock(sessionId: string, label: string): Promise<void> {
-      return enqueueWrite(() => {
+      await enqueueWrite(() => {
         const nodes = scanNodes((p) =>
           p["type"] === "block" && p["sessionId"] === sessionId && p["label"] === label,
         );
@@ -330,6 +367,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         db.flush();
       });
+      publishBlocksChanged(sessionId);
     },
 
     async putKnowledge(k: KnowledgeInput): Promise<NodeId> {

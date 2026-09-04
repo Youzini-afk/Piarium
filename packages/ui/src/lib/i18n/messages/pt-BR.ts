@@ -4,6 +4,12 @@ import { settingsDict } from './pt-BR.settings';
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   'harness.threads.title': 'Tarefas delegadas',
+  'harness.context.title': 'Estado da sessão',
+  'harness.blocks.title': 'Memória e plano',
+  'harness.blocks.edit': 'Editar bloco',
+  'harness.blocks.cancel': 'Cancelar',
+  'harness.blocks.save': 'Salvar',
+  'harness.blocks.conflict': 'Este bloco mudou em segundo plano. A versão mais recente foi recarregada; revise antes de salvar novamente.',
   'harness.threads.open': 'Abrir tarefa',
   'harness.threads.state.queued': 'Na fila',
   'harness.threads.state.starting': 'Iniciando',

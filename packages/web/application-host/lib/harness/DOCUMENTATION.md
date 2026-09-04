@@ -97,6 +97,9 @@ blocks, context usage, and prompt-relevant accepted knowledge. The cursor is
 also embedded in the durable hidden Pi message so a worker reload can resume.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
+The session-state sidebar reads/updates blocks through authenticated context
+routes. Block writes broadcast only an invalidation identity over SSE, never
+the block body. Thread metadata routes use the same UI-auth middleware.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

@@ -1,9 +1,10 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, RequestHandler, Response } from "express";
 import type { ThreadParent } from "@piarium/protocol";
 import type { ThreadRegistry } from "./thread-registry.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
+  requireAuth?: RequestHandler;
 }
 
 const queryString = (request: Request, key: string): string => {
@@ -11,8 +12,10 @@ const queryString = (request: Request, key: string): string => {
   return typeof value === "string" ? value.trim() : "";
 };
 
-export function registerHarnessThreadRoutes(app: Express, { registry }: HarnessThreadRoutesOptions): void {
-  app.get("/api/harness/threads", async (request: Request, response: Response) => {
+const noAuth: RequestHandler = (_request, _response, next) => next();
+
+export function registerHarnessThreadRoutes(app: Express, { registry, requireAuth = noAuth }: HarnessThreadRoutesOptions): void {
+  app.get("/api/harness/threads", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     const workspaceId = queryString(request, "workspaceId");
     const parentId = queryString(request, "parentId");

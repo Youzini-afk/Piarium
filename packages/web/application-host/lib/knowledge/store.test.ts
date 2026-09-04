@@ -14,7 +14,7 @@ function cleanup() {
 let store: KnowledgeStore;
 let storeCounter = 0;
 
-async function openStore() {
+async function openStore(onBlocksChanged?: (sessionId: string) => void) {
   storeCounter++;
   const dir = join(TEST_DIR, `store-${storeCounter}`);
   mkdirSync(dir, { recursive: true });
@@ -23,6 +23,7 @@ async function openStore() {
     hostId: "test-host",
     workspaceId: "ws-test",
     embedding: null,
+    ...(onBlocksChanged ? { onBlocksChanged } : {}),
   });
 }
 
@@ -112,6 +113,15 @@ describe("KnowledgeStore", () => {
   });
 
   describe("blocks", () => {
+    it("publishes block changes only after committed writes", async () => {
+      await store.close();
+      const changed: string[] = [];
+      store = await openStore((sessionId) => changed.push(sessionId));
+      await store.upsertBlock({ sessionId: "s1", label: "progress", content: "one", updatedBy: "agent" });
+      await store.deleteBlock("s1", "progress");
+      expect(changed).toEqual(["s1", "s1"]);
+    });
+
     it("upserts and retrieves blocks", async () => {
       await store.upsertBlock({
         sessionId: "s1",

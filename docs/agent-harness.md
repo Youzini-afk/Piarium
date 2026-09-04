@@ -743,6 +743,11 @@ checkpoint。天然结构化，host 直接写，零模型调用。
 计划工具结果（尾部）、Zone 2 中一份受预算约束的复述（Manus 的 todo 复述；主 agent 不用自己写就能在每步尾部看到
 新鲜状态——这是"注意力"上的收益；profile 可关）、压缩替换块。
 
+当前 UI 将 blocks 与子线程合并到父会话右侧的 session state 侧栏：后台/agent 写入通过 SSE 只发失效通知，UI 随后走鉴权
+GET 重取；用户编辑走鉴权 PUT、带 `updatedAt` 做冲突检查并写 `updatedBy: user`，后台更新后保存旧草稿会收到 409 而不是覆盖，
+且不把块正文放进广播事件。线程列表路由同样必须经过 UI auth，不能因
+“通常只绑定 localhost”而暴露任务说明、worktree 路径或报告元数据（D-046）。
+
 **记忆 agent 的上下文。** 当前 shadow 实现从 Pi 的 `context` hook 捕获本步真实 provider-neutral messages，在 `turn_end`
 补上本次 assistant 与 tool results，复用活动会话的 system 与 model，只暴露 `memory_edit`，尾部追加当前块、游标与编辑指令。
 输出必须是结构化块操作，由 Host 逐项验证、按本次前一项的结果顺序应用并记账；自由文本、陈旧 patch 与越过预算的操作都不写。

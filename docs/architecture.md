@@ -245,6 +245,10 @@ are specified in [agent-harness.md](agent-harness.md); which of its capabilities
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
 
+Session memory blocks remain in the Host store. The renderer reads and edits them only through
+UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block
+content. The same UI-auth boundary protects the thread metadata route.
+
 ### 4.5 Composable workbench and document authority
 
 The product UI is not a fixed shell. A Workbench Profile selects which extension provides

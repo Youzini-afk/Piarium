@@ -609,6 +609,24 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 
 状态：已实施（核心 shadow 纵切；terminal/Git/面板/事件加速仍在状态矩阵）
 
+### D-046 · 2026-09-04 · T3（session blocks 的用户投影与鉴权）
+
+类型：实现澄清
+
+决定：session blocks 与 delegated threads 共用父会话右侧的 session state 侧栏。blocks 的 GET/PUT 与 threads GET 都经过
+现有 UI authentication middleware；用户保存写 `updatedBy: user`，并携带打开时的 `updatedAt` 做同一写队列内的乐观并发检查，
+后台已更新则返回 409、重取而不覆盖。KnowledgeStore 提交 block 后广播的 SSE 只含
+`{workspaceId, sessionId}` 失效通知，正文由 UI 重新走鉴权 GET 获取，避免把记忆/计划内容放进广播载荷。观察/UI 回调失败不能
+把已提交的 block 写伪装成失败。
+
+原因：shadow memory 若不可见、不可编辑，就没有用户审计出口；但 blocks 含任务状态和可能的敏感上下文，不能直接塞进 SSE。
+实现时同时发现 T1 的 `/api/harness/threads` 未显式挂 UI auth，会暴露任务说明、worktree 路径和报告元数据，必须同批封口。
+
+影响：Host `context-routes.ts` / `thread-routes.ts`、KnowledgeStore block observation、全局 UI event、
+`HarnessThreadsPanel` 与 block parser、设计 8.4.1、状态矩阵。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -659,4 +677,5 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 | D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |
 | D-043 | implementation | — | agent-harness.md 9.3、architecture §5.2、plan T1、status 3.4/3.5/3.10/3.11 |
 | D-044 | implementation | — | agent-harness.md 9.1.2、plan 3b、status 3b / 3.4；pi-host / broker / Host scope |
-| D-045 | implementation | — | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |
+| D-045 | implementation | D-046（面板项） | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |
+| D-046 | implementation | — | agent-harness.md 8.4.1、status 2.4/2.5；Host routes / SSE / session state sidebar |
