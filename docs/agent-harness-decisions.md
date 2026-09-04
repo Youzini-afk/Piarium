@@ -1058,6 +1058,187 @@ Settings、Context sidebar、10 locale；设计 8.5/8.6、plan/status 2.9。
 
 状态：已实施并 proven（protocol 单测、真实 Pi reader/Smart judge E2E、UI projection）
 
+### D-069 · 2026-09-05 · 3.2 / 6.1（explore v2：把 Devin 的多轮展开成结构查询）
+
+类型：偏离
+
+决定：`explore` 从 v1 的"关键词 → rg → 命中密度排序 → ±3 行窗口"改为六阶段管线，四条硬要求：(1) **输出单位是"目标 + 结构
+支撑"**（目标函数连同其定义、调用方、测试、配置、co-change 邻居），不是平铺的命中列表；(2) Devin 模型每轮"想"出来的下一跳
+（看定义、找调用方、找测试、沿栈帧走）**换成 LSP / 符号图 / git / 文档注册表的确定性并行查询**，中间没有任何等模型思考的
+环节；模型只在两处出场且都是一次性、无工具、与主路径并行、超预算即弃的调用——问题无代码词时的意图抽取，和排序分差小
+时的"十选一"裁决；(3) **搜索的是当前内容**：rg 搜磁盘的同时对文档权威的脏缓冲做内存匹配，返回前按当前内容重切并校验行号；
+已在主上下文里的文件只回一行指针不再返回片段；(4) **默认开启需通过回放门禁**——对照同预算 BM25 / 现有 `grep`，FileRecall@K
+与 token 浪费率都不劣才默认注册，只赢延迟不算赢。问题类型（where / how / impact / why）决定扩展方向而不是重要性权重；
+低置信时明说并建议 `retrieval` 角色。反馈回路按 Cognition 的口径在线算 recall@k，只做有界的权重微调与"问题 → 文件"记忆。
+
+原因：这是对两份外部证据的直接回应。OpenLocus 研究（`D:\project\opencr\OpenLocus-Lab`）的负结果：给上下文对 agent 成功率
+影响巨大（0.25 → 1.0），但更聪明的候选挑选（BEA v0–v0.3）**没有赢过同预算 BM25**（B16-F 打平且更贵）；FD1 失败分解里最大
+的桶是"正确文件没进候选池"（ContextBench 62 条）和"花了时间没换来质量"（80 条），"文件对片段错"最小（11 条），正确文件缺席
+时改进挑选只能救回 1/119；B16-J 去掉文件名泄漏后，目标 + 支撑 11/11、只给支撑 2/8、只给目标 0/8；FRK-B 纯算法四路索引
+（稀疏词 + 符号名 + 路径 + AST 片段）p95 < 10 ms 文件召回@10 very high 而召回@1 只有 medium。这四点分别对应四条硬要求：
+钱花在召回与结构扩展上而不是重排器；目标必须带支撑；确定性路径把答案送进前十，模型只负责十选一且默认不调；无差别地开
+可选阶段就是最大的浪费桶，所以要门。OpenLocus 设计的 2.4"脏缓冲是一等现实"与 EvidenceCore"候选不是事实、必须按当前源
+重物化"对应第 (3) 条。OCE（`D:\project\opencr\oce`）提供两个可借的零件：tree-sitter 切块里"只含签名的小块并入邻居"
+（`cast_chunker._merge_small`），与覆盖度优先的两遍贪心打包（`coverage_selector.py`）；OCE 的向量主通道、服务化与 LLM 全量
+重排是设计 6.1 明确不选的赌注，不借。
+
+考虑过的替代：(a) 用通用小模型跑 Devin 式 4 轮 tool loop——一轮 2–5 秒、总计十几二十秒，且未训练的模型第二轮乱跳；
+(b) 全仓库 embedding 作主通道（OCE 路线）——代码检索上 grep 打 embedding 已被 Claude Code、Cognition 与 OpenLocus 的 BM25
+打平数据反复验证，且引入服务依赖；(c) 只调 v1 的权重——v1 的结构（平铺命中、行窗口、只搜磁盘、无支撑）不是权重问题；
+(d) 裁决默认开——FD1 的"latency without quality gain"桶说明无差别开可选阶段是最大浪费。
+
+影响：`agent-harness.md` 6.1 第二级重写（六阶段、问题类型表、低置信、反馈回路、门禁）；`agent-harness-plan.md` 3.2 重写为
+v2 实施形状（`ExploreContext` / `ExploreTarget` / `ExploreResult` 类型、各阶段与预算、参考形状路径、测试清单、门禁）；
+`agent-harness.md` 12.2 "explore 无 LLM 时的查询扩展"待决项关闭；status 3.2 行 Blocker 更新。实施在 T4 回放集就位之后。
+
+状态：待实施（设计已回写；代码仍是 v1）
+
+### D-070 · 2026-09-05 · 3.2 / 6.1（explore v2 降级为候选架构；更正 D-069 的六处）
+
+类型：问题与解法
+
+决定：D-069 保留方向（结构查询替代多轮乱跳、返回前按当前内容重读、默认关闭并与 grep / BM25 对照、带关系的代码单元），但**状态
+从"待实施规格"降为"候选架构 / 待验证假设"**，不据此开工、不据此决定默认启用。更正六处：
+
+(1) **组件所有权**。D-069 把整条管线写在 host，却要求 `models.explore` 调用、主上下文文件表、`read` / `edit` 步数、未保存正文、工作台
+焦点——这些分属三个进程：模型与 `completeSimple` 在 pi-host（D-068 的 reader / permissionJudge 同路）；主上下文与 `read` 轨迹在
+pi-host，host 没有 read 观察链；UI 焦点与选区属于具体 surface，不在 worker 发布的 `session.snapshot` 里；Documents authority 的脏
+缓冲发布只有路径、`baseRevision`、`localEditRevision`，**没有正文**（`lib/documents/authority.ts` `DirtyBufferResource`）；LSP
+supervisor 的缓存正文没有 surface 所有权。拆为 pi-host `ExploreCoordinator`、host 纯确定性 `ExploreEngine`、UI 可选焦点提示
+（带 `surfaceId` / `generation` / `revision`）。
+
+(2) **"已交付依赖"说重了**。`lsp.symbols` 需先给 `path` 选语言 provider，不是跨语言 workspace 符号索引；符号图只有 `file → defines →
+symbol`，无 references / calls / imports 边，无 PageRank API；`searchSymbols` 是 JS 扫描 + `includes` 计分（`knowledge/store.ts:800`），
+不是 AC / BM25；`related` 只接受注入的 `findNode` / `getNeighbors`，无生产实现；恢复日志知写不知读；git co-change、工作台焦点、
+最近失败输出入口都无服务。plan 3.2 改为**依赖矩阵**（available / partial / unavailable），缺失来源只能降级并在结果里报告该来源
+状态，不得折叠成一个 `partial: true`。
+
+(3) **外部证据被外推**。OpenLocus 自己标 B16-J 为 *bounded synthetic evidence*；FRK-B 是 R14-S sanity 小套件且报告明确
+`runtime_default_method_scale_claim: false`；后续 FRK-E 结论是 *no proxy lift over best baseline*。因此"目标 + 支撑"是优先输出形状
+而非硬要求（精确 `where` 可能只需目标），"答案几乎总在前十"是待验证假设而非前提；设计 6.1 改写为假设 H1–H4 各带证据边界，
+并把 H1（结构可替代多轮）标为**无直接实证、最需回放集检验**。来源固定到远程与提交：OpenLocus-Lab
+<https://github.com/Youzini-afk/OpenLocus-Lab> @ `eecd28b218b2be211074db2bdd9e7dad43100336`；OCE <https://github.com/oce-ai/oce>
+@ `a359272560bbbdb321055aaed6c16ba1f4e06887`；本地检出路径不作设计依据。
+
+(4) **T4 无法执行 D-069 写的门禁**。`evaluation/harness/cases.json` 与 `scripts/harness-replay.mjs` 只记成功、token、人工介入、失败
+类别，没有查询、目标 / 支撑标注、正确 span、各 baseline 返回包；用 reference commit 的改动文件当正确上下文会把不被修改的支撑
+文件算成浪费，"后来读过的 token"会惩罚自包含的好结果。改为**两级门禁**：独立的检索回放集（`evaluation/retrieval/cases.json`，
+含 query / questionType / targets / support / commit；B0 现有 grep、B1 独立实现的同输出预算 BM25、B2 explore v2；FileRecall@K、
+Span F0.5、首个正确文件位置、返回字节、来源状态）决定是否进入真实会话实验；T4 端到端再决定是否默认注册。
+
+(5) **硬数字无定标依据**。1.5 / 4 s、6000 token、references 20、500 commits、300 字符、60% 重叠、每文件 2 块、分差 0.1、20 条反馈、
+步进 0.05 全部没有 Piarium 数据支持，且 host 不知 tokenizer 不能声称"硬 6000 token"。参数分三类：硬边界（父请求取消、workspace
+containment、judge 只返回候选 ID）不可配置；软预算与观测目标（延迟、候选数、输出**字节**——token 由 Coordinator 按活动模型换算）
+为可配置默认；首版阈值标 experimental，待回放集定标后写回。
+
+(6) **反馈 bandit 不能自动改权重**。"模型随后 read / edit 的文件"有位置偏差、支撑不被改、分析任务无 edit、自包含结果减少 read
+反而是成功、压缩后 `inContext` 旧 step 失效、read 后文件已变。第一版只记 telemetry；排序用 **RRF** 融合各来源排名，不做量纲不同
+信号的加权和。
+
+另外接受的具体更正：阶段不是"全并行"，画出依赖图（intent 只在 fan-out 结束前回来才补一轮；judge 依赖 fuse 的 top-N）；
+`references` 不是调用图、无 call hierarchy，删去"调用图 BFS"；OCE 的 300 字符合并修的是其 AST 切块列切分伪影，不适用于
+`documentSymbol`（它本身区分 `range` 与 `selectionRange`），删去；OCE 两遍覆盖度选择器是平铺 chunk 选择器，打包必须 bundle-aware
+（先在 bundle 内降级支撑再丢 bundle）；`usedLlm: boolean` 与单一 `partial` 改为每来源 `ready | empty | unavailable | failed | stale`、
+每次模型调用 `not-requested | completed | timed-out | failed`；LSP 返回路径与派生支撑路径重新过 workspace scope / realpath 授权；
+judge 看到的仓库正文标不可信数据且只能返回候选 ID；标识符用 Unicode `\p{L}`，问题类型分类同时支持中文线索。
+
+原因：D-069 把一个值得做的方向写成了可以照着做的规格，而它的输入、依赖和证据都还不支持这一步。评审方（另一位复审 agent）的
+六点全部经代码与来源核实成立。
+
+考虑过的替代：退回 v1——v1 的结构（平铺命中、行窗口、只搜磁盘、无关系）不是权重问题，方向仍以 D-069 为准；立即按 D-069 开工
+并在实施中修正——三个进程的所有权与依赖矩阵不先钉，实施必然把 host 写成全能视角。
+
+影响：`agent-harness.md` 6.1 第二级重写（候选架构、H1–H4 与边界、所有权表、依赖图、来源级状态、参数三类、两级门禁、来源提交）；
+`agent-harness-plan.md` 3.2 重写（六步交付顺序、所有权表、依赖矩阵、`ExploreSeeds` / `ExploreBundle` / `ExploreResult` 含状态枚举、
+参数三类表、检索回放集 schema 与 runner、测试清单）；status 3.2 行；D-069 在索引中标 superseded in part。
+
+状态：已实施（文档）；代码仍是 v1；开工条件见 plan 3.2 交付顺序第 1、2 步
+
+### D-071 · 2026-09-05 · 用户取舍与本轮范围
+
+类型：设计修正（用户已决定）
+
+决定：
+
+1. **优先保留 TriviumDB，但不是不可替换依赖。** 不启动 SQLite 迁移。具体缺陷、受影响版本、最小重现和需要的能力先报给用户，
+   由用户联系 TriviumDB 作者处理；Piarium 不长期把绕路当目标接口，也不设无依据的修复期限。保持一个可写知识权威。
+2. **Agent 默认可读所在窗口的未保存内容。** 不增加显式开启、绑定或每次读取确认。用户从窗口发起消息时，surface 来源随已有鉴权
+   请求自动传播；同一会话在别处仅被打开或获得焦点不改变本次工作的来源。后续用户从另一窗口发消息时自动更新来源。后台工作保留
+   最近一次已接受用户输入的窗口来源；只读取得带 generation/revision 的不可变快照，不把 Host 变成第二个可变缓冲权威。窗口断开时
+   已捕获快照仍可标版本使用，最新内容不可得须明说；不把另一窗口或磁盘冒充当前草稿。无 surface 的 headless 任务使用磁盘。
+3. **实施顺序由执行者负责。** 先修已确认的记忆写入/分支、证据版本和观察送达缺口，再补最小实验记录、版本化读取和检索；
+   不要求完整跨 runtime RunManifest、数据库迁移或沙箱先全部完成，不重开宽泛 P0。
+4. **`check` 是执行检查角色，不是只读角色。** 测试、构建、缓存和生成物可能写文件；它需要执行能力，遵守正常工具权限与恢复边界。
+   不规定“bash 只跑不改”，不靠提示词声称只读，不新增一律复制工作区或独立 worktree 的硬规则。工作副本选择按检查目标与真实环境需要决定。
+5. **不安排付费记忆协议/缓存对照实验，不建设 Windows 沙箱。** 记忆质量与真实成本由用户招募的测试者在真实使用中验证；本地只准备
+   可执行场景、配置记录、用量和失败归因。保留当前 `memory_edit` 路径、活动模型与默认关闭；不借本次评审新增 memory 模型槽位、
+   同前缀 JSON 实验或独立记忆会话。Windows 沙箱不再列为待补齐交付项，也不妨碍现有 Windows 能力交付；已有权限与路径边界继续成立。
+
+原因：用户明确选择默认、低摩擦的窗口协作，并要求检查拥有真实执行能力；数据库问题可由作者协作解决，暂无迁移和 Windows 沙箱需求。
+默认读取草稿不等于跨窗口混用正文：内部仍需区分来源、世代与版本，用户不用管理这些字段。
+
+影响：设计决策表、第 6.1/7.5/8.4/9.1.1/9.2.2 节；plan 当前顺序与相关任务；status 仅登记缺口。
+
+状态：已回写文档；**本轮只改文档，不推进实现、不运行实验、不提交**。上述新能力不得因设计被接受而标为 wired/proven。
+
+### D-072 · 2026-09-05 · 更正 D-069/D-070，并收口记忆、证据与执行的契约
+
+类型：设计修正
+
+决定：
+
+- explore 保持候选架构和 default-off。H1 改为“结构查询减少机械跳转”；RRF 只融合排名，不用分差充当答案置信度。目标与支撑按问题
+  组成 bundle，支撑可为空，预算降级不预置统一的支撑删除顺序。可选 intent/judge/查询修复是待比较的机制，不把任何一种定成必经阶段。
+- pi-host Coordinator 拥有上下文、模型/凭据、调度与用量；Host Engine 拥有确定性搜索、来源授权、内容物化、融合/打包与 OutputStore；
+  surface 按 D-071 自动提供本窗口草稿。Host 不等待或直接访问 pi-host 模型回调。judge 必须在候选物化后调用，只能返回候选 ID；
+  补查若日后采用，也只能提交经过类型和路径校验的查询操作。正文作为不可信数据传入模型。
+- 每来源保留 ready/empty/unavailable/failed/stale/timed-out，未请求与取消也独立表达。每次模型调用的真实结局、结果是否采用、用量是否
+  可得分别记录；迟到但成功不能伪装成超时，失败/取消不能伪造零费用。Host 计 UTF-8 字节，pi-host 只有拿到真实 tokenizer 时才声称
+  精确 token 数，否则保留估算标签。所有未定标数字只作实验候选，不形成产品默认或检索通过条件。
+- `inContext` 按实际请求保留的 revision + span + request/context generation 判覆盖，不按文件或 read step 去重。当前不具备该证明时
+  返回正文。新建独立 retrieval replay，人工标注目标 span 与可选支撑；baseline 查询不能由正确答案泄漏产生。固定比较预算与 K，记录
+  baseline 返回包、召回/片段质量、延迟、输出量与来源状态。离线结果支持进入测试者真实任务验证，不把少量样本包装成统计不劣证明。
+- `TranscriptRef` 耐久指向 Pi 持久记录，**不承诺恢复被截断的完整正文**。可重建来源必须有能解析正文的既有对象；不可重建观察要有
+  操作所属的耐久产物，或明确临时。OutputRef 不作为压缩恢复的唯一来源，不把所有输出改为永久保存。
+- keeper 写入需要读取时版本与分支归属；plan 只能标记条目，不能整块 replace。压缩前的 checkpoint 必须证明相关分支上待移除的
+  已处理连续区间；块修订与水位一起提交，部分失败不推进完整水位。缺覆盖或来源不可用时明确降级、保留 Pi 安全切点并回退默认压缩。
+  这证明机械覆盖，不保证语义无遗漏；撤销“结构上不叠加损失”的承诺。
+- 区分 record-only（只记录/展示）、assist（进入 Zone 2，但 Pi 压缩）、takeover（检查点参与接管）；三者之外保持关闭。现有
+  `shadowMode:true` 实际是 assist，保留其行为，不宣称 record-only 已实现。当前 memory 输出协议与模型不变，真实效果由测试者验证。
+- Workbench Profile 归展示，Agent Profile 归执行；工具/system 的冻结以一次执行配置世代为界，持久 session 可在用户操作下换新
+  Run/配置。单会话实验配置先沿现有 launch 接缝提供，不以完整 RunManifest 为前置。结果/验证/集成应绑定明确版本，操作回执与观察
+  送达分别补最小契约，不顺带引入完整 Work Graph、全局并发上限或新的单 Host 禁入规则。
+
+原因：本次代码核对确认 memory get/apply 没有版本与分支字段，`applyOps` 允许 replace plan，compaction 仅检查 keeper 块存在，
+截断后的文本才进入 Pi 持久消息，观察游标在结果发送前推进。报告指出的问题成立，但具体新对象与算法仍需按真实消费者逐项实现。
+当前 takeover 默认关闭，不能将候选接管缺陷描述成默认已经发生的历史丢失；Host/会话清理会重置游标，送达缺口需按仍保留基线的窗口验证。
+
+外部证据固定在设计 6.1 的远程 commit 链接；D-069 原文中的本地路径按 append-only 保留为历史，不再作为现行证据入口。
+Anthropic [工具缓存](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching)明确 `tool_choice` 变化使
+messages 缓存失效，[上下文清理](https://platform.claude.com/docs/en/build-with-claude/context-editing)明确 tool-result clearing 会触发缓存重写。
+OpenAI [Windows 沙箱实现](https://openai.com/index/building-codex-windows-sandbox/)证明存在原生路线；D-071 不实施 Windows 沙箱是用户选择，
+不是“没有技术路线”的推断。
+
+影响：设计 2/5.7/6.1/8/9/10/12，plan 0.7/2.4/2.6/3.2 与阶段验收，status 缺口与下一步表。仅文档修订，不升级实现状态。
+
+状态：已回写文档；代码实施与测试者验证尚未开始。
+
+### D-073 · 2026-09-05 · TriviumDB 问题按数据库职责报告
+
+类型：设计修正（用户补充）
+
+决定：TriviumDB 的问题直接在回复中提供，不另建 Piarium 适配需求文档。区分数据库缺陷、待确认语义和可选通用能力，报告版本与证据范围。
+TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；零向量 hybrid 返回空需先确认参数与算法契约，不先判为缺陷；分词扩展若讨论，
+应是数据库通用的 Unicode/可配置分词或预分词能力，而不是要求内置 Piarium 的代码分析器。分支、memory checkpoint、槽位、编辑器等
+领域职责留在 Piarium，不能以“保留数据库”为由转嫁给作者。
+
+原因：用户明确该项目首先是数据库；作者协作不等于接受 Piarium 专用需求。D-019/D-020 是 0.8.5 的既有实验记录，本轮不运行新实验，
+也不能推断当前上游版本仍有同样问题。
+
+影响：设计 7.5 与 plan 2.1 的问题表述；不改依赖、不迁移存储、不向作者发送消息。
+
+状态：已回写文档；数据库问题在本轮回复说明。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1132,3 +1313,8 @@ Settings、Context sidebar、10 locale；设计 8.5/8.6、plan/status 2.9。
 | D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |
 | D-067 | implementation | — | agent-harness 5.8、plan/status 1b.3/1b.5；protocol / Host providers+auth / pi-host / UI sources |
 | D-068 | implementation | — | agent-harness 8.5/8.6、plan/status 2.9；protocol / pi-host / UI |
+| D-069 | superseded in part（方向保留，规格降级） | D-070 / D-072 | agent-harness.md 6.1、plan 3.2、12.2；status 3.2 |
+| D-070 | superseded in part（候选方向保留，契约补正） | D-071 / D-072 | agent-harness.md 6.1、plan 3.2；status 3.2 |
+| D-071 | folded-in（用户取舍；仅文档） | D-073（数据库问题表述） | agent-harness 决策表/7.5、plan 0.7、status |
+| D-072 | folded-in（语义修订；实现待办） | — | agent-harness 5.7/6.1/8/10/12、plan 0.7/2.4/2.6/3.2、status |
+| D-073 | folded-in（用户补充；仅文档） | — | agent-harness 7.5、plan 2.1 |

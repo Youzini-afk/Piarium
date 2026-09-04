@@ -76,7 +76,7 @@ bun run test:docs && bun run docs:validate   # 触碰 docs/ 后
 4. 限值全部是可配置默认，不设硬上限。
 5. 文件正文、命令输出、页面正文不进日志、事件载荷、URL。
 6. 依赖未配置模型槽位的能力不注册或退化为无 LLM 路径，永不回退主模型。
-7. harness 不检测插件、不自动让位，唯一例外是 web 工具对 `pi-web-access`。
+7. 自动让位必须有明确契约：web 工具对启用的 `pi-web-access`，权限 fallback 对本会话实际发布的 `pi-permission-system` service；其他能力不靠猜插件存在而改变行为。
 8. 主 agent 没有块编辑工具、没有标记工具；系统提示不出现"请维护记忆"类措辞。
 9. host 侧的身份只来自 broker 信封与 host 注册表，永不来自 worker 载荷；每个经 host 中介的能力在 host 侧按 ActorContext、
    静态能力集与 workspace 包含做授权（设计 9.1.2）。
@@ -112,6 +112,25 @@ bun run test:docs && bun run docs:validate   # 触碰 docs/ 后
 | 恢复 UI | `packages/ui/src/components/pi-session/PiChatView.tsx` ~L532、`PiRecoveryDialog.tsx`、`piRecoveryPolicy.ts` |
 | 内置扩展 / 基础 Pi 包 | `packages/extension-builtins/src/index.ts`；`packages/protocol/src/foundational-pi-packages.ts` |
 | TriviumDB Node API | `D:\project\TDB\TriviumDB\triviumdb.d.ts`（`TriviumDB` 类：`insert` / `link` / `indexText` / `indexKeyword` / `search` / `searchHybrid` / `tql` / `createIndex` / `flush`；npm 包 `triviumdb`） |
+
+### 0.7 当前顺序与本轮范围（2026-09-05，D-071/D-072）
+
+**本轮只修订文档，不实现、不运行实验、不提交。** 用户已授权后续实施顺序由执行者判断；这不等于现在开始推进。
+既有 P0/T1/T2/T3 交付保留；新发现的缺口列入状态矩阵，不用新设计覆盖已有交付事实，也不把设计接受当作实现完成。
+
+后续按能够独立形成可用结果的范围推进：
+
+1. **已启用路径的正确性**：keeper expected revision、分支来源与 plan 所有权；观察结果生成/送达水位；核实完整输出的实际可恢复性。
+   接管保持关闭，先补覆盖检查点与必要来源契约；不先建设通用证据仓库或完整 Work Graph。
+2. **最小实验记录**：沿已有 session launch 增加单会话配置与实际执行配置记录，补主/辅助用量、耗时、失败归因；区分 record-only/assist/takeover。
+   不要求完整跨 runtime RunManifest 先完成，不修改全局设置跑比较。真实记忆验证由用户招募测试者完成，本地不安排付费模型实验。
+3. **版本化读取与检索**：默认自动取得发起消息窗口的草稿，先贯通来源/版本/片段；独立 retrieval replay 的 B0/B1 可先建立，
+   explore 的纯算法候选与可用来源逐步接入，始终 default-off，不等待所有图边、co-change 或向量能力。
+4. **结果、验证与集成**：随消费者把报告/验证绑定明确代码修订，合并指定结果并记录父状态、暂存区与恢复影响，再处理归档/回收。
+
+TriviumDB 优先保留，问题先交用户联系作者，不启动 SQLite 迁移；`check` 是执行检查角色，不称只读、不加“测试不能写文件”的门；
+不强制每次检查创建副本。Windows 沙箱不在交付计划中；原有 macOS/Linux smoke、Electron 打包与真实外部服务验证仍按能力分别记阻塞。
+其余 status 本地可实施任务按依赖继续安排，不因上述顺序一律暂停，也不追加猜测性全局配额或单 Host 禁入规则。
 
 ## 阶段 0 / 1 / 1b：已交付
 
@@ -247,7 +266,7 @@ event cursor 增量投影；blocks、context usage 与 prompt-relevant accepted 
 活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。Git 已复用两个现有 status
 刷新边界并按 session 去重；block 的 workspace/user 知识标记与审阅已接进会话状态侧栏；仍缺 user terminal 的 shell integration、
 其余知识建议触发与 memory 事件加速。这些剩余产品面不阻塞先建立
-T4 回放基线。
+T4 回放基线。当前工作的具体顺序已由 0.7 更新。
 
 **T4 当前状态（2026-09-04）**：`evaluation/harness/cases.json` 已固定 6 个来自 Piarium 历史的任务、base/reference commit、原始任务
 与可观察验收；`scripts/harness-replay.mjs` 可校验清单、创建不覆盖的 run record、记录 success/tokens/interventions 与失败类别、按
@@ -281,11 +300,9 @@ export interface KnowledgeStore {
   TriviumDB 用法：`new TriviumDB(path, { dim })`；每个节点 `insert(vector, payload)`，payload 含 `type` 字段；`indexText(id,
   text)` 对 event / block / knowledge 正文；`indexKeyword(id, kw)` 对 knowledge 的触发描述分词与（阶段 3）符号名；边用
   `link(src, dst, label, weight)`；`createIndex('type')`、`createIndex('sessionId')`、`createOrderedIndex('at')`。占位向量
-  模式：`dim = 8`，全零向量，`recall` 只用 `searchHybrid` 的文本与图路径（`hybridAlpha = 0`）——**实施前先在 TriviumDB
-  上验证全零向量的 `search` 不报错**；报错则改用单位向量占位或只走 `tql` 的文本 / 图查询，把选择写进决策记录。
-  TQL 用例（写进模块文档，测试里直接跑）：会话的最近 N 个 event（`FIND {type:"event", sessionId:$s} ... ORDER BY at DESC
-  LIMIT $n`）；会话的块；当前有效 knowledge（`FIND {type:"knowledge", status:"accepted"} WHERE invalid_at IS NULL`）；取代链
-  （`MATCH (k)-[:supersedes]->(old)`）。
+  模式当前是 `dim = 8` 全零占位，查询在 JS 层过滤/词项匹配（D-019/D-020）；不再执行已被实验否定的“直接用占位向量 hybrid”参考形状，
+  也不用单位向量制造虚假相似度。后续先确认数据库本身的类型过滤与文本/混合查询契约，再替换对应绕路。会话事件、块、有效知识和
+  取代链由 Piarium 领域接口表达，不把 TQL 写成上层必须依赖的协议。
   保留：`runRetention` 由 host 空闲调度（复用现有空闲检测），删除 `at < now - eventRetentionDays` 的 event 与已结束会话
   的 block；每次至多删 5000 个节点后 `flush()`。
   两个 host：`packages/web/cli` 的 `serve` 启动时探测桌面 host（现有的实例发现路径 `discoverPiariumInstanceOnPort` /
@@ -294,8 +311,8 @@ export interface KnowledgeStore {
   `better-sqlite3` 于 `packages/electron` 找到全部位置）。
 - 测试：建库与 schema；级联删除；保留；只读 Reader 并发读；占位向量模式 `recall`；Electron 打包 smoke（`packages/electron`
   现有 smoke 加载 `triviumdb`）。
-- 判断要点：TriviumDB 是同一维护者的另一个项目，遇到它的限制（无向量节点、分词、API 缺口）时**优先考虑改 TriviumDB 而不是
-  在 Piarium 里绕**——在报告里列出需要 TriviumDB 提供的能力，由维护者决定在哪边改。schema 定得比较满，但阶段 2 只需要
+- 判断要点：用户可联系 TriviumDB 作者处理数据库问题，优先保留当前数据库；报告其自身的类型处理、检索语义和能力边界，
+  不把 Piarium 的领域需求包装成数据库缺陷。不把旧版问题外推到最新上游，不启动未经比较的迁移。阶段 2 只需要
   `event` / `session` / `block` / `knowledge` 四种节点跑起来；边和索引按实际查询需要加，不要为了对齐设计表而预建用不到的
   索引。`.tdb` 的写入全部经 host 单写者，如果发现有并发写路径（比如观察者与记忆 agent 同时写），在 host 内排队而不是加锁到
   TriviumDB 层。Electron 打包是这一项最容易拖时间的部分——`.node` 的 ABI 与 asar unpack 有现成先例，照抄 `better-sqlite3`
@@ -361,16 +378,13 @@ context: 41% of window used
 ### 2.4 记忆 agent
 
 - 设计：agent-harness.md 第 8.4.1 节。
-- host `lib/harness/memory-agent.ts`：
-
-```ts
-export const createMemoryAgentRunner = (deps: { store: KnowledgeStore; requestPrefix: () => Promise<ProviderPrefix /* 主对话最近一次请求的 system、tools、messages 至游标 */>; callModel: (payload) => Promise<ToolCallResult>; now: () => number; settings: MemoryAgentSettings }) => ({
-  onTurnEnd(meta: { turnIndex; contextTokens; toolCallsSinceLastRun; lastStepHadNoTools }): void;   // 门控评估（下表）
-  onEvent(kind: 'test-finished' | 'exit-flipped-to-pass' | 'user-message' | 'user-steer' | 'plan-edited' | 'child-returned' | 'user-mark'): void;  // 事件加速
-  requestPreCompactionRefresh(): Promise<void>;   // 压缩前保底：若块比一个间隔更旧，同步跑一次（有界 waitMs）
-  dispose(): void;
-});
-```
+- 当前模型调度在 pi-host `src/harness/memory-agent-extension.ts`，Host `lib/harness/memory-agent.ts` 只校验和提交块操作。
+  保留 `memory_edit` 与用户开启后使用活动模型的现状，不重建 Host 模型栈、不开展输出协议或缓存付费实验。
+- **先补正确性**：get 返回块修订及分支/来源区间，apply 携带读取时版本；Host 在同一写任务检查冲突、只允许 keeper 标记 plan 条目，
+  禁止整块 replace plan。分支改变或用户编辑后的旧结果不能提交；块修订与检查点一起落盘，部分失败不推进整段覆盖水位。
+  当前协议仅有 cursorTurn，所以上述状态仍是待实现。
+- 关闭保持默认；已有 `shadowMode:true` 对应 assist（块进入 Zone 2，Pi 压缩）。record-only 仅记录/展示、不注入主请求，待增加；
+  takeover 需 2.6 的覆盖契约与测试者证据。模式迁移保留用户既有 assist 行为。
 
   门控（表驱动实现，测试用同一张表）：
 
@@ -383,8 +397,8 @@ export const createMemoryAgentRunner = (deps: { store: KnowledgeStore; requestPr
 | 事件加速（任一事件） | 跑（仍受"在飞"与 30 s 约束） |
 | 上次运行未改动任何块 | `interval = min(interval * 1.5, 20_000)`；有改动 → `interval = 5_000` |
 
-  请求构造：`prefix = requestPrefix()`（由 pi-host 通过 `before_provider_request` 截获并缓存的最近一次主请求的 system /
-  tools / messages——**逐字节复用**，不重排、不重新序列化）；追加一条 user 消息：
+  当前请求从 Pi `context` hook 的可用消息及本步结果构造，追加当前块与维护任务。工具集不同，不保证复用主请求缓存。
+  下列维护指令只是参考文本，来源内容仍按数据处理：
 
 ```text
 You are the memory keeper for this session. Below are the current memory blocks and the turn cursor. Read the full
@@ -398,7 +412,7 @@ blocked. Emit edits through the memory_edit tool only.
 </blocks>
 ```
 
-  用 `tool_choice` 强制调用工具 `memory_edit`，schema：
+  仅接受 `memory_edit` 的结构化操作；当前 pi-ai 通用路径使用 `toolChoice:auto`，未返回该调用视为未更新，不伪称强制成功。参考 schema：
 
 ```ts
 { ops: Array<
@@ -411,16 +425,11 @@ blocked. Emit edits through the memory_edit tool only.
 
   应用与校验：块名 `^[a-z][a-z0-9_-]{0,31}$`；`plan` 只接受 `mark_plan`；每块 ≤ `blockBudgetTokens`（默认 2000）；总量 ≤
   `totalBudgetTokens`（默认 12000），超出拒绝该 op 并记录；`updatedBy: 'memory-agent'`，`cursorTurn`。模型固定主模型。
-- pi-host：`turn_end` 转发 `meta`（`contextTokens` 用 `ctx.getContextUsage()`）；事件由 host 观察者与工具结果触发。
-- 测试：门控表逐行；`interval` 自适应；`requestPrefix` 与主对话前缀逐字节相同（复用 1.2 助手）；op 校验（越权改 `plan`、
-  超预算、非法块名）；应用后 `getBlocks` 一致。
-- 判断要点：这项的核心约束只有两条——**前缀逐字节复用**（否则每次运行都是全价，设计就不成立）和**主 agent 零参与**（不给
-  它块编辑工具、不在提示里要求维护记忆）。其余都可调：门控数字来自 Claude Code 的实测值，是起点不是结论，如果观察到块
-  更新太稀（压缩时经常过期）或太密（成本占比明显超过 15%），改间隔并记录；`memory_edit` 的 op 集合可以增删；指令提示的
-  措辞可以按模型调。最可能撞到的技术问题：`before_provider_request` 截获的 payload 是 provider 特定格式（Anthropic 与
-  OpenAI 的 messages 结构不同），复用前缀时要按 provider 原样重发，不要试图做一个通用中间表示。如果 pi-ai 不允许从扩展
-  内发起一次"带 tool_choice 的独立请求"，可用 Pi 的子会话（阶段 3 的运行时）或直接调 pi-ai 的 provider 层——选路径时以
-  "能否逐字节复用前缀"为唯一标准。
+- pi-host 在本地评估门控；事件加速仍需接线。每次真实调用的用量、无效输出和失败都要归因，不能因为未更新块就漏计费用。
+- 测试：用户编辑后旧 patch/replace/delete 被拒；分支切换后迟到结果不写；plan 只能标状态；块与覆盖水位同次提交；部分失败不伪造
+  全段覆盖；record-only 不注入、assist 不接管。沿现有真 Pi faux-provider 骨架验证，不为此调用付费 provider。
+- 判断要点：主 agent 不承担记忆维护；版本、分支、来源和费用必须诚实。门控参数先保持可配置现状，实际质量与缓存收益由测试者观察，
+  不增加无定标的比例门槛，也不以缓存命中作为记忆正确性的前提。
 
 ### 2.5 `todo` 工具、`plan` 块与计划面板
 
@@ -462,24 +471,20 @@ last checkpoint: 2026-09-03T10:12Z
 </piarium-compaction>
 ```
 
-  返回 `{ compaction: { summary, firstKeptEntryId: <K 步前的 entry id>, tokensBefore } }`（字段名按 `CompactionResult` 实际
-  类型）。K 默认 8 步（设置 `harness.compaction.keepTurns`）。块缺失或 `cursorTurn < currentTurn - 2*interval` → 先
-  `requestPreCompactionRefresh()`（有界 waitMs 默认 20 s），超时则用现有块并在摘要末尾加一行 `note: memory blocks may be
-  stale`。`reason === 'overflow'` 同样处理（这是唯一可能可感知等待的路径）。`session_compact` 后按预算重注入最近 5 个读过
-  的文件（各 ≤ 5K token，总 ≤ 50K）与已调用技能指针（≤ 25K）——重注入以一条 `message` 追加，不改 Zone 0。
+  `firstKeptEntryId` 只取 Pi 支持的安全切点，不自行按 K 步计算。候选 MemoryCheckpoint 至少表达分支祖先路径、连续处理区间、
+  sourceRefs、读取时块修订与提交后块修订；字段名在实现时按真实消费者定。块与水位原子提交，缺区间、错分支或必要来源不可用时
+  不接管；能用 Pi 安全切点保留缺口才调整，否则交还 Pi 默认压缩。不能只附 stale note 后删除缺口。
+  压缩后重注入按实际请求中丢失的版本/片段与可用来源决定，仍是待实现；不把“最近 read 过这个路径”当成当前有效正文证明。
 - 触发：host 在子任务边界（测试 / 构建命令结束、`todo` 条目勾掉、上一步无工具）且 `contextUsage >= threshold`（默认 0.8）
   时调用 `ctx.compact()`；用户空闲超过 provider TTL 且积压时同样。压缩计数写入 Zone 2（`compactions: 3`）与 UI 信息条。
 - 第 1 档：provider 为 Anthropic 且 pi-ai 暴露 `cache_edits` 类能力时，在阈值 0.6 处先清除 5 步以前的 tool_result 正文
   （保留句柄行）；能力探测失败则跳过。**实施前确认 pi-ai 是否暴露该能力**，不暴露则跳过此档并在决策记录写明（可附一句
   是否值得向 Pi 上游提需求的判断）。
 - UI：时间线压缩分隔标记（i18n `chat.timeline.compacted`）；composer 不因压缩锁定。
-- 测试：摘要模板快照；K 步保留；Zone 0 前后逐字节相同；句柄跨压缩可读；两次压缩后摘要不含前一次摘要的嵌套；块过期路径。
-- 判断要点：这项依赖 Pi 的压缩钩子怎么消费我们返回的结果，前置实验的结论决定实现路径——三种可能：(a) Pi 完整接受
-  `firstKeptEntryId` 与摘要，直接实现；(b) Pi 接受摘要但自己决定保留范围，那就接受它的范围、只保证摘要块的内容；(c) Pi 在
-  我们返回后还会自己再摘要一次，那就要用 `context` 钩子在发给 provider 前投影我们想要的形状。三条路都能满足"零模型调用、
-  不停顿"，选最少改 Pi 行为的那条。"不堆叠"是要守住的性质：无论走哪条路，第二次压缩的替换块必须是当前块 + 事实，不能包含
-  第一次的摘要文本——测试里那条"不嵌套"用例就是为此。K = 8 步是默认，短步（纯对话）多的会话可以更大，工具输出密集的会话
-  可以更小。
+- 测试：正确分支与连续区间覆盖；处理到 100 而切到 121 时缺口不被接管删除；tool call/result 配对；块并发修改；原始正文仅临时
+  可得、Host 重启后来源过期的降级；assist 始终交还 Pi。D-022 已验证钩子消费，不重复开展同一前置实验。
+- 不嵌套旧摘要文本不能证明没有累计语义损失。测试者用多次压缩后的早期约束、放弃方案理由和未解决问题检查语义质量；本地不安排
+  付费模型对照。必要来源必须真能读取，不以 TranscriptRef 名称或内容 hash 代替正文持久性。
 
 ### 2.7 知识建议、审阅托盘、双时态取代
 
@@ -535,9 +540,8 @@ last checkpoint: 2026-09-03T10:12Z
 
 ### 阶段 2 完成标准
 
-- fake provider 下 200 步的长回合：记忆 agent 按门控运行 ≥ 5 次；压缩 ≥ 2 次且无模态；第二次压缩的摘要不嵌套第一次；
-  Zone 0 契约测试全程绿；`cacheHitRatio > 0.8`。
-- 真实 provider smoke（一次即可）：用户在编辑器改文件后发消息，Zone 2 出现该文件且带 data 标记。
+- faux provider 验证实际门控、版本/分支冲突、连续覆盖、Pi 安全切点和不同模式的请求投影；不从 fake provider 的 cache 值宣称真实缓存收益。
+- 测试者验证用户编辑、早期约束、计划修正与多次压缩后的语义质量，记录真实用量/耗时，不安排本地付费模型实验。
 - 知识建议进入托盘 → 接受 → Settings 显示；再接受一条冲突条目 → 取代链可见。
 
 ## 阶段 3：检索与子 agent
@@ -561,8 +565,8 @@ settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快�
 **T1 线程纵切**交付（P0 节末），T1 的范围是"一个 Thread、一个 Pi Run、一个 worktree；dispatch / send / wait / cancel /
 report / merge；worker 与 host 崩溃恢复；最小侧栏"，嵌套与自动 review 不在 T1。
 
-检索线（3.1–3.3）在 T4 回放集之后按证据决定投入：`explore` 先接为工具（纯算法模式），回放显示对 grep 有增益再接
-符号图与向量。
+检索线按 0.7 与 3.2 推进：先建立独立 retrieval replay 的基线，纯算法 explore 保持默认关闭；真实使用的证据决定是否注册，
+不把未接线的图/向量能力或完整 T4 自动执行器作为全部本地检索工作的前置。
 
 ### 3.1 符号图采集器
 
@@ -574,40 +578,138 @@ report / merge；worker 与 host 崩溃恢复；最小侧栏"，嵌套与自动 
   unavailable 与权威空结果分开；关键词 symbol search 已可供后续 explore 使用。references/calls/imports 尚未接，不能把每 symbol 的
   无界 LSP 扇出藏进写后 observer（D-059）。
 
-### 3.2 `explore` 管线
+### 3.2 `explore` 管线（v2 候选架构，D-069–D-072）
 
-- 设计：agent-harness.md 第 5.7、6.1 节。**先做纯算法模式。**
-- host `lib/harness/explore.ts`：
+- 设计：agent-harness.md 第 6.1 节第二级——假设 H1–H4 与证据边界、三进程所有权、真实依赖图、参数三类、两级门禁都在那里。
+  **状态**：候选架构；代码仍是 v1，pi-host 无工具定义。v1 的窗口只扩行号并拼命中，语义结果未用于排序、handle 未入 OutputStore，
+  不能直接注册为退化路径。**本轮仅改文档**。
+- **后续参考顺序**：先明确跨进程契约并建立检索专用回放的 B0/B1 基线；按可用来源实现纯算法 Engine 与 Coordinator，贯通当前内容
+  物化、RRF、bundle 打包及真实输出句柄。不把每个算法阶段当成必须单独 proven 的纵切。可选模型机制后续按证据比较；只记反馈，
+  不自动改权重。离线结果支持进入测试者真实使用，默认注册另行依据结果决定。
+
+**所有权**（不能都写在 host）：
+
+| 输入 / 职责 | 归属 | 现状 |
+| --- | --- | --- |
+| 问题文本、`paths` | pi-host Coordinator | 有 |
+| 实际请求中可见的 revision/span 覆盖 | pi-host Coordinator（实际请求物化、截断与会话分支） | **无**：不能只从 read step 或 firstKeptEntryId 推断；未知覆盖时不省正文 |
+| `models.explore` 调用（intent / judge）、槽位用量 | pi-host Coordinator（`completeSimple`，与 reader / permissionJudge 同路，D-068） | 有机制，无 explore 用法 |
+| 最终请求 token 计量 | pi-host Coordinator | 知道模型不等于有 tokenizer；可得时精确计算，否则明确估算 |
+| rg、LSP、符号图、git、Documents 脏状态、恢复日志、shell 输出、OutputStore | host `ExploreEngine` | 见依赖矩阵 |
+| 本窗口草稿与当前文件/选区 | UI surface；用户消息自动传播来源，草稿默认可读，焦点是可选提示 | **无**；不增加开启/绑定操作，不让 worker snapshot 自报来源 |
+
+**依赖矩阵**（缺失来源只能**降级并在结果里报告该来源的状态**，不得折叠成一个 `partial: true`）：
+
+| 来源 | 状态 | 现有 | 缺口 |
+| --- | --- | --- | --- |
+| rg 内容搜索 | available | `search.content` | — |
+| LSP `workspace/symbol` | partial | `lsp.symbols`（D-051）需先给一个 `path` 选语言 provider | 无跨语言通用符号索引；按种子文件逐语言发起，无种子文件时不可用 |
+| LSP definition / references | partial | `lsp.definition` / `lsp.references`（D-051） | `references` 不是调用图，无 call hierarchy；返回路径需重新授权 |
+| 符号图 | partial | `file → defines → symbol`，关键词 `searchSymbols`（D-059） | `references` / `calls` / `imports` 边未接；无 PageRank API；`searchSymbols` 是 JS 扫描 + 字符串计分，不是 AC / BM25 |
+| `related` | unavailable | `related-tool.ts` 只接受注入的 `findNode` / `getNeighbors` | 无生产实现 |
+| 脏缓冲正文 | unavailable | Documents authority 只发布路径、`baseRevision`、`localEditRevision` | 从自动识别的消息来源 surface 读不可变快照；断开时说明最新内容不可得；LSP 缓存不能冒充来源权威 |
+| 脏路径与新近度 | available | Documents dirty publication、git status | — |
+| 主上下文文件表 | unavailable | 恢复日志只知写、不知读 | pi-host 侧建（上表） |
+| 会话触碰（写） | available | 恢复日志 | — |
+| 最近失败命令输出 | partial | shell 监督器有输出存储 | 无"最近一条失败命令"入口，需加 |
+| git co-change | unavailable | `lib/git` 有 status / blame 基础 | 需 `git log --name-only` 统计 + 缓存服务 |
+| 测试 ↔ 源码配对 | unavailable | — | 纯命名规则，需实现 |
+| 工作台焦点 / 选区 | unavailable | — | UI 可选提示协议 |
+| tree-sitter 兜底切块 | unavailable | — | 优先 wasm 版；LSP 已覆盖的语言不需要 |
+| embedding 语义召回 | partial | 知识库 embedding 模式（2.8 未接线） | 未配置即无此来源 |
+
+- 下面是候选结果形状，**不是已存在的 protocol**。取消在 Coordinator/Engine 中传播并停止后续工作；具体时延/资源预算按已有服务与测量决定：
 
 ```ts
-export const explore = async (input: { question: string; paths?: string[]; limit?: number /* 20 */; llm: { expand?: (q) => Promise<Expansion>; rerank?: (cands) => Promise<Ranked> } | null }) => ExploreResult;
+export type SourceStatus = 'not-requested' | 'ready' | 'empty' | 'unavailable' | 'failed' | 'stale' | 'timed-out' | 'cancelled';
+export type ModelCallStatus = 'not-requested' | 'succeeded' | 'timed-out' | 'failed' | 'cancelled';
+export type ExploreQuestionType = 'where' | 'how' | 'impact' | 'why' | 'unknown';
+export interface ExploreSeeds {                // Coordinator 组装；可选来源缺失需独立报告
+  question: string; paths?: string[];
+  questionTypeHint?: ExploreQuestionType;      // Coordinator 的分类（中英文线索）或 intent 结果
+  sourceSurface?: { surfaceId: string; generation: number }; // 随用户消息自动取得，非显式绑定设置
+  inContext: Array<{ path: string; revision: string; startLine: number; endLine: number; requestGeneration: string; sourceEntryIds: string[] }>;
+  sessionTouched: Array<{ path: string; kind: 'read' | 'edit'; step: number }>;
+  focus?: { surfaceId: string; generation: number; revision: string; path: string; startLine?: number; endLine?: number };
+  lastFailedCommandOutput?: string;
+  lastExplore?: { targets: string[] };
+  budgetBytes?: number;                         // 实验软预算；Host 计 UTF-8 字节
+}
+export interface ExploreSpan { id: string; path: string; symbol?: string; startLine: number; endLine: number; text: string; revision: string; sourceStatus: SourceStatus; provenance: { source: string; request?: string; surfaceId?: string; generation?: number } }
+export interface ExploreBundle { id: string; target: ExploreSpan; why: string; support: Array<ExploreSpan & { role: 'definition' | 'reference' | 'test' | 'config' | 'cochange' }>; omittedSupport?: string[] }
+export interface ModelAttempt { kind: 'intent' | 'judge' | 'repair'; status: ModelCallStatus; resultUse: 'used' | 'ignored' | 'none'; usageStatus: 'reported' | 'unavailable'; tokens?: number; cost?: number }
+export interface ExploreResult {
+  bundles: ExploreBundle[];                     // 目标 + 支撑；`where` 类可能只有 target
+  alreadyInContext: ExploreSeeds['inContext'];    // 必须是真实可见覆盖，不是已读文件表
+  gaps: string[];                               // 可观察缺口；RRF 分差不等于置信度
+  questionType: ExploreQuestionType;
+  sources: Record<string, { status: SourceStatus; ms: number; hits: number; note?: string }>;
+  model: ModelAttempt[];                        // Coordinator 汇总，Engine 不调用模型
+  droppedForAuthorization: number;              // LSP / 派生路径越界被丢弃的数量
+  staleRiskPaths: string[];                     // 脏路径：正文来自磁盘、可能落后于编辑器
+  partial: boolean; searched: { patterns: number; files: number; ms: number };
+  handle?: OutputRef;                           // 只有已授权物化的正文可入实际 OutputStore
+}
 ```
 
-  1. 查询扩展（纯算法）：提取 `question` 中的标识符（`/[A-Za-z_][A-Za-z0-9_]{2,}/g`）、引号内字面量、驼峰 / 下划线拆分
-     后的词；对每个词在知识库 `symbol` 名上做 AC 精确 + BM25 前 5 候选；同义扩展表（`config`↔`settings`、`auth`↔`login`
-     等，放 `explore-synonyms.json`，可配置）。产出 ≤ 12 组 rg 模式（字面量用 `--fixed-strings`，标识符用单词边界）。
-     `llm.expand` 存在时用它替代（提示："Turn this question into up to 12 ripgrep patterns and up to 8 symbol names…"）。
-  2. 并行扇出：全部 rg 模式并行（复用 `search.content`，每组 `limit 50`）；符号候选做 1–2 跳 `related`；embedding 存在时
-     `recall` 语义召回前 20。
-  3. 合并去重（按 `path:line`）。
-  4. 排序：`score = 0.35*hitDensity + 0.25*pagerank + 0.15*recency + 0.10*pathPref + 0.15*vectorSim`（无向量时把 0.15
-     按比例分给前四项）；`llm.rerank` 存在时对前 40 做一次重排并生成一句解释。
-  5. 切片段：每命中 `context 3` 行窗口，同文件相邻窗口合并；返回前 `limit` 个，全部入句柄。
-  结果 DTO：`{ snippets: Array<{ path; startLine; endLine; text; why: string }>; searched: { patterns: number; files: number; ms: number }; handle; usedLlm: boolean }`。
-- pi-host `explore(question, paths?)`：文本 `${n} snippets (${ms} ms, ${patterns} patterns${usedLlm ? ', llm-assisted' : ''})\n` + 每条 `${path}:${startLine}-${endLine} — ${why}\n${text}`；`promptSnippet: 'explore: multi-pattern code search for open questions; an order of magnitude more expensive than grep'`；`promptGuidelines: ["Use grep when you know the exact symbol or literal; use explore for open questions like 'how does X work' or 'where is Y handled'."]`。`models.explore` 未配置 → `llm: null`，**绝不用主模型**。
-- 测试：本仓库 10 个固定问题的第一屏命中快照（回归用，不是评测）；纯算法零模型调用断言；有 llm 时两步各调一次。
-- 判断要点：这是"用算法替代 Devin 专训模型"的赌注，排序权重和查询扩展规则是**一定要调的**，给出的数字只是起点。调法：拿
-  本仓库和一两个不同语言的真实仓库，各写 10 个开放性问题，看第一屏；权重与同义表按结果改，改完把新值写回本文。要守住的
-  只有两条：`models.explore` 未配置时零模型调用（这是它便宜到可以频繁调用的前提），以及返回排好序的片段而不是原始命中。
-  最可能撞到：rg 扇出 12 组模式在大仓库上的总耗时超过两秒——那就并行度或模式数降一点，或先按知识库符号候选缩小 `paths`；
-  纯算法的查询扩展对自然语言问题效果有限（"为什么登录会慢"这类）——那正是 `retrieval` 角色存在的理由，不要试图在管线里
-  用规则覆盖它。
+- 阶段（依赖图见设计 6.1）：
+  0. `seed`：标识符覆盖 Unicode 字母/组合字符、语言允许的 `_`/`$` 和单字符，不把中文整句当一个代码名；引号字面量；路径片段；栈帧解析（Node `at fn (path:line:col)`、
+     Python `File "path", line N`、Rust `--> path:line:col`、Go `path:line`、.NET `in path:line N`）；问题类型分类用中英文线索表
+     （在哪 / 哪里 / where → `where`；怎么 / 如何 / 流程 / how → `how`；改了 / 影响 / 会不会 / what if / impact → `impact`；为什么 /
+     报错 / 失败 / why / 有栈帧 → `why`；未知保留 `unknown`）。可选 intent 由 Coordinator 与初次检索并行调度，采纳时另发补充检索
+     请求；Engine 不访问模型回调。是否采用迟到结果与真实调用结局分开，不能因初次搜索先结束就把模型标成 timed-out。
+  1. `fanOut`：rg（沿用 `buildRgPatterns`）；`lsp.symbols` 按种子文件逐语言发起；`searchSymbols` 退化通道；`semanticRecall`（有则用）。
+     每个来源独立计时、独立状态。
+  2. `expand`：按问题类型——`where`：definition + 少量 references；`how`：references 有界（**不是**调用图）+ defines 邻居；`impact`：
+     references 有界传递 + 测试配对；`why`：栈帧 → definition → 脏路径 / git 最近改动。**所有派生路径过 workspace scope / realpath
+     授权**，越界丢弃并计数。
+  3. `fuse`：各来源排名用 RRF 融合，保留 provenance 与确定性并列顺序，不把相关来源一致当成独立确认。最终物化/截断后，
+     Coordinator 只有证明同 revision 的相关 span 仍在实际请求里才投影为 alreadyInContext，不能移除整文件。
+  4. `slice`：`lsp.documentSymbol` 的 `range`（它区分 `range` 与 `selectionRange`，不需要 OCE 的字符阈值合并）→ tree-sitter 兜底 →
+     行窗口。按实际来源的当前快照重读并记录版本，LSP 位置必须与该版本匹配；窗口草稿尚未接通时只声明磁盘原型，脏路径标 stale。
+  5. `pack`：按问题所需关系组成 bundle，支撑允许为空；预算降级保留必要关系并注明省略，不预置统一支撑删除顺序。先重读、再
+     打包，使用真实 OutputStore，不自行拼句柄。token 精确计量仅在真实 tokenizer 可得时由 pi-host 完成。
+  6. 可选模型机制由 Coordinator 拥有：judge 等已物化候选后只选候选 ID；查询修复若采用只提类型化补查，由 Engine 重新授权执行。
+     正文标为不可信数据，不连接 shell。各机制先分开比较，不强制全开；记录真实调用结局、采用状态、已知用量/成本及未知用量。
+- **参数三类**（实验配置的值**无 Piarium 数据支持**，待回放集定标后写回）：
+
+| 类 | 项 | 首版 |
+| --- | --- | --- |
+| 硬边界 | 父请求 abort 立即停；workspace scope / realpath 授权；judge 只返回候选 ID | 不可配置 |
+| 软预算 / 观测 | 端到端及分来源延迟、实际输出字节、候选量与服务负载 | 复用已有服务背压；默认值待测量，不在这里新定产品数字 |
+| 实验候选 | 查询扩展方式、references/历史窗口、候选量与重叠处理 | D-069/D-070 的 1.5/4 秒、6000 token/24 KiB、20 references、500 commits、300 字符、60%、2 块、0.1 分差、20 样本、0.05 步进均不作为默认或门槛；不用 RRF 分差判答案置信度 |
+
+- **检索专用回放集**（独立于 T4 的 `evaluation/harness/cases.json`）：`evaluation/retrieval/cases.json`，每条
+  每项固定 repo/commit、可还原的磁盘/草稿状态、query/questionType、人工 targets（path/revision/startLine/endLine）、可选 support
+  （关系、来源 span 与所属目标）、标注依据。覆盖定位、解释、影响、故障、中文、Unicode、候选缺席及多窗口草稿；样本数按覆盖缺口选择。
+  Runner `scripts/retrieval-replay.mjs`：B0 = 现有 grep 工作流，B1 = 独立 BM25，B2 = 候选 explore。查询来自问题及明确记录的查询策略，
+  不从答案标签提取文件/符号作为某一路输入。固定比较的输出预算与 K，记录实际查询/返回包、FileRecall@K、Span F0.5、支撑覆盖、
+  首个正确结果位置/时间、总耗时、输出量与来源/模型状态。无 span 标注不参与 span 指标，不把各路返回数量当作不同的 K。**不用** reference
+  commit 的改动文件充当正确上下文，**不用**"后来读过的 token"算浪费。
+- **两级证据**：离线按问题类型比较正确性、遗漏与资源代价；有值得验证的收益后交测试者真实任务/T4 配对。记录成功、耗时、主及辅助
+  用量、人工介入与失败，不把少量样本宣称为统计不劣。明确收益、无已知严重回归、可诊断且可关闭后才讨论默认注册。
+- **反馈**：第一版只记 telemetry（问题、类型、返回包摘要、各来源状态、后续 read / edit、耗时）到知识库 `event(kind: 'explore')`；
+  **不自动改权重**。原因见设计 6.1（位置偏差、支撑不被改、无 edit 任务、自包含结果减少 read、压缩后 inContext 失效）。
+- pi-host `explore(question, paths?)`：首行给目标数、总耗时和实际采用的模型机制；
+  每个 bundle `## ${path}:${startLine}-${endLine} ${symbol ?? ''} — ${why}` + 正文 + `  ↳ ${role} ${path}:${startLine}-${endLine}`；
+  `alreadyInContext` 一行；`staleRiskPaths` 一行 `note: ${n} files have unsaved edits; text shown is from disk`；来源不可用时一行
+  `sources unavailable: lsp (no server for .py), cochange (not built)`；failed/stale/timed-out 分别显示，首行说明关键缺口。工具说明只陈述
+  已实现能力，不承诺速度或必有完整支撑；`HARNESS_TOOL_META.explore` 保持 `mutation: none, parallel`。
+- **参考形状**（读实现、不引架构）：[OpenLocus 固定版本](https://github.com/Youzini-afk/OpenLocus-Lab/tree/eecd28b218b2be211074db2bdd9e7dad43100336) 的指标与 FRK-B 索引思路；
+  [OCE 固定版本](https://github.com/oce-ai/oce/tree/a359272560bbbdb321055aaed6c16ba1f4e06887) 的 `coverage_selector.py`（只借“覆盖面、重叠抑制”，不借平铺
+  选择）；OCE 的 `cast_chunker._merge_small` **不借**（修的是它自己 AST 切块的伪影）。
+- 测试：中文/Unicode/栈帧；同文件只读部分、文件变化、压缩/切分支/截断后不误省正文；自动来源与多窗口/断开；派生路径重新授权；
+  RRF 确定性、bundle 关系与省略说明；每来源状态独立；纯算法零模型调用；可选 judge 依赖真实候选、拒绝未知 ID；迟到成功与超时区分、
+  已知费用不漏记；取消传播与真实 OutputStore 分页。验证当前实现的风险，不要求所有可选来源先建齐。
+- 判断要点：要守住的四条——不调主模型；来源状态与模型状态到项目级诚实；派生路径必须重新授权；正文按当前内容重切并对脏路径
+  标注。最可能撞到：`lsp.symbols` 需要种子文件——无种子时坦白 `unavailable` 而不是猜一个文件；`references` 在高频符号上爆炸——
+  先记录负载并利用背压/可配置实验预算；co-change 慢则按测量选择缓存/窗口；tree-sitter 是可选兜底，不必为已有 LSP 语言引入。
+  自然语言问题可能缺候选，说明已知缺口；只有 retrieval 角色实际可用才建议调用，不用“高置信”标签掩盖未知。
 
 ### 3.3 `related`
 
-- pi-host `related(anchor: string /* path 或 symbol */, hops = 1, labels?)`：host 用 TQL（设计文档 6.2 节）返回按 PageRank 的
-  邻居列表；文本 `related to ${anchor} (${hops} hops):\n` + `- ${path}[:${symbol}] · rank ${score}`。
-- 测试：与直接 TQL 一致。
+- 当前仅有注入 findNode/getNeighbors 的 helper，无生产图邻居查询、PageRank 或 pi-host 工具。后续通过 KnowledgeStore 领域接口提供
+  实际可用关系与来源，不以 TQL 作为上层契约；未实现的关系报告 unavailable。测试覆盖真实节点/边与失败分类后再注册。
 
 ### 3.4 线程运行时（原生子会话）
 
@@ -727,8 +829,7 @@ ${diffStats 变化 ? `  Δ ${files} files (+${ins} −${del})` : ''}
 - 测试：TTL 表；增量视图（两次 `threads` 之间有 / 无变化的文本）；`wait` 超时非错误；`wait` 被 `waiting-for-input` 唤醒；游标在
   `compaction.after` 后重置为全量；`send` 唤醒 idle 线程；`read_thread` 三档；`merge` 干净 / 冲突；排队与出队；`kill` 保留
   worktree；观察类调用计入计数器。
-- 判断要点：`wait` 的超时按缓存 TTL 推导是为了让父在缓存冷掉前醒一次——如果 pi-ai 或 provider 元数据里拿不到 TTL，用
-  240 s 保守值即可，不要为此加配置项让用户填。**边界**：`wait` 超时是正常结果；观察类工具默认增量、游标归 host、压缩重置；
+- 判断要点：`wait` 无 TTL 默认唤醒；已有 Host 请求时限与调用方显式 timeout 保持。**边界**：超时是正常结果；观察类工具默认增量、游标归 host、压缩重置；
   `read_thread` 默认是块不是转录；`kill` 默认保留 worktree；并发 12 是默认，排队而非拒绝。`merge` 用 `git apply --3way` 而不是
   `git merge`，是因为父的工作树有未提交改动且我们不想在用户历史里制造提交；如果 `--3way` 在某些情况（重命名、二进制）下
   表现不好，可以退回到"逐文件三方合并 + 未跟踪文件复制"的自实现，只要冲突时标记留在文件里、父能用 `edit` 解决这个体验
@@ -744,8 +845,8 @@ interface RoleDefinition { id: RoleId; slot: SlotId; tools: string[]; worktree: 
 ```
 
   六个角色按设计文档 9.2.2 表；不携带无执行语义的固定 token/turn budget，实际用量随 Run 记录并进入 Fleet；`review` 的 `systemPromptFragment` 明确"You have not seen the conversation; review the diff
-  on its own merits"；`check` 的工具 = 只读 + `bash`（但 `tool_call` 门控拒绝任何写入路径的命令——3b 之前用提示约束并在
-  报告中标注）。团队提示片段（追加到 code profile 的静态提示，通过 `dispatch` 工具的 `promptGuidelines`）：
+  on its own merits"；`check` 有读取与命令执行能力，测试/构建及准备步骤可在正常权限下写文件，不能叫只读角色或承诺 bash 只跑不改。
+  当前 shared 工作区选择保留，不强制每次复制；需要工作副本时记录真实受检版本与环境。团队提示片段（追加到 code profile 的静态提示）：
 
 ```text
 You can hand work to teammates with dispatch(role, task). Teammates: quick-implement (cheap model; mechanical, well-specified changes), hard-implement (strong model; ambiguous or cross-cutting work), frontend (UI specialist), review (strong model; independent review of a diff), check (cheap model; run tests/lint and report), retrieval (cheap model; multi-step code search). Judge by time and cost: if you can finish in a few tool calls yourself, do it yourself. Dispatch is asynchronous: wait blocks until a teammate changes state, threads is a quick glance, send passes a teammate new information, read_thread shows their notes. The user may also open and talk to teammates directly; their final report tells you what actually happened.
@@ -819,8 +920,8 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 ### 阶段 3 完成标准
 
-- `explore` 纯算法模式 10 问题快照通过；配置 `models.explore` 后 `usedLlm: true` 且可关。
-- fake provider：并发 `dispatch` 两个角色，`wait` 在 TTL 前唤醒且超时返回非错误，`threads` 两次调用第二次只含增量，`merge`
+- `explore` 满足 3.2 的来源/版本/片段与真实句柄契约，纯算法零模型调用；独立 retrieval replay 保留 baseline 输出，默认关闭。
+- fake provider：并发 `dispatch` 两个角色，`wait` 只因真实状态、取消或显式时限返回，超时非错误，`threads` 两次调用第二次只含增量，`merge`
   干净；人为冲突由 `edit` 解决后无残留标记。
 - 线程韧性：杀掉一条运行中线程的 worker 进程 → 该 Run `outcome: lost`、父 `wait` 看到 `attention` / Run 变化、
   `startRun` 开出 `attempt + 1` 的新 Run 在同一会话继续、worktree 未动；父 worker 退出后线程继续跑并在父恢复的下一回合
@@ -887,14 +988,11 @@ interface PermissionPolicy { mode: 'normal' | 'accept-edits' | 'bypass' | 'smart
 | 3 / 3b | `architecture.md` 第 4.3、7.1、9 节；`README.md`；`extension-compatibility.md`；`security.md` |
 | 每项 | agent-harness.md 中任何被实施改变的默认值或形状；`agent-harness-status.md` 每次交付更新；`roadmap.md` 只引用状态矩阵 |
 
-### 每个纵切结束的固定检查
+### 每个纵切的验证选择
 
-1. `bun run type-check && bun run lint`。
-2. 所属包测试 + Zone 0 契约测试（`zone0-stability.test.ts`）通过；`bun run test:node-smoke` 通过。
-3. 纵切要求的平台 smoke 已执行，提交信息写明平台与未验证项。
-4. `bun run test:docs && bun run docs:validate`。
-5. 状态矩阵已更新，`Proven evidence` 列链接到本次新增的测试文件。
-6. 触碰 0.1 五类之一的变更有对应的决策日志条目并已验收。
+按 [development.md](development.md) 和真实回归风险选择：文档只跑文档校验；行为改动跑相关生产链测试与所属类型/静态检查；
+共享契约覆盖真实消费者；只有影响请求前缀、Node 产物或平台行为时才追加相应契约/打包 smoke。失败或新的风险才扩大验证，
+不把全量检查固定附到每次改动。状态矩阵写具体证据与未验证项，0.1 的设计差异按已有授权处理。
 
 ## 验收
 
@@ -913,5 +1011,5 @@ interface PermissionPolicy { mode: 'normal' | 'accept-edits' | 'bypass' | 'smart
 | 文本 | 模型可见文本含模板要求的信息；UI 文本经 i18n 且 catalog 齐全 |
 | 文档 | 文档同步矩阵对应行已更新 |
 
-验收另做一次真实 provider 的 30 步以上会话，读诊断面板的四个计数器（工具错误、重试、输出字节、缓存命中率）；对影响
-模型行为的能力，另看 T4 回放集（设计 8.6）的成功率、总 token 与人工介入次数。
+模型行为的真实验收由用户组织测试者运行，记录实际配置、任务成功、主/辅助用量、耗时与人工介入；本地先完成可执行前置与确定性验证。
+不把固定步数或一次真实会话当质量证明，不因当前缺少测试者结果伪装完成，也不自行发起付费记忆实验。

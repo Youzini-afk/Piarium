@@ -26,6 +26,10 @@ Host 生产链。Host 通过握手声明真实线程能力，pi-host 才注册�
 provider 请求；用户改动后的 LSP 诊断、当前 blocks、context usage 与相关 accepted knowledge 进入同一路径。memory keeper
 由用户显式开启，复用活动会话模型在后台写块，默认关闭且不接管 Pi compaction。
 
+**2026-09-05 文档修订（D-071–D-073）未改变代码状态。** 既有 `shadowMode:true` 实际是 assist（会影响 Zone 2），不是纯观测；
+record-only、分支/版本提交、压缩覆盖检查点和窗口草稿读取尚未交付。TriviumDB 优先保留，Windows 沙箱不在交付计划中；
+记忆真实效果由用户招募测试者验证，不安排付费协议/缓存实验。本轮仅文档修订，不执行实现或实验，不提交。
+
 ## 矩阵
 
 Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
@@ -63,7 +67,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.9** 模型槽位 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-model-slots.test.ts`、`roles.test.ts`（统一 fallback）；`pi-host/test/harness/counter-tracker.test.ts` 与 `session-e2e.test.ts`（reader / permissionJudge 真请求归因）；`harnessCounterPresentation.test.ts`；Harness Settings 与 Context sidebar 生产入口 | ✓（依赖能力各自按配置启用） | 未配置辅助槽位不注册或走无 LLM 路径；仅 hardImplement / review 明示回退主模型 | 三套预设从已连接 provider 的真实 model id 匹配且只填空槽位；线程角色的 model/token 由 `ThreadRun` 记录，不在父 SessionStats 双计 |
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；显式审阅/写入已接，Settings 全量知识管理仍待 2.7 |
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✓（file/symbol/defines） | `knowledge/store.test.ts`（真实节点、defines edges、代际替换、坏 range 不破坏旧图）；`symbol-runtime.test.ts`（Documents post-commit → LSP → graph、buffer 不覆盖、unavailable 保留、delete、嵌套 symbols） | ✓（随 Documents mutation） | 未知语言只 touch file；LSP unavailable 保留最后图，ready 空结果才清空 | 不做启动全仓扫描；references/calls/imports 边未接，需基于 LSP 请求成本设计批处理/背压（D-059） |
-| **3.2** `explore` 管线 | host | ✓ | ✗ | `host/explore.test.ts`（17） | — | — | pi-host 无 `explore` 工具定义；10 问题快照未做 |
+| **3.2** `explore` 管线 | pi-host Coordinator / host Engine | ✓（v1 原型） | ✗ | `host/explore.test.ts`（17，v1；不证明 v2） | ✗ | 不注册 | v1 只拼命中并扩行号，语义结果未参与排序，handle 未入 OutputStore；v2 仍为候选（D-072）。缺实际请求 span/revision 覆盖、来源自动传播与草稿正文、真实句柄接线、独立 retrieval replay 的 B0/B1 基线；related/co-change/测试配对/tree-sitter 等按可用性降级，不作全部前置。离线证据后交测试者真实任务验证，不把少量样本说成统计不劣；是否默认注册尚未决定 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
 | **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`（真实持久 Pi child、父 blocks 快照、冻结模型/工具/scope、child blocks/deviation 报告）；`thread-worktree.test.ts`（真实 Git、dirty baseline、result branch/commit、冲突不覆盖）；`thread-runtime.test.ts`（worker/host 中断续跑、权限等待、stalled/looping、结构化报告与 unavailable 分类）；`thread-registry.test.ts`（result ref 跨重启）；`path-authority.test.ts` / `search-service.test.ts`（scope enforcement）；`phase3-e2e.test.ts`（bridge→router→registry 与 active/settled/compaction Zone 2）；`zone2-threads.test.ts`（终态增量、活跃快照、嵌套父边）；`thread-runtime-capability.test.ts`；`runtime-dispatcher-session-launch.test.ts`；`session-delete-coordinator.test.ts` | ✓（Web/Application Host） | Host 未声明 `harnessThreads` 时不注册 | live worktree 自动删除会破坏当前按 cwd 重开 child session；待只读 transcript/rehome + 显式归档纵切后再回收。分支不设猜测性期限；scope 不是 OS 沙箱（D-044/D-055/D-057） |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
@@ -76,6 +80,23 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.2** Smart fallback | pi-host | ✓ | ✓ | `session-e2e.test.ts`（配置槽位后真实模型调用）；`permission-gate-extension.test.ts`（普通 ask 可放行、高风险不调用 judge） | 用户选择后 | 无槽位时不可选、判断失败时 ask | 插件活跃时应使用其显式 `authorizerChain`，原生 Smart 不参与裁决 |
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 最小配对回放集 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个真实历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor 校验、非覆盖记录、配对汇总、失败分类） | — | 不运行即不产生模型调用或设置变化 | 缺 per-session Harness profile override；需同 provider/model/machine 跑完 native + harness-shadow 配对（D-047） |
+
+## 当前新增缺口与后续顺序（只登记，未开始实现）
+
+顺序见 plan 0.7；以下是新发现或目标契约与当前实现的差距，不取消上表已有范围的测试证据，也不把它们算成已交付。
+
+| 范围 | 已确认现状 / 待做 | 验证与外部边界 |
+| --- | --- | --- |
+| 2.4 记忆写入 | `memory.blocks.get/apply` 无读取时版本/分支；`applyOps` 允许 replace plan；后台调用用量需补归因 | 先用现有 faux-provider 路径覆盖用户并发编辑、切分支、迟到写入及 plan 所有权；真实语义由测试者验证 |
+| 2.6 覆盖与证据 | takeover 默认关闭且只检查 keeper 块存在，无连续区间检查点；TranscriptRef 可能只找回预览 | 补分支/块修订/处理区间一致性与必要来源可恢复性；不能仅因 hash 或持久 entry 存在声称全文可恢复 |
+| 3.9 / 线程观察 | Host 生成响应时已推进内存游标，尚无持久接收确认；Host/会话清理会重置 | 验证响应未落盘但基线仍在的故障窗口，允许重放，避免漏报 |
+| 窗口读取 / 3.2 | 默认看本窗口草稿是已接受目标；dirty publication 当前只有路径与版本，无自动来源/正文读取纵切 | 无显式开关/绑定；自动传播来源，正文快照按版本读，多窗口和断开状态诚实；headless 读磁盘 |
+| T4 / 执行配置 | 无单会话实验覆盖与完整实际配置记录；record-only 未实现；Workbench/Agent Profile 职责需分开 | 本地只准备记录与可运行场景，不以完整跨 runtime RunManifest 为前置；用户组织真实测试 |
+| 结果与集成 | 有 resultCommit，但报告/验证未绑定不可变结果修订，merge 仍检查 live worktree；暂存区和父状态影响需明确 | 后续按消费者补结果/验证/集成记录与恢复；不先造完整 Work Graph |
+| `check` | 现有角色含 bash 且 shared，具备命令执行能力 | 不称只读 agent，不阻止测试/构建正常生成文件；不新增统一副本要求 |
+
+TriviumDB 的数据库问题按版本和通用语义向用户说明，不转嫁 Piarium 领域职责；迁移未立项。Windows 沙箱是用户排除项，
+不是缺平台测试而暂时 blocked。macOS/Linux smoke、Electron 打包、真实 provider/测试者结果继续分别记录真实阻塞。
 
 ## 未完成项（来自 D-027，按来源）
 
