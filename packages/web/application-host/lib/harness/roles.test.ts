@@ -113,10 +113,9 @@ describe("ROLE_DEFINITIONS", () => {
     expect(tools).not.toContain("write");
   });
 
-  it("all roles have budget", () => {
+  it("does not publish unenforced per-role token or turn ceilings", () => {
     for (const role of Object.values(ROLE_DEFINITIONS)) {
-      expect(role.budget.maxTurns).toBeGreaterThan(0);
-      expect(role.budget.maxTokens).toBeGreaterThan(0);
+      expect(role).not.toHaveProperty("budget");
     }
   });
 });

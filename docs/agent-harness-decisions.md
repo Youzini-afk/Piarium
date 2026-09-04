@@ -794,6 +794,22 @@ transcript bounds、worktree diff、blocks 与结构化最终回答收齐后，�
 
 状态：已实施
 
+### D-056 · 2026-09-04 · 3.6（删除休眠且无依据的 role budget）
+
+类型：设计修正
+
+决定：从 `RoleDefinition` 删除 `budget.maxTurns/maxTokens` 以及六组固定数字。角色继续冻结模型、工具、worktree 和提示片段；Run 继续
+记录真实 steps/tokens/cost 并由 Fleet/报告展示。当前不增加自动停止、降级或排队策略。未来若用户显式要求预算，或 T4 同模型回放给出
+可定标的分布，再单独设计“用户策略/默认值/告警/硬边界”中的正确层级和 Pi child 执行原语，不能复活仅存在于 catalog 的假字段。
+
+原因：全仓只有定义和“数字大于零”测试，没有生产读取点；Pi child 的一次 Run 也没有 per-role turn/token enforcement。现有
+10/15/20/40/50 turns 与 30K–200K tokens 没有协议上限、基础设施数据或回放依据。把它们接成硬拒绝会截断正常长任务，保留则让
+状态矩阵长期误报一个不存在的能力，均不如删除。
+
+影响：protocol `harness-roles.ts`、roles tests、plan 3.6、status 3.4/3.5。并发 12 是独立的 Host 背压机制，不受本决定影响。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -855,3 +871,4 @@ transcript bounds、worktree diff、blocks 与结构化最终回答收齐后，�
 | D-053 | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors |
 | D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |
 | D-055 | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report |
+| D-056 | implementation | — | plan/status 3.6；protocol role catalog |

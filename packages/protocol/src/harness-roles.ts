@@ -39,7 +39,6 @@ export interface RoleDefinition {
   /** One clause describing the teammate, used to build the team prompt. */
   teamDescription: string;
   resultSchema: unknown;
-  budget: { maxTurns: number; maxTokens: number };
 }
 
 // ── Role definitions ───────────────────────────────────────────────
@@ -54,7 +53,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       "You are a quick implementation agent. Make mechanical, well-specified changes efficiently.",
     teamDescription: "cheap model; mechanical, well-specified changes",
     resultSchema: { changedFiles: "string[]", conclusion: "string" },
-    budget: { maxTurns: 20, maxTokens: 50_000 },
   },
   "hard-implement": {
     id: "hard-implement",
@@ -65,7 +63,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
     teamDescription: "strong model; ambiguous or cross-cutting work",
     resultSchema: { changedFiles: "string[]", conclusion: "string", unresolved: "string[]" },
-    budget: { maxTurns: 50, maxTokens: 200_000 },
   },
   "frontend": {
     id: "frontend",
@@ -76,7 +73,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",
     teamDescription: "UI specialist",
     resultSchema: { changedFiles: "string[]", conclusion: "string" },
-    budget: { maxTurns: 40, maxTokens: 150_000 },
   },
   "review": {
     id: "review",
@@ -86,7 +82,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
     systemPromptFragment: "You have not seen the conversation; review the diff on its own merits.",
     teamDescription: "strong model; independent review of a diff",
     resultSchema: { conclusion: "string", issues: "string[]", severity: "string" },
-    budget: { maxTurns: 15, maxTokens: 50_000 },
   },
   "check": {
     id: "check",
@@ -97,7 +92,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       "You are a check agent. Run tests and lint, report results. Do not make changes.",
     teamDescription: "cheap model; run tests/lint and report",
     resultSchema: { conclusion: "string", passed: "boolean", output: "string" },
-    budget: { maxTurns: 10, maxTokens: 30_000 },
   },
   "retrieval": {
     id: "retrieval",
@@ -108,7 +102,6 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       "You are a retrieval agent. Perform multi-step code search to answer open questions.",
     teamDescription: "cheap model; multi-step code search",
     resultSchema: { conclusion: "string", snippets: "string[]" },
-    budget: { maxTurns: 15, maxTokens: 50_000 },
   },
 };
 
