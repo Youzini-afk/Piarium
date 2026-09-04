@@ -45,6 +45,8 @@ describe("thread runtime with real Pi sessions", () => {
     assert.ok(parent.sessionFile);
     const registry = createThreadRegistry({ dataDir: join(root, "data"), hostId: "host-1" });
     const childHosts = new Map<string, SessionHost>();
+    let childRuntimeWorkspaceId: string | null = null;
+    let childScope: string[] | undefined;
     let runtime!: ReturnType<typeof createThreadRuntime>;
 
     const hostFor = (sessionId: string): SessionHost => {
@@ -56,6 +58,8 @@ describe("thread runtime with real Pi sessions", () => {
 
     const sessions: ThreadSessionAdapter = {
       create: async (input) => {
+        childRuntimeWorkspaceId = input.workspaceId;
+        childScope = input.scope;
         let child!: SessionHost;
         const emit = <E extends HostEvent>(event: E, data: HostEventData<E>): void => {
           const sessionId = child?.sessionId;
@@ -93,6 +97,7 @@ describe("thread runtime with real Pi sessions", () => {
       registry,
       sessions,
       resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       worktrees: {
         prepare: async () => ({ cwd: workspace, worktree: null }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
@@ -113,12 +118,15 @@ describe("thread runtime with real Pi sessions", () => {
         worktree: "none" as const,
         model: { providerId: model.provider, modelId: model.id },
         tools: ["read"],
+        scope: ["src"],
         permissions: {},
         systemPromptFragment: "Run a focused check.",
       };
       const thread = await registry.createThread(input);
       const run = await registry.startRun("workspace-1", thread.id);
       const child = await runtime.spawn({ ...input, threadId: thread.id, runId: run.id });
+      assert.equal(childRuntimeWorkspaceId, "runtime-workspace-1");
+      assert.deepEqual(childScope, ["src"]);
       assert.equal(hostFor(child.sessionId).header(child.sessionId)?.parentSession, parent.sessionFile);
       assert.deepEqual(hostFor(child.sessionId).snapshot().activeTools, ["read"]);
       assert.equal(hostFor(child.sessionId).snapshot().model?.id, model.id);

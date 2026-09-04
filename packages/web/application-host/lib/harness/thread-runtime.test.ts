@@ -80,6 +80,7 @@ const createInput = (): CreateThreadInput => ({
   autoRun: true,
   worktree: "isolated",
   model: { providerId: "test-provider", modelId: "test-model" },
+  scope: ["src"],
   tools: ["read", "edit"],
   permissions: {},
   systemPromptFragment: "Work carefully.",
@@ -119,6 +120,7 @@ describe("thread runtime", () => {
       registry,
       sessions: sessionAdapter,
       resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
@@ -146,11 +148,13 @@ describe("thread runtime", () => {
     expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/workspace/thread",
       parentSession: "/sessions/parent-1.jsonl",
-      workspaceId: WORKSPACE,
+      workspaceId: "runtime-workspace-1",
     }));
     expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({
       model: { providerId: "test-provider", modelId: "test-model" },
+      scope: ["src"],
       tools: ["read", "edit"],
+      workspaceId: "runtime-workspace-1",
     }));
     expect(sent[0]).toContain("Implement the feature");
     expect(sent[0]).toContain("Work carefully.");
@@ -276,6 +280,7 @@ describe("thread runtime", () => {
       registry,
       sessions: sessionAdapter,
       resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       stalledAfterMs: () => 20,
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),

@@ -7,7 +7,7 @@ import { PiRuntimeBroker } from "../src/runtime-broker.js";
 
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
 
-describe("session deletion coordination", () => {
+describe("session ownership coordination", () => {
   it("waits for the application-owned cleanup before removing the Pi session file", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-delete-coordinate-"));
     const workspace = join(root, "workspace");
@@ -42,6 +42,40 @@ describe("session deletion coordination", () => {
       await broker.deleteSession(created.sessionId);
       assert.equal(coordinated, true);
       await assert.rejects(access(created.sessionFile));
+    } finally {
+      await broker.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("attaches the broker-pinned child workspace scope to Host events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-session-scope-"));
+    const workspace = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    await Promise.all([mkdir(workspace), mkdir(agentDir)]);
+    const events: Array<Parameters<Parameters<PiRuntimeBroker["subscribe"]>[0]>[0]> = [];
+    const broker = new PiRuntimeBroker({
+      agentDir,
+      client: { clientName: "scope-test", clientVersion: "0.0.0", mode: "test" },
+      execArgv: ["--import", import.meta.resolve("tsx")],
+      hostEntry: HOST_ENTRY,
+      projectTrustOverride: true,
+    });
+    broker.subscribe((event) => events.push(event));
+    try {
+      const created = await broker.createSession(
+        workspace,
+        "Scoped child",
+        undefined,
+        { kind: "workspace", id: "runtime-workspace-1" },
+        { scope: ["packages/web"], tools: ["read"] },
+      );
+      const snapshot = events.find((event) => (
+        event.kind === "host"
+        && event.sessionId === created.sessionId
+        && event.envelope.event === "session.snapshot"
+      ));
+      assert.deepEqual(snapshot && "actor" in snapshot ? snapshot.actor?.workspaceScope : undefined, ["packages/web"]);
     } finally {
       await broker.dispose();
       await rm(root, { force: true, recursive: true });

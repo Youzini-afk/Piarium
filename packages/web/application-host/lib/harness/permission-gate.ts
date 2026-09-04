@@ -27,4 +27,9 @@ export {
   mergePolicies,
   isHighRisk,
   HIGH_RISK_PATTERNS,
+  MAX_PERMISSION_PATTERN_LENGTH,
+  PermissionPolicyValidationError,
+  permissionPatternIssue,
+  validatePermissionMode,
+  validatePermissionRule,
 } from "@piarium/protocol";

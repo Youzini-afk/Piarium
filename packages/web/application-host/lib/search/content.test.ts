@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -40,6 +41,46 @@ const matchLine = (absolutePath: string, preview: string, start = 0): string => 
 });
 
 describe('workspace content search', () => {
+  it('passes only canonical workspace-contained search roots to ripgrep', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const sourceRoot = path.join(workspace.root, 'src');
+      await fs.promises.mkdir(sourceRoot, { recursive: true });
+      let spawnArgs: string[] = [];
+      let spawnCalls = 0;
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: (_command, args) => {
+          spawnCalls += 1;
+          spawnArgs = args;
+          const child = createFakeChild();
+          queueMicrotask(() => child.emit('close', 1));
+          return child;
+        },
+      });
+
+      const scoped = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'needle',
+        paths: ['src'],
+      });
+      expect(scoped.status, scoped.status === 'failure' ? scoped.message : undefined).toBe('empty');
+      expect(spawnArgs[spawnArgs.length - 1]).toBe(await fs.promises.realpath(sourceRoot));
+
+      spawnCalls = 0;
+      await expect(search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'needle',
+        paths: ['../outside'],
+      })).resolves.toMatchObject({ status: 'failure' });
+      expect(spawnCalls).toBe(0);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   it('returns ready hits, empty success, and failure without mapping errors to empty', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {

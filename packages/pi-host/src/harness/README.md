@@ -54,6 +54,10 @@ if (isOpenAIFamily) {
   stores full text via `output.store`, adds `[output: N bytes]` marker.
 - `createHarnessCounterTracker` — tracks `toolErrors`, `toolRetries`,
   `outputBytes`, `cacheHitRatio`.
+- `createPermissionGateExtension` — Harness-tool fallback for sessions without
+  `pi-permission-system`. It resolves the plugin's session-keyed service on every
+  call and yields completely while that service is active, so there is one
+  approval owner rather than two dialogs. Smart mode is part of this fallback.
 
 ## HostServicesBridge
 
@@ -86,7 +90,10 @@ handshake. Thread tools are absent when that capability is missing. A real
 child launch supplies its resolved role model and tool allowlist to
 `session.create/open` before Pi constructs the AgentSession; read-only roles do
 not merely rely on a prompt asking them not to write. The role fragment and
-scope stay in the first task message, keeping the base system prefix stable.
+scope stay in the first task message, keeping the base system prefix stable;
+scope also travels in the broker-owned Actor envelope. Host path services
+enforce it, but it is not an OS sandbox over shell text or Pi tools that access
+the filesystem directly inside the worker.
 
 ## Mutation Journal Integration
 

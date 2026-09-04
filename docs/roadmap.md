@@ -727,43 +727,21 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
   **Not wired** (TODO).
 
-### Phase 3b: Native permissions (wired 2026-09-03)
+### Phase 3b: Permission integration (delivered 2026-09-04)
 
-- **3b.1 Permission gate**: Policy file with mode/rules, high-risk
-  patterns always ask, top-down rule evaluation
-  (`lib/harness/permission-gate.ts`). 22 tests. **Wired**: pure types
-  and evaluation moved to `@piarium/protocol/permission-gate.ts` (shared
-  between pi-host and web host). `permission-gate-extension.ts` in
-  pi-host hooks `tool_call`, evaluates policy, and drives the existing
-  `ctx.ui.select` dialog (Allow once / Allow for this session / Deny) for
-  `ask` decisions; only `deny`, an explicit Deny, or a dismissed dialog
-  blocks. Registered in `session-host.ts` with mode resolved from
-  `harnessSettings.permissions.mode` and per-role `dispatch.askBefore`.
-  Rules are generated from `HARNESS_TOOL_META.mutation`, so non-harness
-  tools (MCP, Pi built-ins) pass through to Pi's own permission system.
-  22 unit + 14 e2e tests, including four real Pi session tests covering
-  allow-once, deny, the session grant, and the high-risk override.
-- **3b.2 Smart mode**: Model-judged permission decisions, high-risk
-  bypass (`lib/harness/smart-mode.ts`). 10 tests. **Not wired** (TODO:
-  wire permissionJudge model slot).
-- **3b.3 Stop provisioning**: **Reverted (D-021)** —
-  `@gotgenes/pi-permission-system` is still in
-  `FOUNDATIONAL_PI_PACKAGE_MANIFEST` (revision 2) and is still
-  provisioned, so the native gate and the plugin currently coexist.
-  Removing it is blocked on the native gate covering the plugin's
-  surface; "native wins + duplicate warning in the diagnostics panel"
-  (plan §3b.1) is also still TODO. Protocol tests 3/3.
+- **3b.1 Host and fallback gate**: broker-pinned actor identity, static
+  capability and path/scope checks are non-interactive. The pi-host fallback
+  implements user/workspace rule ownership, normal/accept-edits/bypass and
+  high-risk session-grant behavior for Harness tools.
+- **3b.2 Smart fallback**: `models.permissionJudge` is resolved in SessionHost;
+  ordinary asks may be auto-allowed, while high-risk calls never reach the model.
+  Model failure or any output other than exact `allow` falls back to asking.
+- **3b.3 Mature plugin coexistence**: `@gotgenes/pi-permission-system` remains
+  foundational. When its session-keyed service is present it is the sole prompt
+  owner and the native fallback yields; another session cannot trigger that yield,
+  and removing the service reactivates fallback. D-044 records why replacing the
+  plugin would currently reduce Bash/path/MCP/skill/subagent/audit coverage.
 
-**Phase 3b wiring summary**: Permission gate extension registered in
-every session, mode from settings (default `normal`). Read-only tools
-(`mutation: 'none'`) always allowed. Edit tools ask in normal mode,
-allow in accept-edits. Shell tools always ask except in bypass.
-High-risk categories — `rm`/`sudo`/`git push`/package installs on a
-command, and `.env`/`id_rsa`/`.ssh` on a shell command *or* an edit path
-— always ask and are never covered by a session-scoped grant (D-028).
-
-**Total**: 248 pi-host tests (1 skip) + 1352 web tests (1 skip) + 53
-protocol tests (15 thread contract tests). Type-check, lint, and the
-Node smoke of the built server artifact all clean. Test counts are from
-`bun run --cwd packages/{pi-host,web,protocol} test` on 2026-09-04.
-Decisions D-019 through D-029 recorded in agent-harness-decisions.md.
+Current delivery evidence and remaining blockers live only in
+[`agent-harness-status.md`](agent-harness-status.md); D-044 records the
+coexistence and scope boundary.

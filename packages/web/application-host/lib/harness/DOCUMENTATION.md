@@ -35,7 +35,10 @@ Global singleton that owns:
 ### HarnessRouter (`router.ts`)
 
 Consumes `harness.request` events from the broker stream and dispatches
-to registered services. Responds via `harness.respond` on the broker.
+to registered services. Responds via `harness.respond` on the broker. The
+broker-pinned Actor must match the Host session registry and carry the method's
+frozen capability. Path-bearing methods are resolved through Documents and, for
+a restricted child Run, must also remain inside its scope.
 
 ### ShellSupervisor (`shell-supervisor.ts`)
 
@@ -79,7 +82,10 @@ registry exposes it through the `piarium-harness` provider.
 ### HarnessSearchService (`search-service.ts`)
 
 Wraps `createWorkspaceContentSearch` with hit grouping, scoring, and
-formatting. Returns `SearchContentResult` with files, hits, and totals.
+formatting. It intersects an explicit request path with the child scope before
+launching ripgrep, passes those canonical workspace-contained roots to the
+search process, and validates returned resource IDs again. Returns
+`SearchContentResult` with files, hits, and totals.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 
@@ -93,8 +99,8 @@ The harness is wired in `packages/web/application-host/index.ts`:
 
 1. `HarnessServiceHost` instantiated after `workspaceContentSearch` and
    `languageSupervisor` are created.
-2. `HarnessRouter` created after `recoveryTurnCoordinator`, with
-   `respond` and `resolveWorkspace` callbacks.
+2. `HarnessRouter` created after `recoveryTurnCoordinator`, with broker response,
+   Actor resolution, and Documents-backed path authorization callbacks.
 3. `registerHarnessServices()` registers all services on the router.
 4. `harnessRouter.processEvent(event)` added to the broker subscription,
    aligned with `recoveryTurnCoordinator.processEvent`.

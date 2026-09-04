@@ -37,6 +37,7 @@ describe("runtime dispatcher session launch projection", () => {
     } as unknown as PiRuntimeBroker;
     const launch = {
       model: { providerId: "openai", modelId: "gpt-test" },
+      scope: ["packages/web"],
       tools: ["read", "grep"],
     };
 

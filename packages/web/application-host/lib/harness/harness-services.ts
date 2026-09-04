@@ -98,7 +98,11 @@ export function createOutputReadService(store: OutputStore): HarnessService<"out
 export function createSearchContentService(search: HarnessSearchService): HarnessService<"search.content"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      return search.search(params, ctx);
+      return search.search(params, {
+        signal: ctx.signal,
+        workspaceId: ctx.workspaceId,
+        ...(ctx.actor.workspaceScope ? { workspaceScope: ctx.actor.workspaceScope } : {}),
+      });
     },
   };
 }

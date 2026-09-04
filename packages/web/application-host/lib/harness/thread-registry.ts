@@ -1161,6 +1161,39 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: changed, changed, write: changed.length > 0 };
   });
 
+  const archiveThreadsForDeletedSessionAcrossWorkspaces = async (
+    sessionId: string,
+  ): Promise<Thread[]> => {
+    const workspaceIds = new Set(cache.keys());
+    const directory = join(dataDir, "threads", hostId);
+    let entries: fs.Dirent<string>[];
+    try {
+      entries = await fsPromises.readdir(directory, { withFileTypes: true, encoding: "utf8" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") entries = [];
+      else throw new ThreadRegistryError("read-failed", `Unable to enumerate thread registries: ${directory}`, directory, { cause: error });
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const path = join(directory, entry.name);
+      const raw = await readText(path);
+      if (raw === null) continue;
+      const parsed = parseJson(raw, path);
+      if (Array.isArray(parsed)) continue;
+      const catalog = parseCatalog(raw, path);
+      if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) {
+        throw new ThreadRegistryError("corrupt", `Thread registry filename does not match its workspace identity: ${path}`, path);
+      }
+      if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
+      workspaceIds.add(catalog.workspaceId);
+    }
+    const archived: Thread[] = [];
+    for (const workspaceId of workspaceIds) {
+      archived.push(...await archiveThreadsForDeletedSession(workspaceId, sessionId));
+    }
+    return archived;
+  };
+
   const convertThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
@@ -1352,6 +1385,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     cancelThread,
     archiveThread,
     archiveThreadsForDeletedSession,
+    archiveThreadsForDeletedSessionAcrossWorkspaces,
     convertThread,
     mergeThread,
     cancelAllForParent,

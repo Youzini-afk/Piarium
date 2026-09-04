@@ -1,6 +1,15 @@
 import React from 'react';
-import type { JsonValue, PiSettingsSnapshot, RuntimeContextTarget } from '@piarium/protocol';
+import {
+  DEFAULT_HARNESS_SETTINGS,
+  validatePermissionRule,
+  type JsonValue,
+  type PermissionMode,
+  type PermissionRule,
+  type PiSettingsSnapshot,
+  type RuntimeContextTarget,
+} from '@piarium/protocol';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SettingsSection,
@@ -27,10 +36,12 @@ const TOOL_KEYS = [
 const SHELL_OPTIONS = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 
 interface HarnessSettings {
-  tools?: Record<string, boolean>;
+  tools?: Partial<Record<string, boolean>>;
   shell?: string;
   output?: { visibleBytes?: number };
   bash?: { waitMs?: number };
+  models?: Record<string, { providerId: string; modelId: string }>;
+  permissions?: { mode?: PermissionMode; rules?: PermissionRule[] };
 }
 
 function readHarnessSettings(snapshot: PiSettingsSnapshot | null): HarnessSettings {
@@ -54,6 +65,8 @@ export const HarnessSettingsPage: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [rulesDraft, setRulesDraft] = React.useState('[]');
+  const [rulesIssue, setRulesIssue] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -72,10 +85,17 @@ export const HarnessSettingsPage: React.FC = () => {
   }, [runtimeTarget]);
 
   const harness = readHarnessSettings(snapshot);
-  const tools = React.useMemo(() => harness.tools ?? {}, [harness.tools]);
-  const shell = harness.shell ?? 'auto';
-  const visibleBytes = harness.output?.visibleBytes ?? 32768;
-  const bashWaitMs = harness.bash?.waitMs ?? 30000;
+  const tools = React.useMemo(() => harness.tools ?? DEFAULT_HARNESS_SETTINGS.tools, [harness.tools]);
+  const shell = harness.shell ?? DEFAULT_HARNESS_SETTINGS.shell;
+  const visibleBytes = harness.output?.visibleBytes ?? DEFAULT_HARNESS_SETTINGS.output.visibleBytes;
+  const bashWaitMs = harness.bash?.waitMs ?? DEFAULT_HARNESS_SETTINGS.bash.waitMs;
+  const permissionMode = harness.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? 'normal';
+  const smartAvailable = Boolean(harness.models?.permissionJudge);
+
+  React.useEffect(() => {
+    setRulesDraft(JSON.stringify(harness.permissions?.rules ?? [], null, 2));
+    setRulesIssue(null);
+  }, [harness.permissions?.rules, snapshot?.globalRevision]);
 
   const saveHarness = React.useCallback(async (newHarness: HarnessSettings) => {
     if (isSaving || !snapshot) return;
@@ -115,6 +135,32 @@ export const HarnessSettingsPage: React.FC = () => {
   const handleBashWaitMsChange = React.useCallback((value: number) => {
     void saveHarness({ ...harness, bash: { ...harness.bash, waitMs: value } });
   }, [harness, saveHarness]);
+
+  const handlePermissionModeChange = React.useCallback((value: string) => {
+    if (value === 'smart' && !smartAvailable) return;
+    void saveHarness({
+      ...harness,
+      permissions: { ...harness.permissions, mode: value as PermissionMode },
+    });
+  }, [harness, saveHarness, smartAvailable]);
+
+  const handlePermissionRulesSave = React.useCallback(() => {
+    try {
+      const parsed = JSON.parse(rulesDraft) as unknown;
+      if (!Array.isArray(parsed)) throw new Error(t('settings.page.harness.permissions.rules.arrayError'));
+      const rules = parsed.map((rule, index) => validatePermissionRule(
+        rule as PermissionRule,
+        `permission[${index}]`,
+      ));
+      setRulesIssue(null);
+      void saveHarness({
+        ...harness,
+        permissions: { ...harness.permissions, rules },
+      });
+    } catch (ruleError) {
+      setRulesIssue(ruleError instanceof Error ? ruleError.message : String(ruleError));
+    }
+  }, [harness, rulesDraft, saveHarness, t]);
 
   if (isLoading) {
     return (
@@ -157,6 +203,55 @@ export const HarnessSettingsPage: React.FC = () => {
               description={t(`settings.page.harness.tool.${toolKey}.description`)}
             />
           ))}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.permissions')}
+        description={t('settings.page.harness.section.permissions.description')}
+      >
+        <div className="space-y-4">
+          <SettingsFieldRow
+            label={t('settings.page.harness.permissions.mode.label')}
+            description={t('settings.page.harness.permissions.mode.description')}
+          >
+            <Select value={permissionMode} onValueChange={handlePermissionModeChange}>
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className={SETTINGS_OPTION_STACK_CLASS}>
+                <SelectItem value="normal">{t('settings.page.harness.permissions.mode.normal')}</SelectItem>
+                <SelectItem value="accept-edits">{t('settings.page.harness.permissions.mode.accept-edits')}</SelectItem>
+                <SelectItem value="bypass">{t('settings.page.harness.permissions.mode.bypass')}</SelectItem>
+                <SelectItem value="smart" disabled={!smartAvailable}>
+                  {t('settings.page.harness.permissions.mode.smart')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+          {!smartAvailable ? (
+            <p className="text-xs text-muted-foreground">{t('settings.page.harness.permissions.smartUnavailable')}</p>
+          ) : null}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-foreground" htmlFor="harness-permission-rules">
+              {t('settings.page.harness.permissions.rules.label')}
+            </label>
+            <p className="text-xs text-muted-foreground">{t('settings.page.harness.permissions.rules.description')}</p>
+            <textarea
+              id="harness-permission-rules"
+              value={rulesDraft}
+              spellCheck={false}
+              onChange={(event) => setRulesDraft(event.target.value)}
+              className="min-h-40 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-primary"
+            />
+            {rulesIssue ? <p className="text-xs text-destructive">{rulesIssue}</p> : null}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">{t('settings.page.harness.permissions.coexistence')}</p>
+              <Button type="button" size="sm" onClick={handlePermissionRulesSave} disabled={isSaving}>
+                {t('settings.page.harness.permissions.rules.save')}
+              </Button>
+            </div>
+          </div>
         </div>
       </SettingsSection>
 

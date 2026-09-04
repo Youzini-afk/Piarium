@@ -1,4 +1,6 @@
-import type path from 'node:path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { assertAbsolutePathInWorkspace } from '../workspace/path-safety.js';
 
 const CONTENT_SEARCH_EXCLUDED_GLOBS = [
   '!**/node_modules/**',
@@ -28,6 +30,8 @@ export type WorkspaceContentSearchResult =
 export interface WorkspaceContentSearchRequest {
   includeHidden?: boolean | undefined;
   maxResults?: number | undefined;
+  /** Optional workspace-contained files/directories to search instead of the whole root. */
+  paths?: string[] | undefined;
   query?: string | undefined;
   workspaceId?: string | undefined;
 }
@@ -62,6 +66,7 @@ export interface SearchChild {
 export interface WorkspaceContentSearchDependencies {
   documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
   env?: NodeJS.ProcessEnv | undefined;
+  fsPromises?: Pick<typeof fs.promises, 'realpath' | 'stat'> | undefined;
   pathModule: PathModule;
   spawn(command: string, args: string[], options: {
     cwd: string;
@@ -135,6 +140,7 @@ export const createWorkspaceContentSearch = ({
   spawn,
   pathModule,
   env = process.env,
+  fsPromises = fs.promises,
 }: WorkspaceContentSearchDependencies) => {
   const searchContent = async (
     request: WorkspaceContentSearchRequest,
@@ -162,6 +168,28 @@ export const createWorkspaceContentSearch = ({
       return { status: 'failure', generation, message };
     }
 
+    let searchPaths = [workspace.root];
+    if (request.paths !== undefined) {
+      if (!Array.isArray(request.paths) || request.paths.length === 0 || !request.paths.every((entry) => typeof entry === 'string' && entry.trim())) {
+        return { status: 'failure', generation, message: 'Search paths must be a non-empty string array' };
+      }
+      try {
+        searchPaths = await Promise.all(request.paths.map(async (entry) => {
+          const resolved = await assertAbsolutePathInWorkspace(
+            pathModule.isAbsolute(entry) ? entry : pathModule.resolve(workspace.root, entry),
+            { root: workspace.root, fsPromises, pathModule, allowMissing: false },
+          );
+          return resolved.realPath;
+        }));
+      } catch (error) {
+        return {
+          status: 'failure',
+          generation,
+          message: error instanceof Error ? error.message : 'Search path is outside the workspace',
+        };
+      }
+    }
+
     const maxResults = typeof request.maxResults === 'number'
       && Number.isFinite(request.maxResults) && request.maxResults > 0
       ? Math.floor(request.maxResults)
@@ -175,7 +203,7 @@ export const createWorkspaceContentSearch = ({
       ...CONTENT_SEARCH_EXCLUDED_GLOBS.flatMap((glob) => ['--glob', glob]),
     ];
     if (request?.includeHidden) args.push('--hidden');
-    args.push('--', query.trim(), workspace.root);
+    args.push('--', query.trim(), ...searchPaths);
 
     return await new Promise<WorkspaceContentSearchResult>((resolve) => {
       let child: SearchChild;

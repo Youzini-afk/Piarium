@@ -6,6 +6,7 @@ import {
   type PermissionPolicy,
   type PermissionMode,
   type PermissionDecision,
+  type GateResult,
 } from "@piarium/protocol";
 import { HARNESS_TOOL_META } from "@piarium/protocol";
 
@@ -36,11 +37,24 @@ import { HARNESS_TOOL_META } from "@piarium/protocol";
  */
 export interface PermissionGateOptions {
   policy: PermissionPolicy;
+  sessionId: string;
+  smartJudge?: (toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">;
+  onExternalGateDetected?: () => void;
 }
 
 const ALLOW_ONCE = "Allow once";
 const ALLOW_SESSION = "Allow for this session";
 const DENY = "Deny";
+const PERMISSION_SERVICES_KEY = Symbol.for("@gotgenes/pi-permission-system:session-services");
+
+const hasPublishedPermissionService = (sessionId: string): boolean => {
+  const value = (globalThis as Record<symbol, unknown>)[PERMISSION_SERVICES_KEY];
+  return value instanceof Map && value.has(sessionId);
+};
+
+const hasSessionServiceRegistry = (): boolean => (
+  (globalThis as Record<symbol, unknown>)[PERMISSION_SERVICES_KEY] instanceof Map
+);
 
 export function createPermissionGateExtension(options: PermissionGateOptions): ExtensionFactory {
   const { policy } = options;
@@ -48,8 +62,29 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
   // Session-scoped "always allow" set — tools the user approved for
   // the entire session.
   const sessionAllow = new Set<string>();
+  let externalGateReported = false;
+  let legacyExternalGateActive = false;
+
+  const externalGateActive = (): boolean => {
+    const active = legacyExternalGateActive || hasPublishedPermissionService(options.sessionId);
+    if (active && !externalGateReported) {
+      externalGateReported = true;
+      options.onExternalGateDetected?.();
+    }
+    return active;
+  };
 
   return (pi) => {
+    pi.events.on("permissions:ready", (value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const sessionId = (value as Record<string, unknown>).sessionId;
+      if (sessionId !== options.sessionId) return;
+      // Releases before the session-keyed service locator announced their
+      // presence only through this session-local event. Support them without
+      // treating a missing entry in a modern registry as an active service.
+      if (!hasSessionServiceRegistry()) legacyExternalGateActive = true;
+      externalGateActive();
+    });
     pi.on("tool_call", async (event, ctx) => {
       const toolName = event.toolName;
       const params = event.input as Record<string, unknown>;
@@ -59,7 +94,26 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
         return undefined;
       }
 
-      const result = evaluateGate(toolName, params, policy);
+      // The mature permission-system package is the sole gate when this exact
+      // session currently publishes its service. Resolve on every call so a
+      // sibling session cannot trigger yielding and hot-unload restores the
+      // Harness-only fallback without restarting the worker.
+      if (externalGateActive()) return undefined;
+
+      let result: GateResult = evaluateGate(toolName, params, policy);
+      if (
+        policy.mode === "smart"
+        && result.decision === "ask"
+        && !isHighRisk(toolName, params)
+        && options.smartJudge
+      ) {
+        try {
+          const judged = await options.smartJudge(toolName, params);
+          result = { decision: judged, reason: `smart mode: model judged ${judged}` };
+        } catch {
+          result = { decision: "ask", reason: "smart mode judge failed" };
+        }
+      }
       const decision: PermissionDecision = result.decision;
 
       if (decision === "deny") {
@@ -111,7 +165,7 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
  */
 function buildDialogTitle(toolName: string, params: Record<string, unknown>): string {
   if (toolName === "bash" || toolName === "write_to_process") {
-    const command = params["command"];
+    const command = params[toolName === "bash" ? "command" : "text"];
     if (typeof command === "string") {
       const firstLine = command.split("\n")[0] ?? command;
       const truncated = firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
@@ -144,7 +198,7 @@ export function buildPermissionPolicy(
   customRules?: PermissionPolicy["rules"],
 ): PermissionPolicy {
   if (customRules && customRules.length > 0) {
-    return { mode, rules: customRules };
+    return { mode, rules: [...customRules, ...defaultRules(mode, askBefore)] };
   }
   return { mode, rules: defaultRules(mode, askBefore) };
 }

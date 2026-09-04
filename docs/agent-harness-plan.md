@@ -234,8 +234,7 @@ OutputRef/UTF-8、path authority/lease 与三段 bridge E2E；本轮 protocol 59
 
 T1 **真实 child session 的线程纵切（核心已于 2026-09-04 交付）**（一个 Thread、一个 Pi Run、一个 worktree；dispatch / send /
 wait / cancel / report / merge；worker 与 host 崩溃恢复；活性与等待传感器；Fleet；最小线程侧栏；先不做嵌套与自动 review）→
-T2 **权限纵切**（Host enforcement 完整 + pi-host
-门 + 插件并存与重复提示；真实恶意路径测试通过后再移除插件）→ T3 **上下文 shadow mode**（观察者接事件源、Zone 2 真材料、
+T2 **权限纵切（2026-09-04 已交付）**（Host capability / scope enforcement + pi-host fallback + 插件单一提示所有权；保留成熟插件）→ T3 **上下文 shadow mode**（观察者接事件源、Zone 2 真材料、
 记忆 agent 维护块但不接管、TranscriptRef 全接通）→ T4 **最小回放集**（设计 8.6）→ 由回放数据决定压缩接管、记忆 agent
 模型、TTL 唤醒实验。阶段 4（默认 runtime）并行；阶段 5、6 暂停到 T1 `proven`。
 
@@ -789,9 +788,10 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 设计：agent-harness.md 第 9.1.2 节（三层模型、真值表、威胁模型）。
 
-**状态（2026-09-04）**：3b.1 的 pi-host 门 `proven`（真会话 e2e：allow once / deny / 会话授权 / 高风险覆盖 / 只读不弹窗），
-默认开启；Host 静态授权在 P0.2；3b.2 `implemented`；3b.3 已回退（D-021），插件与原生门并存。剩余以 **T2 权限纵切**交付：
-Host enforcement 完整 + 插件并存时的重复提示 + 工作区规则 ReDoS 防护 + 真实恶意路径测试，全部通过后再移除插件。
+**状态（2026-09-04）**：T2 已交付。Host 静态 capability 与 path/scope enforcement 已接生产；用户/工作区字段所有权、
+工作区只收紧权限、危险 regex 拒绝均有契约测试；pi-host fallback 的 normal / accept-edits / bypass / Smart 已进真会话 E2E。
+`pi-permission-system` 活跃时按 session-keyed service 让它成为唯一提示所有者，原生门动态让位；插件卸载后无需重启即可恢复
+fallback。D-044 取代“验证后移除插件”的旧目标。
 
 ### 3b.1 `tool_call` 门控与策略文件
 
@@ -803,11 +803,11 @@ interface PermissionPolicy { mode: 'normal' | 'accept-edits' | 'bypass' | 'smart
 
   默认规则由 `HARNESS_TOOL_META.mutation` 生成（已实施，`packages/protocol/src/permission-gate.ts`）；非 harness 工具不由
   本门处理。判定顺序以设计 9.1.2 的真值表为准，实现与测试都对着那张表。
-- pi-host 进程内扩展 `permission-gate-extension.ts`（已实施）：`ask` 走 `ctx.ui.select`（Allow once / Allow for this
-  session / Deny）；高风险调用的 "Allow for this session" 不记入。与 `@gotgenes/pi-permission-system` 同时启用时原生优先
-  并在诊断面板提示重复（**未做**，T2）。
-- 测试：已有 `permission-gate.test.ts`（22）、`phase3b-e2e.test.ts`、`session-e2e.test.ts`（真会话 4 条）。T2 补：工作区
-  收紧规则生效、放宽规则被忽略；ReDoS 模式被拒；插件并存时只弹一次。
+- pi-host 进程内扩展 `permission-gate-extension.ts`（已实施）：插件缺席时，`ask` 走 `ctx.ui.select`（Allow once / Allow for this
+  session / Deny），高风险调用的 "Allow for this session" 不记入。插件存在时按**当前会话**的已发布 service 每次确认，完全
+  让位；不因其他会话的 ready 事件串线，也不把卸载后的旧状态永久缓存。
+- 测试：`permission-gate.test.ts` 覆盖合并、模式、高风险与 regex；`session-e2e.test.ts` 覆盖真会话 allow/deny/会话授权/Smart；
+  `permission-gate-extension.test.ts` 覆盖插件并存只弹一次、跨会话隔离与热卸载恢复。
 
 ### 3b.2 Settings 页与 Smart 模式
 
@@ -816,13 +816,11 @@ interface PermissionPolicy { mode: 'normal' | 'accept-edits' | 'bypass' | 'smart
   包管理安装、`git (push|reset|checkout|rebase|clean)`、路径含 `.env|id_rsa|\.ssh`）**永远 ask**，不经模型。
 - 测试：模式行为；高风险类别不受模型判定影响；槽位未配置 → Smart 不可选。
 
-### 3b.3 停止 provisioning 插件与文档同步
+### 3b.3 保留成熟插件与明确 fallback
 
-- **前提**（D-021，T2 完成标准）：Host 静态授权已就位、pi-host 门覆盖插件的全部面、真实恶意路径测试通过、并存时的
-  重复提示已实现。满足前不动清单。
-- 然后：`packages/protocol/src/foundational-pi-packages.ts` 移除 `@gotgenes/pi-permission-system`（revision 2→3）；相关
-  provisioning 测试更新；已安装实例不删不迁。这是 0.1 暂停类别（安全默认值），实施前提交决策日志待验收。
-- 文档：`architecture.md` 第 4.1、7.1、9 节；`README.md` 维护集成表；`extension-compatibility.md`；`security.md`。
+- `@gotgenes/pi-permission-system` 保留在 foundational manifest；它在已加载会话中拥有权限提示，Piarium 原生门仅作缺席 fallback。
+- 当前不建立“做到某几个测试后自动移除”的检查表。若未来重提替换，必须先逐项证明 Bash AST、规范路径/外部目录、MCP、skill、
+  子会话权限转发、审计与跨扩展 API 的能力等价，并作为安全默认值变更单独复审；不能把 Harness 自有工具的 E2E 当成全插件等价。
 
 ## 阶段 4–6（纲要）
 

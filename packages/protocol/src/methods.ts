@@ -314,7 +314,7 @@ export interface HostMethodMap {
     result: { closed: boolean };
   };
   "session.create": {
-    params: { cwd: string; model?: ModelSelection; name?: string; parentSession?: string; tools?: string[] };
+    params: { cwd: string; model?: ModelSelection; name?: string; parentSession?: string; scope?: string[]; tools?: string[] };
     result: SessionSnapshot;
   };
   "session.list": {
@@ -405,6 +405,7 @@ export interface HostMethodMap {
       model?: ModelSelection;
       sessionFile?: string;
       sessionId?: string;
+      scope?: string[];
       tools?: string[];
       workspace?: SessionWorkspaceBinding;
     };

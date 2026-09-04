@@ -76,6 +76,12 @@ const requestPaths = (
       ? [{ allowMissing: false, path: record.cwd }]
       : "invalid";
   }
+  if (method === "thread.dispatch") {
+    if (record.scope === undefined) return [];
+    return Array.isArray(record.scope) && record.scope.every((path) => typeof path === "string" && path.trim())
+      ? record.scope.map((path) => ({ allowMissing: true, path: path as string }))
+      : "invalid";
+  }
   if (method === "fs.lock") {
     if (record.action === "release") {
       return typeof record.leaseId === "string" && record.leaseId.length > 0 ? [] : "invalid";

@@ -4,6 +4,8 @@ import {
   defaultRules,
   mergePolicies,
   isHighRisk,
+  permissionPatternIssue,
+  PermissionPolicyValidationError,
   type PermissionPolicy,
 } from "./permission-gate.js";
 
@@ -66,6 +68,15 @@ describe("evaluateGate", () => {
     expect(evaluateGate("dispatch", { role: "hard-implement" }, policy).decision).toBe("ask");
   });
 
+  it("treats askBefore role names as literals rather than regular expressions", () => {
+    const policy: PermissionPolicy = {
+      mode: "normal",
+      rules: defaultRules("normal", { "review.*": true }),
+    };
+    expect(evaluateGate("dispatch", { role: "review.*" }, policy).decision).toBe("ask");
+    expect(evaluateGate("dispatch", { role: "review-fast" }, policy).decision).toBe("allow");
+  });
+
   it("rules evaluated top-down, first match wins", () => {
     const policy: PermissionPolicy = {
       mode: "normal",
@@ -96,16 +107,25 @@ describe("evaluateGate", () => {
 });
 
 describe("mergePolicies", () => {
-  it("workspace overrides user mode", () => {
+  it("workspace cannot loosen the user mode", () => {
     const user: PermissionPolicy = { mode: "normal", rules: [] };
     const merged = mergePolicies(user, { mode: "accept-edits" });
-    expect(merged.mode).toBe("accept-edits");
+    expect(merged.mode).toBe("normal");
   });
 
-  it("workspace overrides user rules", () => {
+  it("workspace allow rules are ignored", () => {
     const user: PermissionPolicy = { mode: "normal", rules: [{ tool: "*", decision: "ask" }] };
     const merged = mergePolicies(user, { rules: [{ tool: "*", decision: "allow" }] });
-    expect(merged.rules[0]?.decision).toBe("allow");
+    expect(merged.rules).toEqual(user.rules);
+  });
+
+  it("workspace deny rules precede user allows, including in bypass mode", () => {
+    const user: PermissionPolicy = { mode: "bypass", rules: [{ tool: "bash", decision: "allow" }] };
+    const merged = mergePolicies(user, {
+      rules: [{ tool: "bash", match: { param: "command", pattern: "^deploy" }, decision: "deny" }],
+    });
+    expect(evaluateGate("bash", { command: "deploy prod" }, merged).decision).toBe("deny");
+    expect(evaluateGate("bash", { command: "echo ok" }, merged).decision).toBe("allow");
   });
 
   it("falls back to user when workspace doesn't specify", () => {
@@ -113,6 +133,31 @@ describe("mergePolicies", () => {
     const merged = mergePolicies(user, {});
     expect(merged.mode).toBe("normal");
     expect(merged.rules).toEqual(user.rules);
+  });
+
+  it("rejects backtracking-prone workspace regexes", () => {
+    expect(permissionPatternIssue("(a+)+$")).toContain("quantified groups");
+    expect(permissionPatternIssue("(a|aa)+$")).toContain("quantified groups");
+    expect(permissionPatternIssue("((a|aa))+$")).toContain("quantified groups");
+    expect(() => mergePolicies(
+      { mode: "normal", rules: [] },
+      { rules: [{ tool: "bash", match: { param: "command", pattern: "(a+)+$" }, decision: "deny" }] },
+    )).toThrow(PermissionPolicyValidationError);
+  });
+
+  it("rejects malformed modes, rule arrays, and match objects from JSON settings", () => {
+    expect(() => mergePolicies(
+      { mode: "surprise" as never, rules: [] },
+      {},
+    )).toThrow(PermissionPolicyValidationError);
+    expect(() => mergePolicies(
+      { mode: "normal", rules: {} as never },
+      {},
+    )).toThrow(PermissionPolicyValidationError);
+    expect(() => mergePolicies(
+      { mode: "normal", rules: [{ tool: "bash", match: null as never, decision: "ask" }] },
+      {},
+    )).toThrow(PermissionPolicyValidationError);
   });
 });
 
@@ -131,6 +176,11 @@ describe("isHighRisk", () => {
 
   it("detects npm install", () => {
     expect(isHighRisk("bash", { command: "npm install express" })).toBe(true);
+  });
+
+  it("checks commands sent to a running process and apply_patch file headers", () => {
+    expect(isHighRisk("write_to_process", { text: "git push origin main" })).toBe(true);
+    expect(isHighRisk("apply_patch", { patch: "*** Begin Patch\n*** Update File: .ENV\n*** End Patch" })).toBe(true);
   });
 
   it("detects .env path", () => {

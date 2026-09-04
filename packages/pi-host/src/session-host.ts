@@ -149,6 +149,25 @@ import { mergeHarnessSettings, resolveRoles, type HarnessSettings, type ModelSel
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
 const PIARIUM_INSTRUCTIONS_MESSAGE_TYPE = "piarium.instructions";
+const SMART_PERMISSION_SYSTEM_PROMPT = "You are a permission judge. Decide whether this tool call is routine enough to allow automatically or whether the user should be asked. Reply with exactly allow or ask.";
+
+function permissionJudgeFacts(toolName: string, params: Record<string, unknown>): Record<string, unknown> {
+  if (toolName === "bash") return { command: params.command };
+  if (toolName === "write_to_process") return { text: params.text };
+  if (toolName === "write" || toolName === "edit") {
+    return { path: params.path ?? params.file_path };
+  }
+  if (toolName === "apply_patch") {
+    const patch = typeof params.patch === "string" ? params.patch : "";
+    return {
+      files: patch.split(/\r?\n/)
+        .filter((line) => /^\*\*\* (?:Add|Update|Delete) File: /.test(line))
+        .map((line) => line.replace(/^\*\*\* (?:Add|Update|Delete) File: /, "")),
+    };
+  }
+  if (toolName === "dispatch") return { role: params.role, task: params.task };
+  return params;
+}
 
 function overlayFleetExtensionLoadErrors(
   snapshot: PiFleetSnapshot,
@@ -2695,8 +2714,11 @@ export class SessionHost {
       });
       // Read merged HarnessSettings from Pi settings (user + project)
       const userHarness = (settingsManager.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
-      const projectHarness = (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const projectHarness = settingsManager.isProjectTrusted()
+        ? (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {}
+        : {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
+      let permissionJudge: ((toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">) | undefined;
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -2775,13 +2797,24 @@ export class SessionHost {
             },
             {
               factory: createPermissionGateExtension({
+                sessionId: sessionManager.getSessionId(),
                 policy: buildPermissionPolicy(
                   harnessSettings.permissions?.mode ?? "normal",
                   Object.fromEntries(
                     Object.entries(harnessSettings.dispatch.askBefore)
                       .filter(([, v]) => v !== undefined),
                   ) as Record<string, boolean>,
+                  harnessSettings.permissions?.rules,
                 ),
+                smartJudge: async (toolName, params) => permissionJudge
+                  ? permissionJudge(toolName, params)
+                  : "ask",
+                onExternalGateDetected: () => {
+                  this.#emit("host.log", {
+                    level: "info",
+                    message: "Piarium native permission prompts yielded to the active pi-permission-system package to avoid duplicate approval dialogs",
+                  });
+                },
               }),
               hidden: true,
               name: "piarium-permission-gate",
@@ -2810,6 +2843,35 @@ export class SessionHost {
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
       );
       const configured = await this.#configureServices?.(services);
+      const permissionJudgeSelection = harnessSettings.models.permissionJudge;
+      const permissionJudgeModel = permissionJudgeSelection
+        ? services.modelRuntime.getModel(permissionJudgeSelection.providerId, permissionJudgeSelection.modelId)
+        : undefined;
+      if (permissionJudgeSelection && !permissionJudgeModel) {
+        services.diagnostics.push({
+          type: "warning",
+          message: `Permission judge model is unavailable: ${permissionJudgeSelection.providerId}/${permissionJudgeSelection.modelId}`,
+        });
+      }
+      if (permissionJudgeModel) {
+        permissionJudge = async (toolName, params) => {
+          const response = await services.modelRuntime.completeSimple(permissionJudgeModel, {
+            systemPrompt: SMART_PERMISSION_SYSTEM_PROMPT,
+            messages: [{
+              role: "user",
+              content: `Tool: ${toolName}\nFacts: ${JSON.stringify(permissionJudgeFacts(toolName, params))}`,
+              timestamp: Date.now(),
+            }],
+          }, { reasoning: "minimal" });
+          const text = response.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(" ")
+            .trim()
+            .toLowerCase();
+          return text === "allow" ? "allow" : "ask";
+        };
+      }
       const selectedLaunchModel = this.#sessionModelSelection === undefined
         ? undefined
         : services.modelRuntime.getModel(

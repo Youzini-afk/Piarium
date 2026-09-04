@@ -317,6 +317,7 @@ export class PiRuntimeBroker {
   readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
+  readonly #sessionWorkspaceScopes = new Map<string, readonly string[]>();
   readonly #knownSummaries = new Map<string, SessionSummary>();
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
@@ -557,7 +558,7 @@ export class PiRuntimeBroker {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
-    launch?: { model?: { providerId: string; modelId: string }; tools?: string[] },
+    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[] },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
     const normalizedCwd = resolve(cwd);
@@ -571,6 +572,7 @@ export class PiRuntimeBroker {
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
       });
       this.#bindSession(worker, snapshot.sessionId);
+      if (launch?.scope?.length) this.#sessionWorkspaceScopes.set(snapshot.sessionId, [...launch.scope]);
       if (workspace !== undefined) {
         await this.#persistWorkspaceBinding(
           await this.#metadataFor(worker),
@@ -599,6 +601,7 @@ export class PiRuntimeBroker {
     model?: { providerId: string; modelId: string };
     sessionFile?: string;
     sessionId?: string;
+    scope?: string[];
     tools?: string[];
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
@@ -606,6 +609,7 @@ export class PiRuntimeBroker {
       const existing = this.#sessions.get(input.sessionId);
       if (existing) {
         const snapshot = await existing.request("session.snapshot", { sessionId: input.sessionId });
+        if (input.scope?.length) this.#sessionWorkspaceScopes.set(snapshot.sessionId, [...input.scope]);
         if (input.workspace !== undefined) {
           await this.#persistWorkspaceBinding(
             await this.#metadataFor(existing),
@@ -629,6 +633,7 @@ export class PiRuntimeBroker {
       ...(explicitSessionFile === undefined ? {} : { sessionFile: explicitSessionFile }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       ...(input.model === undefined ? {} : { model: { ...input.model } }),
+      ...(input.scope === undefined ? {} : { scope: [...input.scope] }),
       ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
     };
     let known = this.#knownSummaryForOpen(normalizedInput);
@@ -670,6 +675,7 @@ export class PiRuntimeBroker {
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
       this.#bindSession(opened.worker, opened.snapshot.sessionId);
+      if (input.scope?.length) this.#sessionWorkspaceScopes.set(opened.snapshot.sessionId, [...input.scope]);
       if (input.workspace !== undefined) {
         await this.#persistWorkspaceBinding(
           await this.#metadataFor(opened.worker),
@@ -920,6 +926,7 @@ export class PiRuntimeBroker {
   async forkSession(sessionId: string, entryId: string, position?: "before" | "at") {
     const worker = this.#workerForSession(sessionId);
     const sourceSummary = await this.#rememberSummary(worker, sessionId);
+    const sourceScope = this.#sessionWorkspaceScopes.get(sessionId);
     const finishTransition = worker.beginSessionTransition();
     try {
       const result = await worker.request("session.fork", {
@@ -928,7 +935,10 @@ export class PiRuntimeBroker {
         sessionId,
       });
       this.#bindSession(worker, result.snapshot.sessionId);
-      if (result.snapshot.sessionId !== sessionId) this.#sessions.delete(sessionId);
+      if (result.snapshot.sessionId !== sessionId) {
+        this.#sessions.delete(sessionId);
+        if (sourceScope) this.#sessionWorkspaceScopes.set(result.snapshot.sessionId, sourceScope);
+      }
       if (result.snapshot.sessionId !== sessionId && sourceSummary.workspace !== undefined) {
         await this.#persistWorkspaceBinding(
           await this.#metadataFor(worker),
@@ -1000,6 +1010,7 @@ export class PiRuntimeBroker {
       const hadPendingWorkspace = this.#pendingWorkspaceBindings.delete(sessionId);
       const removedMetadata = await metadata.remove(sessionId);
       this.#knownSummaries.delete(sessionId);
+      this.#sessionWorkspaceScopes.delete(sessionId);
       return { deleted: hadPendingWorkspace || removedMetadata, sessionId };
     }
     await this.#sessionDeleteCoordinator?.({ sessionId, summary: structuredClone(summary) });
@@ -1011,6 +1022,7 @@ export class PiRuntimeBroker {
     await metadata.remove(sessionId);
     this.#pendingWorkspaceBindings.delete(sessionId);
     this.#knownSummaries.delete(sessionId);
+    this.#sessionWorkspaceScopes.delete(sessionId);
     return { deleted: true, sessionId };
   }
 
@@ -1093,6 +1105,7 @@ export class PiRuntimeBroker {
     this.#configWatches.clear();
     this.#sessions.clear();
     this.#knownSummaries.clear();
+    this.#sessionWorkspaceScopes.clear();
     this.#pendingWorkspaceBindings.clear();
     this.#pendingProjectTrust.clear();
     this.#workerCwds.clear();
@@ -1871,6 +1884,9 @@ export class PiRuntimeBroker {
       ? {
           authorityInstanceId: this.#authorityInstanceId,
           sessionId: event.sessionId,
+          ...(this.#sessionWorkspaceScopes.has(event.sessionId)
+            ? { workspaceScope: this.#sessionWorkspaceScopes.get(event.sessionId)! }
+            : {}),
           ...(executionId === undefined ? {} : { runId: executionId }),
           workerId: event.workerId,
           workerGeneration: this.#runtimeGeneration,

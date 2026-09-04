@@ -1,8 +1,9 @@
+import path from "node:path";
 import type { SearchContentParams, SearchContentResult, SearchContentFile, SearchContentHit } from "@piarium/protocol";
 import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
 
 export interface HarnessSearchDeps {
-  search: (request: { query: string; workspaceId: string; maxResults?: number }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
+  search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
 }
 
@@ -94,7 +95,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
   return {
     async search(
       params: SearchContentParams,
-      ctx: { workspaceId: string | null; signal: AbortSignal },
+      ctx: { workspaceId: string | null; workspaceScope?: readonly string[]; signal: AbortSignal },
     ): Promise<SearchContentResult> {
       if (!ctx.workspaceId) {
         return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
@@ -110,11 +111,64 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       ctx.signal.addEventListener("abort", () => controller.abort(), { once: true });
 
       try {
+        const root = await deps.resolveWorkspaceRoot(ctx.workspaceId);
+        if (!root) {
+          return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+        }
+        const toPrefix = (input: string): string | null => {
+          const absolute = path.isAbsolute(input) ? path.resolve(input) : path.resolve(root, input);
+          const relative = path.relative(root, absolute);
+          if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+          return relative.split(path.sep).join("/").replace(/\/$/, "");
+        };
+        const comparable = (input: string): string => process.platform === "win32" ? input.toLowerCase() : input;
+        const within = (resourceId: string, prefixes: readonly string[]): boolean => {
+          const resource = comparable(resourceId);
+          return prefixes.some((rawPrefix) => {
+            const prefix = comparable(rawPrefix);
+            return !prefix || resource === prefix || resource.startsWith(`${prefix}/`);
+          });
+        };
+        const actorPrefixes = ctx.workspaceScope?.map(toPrefix).filter((value): value is string => value !== null) ?? [];
+        const requestedPrefixes = params.path === undefined
+          ? []
+          : [toPrefix(params.path)].filter((value): value is string => value !== null);
+        if (
+          (ctx.workspaceScope !== undefined && actorPrefixes.length !== ctx.workspaceScope.length)
+          || (params.path !== undefined && requestedPrefixes.length !== 1)
+        ) {
+          return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+        }
+        let searchPrefixes: string[] | undefined;
+        if (ctx.workspaceScope !== undefined && params.path !== undefined) {
+          searchPrefixes = [];
+          for (const actorPrefix of actorPrefixes) {
+            for (const requestedPrefix of requestedPrefixes) {
+              if (within(actorPrefix, [requestedPrefix])) searchPrefixes.push(actorPrefix);
+              else if (within(requestedPrefix, [actorPrefix])) searchPrefixes.push(requestedPrefix);
+            }
+          }
+          if (searchPrefixes.length === 0) {
+            return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          }
+        } else if (ctx.workspaceScope !== undefined) {
+          searchPrefixes = [...actorPrefixes];
+        } else if (params.path !== undefined) {
+          searchPrefixes = [...requestedPrefixes];
+        }
+        if (searchPrefixes) {
+          const minimal: string[] = [];
+          for (const prefix of [...new Set(searchPrefixes)].sort((left, right) => left.length - right.length)) {
+            if (!within(prefix, minimal)) minimal.push(prefix);
+          }
+          searchPrefixes = minimal;
+        }
         const result = await deps.search(
           {
             query: params.pattern,
             workspaceId: ctx.workspaceId,
             maxResults: limit * 3, // Over-fetch for grouping
+            ...(searchPrefixes ? { paths: searchPrefixes.map((prefix) => prefix || ".") } : {}),
           },
           { signal: controller.signal },
         );
@@ -126,8 +180,18 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
         }
         if (result.status === "ready") {
-          const root = await deps.resolveWorkspaceRoot(ctx.workspaceId) ?? "";
-          const { files, totalHits, totalFiles } = groupAndSort(result.hits, root, limit);
+          const hits = result.hits.filter((hit) => {
+            const resourceId = toPrefix(hit.resource.resourceId);
+            if (resourceId === null) return false;
+            return (
+              (ctx.workspaceScope === undefined || within(resourceId, actorPrefixes))
+              && (params.path === undefined || within(resourceId, requestedPrefixes))
+            );
+          });
+          if (hits.length === 0) {
+            return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          }
+          const { files, totalHits, totalFiles } = groupAndSort(hits, root, limit);
           const partial = totalHits > limit;
           return {
             status: "ready",

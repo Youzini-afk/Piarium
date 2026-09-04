@@ -37,7 +37,7 @@ describe("harness service host authorization", () => {
     });
     try {
       host.registerSession({
-        actor: ACTOR,
+        actor: { ...ACTOR, workspaceScope: ["packages/web"] },
         grantedCapabilities: ["read.output"],
         workspaceId: "workspace-1",
         workspaceRoot: "D:/workspace",
@@ -46,6 +46,7 @@ describe("harness service host authorization", () => {
         ...ACTOR,
         runId: "run-2",
         workspaceId: "workspace-1",
+        workspaceScope: ["packages/web"],
         grantedCapabilities: ["read.output"],
       });
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();

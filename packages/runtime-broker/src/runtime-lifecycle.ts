@@ -220,7 +220,7 @@ export class PiRuntimeLifecycle {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
-    launch?: { model?: { providerId: string; modelId: string }; tools?: string[] },
+    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[] },
   ): Promise<SessionSnapshot> {
     return this.requireBroker().createSession(cwd, name, parentSession, workspace, launch);
   }
@@ -230,6 +230,7 @@ export class PiRuntimeLifecycle {
     model?: { providerId: string; modelId: string };
     sessionFile?: string;
     sessionId?: string;
+    scope?: string[];
     tools?: string[];
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {

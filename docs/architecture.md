@@ -451,8 +451,12 @@ worker cannot pin a host handler open indefinitely.
 
 Host authorization is non-interactive: `HARNESS_METHOD_CAPABILITY` maps every
 method to a structural capability, and path-bearing shell/search/LSP/lock calls
-must remain within the actor workspace. User-facing allow/ask/deny policy stays
-in pi-host's `tool_call` gate; the two checks do not duplicate prompts.
+must remain within the actor workspace and the broker-pinned child scope when
+one exists. User-facing allow/ask/deny stays at Pi's `tool_call` boundary:
+`pi-permission-system` owns it when that session publishes its service, otherwise
+pi-host's Harness-only fallback handles it. The two checks do not duplicate prompts.
+Scope constrains Host-visible paths and search results; it is not an OS sandbox and
+does not constrain paths embedded in shell text or Pi tools executing inside the worker.
 
 Large tool output uses an ephemeral `OutputRef` signed by the current Host
 generation. FIFO sequence watermarks distinguish `expired` from `not-found`,

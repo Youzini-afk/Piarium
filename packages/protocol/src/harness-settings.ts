@@ -4,7 +4,7 @@
  * Effective at next session creation; frozen into `session.harness` for the session lifetime.
  */
 
-import type { PermissionMode } from "./permission-gate.js";
+import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -29,6 +29,7 @@ export interface HarnessSettings {
   };
   permissions?: {
     mode?: PermissionMode;
+    rules?: PermissionRule[];
   };
 }
 
@@ -55,12 +56,31 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
+  permissions: { mode: "normal", rules: [] },
 };
 
 export function mergeHarnessSettings(
   user: Partial<HarnessSettings>,
   workspace: Partial<HarnessSettings>,
 ): HarnessSettings {
+  const askBeforeKeys = new Set([
+    ...Object.keys(user.dispatch?.askBefore ?? {}),
+    ...Object.keys(workspace.dispatch?.askBefore ?? {}),
+  ]);
+  const askBefore = Object.fromEntries([...askBeforeKeys].map((key) => [
+    key,
+    user.dispatch?.askBefore?.[key] === true || workspace.dispatch?.askBefore?.[key] === true,
+  ]));
+  const permissions = mergePolicies(
+    {
+      mode: user.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? "normal",
+      rules: user.permissions?.rules ?? [],
+    },
+    {
+      ...(workspace.permissions?.mode === undefined ? {} : { mode: workspace.permissions.mode }),
+      ...(workspace.permissions?.rules === undefined ? {} : { rules: workspace.permissions.rules }),
+    },
+  );
   const merged: HarnessSettings = {
     ...DEFAULT_HARNESS_SETTINGS,
     ...user,
@@ -69,33 +89,31 @@ export function mergeHarnessSettings(
     tools: { ...DEFAULT_HARNESS_SETTINGS.tools, ...user.tools, ...workspace.tools },
     output: { ...DEFAULT_HARNESS_SETTINGS.output, ...user.output, ...workspace.output },
     bash: { ...DEFAULT_HARNESS_SETTINGS.bash, ...user.bash, ...workspace.bash },
-    models: { ...DEFAULT_HARNESS_SETTINGS.models, ...user.models, ...workspace.models },
+    // Model/provider selection is user-owned. A repository cannot redirect
+    // auxiliary requests to another provider.
+    models: { ...DEFAULT_HARNESS_SETTINGS.models, ...user.models },
     dispatch: {
       ...DEFAULT_HARNESS_SETTINGS.dispatch,
       ...user.dispatch,
       ...workspace.dispatch,
-      askBefore: {
-        ...DEFAULT_HARNESS_SETTINGS.dispatch.askBefore,
-        ...user.dispatch?.askBefore,
-        ...workspace.dispatch?.askBefore,
-      },
+      askBefore,
     },
     knowledge: {
       ...DEFAULT_HARNESS_SETTINGS.knowledge,
       ...user.knowledge,
       ...workspace.knowledge,
       autoAcceptSuggestions: {
-        ...DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions,
-        ...user.knowledge?.autoAcceptSuggestions,
-        ...workspace.knowledge?.autoAcceptSuggestions,
+        user: user.knowledge?.autoAcceptSuggestions?.user
+          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.user,
+        workspace: workspace.knowledge?.autoAcceptSuggestions?.workspace
+          ?? user.knowledge?.autoAcceptSuggestions?.workspace
+          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
       },
     },
     ...(user.web || workspace.web
       ? { web: { ...user.web, ...workspace.web } }
       : {}),
-    ...(user.permissions || workspace.permissions
-      ? { permissions: { ...user.permissions, ...workspace.permissions } }
-      : {}),
+    permissions,
   };
   return merged;
 }

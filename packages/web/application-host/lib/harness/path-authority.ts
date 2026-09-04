@@ -42,6 +42,32 @@ export function createHarnessPathAuthority({
           pathModule,
           allowMissing: options.allowMissing,
         });
+        if (actor.workspaceScope?.length) {
+          const targetIdentity = normalizePathIdentity(resolved.realPath, { pathModule, platform });
+          let permitted = false;
+          for (const scopePath of actor.workspaceScope) {
+            const scopeAbsolute = pathModule.isAbsolute(scopePath)
+              ? scopePath
+              : pathModule.resolve(workspace.root, scopePath);
+            try {
+              const scope = await assertAbsolutePathInWorkspace(scopeAbsolute, {
+                root: workspace.root,
+                fsPromises,
+                pathModule,
+                allowMissing: true,
+              });
+              const scopeIdentity = normalizePathIdentity(scope.realPath, { pathModule, platform });
+              const relative = pathModule.relative(scopeIdentity, targetIdentity);
+              if (!relative || (relative !== ".." && !relative.startsWith(`..${pathModule.sep}`) && !pathModule.isAbsolute(relative))) {
+                permitted = true;
+                break;
+              }
+            } catch (error) {
+              if (!(error instanceof WorkspacePathError)) throw error;
+            }
+          }
+          if (!permitted) return null;
+        }
         return {
           authorityId,
           workspaceId: actor.workspaceId,

@@ -102,6 +102,33 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("validates every child scope path before creating a thread", async () => {
+    const handle = vi.fn(async () => ({ text: "created", threadId: "thread-1", queued: false }));
+    const responses: Array<{ ok: boolean; code?: string }> = [];
+    const authorize = vi.fn(async (_actor: HarnessActorContext, candidate: string) => (
+      candidate === "src/new-file.ts"
+        ? { authorityId: "host-1", workspaceId: "workspace-1", canonicalResourceId: candidate, inputPath: candidate }
+        : null
+    ));
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["control.thread"]),
+      authorizeWorkspacePath: authorize,
+    });
+    router.register("thread.dispatch", { handle });
+    await router.processEvent(harnessEvent("thread.dispatch", {
+      role: "check",
+      task: "inspect",
+      scope: ["src/new-file.ts", "../outside"],
+    }));
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src/new-file.ts", { allowMissing: true });
+    expect(handle).not.toHaveBeenCalled();
+    expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
+    router.dispose();
+  });
+
   it("responds with failed when a service throws", async () => {
     const responses: Array<{ ok: boolean; code?: string; message?: string }> = [];
     const router = createHarnessRouter({

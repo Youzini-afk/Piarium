@@ -374,16 +374,18 @@ async function dispatchRuntimeRequestUnchecked(
     }
     case "session.create": {
       const model = optionalModelSelection(input);
+      const scope = optionalStringList(input, "scope");
       const tools = optionalStringList(input, "tools");
       return broker.createSession(
         requireString(input, "cwd"),
         optionalName(input),
         optionalString(input, "parentSession"),
         optionalSessionWorkspaceBinding(input),
-        model === undefined && tools === undefined
+        model === undefined && scope === undefined && tools === undefined
           ? undefined
           : {
               ...(model === undefined ? {} : { model }),
+              ...(scope === undefined ? {} : { scope }),
               ...(tools === undefined ? {} : { tools }),
             },
       );
@@ -394,6 +396,7 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionId = optionalString(input, "sessionId");
       const workspace = optionalSessionWorkspaceBinding(input);
       const model = optionalModelSelection(input);
+      const scope = optionalStringList(input, "scope");
       const tools = optionalStringList(input, "tools");
       if (!sessionFile && !sessionId) {
         throw new RuntimeDispatchError(
@@ -406,6 +409,7 @@ async function dispatchRuntimeRequestUnchecked(
         ...(sessionFile === undefined ? {} : { sessionFile }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(model === undefined ? {} : { model }),
+        ...(scope === undefined ? {} : { scope }),
         ...(tools === undefined ? {} : { tools }),
         ...(workspace === undefined ? {} : { workspace }),
       });

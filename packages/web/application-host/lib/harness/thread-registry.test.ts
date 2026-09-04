@@ -465,4 +465,16 @@ describe("thread registry", () => {
     expect(archived).toMatchObject({ id: thread.id, lifecycle: "archived", report: null });
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "success" });
   });
+
+  it("finds a deleted child session even when its runtime workspace differs from the parent catalog", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-worktree-session");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    const archived = await registry.archiveThreadsForDeletedSessionAcrossWorkspaces("child-worktree-session");
+    expect(archived.map((entry) => entry.id)).toEqual([thread.id]);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
+  });
 });

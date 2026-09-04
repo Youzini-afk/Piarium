@@ -18,10 +18,11 @@ export interface ThreadSessionAdapter {
     name: string;
     parentSession: string;
     model?: { providerId: string; modelId: string };
+    scope?: string[];
     tools: string[];
     workspaceId: string;
   }): Promise<SessionSnapshot>;
-  open(input: { cwd: string; model?: { providerId: string; modelId: string }; sessionId: string; tools: string[]; workspaceId: string }): Promise<SessionSnapshot>;
+  open(input: { cwd: string; model?: { providerId: string; modelId: string }; scope?: string[]; sessionId: string; tools: string[]; workspaceId: string }): Promise<SessionSnapshot>;
   prompt(sessionId: string, text: string, instructions?: string): Promise<void>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
@@ -36,6 +37,7 @@ export interface ThreadRuntimeOptions {
   sessions: ThreadSessionAdapter;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "merge">;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
+  resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   withMergeWriter?<T>(workspaceId: string, threadId: string, operation: () => Promise<T>): Promise<T>;
   onError?: (error: unknown) => void;
   /** Alert threshold only; it does not cancel or limit a Run. */
@@ -255,6 +257,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           signal: abortController.signal,
         });
     if (prepared.worktree) await options.registry.setWorktree(input.workspaceId, input.threadId, prepared.worktree);
+    const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
     let sessionId: string | null = null;
     try {
       const snapshot = await options.sessions.create({
@@ -262,8 +265,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         name: `${input.role ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession,
         ...(input.model ? { model: input.model } : {}),
+        ...(input.scope?.length ? { scope: [...input.scope] } : {}),
         tools: [...input.tools],
-        workspaceId: input.workspaceId,
+        workspaceId: runtimeWorkspaceId,
       });
       sessionId = snapshot.sessionId;
       const binding = {
@@ -527,12 +531,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
           const sourceRoot = await options.resolveWorkspaceRoot(workspaceId);
           const cwd = thread.worktree?.path ?? sourceRoot;
+          const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
           const snapshot = await options.sessions.open({
             cwd,
             ...(thread.model ? { model: thread.model } : {}),
+            ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
             sessionId: previous.sessionId!,
             tools: [...thread.manifest.tools],
-            workspaceId,
+            workspaceId: runtimeWorkspaceId,
           });
           resumedSessionId = snapshot.sessionId;
           const baselineStats = await options.sessions.stats(snapshot.sessionId).catch((error) => {

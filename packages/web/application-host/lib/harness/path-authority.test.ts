@@ -64,4 +64,24 @@ describe("harness path authority", () => {
     });
     await expect(authority.resolve(actor(), "file.ts", { allowMissing: false })).rejects.toBe(failure);
   });
+
+  it("restricts a child actor to its broker-pinned workspace scope", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-scope-"));
+    const allowed = join(root, "packages", "web");
+    fs.mkdirSync(allowed, { recursive: true });
+    writeFileSync(join(allowed, "inside.ts"), "inside");
+    writeFileSync(join(root, "outside.ts"), "outside");
+    const authority = createHarnessPathAuthority({
+      authorityId: "host-1",
+      documents: { inspectWorkspace: async () => ({ root }) },
+    });
+    const scoped = { ...actor(), workspaceScope: ["packages/web"] };
+    try {
+      await expect(authority.resolve(scoped, "packages/web/inside.ts", { allowMissing: false })).resolves.not.toBeNull();
+      await expect(authority.resolve(scoped, "outside.ts", { allowMissing: false })).resolves.toBeNull();
+      await expect(authority.resolve(scoped, "packages/ui/new.ts", { allowMissing: true })).resolves.toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

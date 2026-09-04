@@ -61,8 +61,8 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板替代 Curator server、凭据进钥匙串、结果进知识库、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索 provider 三层（模型 provider 自带 → 搜索 API → 明确不可用）；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
-| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；记忆 agent 固定主模型（缓存） |
-| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；**不检测插件、不自动让位**，唯一例外是 web 工具对 `pi-web-access` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
+| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；记忆 agent 固定主模型（缓存） |
+| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | 后续阶段；macOS Seatbelt / Linux bubblewrap+seccomp 可做，Windows 不承诺；沙箱内 shell 自动放行，`edit` / `write` 仍走权限（它们在 agent 进程内，沙箱管不到） |
 | 缓存契约 | Zone 0 会话内冻结；Zone 1 只追加、序列化确定；所有前缀失效操作批处理到压缩时刻 |
@@ -83,7 +83,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 检索 | 三级：`grep` 工具 → `explore` 工具（Devin 式快速检索的**算法管线**：rg 扇出 + 知识库符号图 + 可选向量 + 多信号排序，LLM 至多两小步且可选，**永不跟随主模型**）→ `retrieval` 角色（纯 LLM 多轮，独立槽位，未配置不注册） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
-| 权限 | **三层**，不寻找唯一安全边界（第 9.1.2 节）：pi-host `tool_call` 门控做 allow / ask / deny 与 UI，也是 worker 内直接写文件的工具目前唯一可阻断的门；Host 服务授权只验身份、静态能力与 workspace 包含，不弹窗；OS 沙箱后续。**原生权限管理替代 `pi-permission-system`**，与恢复替代 `pi-workspace-history` 同一路径；在原生门覆盖插件全部面之前插件保留、并存 |
+| 权限 | **三层**，不寻找唯一安全边界（第 9.1.2 节）：成熟的 `pi-permission-system` 在已加载时拥有 `tool_call` 决策与唯一 UI；Piarium 原生门是插件缺席时只覆盖 Harness 工具的 fallback；Host 服务授权只验身份、静态能力与 workspace 包含，不弹窗；OS 沙箱后续。停止 provisioning 不再是 T2 的既定结论，只有替代面达到真实能力等价并单独通过安全设计复审后才重新讨论 |
 | 知识库保留 | 可配置；默认按时间自动清理原始 `event` 与已结束会话的 `block`，`knowledge` 不按时间过期；删除会话级联删除其 event 与 block |
 | 用户级记忆 | 存在但轻：独立 `user.tdb`，只放 `knowledge`，不放 event / block；写入需经审阅；在 Settings 中可见、可编辑、可审计 |
 
@@ -442,13 +442,13 @@ harness"页有独立开关，关掉后的行为明确，不留半开状态：
 | 知识库 | 不写入 event / block；`recall` / `related` 不注册；已有 `.tdb` 保留不删 |
 | 子 agent 团队 / 单个角色 | `dispatch` 不注册或该角色从团队移除，主 agent 自己做；槽位未配置的角色本就不存在 |
 | `explore` 管线中的 LLM 步 | 清空 `models.explore` 即纯算法模式；`explore` 工具本身另有开关 |
-| 原生权限门控 | `tool_call` 门控交还给会话中任何强制型 Pi 扩展；关闭时 UI 显式警告"无 Piarium 权限门控" |
+| Piarium 权限 fallback | 插件存在时本来就由 `pi-permission-system` 持有门控；插件缺席且关闭 fallback 时 UI 明示该会话没有 Piarium 提供的 Harness 工具确认 |
 
 规则：
 
-- **没有自动让位，唯一例外是 web**（第 5.8 节）：`pi-web-access` 启用时 harness 的 `webfetch` / `websearch` 在该会话不
-  注册，因为两组同功能工具并存会让模型有两种方式做一件事。其他能力**不检测、不让位**——用户装了记忆插件、权限插件、
-  搜索插件时，自己决定关哪边，harness 不猜。
+- **让位必须有明确契约，不能靠包名猜。** `pi-web-access` 启用时 harness 的 `webfetch` / `websearch` 不注册，因为两组同功能
+  工具会让模型有两种入口；`pi-permission-system` 则通过公开的 session-keyed service 宣告它确实持有本会话权限门，原生
+  fallback 才让位。记忆、搜索等没有同等运行时契约的插件仍由用户选择关哪边。
 - 设置**按字段决定所有权**（D-031），不是整份设置一条规则；工作区级只在项目已 trusted 时生效（复用 Pi 的 project trust）：
 
   | 字段 | 所有权与合并 |
@@ -903,22 +903,27 @@ Devin 的一个诚实细节值得照搬：沙箱内 shell 自动放行，但 `ed
 沙箱管不到。三家在 Windows 上都没有原生沙箱（Claude Code 要求 WSL2）。Piarium 把沙箱列为第 5 阶段之后的候选：
 macOS 与 Linux 在 host 的 shell 监督器内可做，Windows 不承诺。沙箱不替代权限门控，只改变门控的默认答案。
 
-### 9.1.2 原生权限管理
+### 9.1.2 权限管理与原生 fallback
 
-权限门控收回 Piarium：与恢复替代 `pi-workspace-history` 同一路径，原生实现替代 `@gotgenes/pi-permission-system`。
-Piarium 的进程内扩展成为 [architecture.md](architecture.md) 所要求的"拥有 `tool_call` 门控的强制扩展"；策略按工具
+Piarium 不再把移除 `@gotgenes/pi-permission-system` 当作既定迁移终点。对实际 provision 的 v27 公共契约复审后确认，插件已经
+覆盖 Bash 语法拆分、规范路径与外部目录、MCP、skill、子会话转发、会话授权与审计，并提供 session-keyed service；当前原生门
+只覆盖 Harness 工具，直接替换会缩小真实保护面（D-044）。因此插件已加载时由它独占 `tool_call` 决策与 UI，Piarium 原生门按
+本会话发布的 service 动态让位；插件缺席或卸载后原生门立即恢复，作为 Harness 工具的 fallback，不出现连续两次确认。
+
+fallback 策略按工具
 名与参数模式声明，默认规则由 `HARNESS_TOOL_META` 的 `mutation` 属性生成（`none` 放行；`journaled` 在 normal 下 ask、
 accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（MCP、Pi 包）不由本门处理、交给 Pi 自己的权限
 系统；用户在 Settings 修改，策略文件是 Piarium 自有的原子 JSON 而非插件的原生配置。Devin CLI 的 Smart 模式（快模型
-判定安全性，装包 / 变更 git / `rm` / `sudo` / 敏感文件永远询问）作为可选模式纳入。在原生门覆盖插件的全部面之前
-**插件保留并与原生门并存**（D-021）；届时停止 provisioning 并从基础包清单移除，已安装的用户实例按普通 Pi 包对待，不删除、
-不迁移其配置。
+判定安全性，装包 / 变更 git / `rm` / `sudo` / 敏感文件永远询问）作为 fallback 的可选模式纳入。插件活跃时，以上原生模式
+与规则不参与最终决策；需要模型判断时使用插件公开的、由用户在 `authorizerChain` 中显式启用的 authorizer 扩展点。注册 link
+本身不取得权限，是否启用仍由插件配置决定。
 
 **三层，不寻找唯一安全边界**（D-035）：
 
-1. **pi-host `tool_call` 门**：唯一做 allow / ask / deny 与 UI 交互的层（`ask` 走现有 `ui.select`：Allow once / Allow for
-   this session / Deny）。它也是 `edit` / `write` / `apply_patch` 这类**在 worker 进程内直接写文件**的工具目前唯一可阻断
-   的门——host 对这些写入只能观察（mutation journal），不能阻止。
+1. **Pi `tool_call` 门**：插件存在时由 `pi-permission-system` 做 allow / ask / deny、路径与命令分析及 UI；插件缺席时由
+   pi-host fallback 处理 Harness 工具（`ask` 走现有 `ui.select`：Allow once / Allow for this session / Deny）。这一层也是
+   `edit` / `write` / `apply_patch` 这类**在 worker 进程内直接写文件**的工具目前唯一可阻断的门——Host 对这些写入只能通过
+   Harness wrapper 的 mutation lease 约束，无法约束任意第三方工具或 worker 自己的文件访问。
 2. **Host 服务授权**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态能力集、workspace / path 包含，
    覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `thread.*` / `fs.lock` / `lsp.*`）。能力按会话实际冻结的
    `activeTools` 推导：只有没有任何 `bash` 工具时才不含 `process.shell`；关闭 Piarium 的同名覆盖若会回退到 Pi 内置 bash，
@@ -926,6 +931,11 @@ accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（
    绕过工具入口。按风险类别授权：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill /
    merge）、`write`（未来经 host 中介的文档写入）。
 3. **OS 沙箱**（第 9.1.1 节）：限制 worker 绕过工具直接访问文件与网络。当前不具备。
+
+`ThreadLaunchManifest.scope` 是任务范围，同时对 Host 能解析出具体路径的服务形成强约束：`search.content` 的返回项、LSP 路径、
+`fs.lock` 路径与显式 `shell.exec.cwd` 都必须落在 scope 内。它**不是文件系统沙箱**：shell 命令文本内部可以改变目录或访问其他
+路径，Pi 内置 `read` 也在 worker 内直接执行。隔离 worktree 把写入副本与父工作区分开，但只有未来的 OS containment 才能约束
+同用户进程能读写的全部路径。
 
 **威胁模型**：worker 是 host 自己 spawn 的、同一 OS 用户的子进程，本来就拥有整个文件系统；第二层防的是**跨会话串线、
 陈旧 worker 污染当前会话、第三方 Pi 扩展借 host 能力越权**，不是防同权限下完全恶意的 worker——后者只有第三层能防。
@@ -950,7 +960,8 @@ RunManifest 落地前，host 从 broker 验证后的首次 `session.snapshot.act
 高风险类别：`bash` / `write_to_process` 的命令匹配 `rm | sudo | chmod | chown | mkfs | dd`、`git push | reset | checkout |
 rebase | clean`、包管理安装 / 卸载、路径含 `.env | id_rsa | .ssh`；`write` / `edit` / `apply_patch` 的路径含
 `.env | id_rsa | .ssh`。`bypass` 是用户说"别再问我"，高风险在 bypass 下同样放行。工作区提供的 regex 规则须有 ReDoS
-防护（长度上限与线性时间匹配），工作区只能收紧不能放宽（第 5.10 节）。
+防护（配置长度上限，并在构造 `RegExp` 前拒绝反向引用、lookaround、嵌套量词和量词包裹的分支），工作区只能收紧不能放宽
+（第 5.10 节）。
 
 ### 9.2 多 agent：主 agent 不面对角色，harness 面对
 
@@ -1177,7 +1188,7 @@ allowlist 不含 `dispatch`，因此嵌套线程仍是后续能力，而不是�
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等
 attention——实践里最常见的"卡死"其实
 是在等一个没人看见的权限确认或澄清问题：它出现在 `threads` / `wait` 结果和用户面板里，附问题正文，父 `send` 或人直接
-答；权限请求走原生权限 UI 并带线程徽标，永远不会静默等待。完成报告幂等：报告、记忆块快照、diff 统计原子写进注册表，
+答；权限请求走当前活动权限门的 UI 并带线程徽标，永远不会静默等待。完成报告幂等：报告、记忆块快照、diff 统计原子写进注册表，
 `done` 之后再 `wait` 仍返回同一份。
 
 #### 9.3.6 父 agent 的工具：看仪表盘，必要时传话
@@ -1226,8 +1237,8 @@ profile 是会话级属性：切换只在会话边界生效，会话中途不换
 
 ### 10.2 `code`（v1）
 
-本文档第 5–9 节即其规格。工作区形态：仓库；验证器：编辑后诊断、可选测试门、review 传感器；权限默认由原生权限
-管理（第 9.1.2 节）给出：只读工具放行，写与 shell 按用户策略。
+本文档第 5–9 节即其规格。工作区形态：仓库；验证器：编辑后诊断、可选测试门、review 传感器；权限默认由活动的
+`pi-permission-system` 管理，插件缺席时由原生 fallback 接管 Harness 工具（第 9.1.2 节）。
 
 ### 10.3 `research`（第二个）
 
@@ -1276,9 +1287,8 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 交付后删除）。
 
 2026-09-04 复审后的顺序调整：阶段 0–1b 已交付（详见状态矩阵）；阶段 2、3、3b 的模块大部分处于 `implemented`，接线部分
-`wired`。**P0 integrity 纵切已完成**（broker 身份 pin、Host 静态授权、注册表错误分类与对账、Thread + ThreadRun、两级输出
-引用、工作区级规范租约及故障注入）。下一步是一条**真实 child session 的线程纵切** → 权限纵切（Host enforcement +
-插件并存）→ 上下文 shadow mode + 最小回放集 → 由回放数据决定压缩
+`wired`。**P0 integrity、真实 child session 的 T1 线程纵切与 T2 权限纵切已完成**（具体证据见状态矩阵）。下一步是
+上下文 shadow mode + 最小回放集 → 由回放数据决定压缩
 接管与记忆 agent 是否开启。阶段 4 与内核正交，并行推进；阶段 5、6 暂停到线程纵切 `proven` 之后——是顺序，不是取消。
 下面的阶段列表保留为原始规划。
 
@@ -1298,8 +1308,8 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
    `models.explore` 的两小步）、`file` / `symbol` 节点与 LSP / Git 采集器、`related`、LSP 导航工具（`symbols` / `definition` /
    `references` / `hover`）；原生子会话 worker 运行时按**线程**形态（第 9.3 节）交付：host 持久化的线程注册表与状态机、
    worker 丢失恢复、host 观察的活性与循环检测、`dispatch` / `threads` / `wait` / `send` / `read_thread` / `kill`、角色目录
-   与独立模型槽位、worktree 隔离与回收策略、按 TTL 的唤醒、观察类工具的增量游标、线程侧栏与讨论线；review 传感器。
-3b. **原生权限**：进程内 `tool_call` 门控、策略文件、Settings 页、Smart 模式；停止 provisioning 插件。可与 3 并行。
+   与独立模型槽位、worktree 隔离与回收策略、事件驱动等待（TTL 续缓存仅作默认关闭实验）、观察类工具的增量游标、线程侧栏与讨论线；review 传感器。
+3b. **权限纵切**：Host 静态授权与 scope、`pi-permission-system` 单一提示所有权、原生 Harness fallback、Settings 与 Smart fallback。可与 3 并行。
 4. **默认 runtime**：内置钉住的 Pi。
 5. **外部 agent**：host 服务的 MCP 门面、ACP host、能力协商；届时重新评估协议兼容策略。
 6. **research profile**：在 1–3 稳定后开始，先做知识库 schema 扩展与文献采集器，再做 Shell 面。

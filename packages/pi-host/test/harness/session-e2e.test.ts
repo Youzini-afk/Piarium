@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -566,6 +566,89 @@ describe("session e2e — permission gate extension", () => {
           0,
           "mutation:none tools are allowed without a prompt",
         );
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("uses the configured Smart judge for an ordinary edit without prompting", async () => {
+    await withTempRoot("piarium-s-perm-smart-", async (root) => {
+      const faux = registerFauxProvider();
+      const model = faux.getModel();
+      const judgeContexts: Context[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "smart.txt", content: "ok" })]),
+        (context) => { judgeContexts.push(context); return fauxAssistantMessage("allow"); },
+        () => fauxAssistantMessage("done"),
+      ]);
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: {
+          models: { permissionJudge: { providerId: model.provider, modelId: model.id } },
+          permissions: { mode: "smart", rules: [] },
+        },
+      }), "utf8");
+      const session = await setupSession({ root, faux, answerDialog: () => "Deny" });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "write smart.txt");
+        await session.host.session.waitForIdle();
+        assert.equal(session.uiRequests.length, 0);
+        assert.ok(existsSync(join(root, "smart.txt")));
+        assert.equal(judgeContexts.length, 1);
+        assert.match(judgeContexts[0]!.systemPrompt ?? "", /permission judge/i);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("gives a session-published permission service sole prompt ownership", async () => {
+    await withTempRoot("piarium-s-perm-plugin-", async (root) => {
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "plugin-owned.txt", content: "ok" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+      const extensions = join(root, "agent", "extensions");
+      await mkdir(extensions, { recursive: true });
+      await writeFile(join(extensions, "permission-owner.ts"), `
+const servicesKey = Symbol.for("@gotgenes/pi-permission-system:session-services");
+let ownedSessionId: string | undefined;
+export default function permissionOwner(pi: any) {
+  pi.on("session_start", (_event: unknown, ctx: any) => {
+    ownedSessionId = ctx.sessionManager.getSessionId();
+    const root = globalThis as any;
+    const services = root[servicesKey] instanceof Map ? root[servicesKey] : new Map();
+    root[servicesKey] = services;
+    services.set(ownedSessionId, {});
+    pi.events.emit("permissions:ready", { adjudicatesLocally: true, sessionId: ownedSessionId });
+  });
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    if (event.toolName !== "write") return undefined;
+    const choice = await ctx.ui.select("Plugin permission: " + String(event.input?.path ?? "write"), ["Allow once", "Deny"]);
+    return choice === "Allow once" ? undefined : { block: true, reason: "Plugin denied write" };
+  });
+  pi.on("session_shutdown", () => {
+    const services = (globalThis as any)[servicesKey];
+    if (services instanceof Map && ownedSessionId) services.delete(ownedSessionId);
+  });
+}
+`, "utf8");
+      const session = await setupSession({ root, faux, answerDialog: () => "Allow once" });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "write plugin-owned.txt");
+        await session.host.session.waitForIdle();
+        assert.equal(session.uiRequests.length, 1, "the plugin and fallback must not both prompt");
+        assert.match(session.uiRequests[0]!.title, /^Plugin permission:/);
+        assert.ok(existsSync(join(root, "plugin-owned.txt")));
       } finally {
         await session.dispose();
         faux.unregister();

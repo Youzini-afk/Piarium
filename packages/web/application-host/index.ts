@@ -1157,6 +1157,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
     withMergeWriter: async (workspaceId, threadId, operation) => {
       const writer = await documentsAuthority.registerWriterForScope(
         workspaceId,
@@ -1175,11 +1176,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         input.name,
         input.parentSession,
         { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
-        { ...(input.model ? { model: input.model } : {}), tools: input.tools },
+        {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.scope?.length ? { scope: input.scope } : {}),
+          tools: input.tools,
+        },
       ),
       open: (input) => piRuntimeBroker.openSession({
         cwd: input.cwd,
         ...(input.model ? { model: input.model } : {}),
+        ...(input.scope?.length ? { scope: input.scope } : {}),
         sessionId: input.sessionId,
         workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         tools: input.tools,
@@ -1208,9 +1214,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerHarnessThreadRoutes(app, { registry: threadRegistry });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
+    await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
     if (summary.workspace?.kind !== 'workspace') return;
     const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
-    await threadRegistry.archiveThreadsForDeletedSession(workspaceId, sessionId);
     await threadRegistry.cancelAllForParent(
       workspaceId,
       { kind: 'session', id: sessionId },

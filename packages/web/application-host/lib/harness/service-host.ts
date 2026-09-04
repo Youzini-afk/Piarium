@@ -32,6 +32,7 @@ interface SessionEntry {
   interpreter: ShellInterpreter | { unavailable: { reason: string; hint: string } };
   workspaceId: string | null;
   workspaceRoot: string;
+  workspaceScope?: readonly string[];
 }
 
 export function deriveHarnessCapabilities(
@@ -100,7 +101,7 @@ export interface HarnessServiceHost {
 }
 
 export interface HarnessServiceHostOptions {
-  search: (request: { query: string; workspaceId: string; maxResults?: number }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
+  search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   diagnosticsProvider?: DiagnosticsProvider;
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
@@ -208,6 +209,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       interpreter: interpreterResult,
       workspaceId: ctx.workspaceId,
       workspaceRoot: ctx.workspaceRoot,
+      ...(ctx.actor.workspaceScope?.length ? { workspaceScope: [...ctx.actor.workspaceScope] } : {}),
     });
   };
 
@@ -246,6 +248,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return {
       ...identity,
       workspaceId: entry.workspaceId,
+      ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
       grantedCapabilities: await entry.grantedCapabilities,
     };
   };

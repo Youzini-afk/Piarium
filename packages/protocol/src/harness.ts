@@ -295,6 +295,8 @@ export interface HarnessActorIdentity {
   authorityInstanceId: string;
   sessionId: string;
   runId?: string;
+  /** Broker-pinned relative workspace paths for a restricted child Run. */
+  workspaceScope?: readonly string[];
   workerId: string;
   workerGeneration: number;
 }

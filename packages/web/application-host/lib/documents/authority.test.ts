@@ -15,6 +15,21 @@ import type { WatchPosition, WorkspaceWatchFs } from './watch.js';
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
 
+it('assigns a nested runtime root its own workspace identity', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  try {
+    const nestedRoot = path.join(harness.workspaceRoot, '.piarium', 'threads', 'child-worktree');
+    await fs.promises.mkdir(nestedRoot, { recursive: true });
+    const nested = await harness.authority.resolveWorkspace({ path: nestedRoot });
+    expect(nested.workspaceId).not.toBe(harness.identity.workspaceId);
+    await expect(harness.authority.inspectWorkspace(nested.workspaceId)).resolves.toMatchObject({
+      root: await fs.promises.realpath(nestedRoot),
+    });
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 const createPeerAuthority = (
   harness: DocumentAuthorityHarness,
   options: Partial<Omit<DocumentAuthorityOptions, 'dataDir' | 'hostId'>> = {},

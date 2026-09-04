@@ -141,6 +141,7 @@ export const HarnessThreadsPanel: React.FC<{
                   sessionId,
                   ...(cwd ? { cwd } : {}),
                   ...(entry.thread.model ? { model: entry.thread.model } : {}),
+                  ...(entry.thread.manifest.scope.length > 0 ? { scope: entry.thread.manifest.scope } : {}),
                   tools: entry.thread.manifest.tools,
                 }).catch((error) => {
                   toast.error(error instanceof Error ? error.message : String(error));

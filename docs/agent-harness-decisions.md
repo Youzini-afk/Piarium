@@ -556,6 +556,32 @@ ThreadRun 只是日志，若无限恢复又会制造进程崩溃循环。内部 
 
 状态：已实施
 
+### D-044 · 2026-09-04 · T2（权限插件共存与 scope 的真实边界）
+
+类型：设计修正
+
+决定：(1) `@gotgenes/pi-permission-system` 继续作为 foundational Pi package provision，不再把 T2 之后移除插件当作默认路线。
+在会话发布了与本 sessionId 对应的 permission service 时，Piarium 原生 `tool_call` 门完全让位，由插件单独提示；service 缺席或
+热卸载后原生门恢复，作为 **Harness 工具范围内**的 fallback。检测每次按 session-keyed service 重新确认，不因其他会话事件串线，
+也不缓存已经失效的服务。(2) 原生 Smart 只属于 fallback；插件活跃时若需要模型判断，走插件的 `registerAuthorizer` seam，且仍需
+用户在 `authorizerChain` 中显式列名，Piarium 不暗改插件配置。(3) 删除 Web/Application Host 中未接生产链的 `smart-mode.ts`
+原型，实际实现只有 pi-host 会话内的一份。(4) child Run 的工作目录先注册为独立 Documents workspace，再绑定 Pi session；
+`scope` 随 broker Actor 传播并约束 Host 可解析路径的服务与搜索结果。它不是 OS containment，不声称约束 shell 命令文本或 worker
+内直接运行的 Pi 工具。
+
+原因：对本机实际 provision 的 `pi-permission-system` v27.0.1 公共声明与文档核对后，它已覆盖 Bash AST 拆分、规范/符号链接路径、
+外部目录、MCP、skills、子会话转发、会话授权、审计以及跨扩展 formatter/extractor/authorizer API；原生门只认识
+`HARNESS_TOOL_META`。按旧计划移除会真实缩小保护面。简单地同时运行两个门又会连续弹两次确认。另一个实锤问题是 isolated
+child 曾绑定父 Documents workspace，使 Host 搜索和路径 authority 指向父树而不是 worktree；单独 runtime workspace 修复该身份错误。
+
+考虑过的替代：(a) 原生门优先、插件随后再判——无法保证一次提示，且两套路径/命令语义会漂移。(b) T2 结束立即移除插件——
+没有能力等价证据。(c) 自动把 Piarium Smart link 写进插件 `authorizerChain`——注册 link 本身不应取得用户授权，违反插件公开契约。
+
+影响：`permission-gate-extension.ts` / SessionHost；Thread runtime、broker actor scope、Host path/search authority；设计 9.1.2、
+plan 3b、状态矩阵。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -592,7 +618,7 @@ ThreadRun 只是日志，若无限恢复又会制造进程崩溃循环。内部 
 | D-028 | active-design | — | agent-harness.md 9.2.2 / 9.1.2 / 8.4 / 5.9、architecture §5 |
 | D-029 | implementation | — | — |
 | D-030 | active-design | — | 本文件治理规则 |
-| D-031 | active-design（待实施） | — | agent-harness.md 5.10、plan 1.9 |
+| D-031 | implementation | — | agent-harness.md 5.10、plan 1.9、protocol `harness-settings.ts` |
 | D-032 | folded-in | D-039（原子 catalog 文件形状） | agent-harness.md 9.3.1 / 9.3.4、plan P0、protocol / Host registry |
 | D-033 | folded-in | — | agent-harness.md 2 / 9.2.6 / 9.3.6 / 12.2、protocol 与 thread services |
 | D-034 | folded-in | D-040（位强度与 schema 1 迁移） | agent-harness.md 5.1、plan P0、protocol / Host / pi-host |
@@ -605,3 +631,4 @@ ThreadRun 只是日志，若无限恢复又会制造进程崩溃循环。内部 
 | D-041 | implementation | — | architecture §5.1、plan P0.6、path authority / leases |
 | D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |
 | D-043 | implementation | — | agent-harness.md 9.3、architecture §5.2、plan T1、status 3.4/3.5/3.10/3.11 |
+| D-044 | implementation | — | agent-harness.md 9.1.2、plan 3b、status 3b / 3.4；pi-host / broker / Host scope |

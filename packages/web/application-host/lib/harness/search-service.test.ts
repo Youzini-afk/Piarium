@@ -112,4 +112,53 @@ describe("harness search service", () => {
     const result2 = await service.search({ pattern: "test" }, { workspaceId: "ws-1", signal: new AbortController().signal });
     expect(result1.files.map((f) => f.path)).toEqual(result2.files.map((f) => f.path));
   });
+
+  it("returns only hits inside both the child scope and requested path", async () => {
+    const hits = [
+      makeHit("packages/web/src/a.ts", 1, "allowed"),
+      makeHit("packages/web/test/a.test.ts", 1, "outside request"),
+      makeHit("packages/ui/src/a.ts", 1, "outside child scope"),
+      makeHit("packages/web/../ui/src/traversal.ts", 1, "scope-looking traversal"),
+    ];
+    let searchPaths: string[] | undefined;
+    const service = createHarnessSearchService({
+      search: async (request) => {
+        searchPaths = request.paths;
+        return { status: "ready", generation: 1, hits };
+      },
+      resolveWorkspaceRoot: async () => "/workspace",
+    });
+    const result = await service.search(
+      { pattern: "a", path: "packages/web/src" },
+      {
+        workspaceId: "ws-1",
+        workspaceScope: ["packages/web"],
+        signal: new AbortController().signal,
+      },
+    );
+    expect(result.status).toBe("ready");
+    expect(result.files.map((file) => file.path)).toEqual(["packages/web/src/a.ts"]);
+    expect(searchPaths).toEqual(["packages/web/src"]);
+  });
+
+  it("returns empty without launching search when the requested path and child scope are disjoint", async () => {
+    let called = false;
+    const service = createHarnessSearchService({
+      search: async () => {
+        called = true;
+        return { status: "empty", generation: 1 };
+      },
+      resolveWorkspaceRoot: async () => "/workspace",
+    });
+    const result = await service.search(
+      { pattern: "a", path: "packages/ui" },
+      {
+        workspaceId: "ws-1",
+        workspaceScope: ["packages/web"],
+        signal: new AbortController().signal,
+      },
+    );
+    expect(result.status).toBe("empty");
+    expect(called).toBe(false);
+  });
 });

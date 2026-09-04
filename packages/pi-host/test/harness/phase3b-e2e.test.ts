@@ -148,7 +148,7 @@ describe("Phase 3b permission gate", () => {
 
   it("permission gate extension factory creates a valid extension", () => {
     const policy = buildPermissionPolicy("normal");
-    const factory = createPermissionGateExtension({ policy });
+    const factory = createPermissionGateExtension({ policy, sessionId: "phase3b-session" });
     assert.equal(typeof factory, "function");
   });
 
