@@ -26,10 +26,12 @@ const workspaceFor = (ctx: HarnessServiceContext): string => {
 const threadState = ({ thread, activeRun }: ThreadSnapshot): string => {
   if (thread.lifecycle === "archived") return "archived";
   if (thread.integration === "merged") return "merged";
+  if (thread.integration === "conflict") return "conflict";
   if (thread.lifecycle === "queued") return "queued";
   if (thread.attention === "user" || thread.attention === "permission") return "waiting-for-input";
   if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;
   if (thread.lifecycle === "settled") {
+    if (thread.integration === "merge-ready" && activeRun?.outcome === "success") return "merge-ready";
     if (activeRun?.outcome === "success") return "done";
     return activeRun?.outcome ?? "settled";
   }
@@ -53,7 +55,7 @@ const formatThreadLine = (snapshot: ThreadSnapshot, cursor: ThreadViewCursor | n
   const { thread, activeRun } = snapshot;
   const state = threadState(snapshot);
   const icon = state === "done" || state === "merged" ? "✔"
-    : state === "failure" || state === "cancelled" || state === "lost" ? "✘"
+    : state === "failure" || state === "cancelled" || state === "lost" || state === "conflict" ? "✘"
     : state === "queued" || state === "starting" ? "⏳"
     : state === "waiting-for-input" ? "?"
     : state === "stalled" ? "!"
@@ -120,7 +122,11 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       const workspaceId = workspaceFor(ctx);
       const parent = parentFor(ctx);
-      const isQueued = await registry.countActive(workspaceId, parent) >= registry.maxConcurrency;
+      const concurrency = params.concurrency ?? registry.maxConcurrency;
+      if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+        throw new HarnessServiceError("invalid-params", "Thread concurrency must be a positive integer");
+      }
+      const isQueued = await registry.countActive(workspaceId, parent) >= concurrency;
       const input = {
         workspaceId,
         parent,
@@ -128,12 +134,14 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         role: params.role,
         kind: "implementation" as const,
         createdBy: "agent" as const,
+        concurrency,
         autoRun: true,
         worktree: role.worktree === "none" ? "none" as const
           : role.worktree === "shared" ? "shared" as const
           : "isolated" as const,
         tools: role.tools,
         permissions: {},
+        ...(params.model ? { model: params.model } : {}),
         systemPromptFragment: role.systemPromptFragment,
         ...(params.scope ? { scope: params.scope } : {}),
       };
@@ -146,19 +154,15 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         };
       }
       const run = await registry.startRun(workspaceId, thread.id);
-      try {
-        const spawned = await host.threadSpawnSession({ ...input, threadId: thread.id, runId: run.id });
-        await registry.markRunRunning(workspaceId, thread.id, run.id, spawned.sessionId);
-      } catch (error) {
+      void host.threadSpawnSession({ ...input, threadId: thread.id, runId: run.id }).catch(async (error) => {
         await registry.endRun(
           workspaceId,
           thread.id,
           run.id,
           "failure",
           error instanceof Error ? error.message : String(error),
-        );
-        throw error;
-      }
+        ).catch(() => undefined);
+      });
       return { text: `dispatched ${thread.id} (${params.role})`, threadId: thread.id, queued: false };
     },
   };
@@ -197,7 +201,9 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
           attention: thread.attention,
           integration: thread.integration,
           brief: thread.brief,
+          createdAt: thread.createdAt,
           role: thread.role,
+          updatedAt: thread.updatedAt,
           activeRun,
           waitingFor: thread.waitingFor,
           diffStats: thread.diffStats,
@@ -304,8 +310,13 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const workspaceId = workspaceFor(ctx);
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      if (thread.lifecycle !== "active") {
+        throw new HarnessServiceError("unavailable", `Thread is not active: ${params.threadId}`);
+      }
       const run = await registry.getActiveRun(workspaceId, thread.id);
-      if (!run?.sessionId) throw new HarnessServiceError("unavailable", `Thread has no active session: ${params.threadId}`);
+      if (!run?.sessionId || run.workerState !== "running") {
+        throw new HarnessServiceError("unavailable", `Thread has no running session: ${params.threadId}`);
+      }
       await host.threadSendToSession(run.sessionId, params.message, params.from);
       const updated = thread.attention === "user" || thread.attention === "permission"
         ? await registry.setAttention(workspaceId, thread.id, "none")
@@ -390,16 +401,19 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       if (thread.lifecycle !== "settled" || run?.outcome !== "success") {
         return { text: `thread ${thread.id} is not complete (state: ${thread.lifecycle}/${run?.outcome ?? "none"})`, merged: 0, conflicts: [] };
       }
-      const result = await host.threadApplyWorktreeDiff(thread.id);
+      const result = await host.threadApplyWorktreeDiff(workspaceId, parentFor(ctx), thread.id);
       if (result.conflicts.length > 0) {
-        await registry.setIntegration(workspaceId, thread.id, "conflict");
+        await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
+        const resolution = result.conflictState === "markers"
+          ? "Git left conflict markers/index entries in the parent. Resolve those paths; no further merge step is needed."
+          : "The parent was left unchanged and the child worktree was preserved. Resolve the parent changes, then retry merge.";
         return {
-          text: `merge has conflicts in ${result.conflicts.length} files (markers left in place):\n${result.conflicts.join("\n")}\nResolve them with edit; no further merge step is needed.`,
+          text: `merge could not apply ${result.conflicts.length} files cleanly:\n${result.conflicts.join("\n")}\n${resolution}`,
           merged: 0,
           conflicts: result.conflicts,
         };
       }
-      await registry.mergeThread(workspaceId, thread.id);
+      await registry.setIntegration(workspaceId, thread.id, "merged", result.diffStats);
       return {
         text: `merged ${result.merged} files: ${thread.report?.changedFiles.join(", ") ?? ""}`,
         merged: result.merged,
@@ -418,6 +432,12 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? true;
+      if (!keepWorktree && thread.worktree) {
+        throw new HarnessServiceError(
+          "unavailable",
+          "Stopping a thread without preserving its worktree is not implemented; retry with keep_worktree enabled",
+        );
+      }
       if (thread.lifecycle !== "queued" && host.threadKillSession) await host.threadKillSession(thread.id);
       await registry.cancelThread(workspaceId, thread.id, "killed by parent");
       return { text: `killed ${thread.id}${keepWorktree ? " (worktree kept)" : ""}` };

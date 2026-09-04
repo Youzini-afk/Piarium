@@ -15,6 +15,7 @@ import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
   type PiRuntimeBrokerOptions,
+  type PiSessionDeleteCoordinator,
   type ProjectTrustDecision,
 } from "./runtime-broker.js";
 import {
@@ -58,6 +59,7 @@ export class PiRuntimeLifecycle {
   #handshake: HostHandshakeResult | undefined;
   #nextId = 1;
   #revision = 0;
+  #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
 
   constructor(options: PiRuntimeLifecycleOptions) {
     this.#createBroker = options.createBroker;
@@ -120,6 +122,13 @@ export class PiRuntimeLifecycle {
     return () => {
       this.#brokerListeners.delete(listener);
     };
+  }
+
+  setSessionDeleteCoordinator(coordinate: PiSessionDeleteCoordinator | undefined): void {
+    this.#sessionDeleteCoordinator = coordinate;
+    for (const generation of this.#generations.values()) {
+      generation.broker.setSessionDeleteCoordinator(coordinate);
+    }
   }
 
   async start(): Promise<HostHandshakeResult | undefined> {
@@ -211,14 +220,17 @@ export class PiRuntimeLifecycle {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
+    launch?: { model?: { providerId: string; modelId: string }; tools?: string[] },
   ): Promise<SessionSnapshot> {
-    return this.requireBroker().createSession(cwd, name, parentSession, workspace);
+    return this.requireBroker().createSession(cwd, name, parentSession, workspace, launch);
   }
 
   async openSession(input: {
     cwd?: string;
+    model?: { providerId: string; modelId: string };
     sessionFile?: string;
     sessionId?: string;
+    tools?: string[];
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     const broker = input.sessionId ? this.#findBrokerForSession(input.sessionId) : undefined;
@@ -287,6 +299,9 @@ export class PiRuntimeLifecycle {
         }
         if (property === "warmup") {
           return () => this.ensureActiveBroker();
+        }
+        if (property === "setSessionDeleteCoordinator") {
+          return (coordinate: PiSessionDeleteCoordinator | undefined) => this.setSessionDeleteCoordinator(coordinate);
         }
         if (property === "requestForSession") {
           return (
@@ -365,6 +380,9 @@ export class PiRuntimeLifecycle {
       runtimeGeneration: id,
       runtimeSource: installation.source,
     });
+    if (this.#sessionDeleteCoordinator !== undefined) {
+      broker.setSessionDeleteCoordinator(this.#sessionDeleteCoordinator);
+    }
     let handshake: HostHandshakeResult;
     try {
       handshake = await broker.warmup();

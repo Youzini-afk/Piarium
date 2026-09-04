@@ -82,6 +82,7 @@ export function createDispatchTool(
   bridge: HostServicesBridge,
   _sessionId: string,
   roles: readonly ResolvedRole[] = [],
+  options: { concurrency?: number } = {},
 ): ToolDefinition {
   const available = roles.map((r) => r.id);
   const teamPrompt = buildTeamPrompt([...roles]);
@@ -110,9 +111,12 @@ export function createDispatchTool(
         };
       }
       try {
+        const selectedRole = roles.find((role) => role.id === params.role)!;
         const result = await bridge.request<"thread.dispatch">("thread.dispatch", {
+          ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
           role: params.role,
           task: params.task,
+          model: selectedRole.model,
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
         });
         const typed = result as ThreadDispatchResult;
@@ -248,7 +252,7 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
   return defineTool({
     name: "merge",
     label: "Merge",
-    description: "Merge a completed sub-agent thread's worktree diff into the parent. Uses git apply --3way; conflicts leave markers in place.",
+    description: "Merge a completed sub-agent thread's worktree diff into the parent. Reports whether Git left conflict entries or kept the parent unchanged.",
     promptSnippet: "merge: merge a completed teammate's changes into your worktree",
     promptGuidelines: [],
     parameters: ThreadMergeParams,

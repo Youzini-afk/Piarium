@@ -481,6 +481,8 @@ export interface RecoveryOperationResult {
 
 export interface HostHandshakeParams {
   capabilities?: {
+    /** The application Host can execute and observe durable child threads. */
+    harnessThreads?: boolean;
     workspaceMutationJournal?: boolean;
   };
   clientName: string;

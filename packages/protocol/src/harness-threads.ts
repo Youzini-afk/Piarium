@@ -48,6 +48,15 @@ export interface ThreadWorktree {
   base: string;
 }
 
+/** Immutable launch inputs captured when the Thread is created. */
+export interface ThreadLaunchManifest {
+  concurrency: number;
+  scope: string[];
+  systemPromptFragment: string | null;
+  tools: string[];
+  worktree: "none" | "shared" | "isolated";
+}
+
 export interface ThreadTokens {
   input: number;
   output: number;
@@ -67,6 +76,8 @@ export interface Thread {
   forkPoint: { entryId: string } | null;
   brief: string;
   role: string | null;
+  model: import("./harness-settings.js").ModelSelection | null;
+  manifest: ThreadLaunchManifest;
   createdBy: ThreadCreatedBy;
   kind: ThreadKind;
   worktree: ThreadWorktree | null;
@@ -143,7 +154,9 @@ export interface ThreadListItem {
   attention: ThreadAttention;
   integration: ThreadIntegration;
   brief: string;
+  createdAt: string;
   role: string | null;
+  updatedAt: string;
   activeRun: ThreadRun | null;
   waitingFor: ThreadWaitingFor | null;
   diffStats: ThreadDiffStats | null;
@@ -214,9 +227,13 @@ export interface ThreadKillResult {
 }
 
 export interface ThreadDispatchParams {
+  /** Frozen parent-session setting; not exposed as a model tool argument. */
+  concurrency?: number;
   role: string;
   task: string;
   scope?: string[];
+  /** Resolved by pi-host from the session's frozen role catalog. */
+  model?: import("./harness-settings.js").ModelSelection;
 }
 
 export interface ThreadDispatchResult {

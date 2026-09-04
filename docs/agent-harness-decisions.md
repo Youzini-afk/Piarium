@@ -525,6 +525,37 @@ bash”，因此实际 `activeTools` 仍有 bash 时必须保留 `process.shell`
 
 状态：已实施
 
+### D-043 · 2026-09-04 · T1（真实 Pi child 线程纵切）
+
+类型：实现澄清
+
+决定：(1) Application Host 通过私有握手的 `harnessThreads` 能力声明真实线程运行时，删除用户设置里的临时
+`threadRuntime`；没有该能力时 pi-host 不注册七个线程工具。(2) `dispatch` 先原子写入 Thread + `starting` Run 后立即返回，
+worktree 与 Pi child session 在后台创建。(3) Thread catalog schema 4 新增不可变 `ThreadLaunchManifest { tools, worktree, scope,
+systemPromptFragment, concurrency }`，resolved model 也随 Thread 持久化；`session.create/open` 在构造 AgentSession 前接收模型和工具 allowlist，
+因此角色工具边界不是提示词。(4) T1 保持基础 system/Zone 0 不变，把角色片段、scope 与 brief 放首条任务消息；子 allowlist 不含
+`dispatch`，嵌套留待独立纵切。(5) isolated worktree 在父 dirty 状态上建立内部 baseline commit，merge 只应用 child delta；未跟踪
+碰撞先预检，冲突结果区分 Git markers 与 parent-unchanged。(6) 第一次意外 worker 退出在同会话/worktree 开新 Run；连续第二次
+崩溃翻 `stalled`，不形成无限重启。无事件 300 秒只告警，连续 6 次相同工具+参数哈希翻 `looping`；交互请求投影为
+`user/permission` attention。(7) 同一 registry 投影到七个工具、`piarium-harness` Fleet provider、SSE 与父会话最小桌面侧栏。
+(8) broker 删除父会话前调用 Application Host coordinator；它在 registry 的 draining 区间停止 active child、取消 queued/active
+Run，并归档全部直接子线程，之后才允许删除 Pi session 文件。若用户直接删除 child session，registry 归档其 Thread 并清除指向
+即将删除文件的 report/TranscriptRef，不留下“可读”假引用；历史 Run outcome 不被改写。
+
+原因：如果工具先按默认模型构造、之后再切角色模型，provider 专属工具会错配；如果角色工具只写在提示词里，`check/review`
+仍能拿到写工具；如果 dispatch 等待 worktree 与 worker，创建体验会重现此前新会话长时间“正在发送”的问题；如果崩溃无恢复，
+ThreadRun 只是日志，若无限恢复又会制造进程崩溃循环。内部 baseline commit 则解决父 dirty patch 被合并两次的确定性错误。
+
+考虑过的替代：(a) 继续用 `HarnessSettings.threadRuntime`——Host 缺服务时会暴露只返回 unavailable 的工具。(b) child 创建后再
+`model.select`——工具注册已经完成，太晚。(c) 只靠角色提示词约束——不是能力边界。(d) 每次崩溃都自动恢复——同一损坏会无限
+拉起进程。(e) 合并前直接复制 untracked——会在发现后一个冲突前留下部分写入。
+
+影响：protocol `HostHandshakeParams` / `session.create/open` / `ThreadLaunchManifest`（thread catalog schema 4）；runtime-broker launch
+投影；pi-host SessionHost、角色工具与 Fleet adapter；Host `thread-runtime.ts` / `thread-worktree.ts` / registry / route；UI
+`HarnessThreadsPanel` 与 SSE。尚未包含：scope 的 Host 强制、Zone 2 threads 段、worktree/branch 回收、窄屏与讨论线。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -573,3 +604,4 @@ bash”，因此实际 `activeTools` 仍有 bash 时必须保留 `process.shell`
 | D-040 | implementation | — | agent-harness.md 5.1、plan P0.5、output-store / transcript reader |
 | D-041 | implementation | — | architecture §5.1、plan P0.6、path authority / leases |
 | D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |
+| D-043 | implementation | — | agent-harness.md 9.3、architecture §5.2、plan T1、status 3.4/3.5/3.10/3.11 |

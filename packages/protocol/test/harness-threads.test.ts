@@ -56,7 +56,8 @@ describe("thread protocol types (§9.3)", () => {
     };
     const thread: Thread = {
       id: "thread-1", parent: { kind: "session", id: "parent-1" }, workspaceId: "workspace-1",
-      forkPoint: null, brief: "test", role: "check", createdBy: "agent", kind: "implementation",
+      forkPoint: null, brief: "test", role: "check", model: null, createdBy: "agent", kind: "implementation",
+      manifest: { concurrency: 12, scope: [], systemPromptFragment: "Run checks.", tools: ["read", "bash"], worktree: "shared" },
       worktree: null, lifecycle: "active", attention: "permission", waitingFor: { kind: "permission", text: "allow?" },
       integration: "conflict", diffStats: null, report: null, activeRunId: run.id,
       createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:01:00Z", eventSeq: 2, hidden: false,
@@ -120,7 +121,9 @@ describe("thread protocol types (§9.3)", () => {
         attention: "none",
         integration: "dirty",
         brief: "test",
+        createdAt: "2026-01-01T00:00:00Z",
         role: "check",
+        updatedAt: "2026-01-01T00:01:00Z",
         activeRun: null,
         waitingFor: null,
         diffStats: { files: 2, insertions: 10, deletions: 3 },

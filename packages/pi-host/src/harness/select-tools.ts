@@ -113,7 +113,9 @@ export function selectHarnessTools(
   // thread runtime (thread registry + spawn capability).
   if (threadRuntimeAvailable) {
     if (tools.dispatch !== false) {
-      result.push(createDispatchTool(bridge, sessionId, resolvedRoles ?? []));
+      result.push(createDispatchTool(bridge, sessionId, resolvedRoles ?? [], {
+        concurrency: settings.dispatch.concurrency,
+      }));
     }
     if (tools.threads !== false) {
       result.push(createThreadsTool(bridge, sessionId));

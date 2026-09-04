@@ -8,6 +8,7 @@ import {
   type HostMethodResult,
   type ImageAttachment,
   type JsonValue,
+  type ModelSelection,
   parsePiSessionFeatureMutation,
   parseProviderConfigInput,
   PiSessionFeatureValidationError,
@@ -105,6 +106,19 @@ function requireStringList(record: Record<string, unknown>, key: string): string
     throw new RuntimeDispatchError("invalid_params", `${key} must be an array of strings`);
   }
   return value;
+}
+
+function optionalStringList(record: Record<string, unknown>, key: string): string[] | undefined {
+  return record[key] === undefined ? undefined : requireStringList(record, key);
+}
+
+function optionalModelSelection(record: Record<string, unknown>): ModelSelection | undefined {
+  if (record.model === undefined) return undefined;
+  const model = requireRecord(record.model);
+  return {
+    providerId: requireString(model, "providerId"),
+    modelId: requireString(model, "modelId"),
+  };
 }
 
 function optionalFoundationalPackageIds(
@@ -359,11 +373,19 @@ async function dispatchRuntimeRequestUnchecked(
       return broker.listSessions(optionalString(input, "cwd"));
     }
     case "session.create": {
+      const model = optionalModelSelection(input);
+      const tools = optionalStringList(input, "tools");
       return broker.createSession(
         requireString(input, "cwd"),
         optionalName(input),
         optionalString(input, "parentSession"),
         optionalSessionWorkspaceBinding(input),
+        model === undefined && tools === undefined
+          ? undefined
+          : {
+              ...(model === undefined ? {} : { model }),
+              ...(tools === undefined ? {} : { tools }),
+            },
       );
     }
     case "session.open": {
@@ -371,6 +393,8 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionFile = optionalString(input, "sessionFile");
       const sessionId = optionalString(input, "sessionId");
       const workspace = optionalSessionWorkspaceBinding(input);
+      const model = optionalModelSelection(input);
+      const tools = optionalStringList(input, "tools");
       if (!sessionFile && !sessionId) {
         throw new RuntimeDispatchError(
           "invalid_params",
@@ -381,6 +405,8 @@ async function dispatchRuntimeRequestUnchecked(
         ...(cwd === undefined ? {} : { cwd }),
         ...(sessionFile === undefined ? {} : { sessionFile }),
         ...(sessionId === undefined ? {} : { sessionId }),
+        ...(model === undefined ? {} : { model }),
+        ...(tools === undefined ? {} : { tools }),
         ...(workspace === undefined ? {} : { workspace }),
       });
     }

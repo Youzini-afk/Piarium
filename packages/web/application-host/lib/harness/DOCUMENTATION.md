@@ -15,9 +15,10 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── output.store → OutputStore (global)
                            ├── output.read  → OutputStore
                            ├── search.content → HarnessSearchService
-                           ├── fs.lock      → PathLockService (global)
+                           ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
-                           └── lsp.diagnosticsSnapshot → LspDiagnosticsService
+                           ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
+                           └── thread.*     → ThreadRegistry + ThreadRuntime + Git worktree
 ```
 
 ## Components
@@ -26,7 +27,7 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 Global singleton that owns:
 - `OutputStore` — large output storage with per-session isolation
-- `PathLockService` — per-path edit locks
+- `PathLockService` — owner-bound canonical-resource leases
 - `HarnessSearchService` — wraps `createWorkspaceContentSearch`
 - `DiagnosticsProvider` — LSP diagnostics (optional)
 - Per-session `ShellSupervisor` registry
@@ -52,8 +53,28 @@ retrieval. Handles are `out_XXX` format.
 
 ### PathLockService (`path-lock.ts`)
 
-Per-path mutex locks with configurable timeout. Prevents concurrent
-edits to the same file.
+The Host first resolves every input through Documents identity, deduplicates
+aliases, and acquires the complete path batch in canonical order. The returned
+opaque lease IDs are owner-bound. This coordinates Harness-managed writes in
+one Application Host; it does not claim to lock terminals, Git, external
+processes, or a second Host.
+
+### ThreadRegistry / ThreadRuntime
+
+The registry persists one versioned atomic catalog per workspace. `Thread` is
+durable work; `ThreadRun` is one execution attempt, and
+`ThreadLaunchManifest` freezes model-adjacent launch inputs. `dispatch` commits
+the Thread plus a `starting` Run and returns immediately. The runtime then
+creates a managed worktree when needed, opens a real persisted Pi child
+session with the role's active-tool allowlist, and projects broker events into
+progress, attention, report, durable transcript, and integration state.
+
+One unexpected worker exit is resumed in the same session/worktree as a new
+Run; a second consecutive crash becomes `stalled` instead of entering a crash
+loop. Interactive child prompts, event silence, and six identical tool
+signatures project to `permission`/`user`, `stalled`, and `looping`. The Web UI
+reads the same registry through `/api/harness/threads` and SSE; the Pi Fleet
+registry exposes it through the `piarium-harness` provider.
 
 ### HarnessSearchService (`search-service.ts`)
 

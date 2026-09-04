@@ -105,6 +105,7 @@ import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { FleetProviderRegistry, createFleetRegistryExtension } from "./fleet/registry.js";
 import { PiBackgroundTasksFleetAdapter } from "./fleet/pi-background-tasks-adapter.js";
+import { PiariumHarnessFleetAdapter } from "./fleet/piarium-harness-adapter.js";
 import { packageManifestFromPath, packageNameFromSource } from "./package-descriptor.js";
 import { PiSubagentsFleetBridge } from "./pi-subagents-fleet-bridge.js";
 import {
@@ -143,7 +144,7 @@ import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mergeHarnessSettings, resolveRoles, type HarnessSettings } from "@piarium/protocol";
+import { mergeHarnessSettings, resolveRoles, type HarnessSettings, type ModelSelection } from "@piarium/protocol";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -581,8 +582,11 @@ export class SessionHost {
   #unsubscribe: (() => void) | undefined;
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
+  #harnessThreadRuntimeEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
   #harnessCounters: HarnessCounterTracker | undefined;
+  #sessionToolAllowlist: string[] | undefined;
+  #sessionModelSelection: ModelSelection | undefined;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -622,6 +626,10 @@ export class SessionHost {
     }
   }
 
+  setHarnessThreadRuntimeEnabled(enabled: boolean): void {
+    this.#harnessThreadRuntimeEnabled = enabled;
+  }
+
   respondWorkspaceMutation(
     sessionId: string,
     requestId: string,
@@ -650,7 +658,15 @@ export class SessionHost {
     });
   }
 
-  async create(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
+  async create(
+    cwd: string,
+    name?: string,
+    parentSession?: string,
+    tools?: string[],
+    model?: ModelSelection,
+  ): Promise<SessionSnapshot> {
+    this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
+    this.#sessionModelSelection = model === undefined ? undefined : { ...model };
     await this.#replaceWith(SessionManager.create(
       cwd,
       getSessionDir(cwd, this.#agentDir),
@@ -669,7 +685,11 @@ export class SessionHost {
     cwd?: string;
     sessionFile?: string;
     sessionId?: string;
+    tools?: string[];
+    model?: ModelSelection;
   }): Promise<SessionSnapshot> {
+    this.#sessionToolAllowlist = input.tools === undefined ? undefined : [...new Set(input.tools)];
+    this.#sessionModelSelection = input.model === undefined ? undefined : { ...input.model };
     let sessionFile = input.sessionFile;
     if (!sessionFile && input.sessionId) {
       const sessions = await this.list(input.cwd);
@@ -2682,6 +2702,9 @@ export class SessionHost {
       const fleet = new FleetProviderRegistry([
         new PiSubagentsFleetBridge(),
         new PiBackgroundTasksFleetAdapter(),
+        ...(this.#harnessThreadRuntimeEnabled && this.#sessionToolAllowlist === undefined
+          ? [new PiariumHarnessFleetAdapter(hostServicesBridge)]
+          : []),
       ]);
       this.#fleet = fleet;
       const mcpConfig = new PiMcpConfigBridge();
@@ -2787,6 +2810,18 @@ export class SessionHost {
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
       );
       const configured = await this.#configureServices?.(services);
+      const selectedLaunchModel = this.#sessionModelSelection === undefined
+        ? undefined
+        : services.modelRuntime.getModel(
+            this.#sessionModelSelection.providerId,
+            this.#sessionModelSelection.modelId,
+          );
+      if (this.#sessionModelSelection !== undefined && !selectedLaunchModel) {
+        throw new HostError(
+          "model_not_found",
+          `Unknown model: ${this.#sessionModelSelection.providerId}/${this.#sessionModelSelection.modelId}`,
+        );
+      }
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];
       if (workspaceMutationJournal !== undefined) {
@@ -2798,7 +2833,7 @@ export class SessionHost {
         ));
       }
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
-      const sessionModel = configured?.model;
+      const sessionModel = selectedLaunchModel ?? configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
       // Check if pi-web-access is loaded and enabled → yield webfetch/websearch.
       // Read package list from settings directly (session not yet active).
@@ -2827,12 +2862,13 @@ export class SessionHost {
         isOpenAIFamily,
         yieldedTools,
         readerModelConfigured,
-        threadRuntimeAvailable: harnessSettings.threadRuntime ?? false,
+        threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         resolvedRoles,
       }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),
         customTools,
+        ...(this.#sessionToolAllowlist === undefined ? {} : { tools: this.#sessionToolAllowlist }),
         services,
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),

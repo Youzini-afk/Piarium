@@ -54,6 +54,9 @@ import { type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
+import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
+import { createThreadRuntime } from './lib/harness/thread-runtime.js';
+import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
@@ -1073,11 +1076,56 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const knowledgeStores = new Map<string, KnowledgeStore>();
   const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
+  let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
+    },
+    onThreadChanged: (workspaceId, parent, thread, activeRun) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-thread-changed',
+        properties: { workspaceId, parent, thread, activeRun },
+      });
+    },
+    onThreadDone: (workspaceId, parent, threadId, report) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-thread-done',
+        properties: { workspaceId, parent, threadId, report },
+      });
+    },
+    onThreadDequeued: async (workspaceId, parent, thread) => {
+      if (!threadRuntime) throw new Error('Thread runtime is not ready');
+      const run = await threadRegistry.startRun(workspaceId, thread.id);
+      void threadRuntime.spawn({
+          workspaceId,
+          parent,
+          threadId: thread.id,
+          runId: run.id,
+          brief: thread.brief,
+          ...(thread.role ? { role: thread.role } : {}),
+          kind: thread.kind,
+          createdBy: thread.createdBy,
+          concurrency: thread.manifest.concurrency,
+          autoRun: true,
+          worktree: thread.manifest.worktree,
+          ...(thread.model ? { model: thread.model } : {}),
+          tools: thread.manifest.tools,
+          permissions: {},
+          ...(thread.manifest.scope.length > 0 ? { scope: thread.manifest.scope } : {}),
+          ...(thread.manifest.systemPromptFragment ? { systemPromptFragment: thread.manifest.systemPromptFragment } : {}),
+        }).catch(async (error) => {
+        await threadRegistry.endRun(
+          workspaceId,
+          thread.id,
+          run.id,
+          'failure',
+          errorMessage(error),
+        ).catch((endError) => {
+          console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
+        });
+      });
     },
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
@@ -1086,6 +1134,88 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
   const threadTranscriptReader = createThreadTranscriptReader({
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
+  });
+  const threadWorktreeRuntime = createThreadWorktreeRuntime({
+    createWorktree: async (directory, input) => {
+      const git = await import('./lib/git/service.js');
+      return git.createWorktree(directory, input, {
+        documents: documentsAuthority,
+        writerOwner: { kind: 'harness-thread', id: `create:${String(input.worktreeName ?? 'thread')}` },
+      });
+    },
+    getWorktreeBootstrapStatus: async (directory) => {
+      const git = await import('./lib/git/service.js');
+      return git.getWorktreeBootstrapStatus(directory);
+    },
+    gitBinary: platformEnvironmentRuntime.resolveGitBinaryForSpawn(),
+    env: {
+      ...process.env,
+      PATH: platformEnvironmentRuntime.buildAugmentedPath(),
+    },
+  });
+  threadRuntime = createThreadRuntime({
+    registry: threadRegistry,
+    worktrees: threadWorktreeRuntime,
+    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    withMergeWriter: async (workspaceId, threadId, operation) => {
+      const writer = await documentsAuthority.registerWriterForScope(
+        workspaceId,
+        { kind: 'harness-thread', id: `merge:${threadId}` },
+        { mode: 'process', purpose: 'harness-thread-merge' },
+      );
+      try {
+        return await operation();
+      } finally {
+        await writer?.close();
+      }
+    },
+    sessions: {
+      create: (input) => piRuntimeBroker.createSession(
+        input.cwd,
+        input.name,
+        input.parentSession,
+        { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
+        { ...(input.model ? { model: input.model } : {}), tools: input.tools },
+      ),
+      open: (input) => piRuntimeBroker.openSession({
+        cwd: input.cwd,
+        ...(input.model ? { model: input.model } : {}),
+        sessionId: input.sessionId,
+        workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
+        tools: input.tools,
+      }),
+      prompt: async (sessionId, text, instructions) => {
+        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.prompt', {
+          sessionId,
+          text,
+          ...(instructions ? { instructions } : {}),
+        });
+        if (!result.accepted) throw new Error(`Pi child session rejected its initial prompt: ${sessionId}`);
+      },
+      send: async (sessionId, text) => {
+        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.followUp', { sessionId, text });
+        if (!result.accepted) throw new Error(`Pi child session rejected follow-up input: ${sessionId}`);
+      },
+      abort: async (sessionId) => { await piRuntimeBroker.requestForSession(sessionId, 'agent.abort', { sessionId }); },
+      close: async (sessionId) => { await piRuntimeBroker.closeSession(sessionId); },
+      summary: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId }),
+      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
+      entries: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope: 'branch' }),
+    },
+    onError: (error) => {
+      console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
+    },
+  });
+  registerHarnessThreadRoutes(app, { registry: threadRegistry });
+  piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
+    if (summary.workspace?.kind !== 'workspace') return;
+    const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
+    await threadRegistry.archiveThreadsForDeletedSession(workspaceId, sessionId);
+    await threadRegistry.cancelAllForParent(
+      workspaceId,
+      { kind: 'session', id: sessionId },
+      async (thread) => { await threadRuntime!.kill(thread.id); },
+    );
   });
 
   async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore | null> {
@@ -1212,6 +1342,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     recallDepsProvider,
     threadRegistry,
     threadTranscriptReader,
+    threadSpawnSession: (input) => threadRuntime!.spawn(input),
+    threadKillSession: (threadId) => threadRuntime!.kill(threadId),
+    threadApplyWorktreeDiff: (workspaceId, parent, threadId) => threadRuntime!.merge(workspaceId, parent, threadId),
+    threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
     ...(memoryAgent ? { memoryAgent } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
@@ -1357,6 +1491,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
     void harnessRouter.processEvent(event);
+    threadRuntime.processEvent(event);
     if (event?.kind === 'worker.exit') {
       if (event.sessionId) {
         const ownsRegisteredSession = !event.actor || harnessServiceHost.hasActor(event.actor);
@@ -1403,10 +1538,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             workspaceRoot: envelopeData.cwd,
           });
         }
+        void threadRuntime.resumeLostForParent(
+          harnessWorkspaceId,
+          { kind: 'session', id: sessionId },
+        ).catch((error) => {
+          console.error('[HarnessThreads] Failed to resume child runs:', errorMessage(error));
+        });
       }
       return;
     }
     if (envelope.event !== 'agent.event' || !sessionId) return;
+    if (threadRuntime.isThreadSession(sessionId)) return;
     const agentEvent = recordOf(envelopeData.event);
     if (agentEvent?.type === 'agent_settled') return;
     if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
@@ -1597,6 +1739,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterTestCapability();
       await languageSupervisor.dispose();
       await runRuntime.dispose();
+      await threadRuntime.dispose();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await recoveryTurnCoordinator.dispose();

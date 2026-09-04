@@ -1102,6 +1102,7 @@ Devin 的 MultiDevin 让用户能打开任何 worker 对话纠偏，但没有合
 ```ts
 Thread {
   id; parent: { kind: "session" | "thread"; id }; workspaceId; brief; kind: "discussion" | "implementation";
+  role; model; manifest: { tools; worktree; scope; systemPromptFragment; concurrency }; // 创建时冻结，重启后仍按同一能力启动
   lifecycle:   "queued" | "active" | "settled" | "archived";
   attention:   "none" | "user" | "permission" | "stalled" | "looping";     // 归 Thread：Run 崩了问题还在等
   integration: "none" | "dirty" | "merge-ready" | "conflict" | "merged";   // 归 Thread：worktree 比 Run 活得久
@@ -1166,6 +1167,11 @@ ThreadRun {
 活性由 host 从线程的事件流观察，不靠线程自报、不靠父读转录：最近事件时间、工具调用频率、连续相同工具加相同参数的次数、
 上下文增长、花费。停滞 = 超过 T 没有事件（T 默认按 provider 缓存 TTL 推，与第 9.2.6 节一致）；循环 = 重复模式。这是
 传感器，允许机械判定（它决定的是"提醒谁"，不是"什么重要"）。
+
+T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；连续 6 次完全相同的 `(tool name, 参数哈希)` 翻
+`looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
+停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型和工具经 `session.create/open` 在 Pi 会话构造前冻结；T1 子会话的
+allowlist 不含 `dispatch`，因此嵌套线程仍是后续能力，而不是当前的隐式半支持。
 
 失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等

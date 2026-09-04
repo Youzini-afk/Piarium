@@ -72,4 +72,38 @@ describe('Piarium events', () => {
     ]);
     unsubscribe();
   });
+
+  test('dispatches stream readiness and typed harness thread changes', async () => {
+    const { subscribePiariumEvents } = await import('./piariumEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribePiariumEvents((event) => events.push(event));
+    const source = MockEventSource.instances[0];
+
+    source.onmessage?.({
+      data: JSON.stringify({ type: 'piarium:event-stream-ready', properties: {} }),
+    });
+    source.onmessage?.({
+      data: JSON.stringify({
+        type: 'piarium:harness-thread-changed',
+        properties: {
+          workspaceId: 'workspace-1',
+          parent: { kind: 'session', id: 'parent-1' },
+          thread: { id: 'thread-1', workspaceId: 'workspace-1', eventSeq: 3 },
+          activeRun: { id: 'run-1', workerState: 'running' },
+        },
+      }),
+    });
+
+    expect(events).toEqual([
+      { type: 'stream-ready' },
+      {
+        type: 'harness-thread-changed',
+        workspaceId: 'workspace-1',
+        parent: { kind: 'session', id: 'parent-1' },
+        thread: { id: 'thread-1', workspaceId: 'workspace-1', eventSeq: 3 },
+        activeRun: { id: 'run-1', workerState: 'running' },
+      },
+    ]);
+    unsubscribe();
+  });
 });

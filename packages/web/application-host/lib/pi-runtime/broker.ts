@@ -57,7 +57,7 @@ export function createWebPiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
     ...(typeof admitSessionExecution === 'function' ? { admitSessionExecution } : {}),
     client: {
-      capabilities: { workspaceMutationJournal: true },
+      capabilities: { harnessThreads: true, workspaceMutationJournal: true },
       clientName: 'piarium-web-server',
       clientVersion: typeof clientVersion === 'string' && clientVersion ? clientVersion : '0.1.0',
       mode: 'headless',

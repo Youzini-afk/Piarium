@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
+import { ROLE_DEFINITIONS } from "@piarium/protocol";
 import type {
   Thread,
   ThreadAttention,
@@ -17,6 +18,7 @@ import type {
   ThreadIntegration,
   ThreadKind,
   ThreadLifecycle,
+  ThreadLaunchManifest,
   ThreadParent,
   ThreadReport,
   ThreadRun,
@@ -44,7 +46,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 2;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 4;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -74,7 +76,21 @@ export interface ThreadCatalogDocument {
 interface ThreadCatalogV1 {
   schemaVersion: 1;
   workspaceId: string;
-  threads: Array<Omit<Thread, "report"> & { report: LegacyThreadReport | null }>;
+  threads: Array<Omit<Thread, "manifest" | "model" | "report"> & { report: LegacyThreadReport | null }>;
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV2 {
+  schemaVersion: 2;
+  workspaceId: string;
+  threads: Array<Omit<Thread, "manifest" | "model">>;
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV3 {
+  schemaVersion: 3;
+  workspaceId: string;
+  threads: Array<Omit<Thread, "manifest">>;
   runs: ThreadRun[];
 }
 
@@ -87,6 +103,7 @@ export interface CreateThreadInput {
   createdBy: ThreadCreatedBy;
   forkPoint?: { entryId: string };
   carryBlocks?: boolean;
+  concurrency: number;
   scope?: string[];
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
@@ -218,6 +235,15 @@ const isTranscriptRef = (value: unknown): value is ThreadReport["transcriptRef"]
   && (value.branchLeafId === undefined || isString(value.branchLeafId))
 );
 
+const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
+  isRecord(value)
+  && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
+  && Array.isArray(value.scope) && value.scope.every(isString)
+  && isNullableString(value.systemPromptFragment)
+  && Array.isArray(value.tools) && value.tools.every(isString)
+  && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
+);
+
 const isReport = (value: unknown): value is ThreadReport | null => (
   value === null
   || (isRecord(value)
@@ -250,6 +276,8 @@ const isThread = (value: unknown): value is Thread => {
     && (value.forkPoint === null || (isRecord(value.forkPoint) && isString(value.forkPoint.entryId)))
     && isString(value.brief)
     && isNullableString(value.role)
+    && (value.model === null || (isRecord(value.model) && isString(value.model.providerId) && isString(value.model.modelId)))
+    && isLaunchManifest(value.manifest)
     && (value.createdBy === "user" || value.createdBy === "agent")
     && (value.kind === "discussion" || value.kind === "implementation")
     && (value.worktree === null || (isRecord(value.worktree) && isString(value.worktree.path) && isString(value.worktree.base)))
@@ -266,10 +294,36 @@ const isThread = (value: unknown): value is Thread => {
     && typeof value.hidden === "boolean";
 };
 
+const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManifest => {
+  const role = typeof value.role === "string" && Object.hasOwn(ROLE_DEFINITIONS, value.role)
+    ? ROLE_DEFINITIONS[value.role as keyof typeof ROLE_DEFINITIONS]
+    : null;
+  const configuredWorktree = role?.worktree === "shared"
+    ? "shared" as const
+    : role?.worktree === "none"
+      ? "none" as const
+      : "isolated" as const;
+  return {
+    concurrency: 12,
+    scope: [],
+    systemPromptFragment: role?.systemPromptFragment ?? null,
+    tools: [...(role?.tools ?? [])],
+    worktree: value.worktree && typeof value.worktree === "object" ? "isolated" : configuredWorktree,
+  };
+};
+
 const isThreadV1 = (value: unknown): value is ThreadCatalogV1["threads"][number] => (
   isRecord(value)
   && isLegacyReport(value.report)
-  && isThread({ ...value, report: null })
+  && isThread({ ...value, manifest: legacyLaunchManifest(value), model: null, report: null })
+);
+
+const isThreadV2 = (value: unknown): value is ThreadCatalogV2["threads"][number] => (
+  isRecord(value) && isThread({ ...value, manifest: legacyLaunchManifest(value), model: null })
+);
+
+const isThreadV3 = (value: unknown): value is ThreadCatalogV3["threads"][number] => (
+  isRecord(value) && isThread({ ...value, manifest: legacyLaunchManifest(value) })
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -399,7 +453,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -425,8 +479,42 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
         const sessionId = thread.activeRunId === null
           ? ""
           : v1.runs.find((run) => run.id === thread.activeRunId)?.sessionId ?? "";
-        return { ...structuredClone(thread), report: migrateLegacyReport(thread.report, sessionId) };
+        return {
+          ...structuredClone(thread),
+          manifest: legacyLaunchManifest(thread as unknown as Record<string, unknown>),
+          model: null,
+          report: migrateLegacyReport(thread.report, sessionId),
+        };
       }),
+    };
+  } else if (schemaVersion === 2) {
+    if (!value.threads.every(isThreadV2)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v2 thread records: ${path}`, path);
+    }
+    const v2 = value as unknown as ThreadCatalogV2;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: v2.workspaceId,
+      runs: structuredClone(v2.runs),
+      threads: v2.threads.map((thread) => ({
+        ...structuredClone(thread),
+        manifest: legacyLaunchManifest(thread as unknown as Record<string, unknown>),
+        model: null,
+      })),
+    };
+  } else if (schemaVersion === 3) {
+    if (!value.threads.every(isThreadV3)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v3 thread records: ${path}`, path);
+    }
+    const v3 = value as unknown as ThreadCatalogV3;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: v3.workspaceId,
+      runs: structuredClone(v3.runs),
+      threads: v3.threads.map((thread) => ({
+        ...structuredClone(thread),
+        manifest: legacyLaunchManifest(thread as unknown as Record<string, unknown>),
+      })),
     };
   } else {
     if (!value.threads.every(isThread)) {
@@ -525,6 +613,8 @@ const convertLegacy = (workspaceId: string, records: LegacyThreadRecord[]): { th
       forkPoint: legacy.forkPoint ?? null,
       brief: legacy.brief,
       role: legacy.role ?? null,
+      model: null,
+      manifest: legacyLaunchManifest(legacy as unknown as Record<string, unknown>),
       createdBy: legacy.createdBy === "user" ? "user" : "agent",
       kind: legacy.kind === "discussion" ? "discussion" : "implementation",
       worktree: legacy.worktree ?? null,
@@ -575,6 +665,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const cursors = new Map<string, ThreadViewCursor>();
   const waiters = new Map<string, Set<() => void>>();
   const draining = new Set<string>();
+  const retiredParents = new Set<string>();
   const dequeueing = new Set<string>();
   let persistCounter = 0;
 
@@ -746,8 +837,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const createThread = async (input: CreateThreadInput): Promise<Thread> => {
+    const key = scopeKey(input.workspaceId, input.parent);
+    if (draining.has(key) || retiredParents.has(key)) {
+      throw new Error("Cannot create a thread while its parent is being deleted");
+    }
     await ensureLegacyParent(input.workspaceId, input.parent);
     return mutateWorkspace(input.workspaceId, (catalog) => {
+      if (draining.has(key) || retiredParents.has(key)) {
+        throw new Error("Cannot create a thread after its parent entered deletion");
+      }
       const timestamp = nowISO();
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
@@ -756,6 +854,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         forkPoint: input.forkPoint ?? null,
         brief: input.brief,
         role: input.role ?? null,
+        model: input.model ?? null,
+        manifest: {
+          concurrency: input.concurrency,
+          scope: [...(input.scope ?? [])],
+          systemPromptFragment: input.systemPromptFragment ?? null,
+          tools: [...new Set(input.tools)],
+          worktree: input.worktree,
+        },
         createdBy: input.createdBy,
         kind: input.kind,
         worktree: null,
@@ -812,6 +918,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
+      const parentKey = scopeKey(workspaceId, thread.parent);
+      if (draining.has(parentKey) || retiredParents.has(parentKey)) {
+        throw new Error("Cannot start a thread while its parent is being deleted");
+      }
       const current = activeRunFor(catalog, thread);
       if (current?.workerState === "starting" || current?.workerState === "running") {
         throw new Error(`Thread already has an active run: ${threadId}`);
@@ -869,7 +979,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const maybeDequeue = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
     const key = scopeKey(workspaceId, parent);
-    if (draining.has(key) || await countActive(workspaceId, parent) >= maxConcurrency) return;
+    if (draining.has(key)) return;
     await tryDequeue(workspaceId, parent);
   };
 
@@ -1019,6 +1129,38 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     })
   );
 
+  const archiveThreadsForDeletedSession = async (
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<Thread[]> => mutateWorkspace(workspaceId, (catalog) => {
+    const timestamp = nowISO();
+    const affectedIds = new Set(
+      catalog.runs.filter((run) => run.sessionId === sessionId).map((run) => run.threadId),
+    );
+    const changed: Thread[] = [];
+    for (const threadId of affectedIds) {
+      const thread = findThread(catalog, threadId);
+      if (!thread) continue;
+      const activeRun = activeRunFor(catalog, thread);
+      if (activeRun?.sessionId === sessionId && activeRun.outcome === null) {
+        activeRun.workerState = "exited";
+        activeRun.outcome = "cancelled";
+        activeRun.exitReason = "thread session deleted by user";
+        activeRun.endedAt = timestamp;
+        activeRun.lastActivityAt = timestamp;
+      }
+      thread.lifecycle = "archived";
+      thread.attention = "none";
+      thread.waitingFor = null;
+      // The report's TranscriptRef points at the file being deleted. Retaining
+      // it would turn an intentional deletion into a durable broken reference.
+      thread.report = null;
+      touchThread(catalog, thread);
+      changed.push(thread);
+    }
+    return { value: changed, changed, write: changed.length > 0 };
+  });
+
   const convertThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
@@ -1033,17 +1175,23 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setIntegration(workspaceId, threadId, "merged")
   );
 
-  const cancelAllForParent = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
+  const cancelAllForParent = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    stopActive?: (thread: Thread) => Promise<void>,
+  ): Promise<void> => {
     const key = scopeKey(workspaceId, parent);
     draining.add(key);
     try {
       const threads = await listThreads(workspaceId, parent, true);
       for (const thread of threads) {
         if (thread.lifecycle === "queued" || thread.lifecycle === "active") {
+          if (thread.lifecycle === "active") await stopActive?.(thread);
           await cancelThread(workspaceId, thread.id, "parent session deleted");
-          await archiveThread(workspaceId, thread.id);
         }
+        await archiveThread(workspaceId, thread.id);
       }
+      retiredParents.add(key);
     } finally {
       draining.delete(key);
     }
@@ -1092,6 +1240,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const next = catalog.threads
       .filter((thread) => parentEquals(thread.parent, parent) && thread.lifecycle === "queued")
       .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0] ?? null;
+    if (next && await countActive(workspaceId, parent) >= next.manifest.concurrency) return null;
     if (!next || !options.onThreadDequeued) return structuredClone(next);
     dequeueing.add(key);
     try {
@@ -1182,6 +1331,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     waiters.clear();
     cursors.clear();
     cache.clear();
+    retiredParents.clear();
   };
 
   return {
@@ -1201,6 +1351,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     completeThread,
     cancelThread,
     archiveThread,
+    archiveThreadsForDeletedSession,
     convertThread,
     mergeThread,
     cancelAllForParent,

@@ -487,6 +487,34 @@ outcome, session, metrics, and exit reason. A restart ends the old Run as
 `lost`; resuming creates `attempt + 1` without rewriting history. Event
 sequences resume from the persisted workspace maximum.
 
+The Web/Application Host advertises `harnessThreads` during the private Host
+handshake. Only then does pi-host register thread tools. Dispatch atomically
+persists a Thread and `starting` Run and returns before worktree/session setup;
+the background runtime creates a real persisted Pi child. Its
+`ThreadLaunchManifest` freezes scope, worktree mode, role prompt fragment, and
+active tool names, while the resolved model is supplied at `session.create`
+time. Pi therefore constructs the child with the correct model-family tools
+and a read-only role cannot regain write tools merely because the global
+settings expose them. Opening the child from the UI supplies the same frozen
+launch values again.
+
+Isolated work starts from the parent's full working state. A private baseline
+commit inside the child worktree separates pre-existing parent dirt from the
+child delta; merge preflights untracked collisions before applying tracked
+changes and reports whether Git wrote conflict entries or left the parent
+unchanged. One unexpected worker exit automatically creates a new Run in the
+same session/worktree. A second consecutive crash becomes `stalled`, avoiding
+an unbounded crash loop. Event silence, six identical tool signatures, and
+interactive UI requests project `stalled`, `looping`, and `user/permission`
+attention without stopping the Run.
+Before the broker deletes a parent Pi session file it awaits an Application
+Host coordinator. The registry enters draining mode, stops active child
+workers, cancels queued/active Runs, and archives every direct child; dequeue is
+suppressed throughout so deletion cannot resurrect queued work.
+Deleting a child session directly archives its owning Thread and clears the
+report whose TranscriptRef is about to disappear; completed Run history keeps
+its original outcome.
+
 Thread params do not carry parent or workspace authority — the service resolves
 the session parent and workspace from the trusted ActorContext. Observer cursors (`ThreadViewCursor`) enable
 incremental views: `thread.list` and `thread.wait` only show changes
@@ -495,7 +523,9 @@ changes state, the timeout fires, or the abort signal fires.
 
 Concurrency is enforced by the registry. A slot is occupied only by an active
 Thread whose current Run is `starting` or `running`; `queued` means created but not yet spawned, so it
-holds nothing. When `countActive >= maxConcurrency` a dispatch is
+holds nothing. pi-host sends the parent session's frozen
+`harness.dispatch.concurrency` with each dispatch (default 12; no unrelated
+hard ceiling). When `countActive >= concurrency` a dispatch is
 queued, and any terminal transition promotes the oldest queued thread
 through the `onThreadDequeued` callback whenever a Run ends or a queued Thread is cancelled.
 Tearing a parent down suppresses dequeue: promoting a queued thread
@@ -503,9 +533,9 @@ there would resurrect work the user just deleted.
 
 `HarnessSettings` (in `harness-settings.ts`) configures shell
 interpreter selection, output truncation budgets, per-tool enable flags,
-and the permission mode. `threadRuntime` remains a temporary pi-host setting,
-but the Host grants `control.thread` only when the registry and real spawn
-runtime both exist, so a setting cannot expose tools that only fail. The
+the permission mode, model slots, and dispatch concurrency. Thread-runtime
+availability is Host capability, not a setting: a Host without a real registry
+and spawn runtime cannot expose tools that only fail. The
 Settings page contribution lets users toggle tools like grep; when
 disabled, the next session does not register the tool and Pi falls back
 to its built-in equivalent.
@@ -522,7 +552,7 @@ to its built-in equivalent.
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
+| Native harness thread lifecycle | Host atomic Thread/ThreadRun catalog + Pi child session JSONL + managed Git worktree | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, and merge only the child delta |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |

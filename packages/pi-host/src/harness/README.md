@@ -19,6 +19,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
 | `diagnostics` | Get LSP diagnostics for a file | `lsp.diagnosticsSnapshot` |
+| `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
 ## Registration
 
@@ -58,11 +59,13 @@ if (isOpenAIFamily) {
 
 The `HostServicesBridge` sends `harness.request` events to the host via
 the broker. The host's `HarnessRouter` dispatches to the appropriate
-service and responds via `harness.respond`.
+service and responds via `harness.respond`. Worker payloads do not carry a
+session identity; the broker pins identity after `session.create/open` and
+adds the trusted Actor envelope consumed by the Host.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
-   → emit("harness.request", { method, params, requestId, sessionId })
+   → emit("harness.request", { method, params, requestId })
    → host: HarnessRouter.processEvent() → ShellSupervisor.exec()
    → emit("harness.respond", { requestId, result/error })
    → pi-host: bridge resolves promise
@@ -70,9 +73,20 @@ pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
 
 ## Path Locking
 
-`withPathLock(bridge, sessionId, paths, fn)` acquires `fs.lock` for each
-path, executes `fn`, then releases. Used by `apply_patch` to prevent
-concurrent edits.
+`withPathLock(bridge, sessionId, paths, fn)` submits one path batch. The Host
+canonicalizes and orders it, returns owner-bound lease IDs, then the wrapper
+releases those IDs after `fn`. `apply_patch` therefore acquires every file
+before applying the first change and cannot deadlock with another reversed
+multi-file patch in the same Host.
+
+## Child Session Launch
+
+The Application Host advertises `harnessThreads` in the private Host
+handshake. Thread tools are absent when that capability is missing. A real
+child launch supplies its resolved role model and tool allowlist to
+`session.create/open` before Pi constructs the AgentSession; read-only roles do
+not merely rely on a prompt asking them not to write. The role fragment and
+scope stay in the first task message, keeping the base system prefix stable.
 
 ## Mutation Journal Integration
 

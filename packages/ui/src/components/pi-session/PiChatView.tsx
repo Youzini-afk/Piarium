@@ -69,6 +69,7 @@ import { projectPiAssistantWaiting } from './piAssistantWaiting';
 import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
+import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -745,6 +746,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const entries = currentRecord.branchEntries.entries;
   const previewOnly = !isPiSessionWorkerReady(currentRecord);
   const sessionCwd = snapshot?.cwd ?? currentSummary?.cwd ?? currentDirectory;
+  const threadWorkspaceId = snapshot?.workspace?.kind === 'workspace'
+    ? snapshot.workspace.authorityId ?? snapshot.workspace.id
+    : null;
   return (
     <TooltipProvider>
       <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
@@ -854,6 +858,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
         </section>
         </div>
+        {threadWorkspaceId ? (
+          <HarnessThreadsPanel
+            fallbackCwd={sessionCwd}
+            parentSessionId={currentSessionId}
+            workspaceId={threadWorkspaceId}
+          />
+        ) : null}
       </div>
 
       {treeDialogOpen && currentSessionId && snapshot ? (

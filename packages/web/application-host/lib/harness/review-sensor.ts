@@ -73,6 +73,8 @@ export async function onAgentSettled(
     role: reviewRole.id,
     kind: "implementation",
     createdBy: "agent",
+    concurrency: registry.maxConcurrency,
+    model: reviewRole.model,
     autoRun: true,
     // Review reads the diff; it never needs a worktree of its own.
     worktree: "none",

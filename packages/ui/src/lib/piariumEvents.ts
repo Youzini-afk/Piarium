@@ -1,5 +1,18 @@
 import { getRuntimeUrlResolver } from '@piarium/application-client';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import type { Thread, ThreadParent, ThreadRun } from '@piarium/protocol';
+
+type StreamReadyEvent = {
+  type: 'stream-ready';
+};
+
+export type HarnessThreadChangedEvent = {
+  type: 'harness-thread-changed';
+  workspaceId: string;
+  parent: ThreadParent;
+  thread: Thread;
+  activeRun: ThreadRun | null;
+};
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -20,7 +33,7 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-type PiariumEvent = ScheduledTaskRanEvent | SessionCreatedEvent;
+export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent;
 type Listener = (event: PiariumEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -97,9 +110,39 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
   return properties as Record<string, unknown>;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const parseHarnessThreadChanged = (properties: unknown): HarnessThreadChangedEvent | null => {
+  const record = getEventProperties(properties);
+  const parent = record?.parent;
+  const thread = record?.thread;
+  const activeRun = record?.activeRun;
+  if (
+    typeof record?.workspaceId !== 'string'
+    || !isRecord(parent)
+    || (parent.kind !== 'session' && parent.kind !== 'thread')
+    || typeof parent.id !== 'string'
+    || !isRecord(thread)
+    || typeof thread.id !== 'string'
+    || typeof thread.workspaceId !== 'string'
+    || typeof thread.eventSeq !== 'number'
+    || (activeRun !== null && !isRecord(activeRun))
+  ) return null;
+  return {
+    type: 'harness-thread-changed',
+    workspaceId: record.workspaceId,
+    parent: parent as ThreadParent,
+    thread: thread as unknown as Thread,
+    activeRun: activeRun as ThreadRun | null,
+  };
+};
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'piarium:event-stream-ready') {
     reconnectAttempt = 0;
+    for (const listener of listeners) listener({ type: 'stream-ready' });
     return;
   }
 
@@ -129,6 +172,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const listener of listeners) {
       listener(nextEvent);
     }
+    return;
+  }
+
+  if (envelope.type === 'piarium:harness-thread-changed') {
+    const nextEvent = parseHarnessThreadChanged(envelope.properties);
+    if (nextEvent) for (const listener of listeners) listener(nextEvent);
     return;
   }
 

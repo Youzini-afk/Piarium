@@ -15,6 +15,7 @@ import {
   type HostMethod,
   type ImageAttachment,
   type JsonValue,
+  type ModelSelection,
   parsePiSessionFeatureMutation,
   parseProviderConfigInput,
   PiSessionFeatureValidationError,
@@ -227,6 +228,19 @@ function readStringList(record: Record<string, unknown>, key: string): string[] 
     throw new HostError("invalid_params", `${key} must be an array of strings`);
   }
   return value as string[];
+}
+
+function optionalStringList(record: Record<string, unknown>, key: string): string[] | undefined {
+  return record[key] === undefined ? undefined : readStringList(record, key);
+}
+
+function optionalModelSelection(record: Record<string, unknown>): ModelSelection | undefined {
+  if (record.model === undefined) return undefined;
+  const model = expectRecord(record.model, "model");
+  return {
+    providerId: readString(model, "providerId"),
+    modelId: readString(model, "modelId"),
+  };
 }
 
 function readProviderConfig(value: unknown): ProviderConfigInput {
@@ -489,6 +503,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "workspaceMutationJournal", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessThreadRuntimeEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessThreads", { optional: true }) === true,
+        );
         return {
           capabilities: HOST_CAPABILITIES,
           hostVersion: PIARIUM_HOST_VERSION,
@@ -506,15 +524,21 @@ export class HostController {
           readString(params, "cwd"),
           optionalString(params, "name"),
           optionalString(params, "parentSession"),
+          optionalStringList(params, "tools"),
+          optionalModelSelection(params),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
         const sessionFile = optionalString(params, "sessionFile");
         const sessionId = optionalString(params, "sessionId");
+        const tools = optionalStringList(params, "tools");
+        const model = optionalModelSelection(params);
         return this.#sessionHost.open({
           ...(cwd === undefined ? {} : { cwd }),
           ...(sessionFile === undefined ? {} : { sessionFile }),
           ...(sessionId === undefined ? {} : { sessionId }),
+          ...(tools === undefined ? {} : { tools }),
+          ...(model === undefined ? {} : { model }),
         });
       }
       case "session.resolve": {

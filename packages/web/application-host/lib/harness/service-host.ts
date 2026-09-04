@@ -81,7 +81,13 @@ export interface HarnessServiceHost {
   threadRegistry: ThreadRegistry | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   threadKillSession: ((threadId: string) => Promise<void>) | null;
-  threadApplyWorktreeDiff: ((threadId: string) => Promise<{ merged: number; conflicts: string[] }>) | null;
+  threadApplyWorktreeDiff: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent, threadId: string) => Promise<{
+    merged: number;
+    conflicts: string[];
+    conflictState?: "none" | "markers" | "parent-unchanged";
+    changedFiles?: string[];
+    diffStats?: import("@piarium/protocol").ThreadDiffStats;
+  }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
   registerSession(ctx: HarnessSessionContext): void;
@@ -126,7 +132,7 @@ export interface HarnessServiceHostOptions {
   threadRegistry?: ThreadRegistry;
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
   threadKillSession?: (threadId: string) => Promise<void>;
-  threadApplyWorktreeDiff?: (threadId: string) => Promise<{ merged: number; conflicts: string[] }>;
+  threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
 }

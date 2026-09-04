@@ -60,13 +60,19 @@ waiting on a concurrency slot.
 ### Thread Lifecycle
 
 ```
-queued → running → idle → waiting-for-input → done → merged → archived
-                 ↘ failed                    ↘ cancelled
+Thread.lifecycle: queued → active → settled → archived
+Thread.attention: none | user | permission | stalled | looping
+Thread.integration: none | dirty | merge-ready | conflict | merged
+ThreadRun.workerState: starting → running → exited | lost
+ThreadRun.outcome: success | failure | cancelled | lost
 ```
 
-State transitions are validated by the registry; an invalid transition
-throws. Reaching any terminal state frees a concurrency slot and may
-promote the oldest queued thread.
+These axes are intentionally independent: a successful Run may leave its
+Thread `merge-ready` or `conflict`, while a lost Run leaves durable work and
+attention intact. `ThreadLaunchManifest` freezes the role's tool allowlist,
+worktree mode, scope, prompt fragment, and parent concurrency so a restart cannot silently gain
+different capabilities. Reaching a terminal Run frees a concurrency slot and
+may promote the oldest queued Thread.
 
 ### ShellExecResult Variants
 
@@ -95,16 +101,20 @@ interface HarnessSettings {
   };
   web?: { maxFetchesPerTurn?: number; render?: boolean };
   permissions?: { mode?: PermissionMode };   // default "normal"
-  threadRuntime?: boolean;                   // default false — see harness-settings.ts
 }
 ```
+
+Thread-runtime availability is not a user setting. The Application Host
+advertises `capabilities.harnessThreads` in the private Host handshake; only
+then does pi-host register the seven thread tools. Child sessions receive their
+frozen role model and active tool list in `session.create/open`.
 
 ## Exports
 
 - `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `OutputRef`, `OutputSlice`, `ShellExecResult`, `DiagnosticsResult`
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
 - `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
-- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` protocol types, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
+- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest`, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`

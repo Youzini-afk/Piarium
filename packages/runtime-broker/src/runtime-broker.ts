@@ -77,6 +77,11 @@ export type PiSessionExecutionAdmission = (
   request: PiSessionExecutionAdmissionRequest,
 ) => Promise<PiSessionExecutionLease | null | undefined>;
 
+export type PiSessionDeleteCoordinator = (request: {
+  sessionId: string;
+  summary: SessionSummary;
+}) => Promise<void>;
+
 interface SessionExecutionAdmissionState {
   awaitsAgentSettlement: boolean;
   client: PiHostClient;
@@ -331,6 +336,7 @@ export class PiRuntimeBroker {
   #packageMutationTail: Promise<void> = Promise.resolve();
   #receiptPromise: Promise<PackageProvisioningReceiptStore> | undefined;
   #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
+  #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
@@ -387,6 +393,13 @@ export class PiRuntimeBroker {
       throw new TypeError("Pi session execution admission must be a function");
     }
     this.#sessionExecutionAdmission = admit;
+  }
+
+  setSessionDeleteCoordinator(coordinate: PiSessionDeleteCoordinator | undefined): void {
+    if (coordinate !== undefined && typeof coordinate !== "function") {
+      throw new TypeError("Pi session delete coordinator must be a function");
+    }
+    this.#sessionDeleteCoordinator = coordinate;
   }
 
   async warmup(): Promise<HostHandshakeResult> {
@@ -544,6 +557,7 @@ export class PiRuntimeBroker {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
+    launch?: { model?: { providerId: string; modelId: string }; tools?: string[] },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
     const normalizedCwd = resolve(cwd);
@@ -553,6 +567,8 @@ export class PiRuntimeBroker {
         cwd: normalizedCwd,
         ...(name === undefined ? {} : { name }),
         ...(parentSession === undefined ? {} : { parentSession }),
+        ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
+        ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
       });
       this.#bindSession(worker, snapshot.sessionId);
       if (workspace !== undefined) {
@@ -580,8 +596,10 @@ export class PiRuntimeBroker {
 
   async openSession(input: {
     cwd?: string;
+    model?: { providerId: string; modelId: string };
     sessionFile?: string;
     sessionId?: string;
+    tools?: string[];
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     if (input.sessionId) {
@@ -610,6 +628,8 @@ export class PiRuntimeBroker {
     const normalizedInput = {
       ...(explicitSessionFile === undefined ? {} : { sessionFile: explicitSessionFile }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.model === undefined ? {} : { model: { ...input.model } }),
+      ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
     };
     let known = this.#knownSummaryForOpen(normalizedInput);
     if (
@@ -644,6 +664,8 @@ export class PiRuntimeBroker {
       cwd: workerCwd,
       ...(sessionFile === undefined ? {} : { sessionFile }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.model === undefined ? {} : { model: { ...input.model } }),
+      ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
     };
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
@@ -980,6 +1002,7 @@ export class PiRuntimeBroker {
       this.#knownSummaries.delete(sessionId);
       return { deleted: hadPendingWorkspace || removedMetadata, sessionId };
     }
+    await this.#sessionDeleteCoordinator?.({ sessionId, summary: structuredClone(summary) });
     // Deletion must not wait forever for a plugin's session_shutdown hook. The
     // client disposal path already asks the Host to shut down gracefully, then
     // retires the process tree after the configured shutdown budget.

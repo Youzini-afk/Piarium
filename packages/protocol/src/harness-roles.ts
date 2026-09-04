@@ -48,7 +48,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "quick-implement": {
     id: "quick-implement",
     slot: "quickImplement",
-    tools: ["read", "edit", "write", "bash", "grep", "glob"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "shared",
     systemPromptFragment:
       "You are a quick implementation agent. Make mechanical, well-specified changes efficiently.",
@@ -59,7 +59,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "hard-implement": {
     id: "hard-implement",
     slot: "hardImplement",
-    tools: ["read", "edit", "write", "bash", "grep", "glob", "explore", "recall", "todo"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo"],
     worktree: "isolated-when-parallel",
     systemPromptFragment:
       "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
@@ -70,7 +70,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "frontend": {
     id: "frontend",
     slot: "frontend",
-    tools: ["read", "edit", "write", "bash", "grep", "glob", "explore"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore"],
     worktree: "isolated-when-parallel",
     systemPromptFragment:
       "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",
@@ -81,7 +81,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "review": {
     id: "review",
     slot: "review",
-    tools: ["read", "grep", "glob", "bash"],
+    tools: ["read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
     worktree: "none",
     systemPromptFragment: "You have not seen the conversation; review the diff on its own merits.",
     teamDescription: "strong model; independent review of a diff",
@@ -91,7 +91,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "check": {
     id: "check",
     slot: "check",
-    tools: ["read", "bash", "grep", "glob"],
+    tools: ["read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "shared",
     systemPromptFragment:
       "You are a check agent. Run tests and lint, report results. Do not make changes.",

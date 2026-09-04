@@ -51,6 +51,7 @@ import type {
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
 import type { HarnessRespondParams } from "./harness.js";
+import type { ModelSelection } from "./harness-settings.js";
 
 export interface HostMethodMap {
   "agentProvider.action": {
@@ -313,7 +314,7 @@ export interface HostMethodMap {
     result: { closed: boolean };
   };
   "session.create": {
-    params: { cwd: string; name?: string; parentSession?: string };
+    params: { cwd: string; model?: ModelSelection; name?: string; parentSession?: string; tools?: string[] };
     result: SessionSnapshot;
   };
   "session.list": {
@@ -401,8 +402,10 @@ export interface HostMethodMap {
   "session.open": {
     params: {
       cwd?: string;
+      model?: ModelSelection;
       sessionFile?: string;
       sessionId?: string;
+      tools?: string[];
       workspace?: SessionWorkspaceBinding;
     };
     result: SessionSnapshot;

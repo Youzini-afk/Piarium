@@ -17,9 +17,10 @@ Last updated: 2026-09-04
 规则：只有 `proven` 算纵切完成；`Proven evidence` 列不接受 `yes`，只接受路径；`Blocker` 列写阻止升级到下一级的具体事项。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**P0 integrity（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned Thread/ThreadRun catalog 与启动对账、
-事件驱动 wait、OutputRef/TranscriptRef、UTF-8 字节分页、workspace canonical lease 均已进入生产链。下一交付目标是 T1
-真实 child session + worktree 纵切；在它完成前 `control.thread` 仍不授予普通会话。
+**P0 integrity 与 T1 线程核心纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
+Thread/ThreadRun catalog 与启动对账、事件驱动 wait、OutputRef/TranscriptRef、UTF-8 字节分页、workspace canonical lease，
+以及异步 dispatch → 真实 Pi child session → 冻结角色模型/工具 → worktree → report/transcript → merge 均已进入 Web/Application
+Host 生产链。Host 通过握手声明真实线程能力，pi-host 才注册七个工具；无能力的 Host 不暴露休眠工具。
 
 ## 矩阵
 
@@ -60,12 +61,13 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✗ | `knowledge/symbols`（单测） | — | 只维护 file 节点 | 未接 LSP / watch |
 | **3.2** `explore` 管线 | host | ✓ | ✗ | `host/explore.test.ts`（17） | — | — | pi-host 无 `explore` 工具定义；10 问题快照未做 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
-| **3.4 / 3.5** 线程注册表与 7 个工具 | protocol / host / pi-host | ✓ | 部分（生产 Host 已创建 versioned registry、启动对账与 Pi 会话 transcript reader；无 child runtime 时不授予 `control.thread`） | `host/thread-registry.test.ts`（损坏/权限/未来 schema、v0/v1 迁移、崩溃对账、正交状态）；`thread-transcript.test.ts`；`phase3-e2e.test.ts`（ThreadRun、事件 wait、耐久 steps）；`protocol/test/harness-threads.test.ts` | ✗ | 不注册 | 真实 spawn / kill / send / merge、worktree、活性传感器、Zone 2 threads 段、Fleet provider、侧栏属于 T1 |
+| **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`（真实持久 Pi child、冻结模型/工具、报告）；`thread-worktree.test.ts`（真实 Git、dirty baseline、冲突不覆盖）；`thread-runtime.test.ts`（worker/host 中断续跑、权限等待、stalled/looping）；`phase3-e2e.test.ts`（bridge→router→registry）；`thread-runtime-capability.test.ts`（Host 握手能力门）；`runtime-dispatcher-session-launch.test.ts`；`session-delete-coordinator.test.ts` | ✓（Web/Application Host） | Host 未声明 `harnessThreads` 时不注册 | `scope` 目前进入冻结 manifest 与任务提示，但路径级强制归 T2；role budget、父 blocks 快照与结构化 deviations 尚未接；Zone 2 threads 段、完成后的 worktree/branch 回收策略仍待做 |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
 | **3.7** review 传感器 | host | ✓ | ✗ | `host/review-sensor.test.ts`（6，含对父不可见） | — | — | 未挂 `agent_settled`；`<review>` Zone 2 注入未做 |
 | **3.8** LSP 导航工具 | host | ✓ | ✗ | `host/lsp-nav.test.ts`（13） | — | — | pi-host 无工具定义 |
 | **3.9** 观察类工具增量视图（`get_output` / `diagnostics`） | host | ✗ | ✗ | — | — | — | 仅线程有游标；通用 `ObservationCursorStore` 未做 |
-| **3.10** 线程侧栏 / 讨论线 | ui | ✗ | ✗ | — | — | — | 依赖 3.4 纵切 |
+| **3.10** 最小线程侧栏 | ui / host | ✓ | ✓ | `thread-routes.test.ts`；`HarnessThreadsPanel.test.ts`；`piariumEvents.test.ts`（SSE 重连后重取 + 增量事件） | ✓（有线程且桌面宽度足够时） | 线程工具仍可完整操作 | 当前是父会话桌面最小侧栏；窄屏/移动投影、时间线卡片与用户创建讨论线未做 |
+| **3.11** Harness Fleet provider | pi-host / host | ✓ | ✓ | `piarium-harness-adapter.test.ts`；复用 `phase3-e2e.test.ts` 的 Host thread service 链 | ✓（普通会话） | 专用 `threads` / `wait` 工具 | 子会话按角色工具 allowlist 不注册该 provider；Zone 2 threads 段未做 |
 | **3b.1** 权限门（`tool_call`） | protocol / pi-host / host | ✓ | ✓ | `host/permission-gate.test.ts`（22）；`phase3b-e2e.test.ts`；`session-e2e.test.ts`（真会话：allow once / deny / 会话授权 / 高风险覆盖 / 只读不弹窗）；`router.test.ts`（静态 capability / path） | ✓ | 交还给任何强制型 Pi 扩展 | 与 `pi-permission-system` 并存、无重复提示（D-021）；工作区 regex 无 ReDoS 防护 |
 | **3b.2** Smart 模式 | host | ✓ | ✗ | `host/smart-mode.test.ts`（10） | — | — | `permissionJudge` 槽位未接 |
 | **3b.3** 停止 provisioning 插件 | protocol | ✗（已回退） | — | — | — | — | 插件仍在 `FOUNDATIONAL_PI_PACKAGE_MANIFEST`（revision 2）；等 3b.1 覆盖插件全部面后再移除 |
@@ -75,7 +77,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | 来源 | 未完成 |
 | --- | --- |
 | D-023 | Zone 2 material 收集（观察者未订阅事件源）；记忆 agent 无 model 访问；user 知识库未打开；todo 的确认通道与"只问一次"未接 |
-| D-024 / D-026 | worktree 创建与回收；活性传感器 stalled / looping；Zone 2 threads 段；Fleet provider；broker child session（spawn / kill / send / applyWorktreeDiff 仍为 mock）；`read_thread(steps)` 转录切片；progress / decisions / errors 块提取 |
+| D-024 / D-026 | Zone 2 threads 段；merge/归档后的 worktree 与分支回收；窄屏侧栏与讨论线；progress / decisions / errors 块提取；`scope` 的 Host 强制 |
 | D-025 | smart mode 未接 permissionJudge 槽位 |
 | D-013 | harness shell 未接进 terminal runtime |
 | 3b.3 | 插件未移除，原生门控与插件并存 |

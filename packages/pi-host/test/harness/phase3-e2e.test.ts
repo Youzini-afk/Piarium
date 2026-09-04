@@ -36,6 +36,7 @@ const threadInput = (brief: string) => ({
   role: "check",
   kind: "implementation" as const,
   createdBy: "agent" as const,
+  concurrency: 12,
   autoRun: true,
   worktree: "isolated" as const,
   tools: [] as string[],
@@ -63,7 +64,11 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
     resolveWorkspaceRoot: async () => workspaceRoot,
     discoveredShells: { hasBash: process.platform !== "win32", hasPowerShell: process.platform === "win32" },
     threadRegistry,
-    threadSpawnSession: async () => ({ sessionId: `child-session-${++sessionCounter}` }),
+    threadSpawnSession: async (input) => {
+      const sessionId = `child-session-${++sessionCounter}`;
+      await threadRegistry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
+      return { sessionId };
+    },
     threadKillSession: async () => {},
     threadApplyWorktreeDiff: async () => ({ merged: 3, conflicts: [] }),
     threadSendToSession: async (sessionId, message) => { sent.push({ sessionId, message }); },
@@ -124,6 +129,10 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       });
       assert.match(result.text, /dispatched/);
       const threadId = (result.details as { threadId: string }).threadId;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if ((await harness.threadRegistry.getActiveRun(WORKSPACE_ID, threadId))?.workerState === "running") break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
       const thread = await harness.threadRegistry.getThread(WORKSPACE_ID, PARENT, threadId);
       const run = await harness.threadRegistry.getActiveRun(WORKSPACE_ID, threadId);
       assert.equal(thread?.lifecycle, "active");

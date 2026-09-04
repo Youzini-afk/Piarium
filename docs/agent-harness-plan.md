@@ -232,8 +232,9 @@ OutputRef/UTF-8、path authority/lease 与三段 bridge E2E；本轮 protocol 59
 
 ### P0 之后的顺序
 
-T1 **真实 child session 的线程纵切**（一个 Thread、一个 Pi Run、一个 worktree；dispatch / send / wait / cancel / report /
-merge；worker 与 host 崩溃恢复；最小线程侧栏；先不做嵌套与自动 review）→ T2 **权限纵切**（Host enforcement 完整 + pi-host
+T1 **真实 child session 的线程纵切（核心已于 2026-09-04 交付）**（一个 Thread、一个 Pi Run、一个 worktree；dispatch / send /
+wait / cancel / report / merge；worker 与 host 崩溃恢复；活性与等待传感器；Fleet；最小线程侧栏；先不做嵌套与自动 review）→
+T2 **权限纵切**（Host enforcement 完整 + pi-host
 门 + 插件并存与重复提示；真实恶意路径测试通过后再移除插件）→ T3 **上下文 shadow mode**（观察者接事件源、Zone 2 真材料、
 记忆 agent 维护块但不接管、TranscriptRef 全接通）→ T4 **最小回放集**（设计 8.6）→ 由回放数据决定压缩接管、记忆 agent
 模型、TTL 唤醒实验。阶段 4（默认 runtime）并行；阶段 5、6 暂停到 T1 `proven`。
@@ -518,9 +519,10 @@ last checkpoint: 2026-09-03T10:12Z
 
 设计：agent-harness.md 第 6、9.2、9.3 节。依赖阶段 1 与 2.1 / 2.9。
 
-**状态（2026-09-04）**：3.1 / 3.2 / 3.3 / 3.7 / 3.8 `implemented`（pi-host 无对应工具定义）；3.4 / 3.5 注册表与七个工具
-`implemented`，生产 host 未创建注册表、`threadRuntime` 默认 false 因此工具不注册，spawn / kill / send / merge 为 mock；
-3.6 `wired`（随 dispatch）；3.9 / 3.10 未开始。
+**状态（2026-09-04）**：T1 核心纵切已经 `proven`：3.4 / 3.5 七个工具经 Host 能力握手默认接入真实 Pi child、冻结的
+`ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
+已有父会话桌面最小侧栏。未完成边界以 `agent-harness-status.md` 为准：Zone 2 threads 段、worktree/branch 回收、
+窄屏与讨论线、结构化 progress/decisions/errors、scope 强制。3.1 / 3.2 / 3.3 / 3.7 / 3.8 仍只是 `implemented`。
 
 **3.4 / 3.5 的对象模型已由 P0.4 替代**：下文两节里的 `ThreadRecord` 单枚举 `status` + flags 的形状**不再有效**，以设计
 9.3.1 的 Thread + ThreadRun 与正交维度为准；`wait` 不再有 TTL 默认唤醒（D-033）；报告里的 `traceHandle` 改为
@@ -605,8 +607,9 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
 // 事件（protocol events.ts 新增，一律只带状态不带正文）："harness.thread.changed": { parentSessionId; thread: ThreadRecord 的状态子集 }；"harness.thread.done": { parentSessionId; threadId; report: ThreadReport }
 ```
 
-  线程的 system + tools 前缀在同模型时与父逐字节相同（复用父的 Zone 0 组装 + 角色片段追加在 system **末尾**）；开线时带走
-  父会话的记忆块快照（标注"这是快照，父可能已前进"）+ 简报，不带父对话。线程内也注册 `dispatch`（嵌套不限深）。
+  T1 保持基础 system/Zone 0 与普通 Pi 会话一致，把冻结的角色片段、scope 与简报放进首条任务消息；角色边界由 Pi 会话创建时的
+  `tools` allowlist 强制，而不是依赖提示词。这样不会为每个角色改写静态 system 前缀。父记忆块快照尚未接入；T1 子会话的
+  allowlist 不含 `dispatch`，嵌套线程留到后续显式纵切，不做隐式半支持。
 - **生命周期解耦**：父回合结束、父 worker 退出，线程照跑。线程 worker 退出 → `flags.workerLost = true`，状态不变；host 用现有
   的会话恢复路径在同一会话文件、同一 worktree 上重启 worker，线程 id 不变，Zone 2 给它一行"你被中断过，上一条工具结果可能
   缺失"（沿用恢复子系统的 incomplete 语义）。用户删除父会话 → 运行中的线程 `cancelled`（worktree 保留）并归档。
@@ -617,13 +620,14 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
   记忆块快照、diffStats 一次事务写入注册表，发 `harness.thread.done`；之后任何 `wait` / `read_thread(report)` 返回同一份。
 - **进入父的 Zone 2**：2.2 的 Zone 2 组装新增 `threads` 段——每条活跃线程一行（状态 · 一句进度 · 最近活动），完成的线程一行
   "完成：结论 · N 文件 · 偏离：…"，超过 `harness.threads.zone2Max`（默认 6）条折为"另有 K 条"。
-- worktree（`isolated`）：`git worktree add <PIARIUM_DATA_DIR>/worktrees/<threadId> --detach <父 HEAD>`，再把父工作树的
-  未提交改动以 patch 应用到线程（`git diff` + `git apply`；二进制与未跟踪文件复制），使线程从父的**工作树状态**出发；线程的
-  会话 cwd 指向该目录。**worktree 独立于线程寿命**：failed / cancelled / worker-lost 都不删。
+- worktree（`isolated`）：复用 Git 服务创建受管分支/worktree，从父 HEAD 分出，再把父工作树的 tracked patch 与未跟踪文件复制
+  进去；若父起点非 clean，在子 worktree 内提交一笔仅用于界定基线的内部 commit。这样最终 `base → child` diff 只包含子线程增量，
+  不会把父原有脏改动重复合并。合并先预检未跟踪文件碰撞，再尝试 plain `git apply` 与 `--3way`；失败明确区分“父未改动”和
+  “Git 已留下冲突项”。**worktree 独立于线程寿命**：failed / cancelled / worker-lost 都不删。
 - **回收策略**（`harness.threads.*`）：merge 成功 → 删工作目录、保留分支引用 `keepBranchDays`（默认 7）；idle ≥ `archiveAfterDays`
   （默认 14）→ 面板提示归档，归档删 worktree 不删会话；对话正文永不自动删除；报告与记忆块进知识库 `session` 节点并加
   `spawned_from` 边（2.1 就位后）。
-- UI：Fleet 注册表新增 `harness-thread` provider（卡片：角色、状态、步数、最后活动、花费、`kill`）；父时间线折叠卡片链接到
+- UI：Fleet 注册表新增 `piarium-harness` provider（卡片：角色、状态、步数、最后活动、花费、`kill`）；父时间线折叠卡片链接到
   线程会话；侧栏与讨论线见 3.10。
 - 测试：状态机每条迁移；worker 丢失后 `resumeThread` 在同一会话继续且 id 不变；父 worker 退出线程仍在跑；`stalled` /
   `looping` 判定；`waiting-for-input` 由权限询问与 `ask` 触发；报告幂等（两次读取字节相同）；删除父会话 → cancelled + worktree
@@ -663,8 +667,8 @@ ${diffStats 变化 ? `  Δ ${files} files (+${ins} −${del})` : ''}
     改为 `no changes since last view (${ago}); use wait to block instead of polling`。`full: true` 忽略游标。
   - `wait(ids?, timeout_ms?)`：与 `threads` 相同的表，阻塞到任一线程状态变化（含 `waiting-for-input`、`stalled` / `looping` 翻转、
     `done` / `failed` / `worker-lost`）或超时；**超时是正常返回**，首行 `timed out after ${s}s — ${summary}`，不是 isError。
-    默认超时 = `ttlTable[providerId]`（Anthropic 300 s → 240 s；Anthropic 1 h 缓存 → 3300 s；OpenAI → 240 s；Gemini → 240 s；
-    未知 → 240 s；表可配置）。`done` 的线程附完整报告：
+    未显式传入时只受 `HARNESS_MAX_REQUEST_TIMEOUT_MS` 的传输上限约束；provider TTL 只保留为默认关闭的续缓存实验数据（D-033）。
+    `done` 的线程附完整报告：
 
 ```text
 ✔ ${id} (${role}) — ${conclusion}

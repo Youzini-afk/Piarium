@@ -24,8 +24,10 @@ const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadIn
   role: "check",
   kind: "implementation",
   createdBy: "agent",
+  concurrency: 12,
   autoRun: true,
   worktree: "isolated",
+  model: { providerId: "test-provider", modelId: "test-model" },
   tools: [],
   permissions: {},
   ...overrides,
@@ -158,6 +160,15 @@ describe("thread registry", () => {
 
     const restarted = createThreadRegistry({ dataDir, hostId: "test-host" });
     expect((await restarted.getActiveRun(WORKSPACE, thread.id))?.id).toBe(run.id);
+    expect((await restarted.getThread(WORKSPACE, PARENT, thread.id))?.model).toEqual({
+      providerId: "test-provider",
+      modelId: "test-model",
+    });
+    expect((await restarted.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
+      concurrency: 12,
+      tools: [],
+      worktree: "isolated",
+    });
     await restarted.dispose();
   });
 
@@ -235,6 +246,7 @@ describe("thread registry", () => {
       threads: Array<{ report: Record<string, unknown> | null }>;
     };
     v1.schemaVersion = 1;
+    delete (v1.threads[0] as Record<string, unknown>).manifest;
     const currentReport = v1.threads[0]!.report!;
     delete currentReport.transcriptRef;
     currentReport.traceHandle = "out_legacy";
@@ -250,6 +262,49 @@ describe("thread registry", () => {
     });
     await registry.setAttention(WORKSPACE, thread.id, "stalled");
     expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+  });
+
+  it("reads schema v2 threads without a frozen model and upgrades on mutation", async () => {
+    const thread = await registry.createThread(createInput());
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v2 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<Record<string, unknown>>;
+    };
+    v2.schemaVersion = 2;
+    delete v2.threads[0]!.model;
+    delete v2.threads[0]!.manifest;
+    await writeFile(path, JSON.stringify(v2), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.model).toBeNull();
+    await registry.setAttention(WORKSPACE, thread.id, "stalled");
+    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+  });
+
+  it("reads schema v3 threads by deriving their frozen launch manifest", async () => {
+    const thread = await registry.createThread(createInput({
+      role: "check",
+      scope: ["packages/web"],
+      tools: ["read"],
+      worktree: "shared",
+    }));
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v3 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<Record<string, unknown>>;
+    };
+    v3.schemaVersion = 3;
+    delete v3.threads[0]!.manifest;
+    await writeFile(path, JSON.stringify(v3), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
+      tools: expect.arrayContaining(["read", "bash", "grep"]),
+      worktree: "shared",
+    });
   });
 
   it("reconciles interrupted runs as lost while preserving pending attention", async () => {
@@ -328,6 +383,28 @@ describe("thread registry", () => {
     expect(dequeued).toEqual([second.id]);
   });
 
+  it("uses the queued Thread's persisted concurrency after a restart or settings change", async () => {
+    const dequeued: string[] = [];
+    await registry.dispose();
+    registry = createThreadRegistry({
+      dataDir,
+      hostId: "test-host",
+      onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
+    });
+    const first = await registry.createThread(createInput({ brief: "first", concurrency: 2 }));
+    const firstRun = await registry.startRun(WORKSPACE, first.id);
+    await registry.markRunRunning(WORKSPACE, first.id, firstRun.id, "child-1");
+    const second = await registry.createThread(createInput({ brief: "second", concurrency: 2 }));
+    const secondRun = await registry.startRun(WORKSPACE, second.id);
+    await registry.markRunRunning(WORKSPACE, second.id, secondRun.id, "child-2");
+    const queued = await registry.createThread(createInput({ brief: "queued", concurrency: 1 }));
+
+    await registry.endRun(WORKSPACE, first.id, firstRun.id, "success", null, report());
+    expect(dequeued).toEqual([]);
+    await registry.endRun(WORKSPACE, second.id, secondRun.id, "success", null, report());
+    expect(dequeued).toEqual([queued.id]);
+  });
+
   it("wakes scoped waiters and keeps observer cursors isolated", async () => {
     const thread = await registry.createThread(createInput());
     const wake = vi.fn();
@@ -360,5 +437,32 @@ describe("thread registry", () => {
     await registry.cancelAllForParent(WORKSPACE, PARENT);
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "cancelled" });
+  });
+
+  it("stops active children before parent deletion and archives settled siblings", async () => {
+    const stopped: string[] = [];
+    const active = await registry.createThread(createInput({ brief: "active" }));
+    const activeRun = await registry.startRun(WORKSPACE, active.id);
+    await registry.markRunRunning(WORKSPACE, active.id, activeRun.id, "child-active");
+    const settled = await registry.createThread(createInput({ brief: "settled" }));
+    const settledRun = await registry.startRun(WORKSPACE, settled.id);
+    await registry.endRun(WORKSPACE, settled.id, settledRun.id, "success", null, report());
+
+    await registry.cancelAllForParent(WORKSPACE, PARENT, async (thread) => { stopped.push(thread.id); });
+    expect(stopped).toEqual([active.id]);
+    expect(await registry.getThread(WORKSPACE, PARENT, active.id)).toMatchObject({ lifecycle: "archived" });
+    expect(await registry.getThread(WORKSPACE, PARENT, settled.id)).toMatchObject({ lifecycle: "archived" });
+    await expect(registry.createThread(createInput({ brief: "too late" }))).rejects.toThrow(/parent/);
+  });
+
+  it("archives a directly deleted child session without retaining a broken transcript reference", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-delete");
+    await registry.completeThread(WORKSPACE, thread.id, report());
+
+    const [archived] = await registry.archiveThreadsForDeletedSession(WORKSPACE, "child-delete");
+    expect(archived).toMatchObject({ id: thread.id, lifecycle: "archived", report: null });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "success" });
   });
 });
