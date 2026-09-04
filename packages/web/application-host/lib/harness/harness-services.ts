@@ -21,6 +21,8 @@ import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { applyOps } from "./memory-agent.js";
+import { projectZone2Threads } from "./zone2-threads.js";
+import { ThreadRegistryError } from "./thread-registry.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -184,7 +186,24 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
         ...(params.query === undefined ? {} : { query: params.query }),
         contextUsage: params.contextUsage ?? null,
       });
-      const content = assembleZone2Content(result.material, { eventCursor: result.eventCursor });
+      let threads = null;
+      if (host.threadRegistry && ctx.workspaceId) {
+        try {
+          threads = await projectZone2Threads({
+            registry: host.threadRegistry,
+            cursors: host.observationCursors,
+          }, {
+            sessionId: ctx.sessionId,
+            workspaceId: ctx.workspaceId,
+          });
+        } catch (error) {
+          threads = {
+            status: "unavailable" as const,
+            reason: error instanceof ThreadRegistryError ? error.code : "failed",
+          };
+        }
+      }
+      const content = assembleZone2Content({ ...result.material, threads }, { eventCursor: result.eventCursor });
       return { content, eventCursor: result.eventCursor };
     },
   };

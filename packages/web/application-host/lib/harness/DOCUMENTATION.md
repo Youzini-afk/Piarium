@@ -19,6 +19,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
                            ├── memory.blocks.* → KnowledgeStore block validator
+                           ├── zone2.assemble → Knowledge material + ThreadRegistry projection
                            └── thread.*     → ThreadRegistry + ThreadRuntime + Git worktree
 ```
 
@@ -99,6 +100,10 @@ blocks, context usage, and prompt-relevant accepted knowledge. The cursor is
 also embedded in the durable hidden Pi message so a worker reload can resume.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
+Active child threads are added to every parent Zone 2 turn, while settled
+threads use a separate observer cursor and appear only after their event
+sequence changes. Nested child sessions resolve their owning Thread from the
+durable Run record before listing children.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

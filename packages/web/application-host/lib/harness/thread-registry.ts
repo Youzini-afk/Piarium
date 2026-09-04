@@ -894,6 +894,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     )));
   };
 
+  const listThreadSnapshots = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    includeHidden = false,
+  ): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
+    const catalog = await catalogForScope(workspaceId, parent);
+    return structuredClone(catalog.threads
+      .filter((thread) => parentEquals(thread.parent, parent) && (includeHidden || !thread.hidden))
+      .map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) })));
+  };
+
   const getActiveRun = async (workspaceId: string, threadId: string): Promise<ThreadRun | null> => {
     const catalog = await loadWorkspace(workspaceId);
     const thread = findThread(catalog, threadId);
@@ -903,6 +914,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const listRuns = async (workspaceId: string, threadId: string): Promise<ThreadRun[]> => {
     const catalog = await loadWorkspace(workspaceId);
     return structuredClone(catalog.runs.filter((run) => run.threadId === threadId).toSorted((a, b) => a.attempt - b.attempt));
+  };
+
+  const getThreadForSession = async (workspaceId: string, sessionId: string): Promise<Thread | null> => {
+    const catalog = await loadWorkspace(workspaceId);
+    for (let index = catalog.runs.length - 1; index >= 0; index -= 1) {
+      const run = catalog.runs[index]!;
+      if (run.sessionId !== sessionId) continue;
+      return structuredClone(findThread(catalog, run.threadId));
+    }
+    return null;
   };
 
   const countActive = async (workspaceId: string, parent: ThreadParent): Promise<number> => {
@@ -1371,8 +1392,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     createThread,
     getThread,
     listThreads,
+    listThreadSnapshots,
     getActiveRun,
     listRuns,
+    getThreadForSession,
     countActive,
     startRun,
     markRunRunning,

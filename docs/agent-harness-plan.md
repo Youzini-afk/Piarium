@@ -305,7 +305,16 @@ export interface KnowledgeStore {
 - host `context.zone2: { params: { sinceTurn: number }; result: Zone2Material }`：
 
 ```ts
-interface Zone2Material { userEdits: Array<{ path; kind: 'modified'|'created'|'deleted' }>; userCommands: Array<{ command; exitCode; at }>; newDiagnostics: Array<{ path; count; worst: 'error'|'warning' }>; git: { branch?; changed?: number; note?: string } | null; knowledge: Array<{ id; title; trigger }>; blocks: Array<{ label; content }>; contextUsage: { used: number; window: number } | null }
+interface Zone2Material {
+  userEdits: Array<{ path; kind: 'modified'|'created'|'deleted' }>;
+  userCommands: Array<{ command; exitCode; at }>;
+  newDiagnostics: Array<{ path; count; worst: 'error'|'warning' }>;
+  git: { branch?; changed?: number; note?: string } | null;
+  knowledge: Array<{ id; title; trigger }>;
+  blocks: Array<{ label; content }>;
+  contextUsage: { used: number; window: number } | null;
+  threads?: { status: 'ready'; items: Zone2Thread[] } | { status: 'unavailable'; reason: string } | null;
+}
 ```
 
   `userEdits` 只含 `source !== 'agent'` 的 event；`knowledge` 为当前有效条目中触发描述与最近 3 步文本 BM25 匹配的 top 5。
@@ -526,8 +535,9 @@ last checkpoint: 2026-09-03T10:12Z
 
 **状态（2026-09-04）**：T1 核心纵切已经 `proven`：3.4 / 3.5 七个工具经 Host 能力握手默认接入真实 Pi child、冻结的
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
-已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor。未完成边界以
-`agent-harness-status.md` 为准：Zone 2 threads 段、worktree/branch 回收、窄屏与讨论线、结构化 progress/decisions/errors。
+已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor；父 Zone 2 已接 queued/active 快照与
+settled 增量，含嵌套父边和压缩重置。未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收、窄屏与讨论线、结构化
+progress/decisions/errors。
 3.1 / 3.2 / 3.3 / 3.7 仍只是 `implemented`。
 
 **3.4 / 3.5 的对象模型已由 P0.4 替代**：下文两节里的 `ThreadRecord` 单枚举 `status` + flags 的形状**不再有效**，以设计
@@ -625,7 +635,7 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
 - **完成幂等**：线程 agent_settled 且无未决 `ask` → 生成 `ThreadReport`（`deviations` 直接取 decisions 块中标记为偏离的条目），与
   记忆块快照、diffStats 一次事务写入注册表，发 `harness.thread.done`；之后任何 `wait` / `read_thread(report)` 返回同一份。
 - **进入父的 Zone 2**：2.2 的 Zone 2 组装新增 `threads` 段——每条活跃线程一行（状态 · 一句进度 · 最近活动），完成的线程一行
-  "完成：结论 · N 文件 · 偏离：…"，超过 `harness.threads.zone2Max`（默认 6）条折为"另有 K 条"。
+  "完成：结论 · N 文件 · 偏离：…"；不另设固定条数，超过现有 Zone 2 总预算时按 actionable 状态优先并折为"另有 K 条"。
 - worktree（`isolated`）：复用 Git 服务创建受管分支/worktree，从父 HEAD 分出，再把父工作树的 tracked patch 与未跟踪文件复制
   进去；若父起点非 clean，在子 worktree 内提交一笔仅用于界定基线的内部 commit。这样最终 `base → child` diff 只包含子线程增量，
   不会把父原有脏改动重复合并。合并先预检未跟踪文件碰撞，再尝试 plain `git apply` 与 `--3way`；失败明确区分“父未改动”和

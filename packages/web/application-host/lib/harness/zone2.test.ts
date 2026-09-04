@@ -126,6 +126,79 @@ describe("assembleZone2Content", () => {
     expect(content).toContain("context: 41% of window used");
   });
 
+  it("includes actionable and completed thread state", () => {
+    const now = Date.now();
+    const content = assembleZone2Content({
+      ...emptyMaterial,
+      threads: {
+        status: "ready",
+        items: [{
+          id: "thread-1",
+          brief: "check recovery",
+          role: "check",
+          lifecycle: "active",
+          attention: "user",
+          integration: "dirty",
+          waitingFor: "Choose the target",
+          steps: 4,
+          workerState: "running",
+          outcome: null,
+          lastActivityAt: new Date(now - 60_000).toISOString(),
+          lastToolCall: "read",
+          diffStats: { files: 2, insertions: 4, deletions: 1 },
+          conclusion: null,
+          deviations: [],
+        }, {
+          id: "thread-2",
+          brief: "implement fix",
+          role: "hard_implement",
+          lifecycle: "settled",
+          attention: "none",
+          integration: "merge-ready",
+          waitingFor: null,
+          steps: 9,
+          workerState: "exited",
+          outcome: "success",
+          lastActivityAt: new Date(now).toISOString(),
+          lastToolCall: "edit",
+          diffStats: { files: 3, insertions: 10, deletions: 2 },
+          conclusion: "fixed the race",
+          deviations: ["kept the old API"],
+        }],
+      },
+    }, { now });
+    expect(content).toContain("<threads>");
+    expect(content).toContain("thread-1 [check]: waiting for user");
+    expect(content).toContain("waiting: Choose the target");
+    expect(content).toContain("thread-2 [hard_implement]: completed");
+    expect(content).toContain("conclusion: fixed the race");
+    expect(content).toContain("deviations: kept the old API");
+  });
+
+  it("folds thread rows against the existing Zone 2 budget instead of a fixed count", () => {
+    const now = Date.now();
+    const items = Array.from({ length: 20 }, (_, index) => ({
+      id: `thread-${index}`,
+      brief: `work item ${index} ${"detail ".repeat(20)}`,
+      role: "check",
+      lifecycle: "active" as const,
+      attention: "none" as const,
+      integration: "none" as const,
+      waitingFor: null,
+      steps: index,
+      workerState: "running" as const,
+      outcome: null,
+      lastActivityAt: new Date(now).toISOString(),
+      lastToolCall: "read",
+      diffStats: null,
+      conclusion: null,
+      deviations: [],
+    }));
+    const content = assembleZone2Content({ ...emptyMaterial, threads: { status: "ready", items } }, { now, budgetTokens: 180 });
+    expect(content).toContain("more thread updates; use threads for details");
+    expect(content!.length).toBeLessThanOrEqual(180 * 4 + 4);
+  });
+
   it("wraps in piarium-context tag with note", () => {
     const content = assembleZone2Content({
       ...emptyMaterial,

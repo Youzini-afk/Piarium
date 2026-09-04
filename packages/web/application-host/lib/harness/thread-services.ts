@@ -102,11 +102,7 @@ const snapshotsFor = async (
   includeHidden = false,
 ): Promise<ThreadSnapshot[]> => {
   const registry = host.threadRegistry!;
-  const threads = await registry.listThreads(workspaceId, parent, includeHidden);
-  return Promise.all(threads.map(async (thread) => ({
-    thread,
-    activeRun: await registry.getActiveRun(workspaceId, thread.id),
-  })));
+  return registry.listThreadSnapshots(workspaceId, parent, includeHidden);
 };
 
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {

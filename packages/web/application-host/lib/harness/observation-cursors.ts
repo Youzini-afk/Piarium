@@ -1,4 +1,4 @@
-export type ObservationObjectKind = "diagnostics" | "shell";
+export type ObservationObjectKind = "diagnostics" | "shell" | "zone2-threads";
 
 export interface ObservationCursorEntry<T> {
   observedAt: number;
@@ -148,6 +148,7 @@ export function createObservationCursorStore(
     clearObserver(observerSessionId: string): void {
       invalidate(observerSessionId, "diagnostics");
       invalidate(observerSessionId, "shell");
+      invalidate(observerSessionId, "zone2-threads");
       observers.delete(observerSessionId);
     },
 

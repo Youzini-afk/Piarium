@@ -733,6 +733,27 @@ services；pi-host 工具格式与计数器；Context sidebar；plan/status 3.9�
 
 状态：已实施
 
+### D-053 · 2026-09-04 · 3.4（原生线程进入父会话 Zone 2）
+
+类型：实现澄清
+
+决定：(1) `zone2.assemble` 在知识/编辑材料之外，从同一 Host 的 `ThreadRegistry` 投影线程：queued/active（含 waiting、stalled、
+looping）每个父回合都作为事实快照出现；settled/archived 仅在该观察者尚未见过其最新 `eventSeq` 时出现，完成结论、偏离与 diff
+随该行交付。(2) Zone 2 使用独立的 `zone2-threads` 观察游标，不推进 `threads`/`wait` 工具的游标；压缩和会话结束沿 D-052 一起
+重置。(3) child session 通过持久 Run 的 sessionId 反查所属 Thread，嵌套线程以 `{kind: thread, id}` 为父，不错误投到根会话。
+(4) Thread 与 active Run 由注册表一次 catalog 快照读取，避免状态转换期间拼出不一致组合。(5) 不新增固定 `zone2Max` 数量限制；
+行按现有 Zone 2 总 token 预算动态保留，优先 waiting/stalled/active/conflict，余项折成一行并提示用 `threads` 查看。(6) 注册表读取
+失败投影为显式 `<threads status="unavailable">`，不把损坏/权限错误当作“没有线程”。
+
+原因：线程运行时、侧栏和主动工具已经进入生产链，但父 agent 不调用 `wait` 时完全看不到完成或等输入事件。每轮全量重复所有历史
+线程又会持续污染上下文。活跃快照 + 终态增量同时满足监督和低重复；预算来自 Zone 2 已有资源边界，比再猜一个固定条数更符合真实
+上下文容量。
+
+影响：Host `zone2-threads.ts`、ThreadRegistry atomic snapshot/session lookup、Zone2 material/formatter、3.9 observation store；phase3 E2E；
+plan/status 3.4/3.5。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -791,3 +812,4 @@ services；pi-host 工具格式与计数器；Context sidebar；plan/status 3.9�
 | D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |
 | D-051 | implementation | — | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |
 | D-052 | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI |
+| D-053 | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors |
