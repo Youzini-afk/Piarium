@@ -92,6 +92,8 @@
     "splash:emit": "bun run scripts/splash/emit-splash.ts",
     "docs:validate": "node scripts/docs/validate-docs.mjs",
     "test:docs": "node --test scripts/docs/engineering-docs.test.mjs",
+    "harness:replay": "node scripts/harness-replay.mjs",
+    "test:harness-replay": "node --test scripts/harness-replay.test.mjs",
     "test:i18n": "bun run --cwd packages/ui test:i18n",
     "dead-code": "bunx knip@5.80.0 --no-exit-code --include files,exports,nsExports,types,nsTypes,enumMembers,duplicates",
     "profile:browser": "node scripts/profile-browser.mjs",

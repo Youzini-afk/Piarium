@@ -877,6 +877,11 @@ Piarium 自身历史的真实任务（跨多文件修改、测试失败到修复
 需要回放证据的能力：记忆 agent 接管压缩、`explore` 默认开启、自动 review、按 TTL 唤醒；基础设施类能力（bash / grep
 覆盖、截断、权限门）`proven` 即可默认开启。
 
+T4 第一版已把 6 个真实历史任务固定在 `evaluation/harness/cases.json`，涵盖故障修复、跨包能力、Settings UI、持久子线程、
+长上下文 shadow 与用户审计面；每项钉住 base/reference commit，但 reference 只供复核，不要求逐字节复刻。记录器
+`scripts/harness-replay.mjs` 默认不调用模型、不改 settings，只创建 run record 并汇总配对结果。自动执行要等 per-session
+Harness profile override，避免为了跑实验临时改全局设置而污染用户的普通会话（D-047）。
+
 **Zone 0 字节稳定性契约测试**：在一个测试会话内跨 N 轮截获发往 provider 的请求，断言 system 与 tools 段逐字节相同、
 Zone 1 只增不改。它确定、便宜，直接捕获第 4.2 节那一类缺陷，并让任何向系统提示加入动态字段的改动立刻失败。放在
 `packages/pi-host` 的契约测试中。

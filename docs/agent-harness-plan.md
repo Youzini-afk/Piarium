@@ -246,6 +246,11 @@ event cursor 增量投影；blocks、context usage 与 prompt-relevant accepted 
 活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。仍缺 user terminal / Git
 观察、知识建议审阅 UI 与 memory 事件加速；session block 已通过鉴权路由 + SSE 接进会话状态侧栏。这些剩余产品面不阻塞先建立
 T4 回放基线。
+
+**T4 当前状态（2026-09-04）**：`evaluation/harness/cases.json` 已固定 6 个来自 Piarium 历史的任务、base/reference commit、原始任务
+与可观察验收；`scripts/harness-replay.mjs` 可校验清单、创建不覆盖的 run record、记录 success/tokens/interventions 与失败类别、按
+case/model/pair 汇总 native 和 harness-shadow。它不会调用模型或修改全局设置。真实自动执行仍需 per-session Harness profile
+override；在此之前由操作者显式建 checkout、切同一模型并运行两种变体，不能用脚本暗改用户 settings 充数。
 压缩接管（2.6 第 2 档）与记忆 agent 的模型选择等 T4 回放数据（设计 8.6）。下列参考形状对未完成部分仍有效；已交付部分
 的形状以代码与 `lib/knowledge/DOCUMENTATION.md` 为准。已被决策日志修正的点：2.1 的 TQL 与全零向量（D-019 / D-020，
 设计 7.5）；2.4 的"前缀逐字节复用"是未验证假设（D-037，设计 8.4.1）；2.6 的保留范围用 Pi `preparation` 的切点、接管

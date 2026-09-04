@@ -627,6 +627,22 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 
 状态：已实施
 
+### D-047 · 2026-09-04 · T4（最小回放集与执行边界）
+
+类型：实现澄清
+
+决定：第一版回放集固定 6 个真实 Piarium 历史任务，范围为 5–8 的设计窗口内；每项记录 base/reference full commit、用户任务、
+可观察验收和建议检查。reference 是评审证据，不是 exact-diff oracle。每次实验按 `{case, model, pair}` 各跑 `native` 与
+`harness-shadow`，只比较成功、总 token、人工介入次数；失败另记 D-037 的分类。记录器默认只校验/建记录/汇总，绝不调用模型、
+建 worktree 或改用户 settings。自动运行要等 per-session Harness profile override，不能用修改全局设置的捷径。
+
+原因：当前 Harness 设置在 session 创建时从用户/项目文件冻结，没有实验专用的单会话覆盖；自动切全局设置会影响并行普通会话，
+结果也无法证明究竟运行了哪个 profile。先固定任务与证据格式，可以开始人工配对，同时不伪造自动化程度或产生意外 API 费用。
+
+影响：`evaluation/harness/cases.json` / README、`scripts/harness-replay.mjs` 与测试、package scripts、设计 8.6、状态矩阵。
+
+状态：已实施（清单与记录器）；真实 paired runs 尚未执行
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -679,3 +695,4 @@ event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker
 | D-044 | implementation | — | agent-harness.md 9.1.2、plan 3b、status 3b / 3.4；pi-host / broker / Host scope |
 | D-045 | implementation | D-046（面板项） | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |
 | D-046 | implementation | — | agent-harness.md 8.4.1、status 2.4/2.5；Host routes / SSE / session state sidebar |
+| D-047 | implementation | — | agent-harness.md 8.6、plan/status T4；evaluation/harness / replay script |

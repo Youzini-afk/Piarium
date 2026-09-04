@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "diagnostics-runtime",
+      "title": "接通真实诊断语义",
+      "category": "repair",
+      "baseCommit": "dd6d57e4f997ae58d2ee4edbbcbd4a60631cfe1b",
+      "referenceCommit": "968a2d88b8f26ba7385bfff6c69d71839ae50ba3",
+      "task": "诊断工具现在仍有假成功和接线缺口。请把 Harness diagnostics 接到真实 LanguageSupervisor：同步当前文档后等待对应版本的诊断，明确区分 ready、pending、unavailable，不能把 provider 缺失或失败说成 clean。补直接相关测试并保持既有协议兼容。",
+      "acceptance": [
+        "生产 Application Host 注入真实 diagnostics provider，而不是测试桩",
+        "文档版本和 provider generation 的陈旧结果不会冒充当前诊断",
+        "ready/pending/unavailable 保持可区分，错误不塌缩为空成功",
+        "相关 Host 与 pi-host 类型检查、诊断测试通过"
+      ],
+      "suggestedChecks": [
+        "bunx vitest run packages/web/application-host/lib/harness/diagnostics-service.test.ts",
+        "bun run --cwd packages/web type-check:application-host:tests"
+      ]
+    },
+    {
+      "id": "web-fetch-boundary",
+      "title": "实现受约束的网页抓取服务",
+      "category": "multi-file-feature",
+      "baseCommit": "6b534b259111057e26c5f3c2cab501e8c51d6dc2",
+      "referenceCommit": "79e4241b2898113d775dd6b02c33ae423cd5cf2f",
+      "task": "为 Agent Harness 实现可复用的 web fetch Host 服务。必须覆盖 SSRF、DNS/重定向重新校验、响应类型与正文提取、HTML 可读正文、PDF 文本、缓存与明确失败状态；不要把凭据或正文放进日志。补协议和故障测试，但不要顺手实现 web search。",
+      "acceptance": [
+        "初始 URL 和每次重定向都经过同一 SSRF/域策略检查",
+        "HTML、纯文本和 PDF 有明确且测试覆盖的提取路径",
+        "过大、超时、类型不支持和网络失败不会返回伪成功",
+        "缓存不绕过安全复核且不会把私密正文广播到 UI 事件"
+      ],
+      "suggestedChecks": [
+        "bunx vitest run packages/web/application-host/lib/harness/web-fetch.test.ts",
+        "bun run --cwd packages/web type-check:application-host:tests"
+      ]
+    },
+    {
+      "id": "harness-settings-controls",
+      "title": "把 Harness 设置骨架做成真实控制",
+      "category": "ui-integration",
+      "baseCommit": "968a2d88b8f26ba7385bfff6c69d71839ae50ba3",
+      "referenceCommit": "127af5b82a30cdb43ba6b9db437c8590b39c477a",
+      "task": "Agent Harness 设置页现在只是骨架。请把工具开关、shell、输出预览大小和 bash 等待时间接到真实 Pi settings，使用 revision 冲突写入，说明设置从下一会话生效，并同步现有本地化结构。保留未知 harness 字段，不能保存一个控件时覆盖其他设置。",
+      "acceptance": [
+        "页面从真实 global settings 水合并显示有效默认值",
+        "保存使用 expected revision，冲突或失败不会显示成功",
+        "每次写入保留页面不拥有的 harness 字段",
+        "控件在下一个会话生效的语义和多语言文案一致"
+      ],
+      "suggestedChecks": [
+        "bun run --cwd packages/ui type-check",
+        "bun run --cwd packages/ui test:i18n"
+      ]
+    },
+    {
+      "id": "durable-child-thread",
+      "title": "真实持久子线程纵切",
+      "category": "coordination",
+      "baseCommit": "27566daba62814da5efa44e3b741d3d6c665af8b",
+      "referenceCommit": "036b43e3d1731c1c05fa362d435c33bb6c0292c3",
+      "task": "把现有 Thread/ThreadRun 骨架接成一条真实 child session 纵切：dispatch 立即返回，后台创建持久 Pi 子会话，冻结角色模型和工具，写任务进入首条消息；写者使用隔离 worktree，完成后形成 report/transcript 并可显式 merge。处理一次 worker 丢失恢复、连续崩溃停机、父会话删除和最小用户侧栏。不要用提示词代替工具能力边界。",
+      "acceptance": [
+        "dispatch 不等待 worktree 或模型完成，线程状态先持久化",
+        "子会话真实落盘，模型/工具在 AgentSession 构造前冻结",
+        "worker 丢失产生新 Run 而不改写旧尝试，连续崩溃不循环拉起",
+        "isolated worktree 只合并 child delta，冲突不覆盖父工作区",
+        "工具、Fleet、SSE 和侧栏投影来自同一 Host registry"
+      ],
+      "suggestedChecks": [
+        "bunx tsx --test packages/pi-host/test/harness/thread-runtime-session.e2e.test.ts",
+        "bunx vitest run packages/web/application-host/lib/harness/thread-runtime.test.ts packages/web/application-host/lib/harness/thread-worktree.test.ts"
+      ]
+    },
+    {
+      "id": "context-shadow-runtime",
+      "title": "上下文观察与影子记忆纵切",
+      "category": "long-context",
+      "baseCommit": "d545edbabf6c605ac65c9994f8026ee3d95cac72",
+      "referenceCommit": "4563c3435e73901360a96d6b613bf08516b67536",
+      "task": "接通 T3 context shadow：Documents 的用户提交和其后 LSP 诊断进入 workspace knowledge store，下一轮通过带耐久 event cursor 的 Zone 2 增量出现；当前 blocks、context usage 和相关 accepted knowledge 同路投影。修正 memory runner 的空 sessionId/陈旧 patch 问题，提供用户显式开启的后台 shadow keeper，但绝不能因此接管 Pi compaction。",
+      "acceptance": [
+        "真实 Documents 用户写入只在下一模型轮追加一次，worker 重载可恢复 cursor",
+        "agent 自己的写入和诊断不在 Zone 2 重复",
+        "memory_edit 不进入主会话，Host 顺序校验并应用块操作",
+        "shadow 默认关闭并明确可能产生全价请求",
+        "存在 keeper block 时生产默认仍由 Pi compaction"
+      ],
+      "suggestedChecks": [
+        "bunx tsx --test packages/pi-host/test/harness/session-e2e.test.ts",
+        "bunx vitest run packages/web/application-host/lib/knowledge/context-runtime.test.ts packages/web/application-host/lib/harness/memory-agent.test.ts"
+      ]
+    },
+    {
+      "id": "auditable-session-blocks",
+      "title": "可审计的会话状态块",
+      "category": "ui-integration",
+      "baseCommit": "4563c3435e73901360a96d6b613bf08516b67536",
+      "referenceCommit": "9658561b852d46f7158912390ee3f7418f478125",
+      "task": "让 memory/plan session blocks 对用户可见可编辑，并和子线程一起形成紧凑的 session state 侧栏。正文只能经 UI 鉴权接口读取，SSE 只发失效身份；用户编辑标明来源并做乐观并发，后台更新后旧草稿不能静默覆盖。同时检查线程元数据接口是否有同样的鉴权缺口。",
+      "acceptance": [
+        "无 blocks 且无线程时不占侧栏；任一存在时可独立展示",
+        "GET/PUT blocks 与 GET threads 均先经过 UI auth",
+        "SSE 不携带 block 正文，客户端收到失效事件后重取",
+        "用户保存携带打开时版本，冲突返回 409 并加载最新内容",
+        "后台写入与 UI 投影失败不反噬已提交的知识库写入"
+      ],
+      "suggestedChecks": [
+        "bunx vitest run packages/web/application-host/lib/harness/context-routes.test.ts packages/web/application-host/lib/harness/thread-routes.test.ts",
+        "bunx vitest run packages/ui/src/components/pi-session/harnessBlockPresentation.test.ts packages/ui/src/lib/piariumEvents.test.ts"
+      ]
+    }
+  ]
+}
