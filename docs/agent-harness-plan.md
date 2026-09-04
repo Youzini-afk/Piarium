@@ -244,7 +244,8 @@ T2 **权限纵切（2026-09-04 已交付）**（Host capability / scope enforcem
 **状态（2026-09-04）**：T3 核心 shadow 纵切已交付：Documents 与用户修改后的 LSP 诊断写入事件库，Zone 2 用耐久会话消息中的
 event cursor 增量投影；blocks、context usage 与 prompt-relevant accepted knowledge 已接；memory shadow 由用户显式开启、使用
 活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。Git 已复用两个现有 status
-刷新边界并按 session 去重；仍缺 user terminal 的 shell integration、知识建议审阅 UI 与 memory 事件加速；session block 已通过鉴权路由 + SSE 接进会话状态侧栏。这些剩余产品面不阻塞先建立
+刷新边界并按 session 去重；block 的 workspace/user 知识标记与审阅已接进会话状态侧栏；仍缺 user terminal 的 shell integration、
+其余知识建议触发与 memory 事件加速。这些剩余产品面不阻塞先建立
 T4 回放基线。
 
 **T4 当前状态（2026-09-04）**：`evaluation/harness/cases.json` 已固定 6 个来自 Piarium 历史的任务、base/reference commit、原始任务
@@ -488,12 +489,15 @@ last checkpoint: 2026-09-03T10:12Z
   JSON suggestion or null"），未配置则不判断。
 - host：`knowledge.suggest` 生成 `{ status: 'suggested', scope: 'workspace', content, trigger, source: { sessionId, kind } }`；
   `models.suggestions` 配置时用它草拟 `content` 与 `trigger`（提示固定，输出 JSON），否则 `content` = 原文、`trigger` = ''。
-  接受：`acceptKnowledge(id, { supersedes })`——`supersedes` 由 UI 选择或由 `models.suggestions` 在有配置时建议（同触发
-  描述 BM25 相似度 > 阈值的现有条目）；旧条目 `invalid_at = now`，边 `supersedes`。自动接受：`settings.knowledge.
+  接受：`acceptKnowledge(id, { supersedes })`——同 scope 现有条目只要触发词有交集就作为候选并排序，`supersedes` 必须由 UI 用户
+  勾选；旧条目 `invalid_at = now`，边 `supersedes`。自动接受：`settings.knowledge.
   autoAcceptSuggestions.{workspace,user}` 默认 false。
-- UI：审阅托盘（`useKnowledgeSuggestionsStore`）：编辑 / 接受 / 重新生成（仅配置了模型时可用）/ 驳回；Settings 知识页：
+- UI：会话状态侧栏审阅区：编辑 / 接受 / 驳回；Settings 知识页：
   当前有效列表、取代链展开、`recallCount` / `recalledAt` 排序、删除。
 - 测试：三类触发；草拟有无模型两路；取代链；默认不自动接受；召回计数（配合 2.2）。
+- **状态（2026-09-04）**：block 上“记到项目/记到用户”→ authenticated routes → scope store → 审阅卡 → 冲突检查编辑/接受/
+  驳回 → SSE 失效通知已 proven。接受把最终草稿、打开时原值和 supersedes 在同一 store 写任务内处理。message/tool-result 动作、
+  memory decisions 与 suggestions model 两种自动提议、Settings 全量管理尚未接；未接部分不调模型、不写知识（D-058）。
 
 ### 2.8 embedding provider 抽象
 

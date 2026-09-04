@@ -10,7 +10,7 @@
  * 3. User message explicit pattern (only when models.suggestions configured)
  */
 
-import type { KnowledgeStore, KnowledgeInput, NodeId } from "../knowledge/store.js";
+import type { KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -21,6 +21,8 @@ export interface SuggestionInput {
   content: string;
   sessionId: string;
   kind: string;
+  scope?: KnowledgeScope;
+  recallTrigger?: string;
   /** Optional model to draft content/trigger */
   draftWithModel?: (prompt: string) => Promise<{ content: string; trigger: string }>;
 }
@@ -29,7 +31,8 @@ export interface SuggestionResult {
   id: NodeId;
   content: string;
   trigger: string;
-  status: "suggested";
+  status: "suggested" | "accepted";
+  scope: KnowledgeScope;
 }
 
 export interface KnowledgeSuggestionsSettings {
@@ -37,13 +40,10 @@ export interface KnowledgeSuggestionsSettings {
     workspace: boolean;
     user: boolean;
   };
-  /** BM25 similarity threshold for suggesting supersedes */
-  supersedesThreshold: number;
 }
 
 export const DEFAULT_SUGGESTIONS_SETTINGS: KnowledgeSuggestionsSettings = {
   autoAcceptSuggestions: { workspace: false, user: false },
-  supersedesThreshold: 0.5,
 };
 
 // ── Suggestion creation ────────────────────────────────────────────
@@ -60,7 +60,8 @@ export async function createSuggestion(
   deps: SuggestionDeps,
 ): Promise<SuggestionResult> {
   let content = input.content;
-  let trigger = "";
+  let trigger = input.recallTrigger ?? "";
+  const scope = input.scope ?? "workspace";
 
   // If model is configured, use it to draft content and trigger
   if (input.draftWithModel) {
@@ -72,7 +73,7 @@ export async function createSuggestion(
   }
 
   const knowledgeInput: KnowledgeInput = {
-    scope: "workspace",
+    scope,
     status: "suggested",
     content,
     trigger,
@@ -82,11 +83,12 @@ export async function createSuggestion(
   const id = await deps.store.putKnowledge(knowledgeInput);
 
   // Auto-accept if configured
-  if (deps.settings.autoAcceptSuggestions.workspace) {
+  const autoAccepted = deps.settings.autoAcceptSuggestions[scope];
+  if (autoAccepted) {
     await deps.store.acceptKnowledge(id, {});
   }
 
-  return { id, content, trigger, status: "suggested" };
+  return { id, content, trigger, scope, status: autoAccepted ? "accepted" : "suggested" };
 }
 
 // ── Supersedes suggestion ──────────────────────────────────────────
@@ -95,11 +97,12 @@ export async function suggestSupersedes(
   newId: NodeId,
   trigger: string,
   deps: SuggestionDeps,
+  scope: KnowledgeScope = "workspace",
 ): Promise<NodeId[]> {
   if (!trigger) return [];
 
   const existing = await deps.store.listKnowledge({
-    scope: "workspace",
+    scope,
     status: "accepted",
     activeOnly: true,
   });
@@ -116,7 +119,7 @@ export async function suggestSupersedes(
       if (existingTerms.has(term)) overlap++;
     }
     const score = overlap / Math.max(newTerms.size, 1);
-    if (score >= deps.settings.supersedesThreshold) {
+    if (score > 0) {
       suggestions.push({ id: k.id, score });
     }
   }
@@ -129,28 +132,23 @@ export async function suggestSupersedes(
 export async function acceptSuggestion(
   id: NodeId,
   deps: SuggestionDeps,
-  options: { supersedes?: NodeId[] | undefined },
+  options: {
+    supersedes?: NodeId[] | undefined;
+    scope?: KnowledgeScope;
+    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+  },
 ): Promise<void> {
-  await deps.store.acceptKnowledge(id, { supersedes: options.supersedes });
+  await deps.store.acceptKnowledge(id, {
+    ...(options.supersedes === undefined ? {} : { supersedes: options.supersedes }),
+    ...(options.scope === undefined ? {} : { expectedScope: options.scope }),
+    ...(options.edit === undefined ? {} : { edit: options.edit }),
+  });
 }
 
 export async function dismissSuggestion(
   id: NodeId,
   deps: SuggestionDeps,
+  scope?: KnowledgeScope,
 ): Promise<void> {
-  await deps.store.dismissKnowledge(id);
-}
-
-export async function regenerateSuggestion(
-  id: NodeId,
-  originalContent: string,
-  deps: SuggestionDeps,
-  draftWithModel: (prompt: string) => Promise<{ content: string; trigger: string }>,
-): Promise<SuggestionResult> {
-  // Dismiss old, create new
-  await deps.store.dismissKnowledge(id);
-  return createSuggestion(
-    { trigger: "user-mark", content: originalContent, sessionId: "", kind: "regenerate", draftWithModel },
-    deps,
-  );
+  await deps.store.dismissKnowledge(id, scope);
 }

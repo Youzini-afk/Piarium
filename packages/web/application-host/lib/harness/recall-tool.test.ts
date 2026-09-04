@@ -3,7 +3,7 @@ import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
-import { executeRecall, RECALL_PROMPT_SNIPPET } from "./recall-tool.js";
+import { executeRecall, openUserKnowledgeStore, RECALL_PROMPT_SNIPPET } from "./recall-tool.js";
 
 // Scratch stores go to the OS temp dir, never into the source tree:
 // architecture.test.ts walks application-host/** and fails when a test
@@ -98,5 +98,21 @@ describe("RECALL_PROMPT_SNIPPET", () => {
   it("has prompt snippet", () => {
     expect(RECALL_PROMPT_SNIPPET).toContain("recall:");
     expect(RECALL_PROMPT_SNIPPET).toContain("memory");
+  });
+});
+
+describe("user knowledge store scope", () => {
+  it("accepts only user-scoped persistent knowledge", async () => {
+    cleanup();
+    const store = await openUserKnowledgeStore({ dataDir: TEST_DIR, hostId: "test-host", embedding: null });
+    try {
+      await expect(store.putKnowledge({ scope: "workspace", status: "suggested", content: "wrong", trigger: "" }))
+        .rejects.toThrow(/user-scoped/);
+      await expect(store.putKnowledge({ scope: "user", status: "suggested", content: "right", trigger: "" }))
+        .resolves.toBeGreaterThan(0);
+    } finally {
+      await store.close();
+      cleanup();
+    }
   });
 });

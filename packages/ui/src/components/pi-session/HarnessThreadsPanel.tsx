@@ -14,6 +14,13 @@ import {
   type HarnessThreadState,
 } from './harnessThreadPresentation';
 import { parseHarnessSessionBlocks, type HarnessSessionBlock } from './harnessBlockPresentation';
+import {
+  harnessKnowledgeKey,
+  parseHarnessKnowledgeSuggestions,
+  type HarnessKnowledgeScope,
+  type HarnessKnowledgeSuggestion,
+} from './harnessKnowledgePresentation';
+import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKnowledgeReviewSection';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -71,6 +78,9 @@ export const HarnessThreadsPanel: React.FC<{
   const openSession = usePiSessionStore((state) => state.openSession);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const [blocks, setBlocks] = React.useState<HarnessSessionBlock[]>([]);
+  const [suggestions, setSuggestions] = React.useState<HarnessKnowledgeSuggestion[]>([]);
+  const [knowledgeDrafts, setKnowledgeDrafts] = React.useState<Record<string, KnowledgeDraft>>({});
+  const [knowledgeBusy, setKnowledgeBusy] = React.useState<string | null>(null);
   const [editingBlock, setEditingBlock] = React.useState<string | null>(null);
   const [blockDraft, setBlockDraft] = React.useState('');
   const [savingBlock, setSavingBlock] = React.useState(false);
@@ -110,6 +120,117 @@ export const HarnessThreadsPanel: React.FC<{
     setBlocks(parseHarnessSessionBlocks(await response.json()));
   }, [parentSessionId]);
 
+  const reloadKnowledge = React.useCallback(async (signal?: AbortSignal) => {
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions`, {
+      cache: 'no-store',
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        setSuggestions([]);
+        setKnowledgeDrafts({});
+        return;
+      }
+      throw new Error(`Unable to load knowledge suggestions (${response.status})`);
+    }
+    const incoming = parseHarnessKnowledgeSuggestions(await response.json());
+    setSuggestions(incoming);
+    setKnowledgeDrafts(Object.fromEntries(incoming.map((suggestion) => [
+      harnessKnowledgeKey(suggestion),
+      { content: suggestion.content, trigger: suggestion.trigger, supersedes: [] },
+    ])));
+  }, [parentSessionId]);
+
+  const rememberBlock = React.useCallback(async (block: HarnessSessionBlock, scope: HarnessKnowledgeScope) => {
+    const busyKey = `create:${scope}:${block.label}`;
+    if (knowledgeBusy) return;
+    setKnowledgeBusy(busyKey);
+    try {
+      const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, content: block.content, trigger: '', kind: `block:${block.label}` }),
+      });
+      if (!response.ok) throw new Error(`Unable to create knowledge suggestion (${response.status})`);
+      await reloadKnowledge();
+      toast.success(t('harness.knowledge.created'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }, [knowledgeBusy, parentSessionId, reloadKnowledge, t]);
+
+  const saveKnowledgeDraft = React.useCallback(async (suggestion: HarnessKnowledgeSuggestion): Promise<boolean> => {
+    const key = harnessKnowledgeKey(suggestion);
+    const draft = knowledgeDrafts[key];
+    if (!draft?.content.trim()) {
+      toast.error(t('harness.knowledge.contentRequired'));
+      return false;
+    }
+    const response = await runtimeFetch(
+      `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions/${suggestion.scope}/${suggestion.id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: draft.content,
+          trigger: draft.trigger,
+          expectedContent: suggestion.content,
+          expectedTrigger: suggestion.trigger,
+        }),
+      },
+    );
+    if (response.status === 409) {
+      await reloadKnowledge();
+      toast.error(t('harness.knowledge.conflict'));
+      return false;
+    }
+    if (!response.ok) throw new Error(`Unable to update knowledge suggestion (${response.status})`);
+    return true;
+  }, [knowledgeDrafts, parentSessionId, reloadKnowledge, t]);
+
+  const actOnKnowledge = React.useCallback(async (
+    suggestion: HarnessKnowledgeSuggestion,
+    action: 'save' | 'accept' | 'dismiss',
+  ) => {
+    const key = harnessKnowledgeKey(suggestion);
+    if (knowledgeBusy) return;
+    setKnowledgeBusy(key);
+    try {
+      if (action === 'save') {
+        if (!await saveKnowledgeDraft(suggestion)) return;
+      } else {
+        const draft = knowledgeDrafts[key];
+        const response = await runtimeFetch(
+          `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions/${suggestion.scope}/${suggestion.id}/${action}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action === 'accept' ? {
+              supersedes: draft?.supersedes ?? [],
+              content: draft?.content ?? suggestion.content,
+              trigger: draft?.trigger ?? suggestion.trigger,
+              expectedContent: suggestion.content,
+              expectedTrigger: suggestion.trigger,
+            } : { supersedes: [] }),
+          },
+        );
+        if (response.status === 409) {
+          await reloadKnowledge();
+          toast.error(t('harness.knowledge.conflict'));
+          return;
+        }
+        if (!response.ok) throw new Error(`Unable to ${action} knowledge suggestion (${response.status})`);
+      }
+      await reloadKnowledge();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setKnowledgeBusy(null);
+    }
+  }, [knowledgeBusy, knowledgeDrafts, parentSessionId, reloadKnowledge, saveKnowledgeDraft, t]);
+
   const saveBlock = React.useCallback(async (block: HarnessSessionBlock) => {
     if (savingBlock) return;
     setSavingBlock(true);
@@ -142,6 +263,8 @@ export const HarnessThreadsPanel: React.FC<{
     eventRevision.current = 0;
     setThreads([]);
     setBlocks([]);
+    setSuggestions([]);
+    setKnowledgeDrafts({});
     setEditingBlock(null);
     void reload(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load threads:', error);
@@ -149,14 +272,22 @@ export const HarnessThreadsPanel: React.FC<{
     void reloadBlocks(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load session blocks:', error);
     });
+    void reloadKnowledge(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load knowledge suggestions:', error);
+    });
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'stream-ready') {
         void reload(controller.signal).catch(() => undefined);
         void reloadBlocks(controller.signal).catch(() => undefined);
+        void reloadKnowledge(controller.signal).catch(() => undefined);
         return;
       }
       if (event.type === 'harness-blocks-changed' && event.workspaceId === workspaceId && event.sessionId === parentSessionId) {
         void reloadBlocks(controller.signal).catch(() => undefined);
+        return;
+      }
+      if (event.type === 'harness-knowledge-changed' && (event.scope === 'user' || event.sessionId === parentSessionId)) {
+        void reloadKnowledge(controller.signal).catch(() => undefined);
         return;
       }
       if (
@@ -171,17 +302,24 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parent, parentSessionId, reload, reloadBlocks, workspaceId]);
+  }, [parent, parentSessionId, reload, reloadBlocks, reloadKnowledge, workspaceId]);
 
-  if (threads.length === 0 && blocks.length === 0) return null;
+  if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0) return null;
 
   return (
     <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
         <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
-        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{blocks.length + threads.length}</span>
+        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{blocks.length + threads.length + suggestions.length}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <HarnessKnowledgeReviewSection
+          suggestions={suggestions}
+          drafts={knowledgeDrafts}
+          busy={knowledgeBusy !== null}
+          onDraftChange={(key, draft) => setKnowledgeDrafts((current) => ({ ...current, [key]: draft }))}
+          onAction={(suggestion, action) => { void actOnKnowledge(suggestion, action); }}
+        />
         {blocks.length > 0 ? (
           <section className="border-b border-border/50 p-2" aria-label={t('harness.blocks.title')}>
             <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.blocks.title')}</h3>
@@ -193,6 +331,12 @@ export const HarnessThreadsPanel: React.FC<{
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{block.label}</span>
                       <span className="text-[9px] text-muted-foreground">{block.updatedBy}</span>
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'workspace')}>
+                        {t('harness.knowledge.rememberWorkspace')}
+                      </button>
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'user')}>
+                        {t('harness.knowledge.rememberUser')}
+                      </button>
                       <button
                         type="button"
                         title={t('harness.blocks.edit')}

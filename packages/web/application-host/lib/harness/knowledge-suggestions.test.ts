@@ -47,6 +47,7 @@ describe("createSuggestion", () => {
     expect(result.status).toBe("suggested");
     expect(result.content).toBe("Always use bun");
     expect(result.trigger).toBe("");
+    expect(result.scope).toBe("workspace");
 
     const list = await store.listKnowledge({ status: "suggested" });
     expect(list).toHaveLength(1);
@@ -66,12 +67,13 @@ describe("createSuggestion", () => {
   });
 
   it("auto-accepts when configured", async () => {
-    await createSuggestion(
+    const result = await createSuggestion(
       { trigger: "user-mark", content: "Always use bun", sessionId: "s1", kind: "message" },
       { store, settings: { ...DEFAULT_SUGGESTIONS_SETTINGS, autoAcceptSuggestions: { workspace: true, user: false } } },
     );
     const accepted = await store.listKnowledge({ status: "accepted" });
     expect(accepted).toHaveLength(1);
+    expect(result.status).toBe("accepted");
   });
 });
 
@@ -155,6 +157,7 @@ describe("review tray actions", () => {
       content: "new", trigger: "test",
     });
     await acceptSuggestion(newId, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS }, { supersedes: [oldId] });
+    await expect(acceptSuggestion(newId, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS }, { supersedes: [oldId] })).resolves.toBeUndefined();
     const active = await store.listKnowledge({ activeOnly: true });
     expect(active.find((k) => k.id === oldId)).toBeUndefined();
     expect(active.find((k) => k.id === newId)).toBeDefined();
@@ -168,5 +171,18 @@ describe("review tray actions", () => {
     await dismissSuggestion(id, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS });
     const list = await store.listKnowledge({ status: "dismissed" });
     expect(list).toHaveLength(1);
+  });
+
+  it("rejects stale edits and cross-scope supersedes without partially accepting", async () => {
+    const oldUser = await store.putKnowledge({ scope: "user", status: "accepted", content: "old", trigger: "test" });
+    const suggestion = await store.putKnowledge({ scope: "workspace", status: "suggested", content: "new", trigger: "test" });
+    await expect(store.acceptKnowledge(suggestion, {
+      expectedScope: "workspace",
+      supersedes: [oldUser],
+    })).rejects.toMatchObject({ code: "invalid" });
+    expect(await store.listKnowledge({ scope: "workspace", status: "suggested" })).toHaveLength(1);
+    await store.acceptKnowledge(suggestion, { expectedScope: "workspace" });
+    await expect(store.updateSuggestedKnowledge(suggestion, { content: "late", trigger: "test" }, "workspace"))
+      .rejects.toMatchObject({ code: "conflict" });
   });
 });

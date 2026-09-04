@@ -98,6 +98,12 @@ describe('Piarium events', () => {
         properties: { workspaceId: 'workspace-1', sessionId: 'parent-1' },
       }),
     });
+    source.onmessage?.({
+      data: JSON.stringify({
+        type: 'piarium:harness-knowledge-changed',
+        properties: { sessionId: 'parent-1', scope: 'user' },
+      }),
+    });
 
     expect(events).toEqual([
       { type: 'stream-ready' },
@@ -109,6 +115,7 @@ describe('Piarium events', () => {
         activeRun: { id: 'run-1', workerState: 'running' },
       },
       { type: 'harness-blocks-changed', workspaceId: 'workspace-1', sessionId: 'parent-1' },
+      { type: 'harness-knowledge-changed', sessionId: 'parent-1', scope: 'user' },
     ]);
     unsubscribe();
   });

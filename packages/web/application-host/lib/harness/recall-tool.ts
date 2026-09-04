@@ -82,6 +82,7 @@ export async function openUserKnowledgeStore(
   const origPutEvent = store.putEvent.bind(store);
   const origPutSession = store.putSession.bind(store);
   const origUpsertBlock = store.upsertBlock.bind(store);
+  const origPutKnowledge = store.putKnowledge.bind(store);
 
   return {
     ...store,
@@ -93,6 +94,10 @@ export async function openUserKnowledgeStore(
     },
     async upsertBlock() {
       throw new Error("user.tdb only allows knowledge nodes");
+    },
+    async putKnowledge(input) {
+      if (input.scope !== "user") throw new Error("user.tdb only allows user-scoped knowledge");
+      return origPutKnowledge(input);
     },
   };
   // Suppress unused var warnings

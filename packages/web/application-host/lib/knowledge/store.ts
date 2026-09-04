@@ -113,6 +113,16 @@ export interface Knowledge {
   recalledAt?: number;
 }
 
+export class KnowledgeMutationError extends Error {
+  readonly code: "conflict" | "not-found" | "invalid";
+
+  constructor(code: KnowledgeMutationError["code"], message: string) {
+    super(message);
+    this.name = "KnowledgeMutationError";
+    this.code = code;
+  }
+}
+
 export interface KnowledgeOrEvent {
   id: NodeId;
   type: "knowledge" | "event";
@@ -143,9 +153,19 @@ export interface KnowledgeStore {
   upsertBlock(b: BlockInput): Promise<Block>;
   deleteBlock(sessionId: string, label: string): Promise<void>;
   putKnowledge(k: KnowledgeInput): Promise<NodeId>;
+  updateSuggestedKnowledge(
+    id: NodeId,
+    patch: { content: string; trigger: string },
+    expectedScope?: KnowledgeScope,
+    expected?: { content: string; trigger: string },
+  ): Promise<void>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
-  acceptKnowledge(id: NodeId, opts: { supersedes?: NodeId[] | undefined }): Promise<void>;
-  dismissKnowledge(id: NodeId): Promise<void>;
+  acceptKnowledge(id: NodeId, opts: {
+    supersedes?: NodeId[] | undefined;
+    expectedScope?: KnowledgeScope;
+    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+  }): Promise<void>;
+  dismissKnowledge(id: NodeId, expectedScope?: KnowledgeScope): Promise<void>;
   recordRecall(ids: NodeId[]): Promise<void>;
   recall(query: string, k: number): Promise<RecallResult[]>;
   deleteSession(sessionId: string): Promise<void>;
@@ -418,12 +438,76 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       return results.sort((a, b) => b.createdAt - a.createdAt);
     },
 
-    async acceptKnowledge(id: NodeId, opts: { supersedes?: NodeId[] }): Promise<void> {
+    async updateSuggestedKnowledge(id, patch, expectedScope, expected): Promise<void> {
       return enqueueWrite(() => {
-        db.patchPayload(id, { $set: { status: "accepted" } });
-        if (opts.supersedes) {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "knowledge") {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found: ${id}`);
+        }
+        if (expectedScope && payload["scope"] !== expectedScope) {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found in ${expectedScope} scope: ${id}`);
+        }
+        if (payload["status"] !== "suggested") {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer awaiting review`);
+        }
+        if (expected && (payload["content"] !== expected.content || payload["trigger"] !== expected.trigger)) {
+          throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
+        }
+        if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+        db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
+        db.indexText(id, patch.content);
+        if (patch.trigger) db.indexKeyword(id, patch.trigger);
+        db.flush();
+      });
+    },
+
+    async acceptKnowledge(id: NodeId, opts: {
+      supersedes?: NodeId[];
+      expectedScope?: KnowledgeScope;
+      edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+    }): Promise<void> {
+      return enqueueWrite(() => {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "knowledge") {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found: ${id}`);
+        }
+        if (opts.expectedScope && payload["scope"] !== opts.expectedScope) {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found in ${opts.expectedScope} scope: ${id}`);
+        }
+        if (payload["status"] === "accepted") return;
+        if (payload["status"] !== "suggested") {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer awaiting review`);
+        }
+        if (opts.edit) {
+          if (payload["content"] !== opts.edit.expectedContent || payload["trigger"] !== opts.edit.expectedTrigger) {
+            throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
+          }
+          if (!opts.edit.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+        }
+        const superseded = [...new Set(opts.supersedes ?? [])].filter((oldId) => oldId !== id);
+        for (const oldId of superseded) {
+          const old = db.getPayload(oldId) as Record<string, unknown> | null;
+          if (
+            !old
+            || old["type"] !== "knowledge"
+            || old["status"] !== "accepted"
+            || old["invalidAt"] !== undefined
+            || old["scope"] !== payload["scope"]
+          ) {
+            throw new KnowledgeMutationError("invalid", `Knowledge ${oldId} cannot be superseded by ${id}`);
+          }
+        }
+        db.patchPayload(id, { $set: {
+          status: "accepted",
+          ...(opts.edit ? { content: opts.edit.content, trigger: opts.edit.trigger } : {}),
+        } });
+        if (opts.edit) {
+          db.indexText(id, opts.edit.content);
+          if (opts.edit.trigger) db.indexKeyword(id, opts.edit.trigger);
+        }
+        if (superseded.length > 0) {
           const now = Date.now();
-          for (const oldId of opts.supersedes) {
+          for (const oldId of superseded) {
             db.patchPayload(oldId, { $set: { invalidAt: now } });
             db.link(id, oldId, "supersedes", 1);
           }
@@ -432,8 +516,19 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async dismissKnowledge(id: NodeId): Promise<void> {
+    async dismissKnowledge(id: NodeId, expectedScope): Promise<void> {
       return enqueueWrite(() => {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "knowledge") {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found: ${id}`);
+        }
+        if (expectedScope && payload["scope"] !== expectedScope) {
+          throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found in ${expectedScope} scope: ${id}`);
+        }
+        if (payload["status"] === "dismissed") return;
+        if (payload["status"] !== "suggested") {
+          throw new KnowledgeMutationError("conflict", `Accepted knowledge ${id} cannot be dismissed as a suggestion`);
+        }
         db.patchPayload(id, { $set: { status: "dismissed" } });
         db.flush();
       });

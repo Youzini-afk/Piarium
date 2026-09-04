@@ -20,6 +20,12 @@ export type HarnessBlocksChangedEvent = {
   sessionId: string;
 };
 
+export type HarnessKnowledgeChangedEvent = {
+  type: 'harness-knowledge-changed';
+  sessionId: string;
+  scope: 'workspace' | 'user';
+};
+
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
   projectId: string;
@@ -39,7 +45,7 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent;
+export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent;
 type Listener = (event: PiariumEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -193,6 +199,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
     if (workspaceId && sessionId) {
       for (const listener of listeners) listener({ type: 'harness-blocks-changed', workspaceId, sessionId });
+    }
+    return;
+  }
+
+  if (envelope.type === 'piarium:harness-knowledge-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const scope = properties?.scope;
+    if (sessionId && (scope === 'workspace' || scope === 'user')) {
+      for (const listener of listeners) listener({ type: 'harness-knowledge-changed', sessionId, scope });
     }
     return;
   }

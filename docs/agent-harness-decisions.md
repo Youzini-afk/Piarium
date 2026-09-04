@@ -832,6 +832,27 @@ ThreadRuntime settle/merge、真实 Git tests；设计 9.2.5b / 9.3.4、plan/sta
 
 状态：已实施（结果耐久化）；目录/分支回收仍待产品纵切
 
+### D-058 · 2026-09-04 · 2.7（用户标记 → 双作用域知识审阅纵切）
+
+类型：实现澄清
+
+决定：(1) 现有 session state 侧栏中的 block 提供“记到项目/记到用户”两个显式动作，只创建 `suggested` 条目；无 suggestions model
+时 trigger 留空，由用户在审阅卡编辑。(2) 鉴权 Host routes 同屏读取 workspace store 与 `user.tdb`，每条 identity 是 `(scope,id)`；
+每项操作先验证 URL 中的 session 能解析 workspace，再选择目标 store，不能给 user knowledge 伪造来源；user store 拒绝非 user scope
+写入。单独保存与接受都携带草稿及打开时原值，写队列内不匹配返回 409；接受在同一个 store task 中完成编辑、状态与取代预检，
+accepted/dismissed 条目不能再按 suggested 编辑。(3) 接受时 `supersedes` 必须是同 store、同 scope、当前有效的 accepted knowledge；全部预检后才使旧条目失效并建边，
+不删除历史。候选只要 trigger 词有交集就按重合度排序展示，不用无数据依据的 0.5 阈值隐藏；是否取代必须由用户勾选。(4) mutation
+SSE 只广播 `{sessionId,scope}` 失效通知，正文重新走鉴权 GET。(5) 删除未接 UI 且“先 dismiss、后模型 create”会在后半失败时吞掉建议
+的 regenerate 原型；模型草拟、用户消息识别和 memory decisions 自动提议继续保持未接，不产生静默费用。
+
+原因：此前 suggestion/store helper 虽有单测，但没有路由或组件引用，且 create 固定写 workspace、auto-accept 也固定读 workspace 设置；
+它不是可用能力。先交付用户明确标记的无模型纵切，能验证治理、双时态与作用域，而不需要提前决定自动抽取质量。
+
+影响：KnowledgeStore mutation contract、`knowledge-suggestions.ts`、authenticated context routes、global SSE、session state sidebar 与 10 locale；
+设计 7.2.2，plan/status 2.7。
+
+状态：已实施并 proven（block user-mark）；其他两类触发与完整 Settings 知识管理仍待实现
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -895,3 +916,4 @@ ThreadRuntime settle/merge、真实 Git tests；设计 9.2.5b / 9.3.4、plan/sta
 | D-055 | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report |
 | D-056 | implementation | — | plan/status 3.6；protocol role catalog |
 | D-057 | active-design | — | agent-harness 9.2/9.3、plan/status 3.4；Thread worktree/runtime |
+| D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |

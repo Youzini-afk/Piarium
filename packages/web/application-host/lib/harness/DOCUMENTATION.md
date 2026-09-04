@@ -119,6 +119,10 @@ rehome path.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.
+Blocks can be explicitly promoted into workspace or user knowledge suggestions.
+The authenticated review API keeps `(scope, id)` identities distinct, uses
+opened-value conflict checks for edits, validates same-scope supersedes before
+mutation, and broadcasts only invalidation identities over SSE.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

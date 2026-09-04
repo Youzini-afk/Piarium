@@ -1231,6 +1231,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerHarnessContextRoutes(app, {
     getStore: getKnowledgeStoreForSession,
+    getUserStore: getUserKnowledgeStore,
+    onKnowledgeChanged: (sessionId, scope) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-knowledge-changed',
+        properties: { sessionId, scope },
+      });
+    },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
