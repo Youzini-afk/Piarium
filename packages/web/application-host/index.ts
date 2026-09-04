@@ -1166,6 +1166,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     worktrees: threadWorktreeRuntime,
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
+    readBlocks: async (sessionId) => {
+      const store = await getKnowledgeStoreForSession(sessionId);
+      if (!store) return null;
+      return (await store.getBlocks(sessionId)).map((block) => ({ label: block.label, content: block.content }));
+    },
     withMergeWriter: async (workspaceId, threadId, operation) => {
       const writer = await documentsAuthority.registerWriterForScope(
         workspaceId,

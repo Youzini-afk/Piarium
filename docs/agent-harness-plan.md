@@ -536,8 +536,8 @@ last checkpoint: 2026-09-03T10:12Z
 **状态（2026-09-04）**：T1 核心纵切已经 `proven`：3.4 / 3.5 七个工具经 Host 能力握手默认接入真实 Pi child、冻结的
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
 已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor；父 Zone 2 已接 queued/active 快照与
-settled 增量，含嵌套父边和压缩重置。未完成边界以 `agent-harness-status.md` 为准：worktree/branch 回收、窄屏与讨论线、结构化
-progress/decisions/errors。
+settled 增量，含嵌套父边和压缩重置；dispatch 已携父 blocks 快照，settle 持久化 child blocks 与结构化 deviations/unresolved。
+未完成边界以 `agent-harness-status.md` 为准：role budget、worktree/branch 回收、窄屏与讨论线。
 3.1 / 3.2 / 3.3 / 3.7 仍只是 `implemented`。
 
 **3.4 / 3.5 的对象模型已由 P0.4 替代**：下文两节里的 `ThreadRecord` 单枚举 `status` + flags 的形状**不再有效**，以设计

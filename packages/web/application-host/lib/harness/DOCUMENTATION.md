@@ -107,6 +107,10 @@ Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
 durable Run record before listing children.
+Thread launch includes a tagged snapshot of the parent's current blocks. At
+settlement the runtime combines explicitly headed report sections, tagged
+decision deviations, the child block snapshot, metrics, transcript bounds, and
+worktree facts before the registry commits the terminal Run and report together.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

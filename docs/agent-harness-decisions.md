@@ -774,6 +774,26 @@ plan/status 2.3。
 
 状态：已实施（Git）；user terminal 仍待 shell integration
 
+### D-055 · 2026-09-04 · 3.4（父 blocks 快照与可核验 ThreadReport）
+
+类型：实现澄清
+
+决定：(1) Thread spawn 在创建 child session 前读取父 Pi session 的当前 blocks；非空块以 `<parent-blocks>` 数据段加入初始任务，
+明确这是 dispatch 时快照且父可能已前进。空与 unavailable 分开标记；读取失败记 Host error 但不阻止子会话。(2) 初始任务要求最终回答使用
+`Conclusion` / `Deviations from brief` / `Unresolved issues` 三个标题。Host 只保守解析这三个受控标题，不从普通散文猜状态；没有结构时
+整段仍作为 conclusion。(3) settle 同时读取 child blocks，完整复制为 `blocksSnapshot`；`decisions` 中显式
+`Deviation: ...` 与最终回答的 deviation 合并去重。读取失败或 store unavailable 写入 report.unresolved，不伪装为空。(4) metrics、
+transcript bounds、worktree diff、blocks 与结构化最终回答收齐后，仍通过 ThreadRegistry 的同一次 `endRun` 原子提交 report 与 Run 终态。
+
+原因：此前 child 启动只拿任务文本，报告又把 `deviations` 和 `blocksSnapshot` 永久写成空值；`read_thread(blocks)` 与 Zone 2 完成行
+因此看似结构化，实际没有数据。受控标题与显式 block 标记比对任意自然语言做启发式抽取可靠，同时在 memory shadow 默认关闭时仍能
+从最终回答得到报告。
+
+影响：ThreadRuntime session adapter、Application Host knowledge store wiring、真实 Pi child E2E、read_thread/Zone 2 已有消费者；
+设计 9.2.5 / 9.3.5，plan/status 3.4。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -834,3 +854,4 @@ plan/status 2.3。
 | D-052 | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI |
 | D-053 | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors |
 | D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |
+| D-055 | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report |

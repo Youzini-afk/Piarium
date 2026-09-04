@@ -47,6 +47,7 @@ describe("thread runtime with real Pi sessions", () => {
     const childHosts = new Map<string, SessionHost>();
     let childRuntimeWorkspaceId: string | null = null;
     let childScope: string[] | undefined;
+    let childInitialPrompt = "";
     let runtime!: ReturnType<typeof createThreadRuntime>;
 
     const hostFor = (sessionId: string): SessionHost => {
@@ -82,6 +83,7 @@ describe("thread runtime with real Pi sessions", () => {
         ...(input.model ? { model: input.model } : {}),
       }),
       prompt: async (sessionId, text, instructions) => {
+        childInitialPrompt = text;
         const result = await hostFor(sessionId).prompt(sessionId, text, undefined, instructions);
         if (!result.accepted) throw new Error("Child prompt was not accepted");
       },
@@ -98,6 +100,12 @@ describe("thread runtime with real Pi sessions", () => {
       sessions,
       resolveWorkspaceRoot: async () => workspace,
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      readBlocks: async (sessionId) => sessionId === parent.sessionId
+        ? [{ label: "plan", content: "- [ ] inspect the runtime" }]
+        : [
+            { label: "progress", content: "Focused check completed" },
+            { label: "decisions", content: "Deviation: used the existing session adapter" },
+          ],
       worktrees: {
         prepare: async () => ({ cwd: workspace, worktree: null }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
@@ -130,12 +138,19 @@ describe("thread runtime with real Pi sessions", () => {
       assert.equal(hostFor(child.sessionId).header(child.sessionId)?.parentSession, parent.sessionFile);
       assert.deepEqual(hostFor(child.sessionId).snapshot().activeTools, ["read"]);
       assert.equal(hostFor(child.sessionId).snapshot().model?.id, model.id);
+      assert.match(childInitialPrompt, /<parent-blocks/);
+      assert.match(childInitialPrompt, /inspect the runtime/);
       await hostFor(child.sessionId).session.waitForIdle();
       await runtime.drain();
 
       const completed = await registry.getThread("workspace-1", input.parent, thread.id);
       assert.equal(completed?.lifecycle, "settled");
       assert.match(completed?.report?.conclusion ?? "", /completed the assigned check/);
+      assert.deepEqual(completed?.report?.deviations, ["used the existing session adapter"]);
+      assert.deepEqual(completed?.report?.blocksSnapshot, {
+        progress: "Focused check completed",
+        decisions: "Deviation: used the existing session adapter",
+      });
       assert.equal(completed?.report?.transcriptRef.sessionId, child.sessionId);
       assert.equal((await registry.getActiveRun("workspace-1", thread.id))?.outcome, "success");
     } finally {

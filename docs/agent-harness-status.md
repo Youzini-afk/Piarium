@@ -65,7 +65,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✗ | `knowledge/symbols`（单测） | — | 只维护 file 节点 | 未接 LSP / watch |
 | **3.2** `explore` 管线 | host | ✓ | ✗ | `host/explore.test.ts`（17） | — | — | pi-host 无 `explore` 工具定义；10 问题快照未做 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
-| **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`（真实持久 Pi child、独立 runtime workspace、冻结模型/工具/scope、报告）；`thread-worktree.test.ts`（真实 Git、dirty baseline、冲突不覆盖）；`thread-runtime.test.ts`（worker/host 中断续跑、权限等待、stalled/looping）；`path-authority.test.ts` / `search-service.test.ts`（scope enforcement）；`phase3-e2e.test.ts`（bridge→router→registry 与 active/settled/compaction Zone 2）；`zone2-threads.test.ts`（终态增量、活跃快照、嵌套父边）；`thread-runtime-capability.test.ts`；`runtime-dispatcher-session-launch.test.ts`；`session-delete-coordinator.test.ts` | ✓（Web/Application Host） | Host 未声明 `harnessThreads` 时不注册 | role budget、父 blocks 快照与结构化 deviations 尚未接；完成后的 worktree/branch 回收策略仍待做；scope 不是 OS 沙箱，不约束 shell 文本或 worker 内置 read（D-044） |
+| **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`（真实持久 Pi child、父 blocks 快照、冻结模型/工具/scope、child blocks/deviation 报告）；`thread-worktree.test.ts`（真实 Git、dirty baseline、冲突不覆盖）；`thread-runtime.test.ts`（worker/host 中断续跑、权限等待、stalled/looping、结构化报告与 unavailable 分类）；`path-authority.test.ts` / `search-service.test.ts`（scope enforcement）；`phase3-e2e.test.ts`（bridge→router→registry 与 active/settled/compaction Zone 2）；`zone2-threads.test.ts`（终态增量、活跃快照、嵌套父边）；`thread-runtime-capability.test.ts`；`runtime-dispatcher-session-launch.test.ts`；`session-delete-coordinator.test.ts` | ✓（Web/Application Host） | Host 未声明 `harnessThreads` 时不注册 | role budget、完成后的 worktree/branch 回收策略仍待做；scope 不是 OS 沙箱，不约束 shell 文本或 worker 内置 read（D-044/D-055） |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
 | **3.7** review 传感器 | host | ✓ | ✗ | `host/review-sensor.test.ts`（6，含对父不可见） | — | — | 未挂 `agent_settled`；`<review>` Zone 2 注入未做 |
 | **3.8** LSP 导航工具 | protocol / host / pi-host | ✓ | ✓ | `host/lsp-nav.test.ts`（真实 fixture LanguageSupervisor、编辑器 buffer 不覆盖、版本/一基位置/三态）；`lsp-tools.test.ts`；`thread-runtime-capability.test.ts`（握手能力门） | ✓（Web/Application Host） | Host 不声明 `harnessLspNavigation` 时四个工具不注册 | `symbols` 需一个代表文件路径来选择语言 provider；未知后缀明确 unavailable（D-051） |
@@ -82,7 +82,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | 来源 | 未完成 |
 | --- | --- |
 | D-023 | Zone 2 尚缺 user terminal / Git；知识建议与审阅 UI 未接；memory 事件加速触发未接 |
-| D-024 / D-026 | merge/归档后的 worktree 与分支回收；窄屏侧栏与讨论线；progress / decisions / errors 块提取 |
+| D-024 / D-026 | merge/归档后的 worktree 与分支回收；窄屏侧栏与讨论线 |
 | D-013 | harness shell 未接进 terminal runtime |
 
 ## 历史快照：阶段 1 小结（2026-09-03，自决策日志迁入）
