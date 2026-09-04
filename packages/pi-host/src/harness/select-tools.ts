@@ -104,7 +104,7 @@ export function selectHarnessTools(
   }
   // Phase 2 tools
   if (tools.todo !== false) {
-    result.push(createTodoTool(bridge, sessionId));
+    result.push(createTodoTool(bridge));
   }
   if (tools.recall !== false) {
     result.push(createRecallTool(bridge, sessionId));

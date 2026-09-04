@@ -16,7 +16,7 @@ import {
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
 } from '@piarium/extension-host';
-import { createDocumentAuthority, type DocumentAuthority } from './lib/documents/authority.js';
+import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
 import { toJsonValue } from './lib/extensions/json-value.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
@@ -45,12 +45,12 @@ import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/ro
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
-import { type MemoryAgentRunner } from './lib/harness/memory-agent.js';
+import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
+import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
-import { type Zone2Material } from './lib/harness/zone2.js';
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
-import { type RecallToolDeps } from './lib/harness/recall-tool.js';
+import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
@@ -911,11 +911,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const dirtyBarrierTimeoutMs = /^\d+$/.test(configuredDirtyBarrierTimeout)
     ? Number(configuredDirtyBarrierTimeout)
     : undefined;
+  let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
+    onMutation: (event) => observeKnowledgeDocumentMutation(event),
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
@@ -1074,6 +1076,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // ── Phase 2: Knowledge store, memory agent, observers ────────────
   // Knowledge stores are opened lazily per workspace and cached.
   const knowledgeStores = new Map<string, KnowledgeStore>();
+  const knowledgeStoreLoads = new Map<string, Promise<KnowledgeStore>>();
+  let userKnowledgeStore: KnowledgeStore | null = null;
+  let userKnowledgeStoreLoad: Promise<KnowledgeStore> | null = null;
   const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
@@ -1224,20 +1229,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     );
   });
 
-  async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore | null> {
-    let store = knowledgeStores.get(workspaceId);
-    if (store) return store;
-    try {
-      store = await openWorkspaceKnowledge({
-        dataDir: PIARIUM_DATA_DIR,
-        hostId,
-        workspaceId,
-        embedding: null, // Placeholder vectors — see D-019/D-020
-      });
+  async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore> {
+    const existing = knowledgeStores.get(workspaceId);
+    if (existing) return existing;
+    const pending = knowledgeStoreLoads.get(workspaceId);
+    if (pending) return pending;
+    const loading = openWorkspaceKnowledge({
+      dataDir: PIARIUM_DATA_DIR,
+      hostId,
+      workspaceId,
+      embedding: null, // Placeholder vectors — see D-019/D-020
+    }).then((store) => {
       knowledgeStores.set(workspaceId, store);
       return store;
-    } catch {
-      return null;
+    });
+    knowledgeStoreLoads.set(workspaceId, loading);
+    try {
+      return await loading;
+    } finally {
+      knowledgeStoreLoads.delete(workspaceId);
     }
   }
 
@@ -1248,31 +1258,60 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
     if (workspace?.kind === 'workspace' && typeof workspace.id === 'string') {
       const store = await getKnowledgeStoreForWorkspace(workspace.id);
-      if (store) sessionStores.set(sessionId, store);
-      return store ?? null;
+      sessionStores.set(sessionId, store);
+      return store;
     }
     return null;
   }
 
-  // Memory agent — shared per host, uses the session's knowledge store
-  const memoryAgent: MemoryAgentRunner | null = null; // TODO: wire with model access when available
+  async function getUserKnowledgeStore(): Promise<KnowledgeStore> {
+    if (userKnowledgeStore) return userKnowledgeStore;
+    if (!userKnowledgeStoreLoad) {
+      userKnowledgeStoreLoad = openUserKnowledgeStore({
+        dataDir: PIARIUM_DATA_DIR,
+        hostId,
+        embedding: null,
+      }).then((store) => {
+        userKnowledgeStore = store;
+        return store;
+      });
+    }
+    try {
+      return await userKnowledgeStoreLoad;
+    } finally {
+      userKnowledgeStoreLoad = null;
+    }
+  }
+
+  const knowledgeContextRuntime = createKnowledgeContextRuntime({
+    getStore: getKnowledgeStoreForWorkspace,
+    onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
+  });
+  observeKnowledgeDocumentMutation = (event) => knowledgeContextRuntime.observeDocumentMutation(event);
+  const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
+  const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
+    knowledgeContextRuntime.bindSession(sessionId, workspaceId);
+    if (knowledgeLanguageSubscriptions.has(workspaceId)) return;
+    knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
+      const event = recordOf(value);
+      if (event.kind !== 'diagnostics' || typeof event.resourceId !== 'string') return;
+      const diagnostics = Array.isArray(event.items)
+        ? event.items.map(recordOf).filter((item) => item.severity === 'error' || item.severity === 'warning')
+        : [];
+      if (diagnostics.length === 0) return;
+      knowledgeContextRuntime.observeDiagnostics({
+        workspaceId,
+        sessionId: 'lsp',
+        path: event.resourceId,
+        count: diagnostics.length,
+        worst: diagnostics.some((item) => item.severity === 'error') ? 'error' : 'warning',
+      });
+    }));
+  };
 
   // Zone 2 provider — assembles material from the knowledge store
-  async function zone2Provider(sessionId: string, sinceTurn: number): Promise<Zone2Material> {
-    const store = await getKnowledgeStoreForSession(sessionId);
-    // TODO: gather real material from store events, git, diagnostics, blocks
-    // For now, return empty material — the assembler returns null when all
-    // sections are empty, so no message is sent.
-    void store; void sinceTurn;
-    return {
-      userEdits: [],
-      userCommands: [],
-      newDiagnostics: [],
-      git: null,
-      knowledge: [],
-      blocks: [],
-      contextUsage: null,
-    };
+  async function zone2Provider(request: Parameters<typeof knowledgeContextRuntime.zone2Material>[0]) {
+    return knowledgeContextRuntime.zone2Material(request);
   }
 
   // Compaction deps provider — uses Pi's preparation (firstKeptEntryId /
@@ -1292,6 +1331,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     };
   }
 
+  async function memoryDepsProvider(sessionId: string) {
+    const store = await getKnowledgeStoreForSession(sessionId);
+    if (!store) throw new Error('No knowledge store for session');
+    return { store, settings: DEFAULT_MEMORY_AGENT_SETTINGS };
+  }
+
   // Todo deps provider
   async function todoDepsProvider(sessionId: string): Promise<TodoToolDeps> {
     const store = await getKnowledgeStoreForSession(sessionId);
@@ -1300,7 +1345,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       store,
       sessionId,
       settings: DEFAULT_TODO_SETTINGS,
-      askConfirmation: async (_message: string) => true, // TODO: wire to permission channel
     };
   }
 
@@ -1310,12 +1354,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!workspaceStore) throw new Error('No knowledge store for session');
     return {
       workspaceStore,
-      userStore: null, // TODO: open user knowledge store
+      userStore: await getUserKnowledgeStore(),
     };
   }
 
   const harnessServiceHost = createHarnessServiceHost({
-    search: async (request, options) => workspaceContentSearch.searchContent({ query: request.query, workspaceId: request.workspaceId, maxResults: request.maxResults }, options),
+    search: async (request, options) => workspaceContentSearch.searchContent({
+      query: request.query,
+      workspaceId: request.workspaceId,
+      maxResults: request.maxResults,
+      ...(request.paths === undefined ? {} : { paths: request.paths }),
+    }, options),
     resolveWorkspaceRoot: async (workspaceId) => {
       try {
         const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
@@ -1343,6 +1392,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     webFetchService,
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
+    memoryDepsProvider,
     compactionDepsProvider,
     todoDepsProvider,
     recallDepsProvider,
@@ -1352,7 +1402,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadKillSession: (threadId) => threadRuntime!.kill(threadId),
     threadApplyWorktreeDiff: (workspaceId, parent, threadId) => threadRuntime!.merge(workspaceId, parent, threadId),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
-    ...(memoryAgent ? { memoryAgent } : {}),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
@@ -1506,6 +1555,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
           sessionStores.delete(event.sessionId);
+          knowledgeContextRuntime.dropSession(event.sessionId);
         }
       }
       return;
@@ -1514,6 +1564,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const envelope = event.envelope;
     const envelopeData = recordOf(envelope.data);
     const sessionId = event.sessionId ?? '';
+    if (envelope.event === 'session.closed' && sessionId) {
+      sessionStores.delete(sessionId);
+      knowledgeContextRuntime.dropSession(sessionId);
+      return;
+    }
     if (envelope.event === 'session.snapshot' && sessionId) {
       sessionSnapshots.set(sessionId, envelopeData);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
@@ -1531,6 +1586,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         && harnessWorkspaceId
         && typeof envelopeData.cwd === 'string'
       ) {
+        bindKnowledgeSession(sessionId, harnessWorkspaceId);
         if (!harnessServiceHost.hasActor(event.actor)) {
           const activeTools = Array.isArray(envelopeData.activeTools)
             ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
@@ -1743,6 +1799,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterTasksCapability();
       unregisterDebugCapability();
       unregisterTestCapability();
+      for (const subscription of knowledgeLanguageSubscriptions.values()) subscription.close();
+      knowledgeLanguageSubscriptions.clear();
       await languageSupervisor.dispose();
       await runRuntime.dispose();
       await threadRuntime.dispose();
@@ -1750,6 +1808,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
+      observeKnowledgeDocumentMutation = () => undefined;
+      await knowledgeContextRuntime.dispose();
+      await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));
+      knowledgeStores.clear();
+      if (userKnowledgeStoreLoad) await userKnowledgeStoreLoad.catch(() => null);
+      await userKnowledgeStore?.close();
+      userKnowledgeStore = null;
       harnessRouter.dispose();
       await harnessServiceHost.dispose();
       await threadRegistry.dispose();

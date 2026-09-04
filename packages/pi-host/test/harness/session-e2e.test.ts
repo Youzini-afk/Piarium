@@ -17,16 +17,19 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import { DEFAULT_MEMORY_AGENT_SETTINGS, type HostEvent, type HostEventData } from "@piarium/protocol";
 
 import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
+import { createKnowledgeContextRuntime } from "../../../web/application-host/lib/knowledge/context-runtime.js";
+import { createDocumentAuthority, type DocumentMutationObservation } from "../../../web/application-host/lib/documents/authority.js";
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 
@@ -174,9 +177,90 @@ async function withTempRoot(prefix: string, fn: (root: string) => Promise<void>)
   }
 }
 
+const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
+  const deadline = Date.now() + 5_000;
+  while (!await predicate()) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for background session work");
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+};
+
 // ── Zone 2 ─────────────────────────────────────────────────────────
 
 describe("session e2e — zone2 extension", () => {
+  it("carries a committed editor mutation through the Host store into the next real Pi turn", async () => {
+    await withTempRoot("piarium-s-zone2-documents-", async (root) => {
+      const dataDir = join(root, "data");
+      let observeMutation = (_event: DocumentMutationObservation): void => {};
+      const documents = createDocumentAuthority({
+        hostId: "zone2-host",
+        dataDir,
+        isAllowedRoot: async () => true,
+        isTrusted: async () => true,
+        onMutation: (event) => observeMutation(event),
+      });
+      const identity = await documents.resolveWorkspace({ path: root });
+      const store = await openWorkspaceKnowledge({
+        dataDir,
+        hostId: "zone2-host",
+        workspaceId: identity.workspaceId,
+        embedding: null,
+      });
+      const knowledge = createKnowledgeContextRuntime({ getStore: async () => store });
+      observeMutation = (event) => knowledge.observeDocumentMutation(event);
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(context); return fauxAssistantMessage("first done"); },
+        (context) => { contexts.push(context); return fauxAssistantMessage("second done"); },
+        (context) => { contexts.push(context); return fauxAssistantMessage("third done"); },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: { zone2Provider: (request) => knowledge.zone2Material(request) },
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        knowledge.bindSession(snapshot.sessionId, identity.workspaceId);
+        await session.host.prompt(snapshot.sessionId, "first turn");
+        await session.host.session.waitForIdle();
+
+        const write = await documents.write({
+          resource: { workspaceId: identity.workspaceId, resourceId: "edited-between-turns.ts" },
+          token: { workspaceId: identity.workspaceId, epoch: identity.epoch, owner: { kind: "web-route", id: "editor" } },
+          expectedRevision: null,
+          content: "export const changedByUser = true;\n",
+          encoding: "utf-8",
+          bom: false,
+          operationId: randomUUID(),
+        });
+        assert.equal(write.status, "written");
+        await knowledge.drain();
+
+        await session.host.prompt(snapshot.sessionId, "second turn");
+        await session.host.session.waitForIdle();
+        assert.doesNotMatch(JSON.stringify(contexts[0]!.messages), /edited-between-turns/);
+        assert.match(JSON.stringify(contexts[1]!.messages), /modified|created/);
+        assert.match(JSON.stringify(contexts[1]!.messages), /edited-between-turns\.ts/);
+        await session.host.prompt(snapshot.sessionId, "third turn");
+        await session.host.session.waitForIdle();
+        assert.equal(
+          JSON.stringify(contexts[2]!.messages).match(/edited-between-turns\.ts/g)?.length,
+          1,
+          "the delivered event must remain in history without being appended a second time",
+        );
+      } finally {
+        await session.dispose();
+        await knowledge.dispose();
+        await store.close();
+        await documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
   it("injects assembled <piarium-context> into the first request and leaves Zone 0 alone", async () => {
     await withTempRoot("piarium-s-zone2-", async (root) => {
       const faux = registerFauxProvider();
@@ -195,11 +279,22 @@ describe("session e2e — zone2 extension", () => {
         blocks: [],
         contextUsage: null,
       };
+      const zone2Requests: Array<{ afterEventId?: number }> = [];
 
       const session = await setupSession({
         root,
         faux,
-        serviceHostOptions: { zone2Provider: async () => material },
+        serviceHostOptions: {
+          zone2Provider: async (request) => {
+            zone2Requests.push(request);
+            return {
+              eventCursor: 4,
+              material: request.afterEventId === 4
+                ? { ...material, userEdits: [], userCommands: [], git: null }
+                : material,
+            };
+          },
+        },
       });
 
       try {
@@ -210,6 +305,8 @@ describe("session e2e — zone2 extension", () => {
         await session.host.session.waitForIdle();
 
         assert.equal(contexts.length, 2, "expected one provider call per turn");
+        assert.equal(zone2Requests[0]?.afterEventId, undefined);
+        assert.equal(zone2Requests[1]?.afterEventId, 4, "the next turn must continue after the delivered event cursor");
 
         const firstMessages = JSON.stringify(contexts[0]!.messages);
         assert.match(firstMessages, /<piarium-context/, "Zone 2 block must reach the provider");
@@ -240,13 +337,16 @@ describe("session e2e — zone2 extension", () => {
         faux,
         serviceHostOptions: {
           zone2Provider: async () => ({
-            userEdits: [],
-            userCommands: [],
-            newDiagnostics: [],
-            git: null,
-            knowledge: [],
-            blocks: [],
-            contextUsage: null,
+            eventCursor: 0,
+            material: {
+              userEdits: [],
+              userCommands: [],
+              newDiagnostics: [],
+              git: null,
+              knowledge: [],
+              blocks: [],
+              contextUsage: null,
+            },
           }),
         },
       });
@@ -264,6 +364,57 @@ describe("session e2e — zone2 extension", () => {
         );
       } finally {
         await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — memory shadow extension", () => {
+  it("uses the active session model to maintain blocks without taking over the conversation", async () => {
+    await withTempRoot("piarium-s-memory-shadow-", async (root) => {
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: { memory: { shadowMode: true } },
+      }), "utf8");
+      const store = await openWorkspaceKnowledge({
+        dataDir: join(root, "data"),
+        hostId: "memory-host",
+        workspaceId: WORKSPACE_ID,
+        embedding: null,
+      });
+      const faux = registerFauxProvider();
+      const keeperContexts: Context[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage("x".repeat(50_000)),
+        (context) => {
+          keeperContexts.push(context);
+          return fauxAssistantMessage([fauxToolCall("memory_edit", {
+            ops: [{ op: "create", block: "progress", content: "The first long turn is complete." }],
+          })]);
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: {
+          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
+        },
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "produce a long answer");
+        await session.host.session.waitForIdle();
+        await waitUntil(async () => (await store.getBlocks(snapshot.sessionId)).length > 0);
+        assert.equal(keeperContexts.length, 1);
+        assert.equal(keeperContexts[0]!.tools?.[0]?.name, "memory_edit");
+        assert.match((await store.getBlocks(snapshot.sessionId))[0]!.content, /long turn is complete/);
+        assert.doesNotMatch(JSON.stringify(session.host.session.messages), /memory_edit/);
+      } finally {
+        await session.dispose();
+        await store.close();
         faux.unregister();
       }
     });
@@ -351,7 +502,7 @@ describe("session e2e — compaction extension", () => {
             });
             return {
               store: openStore,
-              settings: DEFAULT_COMPACTION_SETTINGS,
+              settings: { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true },
               getFacts: async (): Promise<CompactionFacts> => ({
                 touchedFiles: ["a.ts"],
                 unresolvedDiagnostics: [],
@@ -405,7 +556,7 @@ describe("session e2e — compaction extension", () => {
             });
             return {
               store: openStore,
-              settings: DEFAULT_COMPACTION_SETTINGS,
+              settings: { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true },
               getFacts: async (): Promise<CompactionFacts> => ({
                 touchedFiles: ["a.ts"],
                 unresolvedDiagnostics: [],

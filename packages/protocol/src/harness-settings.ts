@@ -23,6 +23,7 @@ export interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
+  memory: { shadowMode: boolean };
   web?: {
     maxFetchesPerTurn?: number;
     render?: boolean;
@@ -56,6 +57,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
+  memory: { shadowMode: false },
   permissions: { mode: "normal", rules: [] },
 };
 
@@ -109,6 +111,12 @@ export function mergeHarnessSettings(
           ?? user.knowledge?.autoAcceptSuggestions?.workspace
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
       },
+    },
+    // Background model calls and their cost are user-owned. A repository may
+    // not silently enable the experimental memory keeper.
+    memory: {
+      ...DEFAULT_HARNESS_SETTINGS.memory,
+      ...user.memory,
     },
     ...(user.web || workspace.web
       ? { web: { ...user.web, ...workspace.web } }

@@ -5,8 +5,8 @@ import { createHarnessSearchService, type HarnessSearchService } from "./search-
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { WorkspaceContentSearchResult } from "../search/content.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
-import type { MemoryAgentRunner } from "./memory-agent.js";
-import type { Zone2Material } from "./zone2.js";
+import type { MemoryAgentSettings } from "@piarium/protocol";
+import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
 import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
@@ -71,8 +71,8 @@ export interface HarnessServiceHost {
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
-  memoryAgent: MemoryAgentRunner | null;
-  zone2Provider: ((sessionId: string, sinceTurn: number) => Promise<Zone2Material>) | null;
+  memoryDepsProvider: ((sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>) | null;
+  zone2Provider: ((request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>) | null;
   compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
   compactionSettings: CompactionSettings;
   todoSettings: TodoToolSettings;
@@ -122,8 +122,8 @@ export interface HarnessServiceHostOptions {
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
-  memoryAgent?: MemoryAgentRunner;
-  zone2Provider?: (sessionId: string, sinceTurn: number) => Promise<Zone2Material>;
+  memoryDepsProvider?: (sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>;
+  zone2Provider?: (request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>;
   compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
   compactionSettings?: CompactionSettings;
   todoSettings?: TodoToolSettings;
@@ -152,7 +152,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
-  const memoryAgent = options.memoryAgent ?? null;
+  const memoryDepsProvider = options.memoryDepsProvider ?? null;
   const zone2Provider = options.zone2Provider ?? null;
   const compactionDepsProvider = options.compactionDepsProvider ?? null;
   const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
@@ -262,7 +262,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     await Promise.all(disposes);
     outputStore.dispose();
     pathLockService.dispose();
-    memoryAgent?.dispose();
     if (knowledgeStore) disposes.push(knowledgeStore.close());
     if (userKnowledgeStore) disposes.push(userKnowledgeStore.close());
     await Promise.all(disposes);
@@ -278,7 +277,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     webSearchService,
     knowledgeStore,
     userKnowledgeStore,
-    memoryAgent,
+    memoryDepsProvider,
     zone2Provider,
     compactionDepsProvider,
     compactionSettings,

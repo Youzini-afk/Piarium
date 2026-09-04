@@ -22,17 +22,15 @@ import type { CompactionBeforeResult, CompactionAfterParams } from "@piarium/pro
  */
 export interface CompactionExtensionOptions {
   bridge: HostServicesBridge;
-  sessionId: string;
 }
 
 export function createCompactionExtension(options: CompactionExtensionOptions): ExtensionFactory {
-  const { bridge, sessionId } = options;
+  const { bridge } = options;
 
   return (pi) => {
     pi.on("session_before_compact", async (event) => {
       try {
         const result = await bridge.request<"compaction.before">("compaction.before", {
-          sessionId,
           firstKeptEntryId: event.preparation.firstKeptEntryId,
           tokensBefore: event.preparation.tokensBefore,
         }, { timeoutMs: 5_000, signal: event.signal });
@@ -58,7 +56,6 @@ export function createCompactionExtension(options: CompactionExtensionOptions): 
       } | undefined;
       try {
         await bridge.request<"compaction.after">("compaction.after", {
-          sessionId,
           summary: compactionEntry?.summary ?? "",
           firstKeptEntryId: compactionEntry?.firstKeptEntryId ?? "",
           tokensBefore: compactionEntry?.tokensBefore ?? 0,

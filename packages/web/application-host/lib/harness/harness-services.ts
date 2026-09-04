@@ -20,6 +20,7 @@ import { assembleZone2Content } from "./zone2.js";
 import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
+import { applyOps } from "./memory-agent.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -148,11 +149,17 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.zone2Provider) {
-        return { content: null };
+        return { content: null, eventCursor: params.afterEventId ?? 0 };
       }
-      const material = await host.zone2Provider(ctx.sessionId, params.sinceTurn);
-      const content = assembleZone2Content(material);
-      return { content };
+      const result = await host.zone2Provider({
+        sessionId: ctx.sessionId,
+        sinceTurn: params.sinceTurn,
+        ...(params.afterEventId === undefined ? {} : { afterEventId: params.afterEventId }),
+        ...(params.query === undefined ? {} : { query: params.query }),
+        contextUsage: params.contextUsage ?? null,
+      });
+      const content = assembleZone2Content(result.material, { eventCursor: result.eventCursor });
+      return { content, eventCursor: result.eventCursor };
     },
   };
 }
@@ -175,15 +182,38 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
   };
 }
 
-export function createCompactionAfterService(host: HarnessServiceHost): HarnessService<"compaction.after"> {
+export function createCompactionAfterService(_host: HarnessServiceHost): HarnessService<"compaction.after"> {
   return {
     handle: async (_params, _ctx: HarnessServiceContext) => {
-      // Notify memory agent to do a pre-compaction refresh if needed.
-      // The actual compaction has already happened; this is a post-hook.
-      if (host.memoryAgent) {
-        await host.memoryAgent.requestPreCompactionRefresh();
-      }
       return { acknowledged: true };
+    },
+  };
+}
+
+export function createMemoryBlocksGetService(host: HarnessServiceHost): HarnessService<"memory.blocks.get"> {
+  return {
+    handle: async (_params, ctx) => {
+      if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
+      const deps = await host.memoryDepsProvider(ctx.sessionId);
+      const blocks = await deps.store.getBlocks(ctx.sessionId);
+      return {
+        blocks: blocks.map((block) => ({
+          label: block.label,
+          content: block.content,
+          updatedBy: block.updatedBy,
+          ...(block.cursorTurn === undefined ? {} : { cursorTurn: block.cursorTurn }),
+        })),
+      };
+    },
+  };
+}
+
+export function createMemoryBlocksApplyService(host: HarnessServiceHost): HarnessService<"memory.blocks.apply"> {
+  return {
+    handle: async (params, ctx) => {
+      if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
+      const deps = await host.memoryDepsProvider(ctx.sessionId);
+      return applyOps(params.ops, deps.store, ctx.sessionId, params.cursorTurn, deps.settings);
     },
   };
 }
@@ -198,7 +228,7 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
       const result = await executeTodoTool(
         { items: params.items, ...(params.confidence !== undefined ? { confidence: params.confidence } : {}) },
         deps,
-        false, // sessionConfirmed — TODO: track per-session confirmation state
+        params.confirmed === true,
       );
       return {
         text: result.text,
@@ -277,8 +307,12 @@ export function registerHarnessServices(
   if (host.compactionDepsProvider) {
     router.register("compaction.before", createCompactionBeforeService(host));
   }
-  if (host.memoryAgent || host.compactionDepsProvider) {
+  if (host.compactionDepsProvider) {
     router.register("compaction.after", createCompactionAfterService(host));
+  }
+  if (host.memoryDepsProvider) {
+    router.register("memory.blocks.get", createMemoryBlocksGetService(host));
+    router.register("memory.blocks.apply", createMemoryBlocksApplyService(host));
   }
   if (host.todoDepsProvider) {
     router.register("todo.upsert", createTodoUpsertService(host));

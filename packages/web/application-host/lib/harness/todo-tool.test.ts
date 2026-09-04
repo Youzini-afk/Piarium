@@ -93,7 +93,7 @@ describe("executeTodoTool", () => {
         { text: "Task 2", status: "open" },
         { text: "Task 3", status: "blocked" },
       ]},
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS, askConfirmation: async () => true },
+      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
       true, // session already confirmed
     );
     expect(result.text).toBe("plan updated: 1/3 done, 1 blocked");
@@ -106,74 +106,44 @@ describe("executeTodoTool", () => {
     expect(blocks[0]?.content).toContain("- [x] Task 1");
   });
 
-  it("asks confirmation when confidence is low and not yet confirmed", async () => {
-    let asked = false;
+  it("requires confirmation without writing when confidence is low", async () => {
     const result = await executeTodoTool(
       { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      {
-        store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS,
-        askConfirmation: async () => { asked = true; return true; },
-      },
+      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
       false,
     );
-    expect(asked).toBe(true);
     expect(result.askedConfirmation).toBe(true);
-    expect(result.confirmed).toBe(true);
+    expect(result.confirmed).toBe(false);
+    expect(result.text).toContain("requires user confirmation");
+    expect(await store.getBlocks("s1")).toHaveLength(0);
   });
 
-  it("does not ask when session already confirmed", async () => {
-    let asked = false;
+  it("writes a low-confidence plan after pi-host confirms it", async () => {
     const result = await executeTodoTool(
       { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      {
-        store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS,
-        askConfirmation: async () => { asked = true; return true; },
-      },
+      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
       true,
     );
-    expect(asked).toBe(false);
+    expect(result.askedConfirmation).toBe(true);
+    expect(result.confirmed).toBe(true);
+    expect(await store.getBlocks("s1")).toHaveLength(1);
+  });
+
+  it("does not require confirmation when confidence is high", async () => {
+    const result = await executeTodoTool(
+      { items: [{ text: "Task", status: "open" }], confidence: 0.9 },
+      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
+      false,
+    );
     expect(result.askedConfirmation).toBe(false);
   });
 
-  it("cancels update when user declines", async () => {
+  it("does not require confirmation when confidence is absent", async () => {
     const result = await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      {
-        store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS,
-        askConfirmation: async () => false,
-      },
-      false,
-    );
-    expect(result.confirmed).toBe(false);
-    expect(result.text).toContain("cancelled");
-    // Plan block should not be created
-    const blocks = await store.getBlocks("s1");
-    expect(blocks).toHaveLength(0);
-  });
-
-  it("does not ask when confidence is high", async () => {
-    let asked = false;
-    await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.9 },
-      {
-        store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS,
-        askConfirmation: async () => { asked = true; return true; },
-      },
-      false,
-    );
-    expect(asked).toBe(false);
-  });
-
-  it("does not ask when confidence not provided", async () => {
-    let asked = false;
-    await executeTodoTool(
       { items: [{ text: "Task", status: "open" }] },
-      {
-        store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS,
-        askConfirmation: async () => { asked = true; return true; },
-      },
+      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
       false,
     );
-    expect(asked).toBe(false);
+    expect(result.askedConfirmation).toBe(false);
   });
 });

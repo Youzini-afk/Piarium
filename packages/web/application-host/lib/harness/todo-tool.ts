@@ -14,6 +14,7 @@
  */
 
 import type { KnowledgeStore } from "../knowledge/store.js";
+import { DEFAULT_TODO_CONFIRM_BELOW } from "@piarium/protocol";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -34,15 +35,13 @@ export interface TodoToolSettings {
 }
 
 export const DEFAULT_TODO_SETTINGS: TodoToolSettings = {
-  confirmBelow: 0.6,
+  confirmBelow: DEFAULT_TODO_CONFIRM_BELOW,
 };
 
 export interface TodoToolDeps {
   store: KnowledgeStore;
   sessionId: string;
   settings: TodoToolSettings;
-  /** Ask user for confirmation. Returns true if confirmed. */
-  askConfirmation: (message: string) => Promise<boolean>;
 }
 
 // ── Rendering ──────────────────────────────────────────────────────
@@ -80,29 +79,18 @@ export async function executeTodoTool(
   deps: TodoToolDeps,
   sessionConfirmed: boolean,
 ): Promise<TodoToolResult> {
-  const { store, sessionId, settings, askConfirmation } = deps;
+  const { store, sessionId, settings } = deps;
   const items = input.items;
   const content = renderPlanContent(items);
 
   // Confidence check
-  let askedConfirmation = false;
-  let confirmed: boolean | undefined;
-  if (
-    !sessionConfirmed &&
-    input.confidence !== undefined &&
-    input.confidence < settings.confirmBelow
-  ) {
-    askedConfirmation = true;
-    confirmed = await askConfirmation(
-      `The plan has confidence ${input.confidence}. Do you want to proceed?`,
-    );
-    if (!confirmed) {
-      return {
-        text: "plan update cancelled by user",
-        confirmed: false,
-        askedConfirmation: true,
-      };
-    }
+  const askedConfirmation = input.confidence !== undefined && input.confidence < settings.confirmBelow;
+  if (!sessionConfirmed && askedConfirmation) {
+    return {
+      text: "plan update requires user confirmation",
+      confirmed: false,
+      askedConfirmation: true,
+    };
   }
 
   // Replace plan block
@@ -120,7 +108,7 @@ export async function executeTodoTool(
   let text = `plan updated: ${done}/${total} done`;
   if (blocked > 0) text += `, ${blocked} blocked`;
 
-  return { text, confirmed, askedConfirmation };
+  return { text, ...(sessionConfirmed && askedConfirmation ? { confirmed: true } : {}), askedConfirmation };
 }
 
 // ── Prompt guidelines ──────────────────────────────────────────────

@@ -61,6 +61,41 @@ describe("KnowledgeStore", () => {
       });
       expect(id).toBeGreaterThan(0);
     });
+
+    it("lists session events by durable node cursor or turn fallback", async () => {
+      const first = await store.putEvent({
+        kind: "edit",
+        at: 1,
+        sessionId: "s1",
+        turnIndex: 3,
+        text: "modified a.ts",
+        data: { kind: "modified", path: "a.ts" },
+        source: "user",
+      });
+      const second = await store.putEvent({
+        kind: "command",
+        at: 2,
+        sessionId: "s1",
+        turnIndex: 4,
+        text: "bun test",
+        source: "user",
+      });
+      await store.putEvent({
+        kind: "edit",
+        at: 3,
+        sessionId: "other",
+        turnIndex: 4,
+        text: "other session",
+        source: "user",
+      });
+
+      await expect(store.listEvents({ sessionId: "s1", minTurnIndex: 4 })).resolves.toMatchObject([
+        { id: second, text: "bun test" },
+      ]);
+      await expect(store.listEvents({ sessionId: "s1", afterId: first })).resolves.toMatchObject([
+        { id: second, text: "bun test" },
+      ]);
+    });
   });
 
   describe("putSession", () => {

@@ -55,6 +55,12 @@ export interface MutationOwner {
   generation?: number | undefined;
 }
 
+interface DocumentWriter {
+  owner: MutationOwner;
+  markMutated: () => Promise<void>;
+  close: () => Promise<void>;
+}
+
 interface ResolvedWorkspacePath {
   absolutePath: string;
   relativePath: string;
@@ -255,9 +261,17 @@ export interface DocumentAuthorityOptions {
   isTrusted?: (root: string) => Promise<boolean>;
   isAllowedRoot?: (root: string) => Promise<boolean>;
   onWorkspaceResolved?: (resolved: ResolveWorkspaceResult) => void;
+  onMutation?: (event: DocumentMutationObservation) => void | Promise<void>;
   maxReadBytes?: number;
   overflowLimit?: number;
   dirtyBarrierTimeoutMs?: number;
+}
+
+export interface DocumentMutationObservation {
+  workspaceId: string;
+  resourceId: string;
+  kind: 'created' | 'modified' | 'deleted';
+  owner: MutationOwner;
 }
 
 export type DocumentFsPromises = typeof fs.promises;
@@ -298,6 +312,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     isTrusted = async () => true,
     isAllowedRoot = async () => true,
     onWorkspaceResolved = () => undefined,
+    onMutation = () => undefined,
     maxReadBytes = Number.POSITIVE_INFINITY,
     overflowLimit,
     dirtyBarrierTimeoutMs = 15_000,
@@ -333,6 +348,16 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     pathModule,
     processLike,
   });
+
+  const publishMutation = (event: DocumentMutationObservation): void => {
+    try {
+      void Promise.resolve(onMutation({ ...event, owner: { ...event.owner } })).catch((error: unknown) => {
+        console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
+      });
+    } catch (error) {
+      console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
+    }
+  };
 
   const loadWorkspace = async (workspaceId: string): Promise<LoadedWorkspace> => {
     const mapping = await registry.get(workspaceId);
@@ -589,7 +614,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   });
 
   const write = (request: WriteRequest): Promise<DocumentWriteResult> => queues.run(resourceKey(request.resource), async () => {
-    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
+    let writer: DocumentWriter | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-write' });
@@ -627,6 +652,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         byteLength: next.byteLength,
       };
       if (next.modifiedAt) result.modifiedAt = next.modifiedAt;
+      publishMutation({
+        workspaceId: request.resource.workspaceId,
+        resourceId: request.resource.resourceId,
+        kind: current.status === 'missing' ? 'created' : 'modified',
+        owner: writer.owner,
+      });
       return result;
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
@@ -639,7 +670,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   });
 
   const move = (request: MoveRequest): Promise<DocumentMoveResult> => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
-    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
+    let writer: DocumentWriter | undefined;
     try {
       if (request.from.workspaceId !== request.to.workspaceId) {
         throw new DocumentAuthorityError('Document moves must stay within one workspace', {
@@ -675,6 +706,18 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         byteLength: next.status === 'missing' ? 0 : next.byteLength ?? 0,
       };
       if (next.status !== 'missing' && next.modifiedAt) result.modifiedAt = next.modifiedAt;
+      publishMutation({
+        workspaceId: request.from.workspaceId,
+        resourceId: request.from.resourceId,
+        kind: 'deleted',
+        owner: writer.owner,
+      });
+      publishMutation({
+        workspaceId: request.to.workspaceId,
+        resourceId: request.to.resourceId,
+        kind: 'created',
+        owner: writer.owner,
+      });
       return result;
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
@@ -687,7 +730,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   });
 
   const remove = (request: DeleteRequest): Promise<DocumentDeleteResult> => queues.run(resourceKey(request.resource), async () => {
-    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
+    let writer: DocumentWriter | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-delete' });
@@ -702,6 +745,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       await fsPromises.unlink(resolved.absolutePath);
       await writer.markMutated();
+      publishMutation({
+        workspaceId: request.resource.workspaceId,
+        resourceId: request.resource.resourceId,
+        kind: 'deleted',
+        owner: writer.owner,
+      });
       return { status: 'deleted', resource: request.resource };
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'stale-epoch') {
@@ -802,7 +851,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     purpose: string,
     operation: () => Promise<T>,
   ): Promise<T | StaleEpochResult> => {
-    let writer: { markMutated: () => Promise<void>; close: () => Promise<void> } | undefined;
+    let writer: DocumentWriter | undefined;
     try {
       const workspaceId = request.workspaceId ?? request.token?.workspaceId;
       assertTokenWorkspace(request.token, workspaceId);

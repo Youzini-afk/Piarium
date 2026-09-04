@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDocumentAuthority,
@@ -25,6 +26,33 @@ it('assigns a nested runtime root its own workspace identity', async () => {
     await expect(harness.authority.inspectWorkspace(nested.workspaceId)).resolves.toMatchObject({
       root: await fs.promises.realpath(nestedRoot),
     });
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+it('publishes committed document mutations without letting an observer fail the write', async () => {
+  const events: Array<{ resourceId: string; kind: string; owner: { kind: string } }> = [];
+  const harness = await createDocumentAuthorityHarness({
+    authority: {
+      onMutation: (event) => {
+        events.push(event);
+        throw new Error('observer unavailable');
+      },
+    },
+  });
+  try {
+    const result = await harness.authority.write({
+      resource: harness.resource('observed.ts'),
+      token: harness.token(undefined, { kind: 'web-route', id: 'editor' }),
+      content: 'export const observed = true;\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    });
+    expect(result.status).toBe('written');
+    expect(events).toMatchObject([{ resourceId: 'observed.ts', kind: 'created', owner: { kind: 'web-route' } }]);
   } finally {
     await harness.cleanup();
   }

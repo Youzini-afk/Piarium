@@ -582,6 +582,33 @@ plan 3b、状态矩阵。
 
 状态：已实施
 
+### D-045 · 2026-09-04 · T3（上下文观察与 memory shadow 的生产形状）
+
+类型：实现澄清
+
+决定：(1) Documents authority 在 `write/move/delete` 成功提交后发布结构化 mutation observation，携带规范 workspace/resource、
+created/modified/deleted 与已校验 writer owner；观察回调失败只记 Host 错误，不能反噬已经成功的文件提交。同 workspace 的每个活跃
+session 各写一条 event，保持 session 删除级联与各自增量游标语义。(2) Zone 2 请求增加 `afterEventId`、query、context usage；返回
+`eventCursor`，并把 cursor 写入隐藏的 `piarium-context` custom message。worker 重载从会话历史恢复 cursor，普通重试不重复追加。
+相关 accepted knowledge 按当前 prompt 召回；用户修改后的 LSP error/warning 才作为新诊断进入，agent 自己触发的诊断不复述。
+(3) memory keeper 的模型调度在 pi-host（它握有真实 system/messages/model），块校验与写入在 Host（它拥有知识库）。两者通过
+`memory.blocks.get/apply` 连接。旧 Host runner 的空 sessionId 与陈旧块快照实现删除。(4) `harness.memory.shadowMode` 是 user-only、
+默认 false；开启后使用活动会话模型，UI 明示 tools 前缀不同可能产生全价请求。pi-ai 通用 API 只支持 `toolChoice: auto/none`，
+所以无 `memory_edit` tool call 就视为未更新，不解释自由文本。(5) `compaction.takeoverEnabled` 默认 false；即使已有 memory-agent
+块，shadow 也必须交还 Pi compaction。低置信度 todo 的确认移到 pi-host UI，Host 只接受显式 confirmed 标志并不再用恒真桩。
+
+原因：观察与记忆必须成为真实会话纵切，但在缓存与质量回放之前不能让后台调用静默产生费用或让实验块成为压缩正确性的依赖。
+event cursor 放在耐久会话消息里，比 Host 内存游标能承受 worker 重载；写后 observer 则比 watcher 时序推断 writer 来源准确。
+
+考虑过的替代：(a) Host 自己调用模型——拿不到真实 session context/provider runtime；旧 runner 也已证明 session identity 为空。
+(b) 默认开启并固定主模型——缓存命中尚无证据。(c) keeper block 一出现就接管压缩——把实验输出变成数据正确性依赖。
+(d) 所有 LSP 诊断都进 Zone 2——会重复 agent 刚在工具结果里看到的错误。
+
+影响：protocol memory/Zone 2 方法；Documents observation；knowledge context runtime；pi-host memory/Zone 2/todo 扩展；Harness Settings；
+设计 7.3、8.4，plan T3，状态矩阵。
+
+状态：已实施（核心 shadow 纵切；terminal/Git/面板/事件加速仍在状态矩阵）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -632,3 +659,4 @@ plan 3b、状态矩阵。
 | D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |
 | D-043 | implementation | — | agent-harness.md 9.3、architecture §5.2、plan T1、status 3.4/3.5/3.10/3.11 |
 | D-044 | implementation | — | agent-harness.md 9.1.2、plan 3b、status 3b / 3.4；pi-host / broker / Host scope |
+| D-045 | implementation | — | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |

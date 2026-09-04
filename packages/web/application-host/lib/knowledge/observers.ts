@@ -22,6 +22,7 @@ export interface DocumentWriteEvent {
   kind: "modified" | "created" | "deleted";
   /** Whether a pi-worker (agent) writer was active at write time */
   agentWriterActive: boolean;
+  turnIndex?: number;
 }
 
 export interface TerminalExitEvent {
@@ -31,6 +32,7 @@ export interface TerminalExitEvent {
   exitCode: number;
   /** Whether this came from a harness shell (agent) or user terminal (user) */
   source: "harness" | "user";
+  turnIndex?: number;
 }
 
 export interface DiagnosticEvent {
@@ -39,6 +41,7 @@ export interface DiagnosticEvent {
   path: string;
   count: number;
   worst: "error" | "warning";
+  turnIndex?: number;
 }
 
 export interface GitStatusEvent {
@@ -46,6 +49,7 @@ export interface GitStatusEvent {
   branch?: string;
   changed?: number;
   note?: string;
+  turnIndex?: number;
 }
 
 // ── Source determination ───────────────────────────────────────────
@@ -74,8 +78,10 @@ export function createObservers(deps: ObserverDeps) {
       kind: "edit",
       at: Date.now(),
       sessionId,
+      ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
       text: `${event.kind} ${event.path}`,
       refs: { path: event.path },
+      data: { kind: event.kind, path: event.path },
       source,
     };
     await store.putEvent(input);
@@ -87,8 +93,10 @@ export function createObservers(deps: ObserverDeps) {
       kind: "command",
       at: Date.now(),
       sessionId,
+      ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
       text: `exit ${event.exitCode} · ${event.command}`,
       ...(event.sessionId ? { refs: { handle: event.sessionId } } : {}),
+      data: { command: event.command, exitCode: event.exitCode },
       source,
     };
     await store.putEvent(input);
@@ -99,8 +107,10 @@ export function createObservers(deps: ObserverDeps) {
       kind: "diagnostic",
       at: Date.now(),
       sessionId,
+      ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
       text: `${event.path}: ${event.count} ${event.worst}${event.count > 1 ? "s" : ""}`,
       refs: { path: event.path },
+      data: { count: event.count, path: event.path, worst: event.worst },
       source: "external",
     };
     await store.putEvent(input);
@@ -112,10 +122,17 @@ export function createObservers(deps: ObserverDeps) {
     if (event.changed !== undefined) parts.push(`${event.changed} files changed`);
     if (event.note) parts.push(event.note);
     const input: EventInput = {
-      kind: "edit",
+      kind: "source",
       at: Date.now(),
       sessionId,
+      ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
       text: `git: ${parts.join(", ")}`,
+      data: {
+        type: "git",
+        ...(event.branch === undefined ? {} : { branch: event.branch }),
+        ...(event.changed === undefined ? {} : { changed: event.changed }),
+        ...(event.note === undefined ? {} : { note: event.note }),
+      },
       source: "external",
     };
     await store.putEvent(input);

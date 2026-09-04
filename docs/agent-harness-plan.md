@@ -234,17 +234,17 @@ OutputRef/UTF-8、path authority/lease 与三段 bridge E2E；本轮 protocol 59
 
 T1 **真实 child session 的线程纵切（核心已于 2026-09-04 交付）**（一个 Thread、一个 Pi Run、一个 worktree；dispatch / send /
 wait / cancel / report / merge；worker 与 host 崩溃恢复；活性与等待传感器；Fleet；最小线程侧栏；先不做嵌套与自动 review）→
-T2 **权限纵切（2026-09-04 已交付）**（Host capability / scope enforcement + pi-host fallback + 插件单一提示所有权；保留成熟插件）→ T3 **上下文 shadow mode**（观察者接事件源、Zone 2 真材料、
-记忆 agent 维护块但不接管、TranscriptRef 全接通）→ T4 **最小回放集**（设计 8.6）→ 由回放数据决定压缩接管、记忆 agent
+T2 **权限纵切（2026-09-04 已交付）**（Host capability / scope enforcement + pi-host fallback + 插件单一提示所有权；保留成熟插件）→ T3 **上下文 shadow mode（核心纵切已于 2026-09-04 交付）**（Documents / user-change LSP → Zone 2 真材料；相关 knowledge 与 blocks；用户显式 memory shadow，不接管压缩）→ T4 **最小回放集**（设计 8.6）→ 由回放数据决定压缩接管、记忆 agent
 模型、TTL 唤醒实验。阶段 4（默认 runtime）并行；阶段 5、6 暂停到 T1 `proven`。
 
 ## 阶段 2：上下文层
 
 设计：agent-harness.md 第 7、8 节。依赖 1.1、1.4、1.8。
 
-**状态（2026-09-04）**：2.1 / 2.5 / 2.10 `wired`；2.2 / 2.6 扩展 `wired` 但材料为空、接管门禁关闭（等价 shadow）；
-2.3 / 2.4 / 2.7 / 2.8 / 2.9 `implemented`。本阶段剩余工作以 **T3 上下文 shadow mode** 纵切交付（P0 节末），不再按单项
-推进：观察者接事件源 → Zone 2 出真材料 → 记忆 agent 有 model 访问并维护块（**不接管压缩**）→ 计划面板与确认通道。
+**状态（2026-09-04）**：T3 核心 shadow 纵切已交付：Documents 与用户修改后的 LSP 诊断写入事件库，Zone 2 用耐久会话消息中的
+event cursor 增量投影；blocks、context usage 与 prompt-relevant accepted knowledge 已接；memory shadow 由用户显式开启、使用
+活动会话模型、Host 验证块操作，压缩接管默认关闭；低置信度 todo 在 pi-host 真 UI 同会话只问一次。仍缺 user terminal / Git
+观察、session block 面板、知识建议审阅 UI 与 memory 事件加速。这些是 T3 后续产品面，不阻塞先建立 T4 回放基线。
 压缩接管（2.6 第 2 档）与记忆 agent 的模型选择等 T4 回放数据（设计 8.6）。下列参考形状对未完成部分仍有效；已交付部分
 的形状以代码与 `lib/knowledge/DOCUMENTATION.md` 为准。已被决策日志修正的点：2.1 的 TQL 与全零向量（D-019 / D-020，
 设计 7.5）；2.4 的"前缀逐字节复用"是未验证假设（D-037，设计 8.4.1）；2.6 的保留范围用 Pi `preparation` 的切点、接管

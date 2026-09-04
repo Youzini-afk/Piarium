@@ -9,7 +9,6 @@ import {
   evaluateEventGate,
   validateOp,
   applyOps,
-  createMemoryAgentRunner,
   DEFAULT_MEMORY_AGENT_SETTINGS,
   type MemoryAgentState,
   type TurnEndMeta,
@@ -267,41 +266,24 @@ describe("applyOps", () => {
     );
     expect(result.rejected).toBeGreaterThanOrEqual(1);
   });
-});
 
-describe("createMemoryAgentRunner", () => {
-  beforeEach(async () => {
-    cleanup();
-    store = await openStore();
-  });
-  afterEach(async () => {
-    cleanup();
-  });
-
-  it("interval adaptation: no changes → interval grows", () => {
-    const runner = createMemoryAgentRunner({
-      store,
-      requestPrefix: async () => ({ system: "", tools: [], messages: [] }),
-      callModel: async () => ({ toolCalls: [] }),
-      now: () => 1_000_000,
-      settings,
-    });
-    const state1 = runner.getState();
-    expect(state1.interval).toBe(settings.interval);
-    // After run with no changes, interval should grow
-    // (Tested via state, but run is async — we test the logic separately)
+  it("applies sequential operations against the result of the previous operation", async () => {
+    const result = await applyOps([
+      { op: "create", block: "progress", content: "started" },
+      { op: "patch", block: "progress", find: "started", replace: "finished" },
+    ], store, "s1", 2, settings);
+    expect(result).toMatchObject({ applied: 2, rejected: 0, changedBlocks: true });
+    await expect(store.getBlocks("s1")).resolves.toMatchObject([
+      { label: "progress", content: "finished", updatedBy: "memory-agent" },
+    ]);
   });
 
-  it("exposes state for inspection", () => {
-    const runner = createMemoryAgentRunner({
-      store,
-      requestPrefix: async () => ({ system: "", tools: [], messages: [] }),
-      callModel: async () => ({ toolCalls: [] }),
-      now: () => 1_000_000,
-      settings,
-    });
-    const state = runner.getState();
-    expect(state.hasRun).toBe(false);
-    expect(state.inFlight).toBe(false);
+  it("rejects a stale patch instead of reporting a successful no-op", async () => {
+    await store.upsertBlock({ sessionId: "s1", label: "progress", content: "current", updatedBy: "agent" });
+    const result = await applyOps([
+      { op: "patch", block: "progress", find: "missing", replace: "new" },
+    ], store, "s1", 2, settings);
+    expect(result).toMatchObject({ applied: 0, rejected: 1, changedBlocks: false });
+    expect(result.errors[0]).toMatch(/not found/);
   });
 });

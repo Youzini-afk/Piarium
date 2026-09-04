@@ -611,10 +611,10 @@ conformance remains in the package tests and architecture checks.
 > [agent-harness-status.md](agent-harness-status.md) (four levels: implemented / wired /
 > proven / default-on, with evidence links). The entries below are the historical
 > delivery narrative and are no longer updated; where they disagree with the status
-> matrix, the matrix wins. In particular: most Phase 2/3 modules are `implemented`
-> (dormant), no real child session is wired, and compaction takeover is gated off
-> until memory-keeper blocks exist. Next work is the P0 integrity slice in
-> [agent-harness-plan.md](agent-harness-plan.md), not further Phase 4–6 modules.
+> matrix, the matrix wins. P0 integrity, the T1 real-child thread slice, T2 permissions,
+> and the core T3 context-shadow path have since shipped; compaction takeover remains
+> explicitly default-off pending replay evidence. Follow
+> [agent-harness-plan.md](agent-harness-plan.md) for the current order.
 
 ### Phase 2: Context layer (modules + wiring complete 2026-09-03)
 

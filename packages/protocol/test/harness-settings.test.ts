@@ -76,6 +76,17 @@ describe("harness settings", () => {
     assert.deepEqual(merged.models.check, { providerId: "trusted", modelId: "user-model" });
   });
 
+  it("does not let a workspace enable background memory model calls", () => {
+    assert.equal(mergeHarnessSettings(
+      { memory: { shadowMode: false } },
+      { memory: { shadowMode: true } },
+    ).memory.shadowMode, false);
+    assert.equal(mergeHarnessSettings(
+      { memory: { shadowMode: true } },
+      { memory: { shadowMode: false } },
+    ).memory.shadowMode, true);
+  });
+
   it("only accepts stricter workspace permission modes and ask/deny rules", () => {
     const tightened = mergeHarnessSettings(
       { permissions: { mode: "accept-edits", rules: [{ tool: "bash", decision: "allow" }] } },

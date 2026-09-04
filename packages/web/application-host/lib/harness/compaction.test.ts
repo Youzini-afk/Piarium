@@ -11,6 +11,8 @@ import {
   type CompactionFacts,
 } from "./compaction.js";
 
+const TAKEOVER_SETTINGS = { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true };
+
 // Scratch stores live in the OS temp dir; see recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "piarium-test-compaction");
 function cleanup() {
@@ -140,7 +142,7 @@ describe("handleBeforeCompact", () => {
 
     const result = await handleBeforeCompact("s1", {
       store,
-      settings: DEFAULT_COMPACTION_SETTINGS,
+      settings: TAKEOVER_SETTINGS,
       getFacts: async () => ({
         touchedFiles: ["a.ts"],
         unresolvedDiagnostics: [],
@@ -161,7 +163,7 @@ describe("handleBeforeCompact", () => {
     });
     const result = await handleBeforeCompact("s1", {
       store,
-      settings: DEFAULT_COMPACTION_SETTINGS,
+      settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
     }, { firstKeptEntryId: "entry", tokensBefore: 1000 }, { staleNote: true });
 
@@ -172,7 +174,7 @@ describe("handleBeforeCompact", () => {
     try {
       await handleBeforeCompact("s1", {
         store,
-        settings: DEFAULT_COMPACTION_SETTINGS,
+        settings: TAKEOVER_SETTINGS,
         getFacts: async () => emptyFacts,
       }, { firstKeptEntryId: "entry", tokensBefore: 1000 });
       expect.fail("should have thrown");
@@ -191,7 +193,7 @@ describe("handleBeforeCompact", () => {
     try {
       await handleBeforeCompact("s1", {
         store,
-        settings: DEFAULT_COMPACTION_SETTINGS,
+        settings: TAKEOVER_SETTINGS,
         getFacts: async () => ({
           touchedFiles: ["a.ts"],
           unresolvedDiagnostics: [],
@@ -202,6 +204,20 @@ describe("handleBeforeCompact", () => {
     } catch (e) {
       expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
     }
+  });
+
+  it("does not treat a plan status update by the memory keeper as a conversation summary", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "plan", content: "- [x] Task",
+      updatedBy: "memory-agent",
+    });
+    await expect(handleBeforeCompact("s1", {
+      store,
+      settings: TAKEOVER_SETTINGS,
+      getFacts: async () => emptyFacts,
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000 })).rejects.toMatchObject({
+      harnessCode: "unavailable",
+    });
   });
 
   it("takes over once the memory keeper has written a block", async () => {
@@ -215,12 +231,26 @@ describe("handleBeforeCompact", () => {
     });
     const result = await handleBeforeCompact("s1", {
       store,
-      settings: DEFAULT_COMPACTION_SETTINGS,
+      settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
     }, { firstKeptEntryId: "entry-8", tokensBefore: 1000 });
 
     expect(result.summary).toContain("Chose PTY over spawn");
     expect(result.firstKeptEntryId).toBe("entry-8");
+  });
+
+  it("keeps Pi compaction authoritative while the memory keeper is in shadow mode", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "Observed only",
+      updatedBy: "memory-agent",
+    });
+    await expect(handleBeforeCompact("s1", {
+      store,
+      settings: DEFAULT_COMPACTION_SETTINGS,
+      getFacts: async () => emptyFacts,
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000 })).rejects.toMatchObject({
+      harnessCode: "unavailable",
+    });
   });
 });
 

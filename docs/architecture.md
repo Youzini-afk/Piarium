@@ -237,7 +237,7 @@ server backend and current command set are not yet sufficient as the sole produc
 Direct workers are also where Piarium's own agent harness lives. The session worker overrides Pi's
 built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
 recovery journal already uses, and mounts in-process extension hooks for tail-appended turn context,
-post-tool feedback, and Piarium-owned compaction. The heavy services behind those tools — shell
+post-tool feedback, an opt-in memory shadow, and explicitly gated compaction takeover. The heavy services behind those tools — shell
 supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
 handing the worker host credentials. The harness contract, its cache rules, and the profile model
@@ -433,7 +433,7 @@ The `HarnessServiceMap` defines the following method groups:
 - **Filesystem**: `fs.lock`
 - **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`
 - **Web**: `web.fetch`, `web.read`, `web.search` (registered when available)
-- **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`
+- **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`, `memory.blocks.get`, `memory.blocks.apply`
 - **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
 
 Each has typed params and result in `@piarium/protocol`. The host's

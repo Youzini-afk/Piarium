@@ -43,6 +43,7 @@ export interface CompactionResult {
 }
 
 export interface CompactionSettings {
+  takeoverEnabled?: boolean;
   keepTurns: number; // default 8
   reinjectFileLimit: number; // default 5
   reinjectFileTokens: number; // default 5000
@@ -51,6 +52,7 @@ export interface CompactionSettings {
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
+  takeoverEnabled: false,
   keepTurns: 8,
   reinjectFileLimit: 5,
   reinjectFileTokens: 5000,
@@ -116,6 +118,13 @@ export async function handleBeforeCompact(
   const { store, settings, getFacts } = deps;
   const { firstKeptEntryId, tokensBefore } = preparation;
 
+  if (settings.takeoverEnabled !== true) {
+    throw new HarnessServiceError(
+      "unavailable",
+      "compaction.before: memory shadow mode does not replace Pi compaction",
+    );
+  }
+
   const blocks = await store.getBlocks(sessionId);
   const planBlock = blocks.find((b) => b.label === "plan");
   const plan = planBlock?.content ?? "";
@@ -126,7 +135,7 @@ export async function handleBeforeCompact(
   // do that: a `plan` block written by the todo tool is a checklist, not a
   // summary, and swapping the history for it loses the work. Until the
   // memory agent is wired, this leaves compaction to Pi (§8.4.1).
-  const hasKeeperBlocks = blocks.some((b) => b.updatedBy === "memory-agent");
+  const hasKeeperBlocks = blocks.some((b) => b.updatedBy === "memory-agent" && b.label !== "plan");
   if (!hasKeeperBlocks) {
     throw new HarnessServiceError(
       "unavailable",

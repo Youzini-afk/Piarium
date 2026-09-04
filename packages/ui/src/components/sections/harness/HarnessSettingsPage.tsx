@@ -41,6 +41,7 @@ interface HarnessSettings {
   output?: { visibleBytes?: number };
   bash?: { waitMs?: number };
   models?: Record<string, { providerId: string; modelId: string }>;
+  memory?: { shadowMode?: boolean };
   permissions?: { mode?: PermissionMode; rules?: PermissionRule[] };
 }
 
@@ -91,6 +92,7 @@ export const HarnessSettingsPage: React.FC = () => {
   const bashWaitMs = harness.bash?.waitMs ?? DEFAULT_HARNESS_SETTINGS.bash.waitMs;
   const permissionMode = harness.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? 'normal';
   const smartAvailable = Boolean(harness.models?.permissionJudge);
+  const memoryShadowMode = harness.memory?.shadowMode ?? DEFAULT_HARNESS_SETTINGS.memory.shadowMode;
 
   React.useEffect(() => {
     setRulesDraft(JSON.stringify(harness.permissions?.rules ?? [], null, 2));
@@ -161,6 +163,13 @@ export const HarnessSettingsPage: React.FC = () => {
       setRulesIssue(ruleError instanceof Error ? ruleError.message : String(ruleError));
     }
   }, [harness, rulesDraft, saveHarness, t]);
+
+  const handleMemoryShadowChange = React.useCallback((enabled: boolean) => {
+    void saveHarness({
+      ...harness,
+      memory: { ...harness.memory, shadowMode: enabled },
+    });
+  }, [harness, saveHarness]);
 
   if (isLoading) {
     return (
@@ -253,6 +262,18 @@ export const HarnessSettingsPage: React.FC = () => {
             </div>
           </div>
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.memory')}
+        description={t('settings.page.harness.section.memory.description')}
+      >
+        <SettingsCheckboxRow
+          checked={memoryShadowMode}
+          onChange={handleMemoryShadowChange}
+          label={t('settings.page.harness.memory.shadow.label')}
+          description={t('settings.page.harness.memory.shadow.description')}
+        />
       </SettingsSection>
 
       {/* Shell selection */}

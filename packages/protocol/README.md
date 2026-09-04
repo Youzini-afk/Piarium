@@ -30,11 +30,13 @@ Piarium protocol types, schemas, and event/method definitions.
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
 | `web.read` | `{ url }` | `WebReadResult` | Read a URL with reader model |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
-| `zone2.assemble` | `{ sinceTurn }` | `{ content }` | Assemble Zone 2 context |
-| `compaction.before` | `{ sessionId, firstKeptEntryId, tokensBefore }` | `CompactionBeforeResult` | Pre-compaction hook |
-| `compaction.after` | `{ sessionId, summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
-| `todo.upsert` | `{ items, confidence? }` | `{ text, confirmed?, askedConfirmation }` | Upsert todo items |
+| `zone2.assemble` | `{ sinceTurn, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble cursor-based Zone 2 context |
+| `compaction.before` | `{ firstKeptEntryId, tokensBefore }` | `CompactionBeforeResult` | Pre-compaction hook |
+| `compaction.after` | `{ summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
+| `todo.upsert` | `{ items, confidence?, confirmed? }` | `{ text, confirmed?, askedConfirmation }` | Upsert todo items after pi-host confirmation when needed |
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
+| `memory.blocks.get` | `{}` | `{ blocks[] }` | Read current session blocks for the shadow keeper |
+| `memory.blocks.apply` | `{ cursorTurn, ops[] }` | `MemoryApplyResult` | Validate and apply shadow keeper block operations |
 | `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
@@ -99,6 +101,7 @@ interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
+  memory: { shadowMode: boolean };           // user-only, default false
   web?: { maxFetchesPerTurn?: number; render?: boolean };
   permissions?: { mode?: PermissionMode };   // default "normal"
 }
@@ -118,4 +121,5 @@ frozen role model and active tool list in `session.create/open`.
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
+- `memory-agent.ts` — shared shadow-memory settings, scheduler state/gate, operation DTOs, and strict model-output parser
 - `types.ts` — `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)

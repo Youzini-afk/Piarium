@@ -43,7 +43,12 @@ export interface EventInput {
   turnIndex?: number;
   text: string;
   refs?: EventRefs;
+  data?: Record<string, unknown>;
   source: EventSource;
+}
+
+export interface StoredEvent extends EventInput {
+  id: NodeId;
 }
 
 export interface SessionInput {
@@ -121,6 +126,7 @@ export interface EmbeddingProvider {
 export interface KnowledgeStore {
   readonly dim: number;
   putEvent(e: EventInput): Promise<NodeId>;
+  listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
   putSession(s: SessionInput): Promise<NodeId>;
   getBlocks(sessionId: string): Promise<Block[]>;
   upsertBlock(b: BlockInput): Promise<Block>;
@@ -212,6 +218,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ...(e.turnIndex !== undefined ? { turnIndex: e.turnIndex } : {}),
           text: e.text,
           ...(e.refs ? { refs: e.refs } : {}),
+          ...(e.data ? { data: e.data } : {}),
           source: e.source,
         };
         const id = db.insert(placeholderVec, payload);
@@ -219,6 +226,26 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.flush();
         return id;
       });
+    },
+
+    async listEvents(filter): Promise<StoredEvent[]> {
+      const nodes = scanNodes((payload) => {
+        if (payload["type"] !== "event" || payload["sessionId"] !== filter.sessionId) return false;
+        const turnIndex = payload["turnIndex"];
+        return filter.minTurnIndex === undefined
+          || (typeof turnIndex === "number" && turnIndex >= filter.minTurnIndex);
+      }).filter(({ id }) => filter.afterId === undefined || id > filter.afterId);
+      return nodes.map(({ id, payload }) => ({
+        id,
+        kind: payload["kind"] as EventKind,
+        at: payload["at"] as number,
+        sessionId: payload["sessionId"] as string,
+        ...(typeof payload["turnIndex"] === "number" ? { turnIndex: payload["turnIndex"] as number } : {}),
+        text: payload["text"] as string,
+        ...(payload["refs"] && typeof payload["refs"] === "object" ? { refs: payload["refs"] as EventRefs } : {}),
+        ...(payload["data"] && typeof payload["data"] === "object" ? { data: payload["data"] as Record<string, unknown> } : {}),
+        source: payload["source"] as EventSource,
+      })).sort((left, right) => left.id - right.id);
     },
 
     async putSession(s: SessionInput): Promise<NodeId> {

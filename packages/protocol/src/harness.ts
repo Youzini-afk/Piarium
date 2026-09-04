@@ -24,6 +24,7 @@ import type {
   ThreadDispatchParams,
   ThreadDispatchResult,
 } from "./harness-threads.js";
+import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
 
 export interface OutputSlice {
   text: string;
@@ -157,15 +158,18 @@ export interface SearchResultItem {
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
+  afterEventId?: number;
+  contextUsage?: { used: number; window: number };
+  query?: string;
   sinceTurn: number;
 }
 
 export interface Zone2AssembleResult {
   content: string | null;
+  eventCursor: number;
 }
 
 export interface CompactionBeforeParams {
-  sessionId: string;
   firstKeptEntryId: string;
   tokensBefore: number;
 }
@@ -177,7 +181,6 @@ export interface CompactionBeforeResult {
 }
 
 export interface CompactionAfterParams {
-  sessionId: string;
   summary: string;
   firstKeptEntryId: string;
   tokensBefore: number;
@@ -188,9 +191,9 @@ export interface CompactionAfterResult {
 }
 
 export interface TodoUpsertParams {
-  sessionId: string;
   items: Array<{ text: string; status: "open" | "done" | "blocked" }>;
   confidence?: number;
+  confirmed?: boolean;
 }
 
 export interface TodoUpsertResult {
@@ -198,6 +201,8 @@ export interface TodoUpsertResult {
   confirmed?: boolean;
   askedConfirmation: boolean;
 }
+
+export const DEFAULT_TODO_CONFIRM_BELOW = 0.6;
 
 export interface RecallSearchParams {
   query: string;
@@ -235,6 +240,8 @@ export interface HarnessServiceMap {
   "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
+  "memory.blocks.get": { params: Record<string, never>; result: { blocks: MemoryBlockSnapshot[] } };
+  "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[] }; result: MemoryApplyResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.list": { params: ThreadListParams; result: ThreadListResult };
@@ -281,6 +288,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "compaction.after": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
+  "memory.blocks.get": "context.session",
+  "memory.blocks.apply": "context.session",
   "thread.dispatch": "control.thread",
   "thread.list": "control.thread",
   "thread.wait": "control.thread",
@@ -326,6 +335,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "compaction.after",
   "todo.upsert",
   "recall.search",
+  "memory.blocks.get",
+  "memory.blocks.apply",
   "thread.dispatch",
   "thread.list",
   "thread.wait",

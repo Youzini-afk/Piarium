@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { TodoUpsertResult } from "@piarium/protocol";
+import { DEFAULT_TODO_CONFIRM_BELOW, type TodoUpsertResult } from "@piarium/protocol";
 
 const TodoParams = Type.Object({
   items: Type.Array(
@@ -17,7 +17,8 @@ const TodoParams = Type.Object({
   confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 });
 
-export function createTodoTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
+  let sessionConfirmed = false;
   return defineTool({
     name: "todo",
     label: "Todo",
@@ -28,12 +29,25 @@ export function createTodoTool(bridge: HostServicesBridge, sessionId: string): T
     ],
     parameters: TodoParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       try {
+        if (!sessionConfirmed && params.confidence !== undefined && params.confidence < DEFAULT_TODO_CONFIRM_BELOW) {
+          const choice = await ctx.ui.select(
+            `The proposed plan has low confidence (${params.confidence}). Use it?`,
+            ["Use plan", "Cancel"],
+          );
+          if (choice !== "Use plan") {
+            return {
+              content: [{ type: "text", text: "plan update cancelled by user" }],
+              details: { askedConfirmation: true, confirmed: false },
+            };
+          }
+          sessionConfirmed = true;
+        }
         const result = await bridge.request<"todo.upsert">("todo.upsert", {
-          sessionId,
           items: params.items,
           ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
+          ...(sessionConfirmed ? { confirmed: true } : {}),
         });
         const typed = result as TodoUpsertResult;
         return {

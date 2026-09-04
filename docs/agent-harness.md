@@ -61,7 +61,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板替代 Curator server、凭据进钥匙串、结果进知识库、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索 provider 三层（模型 provider 自带 → 搜索 API → 明确不可用）；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
-| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；记忆 agent 固定主模型（缓存） |
+| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；memory shadow 是明确的例外：用户单独开启后使用该会话活动模型，UI 明示可能是全价请求，默认关闭（D-045） |
 | 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | 后续阶段；macOS Seatbelt / Linux bubblewrap+seccomp 可做，Windows 不承诺；沙箱内 shell 自动放行，`edit` / `write` 仍走权限（它们在 agent 进程内，沙箱管不到） |
@@ -454,6 +454,7 @@ harness"页有独立开关，关掉后的行为明确，不留半开状态：
   | 字段 | 所有权与合并 |
   | --- | --- |
   | 模型槽位 `models.*`、provider 凭据 | user-only |
+  | `memory.shadowMode` | user-only——仓库不能替用户开启后台模型调用与费用 |
   | `knowledge.autoAcceptSuggestions.user` | user-only——一个仓库的配置绝不能替用户打开"自动写入用户级长期记忆" |
   | `knowledge.autoAcceptSuggestions.workspace`、`knowledge.eventRetentionDays` | 工作区可设 |
   | `tools.*`、`shell`、检索策略、`dispatch.concurrency`、`output.*`、UI 偏好 | user 默认 + 工作区覆盖 |
@@ -589,8 +590,10 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
 
 ### 7.3 写入者
 
-- Document Registry 写事件、终端 exit 事件、LSP 诊断与符号变更、Git status 变化（host 侧观察者）。`kind: edit` 的
-  event 引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
+- Document Registry 在成功提交 `write/move/delete` 后发布带已校验 writer owner 的结构化事件；观察失败不反噬文件提交。
+  同 workspace 的活动会话各保留自己的 event，agent writer 的事件留作轨迹但不进入 Zone 2。LSP 诊断只有紧跟用户编辑的
+  error/warning 才作为“新诊断”投影，避免复述 agent 已在工具结果中见过的诊断。user terminal 与 Git status 的生产订阅仍待接。
+  `kind: edit` 的 event 最终引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
 - 记忆 agent 维护的 `block`（第 8.4.1 节），每次改动记录来源与游标；主 agent 的 `plan` / `todo` 亦为 `block`。回合
   结束时块快照挂在该回合的 `event` 上。`session_before_compact` 只读块与库，不调模型。
 - `knowledge` 建议（第 7.2.2 节）：在用户纠正、"以后都这样"、用户"记住这个"、回合结束等时刻由 harness 生成，
@@ -740,16 +743,18 @@ checkpoint。天然结构化，host 直接写，零模型调用。
 计划工具结果（尾部）、Zone 2 中一份受预算约束的复述（Manus 的 todo 复述；主 agent 不用自己写就能在每步尾部看到
 新鲜状态——这是"注意力"上的收益；profile 可关）、压缩替换块。
 
-**记忆 agent 的上下文。** fork 主对话（系统提示、工具、历史至游标），尾部追加当前块、游标（上次处理到的步）与编辑
-指令。它看到完整轨迹而非摘要（Walden Yan："共享完整轨迹"），输出是**块编辑操作**（insert / replace / rethink），由 host
-应用并记账，不是自由文本。它没有文件与 shell 工具，不写持久知识（那走第 7.2.2 节的建议流程）。
+**记忆 agent 的上下文。** 当前 shadow 实现从 Pi 的 `context` hook 捕获本步真实 provider-neutral messages，在 `turn_end`
+补上本次 assistant 与 tool results，复用活动会话的 system 与 model，只暴露 `memory_edit`，尾部追加当前块、游标与编辑指令。
+输出必须是结构化块操作，由 Host 逐项验证、按本次前一项的结果顺序应用并记账；自由文本、陈旧 patch 与越过预算的操作都不写。
+它没有文件与 shell 工具，不写持久知识（那走第 7.2.2 节的建议流程），`memory_edit` 也不进入主会话历史。
 
 **成本模型是未验证假设（D-037）。** 原设想"前缀逐字节相同、整段缓存命中、因此固定用主模型最便宜"有一个洞：记忆
 agent 必须带 `memory_edit` 工具才能被 `tool_choice` 强制，而主 agent 按本节规则**没有**这个工具，两者的 tools 块必然
 不同；Anthropic 的缓存层级是 tools → system → messages，tools 变则整段前缀失效，"0.1× 缓存读"不成立；OpenAI 的自动前缀
 缓存对 tools 的序列化位置不透明。因此：记忆 agent 的模型与是否复用前缀，**按 provider 实测 system / tools / messages
-分段命中后决定**，不从"相同前缀"概念推断；实测前记忆 agent 只以 shadow mode 运行（维护块、进 Zone 2 与面板，不接管
-压缩）。缓存是 provider adapter 的优化能力，不是正确性依赖。
+分段命中后决定**，不从"相同前缀"概念推断；实测前只提供用户显式开启的 shadow mode（维护块、进 Zone 2，不接管
+压缩），并明确提示额外请求可能全价。pi-ai 的 provider-neutral `toolChoice` 目前只能保证 `auto/none`，所以 prompt 要求调用
+`memory_edit`；未返回该调用就按“本轮未更新”处理，不从自由文本猜操作。缓存是 provider adapter 的优化能力，不是正确性依赖。
 
 **触发。** 频率过高浪费，过低模糊，所以分层：
 
@@ -778,11 +783,12 @@ Piarium 没有这样的模型，替代品是**分工**——记忆 agent 持续�
 1. **清理工具结果（每步，免费）。** 旧 tool_result 正文替换为句柄引用，正文已在 host。有 provider 原生上下文编辑
    （Anthropic `cache_edits` 类）时服务端删除、前缀缓存保留；无则在下一次本地压缩时一并处理。回合内的上下文增长
    绝大部分来自工具输出，这一档就能把回合延长很多。
-2. **替换（零模型调用，回合内可用）。** 阈值到达时，`session_before_compact` 返回 `compaction`：Zone 0 不动，切除
+2. **替换（零模型调用，回合内可用，但默认关闭）。** 阈值到达时，`session_before_compact` 返回 `compaction`：Zone 0 不动，切除
    范围替换为**当前 memory blocks + 主 agent 的计划 + host 事实记录**，保留范围用 Pi `preparation` 给出的安全切点
    （tool_use / tool_result 配对由 Pi 保证），不自行按步数计算。**接管的前提是存在记忆 agent 维护的块**（`updatedBy:
    memory-agent`）：只有 `todo` 写的 `plan` 或只有 host 事实时不接管，交还 Pi 默认摘要——一张清单不是对话的替代
-   （D-028）。替换块是记忆 agent 持续维护的状态与 host 的事实，不是压缩时刻回忆的散文，所以压多少次都是一份当前
+   （D-028）。存在 keeper block 仍不足以开启接管；`takeoverEnabled` 默认 false，shadow 阶段始终交还 Pi，只有回放通过后才
+   改默认。替换块是记忆 agent 持续维护的状态与 host 的事实，不是压缩时刻回忆的散文，所以压多少次都是一份当前
    图景，没有"摘要的摘要"——Codex 团队观察到的随压缩次数下降的准确率来自摘要堆叠，这里结构上不存在。但这个结论
    有前提：记忆 agent 第一次压缩后看到的历史已是压缩后的历史，"不叠加损失"要求原始 trace 耐久可读（`TranscriptRef`，
    第 5.1 节），并且要在回放集上证明（第 8.6 节），不能从结构推定。块最多落后一个门控间隔（约 5K token），那部分落在
@@ -837,8 +843,10 @@ sidekick）只在压缩时刻进行：缓存按模型隔离，中途切换等于
 | `models.check` | `check` 角色 | 未配置 | 角色不注册 |
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
 | `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
+| `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
 
-记忆 agent 不走槽位，固定使用主模型：fork 前缀全部缓存命中，比无缓存的便宜模型更便宜。
+记忆 agent 不走槽位。shadow 由用户单独开启后使用该会话活动模型，以避免跨 provider 回放不兼容；这**不代表缓存必然命中**，
+因为它的 tools 块与主请求不同。是否改为独立槽位、继续使用活动模型或默认开启，等 provider 缓存实测与 T4 回放决定。
 
 Settings 提供**预设**一键填充多个槽位（如 Anthropic 预设：explore / retrievalAgent / quickImplement / check / reader /
 suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只是填表，每个槽位随时可单独改。规则：

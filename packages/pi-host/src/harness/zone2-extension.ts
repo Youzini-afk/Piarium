@@ -18,14 +18,14 @@ import type { Zone2AssembleResult } from "@piarium/protocol";
  */
 export interface Zone2ExtensionOptions {
   bridge: HostServicesBridge;
-  sessionId: string;
 }
 
 export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionFactory {
-  const { bridge, sessionId: _sessionId } = options;
+  const { bridge } = options;
+  let eventCursor: number | undefined;
 
   return (pi) => {
-    pi.on("before_agent_start", async (_event, ctx) => {
+    pi.on("before_agent_start", async (event, ctx) => {
       // Determine the turn index for sinceTurn — use the current turn count
       // from the session manager. The host uses this to filter events
       // that occurred since the last turn.
@@ -33,12 +33,30 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
         (e: { type: string; message?: { role?: string } }) =>
           e.type === "message" && e.message?.role === "user",
       ).length;
+      if (eventCursor === undefined) {
+        for (const entry of [...ctx.sessionManager.getBranch()].reverse()) {
+          if (entry.type !== "custom_message" || entry.customType !== "piarium-context" || typeof entry.content !== "string") continue;
+          const matched = entry.content.match(/\bevent-cursor="(\d+)"/);
+          if (matched) {
+            eventCursor = Number(matched[1]);
+            break;
+          }
+        }
+      }
+      const usage = ctx.getContextUsage();
 
       try {
         const result = await bridge.request<"zone2.assemble">("zone2.assemble", {
           sinceTurn: Math.max(0, turnIndex - 1),
+          ...(event.prompt.trim() ? { query: event.prompt } : {}),
+          ...(eventCursor === undefined ? {} : { afterEventId: eventCursor }),
+          ...(usage?.tokens === null || usage?.tokens === undefined
+            ? {}
+            : { contextUsage: { used: usage.tokens, window: usage.contextWindow } }),
         }, { timeoutMs: 1_000 });
-        const content = (result as Zone2AssembleResult).content;
+        const projected = result as Zone2AssembleResult;
+        eventCursor = projected.eventCursor;
+        const content = projected.content;
         if (!content) return undefined;
 
         return {

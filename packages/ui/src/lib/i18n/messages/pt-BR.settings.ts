@@ -3688,4 +3688,8 @@
   'settings.page.harness.permissions.rules.arrayError': 'As regras devem ser uma matriz JSON.',
   'settings.page.harness.permissions.coexistence': 'Quando pi-permission-system está ativo, ele controla sozinho as permissões; estas opções servem de fallback quando o plugin está indisponível.',
   'settings.page.harness.permissions.rules.save': 'Salvar regras',
+  'settings.page.harness.section.memory': 'Memória',
+  'settings.page.harness.section.memory.description': 'Manutenção experimental em segundo plano do estado de sessões longas.',
+  'settings.page.harness.memory.shadow.label': 'Ativar memória em modo sombra',
+  'settings.page.harness.memory.shadow.description': 'Usa o modelo ativo quando o contexto cresce para manter blocos concisos. O Pi continua responsável pela compactação. Isso pode adicionar solicitações de modelo com custo integral.',
 } as const;

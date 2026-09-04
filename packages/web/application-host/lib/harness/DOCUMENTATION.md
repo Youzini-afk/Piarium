@@ -18,6 +18,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
+                           ├── memory.blocks.* → KnowledgeStore block validator
                            └── thread.*     → ThreadRegistry + ThreadRuntime + Git worktree
 ```
 
@@ -86,6 +87,16 @@ formatting. It intersects an explicit request path with the child scope before
 launching ripgrep, passes those canonical workspace-contained roots to the
 search process, and validates returned resource IDs again. Returns
 `SearchContentResult` with files, hits, and totals.
+
+### Knowledge context runtime (`../knowledge/context-runtime.ts`)
+
+Fans committed Documents mutations out to the active sessions in that
+workspace, keeps agent-authored changes out of Zone 2, correlates LSP
+diagnostics only with pending user edits, and projects event-cursor deltas,
+blocks, context usage, and prompt-relevant accepted knowledge. The cursor is
+also embedded in the durable hidden Pi message so a worker reload can resume.
+Model-produced memory block operations return through `memory.blocks.apply` and
+are validated and applied in order here; model scheduling remains in pi-host.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

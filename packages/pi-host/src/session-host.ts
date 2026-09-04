@@ -20,7 +20,7 @@ import {
   type SessionTreeNode as NativeSessionTreeNode,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type Api, type Context, type Model } from "@earendil-works/pi-ai";
 import {
   PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
   PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
@@ -142,9 +142,10 @@ import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
+import { createMemoryAgentExtension } from "./harness/memory-agent-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mergeHarnessSettings, resolveRoles, type HarnessSettings, type ModelSelection } from "@piarium/protocol";
+import { mergeHarnessSettings, parseMemoryEditOps, resolveRoles, type HarnessSettings, type MemoryEditOp, type ModelSelection } from "@piarium/protocol";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -2719,6 +2720,7 @@ export class SessionHost {
         : {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
       let permissionJudge: ((toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">) | undefined;
+      let callMemoryModel: ((model: Model<Api> | undefined, context: Context, signal: AbortSignal) => Promise<MemoryEditOp[] | null>) | undefined;
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -2782,7 +2784,6 @@ export class SessionHost {
             {
               factory: createZone2Extension({
                 bridge: hostServicesBridge,
-                sessionId: sessionManager.getSessionId(),
               }),
               hidden: true,
               name: "piarium-zone2",
@@ -2790,10 +2791,24 @@ export class SessionHost {
             {
               factory: createCompactionExtension({
                 bridge: hostServicesBridge,
-                sessionId: sessionManager.getSessionId(),
               }),
               hidden: true,
               name: "piarium-compaction",
+            },
+            {
+              factory: createMemoryAgentExtension({
+                bridge: hostServicesBridge,
+                enabled: harnessSettings.memory.shadowMode,
+                callModel: (model, context, signal) => callMemoryModel?.(model, context, signal) ?? Promise.resolve(null),
+                onError: (error) => {
+                  this.#emit("host.log", {
+                    level: "warn",
+                    message: `Memory shadow update failed: ${error instanceof Error ? error.message : String(error)}`,
+                  });
+                },
+              }),
+              hidden: true,
+              name: "piarium-memory-shadow",
             },
             {
               factory: createPermissionGateExtension({
@@ -2883,6 +2898,18 @@ export class SessionHost {
           "model_not_found",
           `Unknown model: ${this.#sessionModelSelection.providerId}/${this.#sessionModelSelection.modelId}`,
         );
+      }
+      if (harnessSettings.memory.shadowMode) {
+        callMemoryModel = async (model, context, signal) => {
+          if (!model) return null;
+          const response = await services.modelRuntime.completeSimple(model, context, {
+            reasoning: "minimal",
+            signal,
+            toolChoice: "auto",
+          });
+          const call = response.content.find((part) => part.type === "toolCall" && part.name === "memory_edit");
+          return call?.type === "toolCall" ? parseMemoryEditOps(call.arguments) : null;
+        };
       }
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];

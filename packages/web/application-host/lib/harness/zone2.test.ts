@@ -135,6 +135,14 @@ describe("assembleZone2Content", () => {
     expect(content).toContain("</piarium-context>");
   });
 
+  it("persists the delivered event cursor in the hidden context message", () => {
+    const content = assembleZone2Content({
+      ...emptyMaterial,
+      userEdits: [{ path: "src/a.ts", kind: "modified" }],
+    }, { eventCursor: 42 });
+    expect(content).toContain('event-cursor="42"');
+  });
+
   it("budget folding reduces knowledge when over budget", () => {
     const bigBlocks = Array.from({ length: 10 }, (_, i) => ({
       label: `block${i}`,
