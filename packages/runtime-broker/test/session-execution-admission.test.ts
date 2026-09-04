@@ -68,21 +68,6 @@ test("session execution admission precedes worker and agent execution and owns c
       },
     };
   });
-  let crossingCommand: Promise<unknown> | undefined;
-  const unsubscribe = broker.subscribe((event) => {
-    if (
-      crossingCommand === undefined
-      && event.kind === "host"
-      && event.role === "session"
-      && event.envelope.event === "session.snapshot"
-    ) {
-      crossingCommand = broker.requestForSession(event.envelope.data.sessionId, "command.execute", {
-        command: "/admission-write",
-        sessionId: event.envelope.data.sessionId,
-      });
-    }
-  });
-
   try {
     await assert.rejects(
       broker.createSession(workspace),
@@ -104,8 +89,10 @@ test("session execution admission precedes worker and agent execution and owns c
       kind: "workspace" as const,
     };
     const created = await broker.createSession(workspace, undefined, undefined, workspaceBinding);
-    assert.ok(crossingCommand, "session snapshot should expose the startup/run crossing request");
-    await crossingCommand;
+    await broker.requestForSession(created.sessionId, "command.execute", {
+      command: "/admission-write",
+      sessionId: created.sessionId,
+    });
     assert.equal(broker.workerCount, 1);
     assert.equal(activeLeases, 0, "worker startup admission must close after create settles");
     assert.deepEqual(admissions.slice(-2).map((request) => request.phase), [
@@ -173,7 +160,6 @@ test("session execution admission precedes worker and agent execution and owns c
     await broker.closeSession(created.sessionId);
     assert.equal(activeLeases, 0);
   } finally {
-    unsubscribe();
     await broker.dispose();
     assert.equal(activeLeases, 0);
     await rm(root, { force: true, recursive: true });

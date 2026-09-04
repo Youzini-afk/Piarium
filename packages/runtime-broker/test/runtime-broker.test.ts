@@ -347,6 +347,13 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     assert.equal(goalFeatures.goal?.objective, "Finish the broker-owned Pi migration");
     assert.equal(goalFeatures.goal?.tokenBudget, 50_000);
+    assert.ok(events.some((event) => (
+      event.kind === "host"
+      && event.role === "session"
+      && event.sessionId === created.sessionId
+      && event.envelope.event === "session.snapshot"
+      && event.envelope.data.sessionId === created.sessionId
+    )));
     assert.deepEqual(
       await dispatchRuntimeRequest(broker, "session.features.get", {
         sessionId: created.sessionId,

@@ -80,6 +80,7 @@ export class PiHostClient {
   #readyReject: ((error: unknown) => void) | undefined;
   #readyResolve: (() => void) | undefined;
   #sessionId: string | undefined;
+  #sessionTransitionDepth = 0;
   #terminalError: Error | undefined;
 
   constructor(options: PiHostClientOptions) {
@@ -116,6 +117,36 @@ export class PiHostClient {
 
   get sessionId(): string | undefined {
     return this.#sessionId;
+  }
+
+  get sessionTransitioning(): boolean {
+    return this.#sessionTransitionDepth > 0;
+  }
+
+  /**
+   * Bind this worker to the session selected by a broker-issued method
+   * response. Worker events are observational and must never call this.
+   */
+  pinSession(sessionId: string): void {
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new TypeError("Pinned Pi session ID must be a non-empty string");
+    }
+    this.#sessionId = sessionId;
+  }
+
+  /**
+   * Mark a broker-issued operation that may legitimately switch the worker to
+   * another Pi session (currently session.fork). Snapshot events emitted before
+   * the method response are ignored rather than treated as identity changes.
+   */
+  beginSessionTransition(): () => void {
+    this.#sessionTransitionDepth += 1;
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      this.#sessionTransitionDepth = Math.max(0, this.#sessionTransitionDepth - 1);
+    };
   }
 
   async start(): Promise<HostHandshakeResult> {
@@ -337,10 +368,6 @@ export class PiHostClient {
     }
     this.#lastSequence = envelope.seq;
     if (envelope.event === "host.ready") this.#readyResolve?.();
-    if (envelope.event === "session.snapshot") this.#sessionId = envelope.data.sessionId;
-    if (envelope.event === "session.closed" && envelope.data.sessionId === this.#sessionId) {
-      this.#sessionId = undefined;
-    }
     try {
       this.#options.onEvent?.(envelope);
     } catch (error) {

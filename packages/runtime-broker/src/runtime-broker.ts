@@ -122,6 +122,47 @@ export type PiRuntimeBrokerEvent = PiRuntimeBrokerEventPayload & {
   runtimeGeneration: number;
 };
 
+type WorkerEventIdentityDecision = "accept" | "ignore-unbound-snapshot" | "ignore-transition-snapshot" | "reject";
+
+const claimedEventSessionId = (envelope: EventEnvelope): string | undefined => {
+  const data = envelope.data as unknown;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const sessionId = (data as Record<string, unknown>).sessionId;
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+};
+
+/**
+ * Session/workspace worker events may describe state for their pinned session,
+ * but they never choose that identity. Initial snapshots can arrive before the
+ * create/open response and fork snapshots can arrive while a broker-issued
+ * transition is pending; both are ignored until the response pins the worker.
+ */
+export const classifyWorkerEventIdentity = ({
+  envelope,
+  pinnedSessionId,
+  role,
+  transitioning,
+}: {
+  envelope: EventEnvelope;
+  pinnedSessionId: string | undefined;
+  role: RuntimeWorkerRole;
+  transitioning: boolean;
+}): WorkerEventIdentityDecision => {
+  if (role !== "session" && role !== "workspace") return "accept";
+  const claimedSessionId = claimedEventSessionId(envelope);
+  if (claimedSessionId === undefined) return "accept";
+  if (pinnedSessionId === undefined) {
+    return envelope.event === "session.snapshot"
+      ? "ignore-unbound-snapshot"
+      : "reject";
+  }
+  if (claimedSessionId === pinnedSessionId) return "accept";
+  if (transitioning && envelope.event === "session.snapshot") {
+    return "ignore-transition-snapshot";
+  }
+  return "reject";
+};
+
 export interface PiRuntimeBrokerOptions {
   agentDir?: string;
   client: Omit<HostHandshakeParams, "protocolVersions">;
@@ -848,26 +889,31 @@ export class PiRuntimeBroker {
   async forkSession(sessionId: string, entryId: string, position?: "before" | "at") {
     const worker = this.#workerForSession(sessionId);
     const sourceSummary = await this.#rememberSummary(worker, sessionId);
-    const result = await worker.request("session.fork", {
-      entryId,
-      ...(position === undefined ? {} : { position }),
-      sessionId,
-    });
-    this.#bindSession(worker, result.snapshot.sessionId);
-    if (result.snapshot.sessionId !== sessionId) this.#sessions.delete(sessionId);
-    if (result.snapshot.sessionId !== sessionId && sourceSummary.workspace !== undefined) {
-      await this.#persistWorkspaceBinding(
-        await this.#metadataFor(worker),
-        result.snapshot.sessionId,
-        sourceSummary.workspace,
-        worker,
-        "Failed to preserve forked session workspace binding",
-      );
+    const finishTransition = worker.beginSessionTransition();
+    try {
+      const result = await worker.request("session.fork", {
+        entryId,
+        ...(position === undefined ? {} : { position }),
+        sessionId,
+      });
+      this.#bindSession(worker, result.snapshot.sessionId);
+      if (result.snapshot.sessionId !== sessionId) this.#sessions.delete(sessionId);
+      if (result.snapshot.sessionId !== sessionId && sourceSummary.workspace !== undefined) {
+        await this.#persistWorkspaceBinding(
+          await this.#metadataFor(worker),
+          result.snapshot.sessionId,
+          sourceSummary.workspace,
+          worker,
+          "Failed to preserve forked session workspace binding",
+        );
+      }
+      return {
+        ...result,
+        snapshot: await this.#enrichSnapshot(worker, result.snapshot),
+      };
+    } finally {
+      finishTransition();
     }
-    return {
-      ...result,
-      snapshot: await this.#enrichSnapshot(worker, result.snapshot),
-    };
   }
 
   async renameSession(sessionId: string, name: string): Promise<{ name?: string; sessionId: string }> {
@@ -1548,14 +1594,30 @@ export class PiRuntimeBroker {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },
       onEvent: (envelope) => {
+        const identityDecision = classifyWorkerEventIdentity({
+          envelope,
+          pinnedSessionId: client.sessionId,
+          role,
+          transitioning: client.sessionTransitioning,
+        });
+        if (identityDecision !== "accept") {
+          if (identityDecision === "reject") {
+            const claimed = claimedEventSessionId(envelope) ?? "<missing>";
+            this.#emit({
+              kind: "diagnostic",
+              level: "error",
+              message: `Pi worker protocol violation: ${envelope.event} claimed session ${claimed}; pinned session is ${client.sessionId ?? "<unbound>"}`,
+              role,
+              workerId: client.id,
+            });
+          }
+          return;
+        }
         if (
           envelope.event === "config.changed"
           && this.#configWatches.get(envelope.data.watchId) !== client
         ) {
           return;
-        }
-        if (role === "session" && envelope.event === "session.snapshot") {
-          this.#bindSession(client, envelope.data.sessionId);
         }
         if (role === "session" && envelope.event === "agent.event") {
           if (envelope.data.event.type === "agent_start") {
@@ -1568,9 +1630,6 @@ export class PiRuntimeBroker {
               void this.#releaseSessionExecutionAdmission(admission);
             }
           }
-        }
-        if (role === "workspace" && envelope.event === "session.snapshot") {
-          this.#bindWorkspaceContext(client, envelope.data.sessionId);
         }
         if (envelope.event === "project.trust.request") {
           this.#pendingProjectTrust.set(envelope.data.id, { client });
@@ -1627,20 +1686,50 @@ export class PiRuntimeBroker {
   }
 
   #bindSession(client: PiHostClient, sessionId: string): void {
+    const existingSessionWorker = this.#sessions.get(sessionId);
+    if (existingSessionWorker && existingSessionWorker !== client) {
+      throw new PiRuntimeBrokerError(
+        "session_conflict",
+        `Pi session is already bound to another worker: ${sessionId}`,
+      );
+    }
+    const existingWorkspaceWorker = this.#workspaceSessions.get(sessionId);
+    if (existingWorkspaceWorker && existingWorkspaceWorker !== client) {
+      throw new PiRuntimeBrokerError(
+        "session_conflict",
+        `Pi session is already bound to a workspace worker: ${sessionId}`,
+      );
+    }
     for (const [mappedSessionId, worker] of this.#sessions) {
       if (worker === client && mappedSessionId !== sessionId) {
         this.#sessions.delete(mappedSessionId);
       }
     }
+    client.pinSession(sessionId);
     this.#sessions.set(sessionId, client);
   }
 
   #bindWorkspaceContext(client: PiHostClient, sessionId: string): void {
+    const existingWorkspaceWorker = this.#workspaceSessions.get(sessionId);
+    if (existingWorkspaceWorker && existingWorkspaceWorker !== client) {
+      throw new PiRuntimeBrokerError(
+        "session_conflict",
+        `Pi workspace context is already bound to another worker: ${sessionId}`,
+      );
+    }
+    const existingSessionWorker = this.#sessions.get(sessionId);
+    if (existingSessionWorker && existingSessionWorker !== client) {
+      throw new PiRuntimeBrokerError(
+        "session_conflict",
+        `Pi workspace context collides with an active session: ${sessionId}`,
+      );
+    }
     for (const [mappedSessionId, worker] of this.#workspaceSessions) {
       if (worker === client && mappedSessionId !== sessionId) {
         this.#workspaceSessions.delete(mappedSessionId);
       }
     }
+    client.pinSession(sessionId);
     this.#workspaceSessions.set(sessionId, client);
   }
 
