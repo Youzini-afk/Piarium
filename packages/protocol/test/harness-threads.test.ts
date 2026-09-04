@@ -64,7 +64,10 @@ describe("thread protocol types (§9.3)", () => {
     assert.ok(typeof DEFAULT_TTL_TABLE["openai"] === "number");
     assert.ok(typeof DEFAULT_TTL_TABLE["gemini"] === "number");
     // Anthropic 1h cache has longer TTL
-    assert.ok(DEFAULT_TTL_TABLE["anthropic-1h"] > DEFAULT_TTL_TABLE["anthropic"]);
+    const anthropicTtl = DEFAULT_TTL_TABLE["anthropic"];
+    const anthropic1hTtl = DEFAULT_TTL_TABLE["anthropic-1h"];
+    assert.ok(typeof anthropicTtl === "number" && typeof anthropic1hTtl === "number");
+    assert.ok(anthropic1hTtl > anthropicTtl);
   });
 
   it("DEFAULT_WAIT_TIMEOUT_MS is 240 seconds (conservative fallback)", () => {
@@ -87,7 +90,6 @@ describe("thread protocol types (§9.3)", () => {
 
   it("ThreadListParams supports ids and full", () => {
     const params: ThreadListParams = {
-      parentSessionId: "p1",
       ids: ["t1", "t2"],
       full: true,
     };
@@ -114,15 +116,19 @@ describe("thread protocol types (§9.3)", () => {
     assert.ok(result.threads[0]!.diffStats !== null);
   });
 
-  it("ThreadWaitResult includes timedOut", () => {
+  it("ThreadWaitResult includes timedOut and a waiting count", () => {
     const result: ThreadWaitResult = {
-      text: "timed out after 240s",
+      text: "timed out after 240s — 0 done · 1 running · 1 waiting · 0 queued",
       done: 0,
       running: 1,
+      // Idle / waiting-for-input threads need their own bucket: they are
+      // the ones somebody has to answer (§9.3.5).
+      waiting: 1,
       queued: 0,
       timedOut: true,
     };
     assert.equal(result.timedOut, true);
+    assert.equal(result.waiting, 1);
   });
 
   it("ThreadSendResult includes status", () => {
@@ -135,7 +141,6 @@ describe("thread protocol types (§9.3)", () => {
 
   it("ThreadReadParams supports what and since", () => {
     const params: ThreadReadParams = {
-      parentSessionId: "p1",
       threadId: "t1",
       what: "steps",
       since: 5,
@@ -155,7 +160,6 @@ describe("thread protocol types (§9.3)", () => {
 
   it("ThreadKillParams supports keepWorktree", () => {
     const params: ThreadKillParams = {
-      parentSessionId: "p1",
       threadId: "t1",
       keepWorktree: false,
     };
@@ -172,8 +176,8 @@ describe("thread protocol types (§9.3)", () => {
   });
 
   it("HarnessServiceMap includes all thread methods", () => {
-    // Type-level check: if this compiles, the service map is correct
-    const _check: HarnessServiceMap = {
+    // Type-level check: if this compiles, the thread method keys exist on HarnessServiceMap
+    const _check: Partial<HarnessServiceMap> = {
       "thread.dispatch": { params: {} as ThreadDispatchParams, result: {} as ThreadDispatchResult },
       "thread.list": { params: {} as ThreadListParams, result: {} as ThreadListResult },
       "thread.wait": { params: {} as ThreadWaitParams, result: {} as ThreadWaitResult },
@@ -182,8 +186,9 @@ describe("thread protocol types (§9.3)", () => {
       "thread.merge": { params: {} as ThreadMergeParams, result: {} as ThreadMergeResult },
       "thread.kill": { params: {} as ThreadKillParams, result: {} as ThreadKillResult },
     };
-    // Also verify it has non-thread methods (just check a few)
-    assert.ok("shell.exec" in {} as Partial<HarnessServiceMap> || true);
+    assert.ok("thread.dispatch" in _check);
+    assert.ok("thread.wait" in _check);
+    assert.ok("thread.kill" in _check);
     void _check;
   });
 });

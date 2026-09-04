@@ -103,10 +103,6 @@ export interface CompactionHandlerDeps {
   settings: CompactionSettings;
   /** Get facts from host */
   getFacts: () => Promise<CompactionFacts>;
-  /** Get entry ID for K turns ago (async — may call session manager) */
-  getEntryIdAtTurn: (turnsAgo: number) => Promise<string | null>;
-  /** Get tokens before compaction */
-  getTokensBefore: () => number;
   /** Memory agent pre-compaction refresh */
   requestPreCompactionRefresh?: () => Promise<void>;
 }
@@ -114,30 +110,27 @@ export interface CompactionHandlerDeps {
 export async function handleBeforeCompact(
   sessionId: string,
   deps: CompactionHandlerDeps,
+  preparation: { firstKeptEntryId: string; tokensBefore: number },
   options?: { staleNote?: boolean },
 ): Promise<CompactionResult> {
-  const { store, settings, getFacts, getEntryIdAtTurn, getTokensBefore } = deps;
+  const { store, settings, getFacts } = deps;
+  const { firstKeptEntryId, tokensBefore } = preparation;
 
   const blocks = await store.getBlocks(sessionId);
   const planBlock = blocks.find((b) => b.label === "plan");
   const plan = planBlock?.content ?? "";
   const facts = await getFacts();
 
-  // If there are no blocks and no facts, compaction has nothing to carry.
-  // Signal unavailable so the extension skips injecting a compaction section.
-  const hasNoMaterial = blocks.length === 0
-    && facts.touchedFiles.length === 0
-    && facts.unresolvedDiagnostics.length === 0
-    && facts.checkpoints.length === 0;
-
-  const firstKeptEntryId = await getEntryIdAtTurn(settings.keepTurns);
-
-  if (firstKeptEntryId === null || hasNoMaterial) {
+  // Taking compaction over means Pi does not summarize, so the replacement
+  // has to actually carry the conversation. Only the memory keeper's blocks
+  // do that: a `plan` block written by the todo tool is a checklist, not a
+  // summary, and swapping the history for it loses the work. Until the
+  // memory agent is wired, this leaves compaction to Pi (§8.4.1).
+  const hasKeeperBlocks = blocks.some((b) => b.updatedBy === "memory-agent");
+  if (!hasKeeperBlocks) {
     throw new HarnessServiceError(
       "unavailable",
-      firstKeptEntryId === null
-        ? "compaction.before: getEntryIdAtTurn returned null — session manager not wired"
-        : "compaction.before: no blocks and no facts to carry",
+      "compaction.before: no memory-keeper blocks to carry — Pi summarizes instead",
     );
   }
 
@@ -151,8 +144,6 @@ export async function handleBeforeCompact(
   if (options?.staleNote) {
     summary += "\nnote: memory blocks may be stale";
   }
-
-  const tokensBefore = getTokensBefore();
 
   return { summary, firstKeptEntryId, tokensBefore };
 }

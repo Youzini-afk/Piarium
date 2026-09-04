@@ -1,4 +1,12 @@
-import { isHarnessMethod, type HarnessError, type HarnessMethod, type HarnessServiceMap, buildHarnessRespondParams } from "@piarium/protocol";
+import {
+  isHarnessMethod,
+  type HarnessError,
+  type HarnessMethod,
+  type HarnessRequestData,
+  type HarnessServiceMap,
+  buildHarnessRespondParams,
+  HARNESS_MAX_REQUEST_TIMEOUT_MS,
+} from "@piarium/protocol";
 import { HarnessServiceError } from "./harness-services.js";
 
 export { buildHarnessRespondParams };
@@ -50,12 +58,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
   const processEvent = async (event: RouterHostEvent): Promise<void> => {
     if (disposed) return;
     if (event.kind !== "host" || event.envelope?.kind !== "event" || event.envelope?.event !== "harness.request") return;
-    const data = event.envelope.data as {
-      requestId: string;
-      sessionId: string;
-      method: string;
-      params: unknown;
-    } | undefined;
+    const data = event.envelope.data as HarnessRequestData | undefined;
     if (!data || typeof data.requestId !== "string" || typeof data.sessionId !== "string") return;
     if (!isHarnessMethod(data.method)) {
       await options.respond(data.sessionId, data.requestId, {
@@ -74,7 +77,12 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       return;
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), defaultTimeoutMs);
+    // Per-request timeout override (e.g. thread.wait carries a longer
+    // timeout), clamped so a worker cannot pin a handler open forever.
+    const requestTimeoutMs = (typeof data.timeoutMs === "number" && data.timeoutMs > 0)
+      ? Math.min(data.timeoutMs, HARNESS_MAX_REQUEST_TIMEOUT_MS)
+      : defaultTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const workspaceId = await options.resolveWorkspace(data.sessionId);
       const result = await service.handle(data.params as never, {

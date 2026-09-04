@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   createOpenAIEmbedding,
   createVoyageEmbedding,
@@ -14,7 +15,8 @@ import {
   type EmbeddingProvider,
 } from "./embedding.js";
 
-const TEST_DIR = join(import.meta.dirname, ".test-embedding");
+// Scratch dirs live in the OS temp dir; see harness/recall-tool.test.ts.
+const TEST_DIR = join(tmpdir(), "piarium-test-embedding");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

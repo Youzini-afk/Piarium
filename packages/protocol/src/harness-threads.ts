@@ -116,7 +116,6 @@ export const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
 // ── Harness service methods for thread operations ──────────────────
 
 export interface ThreadListParams {
-  parentSessionId: string;
   /** Filter to specific thread IDs. Omit = all visible threads. */
   ids?: string[];
   /** Ignore observer cursor, return full snapshot. */
@@ -139,22 +138,27 @@ export interface ThreadListResult {
 }
 
 export interface ThreadWaitParams {
-  parentSessionId: string;
   ids?: string[];
   timeoutMs?: number;
 }
 
+/**
+ * `waiting` counts threads that are idle or waiting for an answer. Those are
+ * the ones the parent (or the user) has to act on, so they are reported
+ * separately rather than being folded into running or done.
+ */
 export interface ThreadWaitResult {
   text: string;
   done: number;
   running: number;
+  /** Idle or waiting-for-input — someone has to act on these. */
+  waiting: number;
   queued: number;
   /** Whether the wait timed out (normal result, not an error) */
   timedOut: boolean;
 }
 
 export interface ThreadSendParams {
-  parentSessionId: string;
   threadId: string;
   message: string;
   from: "user" | "parent-agent";
@@ -169,7 +173,6 @@ export interface ThreadSendResult {
 export type ThreadReadWhat = "blocks" | "report" | "steps";
 
 export interface ThreadReadParams {
-  parentSessionId: string;
   threadId: string;
   /** What to read: "blocks" (default), "report", or "steps" */
   what?: ThreadReadWhat;
@@ -185,7 +188,6 @@ export interface ThreadReadResult {
 }
 
 export interface ThreadMergeParams {
-  parentSessionId: string;
   threadId: string;
 }
 
@@ -196,7 +198,6 @@ export interface ThreadMergeResult {
 }
 
 export interface ThreadKillParams {
-  parentSessionId: string;
   threadId: string;
   /** Keep worktree after kill (default true) */
   keepWorktree?: boolean;
@@ -207,7 +208,6 @@ export interface ThreadKillResult {
 }
 
 export interface ThreadDispatchParams {
-  parentSessionId: string;
   role: string;
   task: string;
   scope?: string[];

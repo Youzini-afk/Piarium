@@ -10,6 +10,7 @@ describe("resolveRoles", () => {
     const roles = resolveRoles({
       quickImplement: haiku,
       hardImplement: mainModel,
+      frontend: haiku,
       retrievalAgent: haiku,
       check: haiku,
       review: mainModel,
@@ -39,21 +40,26 @@ describe("resolveRoles", () => {
 
   it("omits roles with unconfigured non-defaulting slots", () => {
     const roles = resolveRoles({}, mainModel);
-    // Only hard-implement, frontend (uses hardImplement slot), review should remain
+    // Only the two slots that default to the main model remain (§9.2.2).
     const ids = roles.map((r) => r.id);
     expect(ids).toContain("hard-implement");
-    expect(ids).toContain("frontend");
     expect(ids).toContain("review");
-    // quick-implement, check, retrieval should be omitted
     expect(ids).not.toContain("quick-implement");
+    expect(ids).not.toContain("frontend");
     expect(ids).not.toContain("check");
     expect(ids).not.toContain("retrieval");
   });
 
-  it("frontend uses hardImplement slot", () => {
-    const roles = resolveRoles({ hardImplement: mainModel }, mainModel);
-    const frontend = roles.find((r) => r.id === "frontend");
-    expect(frontend?.model).toEqual(mainModel);
+  it("frontend uses its own slot and is omitted when that slot is unset", () => {
+    const withoutFrontend = resolveRoles({ hardImplement: mainModel }, mainModel);
+    expect(withoutFrontend.find((r) => r.id === "frontend")).toBeUndefined();
+
+    const withFrontend = resolveRoles({ frontend: haiku }, mainModel);
+    expect(withFrontend.find((r) => r.id === "frontend")?.model).toEqual(haiku);
+  });
+
+  it("omits every role when there is no main model and no slots", () => {
+    expect(resolveRoles({}, null)).toEqual([]);
   });
 });
 
@@ -69,11 +75,21 @@ describe("buildTeamPrompt", () => {
       check: haiku,
     }, mainModel);
     const prompt = buildTeamPrompt(roles);
-    expect(prompt).toContain("dispatch");
-    expect(prompt).toContain("quick-implement");
-    expect(prompt).toContain("hard-implement");
+    expect(prompt).toContain("dispatch(role, task)");
+    expect(prompt).toContain("quick-implement (cheap model; mechanical, well-specified changes)");
+    expect(prompt).toContain("hard-implement (strong model; ambiguous or cross-cutting work)");
+    expect(prompt).toContain("check (cheap model; run tests/lint and report)");
+    // The judgement principle, not a quota or a cost estimate (§9.2.4).
+    expect(prompt).toContain("Judge by time and cost");
+    expect(prompt).toContain("wait blocks until a teammate changes state");
+  });
+
+  it("omits unconfigured roles from the prompt", () => {
+    const roles = resolveRoles({ check: haiku }, mainModel);
+    const prompt = buildTeamPrompt(roles);
     expect(prompt).toContain("check");
-    expect(prompt).toContain("wait to collect results");
+    expect(prompt).not.toContain("quick-implement");
+    expect(prompt).not.toContain("retrieval");
   });
 
   it("prompt is static for same role set", () => {

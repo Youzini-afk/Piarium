@@ -143,7 +143,7 @@ import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mergeHarnessSettings, type HarnessSettings } from "@piarium/protocol";
+import { mergeHarnessSettings, resolveRoles, type HarnessSettings } from "@piarium/protocol";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -2812,6 +2812,13 @@ export class SessionHost {
       const yieldedTools = computeYieldedTools(allPkgs);
       // Check if models.reader is configured
       const readerModelConfigured = harnessSettings.models?.reader !== undefined;
+      // Roles the session can actually dispatch: a role whose model slot is
+      // unconfigured is omitted from the team prompt and rejected by the
+      // tool, rather than silently running on the main model (invariant 6).
+      const resolvedRoles = resolveRoles(
+        harnessSettings.models ?? {},
+        sessionModel ? { providerId: sessionModel.provider, modelId: sessionModel.id } : null,
+      );
       customTools.push(...selectHarnessTools(harnessSettings, {
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
@@ -2820,7 +2827,8 @@ export class SessionHost {
         isOpenAIFamily,
         yieldedTools,
         readerModelConfigured,
-        threadRuntimeAvailable: true, // Host always provides thread registry
+        threadRuntimeAvailable: harnessSettings.threadRuntime ?? false,
+        resolvedRoles,
       }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),

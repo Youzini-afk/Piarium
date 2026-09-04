@@ -40,6 +40,7 @@
     "type-check:cli:raw": "bun run type-check:cli:source && bun run type-check:cli:tests",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" \"./application-host/**/*.ts\" \"./cli/**/*.ts\" --config ../../eslint.config.js",
     "test": "vitest run",
+    "test:node-smoke": "bun run build:application-host && node --test application-host/lib/knowledge/store.smoke.test.ts",
     "prepare:pi-runtime": "bun run prepare:application-host",
     "start": "bun run build:cli && node bin/cli.js serve",
     "clean": "node scripts/build-application-host.mjs --clean && node scripts/build-cli.mjs --clean"

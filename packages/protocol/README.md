@@ -27,6 +27,46 @@ Piarium protocol types, schemas, and event/method definitions.
 | `fs.lock` | `{ path, action, timeoutMs? }` | `{ held }` | Acquire/release path lock |
 | `lsp.diagnostics` | `{ path, afterSnapshot?, waitMs? }` | `DiagnosticsResult` | Get diagnostics (sync + wait) |
 | `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |
+| `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
+| `web.read` | `{ url }` | `WebReadResult` | Read a URL with reader model |
+| `web.search` | `{ query }` | `WebSearchResult` | Web search |
+| `zone2.assemble` | `{ sinceTurn }` | `{ content }` | Assemble Zone 2 context |
+| `compaction.before` | `{ sessionId, firstKeptEntryId, tokensBefore }` | `CompactionBeforeResult` | Pre-compaction hook |
+| `compaction.after` | `{ sessionId, summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
+| `todo.upsert` | `{ items, confidence? }` | `{ text, confirmed?, askedConfirmation }` | Upsert todo items |
+| `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
+| `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
+| `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
+| `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
+| `thread.send` | `{ threadId, message, from }` | `ThreadSendResult` | Send message to a thread |
+| `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
+| `thread.merge` | `{ threadId }` | `ThreadMergeResult` | Merge completed thread's diff |
+| `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
+
+### Thread Events
+
+Two host events, both carrying state only — never message bodies.
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `harness.thread.changed` | host → clients | Thread record changed (status, steps, flags, `waitingFor`) |
+| `harness.thread.done` | host → clients | Thread completed; carries the `ThreadReport` |
+
+The registry raises them through its `onThreadChanged` / `onThreadDone`
+callbacks. `onThreadDequeued` is a registry callback only, not a protocol
+event: it asks the host to spawn a child session for a thread that was
+waiting on a concurrency slot.
+
+### Thread Lifecycle
+
+```
+queued → running → idle → waiting-for-input → done → merged → archived
+                 ↘ failed                    ↘ cancelled
+```
+
+State transitions are validated by the registry; an invalid transition
+throws. Reaching any terminal state frees a concurrency slot and may
+promote the oldest queued thread.
 
 ### ShellExecResult Variants
 
@@ -38,27 +78,33 @@ Piarium protocol types, schemas, and event/method definitions.
 
 ### HarnessSettings
 
+Read once at session creation and frozen into the session snapshot, so a
+settings change takes effect in the next session (plan §1.9).
+
 ```typescript
 interface HarnessSettings {
-  shell: {
-    setting: "auto" | "git-bash" | "powershell" | "wsl";
-    discovered: { gitBashPath?, wslDistros?, hasBash?, hasPowerShell? };
+  tools: Partial<Record<string, boolean>>;   // per-tool switch, default true
+  shell: "auto" | "git-bash" | "powershell" | "wsl";
+  output: { visibleBytes: number };          // default 32768
+  bash: { waitMs: number };                  // default 60000
+  models: Partial<Record<HarnessModelRole, ModelSelection>>;
+  dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
+  knowledge: {
+    eventRetentionDays: number;
+    autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
-  output: {
-    maxBytesPerSession: number; // default 256 MiB
-    visibleBytes: number; // default 32768
-  };
-  tools: {
-    grep: { enabled: boolean }; // default true
-    bash: { enabled: boolean }; // default true
-    applyPatch: { enabled: boolean }; // default true (OpenAI only)
-  };
+  web?: { maxFetchesPerTurn?: number; render?: boolean };
+  permissions?: { mode?: PermissionMode };   // default "normal"
+  threadRuntime?: boolean;                   // default false — see harness-settings.ts
 }
 ```
 
 ## Exports
 
-- `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `ShellExecResult`, `OutputSlice`, `DiagnosticsResult`
-- `harness-settings.ts` — `HarnessSettings` schema
-- `harness-tools.ts` — Tool-specific protocol types
+- `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (carries the optional per-request `timeoutMs`), `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `ShellExecResult`, `OutputSlice`, `DiagnosticsResult`
+- `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
+- `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
+- `harness-threads.ts` — Thread protocol types: `ThreadRecord`, `ThreadStatus`, `ThreadViewCursor`, `ThreadDispatchParams`, `ThreadListParams`, `ThreadWaitParams`, `ThreadSendParams`, `ThreadReadParams`, `ThreadMergeParams`, `ThreadKillParams`, `DEFAULT_TTL_TABLE`, `DEFAULT_WAIT_TIMEOUT_MS`
+- `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
+- `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
 - `types.ts` — `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)

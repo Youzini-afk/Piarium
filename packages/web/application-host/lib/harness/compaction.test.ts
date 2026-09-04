@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import {
   assembleCompactionSummary,
@@ -10,7 +11,8 @@ import {
   type CompactionFacts,
 } from "./compaction.js";
 
-const TEST_DIR = join(import.meta.dirname, ".test-compaction");
+// Scratch stores live in the OS temp dir; see recall-tool.test.ts.
+const TEST_DIR = join(tmpdir(), "piarium-test-compaction");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }
@@ -133,7 +135,7 @@ describe("handleBeforeCompact", () => {
     });
     await store.upsertBlock({
       sessionId: "s1", label: "progress", content: "Working",
-      updatedBy: "agent",
+      updatedBy: "memory-agent",
     });
 
     const result = await handleBeforeCompact("s1", {
@@ -144,9 +146,7 @@ describe("handleBeforeCompact", () => {
         unresolvedDiagnostics: [],
         checkpoints: ["2026-09-03T10:00Z"],
       }),
-      getEntryIdAtTurn: async (n) => `entry-${n}`,
-      getTokensBefore: () => 50000,
-    });
+    }, { firstKeptEntryId: "entry-8", tokensBefore: 50000 });
 
     expect(result.summary).toContain("<piarium-compaction");
     expect(result.summary).toContain("Working");
@@ -156,48 +156,71 @@ describe("handleBeforeCompact", () => {
 
   it("adds stale note when requested", async () => {
     await store.upsertBlock({
-      sessionId: "s1", label: "plan", content: "- [ ] Task",
-      updatedBy: "agent",
+      sessionId: "s1", label: "progress", content: "Working",
+      updatedBy: "memory-agent",
     });
     const result = await handleBeforeCompact("s1", {
       store,
       settings: DEFAULT_COMPACTION_SETTINGS,
       getFacts: async () => emptyFacts,
-      getEntryIdAtTurn: async () => "entry",
-      getTokensBefore: () => 1000,
-    }, { staleNote: true });
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000 }, { staleNote: true });
 
     expect(result.summary).toContain("memory blocks may be stale");
   });
 
-  it("throws unavailable when getEntryIdAtTurn returns null", async () => {
-    try {
-      await handleBeforeCompact("s1", {
-        store,
-        settings: DEFAULT_COMPACTION_SETTINGS,
-        getFacts: async () => ({ touchedFiles: ["a.ts"], unresolvedDiagnostics: [], checkpoints: [] }),
-        getEntryIdAtTurn: async () => null,
-        getTokensBefore: () => 1000,
-      });
-      expect.fail("should have thrown");
-    } catch (e) {
-      expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
-    }
-  });
-
-  it("throws unavailable when no blocks and no facts", async () => {
+  it("throws unavailable when there are no blocks at all", async () => {
     try {
       await handleBeforeCompact("s1", {
         store,
         settings: DEFAULT_COMPACTION_SETTINGS,
         getFacts: async () => emptyFacts,
-        getEntryIdAtTurn: async () => "entry",
-        getTokensBefore: () => 1000,
-      });
+      }, { firstKeptEntryId: "entry", tokensBefore: 1000 });
       expect.fail("should have thrown");
     } catch (e) {
       expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
     }
+  });
+
+  // Taking compaction over replaces the conversation with the summary, so a
+  // todo checklist is not enough material to justify it — Pi must summarize.
+  it("throws unavailable when only the agent's plan block exists", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "plan", content: "- [ ] Task",
+      updatedBy: "agent",
+    });
+    try {
+      await handleBeforeCompact("s1", {
+        store,
+        settings: DEFAULT_COMPACTION_SETTINGS,
+        getFacts: async () => ({
+          touchedFiles: ["a.ts"],
+          unresolvedDiagnostics: [],
+          checkpoints: ["2026-09-03T10:00Z"],
+        }),
+      }, { firstKeptEntryId: "entry", tokensBefore: 1000 });
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
+    }
+  });
+
+  it("takes over once the memory keeper has written a block", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "plan", content: "- [ ] Task",
+      updatedBy: "agent",
+    });
+    await store.upsertBlock({
+      sessionId: "s1", label: "decisions", content: "Chose PTY over spawn",
+      updatedBy: "memory-agent",
+    });
+    const result = await handleBeforeCompact("s1", {
+      store,
+      settings: DEFAULT_COMPACTION_SETTINGS,
+      getFacts: async () => emptyFacts,
+    }, { firstKeptEntryId: "entry-8", tokensBefore: 1000 });
+
+    expect(result.summary).toContain("Chose PTY over spawn");
+    expect(result.firstKeptEntryId).toBe("entry-8");
   });
 });
 

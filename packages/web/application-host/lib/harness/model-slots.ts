@@ -13,33 +13,13 @@
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type SlotId =
-  | "explore"
-  | "retrievalAgent"
-  | "quickImplement"
-  | "hardImplement"
-  | "check"
-  | "reader"
-  | "review"
-  | "suggestions"
-  | "permissionJudge";
+import type { HarnessModelRole, ModelSelection } from "@piarium/protocol";
 
-export interface SlotResolution {
-  providerId: string;
-  modelId: string;
-}
+/** Slot ids are the `harness.models` keys defined by the protocol. */
+export type SlotId = HarnessModelRole;
+export type SlotResolution = ModelSelection;
 
-export interface ModelSlotsSettings {
-  explore?: SlotResolution | null;
-  retrievalAgent?: SlotResolution | null;
-  quickImplement?: SlotResolution | null;
-  hardImplement?: SlotResolution | null;
-  check?: SlotResolution | null;
-  reader?: SlotResolution | null;
-  review?: SlotResolution | null;
-  suggestions?: SlotResolution | null;
-  permissionJudge?: SlotResolution | null;
-}
+export type ModelSlotsSettings = Partial<Record<SlotId, SlotResolution | null>>;
 
 export type PresetName = "anthropic" | "openai" | "gemini";
 

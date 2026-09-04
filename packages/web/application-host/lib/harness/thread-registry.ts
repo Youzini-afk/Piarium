@@ -14,64 +14,33 @@
  *   restarts in the same session/worktree with the same thread id.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ThreadViewCursor } from "@piarium/protocol";
+import type {
+  ThreadViewCursor,
+  ThreadStatus as ProtocolThreadStatus,
+  ThreadKind as ProtocolThreadKind,
+  ThreadCreatedBy as ProtocolThreadCreatedBy,
+  ThreadReport as ProtocolThreadReport,
+  ThreadFlags as ProtocolThreadFlags,
+  ThreadWaitingFor as ProtocolThreadWaitingFor,
+  ThreadWorktree as ProtocolThreadWorktree,
+  ThreadTokens as ProtocolThreadTokens,
+  ThreadDiffStats as ProtocolThreadDiffStats,
+} from "@piarium/protocol";
 
-// ── Types ──────────────────────────────────────────────────────────
+// ── Types (re-exported from protocol) ──────────────────────────────
 
-export type ThreadStatus =
-  | "queued"
-  | "running"
-  | "idle"
-  | "waiting-for-input"
-  | "done"
-  | "failed"
-  | "cancelled"
-  | "merged"
-  | "archived";
-
-export type ThreadKind = "discussion" | "implementation";
-export type ThreadCreatedBy = "user" | "agent";
-
-export interface ThreadReport {
-  conclusion: string;
-  changedFiles: string[];
-  unresolved: string[];
-  deviations: string[];
-  confidence: number;
-  traceHandle: string;
-  blocksSnapshot: Record<string, string>;
-}
-
-export interface ThreadFlags {
-  workerLost: boolean;
-  stalled: boolean;
-  looping: boolean;
-}
-
-export interface ThreadWaitingFor {
-  kind: "user" | "permission" | "thread";
-  text: string;
-}
-
-export interface ThreadWorktree {
-  path: string;
-  base: string;
-}
-
-export interface ThreadTokens {
-  input: number;
-  output: number;
-  cacheRead: number;
-}
-
-export interface ThreadDiffStats {
-  files: number;
-  insertions: number;
-  deletions: number;
-}
+export type ThreadStatus = ProtocolThreadStatus;
+export type ThreadKind = ProtocolThreadKind;
+export type ThreadCreatedBy = ProtocolThreadCreatedBy;
+export type ThreadReport = ProtocolThreadReport;
+export type ThreadFlags = ProtocolThreadFlags;
+export type ThreadWaitingFor = ProtocolThreadWaitingFor;
+export type ThreadWorktree = ProtocolThreadWorktree;
+export type ThreadTokens = ProtocolThreadTokens;
+export type ThreadDiffStats = ProtocolThreadDiffStats;
 
 export interface ThreadRecord {
   id: string;
@@ -98,6 +67,8 @@ export interface ThreadRecord {
   updatedAt: string;
   /** Monotonically increasing event sequence (incremented on every state change) */
   eventSeq: number;
+  /** Whether this thread is hidden from the parent agent's list view */
+  hidden: boolean;
 }
 
 export interface CreateThreadInput {
@@ -127,6 +98,9 @@ export interface ThreadRegistryOptions {
   onThreadChanged?: (parentSessionId: string, thread: ThreadRecord) => void;
   /** Called when a thread completes with a report */
   onThreadDone?: (parentSessionId: string, threadId: string, report: ThreadReport) => void;
+  /** Called when a thread is dequeued (promoted from queued to runnable).
+   * The host should spawn the child session and call setSessionId. */
+  onThreadDequeued?: (parentSessionId: string, thread: ThreadRecord) => Promise<void>;
   /** Max concurrent running threads per parent (default 12) */
   maxConcurrency?: number;
 }
@@ -147,6 +121,36 @@ function makeTokens(): ThreadTokens {
   return { input: 0, output: 0, cacheRead: 0 };
 }
 
+// ── State transition table (§9.3 lifecycle) ────────────────────────
+//
+// Valid transitions: from → { allowed next states }
+const STATE_TRANSITIONS: Record<ThreadStatus, ThreadStatus[]> = {
+  "queued": ["running", "cancelled"],
+  "running": ["idle", "waiting-for-input", "done", "failed", "cancelled", "queued"],
+  "idle": ["running", "cancelled", "archived"],
+  "waiting-for-input": ["running", "cancelled", "archived"],
+  "done": ["merged", "archived"],
+  "failed": ["archived", "running"], // running = resume
+  "cancelled": ["archived"],
+  "merged": ["archived"],
+  "archived": [],
+};
+
+function isValidTransition(from: ThreadStatus, to: ThreadStatus): boolean {
+  if (from === to) return true; // idempotent
+  const allowed = STATE_TRANSITIONS[from];
+  return allowed ? allowed.includes(to) : false;
+}
+
+/** States that free a concurrency slot. */
+const TERMINAL_STATES: ReadonlySet<ThreadStatus> = new Set([
+  "done",
+  "failed",
+  "cancelled",
+  "merged",
+  "archived",
+]);
+
 // ── Registry ───────────────────────────────────────────────────────
 
 export function createThreadRegistry(options: ThreadRegistryOptions) {
@@ -154,37 +158,68 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const maxConcurrency = options.maxConcurrency ?? 12;
   // In-memory cache: parentSessionId → Map<threadId, ThreadRecord>
   const cache = new Map<string, Map<string, ThreadRecord>>();
-  // hidden threads: not included in listThreads for the parent agent
-  const hidden = new Set<string>();
   // Observer cursors: `${observerSessionId}:${threadId}` → ThreadViewCursor
   const cursors = new Map<string, ThreadViewCursor>();
   // Wait wakeup: parentSessionId → array of resolve callbacks
   const waiters = new Map<string, Array<() => void>>();
-  // Global event sequence counter
+  // Serialized write chain per parent
+  const persistChains = new Map<string, Promise<void>>();
+  let persistCounter = 0;
+  // Parents currently being torn down — suppresses dequeue
+  const draining = new Set<string>();
+  // Global event sequence counter — initialized from persisted records
   let globalEventSeq = 0;
 
   async function loadParent(parentSessionId: string): Promise<Map<string, ThreadRecord>> {
     const existing = cache.get(parentSessionId);
     if (existing) return existing;
-    let map = new Map<string, ThreadRecord>();
+    const map = new Map<string, ThreadRecord>();
+    let maxSeq = 0;
     try {
       const raw = await readFile(threadFilePath(dataDir, hostId, parentSessionId), "utf8");
       const records = JSON.parse(raw) as ThreadRecord[];
-      map = new Map(records.map((r) => [r.id, r]));
+      for (const r of records) {
+        // Backfill hidden field for old records
+        if (r.hidden === undefined) r.hidden = false;
+        map.set(r.id, r);
+        if (r.eventSeq > maxSeq) maxSeq = r.eventSeq;
+      }
     } catch {
       // File doesn't exist yet — empty map
     }
     cache.set(parentSessionId, map);
+    // Advance globalEventSeq past any persisted sequence
+    if (maxSeq >= globalEventSeq) globalEventSeq = maxSeq + 1;
     return map;
   }
 
-  async function persist(parentSessionId: string): Promise<void> {
+  async function writeSnapshot(parentSessionId: string): Promise<void> {
     const map = cache.get(parentSessionId);
     if (!map) return;
     const filePath = threadFilePath(dataDir, hostId, parentSessionId);
     await mkdir(join(filePath, ".."), { recursive: true });
     const records = [...map.values()];
-    await writeFile(filePath, JSON.stringify(records, null, 2), "utf8");
+    // Atomic write: temp file + rename to avoid partial writes.
+    // The temp name is unique per write so two writes can never race on
+    // the same path even if serialization is bypassed.
+    persistCounter += 1;
+    const tmpPath = `${filePath}.${process.pid}.${persistCounter}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(records, null, 2), "utf8");
+    await rename(tmpPath, filePath);
+  }
+
+  /**
+   * Serialize writes per parent: several records can reach a terminal state
+   * in the same tick (`cancelAllForParent`), and concurrent temp-file +
+   * rename sequences on one path lose writes or fail outright.
+   */
+  async function persist(parentSessionId: string): Promise<void> {
+    const previous = persistChains.get(parentSessionId) ?? Promise.resolve();
+    const next = previous.then(() => writeSnapshot(parentSessionId));
+    // Keep the chain alive after a failed write; report the failure to the
+    // caller that caused it, not to the next one.
+    persistChains.set(parentSessionId, next.then(() => undefined, () => undefined));
+    return next;
   }
 
   function emitChange(thread: ThreadRecord): void {
@@ -206,12 +241,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const id = `thread-${randomUUID().slice(0, 8)}`;
     const now = nowISO();
     globalEventSeq += 1;
-    // Check concurrency: if autoRun and running threads >= max, queue it
     const map = await loadParent(input.parentSessionId);
-    const runningCount = [...map.values()].filter(
-      (t) => t.status === "running" || t.status === "queued",
-    ).length;
-    const shouldQueue = input.autoRun && runningCount >= maxConcurrency;
     const record: ThreadRecord = {
       id,
       parentSessionId: input.parentSessionId,
@@ -222,7 +252,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       createdBy: input.createdBy,
       kind: input.kind,
       worktree: null, // Filled when worktree is created
-      status: shouldQueue ? "queued" : (input.autoRun ? "queued" : "idle"),
+      // "queued" means created but not yet spawned. The caller decides
+      // whether a slot is free (countActive) and spawns immediately, or
+      // leaves it for maybeDequeue.
+      status: input.autoRun ? "queued" : "idle",
       flags: makeFlags(),
       waitingFor: null,
       lastActivityAt: now,
@@ -236,9 +269,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       createdAt: now,
       updatedAt: now,
       eventSeq: globalEventSeq,
+      hidden: input.hidden ?? false,
     };
     map.set(id, record);
-    if (input.hidden) hidden.add(id);
     await persist(input.parentSessionId);
     emitChange(record);
     return record;
@@ -251,7 +284,20 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   async function listThreads(parentSessionId: string, includeHidden = false): Promise<ThreadRecord[]> {
     const map = await loadParent(parentSessionId);
-    return [...map.values()].filter((t) => includeHidden || !hidden.has(t.id));
+    return [...map.values()].filter((t) => includeHidden || !t.hidden);
+  }
+
+  /**
+   * Threads occupying a concurrency slot: everything that has been spawned
+   * and has not reached a terminal state. `queued` threads have not been
+   * spawned yet, so they do not occupy a slot. Hidden threads count — a
+   * review thread is a real child session.
+   */
+  async function countActive(parentSessionId: string): Promise<number> {
+    const map = await loadParent(parentSessionId);
+    return [...map.values()].filter(
+      (t) => t.status === "running" || t.status === "idle" || t.status === "waiting-for-input",
+    ).length;
   }
 
   async function updateThread(
@@ -262,6 +308,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const map = await loadParent(parentSessionId);
     const thread = map.get(threadId);
     if (!thread) return null;
+    // Validate state transition if status is changing
+    const statusChanged = update.status !== undefined && update.status !== thread.status;
+    if (statusChanged) {
+      if (!isValidTransition(thread.status, update.status!)) {
+        throw new Error(`Invalid thread state transition: ${thread.status} → ${update.status}`);
+      }
+    }
     globalEventSeq += 1;
     const updated: ThreadRecord = {
       ...thread,
@@ -272,6 +325,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     map.set(threadId, updated);
     await persist(parentSessionId);
     emitChange(updated);
+    // Reaching any terminal state frees a slot. Doing it here rather than in
+    // each caller means every path that ends a thread — done, failed,
+    // cancelled, merged, archived, or a direct updateThread — dequeues.
+    if (statusChanged && TERMINAL_STATES.has(updated.status)) {
+      await maybeDequeue(parentSessionId);
+    }
     return updated;
   }
 
@@ -389,21 +448,26 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   }
 
   async function cancelAllForParent(parentSessionId: string): Promise<void> {
-    const map = await loadParent(parentSessionId);
-    const updates: Promise<ThreadRecord | null>[] = [];
-    for (const thread of map.values()) {
-      if (thread.status === "running" || thread.status === "queued" || thread.status === "waiting-for-input") {
-        updates.push(cancelThread(parentSessionId, thread.id, "parent session deleted"));
+    draining.add(parentSessionId);
+    try {
+      const map = await loadParent(parentSessionId);
+      const updates: Promise<ThreadRecord | null>[] = [];
+      for (const thread of map.values()) {
+        if (thread.status === "running" || thread.status === "queued"
+          || thread.status === "idle" || thread.status === "waiting-for-input") {
+          updates.push(cancelThread(parentSessionId, thread.id, "parent session deleted"));
+        }
       }
+      await Promise.all(updates);
+    } finally {
+      draining.delete(parentSessionId);
     }
-    await Promise.all(updates);
   }
 
   async function deleteThread(parentSessionId: string, threadId: string): Promise<boolean> {
     const map = await loadParent(parentSessionId);
     const deleted = map.delete(threadId);
     if (deleted) {
-      hidden.delete(threadId);
       // Clean up cursors for this thread
       for (const key of cursors.keys()) {
         if (key.endsWith(`:${threadId}`)) {
@@ -459,8 +523,24 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   }
 
   /**
+   * Check if concurrency allows dequeuing a queued thread, and if so,
+   * promote the oldest queued thread. Called after a thread reaches a
+   * terminal state (done/failed/cancelled/merged).
+   */
+  async function maybeDequeue(parentSessionId: string): Promise<void> {
+    // While the parent is being torn down every remaining thread is being
+    // cancelled; promoting a queued one into a fresh child session there
+    // would resurrect work the user just deleted.
+    if (draining.has(parentSessionId)) return;
+    if (await countActive(parentSessionId) >= maxConcurrency) return;
+    await tryDequeue(parentSessionId);
+  }
+
+  /**
    * Try to dequeue a queued thread (called when a running thread finishes).
-   * Returns the dequeued thread or null.
+   * Promotes the oldest queued thread to "running" status and calls the
+   * onThreadDequeued callback so the host can spawn the child session.
+   * Returns the dequeued thread or null if no queued threads exist.
    */
   async function tryDequeue(parentSessionId: string): Promise<ThreadRecord | null> {
     const map = await loadParent(parentSessionId);
@@ -468,13 +548,20 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       .filter((t) => t.status === "queued")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (queued.length === 0) return null;
-    return queued[0] ?? null;
+    const next = queued[0]!;
+    // The host will call setSessionId which transitions queued → running.
+    // We just notify the host; the actual spawn happens asynchronously.
+    if (options.onThreadDequeued) {
+      await options.onThreadDequeued(parentSessionId, next);
+    }
+    return next;
   }
 
   return {
     createThread,
     getThread,
     listThreads,
+    countActive,
     updateThread,
     setSessionId,
     setWorktree,

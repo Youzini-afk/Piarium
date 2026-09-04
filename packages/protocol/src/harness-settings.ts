@@ -6,12 +6,18 @@
 
 import type { PermissionMode } from "./permission-gate.js";
 
+/** A provider + model pair, as stored in a model slot. */
+export interface ModelSelection {
+  providerId: string;
+  modelId: string;
+}
+
 export interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
   output: { visibleBytes: number };
   bash: { waitMs: number };
-  models: Partial<Record<HarnessModelRole, { providerId: string; modelId: string }>>;
+  models: Partial<Record<HarnessModelRole, ModelSelection>>;
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
     eventRetentionDays: number;
@@ -24,6 +30,18 @@ export interface HarnessSettings {
   permissions?: {
     mode?: PermissionMode;
   };
+  /**
+   * Whether a thread runtime (thread registry + child-session spawn) is
+   * available. When false, the thread tools are not registered at all, so
+   * the model never sees tools that can only fail.
+   *
+   * Today this is read from the settings file like every other key, which
+   * means enabling it against a host that has no registry produces tools
+   * that always return `unavailable`. Once the host owns a registry this
+   * should move to a host-supplied session capability rather than a user
+   * setting. Defaults to false when absent.
+   */
+  threadRuntime?: boolean;
 }
 
 export type HarnessModelRole =

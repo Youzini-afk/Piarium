@@ -5,6 +5,7 @@ export * from "./events.js";
 export * from "./foundational-pi-packages.js";
 export * from "./harness.js";
 export * from "./harness-settings.js";
+export * from "./harness-roles.js";
 export * from "./harness-tools.js";
 export * from "./harness-threads.js";
 export * from "./permission-gate.js";

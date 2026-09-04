@@ -1,6 +1,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   evaluateGate,
+  isHighRisk,
   defaultRules,
   type PermissionPolicy,
   type PermissionMode,
@@ -25,6 +26,10 @@ import { HARNESS_TOOL_META } from "@piarium/protocol";
  *     - "Allow for this session" → proceed and remember for this session
  *     - "Deny" or dialog dismissed → block
  *   - deny → block
+ *
+ * A session-scoped grant never covers a high-risk call (§3b.2): approving
+ * `bash` for the session must not also approve `rm -rf` or a write into
+ * `.ssh`. Those are asked every time and never remembered.
  *
  * Only harness tools (those in HARNESS_TOOL_META) are gated. Non-harness
  * tools (MCP, Pi built-in) pass through to Pi's own permission system.
@@ -54,48 +59,80 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
         return undefined;
       }
 
-      // Check session-scoped "always allow" first
-      if (sessionAllow.has(toolName)) {
-        return undefined;
-      }
-
       const result = evaluateGate(toolName, params, policy);
       const decision: PermissionDecision = result.decision;
 
+      if (decision === "deny") {
+        return { block: true, reason: result.reason ?? `denied: ${toolName}` };
+      }
       if (decision === "allow") {
-        return undefined; // Proceed normally
+        // An explicit allow — a mutation:none tool, an accept-edits/bypass
+        // mode, or a rule the user wrote. High-risk categories already
+        // evaluate to "ask" through defaultRules in every mode but bypass,
+        // and bypass is the user saying "stop asking me".
+        return undefined;
       }
 
-      if (decision === "ask") {
-        // Show interactive dialog
-        const choice = await ctx.ui.select(
-          `Allow ${toolName}?`,
-          [ALLOW_ONCE, ALLOW_SESSION, DENY],
-        );
-
-        if (choice === ALLOW_ONCE) {
-          return undefined; // Proceed for this call only
-        }
-        if (choice === ALLOW_SESSION) {
-          sessionAllow.add(toolName);
-          return undefined; // Proceed and remember
-        }
-        // Deny or dialog dismissed (undefined)
-        return {
-          block: true,
-          reason: choice === DENY
-            ? `User denied ${toolName}`
-            : `Permission dialog dismissed for ${toolName}`,
-        };
+      // decision === "ask". A session-scoped grant covers it, except for
+      // high-risk categories: "allow bash for this session" must not also
+      // approve `rm -rf` or a write into `.ssh`.
+      const highRisk = isHighRisk(toolName, params);
+      if (!highRisk && sessionAllow.has(toolName)) {
+        return undefined;
       }
 
-      // deny
+      const choice = await ctx.ui.select(
+        buildDialogTitle(toolName, params),
+        [ALLOW_ONCE, ALLOW_SESSION, DENY],
+      );
+
+      if (choice === ALLOW_ONCE) {
+        return undefined;
+      }
+      if (choice === ALLOW_SESSION) {
+        // High-risk calls are approved once and never remembered.
+        if (!highRisk) sessionAllow.add(toolName);
+        return undefined;
+      }
       return {
         block: true,
-        reason: result.reason ?? `denied: ${toolName}`,
+        reason: choice === DENY
+          ? `User denied ${toolName}`
+          : `Permission dialog dismissed for ${toolName}`,
       };
     });
   };
+}
+
+/**
+ * Build a dialog title with key parameters for the tool call.
+ * Shows the first line of bash command, the path for edit/write,
+ * or the role for dispatch.
+ */
+function buildDialogTitle(toolName: string, params: Record<string, unknown>): string {
+  if (toolName === "bash" || toolName === "write_to_process") {
+    const command = params["command"];
+    if (typeof command === "string") {
+      const firstLine = command.split("\n")[0] ?? command;
+      const truncated = firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+      return `Allow ${toolName}: ${truncated}`;
+    }
+  }
+  if (toolName === "edit" || toolName === "write" || toolName === "apply_patch") {
+    const path = params["path"] ?? params["file_path"];
+    if (typeof path === "string") {
+      return `Allow ${toolName}: ${path}`;
+    }
+  }
+  if (toolName === "dispatch") {
+    const role = params["role"];
+    if (typeof role === "string") {
+      const task = params["task"];
+      const taskStr = typeof task === "string" ? ` — ${task.split("\n")[0]?.slice(0, 60) ?? ""}` : "";
+      return `Allow dispatch (${role})${taskStr}`;
+    }
+  }
+  return `Allow ${toolName}?`;
 }
 
 /**

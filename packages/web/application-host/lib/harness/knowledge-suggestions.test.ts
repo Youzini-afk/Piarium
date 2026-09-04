@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import {
   createSuggestion,
@@ -10,7 +11,8 @@ import {
   DEFAULT_SUGGESTIONS_SETTINGS,
 } from "./knowledge-suggestions.js";
 
-const TEST_DIR = join(import.meta.dirname, ".test-suggestions");
+// Scratch stores live in the OS temp dir; see recall-tool.test.ts.
+const TEST_DIR = join(tmpdir(), "piarium-test-suggestions");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

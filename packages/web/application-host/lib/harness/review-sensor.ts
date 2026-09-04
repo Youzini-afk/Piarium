@@ -1,16 +1,21 @@
 /**
- * Review sensor — auto-dispatch review agent after settled turns with diffs.
+ * Review sensor — auto-open a review thread after a settled turn with a diff.
  *
- * Design: agent-harness.md §9.2.2
+ * Design: agent-harness.md §9.1, §9.2.3
  * Plan: agent-harness-plan.md §3.7
  *
- * agent_settled → if journaled changes non-empty → spawnChild(review, diff)
- * Result injected as Zone 2 <review> section (non-blocking).
- * harness.review.gate = true → wait and inject at turn end.
+ * agent_settled → if journaled changes are non-empty → create a hidden
+ * review thread whose brief is the diff. The thread is created through the
+ * same registry the parent's `dispatch` uses, but with `hidden: true`, so it
+ * never appears in the parent's `threads` list (§9.2.3: the harness's own
+ * agents are invisible to the main agent). Its finding is injected as a
+ * Zone 2 `<review>` section on the next turn and does not block.
+ *
+ * `harness.review.gate = true` makes the turn wait for the finding instead.
  */
 
-import type { WorkerRuntime } from "./worker-runtime.js";
 import type { ResolvedRole } from "./roles.js";
+import type { ThreadRecord, ThreadRegistry } from "./thread-registry.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -23,12 +28,12 @@ export const DEFAULT_REVIEW_SENSOR_SETTINGS: ReviewSensorSettings = {
 };
 
 export interface ReviewSensorDeps {
-  runtime: WorkerRuntime;
+  registry: ThreadRegistry;
   reviewRole: ResolvedRole | null;
   settings: ReviewSensorSettings;
-  /** Get journaled changes for current turn */
+  /** Journaled paths changed during the turn that just settled. */
   getJournaledChanges: (sessionId: string) => Promise<string[]>;
-  /** Get diff text */
+  /** Diff text for those changes. */
   getDiff: (sessionId: string) => Promise<string>;
 }
 
@@ -36,7 +41,7 @@ export interface ReviewSensorDeps {
 
 export interface ReviewResult {
   reviewDispatched: boolean;
-  childId?: string;
+  threadId?: string;
   reviewText?: string;
   blocking: boolean;
 }
@@ -45,35 +50,42 @@ export async function onAgentSettled(
   sessionId: string,
   deps: ReviewSensorDeps,
 ): Promise<ReviewResult> {
-  const { runtime, reviewRole, settings, getJournaledChanges, getDiff } = deps;
+  const { registry, reviewRole, settings, getJournaledChanges, getDiff } = deps;
 
-  // Check if there are journaled changes
   const changes = await getJournaledChanges(sessionId);
   if (changes.length === 0) {
     return { reviewDispatched: false, blocking: false };
   }
 
-  // No review role configured → skip
+  // The review slot defaults to the main model, so an absent role means the
+  // session has no model at all — skip rather than fall back (invariant 6).
   if (!reviewRole) {
     return { reviewDispatched: false, blocking: false };
   }
 
-  // Get diff
   const diff = await getDiff(sessionId);
 
-  // Dispatch review
-  const dispatchResult = await runtime.dispatch("review", `Review this diff:\n${diff}`, {
-    resolvedRole: reviewRole,
+  const thread: ThreadRecord = await registry.createThread({
     parentSessionId: sessionId,
+    brief: `Review this diff:\n${diff}`,
+    role: reviewRole.id,
+    kind: "implementation",
+    createdBy: "agent",
+    autoRun: true,
+    // Review reads the diff; it never needs a worktree of its own.
+    worktree: "none",
+    // Clean context is why the review is worth anything (§9.2.3).
+    carryBlocks: false,
+    tools: reviewRole.definition.tools,
+    permissions: {},
+    systemPromptFragment: reviewRole.definition.systemPromptFragment,
+    hidden: true,
   });
-
-  const childId = dispatchResult.match(/(?:dispatched|queued as) (\S+)/)?.[1];
-  const blocking = settings.gate;
 
   return {
     reviewDispatched: true,
-    ...(childId ? { childId } : {}),
-    blocking,
+    threadId: thread.id,
+    blocking: settings.gate,
   };
 }
 

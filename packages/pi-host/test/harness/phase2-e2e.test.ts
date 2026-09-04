@@ -72,8 +72,6 @@ async function setupP2E2E() {
         unresolvedDiagnostics: [],
         checkpoints: [],
       }),
-      getEntryIdAtTurn: async (_turnsAgo: number) => "entry-1",
-      getTokensBefore: () => 50000,
     };
   }
 
@@ -206,8 +204,16 @@ describe("Phase 2 e2e integration", () => {
   });
 
   it("compaction.before → bridge → router → service: returns custom summary", async () => {
-    const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
+    const { workspaceRoot, dataDir, bridge, harnessServiceHost, knowledgeStore } = await setupP2E2E();
     try {
+      // Taking compaction over requires a block written by the memory
+      // keeper — a `plan` block alone is a checklist, not a summary (D-028).
+      await knowledgeStore.upsertBlock({
+        sessionId: SESSION_ID,
+        label: "progress",
+        content: "Wired the compaction service",
+        updatedBy: "memory-agent",
+      });
       const result = await bridge.request("compaction.before", {
         sessionId: SESSION_ID,
         firstKeptEntryId: "test-entry",
@@ -215,8 +221,8 @@ describe("Phase 2 e2e integration", () => {
       });
       assert.ok(result.summary, "compaction.before should return a summary");
       assert.match(result.summary, /piarium-compaction/, "summary should contain piarium-compaction marker");
-      assert.equal(result.firstKeptEntryId, "entry-1", "firstKeptEntryId should come from deps");
-      assert.equal(result.tokensBefore, 50000, "tokensBefore should come from deps");
+      assert.equal(result.firstKeptEntryId, "test-entry", "firstKeptEntryId should come from Pi preparation params");
+      assert.equal(result.tokensBefore, 50000, "tokensBefore should come from Pi preparation params");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

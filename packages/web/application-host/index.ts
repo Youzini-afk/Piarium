@@ -1116,7 +1116,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     };
   }
 
-  // Compaction deps provider
+  // Compaction deps provider — uses Pi's preparation (firstKeptEntryId /
+  // tokensBefore) passed directly through the service params, no broker
+  // round-trip for entry ID resolution.
   async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
     const store = await getKnowledgeStoreForSession(sessionId);
     if (!store) throw new Error('No knowledge store for session');
@@ -1128,28 +1130,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         unresolvedDiagnostics: [],
         checkpoints: [],
       }),
-      // Wire getEntryIdAtTurn to the Pi session entries via the broker.
-      // Fetch the session entries (branch scope) and pick the entry at
-      // position (length - turnsAgo) from the end. If the session has
-      // fewer entries than turnsAgo, or the broker call fails, return
-      // null — the compaction service will throw "unavailable" and Pi
-      // falls back to its own LLM summarization.
-      getEntryIdAtTurn: async (turnsAgo: number): Promise<string | null> => {
-        try {
-          const entriesResult = await piRuntimeBroker.requestForSession(
-            sessionId,
-            'session.entries',
-            { sessionId, scope: 'branch' },
-          ) as { entries: Array<{ id: string }>; leafId: string | null };
-          const entries = entriesResult.entries;
-          if (entries.length < turnsAgo) return null;
-          const targetIndex = entries.length - turnsAgo;
-          return entries[targetIndex]!.id ?? null;
-        } catch {
-          return null;
-        }
-      },
-      getTokensBefore: () => 0,
     };
   }
 

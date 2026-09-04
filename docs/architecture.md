@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ## 1. Context
 
@@ -414,23 +414,76 @@ The agent harness extends the host protocol with worker→host service
 requests. Two out-of-band methods ride on the same broker transport as
 `workspace.mutation.request`/`respond`:
 
-- `harness.request` — pi-host sends `{ method, params, requestId, sessionId }`
-  to invoke a host-side harness service.
+- `harness.request` — pi-host sends `{ method, params, requestId, sessionId, timeoutMs? }`
+  to invoke a host-side harness service. The optional `timeoutMs` overrides the
+  router's default timeout (e.g. `thread.wait` carries a longer timeout).
 - `harness.respond` — host replies with `{ requestId, sessionId, ok: true, result }` or `{ requestId, sessionId, ok: false, error: HarnessError }`, matching `HarnessRespondParams`.
 
-The `HarnessServiceMap` defines ten methods: `shell.exec`, `shell.read`,
-`shell.write`, `shell.kill`, `output.store`, `output.read`,
-`search.content`, `fs.lock`, `lsp.diagnostics`, and
-`lsp.diagnosticsSnapshot`. Each has typed params and result in
-`@piarium/protocol`. The host's `HarnessRouter` dispatches requests to
-registered services and the `HostServicesBridge` on the pi-host side
-resolves the response promise.
+The `HarnessServiceMap` defines the following method groups:
+
+- **Shell**: `shell.exec`, `shell.read`, `shell.write`, `shell.kill`
+- **Output**: `output.store`, `output.read`
+- **Search**: `search.content`
+- **Filesystem**: `fs.lock`
+- **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`
+- **Web**: `web.fetch`, `web.read`, `web.search` (registered when available)
+- **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`
+- **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
+
+Each has typed params and result in `@piarium/protocol`. The host's
+`HarnessRouter` dispatches requests to registered services and the
+`HostServicesBridge` on the pi-host side resolves the response promise.
+The router creates an `AbortController` per request, aborted either by
+the per-request timeout or by session shutdown. Services that block
+(e.g. `thread.wait`) race on `ctx.signal` so they stop promptly.
+
+Both sides default to a 30s timeout, which a deliberately long call has
+to override: `thread.wait` asks the bridge for the wait duration plus a
+buffer, the bridge carries it in `harness.request.timeoutMs`, and the
+router clamps it to `HARNESS_MAX_REQUEST_TIMEOUT_MS` (1 hour) so a
+worker cannot pin a host handler open indefinitely.
+
+### 5.2 Thread protocol (§9.3)
+
+Thread operations use the harness service protocol. The thread registry
+is the single source of truth for thread state, persisted to
+`PIARIUM_DATA_DIR/threads/<hostId>/<parentSessionId>.json` with atomic
+temp-file + rename writes.
+
+Thread lifecycle:
+```
+queued → running → idle → waiting-for-input → done → merged → archived
+                 ↘ failed                    ↘ cancelled
+```
+
+State transitions are validated by the registry; invalid transitions
+throw. The `globalEventSeq` counter is initialized from persisted
+records on `loadParent` and incremented on every state change.
+
+Thread params do not carry `parentSessionId` — the service resolves it
+from `ctx.sessionId`. Observer cursors (`ThreadViewCursor`) enable
+incremental views: `thread.list` and `thread.wait` only show changes
+since the observer's last cursor. `thread.wait` blocks until a thread
+changes state, the timeout fires, or the abort signal fires.
+
+Concurrency is enforced by the registry. A slot is occupied by a thread
+that has been spawned and has not finished (`running`, `idle`,
+`waiting-for-input`); `queued` means created but not yet spawned, so it
+holds nothing. When `countActive >= maxConcurrency` a dispatch is
+queued, and any terminal transition promotes the oldest queued thread
+through the `onThreadDequeued` callback — the dequeue lives in
+`updateThread`, so every path that ends a thread frees its slot.
+Tearing a parent down suppresses dequeue: promoting a queued thread
+there would resurrect work the user just deleted.
 
 `HarnessSettings` (in `harness-settings.ts`) configures shell
-interpreter selection, output truncation budgets, and per-tool enable
-flags. The Settings page contribution lets users toggle tools like grep;
-when disabled, the next session does not register the tool and Pi falls
-back to its built-in equivalent.
+interpreter selection, output truncation budgets, per-tool enable flags,
+the permission mode, and a `threadRuntime` flag that decides whether the
+thread tools are registered at all — a host without a thread registry
+leaves them out rather than offering tools that can only fail. The
+Settings page contribution lets users toggle tools like grep; when
+disabled, the next session does not register the tool and Pi falls back
+to its built-in equivalent.
 
 ## 6. Data ownership
 

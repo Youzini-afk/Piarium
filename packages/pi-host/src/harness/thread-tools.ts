@@ -1,7 +1,9 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
+import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
+  ResolvedRole,
   ThreadDispatchResult,
   ThreadListResult,
   ThreadWaitResult,
@@ -10,6 +12,23 @@ import type {
   ThreadMergeResult,
   ThreadKillResult,
 } from "@piarium/protocol";
+import { DEFAULT_WAIT_TIMEOUT_MS, buildTeamPrompt } from "@piarium/protocol";
+
+/**
+ * Build an error result for a thread tool failure.
+ * Returns isError:true with the harness error code and message.
+ */
+function threadErrorResult(toolName: string, error: unknown): { content: Array<{ type: "text"; text: string }>; isError: true; details: Record<string, unknown> } {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error instanceof HarnessRequestError || (error as { code?: string }).code !== undefined)
+    ? (error as { code: string }).code
+    : "failed";
+  return {
+    content: [{ type: "text", text: `${toolName} failed (${code}): ${message}` }],
+    isError: true,
+    details: { code },
+  };
+}
 
 const DispatchParams = Type.Object({
   role: Type.String(),
@@ -51,7 +70,21 @@ const ThreadKillParams = Type.Object({
   keep_worktree: Type.Optional(Type.Boolean()),
 });
 
-export function createDispatchTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+/**
+ * `dispatch` presents the roles as a team (§9.2.4). Only roles whose model
+ * slot resolves are listed and accepted: an unconfigured slot means the
+ * capability is not registered rather than silently borrowing the main
+ * model (invariant 6). The team prompt is generated from that role set at
+ * session creation, so it is static for the session and does not invalidate
+ * the prefix cache.
+ */
+export function createDispatchTool(
+  bridge: HostServicesBridge,
+  _sessionId: string,
+  roles: readonly ResolvedRole[] = [],
+): ToolDefinition {
+  const available = roles.map((r) => r.id);
+  const teamPrompt = buildTeamPrompt([...roles]);
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
@@ -61,14 +94,23 @@ export function createDispatchTool(bridge: HostServicesBridge, _sessionId: strin
       "Dispatch is asynchronous. Use wait to block until something changes; threads is a quick non-blocking glance — do not call it in a loop.",
       "Teammates report deviations from your brief; trust the report over your assumptions.",
       "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
+      ...(teamPrompt ? [teamPrompt] : []),
     ],
     parameters: DispatchParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+      if (!available.includes(params.role as ResolvedRole["id"])) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `unknown role: ${params.role}. Available roles: ${available.join(", ") || "(none configured)"}`,
+          }],
+          isError: true,
+          details: { code: "invalid-params", availableRoles: available },
+        };
+      }
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.dispatch">("thread.dispatch", {
-          parentSessionId,
           role: params.role,
           task: params.task,
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
@@ -76,8 +118,7 @@ export function createDispatchTool(bridge: HostServicesBridge, _sessionId: strin
         const typed = result as ThreadDispatchResult;
         return { content: [{ type: "text", text: typed.text }], details: { threadId: typed.threadId, queued: typed.queued } };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `dispatch failed: ${message}` }], details: {} };
+        return threadErrorResult("dispatch", error);
       }
     },
   });
@@ -94,19 +135,16 @@ export function createThreadsTool(bridge: HostServicesBridge, _sessionId: string
     ],
     parameters: ThreadListParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.list">("thread.list", {
-          parentSessionId,
           ...(params.ids !== undefined ? { ids: params.ids } : {}),
           ...(params.full !== undefined ? { full: params.full } : {}),
         });
         const typed = result as ThreadListResult;
         return { content: [{ type: "text", text: typed.text }], details: { count: typed.threads.length } };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `threads failed: ${message}` }], details: { count: 0 } };
+        return threadErrorResult("threads", error);
       }
     },
   });
@@ -123,19 +161,28 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
     ],
     parameters: ThreadWaitParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
+        const waitTimeout = params.timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS;
+        // Pass timeout + 5s buffer to bridge so the bridge/router don't
+        // time out before the service's internal wait timeout fires.
         const result = await bridge.request<"thread.wait">("thread.wait", {
-          parentSessionId,
           ...(params.ids !== undefined ? { ids: params.ids } : {}),
-          ...(params.timeout_ms !== undefined ? { timeoutMs: params.timeout_ms } : {}),
-        });
+          timeoutMs: waitTimeout,
+        }, { timeoutMs: waitTimeout + 5_000, ...(signal ? { signal } : {}) });
         const typed = result as ThreadWaitResult;
-        return { content: [{ type: "text", text: typed.text }], details: { done: typed.done, running: typed.running, queued: typed.queued, timedOut: typed.timedOut } };
+        return {
+          content: [{ type: "text", text: typed.text }],
+          details: {
+            done: typed.done,
+            running: typed.running,
+            waiting: typed.waiting,
+            queued: typed.queued,
+            timedOut: typed.timedOut,
+          },
+        };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `wait failed: ${message}` }], details: {} };
+        return threadErrorResult("wait", error);
       }
     },
   });
@@ -150,11 +197,9 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
     promptGuidelines: [],
     parameters: ThreadSendParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.send">("thread.send", {
-          parentSessionId,
           threadId: params.threadId,
           message: params.message,
           from: "parent-agent",
@@ -162,8 +207,7 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
         const typed = result as ThreadSendResult;
         return { content: [{ type: "text", text: typed.accepted ? `sent to ${params.threadId} (${typed.status})` : "not accepted" }], details: { accepted: typed.accepted, status: typed.status } };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `send failed: ${message}` }], details: { accepted: false } };
+        return threadErrorResult("send", error);
       }
     },
   });
@@ -180,11 +224,9 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
     ],
     parameters: ThreadReadParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.read">("thread.read", {
-          parentSessionId,
           threadId: params.threadId,
           ...(params.what !== undefined ? { what: params.what } : {}),
           ...(params.since !== undefined ? { since: params.since } : {}),
@@ -192,8 +234,7 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
         const typed = result as ThreadReadResult;
         return { content: [{ type: "text", text: typed.text }], details: { hasReport: typed.report !== null, traceHandle: typed.traceHandle } };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `read_thread failed: ${message}` }], details: { hasReport: false, traceHandle: null } };
+        return threadErrorResult("read_thread", error);
       }
     },
   });
@@ -208,18 +249,15 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
     promptGuidelines: [],
     parameters: ThreadMergeParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.merge">("thread.merge", {
-          parentSessionId,
           threadId: params.threadId,
         });
         const typed = result as ThreadMergeResult;
         return { content: [{ type: "text", text: typed.text }], details: { merged: typed.merged, conflicts: typed.conflicts } };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `merge failed: ${message}` }], details: { merged: 0, conflicts: [] } };
+        return threadErrorResult("merge", error);
       }
     },
   });
@@ -234,19 +272,16 @@ export function createKillTool(bridge: HostServicesBridge, _sessionId: string): 
     promptGuidelines: [],
     parameters: ThreadKillParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
-        const parentSessionId = ctx?.sessionManager.getSessionId() ?? _sessionId;
         const result = await bridge.request<"thread.kill">("thread.kill", {
-          parentSessionId,
           threadId: params.threadId,
           ...(params.keep_worktree !== undefined ? { keepWorktree: params.keep_worktree } : {}),
         });
         const typed = result as ThreadKillResult;
         return { content: [{ type: "text", text: typed.text }], details: {} };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: `kill failed: ${message}` }], details: {} };
+        return threadErrorResult("kill", error);
       }
     },
   });

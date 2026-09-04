@@ -1,0 +1,561 @@
+/**
+ * Real Pi session e2e — the three in-process extensions that session-host
+ * registers for every session, exercised inside an actual agent loop with a
+ * faux provider:
+ *
+ *   - zone2-extension        (before_agent_start → <piarium-context>)
+ *   - compaction-extension   (session_before_compact → { compaction })
+ *   - permission-gate        (tool_call → ui.select → allow/deny)
+ *
+ * The tool-level e2e files (phase2/phase3/phase3b) drive `tool.execute`
+ * directly, which never reaches a Pi hook. These tests wire a real
+ * SessionHost to a real HarnessRouter + HarnessServiceHost, so the hook
+ * path, the bridge round-trip and the UI answer flow are all covered.
+ */
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
+import type { Context } from "@earendil-works/pi-ai";
+import type { HostEvent, HostEventData } from "@piarium/protocol";
+
+import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
+import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
+import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
+import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
+import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
+import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
+
+import { SessionHost } from "../../src/session-host.js";
+
+const WORKSPACE_ID = "session-e2e-workspace";
+
+interface UiRequest {
+  id: string;
+  method: string;
+  title: string;
+}
+
+/**
+ * Build a SessionHost whose `harness.request` events are served by a real
+ * router, and whose `extension.ui.request` dialogs are answered by
+ * `answerDialog`. Returns the host plus the recorded dialog requests.
+ */
+async function setupSession(options: {
+  root: string;
+  faux: ReturnType<typeof registerFauxProvider>;
+  serviceHostOptions?: Partial<HarnessServiceHostOptions>;
+  /** Answer for a `ui.select` dialog; undefined = dismiss. */
+  answerDialog?: (request: UiRequest, index: number) => string | undefined;
+}) {
+  const { root, faux } = options;
+  const agentDir = join(root, "agent");
+  await mkdir(agentDir, { recursive: true });
+
+  const harnessServiceHost = createHarnessServiceHost({
+    search: async () => ({ status: "empty" as const, generation: undefined }),
+    resolveWorkspaceRoot: async () => root,
+    discoveredShells: {
+      hasBash: process.platform !== "win32",
+      hasPowerShell: process.platform === "win32",
+    },
+    ...options.serviceHostOptions,
+  });
+
+  const uiRequests: UiRequest[] = [];
+  let host: SessionHost;
+
+  const router = createHarnessRouter({
+    respond: async (sessionId, requestId, outcome) => {
+      host.respondHarness(sessionId, requestId, outcome);
+    },
+    resolveWorkspace: async () => WORKSPACE_ID,
+  });
+  registerHarnessServices(router, harnessServiceHost);
+
+  const emit = (<E extends HostEvent>(event: E, data: HostEventData<E>): void => {
+    if (event === "harness.request") {
+      const payload = data as HostEventData<"harness.request">;
+      void router.processEvent({
+        kind: "host",
+        sessionId: payload.sessionId,
+        envelope: { kind: "event", event: "harness.request", data: payload },
+      });
+      return;
+    }
+    if (event === "extension.ui.request") {
+      const payload = data as { id?: string; method?: string; payload?: { title?: string } };
+      // `fire()` emits status/notify updates without an id; only dialogs
+      // (select/confirm/input) carry one and expect an answer.
+      if (!payload.id || payload.method !== "select") return;
+      const request: UiRequest = {
+        id: payload.id,
+        method: payload.method,
+        title: payload.payload?.title ?? "",
+      };
+      const index = uiRequests.length;
+      uiRequests.push(request);
+      const answer = options.answerDialog?.(request, index);
+      host.ui.respond(
+        answer === undefined
+          ? { cancelled: true, requestId: payload.id }
+          : { requestId: payload.id, value: answer },
+      );
+    }
+  }) as <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
+
+  const model = faux.getModel();
+  const configureServices = async (services: AgentSessionServices) => {
+    services.modelRuntime.registerProvider(model.provider, {
+      api: model.api,
+      baseUrl: model.baseUrl,
+      models: [
+        {
+          api: model.api,
+          baseUrl: model.baseUrl,
+          contextWindow: model.contextWindow,
+          cost: model.cost,
+          id: model.id,
+          input: model.input,
+          maxTokens: model.maxTokens,
+          name: model.name,
+          reasoning: model.reasoning,
+        },
+      ],
+    });
+    await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+    return { model };
+  };
+
+  host = new SessionHost({
+    agentDir,
+    configureServices,
+    emit,
+    projectTrustOverride: true,
+  });
+
+  return {
+    host,
+    harnessServiceHost,
+    router,
+    uiRequests,
+    dispose: async () => {
+      await host.dispose();
+      router.dispose();
+      await harnessServiceHost.dispose();
+    },
+  };
+}
+
+async function withTempRoot(prefix: string, fn: (root: string) => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  try {
+    await fn(root);
+  } finally {
+    try { await rm(root, { force: true, recursive: true }); } catch { /* Windows EBUSY */ }
+  }
+}
+
+// ── Zone 2 ─────────────────────────────────────────────────────────
+
+describe("session e2e — zone2 extension", () => {
+  it("injects assembled <piarium-context> into the first request and leaves Zone 0 alone", async () => {
+    await withTempRoot("piarium-s-zone2-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(context); return fauxAssistantMessage("ok 1"); },
+        (context) => { contexts.push(context); return fauxAssistantMessage("ok 2"); },
+      ]);
+
+      const material: Zone2Material = {
+        userEdits: [{ path: "packages/web/lib/foo.ts", kind: "modified" }],
+        userCommands: [{ command: "bun test", exitCode: 1, at: Date.now() }],
+        newDiagnostics: [],
+        git: { branch: "main", changed: 1 },
+        knowledge: [],
+        blocks: [],
+        contextUsage: null,
+      };
+
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: { zone2Provider: async () => material },
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "first turn");
+        await session.host.session.waitForIdle();
+        await session.host.prompt(snapshot.sessionId, "second turn");
+        await session.host.session.waitForIdle();
+
+        assert.equal(contexts.length, 2, "expected one provider call per turn");
+
+        const firstMessages = JSON.stringify(contexts[0]!.messages);
+        assert.match(firstMessages, /<piarium-context/, "Zone 2 block must reach the provider");
+        assert.match(firstMessages, /packages\/web\/lib\/foo\.ts/, "user edit must be listed");
+        assert.match(firstMessages, /not instructions/, "Zone 2 must be marked as data");
+
+        // Zone 2 is a message, never the system prompt (§4.2 / invariant 2).
+        const system = contexts[0]!.systemPrompt ?? "";
+        assert.doesNotMatch(system, /<piarium-context/, "Zone 2 must not touch the system prompt");
+        assert.equal(contexts[1]!.systemPrompt ?? "", system, "system prompt must stay byte-identical");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("sends no context message when the host has no Zone 2 material", async () => {
+    await withTempRoot("piarium-s-zone2-empty-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(context); return fauxAssistantMessage("ok"); },
+      ]);
+
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: {
+          zone2Provider: async () => ({
+            userEdits: [],
+            userCommands: [],
+            newDiagnostics: [],
+            git: null,
+            knowledge: [],
+            blocks: [],
+            contextUsage: null,
+          }),
+        },
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "hello");
+        await session.host.session.waitForIdle();
+
+        assert.equal(contexts.length, 1);
+        assert.doesNotMatch(
+          JSON.stringify(contexts[0]!.messages),
+          /<piarium-context/,
+          "an empty Zone 2 must not produce an empty block",
+        );
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+// ── Compaction ─────────────────────────────────────────────────────
+
+/**
+ * Drive four large turns so the session exceeds `keepRecentTokens`, then
+ * compact. Returns the provider call count before and after compaction.
+ */
+async function runCompactionCase(options: {
+  root: string;
+  compactionDepsProvider: (sessionId: string) => Promise<CompactionHandlerDeps>;
+}): Promise<{ callsBefore: number; callsAfter: number; messagesJson: string }> {
+  const faux = registerFauxProvider();
+  const largeText = "x".repeat(30000); // ~7500 tokens per response
+  faux.setResponses([
+    () => fauxAssistantMessage(`${largeText} turn 1`),
+    () => fauxAssistantMessage(`${largeText} turn 2`),
+    () => fauxAssistantMessage(`${largeText} turn 3`),
+    () => fauxAssistantMessage("done"),
+    // Spare responses: when the harness declines to take compaction over,
+    // Pi summarizes with the model and consumes one of these.
+    () => fauxAssistantMessage("pi-generated summary"),
+    () => fauxAssistantMessage("pi-generated summary 2"),
+  ]);
+
+  const session = await setupSession({
+    root: options.root,
+    faux,
+    serviceHostOptions: { compactionDepsProvider: options.compactionDepsProvider },
+  });
+
+  try {
+    const snapshot = await session.host.create(options.root);
+    for (const prompt of ["turn 1", "turn 2", "turn 3", "say done"]) {
+      await session.host.prompt(snapshot.sessionId, prompt);
+      await session.host.session.waitForIdle();
+    }
+    const callsBefore = faux.state.callCount;
+    await session.host.session.compact();
+    const callsAfter = faux.state.callCount;
+    return {
+      callsBefore,
+      callsAfter,
+      messagesJson: JSON.stringify(session.host.session.messages),
+    };
+  } finally {
+    await session.dispose();
+    faux.unregister();
+  }
+}
+
+describe("session e2e — compaction extension", () => {
+  it("takes compaction over with zero model calls once the memory keeper has blocks", async () => {
+    await withTempRoot("piarium-s-compact-", async (root) => {
+      let store: KnowledgeStore | undefined;
+      try {
+        store = await openWorkspaceKnowledge({
+          dataDir: join(root, "data"),
+          hostId: "test-host",
+          workspaceId: WORKSPACE_ID,
+          embedding: null,
+        });
+        await store.upsertBlock({
+          sessionId: "unused",
+          label: "progress",
+          content: "keeper-written-progress-marker",
+          updatedBy: "memory-agent",
+        });
+        const openStore = store;
+
+        const result = await runCompactionCase({
+          root,
+          compactionDepsProvider: async (sessionId) => {
+            // The keeper block is written under the real session id once it
+            // is known; mirror it here so getBlocks(sessionId) finds it.
+            await openStore.upsertBlock({
+              sessionId,
+              label: "progress",
+              content: "keeper-written-progress-marker",
+              updatedBy: "memory-agent",
+            });
+            return {
+              store: openStore,
+              settings: DEFAULT_COMPACTION_SETTINGS,
+              getFacts: async (): Promise<CompactionFacts> => ({
+                touchedFiles: ["a.ts"],
+                unresolvedDiagnostics: [],
+                checkpoints: [],
+              }),
+            };
+          },
+        });
+
+        assert.match(
+          result.messagesJson,
+          /<piarium-compaction/,
+          "the harness summary must replace the cut-off history",
+        );
+        assert.match(
+          result.messagesJson,
+          /keeper-written-progress-marker/,
+          "the keeper's block must be carried across compaction",
+        );
+        assert.equal(
+          result.callsAfter,
+          result.callsBefore,
+          "taking compaction over must cost zero model calls",
+        );
+      } finally {
+        await store?.close();
+      }
+    });
+  });
+
+  it("leaves compaction to Pi when only the agent's plan block exists", async () => {
+    await withTempRoot("piarium-s-compact-plan-", async (root) => {
+      let store: KnowledgeStore | undefined;
+      try {
+        store = await openWorkspaceKnowledge({
+          dataDir: join(root, "data"),
+          hostId: "test-host",
+          workspaceId: WORKSPACE_ID,
+          embedding: null,
+        });
+        const openStore = store;
+
+        const result = await runCompactionCase({
+          root,
+          compactionDepsProvider: async (sessionId) => {
+            await openStore.upsertBlock({
+              sessionId,
+              label: "plan",
+              content: "- [ ] a task",
+              updatedBy: "agent",
+            });
+            return {
+              store: openStore,
+              settings: DEFAULT_COMPACTION_SETTINGS,
+              getFacts: async (): Promise<CompactionFacts> => ({
+                touchedFiles: ["a.ts"],
+                unresolvedDiagnostics: [],
+                checkpoints: [],
+              }),
+            };
+          },
+        });
+
+        // A todo checklist is not a summary: replacing the conversation with
+        // it would lose the work, so the host reports `unavailable` and Pi
+        // summarizes with the model instead.
+        assert.doesNotMatch(
+          result.messagesJson,
+          /<piarium-compaction/,
+          "the harness must not take compaction over without keeper blocks",
+        );
+        assert.ok(
+          result.callsAfter > result.callsBefore,
+          `Pi must run its own summarization (calls ${result.callsBefore} → ${result.callsAfter})`,
+        );
+      } finally {
+        await store?.close();
+      }
+    });
+  });
+});
+
+// ── Permission gate ────────────────────────────────────────────────
+
+describe("session e2e — permission gate extension", () => {
+  it("asks before a write and performs it when the user allows once", async () => {
+    await withTempRoot("piarium-s-perm-allow-", async (root) => {
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "allowed.txt", content: "hi" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+
+      const session = await setupSession({
+        root,
+        faux,
+        answerDialog: () => "Allow once",
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "write allowed.txt");
+        await session.host.session.waitForIdle();
+
+        assert.equal(session.uiRequests.length, 1, "a write in normal mode must ask exactly once");
+        assert.match(
+          session.uiRequests[0]!.title,
+          /allowed\.txt/,
+          "the dialog must name the path being written",
+        );
+        assert.ok(existsSync(join(root, "allowed.txt")), "allowing once must let the write through");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("blocks the tool and leaves the file alone when the user denies", async () => {
+    await withTempRoot("piarium-s-perm-deny-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "denied.txt", content: "hi" })]),
+        (context) => { contexts.push(context); return fauxAssistantMessage("understood"); },
+      ]);
+
+      const session = await setupSession({
+        root,
+        faux,
+        answerDialog: () => "Deny",
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "write denied.txt");
+        await session.host.session.waitForIdle();
+
+        assert.equal(session.uiRequests.length, 1);
+        assert.ok(!existsSync(join(root, "denied.txt")), "a denied write must not touch the disk");
+        // The model has to learn it was blocked, and why.
+        assert.ok(contexts.length >= 1, "the agent loop must continue after a block");
+        assert.match(JSON.stringify(contexts[0]!.messages), /denied/i, "the block reason must reach the model");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("remembers 'allow for this session' but still asks for a high-risk path", async () => {
+    await withTempRoot("piarium-s-perm-session-", async (root) => {
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "one.txt", content: "1" })]),
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "two.txt", content: "2" })]),
+        () => fauxAssistantMessage([fauxToolCall("write", { path: ".env", content: "SECRET=1" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+
+      const session = await setupSession({
+        root,
+        faux,
+        answerDialog: (_request, index) => (index === 0 ? "Allow for this session" : "Deny"),
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "write three files");
+        await session.host.session.waitForIdle();
+
+        // First write asks and is granted for the session; the second write
+        // must not ask again; the third targets `.env`, which is high-risk
+        // and therefore asks despite the session grant (§3b.2).
+        assert.equal(
+          session.uiRequests.length,
+          2,
+          `expected 2 dialogs (first write + high-risk .env), got ${session.uiRequests.length}: ${session.uiRequests.map((r) => r.title).join(" | ")}`,
+        );
+        assert.match(session.uiRequests[1]!.title, /\.env/, "the second dialog must be the .env write");
+        assert.ok(existsSync(join(root, "one.txt")), "first write was allowed");
+        assert.ok(existsSync(join(root, "two.txt")), "second write rode the session grant");
+        assert.ok(!existsSync(join(root, ".env")), "the high-risk write was denied");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("does not ask for a read-only tool", async () => {
+    await withTempRoot("piarium-s-perm-read-", async (root) => {
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "missing.txt" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+
+      const session = await setupSession({
+        root,
+        faux,
+        answerDialog: () => "Deny",
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "read a file");
+        await session.host.session.waitForIdle();
+
+        assert.equal(
+          session.uiRequests.length,
+          0,
+          "mutation:none tools are allowed without a prompt",
+        );
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});

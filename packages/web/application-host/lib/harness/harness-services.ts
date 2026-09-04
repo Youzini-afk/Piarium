@@ -26,6 +26,7 @@ import { assembleZone2Content } from "./zone2.js";
 import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
+import { ROLE_DEFINITIONS } from "./roles.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -141,13 +142,15 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.compactionDepsProvider) {
-        // Fallback: no custom compaction — return the raw params so Pi
-        // proceeds with its own LLM summarization (hook result is ignored
-        // when compaction field is absent).
         throw new HarnessServiceError("unavailable", "Compaction deps not configured");
       }
       const deps = await host.compactionDepsProvider(ctx.sessionId);
-      const result = await handleBeforeCompact(ctx.sessionId, deps);
+      // Use Pi's preparation directly — no broker round-trip for entry ID
+      const result = await handleBeforeCompact(
+        ctx.sessionId,
+        deps,
+        { firstKeptEntryId: params.firstKeptEntryId, tokensBefore: params.tokensBefore },
+      );
       return result;
     },
   };
@@ -293,28 +296,40 @@ function advanceCursor(
 
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.threadRegistry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      // Check concurrency: count running + queued threads
-      const existing = await host.threadRegistry.listThreads(params.parentSessionId);
-      const activeCount = existing.filter(
-        (t) => t.status === "running" || t.status === "queued",
-      ).length;
+      // Look up role definition — reject unknown roles
+      const roleDef = ROLE_DEFINITIONS[params.role as keyof typeof ROLE_DEFINITIONS];
+      if (!roleDef) {
+        throw new HarnessServiceError(
+          "failed",
+          `Unknown role: ${params.role}. Available roles: ${Object.keys(ROLE_DEFINITIONS).join(", ")}`,
+        );
+      }
+      const parentSessionId = ctx.sessionId;
+      // Map role worktree mode to registry worktree mode
+      const worktreeMode = roleDef.worktree === "none" ? "none"
+        : roleDef.worktree === "shared" ? "shared"
+        : "isolated";
+      // A queued thread has not been spawned, so it does not occupy a slot;
+      // the registry owns that definition so dispatch and maybeDequeue agree.
+      const activeCount = await host.threadRegistry.countActive(parentSessionId);
       const maxConcurrency = host.threadRegistry.maxConcurrency ?? 12;
       const isQueued = activeCount >= maxConcurrency;
 
       const record = await host.threadRegistry.createThread({
-        parentSessionId: params.parentSessionId,
+        parentSessionId,
         brief: params.task,
         role: params.role,
         kind: "implementation",
         createdBy: "agent",
         autoRun: true,
-        worktree: "isolated",
-        tools: [],
+        worktree: worktreeMode,
+        tools: roleDef.tools,
         permissions: {},
+        systemPromptFragment: roleDef.systemPromptFragment,
         ...(params.scope ? { scope: params.scope } : {}),
       });
 
@@ -329,19 +344,20 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
 
       // Spawn the child session
       const { sessionId } = await host.threadSpawnSession({
-        parentSessionId: params.parentSessionId,
+        parentSessionId,
         brief: params.task,
         role: params.role,
         kind: "implementation",
         createdBy: "agent",
         autoRun: true,
-        worktree: "isolated",
-        tools: [],
+        worktree: worktreeMode,
+        tools: roleDef.tools,
         permissions: {},
         threadId: record.id,
+        systemPromptFragment: roleDef.systemPromptFragment,
         ...(params.scope ? { scope: params.scope } : {}),
       });
-      await host.threadRegistry.setSessionId(params.parentSessionId, record.id, sessionId);
+      await host.threadRegistry.setSessionId(parentSessionId, record.id, sessionId);
       return {
         text: `dispatched ${record.id} (${params.role})`,
         threadId: record.id,
@@ -359,7 +375,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
       const observerSessionId = ctx.sessionId;
-      let threads = await registry.listThreads(params.parentSessionId);
+      let threads = await registry.listThreads(observerSessionId);
       if (params.ids) {
         threads = threads.filter((t) => params.ids!.includes(t.id));
       }
@@ -421,7 +437,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
 
       // Check if any target thread has changed since the observer's cursor
       const checkForChanges = async (): Promise<boolean> => {
-        const allThreads = await registry.listThreads(params.parentSessionId, true);
+        const allThreads = await registry.listThreads(observerSessionId, true);
         const targetIds = params.ids ?? allThreads.map((t) => t.id);
         for (const thread of allThreads) {
           if (!targetIds.includes(thread.id)) continue;
@@ -438,17 +454,25 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       let timedOut = false;
 
       if (!hasChanges) {
-        // Block until a change or timeout
+        // Block until a change, timeout, or abort signal
         let resolveWait: () => void;
         const changePromise = new Promise<void>((resolve) => {
           resolveWait = resolve;
         });
-        const unsub = registry.subscribeToChanges(params.parentSessionId, () => {
+        const unsub = registry.subscribeToChanges(observerSessionId, () => {
           resolveWait();
         });
         const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+        // Also race on the abort signal so the service stops promptly
+        // when the router aborts (e.g. session shutdown).
+        const signalPromise = new Promise<void>((resolve) => {
+          if (ctx.signal) {
+            if (ctx.signal.aborted) resolve();
+            else ctx.signal.addEventListener("abort", () => resolve(), { once: true });
+          }
+        });
         try {
-          await Promise.race([changePromise, timeoutPromise]);
+          await Promise.race([changePromise, timeoutPromise, signalPromise]);
           hasChanges = await checkForChanges();
           timedOut = !hasChanges;
         } finally {
@@ -457,7 +481,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       }
 
       // Format result
-      const allThreads = await registry.listThreads(params.parentSessionId, true);
+      const allThreads = await registry.listThreads(observerSessionId, true);
       const targetIds = params.ids ?? allThreads.map((t) => t.id);
       const targetThreads = allThreads.filter((t) => targetIds.includes(t.id));
 
@@ -465,14 +489,17 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         t.status === "done" || t.status === "failed" || t.status === "cancelled" || t.status === "merged",
       );
       const running = targetThreads.filter((t) => t.status === "running");
+      // A thread waiting for an answer is the most actionable state there
+      // is (§9.3.5), so it gets its own bucket instead of falling through
+      // the cracks between "running" and "done".
+      const waiting = targetThreads.filter((t) => t.status === "waiting-for-input" || t.status === "idle");
       const queued = targetThreads.filter((t) => t.status === "queued");
 
+      const counts = `${done.length} done \u00b7 ${running.length} running \u00b7 ${waiting.length} waiting \u00b7 ${queued.length} queued`;
       const lines: string[] = [];
-      if (timedOut) {
-        lines.push(`timed out after ${Math.round(timeoutMs / 1000)}s \u2014 ${done.length} done \u00b7 ${running.length} running \u00b7 ${queued.length} queued`);
-      } else {
-        lines.push(`${done.length} done \u00b7 ${running.length} running \u00b7 ${queued.length} queued`);
-      }
+      lines.push(timedOut
+        ? `timed out after ${Math.round(timeoutMs / 1000)}s \u2014 ${counts}`
+        : counts);
 
       for (const t of done) {
         if (t.report) {
@@ -489,7 +516,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         }
         advanceCursor(observerSessionId, t, registry);
       }
-      for (const t of running) {
+      for (const t of [...running, ...waiting]) {
         const cursor = registry.getCursor(observerSessionId, t.id);
         lines.push(formatThreadLine(t, cursor, false));
         advanceCursor(observerSessionId, t, registry);
@@ -503,6 +530,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         text: lines.join("\n"),
         done: done.length,
         running: running.length,
+        waiting: waiting.length,
         queued: queued.length,
         timedOut,
       };
@@ -512,11 +540,12 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
 
 export function createThreadSendService(host: HarnessServiceHost): HarnessService<"thread.send"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.threadRegistry || !host.threadSendToSession) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      const parentSessionId = ctx.sessionId;
+      const thread = await host.threadRegistry.getThread(parentSessionId, params.threadId);
       if (!thread) {
         throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       }
@@ -524,7 +553,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // Wake idle or waiting-for-input threads
       let newStatus = thread.status;
       if (thread.status === "idle" || thread.status === "waiting-for-input") {
-        await host.threadRegistry.updateThread(params.parentSessionId, params.threadId, {
+        await host.threadRegistry.updateThread(parentSessionId, params.threadId, {
           status: "running",
           waitingFor: null,
         });
@@ -537,11 +566,12 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
 
 export function createThreadReadService(host: HarnessServiceHost): HarnessService<"thread.read"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.threadRegistry) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      const parentSessionId = ctx.sessionId;
+      const thread = await host.threadRegistry.getThread(parentSessionId, params.threadId);
       if (!thread) {
         throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       }
@@ -603,11 +633,12 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
 
 export function createThreadMergeService(host: HarnessServiceHost): HarnessService<"thread.merge"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.threadRegistry || !host.threadApplyWorktreeDiff) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      const parentSessionId = ctx.sessionId;
+      const thread = await host.threadRegistry.getThread(parentSessionId, params.threadId);
       if (!thread) {
         throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       }
@@ -626,7 +657,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
           conflicts: result.conflicts,
         };
       }
-      await host.threadRegistry.mergeThread(params.parentSessionId, params.threadId);
+      await host.threadRegistry.mergeThread(parentSessionId, params.threadId);
       return {
         text: `merged ${result.merged} files: ${thread.report?.changedFiles.join(", ") ?? ""}`,
         merged: result.merged,
@@ -638,23 +669,24 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
 
 export function createThreadKillService(host: HarnessServiceHost): HarnessService<"thread.kill"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       if (!host.threadRegistry) {
         throw new HarnessServiceError("unavailable", "Thread registry not configured");
       }
-      const thread = await host.threadRegistry.getThread(params.parentSessionId, params.threadId);
+      const parentSessionId = ctx.sessionId;
+      const thread = await host.threadRegistry.getThread(parentSessionId, params.threadId);
       if (!thread) {
         return { text: `unknown thread: ${params.threadId}` };
       }
       const keepWorktree = params.keepWorktree ?? true;
       if (thread.status === "queued") {
-        await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
+        await host.threadRegistry.cancelThread(parentSessionId, params.threadId, "killed by parent");
         return { text: `killed ${params.threadId} (was queued${keepWorktree ? ", worktree kept" : ""})` };
       }
       if (host.threadKillSession) {
         await host.threadKillSession(params.threadId);
       }
-      await host.threadRegistry.cancelThread(params.parentSessionId, params.threadId, "killed by parent");
+      await host.threadRegistry.cancelThread(parentSessionId, params.threadId, "killed by parent");
       return { text: `killed ${params.threadId}${keepWorktree ? " (worktree kept)" : ""}` };
     },
   };

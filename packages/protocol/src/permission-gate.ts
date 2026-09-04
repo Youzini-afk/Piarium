@@ -64,21 +64,32 @@ export function evaluateGate(
 
 // ── High-risk detection ────────────────────────────────────────────
 
-const HIGH_RISK_PATTERNS: Array<{ tool: string; param: string; pattern: string }> = [
-  { tool: "bash", param: "command", pattern: "\\b(rm|sudo|chmod|chown|mkfs|dd)\\b" },
-  { tool: "bash", param: "command", pattern: "\\bgit\\s+(push|reset|checkout|rebase|clean)\\b" },
-  { tool: "bash", param: "command", pattern: "\\b(npm|bun|yarn|pnpm)\\s+(install|add|remove)\\b" },
-  { tool: "bash", param: "command", pattern: "\\.env|id_rsa|\\.ssh" },
+/**
+ * Categories that always ask, regardless of mode and regardless of a
+ * session-scoped "always allow" grant (plan §3b.2). Each entry lists the
+ * tools it applies to, the parameter to inspect, and the pattern.
+ */
+export const HIGH_RISK_PATTERNS: ReadonlyArray<{
+  tools: readonly string[];
+  param: string;
+  pattern: string;
+}> = [
+  { tools: ["bash", "write_to_process"], param: "command", pattern: "\\b(rm|sudo|chmod|chown|mkfs|dd)\\b" },
+  { tools: ["bash", "write_to_process"], param: "command", pattern: "\\bgit\\s+(push|reset|checkout|rebase|clean)\\b" },
+  { tools: ["bash", "write_to_process"], param: "command", pattern: "\\b(npm|bun|yarn|pnpm)\\s+(install|add|remove)\\b" },
+  { tools: ["bash", "write_to_process"], param: "command", pattern: "\\.env|id_rsa|\\.ssh" },
+  // Sensitive paths reached through the edit tools, not only through a shell.
+  { tools: ["write", "edit", "apply_patch"], param: "path", pattern: "\\.env|id_rsa|\\.ssh" },
+  { tools: ["write", "edit", "apply_patch"], param: "file_path", pattern: "\\.env|id_rsa|\\.ssh" },
 ];
 
 export function isHighRisk(tool: string, params: Record<string, unknown>): boolean {
-  for (const pattern of HIGH_RISK_PATTERNS) {
-    if (pattern.tool !== tool) continue;
-    const value = params[pattern.param];
+  for (const entry of HIGH_RISK_PATTERNS) {
+    if (!entry.tools.includes(tool)) continue;
+    const value = params[entry.param];
     if (typeof value !== "string") continue;
     try {
-      const regex = new RegExp(pattern.pattern);
-      if (regex.test(value)) return true;
+      if (new RegExp(entry.pattern).test(value)) return true;
     } catch {
       // ignore invalid regex
     }
@@ -93,13 +104,15 @@ import { HARNESS_TOOL_META, type HarnessToolMutation } from "./harness-tools.js"
 export function defaultRules(mode: PermissionMode, askBefore: Record<string, boolean> = {}): PermissionRule[] {
   const rules: PermissionRule[] = [];
 
-  // High-risk bash patterns always ask (even in accept-edits/bypass)
-  for (const pattern of HIGH_RISK_PATTERNS) {
-    rules.push({
-      tool: pattern.tool,
-      match: { param: pattern.param, pattern: pattern.pattern },
-      decision: "ask",
-    });
+  // High-risk categories always ask (even in accept-edits/bypass)
+  for (const entry of HIGH_RISK_PATTERNS) {
+    for (const tool of entry.tools) {
+      rules.push({
+        tool,
+        match: { param: entry.param, pattern: entry.pattern },
+        decision: "ask",
+      });
+    }
   }
 
   // Dispatch askBefore rules (per-role) — must come BEFORE the

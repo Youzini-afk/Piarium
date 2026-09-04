@@ -179,6 +179,7 @@ describe("thread registry", () => {
       tools: [],
       permissions: {},
     });
+    await registry.setSessionId("parent-1", created.id, "session-1");
     const report: ThreadReport = {
       conclusion: "done",
       changedFiles: ["a.ts"],
@@ -208,6 +209,7 @@ describe("thread registry", () => {
       tools: [],
       permissions: {},
     });
+    await registry.setSessionId("parent-1", created.id, "session-1");
     const report: ThreadReport = {
       conclusion: "done",
       changedFiles: [],
@@ -270,6 +272,7 @@ describe("thread registry", () => {
       tools: [],
       permissions: {},
     });
+    await registry.setSessionId("parent-1", created.id, "session-1");
     const updated = await registry.setWaitingFor("parent-1", created.id, {
       kind: "permission",
       text: "allow bash?",
@@ -280,6 +283,39 @@ describe("thread registry", () => {
     const cleared = await registry.setWaitingFor("parent-1", created.id, null);
     expect(cleared!.status).toBe("running");
     expect(cleared!.waitingFor).toBeNull();
+  });
+
+  it("rejects invalid state transitions", async () => {
+    const created = await registry.createThread({
+      parentSessionId: "parent-1",
+      brief: "test",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    // queued → done is invalid (must go through running first)
+    await expect(
+      registry.completeThread("parent-1", created.id, {
+        conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
+        confidence: 1, traceHandle: "t", blocksSnapshot: {},
+      }),
+    ).rejects.toThrow(/Invalid thread state transition/);
+    // queued → running is valid
+    const running = await registry.setSessionId("parent-1", created.id, "session-1");
+    expect(running!.status).toBe("running");
+    // running → done is valid
+    const done = await registry.completeThread("parent-1", created.id, {
+      conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
+      confidence: 1, traceHandle: "t", blocksSnapshot: {},
+    });
+    expect(done!.status).toBe("done");
+    // done → running is invalid
+    await expect(
+      registry.updateThread("parent-1", created.id, { status: "running" }),
+    ).rejects.toThrow(/Invalid thread state transition/);
   });
 
   it("cancelAllForParent cancels all running threads", async () => {
@@ -367,6 +403,7 @@ describe("thread registry", () => {
       tools: [],
       permissions: {},
     });
+    await reg.setSessionId("parent-1", created.id, "session-1");
     const report: ThreadReport = {
       conclusion: "all done",
       changedFiles: ["a.ts"],
@@ -585,6 +622,51 @@ describe("thread registry", () => {
     const dequeued = await registry.tryDequeue("parent-1");
     expect(dequeued).not.toBeNull();
     expect(dequeued!.id).toBe(t1.id); // oldest first
+  });
+
+  it("completeThread dequeues next queued thread", async () => {
+    const dequeuedThreads: ThreadRecord[] = [];
+    const reg = createThreadRegistry({
+      dataDir,
+      hostId: "test-host",
+      maxConcurrency: 1,
+      onThreadDequeued: async (_parentId, thread) => {
+        dequeuedThreads.push(thread);
+        await reg.setSessionId(thread.parentSessionId, thread.id, `sess-${thread.id}`);
+      },
+    });
+    // Create first thread (autoRun with maxConcurrency=1 → queued)
+    const t1 = await reg.createThread({
+      parentSessionId: "parent-1",
+      brief: "first",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    // Manually promote t1 to running
+    await reg.setSessionId("parent-1", t1.id, "sess-1");
+    // Create second thread (should be queued because t1 is running)
+    const t2 = await reg.createThread({
+      parentSessionId: "parent-1",
+      brief: "second",
+      kind: "implementation",
+      createdBy: "agent",
+      autoRun: true,
+      worktree: "isolated",
+      tools: [],
+      permissions: {},
+    });
+    expect(t2.status).toBe("queued");
+    // Complete t1 — should trigger dequeue of t2
+    await reg.completeThread("parent-1", t1.id, {
+      conclusion: "done", changedFiles: [], unresolved: [], deviations: [],
+      confidence: 1, traceHandle: "t", blocksSnapshot: {},
+    });
+    expect(dequeuedThreads.length).toBe(1);
+    expect(dequeuedThreads[0]!.id).toBe(t2.id);
   });
 
   it("deleteThread cleans up cursors", async () => {

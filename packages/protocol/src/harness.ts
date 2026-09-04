@@ -274,7 +274,20 @@ export interface HarnessRequestData {
   sessionId: string;
   method: HarnessMethod;
   params: unknown;
+  /**
+   * How long the worker is prepared to wait, in milliseconds. The router
+   * uses it instead of its own default so a deliberately long call such as
+   * `thread.wait` is not aborted at the default 30s. Clamped by the router
+   * to `HARNESS_MAX_REQUEST_TIMEOUT_MS`; absent means "use the default".
+   */
+  timeoutMs?: number;
 }
+
+/**
+ * Upper bound the router applies to a worker-supplied `timeoutMs`. A worker
+ * must not be able to pin a host handler open indefinitely.
+ */
+export const HARNESS_MAX_REQUEST_TIMEOUT_MS = 3_600_000;
 
 export type HarnessRespondParams = {
   requestId: string;

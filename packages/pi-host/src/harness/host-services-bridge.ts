@@ -86,6 +86,10 @@ export class HostServicesBridge {
         params,
         requestId,
         sessionId: this.#sessionId,
+        // Carry the bridge timeout to the router so the service handler
+        // can run for the same duration (e.g. thread.wait blocks up to
+        // 240s — the router must not abort at its default 30s).
+        ...(timeoutMs !== this.#defaultTimeoutMs ? { timeoutMs } : {}),
       });
     } catch (error) {
       this.#cancel(requestId, new HarnessRequestError("failed", error instanceof Error ? error.message : "emit failed"));

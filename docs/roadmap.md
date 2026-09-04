@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -667,29 +667,53 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   (`lib/harness/explore.ts`). 17 tests. **Not wired** (TODO).
 - **3.3 related tool**: Graph neighbors by PageRank
   (`lib/harness/related-tool.ts`). **Not wired** (TODO).
-- **3.4-3.5 ThreadRecord + Worker runtime**: Redesigned with
+- **3.4-3.5 ThreadRecord + Thread registry**: Redesigned with
   host-persisted ThreadRegistry (`lib/harness/thread-registry.ts`).
-  JSON persistence, in-memory cache, hidden threads, idempotent
-  completion, callbacks for protocol events. 27 unit tests. **Wired**:
-  7 thread service methods (dispatch/list/wait/send/read/merge/kill),
-  7 pi-host tools, protocol events (harness.thread.changed/done).
-  e2e: 6 tests. See D-024/D-026. Worker runtime (`worker-runtime.ts`)
-  kept as pure algorithm module.
-  **§9.3 redo (D-026)**: blocking wait (subscribe + timeout, not
-  polling), incremental threads (observer cursors, `full` param),
-  read_thread `what: "blocks"|"report"|"steps"` with `since` cursor,
-  dispatch concurrency limit (maxConcurrency=12, `queued` result),
-  send wakes idle/waiting-for-input, eventSeq monotonic per thread,
-  kill `keepWorktree` (default true), TTL table + DEFAULT_WAIT_TIMEOUT_MS.
-  Protocol contract tests: 15. See D-026.
+  JSON persistence (atomic temp+rename), in-memory cache, hidden threads
+  (persisted `hidden` field on ThreadRecord), idempotent completion,
+  callbacks for protocol events. State transition table with validation.
+  `globalEventSeq` initialized from persisted records on `loadParent`.
+  31 unit tests. **Wired**: 7 thread service methods
+  (dispatch/list/wait/send/read/merge/kill), 7 pi-host tools, two
+  protocol events (`harness.thread.changed`/`done`; the dequeue hand-off
+  is a registry callback, not an event). e2e: 9 tests.
+  See D-024/D-026. Worker runtime (`worker-runtime.ts`) deleted —
+  superseded by the thread registry.
+  **§9.3 redo (D-026)**: blocking wait (subscribe + timeout + abort
+  signal, not polling), incremental threads (observer cursors, `full`
+  param), read_thread `what: "blocks"|"report"|"steps"` with `since`
+  cursor, dispatch concurrency limit (maxConcurrency=12, `queued`
+  result), send wakes idle/waiting-for-input, eventSeq monotonic per
+  thread, kill `keepWorktree` (default true), TTL table +
+  DEFAULT_WAIT_TIMEOUT_MS. Protocol params no longer carry
+  `parentSessionId` — services resolve it from `ctx.sessionId`.
+  Dispatch validates role against `ROLE_DEFINITIONS` (unknown role →
+  error). Thread tools failure paths return `isError:true` with harness
+  error code. `thread.wait` carries `timeoutMs+buffer` through the
+  `harness.request` contract (router clamps it to
+  `HARNESS_MAX_REQUEST_TIMEOUT_MS`) and observes `ctx.signal`; three e2e
+  tests cover blocking past the transport default, waking on a state
+  change, and the timeout hand-off. `wait` reports a `waiting` count so
+  waiting-for-input threads are visible. Dequeue happens in
+  `updateThread` on any terminal transition via `onThreadDequeued`.
+  Protocol contract tests: 15. See D-026/D-027/D-028.
   **TODO**: worktree management, activity sensors (stalled/looping),
   Zone 2 threads section, Fleet provider, broker child session
   integration, transcript slice ("steps") wiring to memory agent
   blocksSnapshot, progress/decisions/errors blocks extraction.
-- **3.6 Role catalog**: Six roles, team prompt, slot-based resolution
-  (`lib/harness/roles.ts`). 11 tests. **Not wired** (TODO).
-- **3.7 Review sensor**: Auto-dispatch review on diff, gate mode
-  (`lib/harness/review-sensor.ts`). 5 tests. **Not wired** (TODO).
+- **3.6 Role catalog**: Six roles, team prompt, slot-based resolution.
+  Moved to `@piarium/protocol/harness-roles.ts` so pi-host can build the
+  team prompt and reject unconfigured roles; `lib/harness/roles.ts`
+  re-exports it. `frontend` uses its own `models.frontend` slot (§9.2.2).
+  14 tests. **Wired**: `dispatch` lists only resolved roles in its
+  promptGuidelines and rejects the rest with `unknown role`; the host
+  service takes worktree/tools/systemPromptFragment from the definition.
+  See D-028.
+- **3.7 Review sensor**: Opens a hidden review thread after a settled
+  turn with journaled changes (`lib/harness/review-sensor.ts`), gate mode
+  for blocking. Ported from the deleted worker runtime to the thread
+  registry. 6 tests. **Not wired** (TODO: `agent_settled` hook + Zone 2
+  `<review>` injection).
 - **3.8 LSP navigation**: symbols/definition/references/hover with
   ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
   **Not wired** (TODO).
@@ -701,25 +725,36 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   (`lib/harness/permission-gate.ts`). 22 tests. **Wired**: pure types
   and evaluation moved to `@piarium/protocol/permission-gate.ts` (shared
   between pi-host and web host). `permission-gate-extension.ts` in
-  pi-host hooks `tool_call`, evaluates policy, blocks ask/deny with
-  `{ block: true, reason }`. Registered in `session-host.ts` with policy
-  built from `harnessSettings.dispatch.askBefore`. e2e: 12 tests.
+  pi-host hooks `tool_call`, evaluates policy, and drives the existing
+  `ctx.ui.select` dialog (Allow once / Allow for this session / Deny) for
+  `ask` decisions; only `deny`, an explicit Deny, or a dismissed dialog
+  blocks. Registered in `session-host.ts` with mode resolved from
+  `harnessSettings.permissions.mode` and per-role `dispatch.askBefore`.
+  Rules are generated from `HARNESS_TOOL_META.mutation`, so non-harness
+  tools (MCP, Pi built-ins) pass through to Pi's own permission system.
+  22 unit + 14 e2e tests, including four real Pi session tests covering
+  allow-once, deny, the session grant, and the high-risk override.
 - **3b.2 Smart mode**: Model-judged permission decisions, high-risk
   bypass (`lib/harness/smart-mode.ts`). 10 tests. **Not wired** (TODO:
   wire permissionJudge model slot).
-- **3b.3 Stop provisioning**: Removed `@gotgenes/pi-permission-system`
-  from manifest (revision 2→3). Protocol tests 3/3.
+- **3b.3 Stop provisioning**: **Reverted (D-021)** —
+  `@gotgenes/pi-permission-system` is still in
+  `FOUNDATIONAL_PI_PACKAGE_MANIFEST` (revision 2) and is still
+  provisioned, so the native gate and the plugin currently coexist.
+  Removing it is blocked on the native gate covering the plugin's
+  surface; "native wins + duplicate warning in the diagnostics panel"
+  (plan §3b.1) is also still TODO. Protocol tests 3/3.
 
 **Phase 3b wiring summary**: Permission gate extension registered in
-every session. Policy resolved from HarnessSettings at session creation
-(mode hardcoded to "normal" — TODO: resolve from settings). Read-only
-tools (read, grep, threads, send, read_thread, etc.) always allowed.
-Edit tools (edit, write, apply_patch, merge) ask in normal mode, allow
-in accept-edits. Shell tools (bash, write_to_process) always ask (except
-bypass). High-risk bash patterns (rm, sudo, git push, etc.) always ask.
-94/94 pi-host harness tests pass, 32/32 web permission tests pass.
+every session, mode from settings (default `normal`). Read-only tools
+(`mutation: 'none'`) always allowed. Edit tools ask in normal mode,
+allow in accept-edits. Shell tools always ask except in bypass.
+High-risk categories — `rm`/`sudo`/`git push`/package installs on a
+command, and `.env`/`id_rsa`/`.ssh` on a shell command *or* an edit path
+— always ask and are never covered by a session-scoped grant (D-028).
 
-**Total**: 237 pi-host tests (1 skip) + 1362 web tests (1 skip) + 15
-protocol thread contract tests = 1614 tests, all passing. Type-check
-and lint clean.
-Decisions D-019 through D-026 recorded in agent-harness-decisions.md.
+**Total**: 248 pi-host tests (1 skip) + 1352 web tests (1 skip) + 53
+protocol tests (15 thread contract tests). Type-check, lint, and the
+Node smoke of the built server artifact all clean. Test counts are from
+`bun run --cwd packages/{pi-host,web,protocol} test` on 2026-09-04.
+Decisions D-019 through D-029 recorded in agent-harness-decisions.md.

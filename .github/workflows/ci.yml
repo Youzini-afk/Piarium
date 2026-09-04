@@ -36,6 +36,9 @@ jobs:
       - run: bun run type-check
       - run: bun run lint
       - run: bun run test:pi
+      # Imports the built server artifact under plain Node: vitest's CJS
+      # interop hides require/import mismatches that break `node server/index.js`.
+      - run: bun run test:node-smoke
       - run: bun run test:cloud
 
   windows-runtime:
