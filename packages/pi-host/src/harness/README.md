@@ -19,6 +19,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
 | `diagnostics` | Get LSP diagnostics for a file | `lsp.diagnosticsSnapshot` |
+| `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions | `lsp.*` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
 ## Registration

@@ -27,6 +27,10 @@ Piarium protocol types, schemas, and event/method definitions.
 | `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |
 | `lsp.diagnostics` | `{ path, afterSnapshot?, waitMs? }` | `DiagnosticsResult` | Get diagnostics (sync + wait) |
 | `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |
+| `lsp.symbols` | `{ path, query }` | `LspNavigationResult` | Find workspace symbols using the path's language provider |
+| `lsp.definition` | `{ path, line, character? }` | `LspNavigationResult` | Find a definition at a one-based position |
+| `lsp.references` | `{ path, line, character? }` | `LspNavigationResult` | Find references at a one-based position |
+| `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
 | `web.read` | `{ url }` | `WebReadResult` | Read a URL with reader model |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
@@ -111,10 +115,10 @@ Thread-runtime availability is not a user setting. The Application Host
 advertises `capabilities.harnessThreads` in the private Host handshake; only
 then does pi-host register the seven thread tools. Child sessions receive their
 frozen role model and active tool list in `session.create/open`.
-The same handshake owns `harnessWebRead` and `harnessWebSearch`: a configured
-model slot or dormant provider module does not make a tool available. If the
-Host does not advertise a real search service, pi-host omits `websearch` before
-constructing the AgentSession.
+The same handshake owns `harnessLspNavigation`, `harnessWebRead`, and
+`harnessWebSearch`: a configured model slot or dormant provider module does not
+make a tool available. If the Host does not advertise a real service, pi-host
+omits the corresponding tools before constructing the AgentSession.
 
 ## Exports
 

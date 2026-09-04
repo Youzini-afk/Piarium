@@ -690,6 +690,24 @@ sidebar 的独立 Agent harness 区块。只有至少一个字段真实存在才
 
 状态：已实施（能力门）；真实 reader/search provider 仍未实现
 
+### D-051 · 2026-09-04 · 3.8（LSP 导航接入真实 LanguageSupervisor）
+
+类型：实现澄清
+
+决定：新增 `lsp.symbols/definition/references/hover` typed Host methods 与同名 pi-host 工具，由 handshake
+`harnessLspNavigation` 在 AgentSession 构造前统一开关。所有文件路径先过 Router/Documents authority 与 child scope；Host 使用
+authority 给出的 workspace-relative resourceId。未同步文件只在 LanguageSupervisor 尚无 desired document 时从 Documents 读取并
+`didOpen`；已有编辑器 buffer 绝不被磁盘内容覆盖。请求携当前 documentVersion，agent 参数 line/character 为一基，进入 LSP 前
+转零基，输出位置再转一基。`symbols` 要求代表文件 path 来确定语言 provider。三态保持 ready/empty/unavailable。
+
+原因：旧 `lsp-nav.ts` 是自成一套的假依赖接口，没有生产调用点，也没有适配真实 Supervisor 的 status/value、documentVersion 与
+buffer ownership；直接给它补 pi-host 工具仍会是休眠实现。真实 fixture 进程测试还暴露了不携版本会被 Supervisor 正确判 stale。
+
+影响：protocol HarnessServiceMap/handshake；Host router/path authority、LanguageSupervisor 与 nav adapter；pi-host tools/能力门；
+工具卡摘要；设计/plan/status 3.8。
+
+状态：已实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -746,3 +764,4 @@ sidebar 的独立 Agent harness 区块。只有至少一个字段真实存在才
 | D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |
 | D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |
 | D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |
+| D-051 | implementation | — | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |

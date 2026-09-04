@@ -61,6 +61,17 @@ describe('getToolSummary', () => {
     expect(result.readOnly).toBe(true);
   });
 
+  it('LSP navigation: path and one-based position', () => {
+    expect(getToolSummary({
+      toolName: 'hover',
+      arguments: { path: 'src/a.ts', line: 7, character: 3 },
+    })).toEqual({ text: 'Hover src/a.ts:7:3', readOnly: true });
+    expect(getToolSummary({
+      toolName: 'symbols',
+      arguments: { path: 'src/a.ts', query: 'SessionHost' },
+    })).toEqual({ text: 'Symbols SessionHost · src/a.ts', readOnly: true });
+  });
+
   it('webfetch: url + status', () => {
     const result = getToolSummary({
       toolName: 'webfetch',

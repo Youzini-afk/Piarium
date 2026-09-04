@@ -280,6 +280,12 @@ export function registerHarnessServices(
     router.register("lsp.diagnostics", createLspDiagnosticsService(host.diagnosticsProvider));
     router.register("lsp.diagnosticsSnapshot", createLspDiagnosticsSnapshotService(host.diagnosticsProvider));
   }
+  if (host.lspNavigationServices) {
+    router.register("lsp.symbols", host.lspNavigationServices.symbols);
+    router.register("lsp.definition", host.lspNavigationServices.definition);
+    router.register("lsp.references", host.lspNavigationServices.references);
+    router.register("lsp.hover", host.lspNavigationServices.hover);
+  }
   // Web services — registered only when available
   if (host.webFetchService) {
     router.register("web.fetch", {

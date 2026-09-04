@@ -13,6 +13,7 @@ import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
+import { createLspNavigationTools } from "./lsp-tools.js";
 import {
   createDispatchTool,
   createThreadsTool,
@@ -31,6 +32,8 @@ export interface SelectHarnessToolsDeps {
   cwd: string;
   workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   isOpenAIFamily: boolean;
+  /** Whether the Host exposes real LanguageSupervisor navigation services. */
+  lspNavigationAvailable?: boolean;
   /** Tools to yield (not register) because a Pi package provides them. */
   yieldedTools?: ReadonlySet<string>;
   /** Whether models.reader is configured (enables webfetch prompt path). */
@@ -68,6 +71,7 @@ export function selectHarnessTools(
     cwd,
     workspaceMutationJournal,
     isOpenAIFamily,
+    lspNavigationAvailable,
     yieldedTools,
     readerModelConfigured,
     webSearchAvailable,
@@ -93,6 +97,12 @@ export function selectHarnessTools(
   }
   if (tools.diagnostics !== false) {
     result.push(createDiagnosticsTool(bridge, sessionId));
+  }
+  if (lspNavigationAvailable) {
+    const navigationTools = createLspNavigationTools(bridge);
+    for (const tool of navigationTools) {
+      if (tools[tool.name] !== false) result.push(tool);
+    }
   }
   if (isOpenAIFamily && tools.apply_patch !== false) {
     result.push(

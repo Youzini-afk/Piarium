@@ -182,8 +182,9 @@ ${goal.tokenBudget}` 拼进 `systemPrompt`。该数字每轮变化，使整个�
 | `dispatch` / `threads` / `wait` / `send` / `read_thread` / `merge` / `kill` | 新增 | `dispatch` / `threads` / `read_thread` 并行、`wait` 独占当前步、`send` / `merge` / `kill` 串行 | 开一条线程交给团队中的一个角色（异步）、看增量状态、订阅等待、给线程传话、读它的记忆块或报告、把线程 worktree 三方合并回来、终止（第 5.7、9.2、9.3 节） |
 | `webfetch` / `websearch` | 新增 | 并行 | 抓取与搜索，SSRF 策略、阅读子 agent、provider 抽象（第 5.8 节） |
 | `related` / `recall` | 新增（第 3 阶段） | 并行 | 知识库结构与记忆（第 6.2、7.4 节） |
+| `symbols` / `definition` / `references` / `hover` | 新增（第 3 阶段） | 并行 | 真实 LanguageSupervisor 导航；路径受 Host authority/scope 约束，位置对 agent 一基（D-051） |
 
-不在 v1：LSP 导航工具（第 3 阶段与 `related` 一起，见第 5.3 节）；沙箱（第 9.1.1 节）；浏览器操作（点击、表单——
+不在 v1：沙箱（第 9.1.1 节）；浏览器操作（点击、表单——
 research 与 knowledge-work profile 再评估）。
 
 ### 5.1 贯穿所有工具的原则

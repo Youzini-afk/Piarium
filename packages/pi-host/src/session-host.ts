@@ -603,6 +603,7 @@ export class SessionHost {
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
   #harnessThreadRuntimeEnabled = false;
+  #harnessLspNavigationEnabled = false;
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
@@ -650,6 +651,10 @@ export class SessionHost {
 
   setHarnessThreadRuntimeEnabled(enabled: boolean): void {
     this.#harnessThreadRuntimeEnabled = enabled;
+  }
+
+  setHarnessLspNavigationEnabled(enabled: boolean): void {
+    this.#harnessLspNavigationEnabled = enabled;
   }
 
   setHarnessWebCapabilities(input: { read: boolean; search: boolean }): void {
@@ -2956,6 +2961,7 @@ export class SessionHost {
         cwd,
         workspaceMutationJournal: workspaceMutationJournal ?? undefined,
         isOpenAIFamily,
+        lspNavigationAvailable: this.#harnessLspNavigationEnabled,
         yieldedTools,
         readerModelConfigured,
         webSearchAvailable: this.#harnessWebSearchEnabled,

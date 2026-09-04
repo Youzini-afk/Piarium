@@ -25,7 +25,7 @@ export interface ToolSummary {
 
 /** Tool names that are read-only and can be grouped */
 const READ_ONLY_TOOLS = new Set([
-  "grep", "read", "find", "glob", "ls", "diagnostics", "webfetch", "websearch",
+  "grep", "read", "find", "glob", "ls", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "websearch",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -117,6 +117,20 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
       const newCount = asNumber(details?.newCount) ?? asNumber(details?.count);
       const newStr = newCount !== undefined ? ` · ${newCount} new` : "";
       return { text: `Diagnostics ${path}${newStr}`, readOnly };
+    }
+    case "symbols": {
+      const query = asString(args?.query) ?? "";
+      const path = asString(args?.path) ?? "";
+      return { text: `Symbols ${query}${path ? ` · ${path}` : ""}`, readOnly };
+    }
+    case "definition":
+    case "references":
+    case "hover": {
+      const path = asString(args?.path) ?? "";
+      const line = asNumber(args?.line);
+      const character = asNumber(args?.character);
+      const position = line === undefined ? "" : `:${line}${character === undefined ? "" : `:${character}`}`;
+      return { text: `${name[0]!.toUpperCase()}${name.slice(1)} ${path}${position}`, readOnly };
     }
     case "webfetch": {
       const url = asString(args?.url) ?? "";

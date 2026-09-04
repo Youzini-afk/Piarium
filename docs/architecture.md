@@ -415,7 +415,7 @@ pre-release development every product surface changes in lockstep; no historical
 accepted. UI disables unavailable actions instead of guessing from runtime versions.
 
 The application Host side of that handshake also declares optional Harness services.
-`harnessThreads`, `harnessWebRead`, and `harnessWebSearch` gate tool construction before an
+`harnessThreads`, `harnessLspNavigation`, `harnessWebRead`, and `harnessWebSearch` gate tool construction before an
 AgentSession is created; a dormant provider module or configured model slot is not enough. The Web
 Host currently declares threads but not reader/search, so `websearch` is absent and prompted
 `webfetch` falls back directly to extracted content instead of making a guaranteed-failing request.
@@ -441,7 +441,7 @@ The `HarnessServiceMap` defines the following method groups:
 - **Output**: `output.store`, `output.read`
 - **Search**: `search.content`
 - **Filesystem**: `fs.lock`
-- **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`
+- **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`, `lsp.symbols`, `lsp.definition`, `lsp.references`, `lsp.hover`
 - **Web**: `web.fetch`, `web.read`, `web.search` (registered when available)
 - **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`, `memory.blocks.get`, `memory.blocks.apply`
 - **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`

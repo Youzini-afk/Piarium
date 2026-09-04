@@ -10,6 +10,7 @@ import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
 import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
+import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { ThreadTranscriptReader } from "./thread-transcript.js";
 import type {
@@ -65,6 +66,7 @@ export interface HarnessServiceHost {
   pathLockService: PathLockService;
   searchService: HarnessSearchService;
   diagnosticsProvider: DiagnosticsProvider | null;
+  lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webReadService: import("./router.js").HarnessService<"web.read"> | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
@@ -104,6 +106,7 @@ export interface HarnessServiceHostOptions {
   search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   diagnosticsProvider?: DiagnosticsProvider;
+  lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -146,6 +149,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
+  const lspNavigationServices = options.lspNavigationServices ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webReadService = options.webReadService ?? null;
   const webSearchService = options.webSearchService ?? null;
@@ -272,6 +276,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     pathLockService,
     searchService,
     diagnosticsProvider,
+    lspNavigationServices,
     webFetchService,
     webReadService,
     webSearchService,

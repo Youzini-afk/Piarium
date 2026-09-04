@@ -25,6 +25,7 @@ import type {
   ThreadDispatchResult,
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
+import type { JsonValue } from "./types.js";
 
 export interface OutputSlice {
   text: string;
@@ -125,6 +126,12 @@ export interface DiagnosticsResult {
     source: string;
   }>;
   reason?: string;
+}
+
+export interface LspNavigationResult {
+  status: "ready" | "empty" | "unavailable";
+  text: string;
+  value?: JsonValue;
 }
 
 export type FsLockParams =
@@ -231,6 +238,10 @@ export interface HarnessServiceMap {
   "search.content": { params: SearchContentParams; result: SearchContentResult };
   "lsp.diagnostics": { params: { path: string; afterSnapshot?: string; waitMs?: number }; result: DiagnosticsResult };
   "lsp.diagnosticsSnapshot": { params: { path: string }; result: DiagnosticsResult };
+  "lsp.symbols": { params: { path: string; query: string }; result: LspNavigationResult };
+  "lsp.definition": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
+  "lsp.references": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
+  "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.read": { params: { url: string; prompt: string; render?: boolean }; result: WebReadResult };
@@ -279,6 +290,10 @@ export const HARNESS_METHOD_CAPABILITY = {
   "search.content": "read.search",
   "lsp.diagnostics": "read.lsp",
   "lsp.diagnosticsSnapshot": "read.lsp",
+  "lsp.symbols": "read.lsp",
+  "lsp.definition": "read.lsp",
+  "lsp.references": "read.lsp",
+  "lsp.hover": "read.lsp",
   "fs.lock": "write.document",
   "web.fetch": "read.web",
   "web.read": "read.web",
@@ -326,6 +341,10 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "search.content",
   "lsp.diagnostics",
   "lsp.diagnosticsSnapshot",
+  "lsp.symbols",
+  "lsp.definition",
+  "lsp.references",
+  "lsp.hover",
   "fs.lock",
   "web.fetch",
   "web.read",

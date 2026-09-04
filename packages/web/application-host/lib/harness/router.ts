@@ -19,6 +19,7 @@ export interface HarnessAuthorizedPath {
   workspaceId: string;
   canonicalResourceId: string;
   inputPath: string;
+  resourceId: string;
 }
 
 export interface HarnessServiceContext {
@@ -89,6 +90,19 @@ const requestPaths = (
     if (record.action !== "acquire" || !Array.isArray(record.paths) || record.paths.length === 0) return "invalid";
     return record.paths.every((path) => typeof path === "string" && path.trim())
       ? record.paths.map((path) => ({ allowMissing: true, path: path as string }))
+      : "invalid";
+  }
+  if (method === "lsp.symbols") {
+    if (typeof record.query !== "string") return "invalid";
+    return typeof record.path === "string" && record.path.trim()
+      ? [{ allowMissing: false, path: record.path }]
+      : "invalid";
+  }
+  if (method === "lsp.definition" || method === "lsp.references" || method === "lsp.hover") {
+    if (!Number.isSafeInteger(record.line) || Number(record.line) < 1) return "invalid";
+    if (record.character !== undefined && (!Number.isSafeInteger(record.character) || Number(record.character) < 1)) return "invalid";
+    return typeof record.path === "string" && record.path.trim()
+      ? [{ allowMissing: false, path: record.path }]
       : "invalid";
   }
   if (method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {

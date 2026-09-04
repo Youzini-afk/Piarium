@@ -73,6 +73,7 @@ export function createHarnessPathAuthority({
           workspaceId: actor.workspaceId,
           canonicalResourceId: normalizePathIdentity(resolved.realPath, { pathModule, platform }),
           inputPath,
+          resourceId: resolved.relativePath.split(pathModule.sep).join("/"),
         };
       } catch (error) {
         if (error instanceof WorkspacePathError) return null;

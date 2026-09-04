@@ -1,147 +1,184 @@
-/**
- * LSP navigation tools — symbols, definition, references, hover.
- *
- * Design: agent-harness.md §5.7
- * Plan: agent-harness-plan.md §3.8
- *
- * Four tools, each with three states: ready / empty / unavailable.
- * hover returns signature + documentation (cheapest path to check
- * a type/parameter).
- */
+import type { JsonValue, LspNavigationResult } from "@piarium/protocol";
+import type { DocumentAuthority } from "../documents/authority.js";
+import type { createLanguageSupervisor } from "../lsp/supervisor.js";
+import type { HarnessService, HarnessServiceContext } from "./router.js";
+import { languageIdForPath } from "./language-id.js";
 
-// ── Types ──────────────────────────────────────────────────────────
+type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
+  "hasSyncedDocument" | "syncedDocumentVersion" | "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
 
-export type LspState = "ready" | "empty" | "unavailable";
-
-export interface LspResult<T> {
-  state: LspState;
-  data?: T;
-  message: string;
+interface LspNavigationDeps {
+  documents: Pick<DocumentAuthority, "read">;
+  supervisor: LanguageSupervisor;
 }
 
-export interface SymbolEntry {
-  name: string;
-  kind: string;
-  path: string;
-  range: { startLine: number; startCharacter: number; endLine: number; endCharacter: number };
-}
+const recordOf = (value: unknown): Record<string, unknown> => (
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
 
-export interface DefinitionEntry {
-  path: string;
-  startLine: number;
-  startCharacter: number;
-  endLine: number;
-  endCharacter: number;
-}
+const unavailable = (message: string): LspNavigationResult => ({ status: "unavailable", text: message });
+const empty = (message: string): LspNavigationResult => ({ status: "empty", text: message });
 
-export interface ReferenceEntry {
-  path: string;
-  line: number;
-  character: number;
-}
-
-export interface HoverResult {
-  signature: string;
-  documentation?: string;
-}
-
-export interface LspNavDeps {
-  /** Get workspace symbols matching query */
-  symbols: (query: string) => Promise<SymbolEntry[] | null>;
-  /** Get definition at position */
-  definition: (path: string, line: number, character: number) => Promise<DefinitionEntry[] | null>;
-  /** Get references at position */
-  references: (path: string, line: number, character: number) => Promise<ReferenceEntry[] | null>;
-  /** Get hover at position */
-  hover: (path: string, line: number, character: number) => Promise<HoverResult | null>;
-  /** Get language for a file path */
-  getLanguage: (path: string) => string | null;
-  /** Check if a language server is running for a language */
-  isServerRunning: (language: string) => boolean;
-}
-
-// ── Tool implementations ───────────────────────────────────────────
-
-export async function executeSymbols(
-  query: string,
-  deps: LspNavDeps,
-): Promise<LspResult<SymbolEntry[]>> {
-  const result = await deps.symbols(query);
-  if (result === null) {
-    return { state: "unavailable", message: "unavailable (no language server)" };
-  }
-  if (result.length === 0) {
-    return { state: "empty", message: "no symbols found" };
-  }
-  const text = result.map((s) => `${s.path}:${s.range.startLine} — ${s.name} (${s.kind})`).join("\n");
-  return { state: "ready", data: result, message: `${result.length} symbols\n${text}` };
-}
-
-export async function executeDefinition(
+const prepareDocument = async (
   path: string,
-  line: number,
-  character: number,
-  deps: LspNavDeps,
-): Promise<LspResult<DefinitionEntry[]>> {
-  const lang = deps.getLanguage(path);
-  if (!lang || !deps.isServerRunning(lang)) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang ?? "unknown"})` };
+  ctx: HarnessServiceContext,
+  deps: LspNavigationDeps,
+): Promise<{ documentVersion: number; languageId: string; resource: { workspaceId: string; resourceId: string } } | LspNavigationResult> => {
+  if (!ctx.workspaceId) return unavailable("LSP unavailable: no workspace");
+  const resourceId = ctx.authorizedPaths.find((entry) => entry.inputPath === path)?.resourceId ?? path;
+  const languageId = languageIdForPath(resourceId);
+  if (!languageId) return unavailable(`LSP unavailable: unsupported file type for ${path}`);
+  const resource = { workspaceId: ctx.workspaceId, resourceId };
+  let documentVersion = deps.supervisor.syncedDocumentVersion(ctx.workspaceId, languageId, resourceId);
+  if (!deps.supervisor.hasSyncedDocument(ctx.workspaceId, languageId, resourceId) || documentVersion === null) {
+    const snapshot = await deps.documents.read(resource);
+    if (snapshot.status !== "ready") {
+      return unavailable(`LSP unavailable: cannot read ${path} (${snapshot.status})`);
+    }
+    const synced = await deps.supervisor.syncDocument({
+      resource,
+      languageId,
+      documentVersion: 0,
+      content: snapshot.content,
+      reason: "open",
+    });
+    const syncStatus = recordOf(synced).status;
+    if (syncStatus !== "synced" && syncStatus !== "stale") {
+      return unavailable(`LSP unavailable: ${String(recordOf(synced).message ?? syncStatus ?? "document sync failed")}`);
+    }
+    documentVersion = typeof recordOf(synced).documentVersion === "number"
+      ? recordOf(synced).documentVersion as number
+      : 0;
   }
-  const result = await deps.definition(path, line, character);
-  if (result === null) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang})` };
-  }
-  if (result.length === 0) {
-    return { state: "empty", message: "no definition found" };
-  }
-  const text = result.map((d) => `${d.path}:${d.startLine}:${d.startCharacter}`).join("\n");
-  return { state: "ready", data: result, message: text };
-}
+  return { documentVersion, languageId, resource };
+};
 
-export async function executeReferences(
-  path: string,
-  line: number,
-  character: number,
-  deps: LspNavDeps,
-): Promise<LspResult<ReferenceEntry[]>> {
-  const lang = deps.getLanguage(path);
-  if (!lang || !deps.isServerRunning(lang)) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang ?? "unknown"})` };
+const featureValue = (result: unknown): { failure?: string; value?: unknown } => {
+  const record = recordOf(result);
+  if (record.status !== "ready") {
+    return { failure: String(record.message ?? `language service ${record.status ?? "unavailable"}`) };
   }
-  const result = await deps.references(path, line, character);
-  if (result === null) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang})` };
-  }
-  if (result.length === 0) {
-    return { state: "empty", message: "no references found" };
-  }
-  const text = result.map((r) => `${r.path}:${r.line}:${r.character}`).join("\n");
-  return { state: "ready", data: result, message: `${result.length} references\n${text}` };
-}
+  return { value: record.value };
+};
 
-export async function executeHover(
-  path: string,
-  line: number,
-  character: number,
-  deps: LspNavDeps,
-): Promise<LspResult<HoverResult>> {
-  const lang = deps.getLanguage(path);
-  if (!lang || !deps.isServerRunning(lang)) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang ?? "unknown"})` };
-  }
-  const result = await deps.hover(path, line, character);
-  if (result === null) {
-    return { state: "unavailable", message: `unavailable (no language server for ${lang})` };
-  }
-  if (!result.signature) {
-    return { state: "empty", message: "no hover information" };
-  }
-  const text = result.documentation
-    ? `${result.signature}\n\n${result.documentation}`
-    : result.signature;
-  return { state: "ready", data: result, message: text };
-}
+const startOf = (value: unknown): { line: number; character: number } | null => {
+  const record = recordOf(value);
+  const range = recordOf(record.targetSelectionRange ?? record.targetRange ?? record.range);
+  const start = recordOf(range.start);
+  return typeof start.line === "number" && typeof start.character === "number"
+    ? { line: start.line + 1, character: start.character + 1 }
+    : null;
+};
 
-export const HOVER_PROMPT_GUIDELINES = [
-  "Use hover to check a signature or type before reading the whole definition file.",
-];
+const resourcePath = (value: unknown): string | null => {
+  const resource = recordOf(recordOf(value).resource);
+  return typeof resource.resourceId === "string" ? resource.resourceId : null;
+};
+
+const symbolLines = (value: unknown, inheritedPath: string): string[] => {
+  if (!Array.isArray(value)) return [];
+  const lines: string[] = [];
+  const visit = (raw: unknown, fallbackPath: string): void => {
+    const symbol = recordOf(raw);
+    if (typeof symbol.name !== "string") return;
+    const path = resourcePath(symbol) ?? fallbackPath;
+    const start = startOf(symbol);
+    lines.push(`${path}${start ? `:${start.line}:${start.character}` : ""} — ${symbol.name}${typeof symbol.kind === "number" ? ` (kind ${symbol.kind})` : ""}`);
+    if (Array.isArray(symbol.children)) for (const child of symbol.children) visit(child, path);
+  };
+  for (const symbol of value) visit(symbol, inheritedPath);
+  return lines;
+};
+
+const locationLines = (value: unknown): string[] => (
+  Array.isArray(value) ? value.flatMap((entry) => {
+    const path = resourcePath(entry);
+    const start = startOf(entry);
+    return path && start ? [`${path}:${start.line}:${start.character}`] : [];
+  }) : []
+);
+
+const hoverText = (value: unknown): string => {
+  const contents = recordOf(value).contents;
+  if (!Array.isArray(contents)) return "";
+  return contents.flatMap((entry) => {
+    const text = recordOf(entry).value;
+    return typeof text === "string" && text.trim() ? [text.trim()] : [];
+  }).join("\n\n");
+};
+
+const ready = (text: string, value: unknown): LspNavigationResult => ({
+  status: "ready",
+  text,
+  ...(value === undefined ? {} : { value: value as JsonValue }),
+});
+
+export function createLspNavigationServices(deps: LspNavigationDeps): {
+  symbols: HarnessService<"lsp.symbols">;
+  definition: HarnessService<"lsp.definition">;
+  references: HarnessService<"lsp.references">;
+  hover: HarnessService<"lsp.hover">;
+} {
+  return {
+    symbols: {
+      handle: async (params, ctx) => {
+        const prepared = await prepareDocument(params.path, ctx, deps);
+        if ("status" in prepared) return prepared;
+        const result = featureValue(await deps.supervisor.workspaceSymbols({
+          resource: prepared.resource,
+          languageId: prepared.languageId,
+          documentVersion: prepared.documentVersion,
+          query: params.query,
+        }));
+        if (result.failure) return unavailable(`Symbols unavailable: ${result.failure}`);
+        const lines = symbolLines(result.value, params.path);
+        return lines.length === 0 ? empty("No symbols found") : ready(`${lines.length} symbols\n${lines.join("\n")}`, result.value);
+      },
+    },
+    definition: {
+      handle: async (params, ctx) => {
+        const prepared = await prepareDocument(params.path, ctx, deps);
+        if ("status" in prepared) return prepared;
+        const result = featureValue(await deps.supervisor.definition({
+          resource: prepared.resource,
+          languageId: prepared.languageId,
+          documentVersion: prepared.documentVersion,
+          position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
+        }));
+        if (result.failure) return unavailable(`Definition unavailable: ${result.failure}`);
+        const lines = locationLines(result.value);
+        return lines.length === 0 ? empty("No definition found") : ready(lines.join("\n"), result.value);
+      },
+    },
+    references: {
+      handle: async (params, ctx) => {
+        const prepared = await prepareDocument(params.path, ctx, deps);
+        if ("status" in prepared) return prepared;
+        const result = featureValue(await deps.supervisor.references({
+          resource: prepared.resource,
+          languageId: prepared.languageId,
+          documentVersion: prepared.documentVersion,
+          position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
+        }));
+        if (result.failure) return unavailable(`References unavailable: ${result.failure}`);
+        const lines = locationLines(result.value);
+        return lines.length === 0 ? empty("No references found") : ready(`${lines.length} references\n${lines.join("\n")}`, result.value);
+      },
+    },
+    hover: {
+      handle: async (params, ctx) => {
+        const prepared = await prepareDocument(params.path, ctx, deps);
+        if ("status" in prepared) return prepared;
+        const result = featureValue(await deps.supervisor.hover({
+          resource: prepared.resource,
+          languageId: prepared.languageId,
+          documentVersion: prepared.documentVersion,
+          position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
+        }));
+        if (result.failure) return unavailable(`Hover unavailable: ${result.failure}`);
+        const text = hoverText(result.value);
+        return text ? ready(text, result.value) : empty("No hover information");
+      },
+    },
+  };
+}

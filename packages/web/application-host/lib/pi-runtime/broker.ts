@@ -62,6 +62,7 @@ export function createWebPiRuntimeBroker({
     ...(typeof admitSessionExecution === 'function' ? { admitSessionExecution } : {}),
     client: {
       capabilities: {
+        harnessLspNavigation: true,
         harnessThreads: true,
         harnessWebRead,
         harnessWebSearch,

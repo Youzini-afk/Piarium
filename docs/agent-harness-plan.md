@@ -526,8 +526,9 @@ last checkpoint: 2026-09-03T10:12Z
 
 **状态（2026-09-04）**：T1 核心纵切已经 `proven`：3.4 / 3.5 七个工具经 Host 能力握手默认接入真实 Pi child、冻结的
 `ThreadLaunchManifest`、真实 Git worktree、崩溃恢复、活性/权限等待传感器、durable transcript、merge 与 Harness Fleet；3.10
-已有父会话桌面最小侧栏。未完成边界以 `agent-harness-status.md` 为准：Zone 2 threads 段、worktree/branch 回收、
-窄屏与讨论线、结构化 progress/decisions/errors、scope 强制。3.1 / 3.2 / 3.3 / 3.7 / 3.8 仍只是 `implemented`。
+已有父会话桌面最小侧栏，3.8 LSP 导航已通过 Host 能力门接入真实 LanguageSupervisor。未完成边界以
+`agent-harness-status.md` 为准：Zone 2 threads 段、worktree/branch 回收、窄屏与讨论线、结构化 progress/decisions/errors。
+3.1 / 3.2 / 3.3 / 3.7 仍只是 `implemented`。
 
 **3.4 / 3.5 的对象模型已由 P0.4 替代**：下文两节里的 `ThreadRecord` 单枚举 `status` + flags 的形状**不再有效**，以设计
 9.3.1 的 Thread + ThreadRun 与正交维度为准；`wait` 不再有 TTL 默认唤醒（D-033）；报告里的 `traceHandle` 改为
@@ -536,7 +537,7 @@ last checkpoint: 2026-09-03T10:12Z
 **T1 线程纵切**交付（P0 节末），T1 的范围是"一个 Thread、一个 Pi Run、一个 worktree；dispatch / send / wait / cancel /
 report / merge；worker 与 host 崩溃恢复；最小侧栏"，嵌套与自动 review 不在 T1。
 
-检索线（3.1–3.3、3.8）在 T4 回放集之后按证据决定投入：`explore` 先接为工具（纯算法模式），回放显示对 grep 有增益再接
+检索线（3.1–3.3）在 T4 回放集之后按证据决定投入：`explore` 先接为工具（纯算法模式），回放显示对 grep 有增益再接
 符号图与向量。
 
 ### 3.1 符号图采集器
@@ -737,12 +738,15 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 ### 3.8 LSP 导航工具
 
-- pi-host `symbols(query)` / `definition(path, line, character)` / `references(path, line, character)` /
+- pi-host `symbols(path, query)` / `definition(path, line, character)` / `references(path, line, character)` /
   `hover(path, line, character)` → host `lsp.*`；无服务器 → `unavailable (no language server for ${language})`。
 - `hover` 返回签名与文档（`${signature}\n\n${documentation}`，无文档时只返回签名），是"看一个类型 / 参数是什么"最便宜的
   路径，替代为此打开整个定义文件的 `read`（Devin 的 `hover_symbol` 同样与定义、引用并列）。`promptGuidelines`：
   `["Use hover to check a signature or type before reading the whole definition file."]`。
 - 测试：四个工具各三态（`ready` / `empty` / `unavailable`）。
+- **状态（2026-09-04）**：已接通。路径先过 Router/Documents authority；未同步文件从 Documents 读取并 `didOpen`，已有编辑器
+  buffer 不被磁盘内容覆盖；每次请求携带当前 documentVersion，agent 侧 line/character 一基、LSP 侧零基。Web Host 在握手声明
+  `harnessLspNavigation` 后才注册四个工具。
 
 ### 3.9 观察类工具的增量视图
 

@@ -32,9 +32,9 @@ describe("path lock service", () => {
         grantedCapabilities: ["write.document"],
       },
       authorizedPaths: [
-        { ...RESOURCE, canonicalResourceId: "b", inputPath: "b" },
-        { ...RESOURCE, canonicalResourceId: "a", inputPath: "a" },
-        { ...RESOURCE, canonicalResourceId: "a", inputPath: "alias-a" },
+        { ...RESOURCE, canonicalResourceId: "b", inputPath: "b", resourceId: "b" },
+        { ...RESOURCE, canonicalResourceId: "a", inputPath: "a", resourceId: "a" },
+        { ...RESOURCE, canonicalResourceId: "a", inputPath: "alias-a", resourceId: "a" },
       ],
       sessionId: "session-1",
       workspaceId: "workspace-1",

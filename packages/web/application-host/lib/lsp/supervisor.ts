@@ -1123,6 +1123,12 @@ export const createLanguageSupervisor = ({
         },
       };
     },
+    hasSyncedDocument(workspaceId: string, languageId: string, resourceId: string): boolean {
+      return desiredDocuments.get(sessionKey(workspaceId, languageId))?.has(resourceId) === true;
+    },
+    syncedDocumentVersion(workspaceId: string, languageId: string, resourceId: string): number | null {
+      return desiredDocuments.get(sessionKey(workspaceId, languageId))?.get(resourceId)?.documentVersion ?? null;
+    },
     syncDocument,
     completion: (request: LanguageRequest) => requestFeature('textDocument/completion', request, (raw, record) => {
       const rawRecord = asRecord(raw);

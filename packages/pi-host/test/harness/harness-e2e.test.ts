@@ -108,6 +108,7 @@ async function setupE2E() {
       workspaceId: actor.workspaceId!,
       canonicalResourceId: inputPath,
       inputPath,
+      resourceId: inputPath,
     }),
   });
   registerHarnessServices(router, harnessServiceHost);

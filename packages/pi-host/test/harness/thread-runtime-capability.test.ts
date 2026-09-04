@@ -17,7 +17,7 @@ const responseFor = (id: string) => (entry: WireEnvelope): entry is ResponseEnve
   entry.kind === "response" && entry.id === id
 );
 
-async function createSession(capabilities: { harnessThreads?: boolean; harnessWebRead?: boolean; harnessWebSearch?: boolean }): Promise<SessionSnapshot> {
+async function createSession(capabilities: { harnessLspNavigation?: boolean; harnessThreads?: boolean; harnessWebRead?: boolean; harnessWebSearch?: boolean }): Promise<SessionSnapshot> {
   const root = await mkdtemp(join(tmpdir(), "piarium-thread-capability-"));
   const cwd = join(root, "workspace");
   const agentDir = join(root, "agent");
@@ -63,5 +63,17 @@ describe("Host-provided thread runtime capability", () => {
 
     const available = await createSession({ harnessWebSearch: true });
     assert.ok(available.activeTools.includes("websearch"));
+  });
+
+  it("registers LSP navigation tools only for a Host with the real service", async () => {
+    const unavailable = await createSession({ harnessLspNavigation: false });
+    assert.equal(unavailable.activeTools.includes("hover"), false);
+    assert.equal(unavailable.activeTools.includes("definition"), false);
+
+    const available = await createSession({ harnessLspNavigation: true });
+    assert.ok(available.activeTools.includes("symbols"));
+    assert.ok(available.activeTools.includes("definition"));
+    assert.ok(available.activeTools.includes("references"));
+    assert.ok(available.activeTools.includes("hover"));
   });
 });

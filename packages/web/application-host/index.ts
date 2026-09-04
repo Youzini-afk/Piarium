@@ -59,6 +59,7 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
+import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 
@@ -1401,6 +1402,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
     ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
+    lspNavigationServices: createLspNavigationServices({
+      documents: documentsAuthority,
+      supervisor: languageSupervisor,
+    }),
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,

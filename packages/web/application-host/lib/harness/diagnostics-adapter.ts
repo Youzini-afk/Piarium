@@ -1,5 +1,6 @@
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
+import { languageIdForPath } from "./language-id.js";
 
 type LanguageSupervisor = ReturnType<typeof createLanguageSupervisor>;
 
@@ -102,33 +103,9 @@ export function createLanguageSupervisorDiagnosticsProvider(
 
   const isAvailable: DiagnosticsProvider["isAvailable"] = async (workspaceId, path) => {
     ensureSubscription(workspaceId);
-    // Check if the supervisor has a ready session for this workspace
-    // We infer the languageId from the file extension
-    const ext = path.lastIndexOf(".") >= 0 ? path.slice(path.lastIndexOf(".") + 1) : "";
-    const languageIdMap: Record<string, string> = {
-      ts: "typescript",
-      tsx: "typescriptreact",
-      js: "javascript",
-      jsx: "javascriptreact",
-      py: "python",
-      rs: "rust",
-      go: "go",
-      java: "java",
-      c: "c",
-      cpp: "cpp",
-      h: "c",
-      hpp: "cpp",
-      css: "css",
-      html: "html",
-      json: "json",
-      md: "markdown",
-      yml: "yaml",
-      yaml: "yaml",
-      xml: "xml",
-      sh: "shellscript",
-      bash: "shellscript",
-    };
-    const languageId = languageIdMap[ext] ?? "plaintext";
+    // Check if the supervisor has a ready session for this workspace.
+    const languageId = languageIdForPath(path);
+    if (!languageId) return false;
     const status = supervisor.getStatus(workspaceId, languageId);
     return status.status === "ready" || status.status === "degraded";
   };

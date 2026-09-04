@@ -107,7 +107,7 @@ describe("harness router", () => {
     const responses: Array<{ ok: boolean; code?: string }> = [];
     const authorize = vi.fn(async (_actor: HarnessActorContext, candidate: string) => (
       candidate === "src/new-file.ts"
-        ? { authorityId: "host-1", workspaceId: "workspace-1", canonicalResourceId: candidate, inputPath: candidate }
+        ? { authorityId: "host-1", workspaceId: "workspace-1", canonicalResourceId: candidate, inputPath: candidate, resourceId: candidate }
         : null
     ));
     const router = createHarnessRouter({
@@ -126,6 +126,39 @@ describe("harness router", () => {
     expect(authorize).toHaveBeenCalledWith(expect.anything(), "src/new-file.ts", { allowMissing: true });
     expect(handle).not.toHaveBeenCalled();
     expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
+    router.dispose();
+  });
+
+  it("applies workspace path authorization to LSP navigation", async () => {
+    const handle = vi.fn(async () => ({ status: "empty" as const, text: "No definition found" }));
+    const responses: Array<{ ok: boolean; code?: string }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.lsp"]),
+      authorizeWorkspacePath: async () => null,
+    });
+    router.register("lsp.definition", { handle });
+    await router.processEvent(harnessEvent("lsp.definition", { path: "../other/a.ts", line: 1 }));
+    expect(handle).not.toHaveBeenCalled();
+    expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
+    router.dispose();
+  });
+
+  it("rejects non-one-based LSP positions before calling the service", async () => {
+    const handle = vi.fn(async () => ({ status: "empty" as const, text: "No hover information" }));
+    const responses: Array<{ ok: boolean; code?: string }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.lsp"]),
+    });
+    router.register("lsp.hover", { handle });
+    await router.processEvent(harnessEvent("lsp.hover", { path: "src/a.ts", line: 0 }));
+    expect(handle).not.toHaveBeenCalled();
+    expect(responses).toEqual([{ ok: false, code: "invalid-params" }]);
     router.dispose();
   });
 
