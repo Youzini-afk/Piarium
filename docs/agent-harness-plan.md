@@ -798,11 +798,14 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
   `websearch`），无 worktree，权限继承父；转换时挂 worktree、切到实现类工具集，同一会话延续（工具集变更是前缀失效操作，
   在转换那一刻一次完成——会话边界之外唯一允许的工具集变更，因为它是用户显式动作）。
 - 子线程消息**绝不**进父对话正文；父那边只有 Zone 2 的 `threads` 段。
-- i18n：全部新 key 进 9 个 catalog。
+- i18n：全部新 key 进 10 个 catalog。
 - 测试：侧栏按事件更新；徽标状态映射；"从这里开一条线"创建的记录含 `forkPoint` 与记忆块快照；转换后工具集变化且对话延续；
   归档 / 恢复。
 - 判断要点：这是让线程模型对用户"存在"的那一半，没有它 9.3 只是 agent 之间的协议。侧栏样式、徽标形状自己定；**边界**是
   子线程消息不进父正文、面板与 agent 读同一份状态、讨论线零成本可丢。
+- **状态（2026-09-04）**：父 session state 已包含 threads/blocks/knowledge review；桌面用右 rail，`xl` 以下用现有
+  `MobileOverlayPanel` 和带实时数量的入口，共用同一加载/SSE/draft/action 状态。仍缺时间线线程卡片、用户“从这里开线”与讨论线
+  转实现线（D-062）。
 
 ### 阶段 3 完成标准
 

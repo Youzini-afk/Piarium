@@ -911,6 +911,22 @@ Host diagnostics，不阻断 memory block 已完成的提交。(5) memory shadow
 
 状态：已实施并 proven；配置 suggestions model 后的用户消息判断仍未实施
 
+### D-062 · 2026-09-04 · 3.10（窄屏 session state overlay）
+
+类型：实现澄清
+
+决定：`HarnessThreadsPanel` 的数据加载、SSE 订阅、draft/conflict 状态和 action handlers 保持单实例；`xl` 及以上渲染原右 rail，
+更窄窗口在聊天右上显示带实时 item count 的 session state 按钮，打开项目既有 `MobileOverlayPanel`，内部复用同一份
+knowledge review / blocks / threads 内容。无任何内容时 rail、按钮、overlay 都不渲染；切换会话时清数据并关闭 overlay。聊天根容器成为
+positioning context，按钮不会相对整个应用漂移。移动端没有第二套 store、route 或轮询。
+
+原因：旧 `<aside class="hidden ... xl:flex">` 让普通窄窗口、平板和手机完全无法处理 waiting thread、block 冲突或知识审阅；仅做响应式
+样式而没有入口仍不可达。复用现有 overlay 保留项目统一的焦点、关闭和滚动行为。
+
+影响：UI `HarnessThreadsPanel`、`HarnessSessionStateTrigger`、PiChatView positioning、10 locale；plan/status 3.10。
+
+状态：已实施并 proven（响应式触发器 SSR + 既有 panel/overlay 生产链）
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -978,3 +994,4 @@ Host diagnostics，不阻断 memory block 已完成的提交。(5) memory shadow
 | D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
 | D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |
 | D-061 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / decision suggestion runtime |
+| D-062 | implementation | — | agent-harness 9.3.8、plan/status 3.10；session state rail / mobile overlay |

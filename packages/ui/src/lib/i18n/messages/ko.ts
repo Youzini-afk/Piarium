@@ -21,6 +21,7 @@ export const dict: Record<I18nKey, string> = {
   'common.unavailable': '사용할 수 없음',
   'harness.threads.title': '하위 작업',
   'harness.context.title': '세션 상태',
+  'harness.context.open': '세션 상태 열기',
   'harness.blocks.title': '메모리 및 계획',
   'harness.blocks.edit': '블록 편집',
   'harness.blocks.cancel': '취소',

@@ -22,6 +22,7 @@ export const dict: Record<I18nKey, string> = {
   'common.unavailable': 'Niedostępne',
   'harness.threads.title': 'Zadania podrzędne',
   'harness.context.title': 'Stan sesji',
+  'harness.context.open': 'Otwórz stan sesji',
   'harness.blocks.title': 'Pamięć i plan',
   'harness.blocks.edit': 'Edytuj blok',
   'harness.blocks.cancel': 'Anuluj',

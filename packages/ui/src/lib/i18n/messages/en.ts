@@ -15,6 +15,7 @@ export const dict = {
   'common.unavailable': 'Unavailable',
   'harness.threads.title': 'Threads',
   'harness.context.title': 'Session state',
+  'harness.context.open': 'Open session state',
   'harness.blocks.title': 'Memory & plan',
   'harness.blocks.edit': 'Edit block',
   'harness.blocks.cancel': 'Cancel',

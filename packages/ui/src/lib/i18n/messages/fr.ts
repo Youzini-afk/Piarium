@@ -19,6 +19,7 @@ export const dict = {
   'common.unavailable': 'Indisponible',
   'harness.threads.title': 'Tâches déléguées',
   'harness.context.title': 'État de la session',
+  'harness.context.open': 'Ouvrir l’état de la session',
   'harness.blocks.title': 'Mémoire et plan',
   'harness.blocks.edit': 'Modifier le bloc',
   'harness.blocks.cancel': 'Annuler',

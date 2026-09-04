@@ -5,6 +5,7 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   'harness.threads.title': 'Tarefas delegadas',
   'harness.context.title': 'Estado da sessão',
+  'harness.context.open': 'Abrir estado da sessão',
   'harness.blocks.title': 'Memória e plano',
   'harness.blocks.edit': 'Editar bloco',
   'harness.blocks.cancel': 'Cancelar',

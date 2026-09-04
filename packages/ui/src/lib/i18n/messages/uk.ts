@@ -6,6 +6,7 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   'harness.threads.title': 'Делеговані завдання',
   'harness.context.title': 'Стан сесії',
+  'harness.context.open': 'Відкрити стан сесії',
   'harness.blocks.title': 'Пам’ять і план',
   'harness.blocks.edit': 'Редагувати блок',
   'harness.blocks.cancel': 'Скасувати',

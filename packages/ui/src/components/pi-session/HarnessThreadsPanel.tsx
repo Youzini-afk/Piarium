@@ -21,6 +21,8 @@ import {
   type HarnessKnowledgeSuggestion,
 } from './harnessKnowledgePresentation';
 import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKnowledgeReviewSection';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -84,6 +86,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [editingBlock, setEditingBlock] = React.useState<string | null>(null);
   const [blockDraft, setBlockDraft] = React.useState('');
   const [savingBlock, setSavingBlock] = React.useState(false);
+  const [narrowOpen, setNarrowOpen] = React.useState(false);
   const eventRevision = React.useRef(0);
   const parent = React.useMemo<ThreadParent>(() => ({ kind: 'session', id: parentSessionId }), [parentSessionId]);
 
@@ -266,6 +269,7 @@ export const HarnessThreadsPanel: React.FC<{
     setSuggestions([]);
     setKnowledgeDrafts({});
     setEditingBlock(null);
+    setNarrowOpen(false);
     void reload(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load threads:', error);
     });
@@ -306,13 +310,9 @@ export const HarnessThreadsPanel: React.FC<{
 
   if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0) return null;
 
-  return (
-    <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
-        <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
-        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{blocks.length + threads.length + suggestions.length}</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+  const itemCount = blocks.length + threads.length + suggestions.length;
+  const content = (
+    <div className="min-h-0 flex-1 overflow-y-auto">
         <HarnessKnowledgeReviewSection
           suggestions={suggestions}
           drafts={knowledgeDrafts}
@@ -432,7 +432,28 @@ export const HarnessThreadsPanel: React.FC<{
             </div>
           </section>
         ) : null}
-      </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
+          <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
+          <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{itemCount}</span>
+        </div>
+        {content}
+      </aside>
+      <HarnessSessionStateTrigger count={itemCount} onOpen={() => setNarrowOpen(true)} />
+      <MobileOverlayPanel
+        open={narrowOpen}
+        onClose={() => setNarrowOpen(false)}
+        title={t('harness.context.title')}
+        className="h-[min(82dvh,720px)]"
+        contentMaxHeightClassName="flex-1"
+      >
+        {content}
+      </MobileOverlayPanel>
+    </>
   );
 };

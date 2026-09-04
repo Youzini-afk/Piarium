@@ -751,7 +751,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     : null;
   return (
     <TooltipProvider>
-      <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
+      <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
         <WorkbenchReplacement
           target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}

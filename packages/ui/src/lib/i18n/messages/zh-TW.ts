@@ -21,6 +21,7 @@ export const dict: Record<I18nKey, string> = {
   'common.unavailable': '無法使用',
   'harness.threads.title': '子任務',
   'harness.context.title': '會話狀態',
+  'harness.context.open': '開啟會話狀態',
   'harness.blocks.title': '記憶與計畫',
   'harness.blocks.edit': '編輯狀態區塊',
   'harness.blocks.cancel': '取消',
