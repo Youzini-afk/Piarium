@@ -17,7 +17,7 @@ const responseFor = (id: string) => (entry: WireEnvelope): entry is ResponseEnve
   entry.kind === "response" && entry.id === id
 );
 
-async function createSession(harnessThreads: boolean): Promise<SessionSnapshot> {
+async function createSession(capabilities: { harnessThreads?: boolean; harnessWebRead?: boolean; harnessWebSearch?: boolean }): Promise<SessionSnapshot> {
   const root = await mkdtemp(join(tmpdir(), "piarium-thread-capability-"));
   const cwd = join(root, "workspace");
   const agentDir = join(root, "agent");
@@ -27,7 +27,7 @@ async function createSession(harnessThreads: boolean): Promise<SessionSnapshot> 
   controller.start();
   try {
     transport.receive(createRequest("handshake", "host.handshake", {
-      capabilities: { harnessThreads },
+      capabilities,
       clientName: "thread-capability-test",
       clientVersion: "0.0.0",
       mode: "test",
@@ -48,12 +48,20 @@ async function createSession(harnessThreads: boolean): Promise<SessionSnapshot> 
 
 describe("Host-provided thread runtime capability", () => {
   it("registers thread tools only when the application Host advertises a real runtime", async () => {
-    const available = await createSession(true);
+    const available = await createSession({ harnessThreads: true });
     assert.ok(available.activeTools.includes("dispatch"));
     assert.ok(available.activeTools.includes("wait"));
 
-    const unavailable = await createSession(false);
+    const unavailable = await createSession({ harnessThreads: false });
     assert.equal(unavailable.activeTools.includes("dispatch"), false);
     assert.equal(unavailable.activeTools.includes("wait"), false);
+  });
+
+  it("does not advertise websearch when the application Host has no real provider", async () => {
+    const unavailable = await createSession({ harnessWebSearch: false });
+    assert.equal(unavailable.activeTools.includes("websearch"), false);
+
+    const available = await createSession({ harnessWebSearch: true });
+    assert.ok(available.activeTools.includes("websearch"));
   });
 });

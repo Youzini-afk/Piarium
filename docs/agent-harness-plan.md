@@ -118,8 +118,8 @@ bun run test:docs && bun run docs:validate   # 触碰 docs/ 后
 阶段 0（前置）、1（工具与 host 服务）、1b（web）的工作项已交付，参考形状从本文移除。当前状态与已知缺口在
 [agent-harness-status.md](agent-harness-status.md)；契约在 `packages/protocol/README.md`、`lib/harness/DOCUMENTATION.md`、
 `packages/pi-host/src/harness/README.md`；理由在决策日志 D-001–D-018。仍开着的缺口（都在状态矩阵 Blocker 列）：
-harness shell 未接进 terminal runtime（D-013 的前置条件）；`websearch` 工具已注册但 host 未注入
-服务（应改为服务缺失则不注册）；1.6 诊断与 `read` 大文件句柄未在真会话
+harness shell 未接进 terminal runtime（D-013 的前置条件）；`websearch` provider 适配器仍是 placeholder，但 Host 不声明能力时
+工具现已不注册；1.6 诊断与 `read` 大文件句柄未在真会话
 验证；macOS / Linux 的 bash smoke 未做。这些随相关纵切一起收，不单独立项。
 
 ## P0：integrity 纵切（一切新功能之前）

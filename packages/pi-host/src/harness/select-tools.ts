@@ -35,6 +35,8 @@ export interface SelectHarnessToolsDeps {
   yieldedTools?: ReadonlySet<string>;
   /** Whether models.reader is configured (enables webfetch prompt path). */
   readerModelConfigured?: boolean;
+  /** Whether the host registered a real web.search service. */
+  webSearchAvailable?: boolean;
   /** Whether the host provides a thread runtime (thread registry + spawn).
    * When false, thread tools are not registered. */
   threadRuntimeAvailable?: boolean;
@@ -52,7 +54,8 @@ export interface SelectHarnessToolsDeps {
  * New tools (get_output, write_to_process, kill_shell, diagnostics,
  * apply_patch) are omitted when disabled.
  * apply_patch is only included when isOpenAIFamily is true AND not disabled.
- * webfetch / websearch are omitted when in yieldedTools (pi-web-access let-in).
+ * webfetch / websearch are omitted when in yieldedTools (pi-web-access let-in);
+ * websearch is also absent until the application Host advertises a real provider.
  */
 export function selectHarnessTools(
   settings: HarnessSettings,
@@ -67,6 +70,7 @@ export function selectHarnessTools(
     isOpenAIFamily,
     yieldedTools,
     readerModelConfigured,
+    webSearchAvailable,
     threadRuntimeAvailable,
     resolvedRoles,
   } = deps;
@@ -99,7 +103,7 @@ export function selectHarnessTools(
   if (tools.webfetch !== false && !yieldedTools?.has("webfetch")) {
     result.push(createWebFetchTool(bridge, sessionId, { readerModelConfigured: readerModelConfigured ?? false }));
   }
-  if (tools.websearch !== false && !yieldedTools?.has("websearch")) {
+  if (webSearchAvailable && tools.websearch !== false && !yieldedTools?.has("websearch")) {
     result.push(createWebSearchTool(bridge, sessionId));
   }
   // Phase 2 tools

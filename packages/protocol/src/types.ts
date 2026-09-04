@@ -483,6 +483,10 @@ export interface HostHandshakeParams {
   capabilities?: {
     /** The application Host can execute and observe durable child threads. */
     harnessThreads?: boolean;
+    /** The application Host has a real reader-model web service. */
+    harnessWebRead?: boolean;
+    /** The application Host has a real web-search provider. */
+    harnessWebSearch?: boolean;
     workspaceMutationJournal?: boolean;
   };
   clientName: string;

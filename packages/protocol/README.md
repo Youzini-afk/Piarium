@@ -111,6 +111,10 @@ Thread-runtime availability is not a user setting. The Application Host
 advertises `capabilities.harnessThreads` in the private Host handshake; only
 then does pi-host register the seven thread tools. Child sessions receive their
 frozen role model and active tool list in `session.create/open`.
+The same handshake owns `harnessWebRead` and `harnessWebSearch`: a configured
+model slot or dormant provider module does not make a tool available. If the
+Host does not advertise a real search service, pi-host omits `websearch` before
+constructing the AgentSession.
 
 ## Exports
 

@@ -36,6 +36,8 @@ export function createWebPiRuntimeBroker({
   emit = () => {},
   foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
+  harnessWebRead = false,
+  harnessWebSearch = false,
   nodePath,
   packageRoot,
   runtimeGeneration,
@@ -48,6 +50,8 @@ export function createWebPiRuntimeBroker({
   emit?: PiRuntimeBrokerOptions['emit'] | undefined;
   foundationalPackages?: PiRuntimeBrokerOptions['foundationalPackages'] | undefined;
   hostEntry?: string | undefined;
+  harnessWebRead?: boolean | undefined;
+  harnessWebSearch?: boolean | undefined;
   nodePath?: string | undefined;
   packageRoot?: string | undefined;
   runtimeGeneration?: number | undefined;
@@ -57,7 +61,12 @@ export function createWebPiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
     ...(typeof admitSessionExecution === 'function' ? { admitSessionExecution } : {}),
     client: {
-      capabilities: { harnessThreads: true, workspaceMutationJournal: true },
+      capabilities: {
+        harnessThreads: true,
+        harnessWebRead,
+        harnessWebSearch,
+        workspaceMutationJournal: true,
+      },
       clientName: 'piarium-web-server',
       clientVersion: typeof clientVersion === 'string' && clientVersion ? clientVersion : '0.1.0',
       mode: 'headless',

@@ -47,8 +47,8 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **1.10** 静态提示片段 | pi-host | ✓ | ✓ | `zone0-stability.test.ts`（注册全部工具后 system 不变） | ✓ | — | — |
 | **1.11** 工具卡片紧凑渲染 | ui | ✓ | ✓ | `toolSummary.test.ts`（摘要、已知只读分组、未知工具不猜只读）；`PiTimelineEntries.renderMode.test.tsx`（真实 SSR：grep+read 折叠、write 独立） | ✓（live 模式） | 每组/每卡仍可展开完整 arguments/result/details | sorted 模式已有整段 activity 容器，不做第二层默认折叠（D-048） |
 | **1b.1** 抓取服务（SSRF、重定向、提取、PDF、缓存） | host | ✓ | ✓ | `host/web-fetch.test.ts` | ✓ | — | — |
-| **1b.2** `webfetch` 工具 / 阅读子 agent | pi-host / host | ✓ | ✓（fetch）/ ✗（read） | `pi-host/test/harness/webfetch-tool.test.ts`；`host/web-read-service.test.ts` | ✓（fetch） | 无 `models.reader` 时返回提取内容 | `webReadService` 在 `index.ts` 未注入 |
-| **1b.3** 搜索 provider 抽象 / `websearch` | host / pi-host | ✓ | **✗（工具已注册，服务未注入）** | `host/web-search.test.ts`；`pi-host/test/harness/websearch-tool.test.ts` | — | 应为不注册 | `index.ts` 未注入 `webSearchService`，真实会话里 `websearch` 每次返回 unavailable——与线程工具曾有的问题同类，应在服务缺失时不注册 |
+| **1b.2** `webfetch` 工具 / 阅读子 agent | pi-host / host | ✓ | ✓（fetch）/ ✗（read） | `pi-host/test/harness/webfetch-tool.test.ts`；`host/web-read-service.test.ts`；`thread-runtime-capability.test.ts`（Host 未声明 reader 时不走休眠服务） | ✓（fetch） | Host 无 reader 时直接返回提取内容，不先发一个注定 unavailable 的请求 | `webReadService` 在 `index.ts` 未注入 |
+| **1b.3** 搜索 provider 抽象 / `websearch` | host / pi-host | ✓ | ✗（provider 未接；工具正确隐藏） | `host/web-search.test.ts`；`pi-host/test/harness/websearch-tool.test.ts`；`select-tools-web.test.ts` / `thread-runtime-capability.test.ts`（握手能力门） | — | Host 不声明 `harnessWebSearch` 时不注册；`pi-web-access` 启用则由插件提供 | 配置 provider 适配器仍是 placeholder；不能把返回空数组的骨架声明成可用服务（D-050） |
 | **1b.4** Electron 离屏渲染 | electron / host | ✓ | ✓（桌面） | 提交 `12e77d90`；契约测试 `desktop-contract.test.ts` | ✓（桌面） | `renderer-unavailable` | Electron smoke 未在本轮验证 |
 | **1b.5** 来源面板 store | ui | ✓ | ✗ | `useWebSourcesStore` 单测 | — | — | store 无组件引用 |
 | **1b.6** 对 `pi-web-access` 让位 | pi-host | ✓ | ✓ | `pi-host/test/harness/select-tools-web.test.ts` | ✓ | — | — |

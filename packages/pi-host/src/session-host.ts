@@ -603,6 +603,8 @@ export class SessionHost {
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
   #harnessThreadRuntimeEnabled = false;
+  #harnessWebReadEnabled = false;
+  #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
@@ -648,6 +650,11 @@ export class SessionHost {
 
   setHarnessThreadRuntimeEnabled(enabled: boolean): void {
     this.#harnessThreadRuntimeEnabled = enabled;
+  }
+
+  setHarnessWebCapabilities(input: { read: boolean; search: boolean }): void {
+    this.#harnessWebReadEnabled = input.read;
+    this.#harnessWebSearchEnabled = input.search;
   }
 
   respondWorkspaceMutation(
@@ -2935,7 +2942,7 @@ export class SessionHost {
       }));
       const yieldedTools = computeYieldedTools(allPkgs);
       // Check if models.reader is configured
-      const readerModelConfigured = harnessSettings.models?.reader !== undefined;
+      const readerModelConfigured = this.#harnessWebReadEnabled && harnessSettings.models?.reader !== undefined;
       // Roles the session can actually dispatch: a role whose model slot is
       // unconfigured is omitted from the team prompt and rejected by the
       // tool, rather than silently running on the main model (invariant 6).
@@ -2951,6 +2958,7 @@ export class SessionHost {
         isOpenAIFamily,
         yieldedTools,
         readerModelConfigured,
+        webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         resolvedRoles,
       }));

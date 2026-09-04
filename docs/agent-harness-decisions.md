@@ -674,6 +674,22 @@ sidebar 的独立 Agent harness 区块。只有至少一个字段真实存在才
 
 状态：已实施
 
+### D-050 · 2026-09-04 · 1b.2–1b.3（Web 工具按 Host 真实能力注册）
+
+类型：实现澄清
+
+决定：client handshake 新增可选 `harnessWebRead/harnessWebSearch`。pi-host 在 AgentSession 构造前读取并冻结：Host 未声明
+`harnessWebSearch` 时不注册 `websearch`；未声明 `harnessWebRead` 时，即使用户配置了 reader model，`webfetch(prompt)` 也直接
+返回提取正文，不先请求休眠服务。`pi-web-access` 的显式让位规则保持优先。Web Host 当前两个值均为 false，直到真实 provider
+被创建并注入，不能用 `resolveSearchProvider` 返回空数组的 placeholder 冒充能力。
+
+原因：状态矩阵已发现 `websearch` 对真实会话是“工具可见、每次 unavailable”；reader 路径也会多一次注定失败的 round-trip。
+线程工具已用同一握手模式解决休眠实现暴露，Web 应复用而非另建探测。
+
+影响：protocol handshake、HostController/SessionHost、`selectHarnessTools`、Web broker factory 与能力 E2E；状态矩阵 1b.2/1b.3。
+
+状态：已实施（能力门）；真实 reader/search provider 仍未实现
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -729,3 +745,4 @@ sidebar 的独立 Agent harness 区块。只有至少一个字段真实存在才
 | D-047 | implementation | — | agent-harness.md 8.6、plan/status T4；evaluation/harness / replay script |
 | D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |
 | D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |
+| D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |

@@ -507,6 +507,12 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessThreads", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessWebCapabilities({
+          read: clientCapabilities !== undefined
+            && readBoolean(clientCapabilities, "harnessWebRead", { optional: true }) === true,
+          search: clientCapabilities !== undefined
+            && readBoolean(clientCapabilities, "harnessWebSearch", { optional: true }) === true,
+        });
         return {
           capabilities: HOST_CAPABILITIES,
           hostVersion: PIARIUM_HOST_VERSION,

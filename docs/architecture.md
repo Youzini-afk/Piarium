@@ -414,6 +414,12 @@ An initial handshake requires the single Piarium v1 contract and reports capabil
 pre-release development every product surface changes in lockstep; no historical Piarium ABI is
 accepted. UI disables unavailable actions instead of guessing from runtime versions.
 
+The application Host side of that handshake also declares optional Harness services.
+`harnessThreads`, `harnessWebRead`, and `harnessWebSearch` gate tool construction before an
+AgentSession is created; a dormant provider module or configured model slot is not enough. The Web
+Host currently declares threads but not reader/search, so `websearch` is absent and prompted
+`webfetch` falls back directly to extracted content instead of making a guaranteed-failing request.
+
 ### 5.1 Agent harness protocol
 
 The agent harness extends the host protocol with worker→host service

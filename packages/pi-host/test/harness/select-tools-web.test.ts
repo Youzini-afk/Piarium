@@ -18,6 +18,7 @@ const baseDeps = {
   cwd: "/tmp",
   workspaceMutationJournal: undefined,
   isOpenAIFamily: false,
+  webSearchAvailable: true,
 };
 
 describe("computeYieldedTools", () => {
@@ -53,7 +54,7 @@ describe("computeYieldedTools", () => {
 });
 
 describe("selectHarnessTools web tool gating", () => {
-  it("includes webfetch and websearch by default", () => {
+  it("includes webfetch and Host-backed websearch when both are available", () => {
     const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, baseDeps);
     const names = tools.map((t) => t.name);
     assert.ok(names.includes("webfetch"));
@@ -90,5 +91,13 @@ describe("selectHarnessTools web tool gating", () => {
     const names = tools.map((t) => t.name);
     assert.ok(names.includes("webfetch"));
     assert.equal(names.includes("websearch"), false);
+  });
+
+  it("omits websearch when the Host has no real provider service", () => {
+    const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      webSearchAvailable: false,
+    });
+    assert.equal(tools.some((tool) => tool.name === "websearch"), false);
   });
 });
