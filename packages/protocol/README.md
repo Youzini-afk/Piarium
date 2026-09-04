@@ -8,7 +8,7 @@ Piarium protocol types, schemas, and event/method definitions.
 
 | Event | Direction | Description |
 |-------|-----------|-------------|
-| `harness.request` | pi-host → host | Request a harness service |
+| `harness.request` | pi-host → host | Request a harness service; session identity comes from the broker actor, never this payload |
 | `harness.respond` | host → pi-host | Response to a harness request |
 | `workspace.mutation.request` | pi-host → host | Request a file mutation (before/after) |
 | `workspace.mutation.respond` | host → pi-host | Accept/reject a mutation request |
@@ -101,7 +101,7 @@ interface HarnessSettings {
 
 ## Exports
 
-- `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (carries the optional per-request `timeoutMs`), `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `ShellExecResult`, `OutputSlice`, `DiagnosticsResult`
+- `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `ShellExecResult`, `OutputSlice`, `DiagnosticsResult`
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
 - `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
 - `harness-threads.ts` — Thread protocol types: `ThreadRecord`, `ThreadStatus`, `ThreadViewCursor`, `ThreadDispatchParams`, `ThreadListParams`, `ThreadWaitParams`, `ThreadSendParams`, `ThreadReadParams`, `ThreadMergeParams`, `ThreadKillParams`, `DEFAULT_TTL_TABLE`, `DEFAULT_WAIT_TIMEOUT_MS`

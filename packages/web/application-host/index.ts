@@ -40,9 +40,10 @@ import {
 import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
+import { assertAbsolutePathInWorkspace, WorkspacePathError } from './lib/workspace/path-safety.js';
 
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
-import { createHarnessServiceHost } from './lib/harness/service-host.js';
+import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { type MemoryAgentRunner } from './lib/harness/memory-agent.js';
@@ -1273,13 +1274,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     respond: async (sessionId, requestId, outcome) => {
       await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId, outcome));
     },
-    resolveWorkspace: async (sessionId) => {
-      const snapshot = sessionSnapshots.get(sessionId);
-      const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
-      if (workspace?.kind === 'workspace' && typeof workspace.id === 'string') {
-        return workspace.id;
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    authorizeWorkspacePath: async (actor, candidate, { allowMissing }) => {
+      if (!actor.workspaceId) return false;
+      try {
+        const workspace = await documentsAuthority.inspectWorkspace(actor.workspaceId);
+        const absolutePath = path.isAbsolute(candidate)
+          ? candidate
+          : path.resolve(workspace.root, candidate);
+        await assertAbsolutePathInWorkspace(absolutePath, {
+          root: workspace.root,
+          fsPromises,
+          pathModule: path,
+          allowMissing,
+        });
+        return true;
+      } catch (error) {
+        if (error instanceof WorkspacePathError) return false;
+        throw error;
       }
-      return null;
     },
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
@@ -1338,22 +1351,49 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
     void harnessRouter.processEvent(event);
-    if (event?.kind === 'worker.exit') return;
+    if (event?.kind === 'worker.exit') {
+      if (event.sessionId) {
+        const ownsRegisteredSession = !event.actor || harnessServiceHost.hasActor(event.actor);
+        harnessServiceHost.dropSession(event.sessionId, event.actor);
+        if (ownsRegisteredSession) {
+          sessionSnapshots.delete(event.sessionId);
+          sessionNames.delete(event.sessionId);
+          sessionStores.delete(event.sessionId);
+        }
+      }
+      return;
+    }
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
     const envelopeData = recordOf(envelope.data);
-    const sessionId = event.sessionId || (typeof envelopeData.sessionId === 'string' ? envelopeData.sessionId : '');
+    const sessionId = event.sessionId ?? '';
     if (envelope.event === 'session.snapshot' && sessionId) {
       sessionSnapshots.set(sessionId, envelopeData);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
       // Register harness session when workspace is bound
       const workspace = recordOf(envelopeData.workspace);
-      if (workspace?.kind === 'workspace' && typeof workspace.id === 'string' && typeof envelopeData.cwd === 'string') {
-        if (!harnessServiceHost.getInterpreter(sessionId)) {
+      const harnessWorkspaceId = typeof workspace.authorityId === 'string'
+        ? workspace.authorityId
+        : typeof workspace.id === 'string'
+          ? workspace.id
+          : '';
+      if (
+        event.actor
+        && workspace?.kind === 'workspace'
+        && harnessWorkspaceId
+        && typeof envelopeData.cwd === 'string'
+      ) {
+        if (!harnessServiceHost.hasActor(event.actor)) {
+          const activeTools = Array.isArray(envelopeData.activeTools)
+            ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
+            : [];
           harnessServiceHost.registerSession({
-            sessionId,
-            workspaceId: workspace.id,
+            actor: event.actor,
+            grantedCapabilities: deriveHarnessCapabilities(activeTools, {
+              threadRuntime: Boolean(harnessServiceHost.threadRegistry),
+            }),
+            workspaceId: harnessWorkspaceId,
             workspaceRoot: envelopeData.cwd,
           });
         }

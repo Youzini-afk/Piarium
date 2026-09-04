@@ -390,7 +390,7 @@ worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt
 
 `ActorContext { authorityInstanceId; sessionId; runId; workerId; workerGeneration; workspaceId; grantedCapabilities }` 只能由 broker 信封与 host 注册表生成。broker 规则：`session.open` / `session.create` 的**方法响应**成功后写入 `{ sessionId, workerGeneration }` 作为 pin；`session.snapshot` 只能验证与更新状态，不能重绑身份，不一致视为协议违规（诊断 + 忽略）；`session.closed` 不能仅凭 worker 自报清空 pin，关闭必须是 broker 发起成功或连接确认终止；未 pin 的 worker 发出的 harness 请求一律拒绝（catalog worker 没有会话，本就不该发）。Router 从信封取 ActorContext，`HarnessRequestData` 删除 `sessionId`。Host 授权按风险类别：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill / merge）、`write`（未来经 host 中介的文档写入）。
 
-过渡：RunManifest 落地前，host 的 capability 集从会话创建时冻结的同一份设置推导（与 pi-host 同源，各读一次），标为临时方案；RunManifest 由 host 计算、`session.open` 时下发 worker 后收敛为单一来源。
+过渡：RunManifest 落地前，host 从 broker 验证后的首次 `session.snapshot.activeTools` 与 Host 实际服务可用性推导 capability 并随会话注册冻结；不二次读取可能已变化的设置。RunManifest 下发后收敛为显式单一来源。
 
 真值表（pi-host gate，进设计 9.1.2）：
 
@@ -406,7 +406,7 @@ worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt
 原因：router 从 `envelope.data.sessionId`（worker 自报）取身份；broker 信封的 `sessionId` 又来自 worker 自己发出的 `session.snapshot`（`host-client.ts:340`），两层都不可信——worker 发一条伪造 snapshot 就能把自己重绑到别的会话，在别人的 shell 里执行命令。上一轮把 `parentSessionId` 从 params 挪到 `ctx.sessionId` 只是把信任下移了一层。
 考虑过的替代：(a) 只改 router 用信封字段——信封本身不可信，改了没用。(b) Host 也做 allow / ask / deny——与 pi-host gate 双重门控，两次弹窗或两处不一致，正是插件共存时出过的问题。
 影响：`packages/runtime-broker/src/{host-client,runtime-broker}.ts`（pin）；`packages/protocol/src/harness.ts`（删 `sessionId`，加 `ActorContext`）；`packages/web/application-host/lib/harness/{router,harness-services}.ts`；设计 9.1.2、architecture §5.1 回写。D-025 在索引中标 superseded。
-状态：待实施（P0 第 1、2 项）
+状态：已实施（P0 第 1、2 项）
 
 ### D-036 · 2026-09-04 · 1.7（工作区级规范路径锁）
 类型：偏离
@@ -484,7 +484,7 @@ worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt
 | D-032 | active-design（待实施） | — | agent-harness.md 9.3.1 / 9.3.4、plan P0 |
 | D-033 | active-design（待实施） | — | agent-harness.md 2 / 9.2.6 / 12.2、plan P0 |
 | D-034 | active-design（待实施） | — | agent-harness.md 5.1、plan P0 |
-| D-035 | active-design（待实施） | — | agent-harness.md 9.1.2、architecture §5.1、plan P0 |
+| D-035 | folded-in | — | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
 | D-036 | active-design（待实施） | — | plan 1.7 / P0 |
 | D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
 | D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |

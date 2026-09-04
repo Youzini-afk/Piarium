@@ -931,7 +931,8 @@ accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（
 只能由 broker 信封与 host 注册表生成，请求载荷里不再有 `sessionId`。broker 在 `session.open` / `session.create` 的方法
 响应成功后 pin 住 `{ sessionId, workerGeneration }`；worker 自己发出的 `session.snapshot` 只能验证与更新状态，不能重绑
 身份，不一致视为协议违规；`session.closed` 不能仅凭 worker 自报清空 pin；未 pin 的 worker 发出的 harness 请求一律拒绝。
-RunManifest 落地前，host 的能力集从会话创建时冻结的同一份设置推导（过渡方案，与 pi-host 同源各读一次）。
+RunManifest 落地前，host 从 broker 验证后的首次 `session.snapshot.activeTools` 与 Host 实际服务可用性推导能力集并随会话
+注册冻结；它不二次读取可能已变化的设置。RunManifest 落地后收敛为显式单一来源。
 
 **第一层的判定顺序**（真值表，实现必须与之一致）：
 

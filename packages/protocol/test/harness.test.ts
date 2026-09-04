@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  HARNESS_METHOD_CAPABILITY,
   HOST_EVENTS,
   isHarnessMethod,
   isHostEvent,
   type HarnessMethod,
+  type HarnessRequestData,
 } from "../src/index.js";
 
 describe("harness protocol", () => {
@@ -14,17 +16,20 @@ describe("harness protocol", () => {
   });
 
   it("isHarnessMethod recognizes all defined methods", () => {
-    const expected: HarnessMethod[] = [
-      "shell.exec", "shell.read", "shell.write", "shell.kill",
-      "output.store", "output.read",
-      "search.content",
-      "lsp.diagnostics", "lsp.diagnosticsSnapshot",
-      "fs.lock",
-      "web.fetch", "web.read", "web.search",
-    ];
+    const expected = Object.keys(HARNESS_METHOD_CAPABILITY) as HarnessMethod[];
     for (const method of expected) {
       assert.ok(isHarnessMethod(method), `${method} should be a harness method`);
     }
+  });
+
+  it("keeps session identity out of worker request payloads", () => {
+    const request = {
+      method: "output.read",
+      params: { handle: "out_example" },
+      requestId: "request-1",
+    } satisfies HarnessRequestData;
+    assert.equal("sessionId" in request, false);
+    assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
   });
 
   it("isHarnessMethod rejects unknown methods", () => {

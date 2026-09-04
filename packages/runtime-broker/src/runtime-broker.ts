@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   EventEnvelope,
   ExtensionUiResponse,
+  HarnessActorIdentity,
   HostHandshakeParams,
   HostHandshakeResult,
   HostMethod,
@@ -100,6 +101,7 @@ type PiRuntimeBrokerEventPayload =
       workerId: string;
     }
   | {
+      actor?: HarnessActorIdentity;
       envelope: EventEnvelope;
       kind: "host";
       role: RuntimeWorkerRole;
@@ -107,6 +109,7 @@ type PiRuntimeBrokerEventPayload =
       workerId: string;
     }
   | {
+      actor?: HarnessActorIdentity;
       code: number | null;
       expected: boolean;
       kind: "worker.exit";
@@ -135,7 +138,7 @@ const claimedEventSessionId = (envelope: EventEnvelope): string | undefined => {
  * Session/workspace worker events may describe state for their pinned session,
  * but they never choose that identity. Initial snapshots can arrive before the
  * create/open response and fork snapshots can arrive while a broker-issued
- * transition is pending; both are ignored until the response pins the worker.
+ * transition is pending; the client defers both until the response pins the worker.
  */
 export const classifyWorkerEventIdentity = ({
   envelope,
@@ -150,12 +153,11 @@ export const classifyWorkerEventIdentity = ({
 }): WorkerEventIdentityDecision => {
   if (role !== "session" && role !== "workspace") return "accept";
   const claimedSessionId = claimedEventSessionId(envelope);
-  if (claimedSessionId === undefined) return "accept";
   if (pinnedSessionId === undefined) {
-    return envelope.event === "session.snapshot"
-      ? "ignore-unbound-snapshot"
-      : "reject";
+    if (envelope.event === "session.snapshot") return "ignore-unbound-snapshot";
+    return envelope.event === "harness.request" ? "reject" : "accept";
   }
+  if (claimedSessionId === undefined) return "accept";
   if (claimedSessionId === pinnedSessionId) return "accept";
   if (transitioning && envelope.event === "session.snapshot") {
     return "ignore-transition-snapshot";
@@ -165,6 +167,7 @@ export const classifyWorkerEventIdentity = ({
 
 export interface PiRuntimeBrokerOptions {
   agentDir?: string;
+  authorityInstanceId?: string;
   client: Omit<HostHandshakeParams, "protocolVersions">;
   cwd?: string;
   emit?(event: PiRuntimeBrokerEvent): void;
@@ -303,6 +306,7 @@ const requiresWorkspaceAdmission = (method: HostMethod, params: unknown): boolea
 };
 
 export class PiRuntimeBroker {
+  readonly #authorityInstanceId: string;
   readonly #clients = new Set<PiHostClient>();
   readonly #configWatches = new Map<string, PiHostClient>();
   readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
@@ -330,6 +334,7 @@ export class PiRuntimeBroker {
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
+    this.#authorityInstanceId = options.authorityInstanceId?.trim() || randomUUID();
     this.#runtimeGeneration = options.runtimeGeneration ?? 1;
     if (!Number.isSafeInteger(this.#runtimeGeneration) || this.#runtimeGeneration < 1) {
       throw new TypeError("Pi runtime generation must be a positive safe integer");
@@ -559,7 +564,9 @@ export class PiRuntimeBroker {
           "Failed to persist session workspace binding",
         );
       }
-      return await this.#enrichSnapshot(worker, snapshot);
+      const enriched = await this.#enrichSnapshot(worker, snapshot);
+      worker.flushDeferredSessionSnapshots();
+      return enriched;
     } catch (error) {
       await this.#removeWorker(worker);
       throw error;
@@ -650,7 +657,9 @@ export class PiRuntimeBroker {
           "Failed to update session workspace binding",
         );
       }
-      return await this.#enrichSnapshot(opened.worker, opened.snapshot);
+      const enriched = await this.#enrichSnapshot(opened.worker, opened.snapshot);
+      opened.worker.flushDeferredSessionSnapshots();
+      return enriched;
     } catch (error) {
       await this.#removeWorker(opened.worker);
       throw error;
@@ -907,9 +916,11 @@ export class PiRuntimeBroker {
           "Failed to preserve forked session workspace binding",
         );
       }
+      const snapshot = await this.#enrichSnapshot(worker, result.snapshot);
+      worker.flushDeferredSessionSnapshots();
       return {
         ...result,
-        snapshot: await this.#enrichSnapshot(worker, result.snapshot),
+        snapshot,
       };
     } finally {
       finishTransition();
@@ -1118,6 +1129,7 @@ export class PiRuntimeBroker {
           throw new Error("Pi workspace worker was superseded during startup");
         }
         this.#bindWorkspaceContext(client, snapshot.sessionId);
+        client.flushDeferredSessionSnapshots();
         return { client, sessionId: snapshot.sessionId };
       } finally {
         await this.#finishSessionExecutionAdmission(admission);
@@ -1480,6 +1492,23 @@ export class PiRuntimeBroker {
     return { ...summary, workspace, workspacePersistence: "pending" };
   }
 
+  #projectSessionEnvelope(envelope: EventEnvelope, sessionId: string): EventEnvelope {
+    if (envelope.event !== "session.snapshot") return envelope;
+    const workspace = this.#pendingWorkspaceBindings.get(sessionId)
+      ?? this.#knownSummaries.get(sessionId)?.workspace;
+    if (workspace === undefined) return envelope;
+    return {
+      ...envelope,
+      data: {
+        ...envelope.data,
+        workspace,
+        ...(this.#pendingWorkspaceBindings.has(sessionId)
+          ? { workspacePersistence: "pending" as const }
+          : {}),
+      },
+    };
+  }
+
   #knownSummaryForOpen(input: {
     sessionFile?: string;
     sessionId?: string;
@@ -1635,7 +1664,9 @@ export class PiRuntimeBroker {
           this.#pendingProjectTrust.set(envelope.data.id, { client });
         }
         this.#emit({
-          envelope,
+          envelope: client.sessionId === undefined
+            ? envelope
+            : this.#projectSessionEnvelope(envelope, client.sessionId),
           kind: "host",
           role,
           ...(client.sessionId === undefined ? {} : { sessionId: client.sessionId }),
@@ -1705,8 +1736,8 @@ export class PiRuntimeBroker {
         this.#sessions.delete(mappedSessionId);
       }
     }
-    client.pinSession(sessionId);
     this.#sessions.set(sessionId, client);
+    client.pinSession(sessionId);
   }
 
   #bindWorkspaceContext(client: PiHostClient, sessionId: string): void {
@@ -1729,8 +1760,8 @@ export class PiRuntimeBroker {
         this.#workspaceSessions.delete(mappedSessionId);
       }
     }
-    client.pinSession(sessionId);
     this.#workspaceSessions.set(sessionId, client);
+    client.pinSession(sessionId);
   }
 
   #workerForSession(sessionId: string): PiHostClient {
@@ -1812,9 +1843,20 @@ export class PiRuntimeBroker {
   #emit(event: PiRuntimeBrokerEventPayload): void {
     const admission = [...this.#sessionExecutionAdmissions.values()]
       .find((candidate) => candidate.client.id === event.workerId);
+    const executionId = admission?.executionId;
+    const actor = event.kind !== "diagnostic" && event.sessionId !== undefined
+      ? {
+          authorityInstanceId: this.#authorityInstanceId,
+          sessionId: event.sessionId,
+          ...(executionId === undefined ? {} : { runId: executionId }),
+          workerId: event.workerId,
+          workerGeneration: this.#runtimeGeneration,
+        } satisfies HarnessActorIdentity
+      : undefined;
     const projected: PiRuntimeBrokerEvent = {
       ...event,
-      ...(admission ? { executionId: admission.executionId } : {}),
+      ...(actor === undefined ? {} : { actor }),
+      ...(executionId === undefined ? {} : { executionId }),
       runtimeGeneration: this.#runtimeGeneration,
     };
     for (const listener of this.#listeners) {

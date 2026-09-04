@@ -28,6 +28,8 @@ import type { RecallToolDeps } from "../../../web/application-host/lib/harness/r
 
 const SESSION_ID = "p2-e2e-session";
 const WORKSPACE_ID = "p2-e2e-workspace";
+const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
+const CAPABILITIES = ["context.session", "read.lsp", "read.output"] as const;
 
 async function setupP2E2E() {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "p2-e2e-"));
@@ -105,22 +107,22 @@ async function setupP2E2E() {
     todoDepsProvider,
     recallDepsProvider,
   });
-  harnessServiceHost.registerSession({ sessionId: SESSION_ID, workspaceId: WORKSPACE_ID, workspaceRoot });
+  harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   let bridge: HostServicesBridge;
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
       bridge.respond(sessionId, requestId, outcome);
     },
-    resolveWorkspace: async () => WORKSPACE_ID,
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });
   registerHarnessServices(router, harnessServiceHost);
 
   bridge = new HostServicesBridge({
     emit: (_event, data) => {
       void router.processEvent({
+        actor: ACTOR,
         kind: "host",
-        sessionId: data.sessionId,
         envelope: { kind: "event", event: "harness.request", data },
       });
     },

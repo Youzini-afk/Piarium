@@ -5,6 +5,21 @@ import {
   createWebSearchService,
   type SearchProviderConfig,
 } from "./web-search.js";
+import type { HarnessServiceContext } from "./router.js";
+
+const SERVICE_CONTEXT: HarnessServiceContext = {
+  actor: {
+    authorityInstanceId: "test-authority",
+    sessionId: "s1",
+    workerId: "test-worker",
+    workerGeneration: 1,
+    workspaceId: "ws",
+    grantedCapabilities: ["read.web"],
+  },
+  sessionId: "s1",
+  workspaceId: "ws",
+  signal: new AbortController().signal,
+};
 
 describe("resolveSearchProvider", () => {
   it("returns Anthropic adapter when model provider has webSearch capability", () => {
@@ -128,7 +143,7 @@ describe("createWebSearchService", () => {
     const service = createWebSearchService(async () => ({ unavailable: true, hint: "no provider" }));
     const result = await service.handle(
       { query: "test" },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      SERVICE_CONTEXT,
     );
     expect(result.providerId).toBe("none");
     expect(result.results).toEqual([]);
@@ -144,7 +159,7 @@ describe("createWebSearchService", () => {
     }));
     const result = await service.handle(
       { query: "test" },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      SERVICE_CONTEXT,
     );
     expect(result.providerId).toBe("test-provider");
     expect(result.results).toHaveLength(2);
@@ -161,7 +176,7 @@ describe("createWebSearchService", () => {
     }));
     const result = await service.handle(
       { query: "test", blockedDomains: ["bad.com"] },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      SERVICE_CONTEXT,
     );
     expect(result.results).toHaveLength(1);
     expect(result.results[0]?.title).toBe("Good");

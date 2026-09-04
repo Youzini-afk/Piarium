@@ -25,7 +25,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | --- | --- | :-: | :-: | --- | :-: | --- | --- |
 | **0.2** 恢复 coverage 路径级（R1） | host recovery | ✓ | ✓ | `lib/recovery/engine.test.ts`（partial / none / ready 三态）；`piRecoveryPolicy.test.ts` | ✓ | — | 设计文档状态头未改 "R1 implemented"（D-003） |
 | **0.3** `HARNESS_TOOL_META` 与 unjournalled 判定 | protocol / host | ✓ | ✓ | `protocol/test/harness-tools.test.ts`；`turn-coordinator.test.ts` | ✓ | — | — |
-| **1.1** worker→host 请求通道（bridge / router） | protocol / pi-host / host | ✓ | ✓ | `pi-host/test/harness/host-services-bridge.test.ts`、`router-bridge-contract.test.ts`、`harness-e2e.test.ts`；`runtime-broker/test/worker-event-identity.test.ts`；`host/router.test.ts` | ✓ | — | broker 已在 create/open/fork 方法响应后 pin session，并拒绝未绑定/错会话事件；payload sessionId 与 Router ActorContext 仍待 P0.2 移除/接入（D-035） |
+| **1.1** worker→host 请求通道（bridge / router） | protocol / pi-host / host | ✓ | ✓ | `pi-host/test/harness/host-services-bridge.test.ts`、`router-bridge-contract.test.ts`、`harness-e2e.test.ts`；`runtime-broker/test/worker-event-identity.test.ts`；`host/router.test.ts`、`service-host.test.ts` | ✓ | — | broker 在 create/open/fork 方法响应后 pin session；请求 payload 无 sessionId；Router 只使用 broker Actor，并由 Host 注册表补齐 workspace 与静态能力（D-035） |
 | **1.2** Zone 0 字节稳定 | pi-host | ✓ | ✓ | `pi-host/test/zone0-stability.test.ts`、`pi-hooks-contract.test.ts` | ✓ | — | — |
 | **1.3** `bash` / shell 监督器（PTY、持久 login shell、自动转后台） | host / pi-host | ✓ | ✓ | `host/shell-supervisor.test.ts`；`harness-e2e.test.ts` #1–3；Windows 真实 smoke（提交 `e01ce485`） | ✓ | Pi 内置 bash | 后台 shell 不是终端 tab——D-013 的前置条件"接进 terminal runtime"未兑现；macOS / Linux smoke 未做 |
 | **1.4** 输出句柄与 `tool_result` 截断 | host / pi-host | ✓ | ✓ | `host/output-store.test.ts`；`pi-host/test/harness/tool-result-truncation.test.ts`；`harness-e2e.test.ts` #5 | ✓ | Pi 默认（结果原样进上下文） | 字节 / 字符单位不一致；淘汰返回 `not-found` 而非 `expired`；句柄不耐久却被 `ThreadReport` 引用（D-034，P0 ⑤）；`read` 大文件走句柄未在真会话验证 |
@@ -62,7 +62,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.8** LSP 导航工具 | host | ✓ | ✗ | `host/lsp-nav.test.ts`（13） | — | — | pi-host 无工具定义 |
 | **3.9** 观察类工具增量视图（`get_output` / `diagnostics`） | host | ✗ | ✗ | — | — | — | 仅线程有游标；通用 `ObservationCursorStore` 未做 |
 | **3.10** 线程侧栏 / 讨论线 | ui | ✗ | ✗ | — | — | — | 依赖 3.4 纵切 |
-| **3b.1** 权限门（`tool_call`） | protocol / pi-host | ✓ | ✓ | `host/permission-gate.test.ts`（22）；`phase3b-e2e.test.ts`；`session-e2e.test.ts`（真会话：allow once / deny / 会话授权 / 高风险覆盖 / 只读不弹窗） | ✓ | 交还给任何强制型 Pi 扩展 | 与 `pi-permission-system` 并存、无重复提示（D-021）；Host 静态授权未做（D-035）；工作区 regex 无 ReDoS 防护 |
+| **3b.1** 权限门（`tool_call`） | protocol / pi-host / host | ✓ | ✓ | `host/permission-gate.test.ts`（22）；`phase3b-e2e.test.ts`；`session-e2e.test.ts`（真会话：allow once / deny / 会话授权 / 高风险覆盖 / 只读不弹窗）；`router.test.ts`（静态 capability / path） | ✓ | 交还给任何强制型 Pi 扩展 | 与 `pi-permission-system` 并存、无重复提示（D-021）；工作区 regex 无 ReDoS 防护 |
 | **3b.2** Smart 模式 | host | ✓ | ✗ | `host/smart-mode.test.ts`（10） | — | — | `permissionJudge` 槽位未接 |
 | **3b.3** 停止 provisioning 插件 | protocol | ✗（已回退） | — | — | — | — | 插件仍在 `FOUNDATIONAL_PI_PACKAGE_MANIFEST`（revision 2）；等 3b.1 覆盖插件全部面后再移除 |
 

@@ -22,6 +22,8 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3-e2e-session";
 const WORKSPACE_ID = "p3-e2e-workspace";
+const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
+const CAPABILITIES = ["context.session", "control.thread", "read.lsp", "read.output"] as const;
 
 async function setupP3E2E(options: {
   /** Transport defaults. A small value proves that a per-request timeout
@@ -58,14 +60,14 @@ async function setupP3E2E(options: {
     threadApplyWorktreeDiff,
     threadSendToSession,
   });
-  harnessServiceHost.registerSession({ sessionId: SESSION_ID, workspaceId: WORKSPACE_ID, workspaceRoot });
+  harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   let bridge: HostServicesBridge;
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
       bridge.respond(sessionId, requestId, outcome);
     },
-    resolveWorkspace: async () => WORKSPACE_ID,
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     ...(options.transportTimeoutMs !== undefined ? { defaultTimeoutMs: options.transportTimeoutMs } : {}),
   });
   registerHarnessServices(router, harnessServiceHost);
@@ -75,8 +77,8 @@ async function setupP3E2E(options: {
     emit: (_event, data) => {
       emittedRequests.push({ method: data.method, ...(data.timeoutMs !== undefined ? { timeoutMs: data.timeoutMs } : {}) });
       void router.processEvent({
+        actor: ACTOR,
         kind: "host",
-        sessionId: data.sessionId,
         envelope: { kind: "event", event: "harness.request", data },
       });
     },

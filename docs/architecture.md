@@ -416,9 +416,13 @@ The agent harness extends the host protocol with worker→host service
 requests. Two out-of-band methods ride on the same broker transport as
 `workspace.mutation.request`/`respond`:
 
-- `harness.request` — pi-host sends `{ method, params, requestId, sessionId, timeoutMs? }`
-  to invoke a host-side harness service. The optional `timeoutMs` overrides the
-  router's default timeout (e.g. `thread.wait` carries a longer timeout).
+- `harness.request` — pi-host sends `{ method, params, requestId, timeoutMs? }`
+  to invoke a host-side harness service. Session identity is deliberately absent
+  from the worker payload: after create/open/fork succeeds, the broker pins the
+  worker and attaches a trusted `actor` to its outer event. The Host resolves that
+  actor to the registered workspace and frozen structural capability set before
+  dispatch. The optional `timeoutMs` overrides the router's default timeout
+  (e.g. `thread.wait` carries a longer timeout).
 - `harness.respond` — host replies with `{ requestId, sessionId, ok: true, result }` or `{ requestId, sessionId, ok: false, error: HarnessError }`, matching `HarnessRespondParams`.
 
 The `HarnessServiceMap` defines the following method groups:
@@ -444,6 +448,11 @@ to override: `thread.wait` asks the bridge for the wait duration plus a
 buffer, the bridge carries it in `harness.request.timeoutMs`, and the
 router clamps it to `HARNESS_MAX_REQUEST_TIMEOUT_MS` (1 hour) so a
 worker cannot pin a host handler open indefinitely.
+
+Host authorization is non-interactive: `HARNESS_METHOD_CAPABILITY` maps every
+method to a structural capability, and path-bearing shell/search/LSP/lock calls
+must remain within the actor workspace. User-facing allow/ask/deny policy stays
+in pi-host's `tool_call` gate; the two checks do not duplicate prompts.
 
 ### 5.2 Thread protocol (§9.3)
 

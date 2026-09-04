@@ -1,5 +1,8 @@
 import {
+  HARNESS_METHOD_CAPABILITY,
   isHarnessMethod,
+  type HarnessActorContext,
+  type HarnessActorIdentity,
   type HarnessError,
   type HarnessMethod,
   type HarnessRequestData,
@@ -12,8 +15,9 @@ import { HarnessServiceError } from "./harness-services.js";
 export { buildHarnessRespondParams };
 
 export interface HarnessServiceContext {
-  sessionId: string;
-  workspaceId: string | null;
+  actor: HarnessActorContext;
+  sessionId: HarnessActorContext["sessionId"];
+  workspaceId: HarnessActorContext["workspaceId"];
   signal: AbortSignal;
 }
 
@@ -26,11 +30,17 @@ export interface HarnessService<M extends HarnessMethod> {
 
 export interface HarnessRouterOptions {
   respond: (sessionId: string, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
-  resolveWorkspace: (sessionId: string) => Promise<string | null>;
+  resolveActor: (identity: HarnessActorIdentity) => Promise<HarnessActorContext | null>;
+  authorizeWorkspacePath?: (
+    actor: HarnessActorContext,
+    path: string,
+    options: { allowMissing: boolean },
+  ) => Promise<boolean>;
   defaultTimeoutMs?: number;
 }
 
 interface RouterHostEvent {
+  actor?: HarnessActorIdentity;
   envelope?: {
     data?: unknown;
     event?: string;
@@ -39,6 +49,33 @@ interface RouterHostEvent {
   kind: string;
   sessionId?: string;
 }
+
+const requestPath = (
+  method: HarnessMethod,
+  params: unknown,
+): { allowMissing: boolean; path: string } | null | "invalid" => {
+  const record = params && typeof params === "object" && !Array.isArray(params)
+    ? params as Record<string, unknown>
+    : {};
+  if (method === "search.content") {
+    if (record.path === undefined) return null;
+    return typeof record.path === "string" && record.path.trim()
+      ? { allowMissing: false, path: record.path }
+      : "invalid";
+  }
+  if (method === "shell.exec") {
+    if (record.cwd === undefined) return null;
+    return typeof record.cwd === "string" && record.cwd.trim()
+      ? { allowMissing: false, path: record.cwd }
+      : "invalid";
+  }
+  if (method === "fs.lock" || method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {
+    return typeof record.path === "string" && record.path.trim()
+      ? { allowMissing: method === "fs.lock", path: record.path }
+      : "invalid";
+  }
+  return null;
+};
 
 const harnessError = (code: HarnessError["code"], message: string, retryable = false): HarnessError => ({
   code,
@@ -59,23 +96,19 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     if (disposed) return;
     if (event.kind !== "host" || event.envelope?.kind !== "event" || event.envelope?.event !== "harness.request") return;
     const data = event.envelope.data as HarnessRequestData | undefined;
-    if (!data || typeof data.requestId !== "string" || typeof data.sessionId !== "string") return;
+    const identity = event.actor;
+    if (!data || typeof data.requestId !== "string" || !identity) return;
+    const respond = (outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => (
+      options.respond(identity.sessionId, data.requestId, outcome)
+    );
     if (!isHarnessMethod(data.method)) {
-      await options.respond(data.sessionId, data.requestId, {
+      await respond({
         ok: false,
         error: harnessError("unavailable", `Unknown harness method: ${data.method}`),
       });
       return;
     }
     const method = data.method;
-    const service = services.get(method);
-    if (!service) {
-      await options.respond(data.sessionId, data.requestId, {
-        ok: false,
-        error: harnessError("unavailable", `Harness method not registered: ${method}`),
-      });
-      return;
-    }
     const controller = new AbortController();
     // Per-request timeout override (e.g. thread.wait carries a longer
     // timeout), clamped so a worker cannot pin a handler open forever.
@@ -84,13 +117,58 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       : defaultTimeoutMs;
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      const workspaceId = await options.resolveWorkspace(data.sessionId);
+      const actor = await options.resolveActor(identity);
+      if (!actor) {
+        await respond({
+          ok: false,
+          error: harnessError("forbidden", "Harness actor is not registered for this session"),
+        });
+        return;
+      }
+      const requiredCapability = HARNESS_METHOD_CAPABILITY[method];
+      if (!actor.grantedCapabilities.includes(requiredCapability)) {
+        await respond({
+          ok: false,
+          error: harnessError("forbidden", `Harness capability is not granted: ${requiredCapability}`),
+        });
+        return;
+      }
+      const scopedPath = requestPath(method, data.params);
+      if (scopedPath === "invalid") {
+        await respond({
+          ok: false,
+          error: harnessError("invalid-params", `Harness method ${method} requires a valid path`),
+        });
+        return;
+      }
+      if (
+        scopedPath
+        && (
+          !options.authorizeWorkspacePath
+          || !await options.authorizeWorkspacePath(actor, scopedPath.path, { allowMissing: scopedPath.allowMissing })
+        )
+      ) {
+        await respond({
+          ok: false,
+          error: harnessError("forbidden", "Harness path is outside the actor workspace"),
+        });
+        return;
+      }
+      const service = services.get(method);
+      if (!service) {
+        await respond({
+          ok: false,
+          error: harnessError("unavailable", `Harness method not registered: ${method}`),
+        });
+        return;
+      }
       const result = await service.handle(data.params as never, {
-        sessionId: data.sessionId,
-        workspaceId,
+        actor,
+        sessionId: actor.sessionId,
+        workspaceId: actor.workspaceId,
         signal: controller.signal,
       });
-      await options.respond(data.sessionId, data.requestId, { ok: true, result });
+      await respond({ ok: true, result });
     } catch (error) {
       let code: HarnessError["code"];
       let message: string;
@@ -107,7 +185,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         code = "failed";
         message = error instanceof Error ? error.message : String(error);
       }
-      await options.respond(data.sessionId, data.requestId, {
+      await respond({
         ok: false,
         error: harnessError(code, message, retryable),
       });

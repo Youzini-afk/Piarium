@@ -11,14 +11,13 @@ const snapshotEvent = (sessionId: string): EventEnvelope => createEvent(
   { sessionId } as never,
 );
 
-const harnessEvent = (sessionId: string): EventEnvelope => createEvent(
+const harnessEvent = (): EventEnvelope => createEvent(
   0,
   "harness.request",
   {
     method: "output.read",
     params: { handle: "out_example" },
     requestId: "request-1",
-    sessionId,
   },
 );
 
@@ -56,15 +55,18 @@ describe("broker-owned worker session identity", () => {
     }), "ignore-unbound-snapshot");
   });
 
-  it("accepts matching session events and rejects a mismatched claim", () => {
+  it("accepts a sessionless harness payload only after the worker is pinned", () => {
     assert.equal(classifyWorkerEventIdentity({
-      envelope: harnessEvent("session-1"),
+      envelope: harnessEvent(),
       pinnedSessionId: "session-1",
       role: "session",
       transitioning: false,
     }), "accept");
+  });
+
+  it("rejects a mismatched session claim on state events", () => {
     assert.equal(classifyWorkerEventIdentity({
-      envelope: harnessEvent("session-2"),
+      envelope: snapshotEvent("session-2"),
       pinnedSessionId: "session-1",
       role: "session",
       transitioning: false,
@@ -73,7 +75,7 @@ describe("broker-owned worker session identity", () => {
 
   it("rejects an unpinned harness request", () => {
     assert.equal(classifyWorkerEventIdentity({
-      envelope: harnessEvent("session-forged"),
+      envelope: harnessEvent(),
       pinnedSessionId: undefined,
       role: "session",
       transitioning: false,
@@ -88,16 +90,16 @@ describe("broker-owned worker session identity", () => {
       transitioning: true,
     }), "ignore-transition-snapshot");
     assert.equal(classifyWorkerEventIdentity({
-      envelope: harnessEvent("session-2"),
+      envelope: harnessEvent(),
       pinnedSessionId: "session-1",
       role: "session",
       transitioning: true,
-    }), "reject");
+    }), "accept");
   });
 
   it("does not impose session pinning on catalog and package workers", () => {
     assert.equal(classifyWorkerEventIdentity({
-      envelope: harnessEvent("catalog-context"),
+      envelope: harnessEvent(),
       pinnedSessionId: undefined,
       role: "catalog",
       transitioning: false,

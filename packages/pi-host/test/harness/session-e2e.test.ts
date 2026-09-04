@@ -73,16 +73,30 @@ async function setupSession(options: {
     respond: async (sessionId, requestId, outcome) => {
       host.respondHarness(sessionId, requestId, outcome);
     },
-    resolveWorkspace: async () => WORKSPACE_ID,
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });
   registerHarnessServices(router, harnessServiceHost);
 
   const emit = (<E extends HostEvent>(event: E, data: HostEventData<E>): void => {
     if (event === "harness.request") {
       const payload = data as HostEventData<"harness.request">;
+      const actor = {
+        authorityInstanceId: "session-e2e-authority",
+        sessionId: host.session.sessionManager.getSessionId(),
+        workerId: "session-e2e-worker",
+        workerGeneration: 1,
+      } as const;
+      if (!harnessServiceHost.hasActor(actor)) {
+        harnessServiceHost.registerSession({
+          actor,
+          grantedCapabilities: ["context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document"],
+          workspaceId: WORKSPACE_ID,
+          workspaceRoot: root,
+        });
+      }
       void router.processEvent({
+        actor,
         kind: "host",
-        sessionId: payload.sessionId,
         envelope: { kind: "event", event: "harness.request", data: payload },
       });
       return;

@@ -23,6 +23,8 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3b-e2e-session";
 const WORKSPACE_ID = "p3b-e2e-workspace";
+const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
+const CAPABILITIES = ["context.session", "process.shell", "read.lsp", "read.output", "read.search"] as const;
 
 async function setupP3bE2E() {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "p3b-e2e-"));
@@ -35,22 +37,22 @@ async function setupP3bE2E() {
       hasPowerShell: process.platform === "win32",
     },
   });
-  harnessServiceHost.registerSession({ sessionId: SESSION_ID, workspaceId: WORKSPACE_ID, workspaceRoot });
+  harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   let bridge: HostServicesBridge;
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
       bridge.respond(sessionId, requestId, outcome);
     },
-    resolveWorkspace: async () => WORKSPACE_ID,
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });
   registerHarnessServices(router, harnessServiceHost);
 
   bridge = new HostServicesBridge({
     emit: (_event, data) => {
       void router.processEvent({
+        actor: ACTOR,
         kind: "host",
-        sessionId: data.sessionId,
         envelope: { kind: "event", event: "harness.request", data },
       });
     },

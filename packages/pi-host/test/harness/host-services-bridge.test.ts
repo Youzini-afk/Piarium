@@ -16,7 +16,7 @@ describe("HostServicesBridge", () => {
     const resultPromise = bridge.request("output.store", { text: "hello" });
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0]!.method, "output.store");
-    assert.equal(emitted[0]!.sessionId, "session-1");
+    assert.ok(!("sessionId" in emitted[0]!));
     const requestId = emitted[0]!.requestId;
     bridge.respond("session-1", requestId, { ok: true, result: { handle: "out_abc", total: 5 } });
     const result = await resultPromise;

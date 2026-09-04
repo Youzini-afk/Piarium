@@ -231,6 +231,64 @@ export interface HarnessServiceMap {
 
 export type HarnessMethod = keyof HarnessServiceMap;
 
+/**
+ * Coarse, host-enforced capabilities for worker-to-host harness services.
+ * These describe structural authority only; interactive allow/ask/deny policy
+ * remains owned by the Pi tool gate.
+ */
+export type HarnessCapability =
+  | "context.session"
+  | "control.thread"
+  | "process.shell"
+  | "read.lsp"
+  | "read.output"
+  | "read.search"
+  | "read.web"
+  | "write.document";
+
+export const HARNESS_METHOD_CAPABILITY = {
+  "shell.exec": "process.shell",
+  "shell.read": "process.shell",
+  "shell.write": "process.shell",
+  "shell.kill": "process.shell",
+  "output.store": "read.output",
+  "output.read": "read.output",
+  "search.content": "read.search",
+  "lsp.diagnostics": "read.lsp",
+  "lsp.diagnosticsSnapshot": "read.lsp",
+  "fs.lock": "write.document",
+  "web.fetch": "read.web",
+  "web.read": "read.web",
+  "web.search": "read.web",
+  "zone2.assemble": "context.session",
+  "compaction.before": "context.session",
+  "compaction.after": "context.session",
+  "todo.upsert": "context.session",
+  "recall.search": "context.session",
+  "thread.dispatch": "control.thread",
+  "thread.list": "control.thread",
+  "thread.wait": "control.thread",
+  "thread.send": "control.thread",
+  "thread.read": "control.thread",
+  "thread.merge": "control.thread",
+  "thread.kill": "control.thread",
+} as const satisfies Record<HarnessMethod, HarnessCapability>;
+
+/** Identity attached by the broker after it has pinned a worker to a session. */
+export interface HarnessActorIdentity {
+  authorityInstanceId: string;
+  sessionId: string;
+  runId?: string;
+  workerId: string;
+  workerGeneration: number;
+}
+
+/** Identity completed with workspace and frozen authority by the Host. */
+export interface HarnessActorContext extends HarnessActorIdentity {
+  workspaceId: string | null;
+  grantedCapabilities: readonly HarnessCapability[];
+}
+
 const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "shell.exec",
   "shell.read",
@@ -264,14 +322,13 @@ export function isHarnessMethod(value: unknown): value is HarnessMethod {
 }
 
 export type HarnessError = {
-  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "denied" | "failed";
+  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "denied" | "forbidden" | "failed";
   message: string;
   retryable?: boolean;
 };
 
 export interface HarnessRequestData {
   requestId: string;
-  sessionId: string;
   method: HarnessMethod;
   params: unknown;
   /**

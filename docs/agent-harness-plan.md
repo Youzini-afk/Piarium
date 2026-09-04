@@ -151,9 +151,9 @@ harness shell 未接进 terminal runtime（D-013 的前置条件）；1.8 计数
   capability（表放 protocol：`HARNESS_METHOD_CAPABILITY`），router 在分派前检查 `actor.grantedCapabilities`，缺 →
   `forbidden`（不是 `denied`——`denied` 留给用户策略）。`fs.lock`、`lsp.*`、`search.content` 的 `path` 参数须在
   `actor.workspaceId` 的根内（复用 Documents 的 `allowed-roots` 判定），越界 → `forbidden`。
-- 能力集来源（过渡）：host 在会话注册（`registerSession`）时从冻结的 HarnessSettings 推导：`tools.bash !== false` →
-  `process.shell`；线程运行时存在 → `control.thread`；其余默认给。写明这是与 pi-host 同源各读一次的过渡方案，RunManifest
-  下发后收敛（设计 12.2）。
+- 能力集来源（过渡）：host 在收到 broker 验证后的首次 `session.snapshot` 时，从该会话已经冻结的 `activeTools` 与 Host
+  实际服务可用性推导并注册；例如真实存在 `bash` 才给 `process.shell`，线程工具与线程运行时同时存在才给
+  `control.thread`。这比 Host 再读一遍可变设置更接近真实运行态；RunManifest 下发后收敛为显式单一来源（设计 12.2）。
 - **不做**：allow / ask / deny、弹窗、重算用户策略——那是 pi-host 门的事（设计 9.1.2 真值表）。
 - 测试：跨会话——会话 A 的 worker 请求 `shell.exec`，信封 actor 为 A，shell 只能是 A 的；伪造载荷不再有可伪造字段；
   `bash` 关闭的会话直接调 `shell.exec` → `forbidden`；`fs.lock` 越界路径 → `forbidden`；`router-bridge-contract.test.ts`

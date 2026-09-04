@@ -1,6 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { createWebReadService } from "./web-read-service.js";
 import type { FetchResult } from "@piarium/protocol";
+import type { HarnessServiceContext } from "./router.js";
+
+const context = (workspaceId: string | null): HarnessServiceContext => ({
+  actor: {
+    authorityInstanceId: "test-authority",
+    sessionId: "s1",
+    workerId: "test-worker",
+    workerGeneration: 1,
+    workspaceId,
+    grantedCapabilities: ["read.web"],
+  },
+  sessionId: "s1",
+  workspaceId,
+  signal: new AbortController().signal,
+});
 
 describe("web.read service", () => {
   it("returns answer from reader model when configured", async () => {
@@ -23,7 +38,7 @@ describe("web.read service", () => {
 
     const result = await service.handle(
       { url: "https://example.com/", prompt: "What is the answer?" },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      context("ws"),
     );
     expect(result.answer).toBe("42");
     expect(result.sources).toEqual(["https://example.com/"]);
@@ -42,7 +57,7 @@ describe("web.read service", () => {
 
     const result = await service.handle(
       { url: "https://example.com/", prompt: "What?" },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      context("ws"),
     );
     expect(result.answer).toContain("reader unavailable");
     expect(result.sources).toEqual([]);
@@ -57,7 +72,7 @@ describe("web.read service", () => {
 
     const result = await service.handle(
       { url: "https://example.com/", prompt: "What?" },
-      { sessionId: "s1", workspaceId: "ws", signal: new AbortController().signal },
+      context("ws"),
     );
     expect(result.answer).toContain("fetch failed");
     expect(result.sources).toEqual([]);
@@ -72,7 +87,7 @@ describe("web.read service", () => {
 
     const result = await service.handle(
       { url: "https://example.com/", prompt: "What?" },
-      { sessionId: "s1", workspaceId: null, signal: new AbortController().signal },
+      context(null),
     );
     expect(result.answer).toContain("no workspace");
   });

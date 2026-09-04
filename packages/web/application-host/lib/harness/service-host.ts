@@ -11,17 +11,51 @@ import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js"
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { ThreadRegistry } from "./thread-registry.js";
+import type {
+  HarnessActorContext,
+  HarnessActorIdentity,
+  HarnessCapability,
+} from "@piarium/protocol";
 
 export interface HarnessSessionContext {
-  sessionId: string;
+  actor: HarnessActorIdentity;
+  grantedCapabilities: readonly HarnessCapability[] | Promise<readonly HarnessCapability[]>;
   workspaceId: string | null;
   workspaceRoot: string;
 }
 
 interface SessionEntry {
+  actor: Omit<HarnessActorIdentity, "runId">;
+  grantedCapabilities: Promise<readonly HarnessCapability[]>;
   shellSupervisor: ShellSupervisor | null;
   interpreter: ShellInterpreter | { unavailable: { reason: string; hint: string } };
+  workspaceId: string | null;
   workspaceRoot: string;
+}
+
+export function deriveHarnessCapabilities(
+  activeTools: readonly string[],
+  availability: { threadRuntime: boolean },
+): readonly HarnessCapability[] {
+  const tools = new Set(activeTools);
+  const capabilities = new Set<HarnessCapability>([
+    // Hidden session extensions use these even when their corresponding
+    // user-facing tools are not shown.
+    "context.session",
+    "read.lsp",
+    "read.output",
+  ]);
+  if (tools.has("grep")) capabilities.add("read.search");
+  if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
+  if (tools.has("bash")) capabilities.add("process.shell");
+  if (tools.has("apply_patch")) capabilities.add("write.document");
+  if (
+    availability.threadRuntime
+    && ["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"].some((name) => tools.has(name))
+  ) {
+    capabilities.add("control.thread");
+  }
+  return [...capabilities];
 }
 
 export interface HarnessServiceHost {
@@ -49,7 +83,9 @@ export interface HarnessServiceHost {
   threadApplyWorktreeDiff: ((threadId: string) => Promise<{ merged: number; conflicts: string[] }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
   registerSession(ctx: HarnessSessionContext): void;
-  dropSession(sessionId: string): void;
+  dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
+  hasActor(identity: HarnessActorIdentity): boolean;
+  resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   dispose(): Promise<void>;
@@ -123,6 +159,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const sessions = new Map<string, SessionEntry>();
 
   const registerSession = (ctx: HarnessSessionContext): void => {
+    const sessionId = ctx.actor.sessionId;
+    const previous = sessions.get(sessionId);
+    if (previous) void previous.shellSupervisor?.dispose();
     const interpreterResult = selectInterpreter({
       platform: process.platform,
       workspaceRoot: ctx.workspaceRoot,
@@ -136,23 +175,35 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       shellSupervisor = createShellSupervisor({
         interpreter: interpreterResult,
         outputStore,
-        sessionId: ctx.sessionId,
+        sessionId,
         cwd: ctx.workspaceRoot ?? undefined,
         ...(options.registerWriter ? {
-          registerWriter: () => options.registerWriter!(ctx.sessionId, ctx.workspaceRoot),
+          registerWriter: () => options.registerWriter!(sessionId, ctx.workspaceRoot),
         } : {}),
       });
     }
 
-    sessions.set(ctx.sessionId, {
+    const actor = {
+      authorityInstanceId: ctx.actor.authorityInstanceId,
+      sessionId,
+      workerId: ctx.actor.workerId,
+      workerGeneration: ctx.actor.workerGeneration,
+    };
+    sessions.set(sessionId, {
+      actor,
+      grantedCapabilities: Promise.resolve(ctx.grantedCapabilities).then((capabilities) => (
+        Object.freeze([...new Set(capabilities)])
+      )),
       shellSupervisor,
       interpreter: interpreterResult,
+      workspaceId: ctx.workspaceId,
       workspaceRoot: ctx.workspaceRoot,
     });
   };
 
-  const dropSession = (sessionId: string): void => {
+  const dropSession = (sessionId: string, actor?: HarnessActorIdentity): void => {
     const entry = sessions.get(sessionId);
+    if (actor && (!entry || !hasActor(actor))) return;
     if (entry) {
       void entry.shellSupervisor?.dispose();
       sessions.delete(sessionId);
@@ -167,6 +218,26 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const getInterpreter = (sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null => {
     return sessions.get(sessionId)?.interpreter ?? null;
+  };
+
+  const hasActor = (identity: HarnessActorIdentity): boolean => {
+    const entry = sessions.get(identity.sessionId);
+    return Boolean(
+      entry
+      && entry.actor.authorityInstanceId === identity.authorityInstanceId
+      && entry.actor.workerId === identity.workerId
+      && entry.actor.workerGeneration === identity.workerGeneration
+    );
+  };
+
+  const resolveActor = async (identity: HarnessActorIdentity): Promise<HarnessActorContext | null> => {
+    const entry = sessions.get(identity.sessionId);
+    if (!entry || !hasActor(identity)) return null;
+    return {
+      ...identity,
+      workspaceId: entry.workspaceId,
+      grantedCapabilities: await entry.grantedCapabilities,
+    };
   };
 
   const dispose = async (): Promise<void> => {
@@ -208,6 +279,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadSendToSession,
     registerSession,
     dropSession,
+    hasActor,
+    resolveActor,
     getShellSupervisor,
     getInterpreter,
     dispose,

@@ -85,7 +85,6 @@ export class HostServicesBridge {
         method,
         params,
         requestId,
-        sessionId: this.#sessionId,
         // Carry the bridge timeout to the router so the service handler
         // can run for the same duration (e.g. thread.wait blocks up to
         // 240s — the router must not abort at its default 30s).

@@ -70,6 +70,7 @@ export class PiHostClient {
   readonly id = randomUUID();
   readonly #options: PiHostClientOptions;
   readonly #pending = new Map<string, PendingRequest>();
+  readonly #deferredSessionSnapshots: EventEnvelope<"session.snapshot">[] = [];
   #child: ChildProcess | undefined;
   #disposePromise: Promise<void> | undefined;
   #disposed = false;
@@ -134,10 +135,26 @@ export class PiHostClient {
     this.#sessionId = sessionId;
   }
 
+  /** Publish bootstrap/transition snapshots only after broker metadata is ready. */
+  flushDeferredSessionSnapshots(): void {
+    if (this.#sessionId === undefined || this.#deferredSessionSnapshots.length === 0) return;
+    const deferred = this.#deferredSessionSnapshots.splice(0);
+    for (const envelope of deferred) {
+      if (envelope.data.sessionId === this.#sessionId) {
+        this.#deliverEvent(envelope);
+      } else {
+        this.#diagnostic(
+          "error",
+          `Pi worker protocol violation: deferred session.snapshot claimed ${envelope.data.sessionId}; pinned session is ${this.#sessionId}`,
+        );
+      }
+    }
+  }
+
   /**
    * Mark a broker-issued operation that may legitimately switch the worker to
    * another Pi session (currently session.fork). Snapshot events emitted before
-   * the method response are ignored rather than treated as identity changes.
+   * the method response are deferred rather than treated as identity changes.
    */
   beginSessionTransition(): () => void {
     this.#sessionTransitionDepth += 1;
@@ -146,6 +163,7 @@ export class PiHostClient {
       if (ended) return;
       ended = true;
       this.#sessionTransitionDepth = Math.max(0, this.#sessionTransitionDepth - 1);
+      if (this.#sessionTransitionDepth === 0) this.#discardMismatchedDeferredSnapshots();
     };
   }
 
@@ -368,10 +386,40 @@ export class PiHostClient {
     }
     this.#lastSequence = envelope.seq;
     if (envelope.event === "host.ready") this.#readyResolve?.();
+    if (
+      (this.#options.workerRole === "session" || this.#options.workerRole === "workspace")
+      && envelope.event === "session.snapshot"
+      && (
+        this.#sessionId === undefined
+        || (this.#sessionTransitionDepth > 0 && envelope.data.sessionId !== this.#sessionId)
+      )
+    ) {
+      this.#deferredSessionSnapshots.push(envelope);
+      return;
+    }
+    this.#deliverEvent(envelope);
+  }
+
+  #deliverEvent(envelope: EventEnvelope): void {
     try {
       this.#options.onEvent?.(envelope);
     } catch (error) {
       this.#diagnostic("error", `Pi host event handler failed: ${asError(error).message}`);
+    }
+  }
+
+  #discardMismatchedDeferredSnapshots(): void {
+    if (this.#deferredSessionSnapshots.length === 0) return;
+    const retained = this.#sessionId === undefined
+      ? []
+      : this.#deferredSessionSnapshots.filter((envelope) => envelope.data.sessionId === this.#sessionId);
+    const rejected = this.#deferredSessionSnapshots.length - retained.length;
+    this.#deferredSessionSnapshots.splice(0, this.#deferredSessionSnapshots.length, ...retained);
+    if (rejected > 0) {
+      this.#diagnostic(
+        "error",
+        `Pi worker protocol violation: discarded ${rejected} session snapshot${rejected === 1 ? "" : "s"} from an uncommitted session transition`,
+      );
     }
   }
 

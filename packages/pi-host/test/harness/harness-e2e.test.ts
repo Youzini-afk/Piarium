@@ -31,6 +31,8 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "e2e-session";
 const WORKSPACE_ID = "e2e-workspace";
+const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
+const CAPABILITIES = ["context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document"] as const;
 
 async function setupE2E() {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "harness-e2e-"));
@@ -92,7 +94,7 @@ async function setupE2E() {
       ...(process.platform === "win32" ? { gitBashPath: "C:\\Program Files\\Git\\bin\\bash.exe" } : {}),
     },
   });
-  harnessServiceHost.registerSession({ sessionId: SESSION_ID, workspaceId: WORKSPACE_ID, workspaceRoot });
+  harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   // Router with respond callback that feeds back to bridge
   let bridge: HostServicesBridge;
@@ -100,7 +102,8 @@ async function setupE2E() {
     respond: async (sessionId, requestId, outcome) => {
       bridge.respond(sessionId, requestId, outcome);
     },
-    resolveWorkspace: async () => WORKSPACE_ID,
+    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    authorizeWorkspacePath: async () => true,
   });
   registerHarnessServices(router, harnessServiceHost);
 
@@ -108,8 +111,8 @@ async function setupE2E() {
   bridge = new HostServicesBridge({
     emit: (_event, data) => {
       void router.processEvent({
+        actor: ACTOR,
         kind: "host",
-        sessionId: data.sessionId,
         envelope: { kind: "event", event: "harness.request", data },
       });
     },

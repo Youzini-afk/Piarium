@@ -36,6 +36,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
   const subscribedEvents: PiRuntimeBrokerEvent[] = [];
   const broker = new PiRuntimeBroker({
     agentDir,
+    authorityInstanceId: "runtime-broker-test-authority",
     client: {
       clientName: "runtime-broker-test",
       clientVersion: "0.1.0",
@@ -347,13 +348,24 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     assert.equal(goalFeatures.goal?.objective, "Finish the broker-owned Pi migration");
     assert.equal(goalFeatures.goal?.tokenBudget, 50_000);
-    assert.ok(events.some((event) => (
+    const trustedSnapshotEvent = events.find((event) => (
       event.kind === "host"
       && event.role === "session"
       && event.sessionId === created.sessionId
       && event.envelope.event === "session.snapshot"
       && event.envelope.data.sessionId === created.sessionId
-    )));
+    ));
+    assert.ok(trustedSnapshotEvent?.kind === "host");
+    assert.equal(trustedSnapshotEvent.actor?.authorityInstanceId, "runtime-broker-test-authority");
+    assert.equal(trustedSnapshotEvent.actor?.sessionId, created.sessionId);
+    assert.equal(trustedSnapshotEvent.actor?.workerId, trustedSnapshotEvent.workerId);
+    assert.equal(trustedSnapshotEvent.actor?.workerGeneration, 1);
+    assert.equal(typeof trustedSnapshotEvent.actor?.runId, "string");
+    assert.deepEqual(
+      (trustedSnapshotEvent.envelope.data as { workspace?: unknown }).workspace,
+      { id: "workspace-broker", kind: "workspace" },
+      "the deferred snapshot must be published only after broker workspace metadata is available",
+    );
     assert.deepEqual(
       await dispatchRuntimeRequest(broker, "session.features.get", {
         sessionId: created.sessionId,
