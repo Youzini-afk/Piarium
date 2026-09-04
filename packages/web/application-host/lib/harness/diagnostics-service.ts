@@ -32,28 +32,36 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
       try {
         // If afterSnapshot is provided, sync the document and wait for new diagnostics
         if (params.afterSnapshot) {
-          await provider.syncDocument(ctx.workspaceId, params.path, params.afterSnapshot, "save");
           const waitMs = params.waitMs ?? 5000;
-          // Get before-snapshot diagnostics for diff
-          const beforeDiags = await provider.getDiagnostics(ctx.workspaceId, params.path);
+          // Subscribe and capture the publication cursor before didOpen/didChange.
+          // A language server may publish synchronously after the notification;
+          // reading the baseline afterwards would swallow that update.
+          const [beforeDiags, beforeSnapshot] = await Promise.all([
+            provider.getDiagnostics(ctx.workspaceId, params.path),
+            provider.getSnapshot(ctx.workspaceId, params.path),
+          ]);
           const beforeKeys = new Set(beforeDiags.map((d) => `${d.line}:${d.character}:${d.message}`));
-          // Poll for new diagnostics up to waitMs
+          const synced = await provider.syncDocument(ctx.workspaceId, params.path, params.afterSnapshot, "save");
+          if (synced.status === "failed" || synced.status === "unsupported") {
+            return { status: "unavailable", diagnostics: [], reason: "language server rejected document synchronization" };
+          }
+          // Wait for a publication, including an authoritative empty list when
+          // an edit resolves the final diagnostic.
           const deadline = Date.now() + waitMs;
           let lastDiags = beforeDiags;
+          let snapshot = beforeSnapshot;
           while (Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
-            lastDiags = await provider.getDiagnostics(ctx.workspaceId, params.path);
-            // Check if any diagnostics are new (not in beforeKeys)
-            const hasNew = lastDiags.some((d) => !beforeKeys.has(`${d.line}:${d.character}:${d.message}`));
-            if (hasNew) break;
+            [lastDiags, snapshot] = await Promise.all([
+              provider.getDiagnostics(ctx.workspaceId, params.path),
+              provider.getSnapshot(ctx.workspaceId, params.path),
+            ]);
+            if (snapshot !== beforeSnapshot) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
           }
-          // Check if we got new diagnostics
-          const newDiags = lastDiags.filter((d) => !beforeKeys.has(`${d.line}:${d.character}:${d.message}`));
-          if (newDiags.length === 0 && Date.now() >= deadline) {
-            // Timed out waiting for diagnostics
+          if (snapshot === beforeSnapshot) {
             return { status: "pending", diagnostics: [], reason: "diagnostics not yet published" };
           }
-          const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
+          const newDiags = lastDiags.filter((d) => !beforeKeys.has(`${d.line}:${d.character}:${d.message}`));
           return {
             status: "ready",
             ...(snapshot !== null ? { snapshot } : {}),

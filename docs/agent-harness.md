@@ -600,7 +600,8 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
 
 - Document Registry 在成功提交 `write/move/delete` 后发布带已校验 writer owner 的结构化事件；观察失败不反噬文件提交。
   同 workspace 的活动会话各保留自己的 event，agent writer 的事件留作轨迹但不进入 Zone 2。LSP 诊断只有紧跟用户编辑的
-  error/warning 才作为“新诊断”投影，避免复述 agent 已在工具结果中见过的诊断。user terminal 与 Git status 的生产订阅仍待接。
+  error/warning 才作为“新诊断”投影，避免复述 agent 已在工具结果中见过的诊断。Git status 已复用现有刷新边界接入；user
+  terminal 仍需完整 shell integration 才能可靠记录逐命令退出。
   `kind: edit` 的 event 最终引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
 - 记忆 agent 维护的 `block`（第 8.4.1 节），每次改动记录来源与游标；主 agent 的 `plan` / `todo` 亦为 `block`。回合
   结束时块快照挂在该回合的 `event` 上。`session_before_compact` 只读块与库，不调模型。

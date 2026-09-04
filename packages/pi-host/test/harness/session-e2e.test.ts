@@ -16,7 +16,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path, { join } from "node:path";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -30,6 +31,10 @@ import { registerHarnessServices } from "../../../web/application-host/lib/harne
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../../../web/application-host/lib/knowledge/context-runtime.js";
 import { createDocumentAuthority, type DocumentMutationObservation } from "../../../web/application-host/lib/documents/authority.js";
+import { createDocumentAuthorityHarness } from "../../../web/application-host/lib/documents/contract-fixtures.js";
+import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/supervisor.js";
+import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
+import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 
@@ -51,11 +56,14 @@ interface UiRequest {
 async function setupSession(options: {
   root: string;
   faux: ReturnType<typeof registerFauxProvider>;
+  workspaceId?: string;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
+  authorizeWorkspacePath?: NonNullable<Parameters<typeof createHarnessRouter>[0]["authorizeWorkspacePath"]>;
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
   answerDialog?: (request: UiRequest, index: number) => string | undefined;
 }) {
   const { root, faux } = options;
+  const workspaceId = options.workspaceId ?? WORKSPACE_ID;
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
 
@@ -70,13 +78,13 @@ async function setupSession(options: {
   });
 
   const uiRequests: UiRequest[] = [];
-  let host: SessionHost;
 
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
       host.respondHarness(sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    ...(options.authorizeWorkspacePath ? { authorizeWorkspacePath: options.authorizeWorkspacePath } : {}),
   });
   registerHarnessServices(router, harnessServiceHost);
 
@@ -93,7 +101,7 @@ async function setupSession(options: {
         harnessServiceHost.registerSession({
           actor,
           grantedCapabilities: ["context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document"],
-          workspaceId: WORKSPACE_ID,
+          workspaceId,
           workspaceRoot: root,
         });
       }
@@ -148,7 +156,7 @@ async function setupSession(options: {
     return { model };
   };
 
-  host = new SessionHost({
+  const host = new SessionHost({
     agentDir,
     configureServices,
     emit,
@@ -418,6 +426,122 @@ describe("session e2e — memory shadow extension", () => {
         faux.unregister();
       }
     });
+  });
+});
+
+describe("session e2e — durable output handles", () => {
+  it("lets a real Pi turn read a large file and page the truncated result with get_output", async () => {
+    await withTempRoot("piarium-s-large-read-", async (root) => {
+      await writeFile(
+        join(root, "large.txt"),
+        Array.from({ length: 8_000 }, (_, index) => `line ${index + 1} — 大文件`).join("\n"),
+        "utf8",
+      );
+      const faux = registerFauxProvider();
+      let handle = "";
+      let pagedContext = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "large.txt" })]),
+        (context) => {
+          const serialized = JSON.stringify(context.messages.at(-1));
+          const match = serialized.match(/out_(?!XXX)[A-Za-z0-9_-]+/);
+          assert.ok(match, "the model-visible read result should contain an output handle");
+          handle = match[0];
+          assert.ok(!serialized.includes("line 8000 — 大文件"), "the full file must not leak into the model context");
+          return fauxAssistantMessage([fauxToolCall("get_output", { handle, offset: 0, length: 1024 })]);
+        },
+        (context) => {
+          pagedContext = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "inspect the large file");
+        await session.host.session.waitForIdle();
+        assert.match(handle, /^out_/);
+        assert.match(pagedContext, /line 1/);
+        assert.match(pagedContext, /\[\d+\/\d+ bytes/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — real LSP diagnostics", () => {
+  it("carries fixture-server diagnostics through the Host bridge into a real Pi turn", async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    const faux = registerFauxProvider();
+    let diagnosticResult = "";
+    try {
+      const resourceId = "fixture.ts";
+      await writeFile(join(harness.workspaceRoot, resourceId), "FIXTURE_ERROR\n", "utf8");
+      language.registerProvider({
+        providerId: "fixture",
+        command: process.execPath,
+        args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+        languageIds: ["typescript"],
+        source: "host",
+      });
+      const diagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(language, {
+        resolveWorkspaceId: async () => harness.identity.workspaceId,
+      });
+      await diagnosticsProvider.getSnapshot(harness.identity.workspaceId, resourceId);
+      await language.syncDocument({
+        resource: { workspaceId: harness.identity.workspaceId, resourceId },
+        languageId: "typescript",
+        documentVersion: 1,
+        reason: "open",
+        content: "FIXTURE_ERROR\n",
+      });
+      await waitUntil(async () => (
+        (await diagnosticsProvider.getDiagnostics(harness.identity.workspaceId, resourceId))
+          .some((diagnostic) => diagnostic.message === "fixture error")
+      ));
+
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("diagnostics", { path: resourceId, full: true })]),
+        (context) => {
+          diagnosticResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({
+        root: harness.workspaceRoot,
+        faux,
+        workspaceId: harness.identity.workspaceId,
+        serviceHostOptions: { diagnosticsProvider },
+        authorizeWorkspacePath: async (_actor, inputPath) => ({
+          authorityId: "session-e2e-authority",
+          workspaceId: harness.identity.workspaceId,
+          canonicalResourceId: path.resolve(harness.workspaceRoot, inputPath),
+          inputPath,
+          resourceId: inputPath,
+        }),
+      });
+      try {
+        const snapshot = await session.host.create(harness.workspaceRoot);
+        await session.host.prompt(snapshot.sessionId, "check the fixture diagnostics");
+        await session.host.session.waitForIdle();
+        assert.match(diagnosticResult, /fixture error/);
+        assert.match(diagnosticResult, /diagnostics/);
+      } finally {
+        await session.dispose();
+      }
+    } finally {
+      faux.unregister();
+      await language.dispose();
+      await harness.cleanup();
+    }
   });
 });
 

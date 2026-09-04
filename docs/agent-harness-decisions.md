@@ -974,6 +974,25 @@ timeline action、session state conversion、10 locale；设计 9.3.2、plan/sta
 
 状态：已实施并 proven（SSR + eventSeq/fork-point 单测；归档/恢复 UI 仍待）
 
+### D-065 · 2026-09-05 · 1.4 / 1.6（真实 Pi 输出分页与版本化 LSP 诊断）
+
+类型：错误修复与验证补齐
+
+决定：(1) `LanguageSupervisorDiagnosticsProvider` 每个 resource 为每次 `publishDiagnostics` 维护单调 publication revision，snapshot
+使用 `{serverGeneration}:{revision}`，不再拿只在进程重启时变化的 server generation 冒充诊断版本。(2) 同步文档时传入由扩展名解析的
+`languageId`，并在 supervisor 当前 document version 上递增；不再用 `as never` 隐去缺字段。(3) 编辑后诊断先读取 baseline 与建立订阅，
+再发 didOpen/didChange；等待 publication snapshot 变化，新的空列表也作为“错误已全部消失”的 ready，而不是 pending。(4) 用真实
+fixture LSP 子进程覆盖 error→clean、pending、unavailable，并再经真实 Pi agent loop 的 `diagnostics` tool/Host bridge 验证。(5) 大文件
+read 的截断通过真实 Pi agent loop 验证：模型只收到 UTF-8 预览与 `out_*`，下一步能用 `get_output` 分页，完整尾部不进入上下文。
+
+原因：原适配器漏传 `languageId/documentVersion`，真实 supervisor 会直接拒绝同步；即使已有 LSP，旧 service 又在 sync 后才读取
+baseline，可能把同步发布的新诊断吞进旧基线，并且永远观察不到“最后一个错误被清空”。此前直接调用 tool 的 E2E 看不到这两个问题，
+也不能证明模型实际拿得到并能消费输出句柄。
+
+影响：Host diagnostics adapter/service 与真实 fixture 测试；pi-host session E2E；status 1.4/1.6。
+
+状态：已实施并 proven
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1044,3 +1063,4 @@ timeline action、session state conversion、10 locale；设计 9.3.2、plan/sta
 | D-062 | implementation | — | agent-harness 9.3.8、plan/status 3.10；session state rail / mobile overlay |
 | D-063 | implementation | — | agent-harness 9.3.2/9.3.8、architecture 5.2、plan/status 3.10；protocol / Host / pi-host E2E / UI |
 | D-064 | implementation | — | agent-harness 9.3.8、plan/status 3.10；UI shared thread state / timeline markers |
+| D-065 | implementation | — | status 1.4/1.6；Host diagnostics adapter/service、真实 LSP 与 Pi session E2E |

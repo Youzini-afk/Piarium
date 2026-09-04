@@ -14,6 +14,7 @@ interface CachedDiagnostics {
     source: string;
   }>;
   generation: number | undefined;
+  revision: number;
 }
 
 /**
@@ -60,7 +61,12 @@ export function createLanguageSupervisorDiagnosticsProvider(
           source: typeof d.source === "string" ? d.source : "unknown",
         };
       }) : [];
-      wsCache.set(e.resourceId, { items, generation: e.generation });
+      const previous = wsCache.get(e.resourceId);
+      wsCache.set(e.resourceId, {
+        items,
+        generation: e.generation,
+        revision: (previous?.revision ?? 0) + 1,
+      });
     });
     subscriptions.set(workspaceId, () => sub.close());
   };
@@ -83,12 +89,16 @@ export function createLanguageSupervisorDiagnosticsProvider(
 
   const syncDocument: DiagnosticsProvider["syncDocument"] = async (workspaceId, path, content, reason) => {
     ensureSubscription(workspaceId);
-    // The supervisor's syncDocument expects a LanguageRequest shape
+    const languageId = languageIdForPath(path);
+    if (!languageId) return { status: "unsupported" };
+    const documentVersion = (supervisor.syncedDocumentVersion(workspaceId, languageId, path) ?? 0) + 1;
     const result = await supervisor.syncDocument({
       resource: { workspaceId, resourceId: path },
       content,
+      languageId,
+      documentVersion,
       reason,
-    } as never);
+    });
     return { status: typeof result === "object" && result !== null && "status" in result ? (result as { status: string }).status : "ok" };
   };
 
@@ -98,7 +108,7 @@ export function createLanguageSupervisorDiagnosticsProvider(
     if (!wsCache) return null;
     const cached = wsCache.get(path);
     if (!cached) return null;
-    return cached.generation !== undefined ? String(cached.generation) : null;
+    return `${cached.generation ?? 0}:${cached.revision}`;
   };
 
   const isAvailable: DiagnosticsProvider["isAvailable"] = async (workspaceId, path) => {

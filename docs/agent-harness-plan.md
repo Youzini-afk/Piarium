@@ -119,8 +119,8 @@ bun run test:docs && bun run docs:validate   # 触碰 docs/ 后
 [agent-harness-status.md](agent-harness-status.md)；契约在 `packages/protocol/README.md`、`lib/harness/DOCUMENTATION.md`、
 `packages/pi-host/src/harness/README.md`；理由在决策日志 D-001–D-018。仍开着的缺口（都在状态矩阵 Blocker 列）：
 harness shell 未接进 terminal runtime（D-013 的前置条件）；`websearch` provider 适配器仍是 placeholder，但 Host 不声明能力时
-工具现已不注册；1.6 诊断与 `read` 大文件句柄未在真会话
-验证；macOS / Linux 的 bash smoke 未做。这些随相关纵切一起收，不单独立项。
+工具现已不注册；macOS / Linux 的 bash smoke 未做。1.4 大文件句柄与 1.6 诊断已分别经真实 Pi agent loop、真实 fixture LSP
+进程验证并修正 publication/version 时序（D-065）。其余缺口随相关纵切一起收，不单独立项。
 
 ## P0：integrity 纵切（一切新功能之前）
 
