@@ -607,6 +607,15 @@ conformance remains in the package tests and architecture checks.
 
 ## Agent harness — Phase 2/3/3b (2026-09-03)
 
+> **Authority note (2026-09-04).** Per-capability delivery state now lives in
+> [agent-harness-status.md](agent-harness-status.md) (four levels: implemented / wired /
+> proven / default-on, with evidence links). The entries below are the historical
+> delivery narrative and are no longer updated; where they disagree with the status
+> matrix, the matrix wins. In particular: most Phase 2/3 modules are `implemented`
+> (dormant), no real child session is wired, and compaction takeover is gated off
+> until memory-keeper blocks exist. Next work is the P0 integrity slice in
+> [agent-harness-plan.md](agent-harness-plan.md), not further Phase 4–6 modules.
+
 ### Phase 2: Context layer (modules + wiring complete 2026-09-03)
 
 - **2.1 Knowledge store v1**: TriviumDB-backed workspace knowledge base

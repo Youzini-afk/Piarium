@@ -1,12 +1,16 @@
 # Piarium agent harness
 
-Status: design accepted; code profile v1 not yet started
+Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
 Section 4 of [architecture.md](architecture.md) gives the process model this document extends.
+
+本文档是**边界**。哪项能力做到了哪一级（implemented / wired / proven / default-on）看
+[agent-harness-status.md](agent-harness-status.md)；未完成的纵切与实施规则看 [agent-harness-plan.md](agent-harness-plan.md)；
+每个偏离的理由看 [agent-harness-decisions.md](agent-harness-decisions.md)——日志不是规格，被采纳的决定都已回写到本文。
 
 ## 1. 决定
 
@@ -58,28 +62,28 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板替代 Curator server、凭据进钥匙串、结果进知识库、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索 provider 三层（模型 provider 自带 → 搜索 API → 明确不可用）；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
 | 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions），用户填、不自动选，预设只是填表；仅 hardImplement 与 review 默认主模型；**其余未配置则不注册或退化为无 LLM 路径，永不回退主模型**；记忆 agent 固定主模型（缓存） |
-| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；**不检测插件、不自动让位**，唯一例外是 web 工具对 `pi-web-access` 让位；开关下一会话生效 |
+| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；**不检测插件、不自动让位**，唯一例外是 web 工具对 `pi-web-access` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | 后续阶段；macOS Seatbelt / Linux bubblewrap+seccomp 可做，Windows 不承诺；沙箱内 shell 自动放行，`edit` / `write` 仍走权限（它们在 agent 进程内，沙箱管不到） |
 | 缓存契约 | Zone 0 会话内冻结；Zone 1 只追加、序列化确定；所有前缀失效操作批处理到压缩时刻 |
-| 工作状态归属 | 主 agent 对记忆系统**零义务**（可选的 `plan` / `todo` 只服务其自身注意力；无块编辑与标记工具；系统提示不提记忆）；**记忆 agent** 拥有 memory blocks（后台、fork 同前缀、门控触发、默认同模型），从完整轨迹与 host 事实**自行判断**重要性，不接受启发式权重；机械事件只决定它何时运行；标记权属于用户；host 拥有结构化事实；harness 不强加叙述 schema，`plan` 不强制 |
-| 压缩 | Piarium 接管：替换块 = 记忆 agent 维护的 blocks + 主 agent 计划 + host 事实 + 最近 K 步，零模型调用，回合内可多次；块不进 Zone 0；兜底 = 同步有界地运行一次记忆 agent |
+| 工作状态归属 | 主 agent 对记忆系统**零义务**（可选的 `plan` / `todo` 只服务其自身注意力；无块编辑与标记工具；系统提示不提记忆）；**记忆 agent** 拥有 memory blocks（后台、fork 前缀、门控触发），从完整轨迹与 host 事实**自行判断**重要性，不接受启发式权重；机械事件只决定它何时运行；标记权属于用户；host 拥有结构化事实；harness 不强加叙述 schema，`plan` 不强制。记忆 agent 先以 **shadow mode** 交付（维护块、不接管压缩），其模型与成本模型在 provider 实测前不定（第 8.4.1 节） |
+| 压缩 | Piarium 接管：替换块 = 记忆 agent 维护的 blocks + 主 agent 计划 + host 事实 + 最近 K 步，零模型调用，回合内可多次；块不进 Zone 0；兜底 = 同步有界地运行一次记忆 agent。**接管的前提是存在记忆 agent 维护的块**，否则交还 Pi 默认摘要；从 shadow 到接管由回放对比决定（第 8.6 节） |
 | 长任务连续性 | 压缩不降质 + 委派给新上下文子 agent（共享块协作）；压缩计数是给 agent 的信号；**没有自动停下来的 Handoff**，Handoff 仅为用户手动命令 |
 | 持久知识治理 | agent 只提议（带触发描述），用户审阅接受；自动接受按作用域显式开启；更新用双时态取代不覆盖；召回按触发相关性；保留由用户裁剪 |
 | 多 agent | **原生**子会话 worker（不依赖 `pi-subagents`）；角色 = **模型 × 任务性质**（检索 / 快速实现 / 难度实现 / 前端 / 审查 / 检查），每个角色独立模型槽位，全部可并发；`dispatch(role, task)` 异步 + `wait`；隔离 / 权限由 harness 决定；嵌套不限深，靠角色与成本可见性约束；未配置槽位的角色不注册；并行写者各进 worktree；兄弟不通信 |
-| 线程 | 子会话是**线程**：持久、可寻址、用户可见可对话的一等对象（第 9.3 节），不是一次工具调用的返回值。人和父 agent 用同一个原语开线；状态与游标归 host 持久化；生命周期与父的回合、worker 进程解耦——worker 丢失可在同一会话与 worktree 上恢复，worktree 独立于线程寿命；`waiting-for-input` 是一等状态；失败有分类（done / failed / worker-lost / stalled / looping / cancelled），没有"没返回"；回收是策略不是手动清理 |
+| 线程 | 子会话是**线程**：持久、可寻址、用户可见可对话的一等对象（第 9.3 节），不是一次工具调用的返回值。人和父 agent 用同一个原语开线；状态与游标归 host 持久化；生命周期与父的回合、worker 进程解耦——**线程（工作本身）与 Run（一次执行尝试）是两个对象**，worker 丢失结束一个 Run、开始下一个 Run，线程与 worktree 不变；状态是正交维度（lifecycle / attention / integration / worker / outcome）而不是一个枚举；等待输入是一等状态；失败有分类，没有"没返回"；回收是策略不是手动清理 |
 | 观察类工具 | 可能被反复调用的观察工具（`threads` / `wait` / `read_thread` / `get_output` 对运行中 shell / `diagnostics`）**默认返回自上次查看以来的增量**，全量要显式要；游标由 host 按（观察者，对象）持有，压缩时重置；结果只追加不回改（第 8.7 节） |
 | 防过度委派 | 不设配额、不做准入规则、**不估成本**（估不准且会把注意力引向算账）；只靠系统提示说明角色与"自己更快更省就自己做"的判断原则，加并发上限默认 12（超出排队）；"派发前询问"是默认不生效的用户设置 |
-| 长时间委派 | `wait` 是带截止时间的订阅，**超时是正常结果不是错误**，默认截止由 harness 按 provider 缓存 TTL 计算，唤醒 = 刷新缓存 + 看增量状态；活性与循环由 host 从子会话事件流观察（stalled / looping），不靠子自报、不靠父读转录；整理与压缩永不按时间触发 |
+| 长时间委派 | `wait` 是订阅：只因**真实状态变化、用户输入 / 中止、调用方显式超时**返回，**超时是正常结果不是错误**；没有按缓存 TTL 的默认唤醒——按 TTL 续缓存是默认关的实验开关，是否启用由回放数据决定（第 9.2.6 节）；活性与循环由 host 从子会话事件流观察（stalled / looping），翻转本身就是 `wait` 醒来的事件，不靠子自报、不靠父读转录；整理与压缩永不按时间触发 |
 | 验证器 | 是有名字的 profile 声明；post-tool 反馈注入是统一通道 |
 | 默认 runtime | 内置钉住的 Pi 作为默认；数据目录共享 `~/.pi/agent`；用户自有 Pi 是显式选项并带"未测试版本"诊断 |
 | 领域顺序 | code → research → knowledge-work-in-files；SaaS 连接器不在前三个 profile 的范围内 |
-| 度量 | 工具错误计数、重试次数、输出字节、缓存命中率是会话级计数器；不建立独立评测集；Zone 0 字节稳定性是契约测试 |
+| 度量 | 工具错误计数、重试次数、输出字节、缓存命中率是会话级计数器（回答"贵不贵、吵不吵"）；**最小回放集**（5–8 个固定任务、3 个指标）回答"任务做对没有"，是影响模型行为的能力默认开启的门禁（第 8.6 节）；Zone 0 字节稳定性是契约测试 |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | 三级：`grep` 工具 → `explore` 工具（Devin 式快速检索的**算法管线**：rg 扇出 + 知识库符号图 + 可选向量 + 多信号排序，LLM 至多两小步且可选，**永不跟随主模型**）→ `retrieval` 角色（纯 LLM 多轮，独立槽位，未配置不注册） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
-| 权限 | **原生权限管理替代 `pi-permission-system`**，与恢复替代 `pi-workspace-history` 同一路径；Piarium 进程内扩展成为拥有 `tool_call` 门控的强制扩展；到期停止 provisioning 并从基础包清单移除 |
+| 权限 | **三层**，不寻找唯一安全边界（第 9.1.2 节）：pi-host `tool_call` 门控做 allow / ask / deny 与 UI，也是 worker 内直接写文件的工具目前唯一可阻断的门；Host 服务授权只验身份、静态能力与 workspace 包含，不弹窗；OS 沙箱后续。**原生权限管理替代 `pi-permission-system`**，与恢复替代 `pi-workspace-history` 同一路径；在原生门覆盖插件全部面之前插件保留、并存 |
 | 知识库保留 | 可配置；默认按时间自动清理原始 `event` 与已结束会话的 `block`，`knowledge` 不按时间过期；删除会话级联删除其 event 与 block |
 | 用户级记忆 | 存在但轻：独立 `user.tdb`，只放 `knowledge`，不放 event / block；写入需经审阅；在 Settings 中可见、可编辑、可审计 |
 
@@ -191,6 +195,13 @@ research 与 knowledge-work profile 再评估）。
    host 存全文，模型看到预览与 `[省略 N 字节 — get_output("out_x", offset, length)]`。句柄是会话作用域，
    **压缩后仍有效**。截断发生在结果进入上下文之前，不是事后修改。截断在 `tool_result` 钩子层实现，因此对**所有**
    工具生效，包括 Pi 原样保留的 `read` / `find` / `ls`——读一个 5,000 行文件不会整个进入窗口。
+
+   句柄有两种耐久级别，不混用（D-034）。**`OutputRef` 是临时的**：只在 host 进程内、按会话预算 FIFO 淘汰，
+   不得写入任何持久记录；句柄编码 `out_<hostEpoch>_<sequence>_<mac>`，host 按会话记 `{ nextSequence, evictedThrough }`
+   两个水位，于是 host 重启（epoch 不同）或被淘汰（序号低于水位）都能返回 **`expired`**，从未签发的返回 `not-found`——
+   两种"不在"不合并。**`TranscriptRef`（`{ runtimeId, sessionId, fromEntryId, toEntryId }`）是耐久的**：指向 Pi 会话
+   文件本身，线程报告里引用的原始 trace 用它，不用 `OutputRef`。所有偏移与长度一律是 **UTF-8 字节**，切片在字节边界处
+   向最近的字符边界回退，分页返回 `nextOffset` 与 `eof`，调用方不得假设 `next = offset + length`。
 4. **错误即指令。** 每条失败文本 = 发生了什么 + 一个具体的下一步。
 5. **shell 由 harness 决定。** 模型不选 shell、不选编码、不选交互模式。
 6. **非零退出不是工具错误。** 它是正常结果，给退出码与 stderr，不加错误框架；否则模型会把测试失败当成
@@ -233,7 +244,9 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
 - **PTY，不是管道。** Codex 的 `unified_exec` 是 PTY；Claude Code 是持久管道 shell，因此"不能原生处理 vim、sudo 这类
   TTY 交互提示"。Piarium 选 PTY，复用 host 现有终端运行时：后台 shell 天然就是用户可附着、可输入的终端 tab（第 2 节
   已定的 UI 投影），程序的行为与在终端中一致。给模型的文本剥去 ANSI 与控制序列（host 已有 replay-safe 字节逻辑），
-  终端 tab 显示原始字节。
+  终端 tab 显示原始字节。**现状**（D-013）：监督器复用的是 PTY 模块（`node-pty` / `bun-pty`），尚未经 terminal runtime
+  创建，因此后台 shell 还不是终端 tab；"接进 `lib/terminal/runtime.ts` 的 `createTerminalSession` / `attachTerminalSession`"
+  是这条边界的未兑现部分，记在状态矩阵的 Blocker 列。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
 - **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`wait_ms` 到了它转后台，模型在输出里看到提示文本，
   用 `write_to_process` 回答或 `kill_shell` 放弃。Pi 内置 bash 的 stdin 是 ignore，与 `write_to_process` 不相容，
   因此这里不沿用。
@@ -434,8 +447,19 @@ harness"页有独立开关，关掉后的行为明确，不留半开状态：
 - **没有自动让位，唯一例外是 web**（第 5.8 节）：`pi-web-access` 启用时 harness 的 `webfetch` / `websearch` 在该会话不
   注册，因为两组同功能工具并存会让模型有两种方式做一件事。其他能力**不检测、不让位**——用户装了记忆插件、权限插件、
   搜索插件时，自己决定关哪边，harness 不猜。
-- 开关是用户级设置，可按工作区覆盖；**在下一个会话生效**——profile 与工具集是会话级属性（第 8.2 节），会话中途改变
-  会打碎 Zone 0。
+- 设置**按字段决定所有权**（D-031），不是整份设置一条规则；工作区级只在项目已 trusted 时生效（复用 Pi 的 project trust）：
+
+  | 字段 | 所有权与合并 |
+  | --- | --- |
+  | 模型槽位 `models.*`、provider 凭据 | user-only |
+  | `knowledge.autoAcceptSuggestions.user` | user-only——一个仓库的配置绝不能替用户打开"自动写入用户级长期记忆" |
+  | `knowledge.autoAcceptSuggestions.workspace`、`knowledge.eventRetentionDays` | 工作区可设 |
+  | `tools.*`、`shell`、检索策略、`dispatch.concurrency`、`output.*`、UI 偏好 | user 默认 + 工作区覆盖 |
+  | `permissions.mode` / `rules`、`dispatch.askBefore` | 工作区**只能收紧**（`bypass < accept-edits < normal`，只能向右；只能追加 ask / deny 与"派发前询问"）；`smart` 需用户显式开启 |
+  | `web.*` 域名策略 | user 与工作区取更严格组合 |
+  | 能力可用性（如线程运行时是否存在） | **不是设置**，由 host 经 RunManifest 注入，只读 |
+
+- 一切**在下一个会话生效**——profile 与工具集是会话级属性（第 8.2 节），会话中途改变会打碎 Zone 0。
 - 开关状态在会话开始时写入 `session` 节点并显示在诊断面板，便于排查"为什么这次没有 X"。
 
 v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。若将来需要让用户以第三方工具替换某一项，把
@@ -596,7 +620,12 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
     发布新代，旧代由 Reader 租约保护。
   - 每个远端 provider 单独同意，与远程模型 provider 同一信任门。使用云端 LLM 时代码本已出机器，embedding 不是新的
     暴露类别，但可能是新的 vendor。
-  - 需向 TriviumDB 确认无向量节点的支持；不支持则以最小维度占位向量建库并禁用向量检索路径。
+  - 需向 TriviumDB 确认无向量节点的支持；不支持则以最小维度占位向量建库并禁用向量检索路径。**已验证**（D-020）：
+    v0.8.5 上全零占位向量的 `searchHybrid` 不报错但返回空结果，因此占位模式下 `recall` 走 JS 层扫描 + 词项匹配，
+    向量路径只在配置了 embedding 时启用。需要 TriviumDB 提供：显式的"无向量 / 纯稀疏"检索入口。
+- **TQL 在 v0.8.5 上不可用于 payload 字段过滤**（D-019）：`FIND {type:"block", sessionId:"s1"}` 对字符串字面量报
+  napi 类型转换错误。知识库当前所有查询用 `allNodeIds()` + `getPayload()` 在 JS 层过滤；`createIndex` 仍建，待 TQL 修复
+  后启用。数据规模（单会话数百 event）下可接受，是 TriviumDB 侧需要修的项，不是 Piarium 的长期形状。
 - **代码分词**：TriviumDB 当前 tokenizer 为 ASCII 字母数字段 + CJK 2-gram，camelCase 不拆分。需要向
   TriviumDB 增加 identifier-aware tokenizer（camelCase 拆分并保留原词）；未落地前以 AC 关键词层承担精确符号
   命中。
@@ -709,12 +738,16 @@ checkpoint。天然结构化，host 直接写，零模型调用。
 计划工具结果（尾部）、Zone 2 中一份受预算约束的复述（Manus 的 todo 复述；主 agent 不用自己写就能在每步尾部看到
 新鲜状态——这是"注意力"上的收益；profile 可关）、压缩替换块。
 
-**记忆 agent 的上下文。** fork 主对话，**前缀逐字节相同**（系统提示、工具、历史至游标），整段是缓存命中；尾部追加
-当前块、游标（上次处理到的步）与编辑指令，只有这一段按全价计。它看到完整轨迹而非摘要（Walden Yan："共享完整轨迹"），
-输出是**块编辑操作**（insert / replace / rethink），由 host 应用并记账，不是自由文本。它没有文件与 shell 工具，不写
-持久知识（那走第 7.2.2 节的建议流程）。**模型默认与主 agent 相同**：缓存按模型隔离，换"便宜"模型意味着几十 K 前缀
-全价重算，比同模型 0.1× 缓存读更贵；仅当 provider 没有前缀缓存时便宜模型才划算。Settings 可覆盖。一次运行 ≈ 0.1 ×
-当前上下文 + 约 500 输出 token；150K 的会话约 25–30 次，占会话总量约 10–15%。
+**记忆 agent 的上下文。** fork 主对话（系统提示、工具、历史至游标），尾部追加当前块、游标（上次处理到的步）与编辑
+指令。它看到完整轨迹而非摘要（Walden Yan："共享完整轨迹"），输出是**块编辑操作**（insert / replace / rethink），由 host
+应用并记账，不是自由文本。它没有文件与 shell 工具，不写持久知识（那走第 7.2.2 节的建议流程）。
+
+**成本模型是未验证假设（D-037）。** 原设想"前缀逐字节相同、整段缓存命中、因此固定用主模型最便宜"有一个洞：记忆
+agent 必须带 `memory_edit` 工具才能被 `tool_choice` 强制，而主 agent 按本节规则**没有**这个工具，两者的 tools 块必然
+不同；Anthropic 的缓存层级是 tools → system → messages，tools 变则整段前缀失效，"0.1× 缓存读"不成立；OpenAI 的自动前缀
+缓存对 tools 的序列化位置不透明。因此：记忆 agent 的模型与是否复用前缀，**按 provider 实测 system / tools / messages
+分段命中后决定**，不从"相同前缀"概念推断；实测前记忆 agent 只以 shadow mode 运行（维护块、进 Zone 2 与面板，不接管
+压缩）。缓存是 provider adapter 的优化能力，不是正确性依赖。
 
 **触发。** 频率过高浪费，过低模糊，所以分层：
 
@@ -744,10 +777,14 @@ Piarium 没有这样的模型，替代品是**分工**——记忆 agent 持续�
    （Anthropic `cache_edits` 类）时服务端删除、前缀缓存保留；无则在下一次本地压缩时一并处理。回合内的上下文增长
    绝大部分来自工具输出，这一档就能把回合延长很多。
 2. **替换（零模型调用，回合内可用）。** 阈值到达时，`session_before_compact` 返回 `compaction`：Zone 0 不动，切除
-   范围替换为**当前 memory blocks + 主 agent 的计划 + host 事实记录**，最近 K 步原样保留（默认 K 由 profile 给出）。
-   替换块是记忆 agent 持续维护的状态与 host 的事实，不是压缩时刻回忆的散文，所以压多少次都是一份当前图景，没有
-   "摘要的摘要"——Codex 团队观察到的随压缩次数下降的准确率来自摘要堆叠，这里结构上不存在。块最多落后一个门控间隔
-   （约 5K token），那部分落在保留的 K 步内。毫秒级装配，断点 1 之后 Zone 0 依然命中。
+   范围替换为**当前 memory blocks + 主 agent 的计划 + host 事实记录**，保留范围用 Pi `preparation` 给出的安全切点
+   （tool_use / tool_result 配对由 Pi 保证），不自行按步数计算。**接管的前提是存在记忆 agent 维护的块**（`updatedBy:
+   memory-agent`）：只有 `todo` 写的 `plan` 或只有 host 事实时不接管，交还 Pi 默认摘要——一张清单不是对话的替代
+   （D-028）。替换块是记忆 agent 持续维护的状态与 host 的事实，不是压缩时刻回忆的散文，所以压多少次都是一份当前
+   图景，没有"摘要的摘要"——Codex 团队观察到的随压缩次数下降的准确率来自摘要堆叠，这里结构上不存在。但这个结论
+   有前提：记忆 agent 第一次压缩后看到的历史已是压缩后的历史，"不叠加损失"要求原始 trace 耐久可读（`TranscriptRef`，
+   第 5.1 节），并且要在回放集上证明（第 8.6 节），不能从结构推定。块最多落后一个门控间隔（约 5K token），那部分落在
+   保留范围内。毫秒级装配，断点 1 之后 Zone 0 依然命中。
 3. **兜底（调一次模型）。** 仅当块缺失或落后超过容忍（导入的长会话、记忆 agent 连续失败）时使用：以**同步且有界**的方式
    运行一次记忆 agent（同一机制，不是另一个组件）；有服务端压缩的 provider（Anthropic `compact_20260112`，用
    `pause_after_compaction` 追加最近步与块）可替代。这是唯一可能出现可感知等待的路径。
@@ -814,7 +851,16 @@ suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只
 ### 8.6 度量
 
 Piarium 已按轮聚合 token 用量并显示 cache-read / cache-write（0.9.8）。harness 增加会话级计数器：缓存命中率、
-工具错误次数、重试次数、输出字节。这四个数是回答"这次改动有没有把体验做坏"的最小集合；本设计不建立独立评测集。
+工具错误次数、重试次数、输出字节。这四个数回答"这次改动有没有把体验做贵、做吵"；它们回答不了"任务做对没有"。
+
+**最小回放集**（D-037）回答后者，是影响模型行为的能力从 shadow / `proven` 升到 `default-on` 的门禁：5–8 个来自
+Piarium 自身历史的真实任务（跨多文件修改、测试失败到修复、长上下文后回忆早前决定、编辑器有未保存改动时的恢复），
+每个固定起点（commit + 工作区状态）与判定标准；三个指标——任务是否成功、总 token、人工介入次数；每次失败附一个类别
+（`retrieval miss` / `lost context` / `wrong edit` / `permission interruption` / `tool-runtime failure` /
+`coordination failure`）让失败可诊断。对比同模型、同 provider、同起点，原生 Pi 对开了某项能力的 Pi。它不是 benchmark：
+手工跑、结果记入状态矩阵的 evidence 列。Recovery、安全、崩溃等确定性行为由 E2E 与故障注入验证，不进回放集。
+需要回放证据的能力：记忆 agent 接管压缩、`explore` 默认开启、自动 review、按 TTL 唤醒；基础设施类能力（bash / grep
+覆盖、截断、权限门）`proven` 即可默认开启。
 
 **Zone 0 字节稳定性契约测试**：在一个测试会话内跨 N 轮截获发往 provider 的请求，断言 system 与 tools 段逐字节相同、
 Zone 1 只增不改。它确定、便宜，直接捕获第 4.2 节那一类缺陷，并让任何向系统提示加入动态字段的改动立刻失败。放在
@@ -859,10 +905,48 @@ macOS 与 Linux 在 host 的 shell 监督器内可做，Windows 不承诺。沙�
 
 权限门控收回 Piarium：与恢复替代 `pi-workspace-history` 同一路径，原生实现替代 `@gotgenes/pi-permission-system`。
 Piarium 的进程内扩展成为 [architecture.md](architecture.md) 所要求的"拥有 `tool_call` 门控的强制扩展"；策略按工具
-名与参数模式声明，profile 提供默认（`get_output` 只读放行；`write_to_process` 与 `bash` 同级；`apply_patch` 与
-`edit` 同级），用户在 Settings 修改，策略文件是 Piarium 自有的原子 JSON 而非插件的原生配置。Devin CLI 的 Smart 模式
-（快模型判定安全性，装包 / 变更 git / `rm` / `sudo` / 敏感文件永远询问）作为可选模式纳入。到期停止 provisioning
-该插件并从基础包清单移除；已安装的用户实例按普通 Pi 包对待，不删除、不迁移其配置。
+名与参数模式声明，默认规则由 `HARNESS_TOOL_META` 的 `mutation` 属性生成（`none` 放行；`journaled` 在 normal 下 ask、
+accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（MCP、Pi 包）不由本门处理、交给 Pi 自己的权限
+系统；用户在 Settings 修改，策略文件是 Piarium 自有的原子 JSON 而非插件的原生配置。Devin CLI 的 Smart 模式（快模型
+判定安全性，装包 / 变更 git / `rm` / `sudo` / 敏感文件永远询问）作为可选模式纳入。在原生门覆盖插件的全部面之前
+**插件保留并与原生门并存**（D-021）；届时停止 provisioning 并从基础包清单移除，已安装的用户实例按普通 Pi 包对待，不删除、
+不迁移其配置。
+
+**三层，不寻找唯一安全边界**（D-035）：
+
+1. **pi-host `tool_call` 门**：唯一做 allow / ask / deny 与 UI 交互的层（`ask` 走现有 `ui.select`：Allow once / Allow for
+   this session / Deny）。它也是 `edit` / `write` / `apply_patch` 这类**在 worker 进程内直接写文件**的工具目前唯一可阻断
+   的门——host 对这些写入只能观察（mutation journal），不能阻止。
+2. **Host 服务授权**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态能力集、workspace / path 包含，
+   覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `thread.*` / `fs.lock` / `lsp.*`）。用户关掉 `bash`
+   后本次 Run 的能力集不含 `process.shell`，绕过工具直接到达的 `shell.exec` 必须被拒——这不是第二套用户策略，是防止
+   绕过工具入口。按风险类别授权：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill /
+   merge）、`write`（未来经 host 中介的文档写入）。
+3. **OS 沙箱**（第 9.1.1 节）：限制 worker 绕过工具直接访问文件与网络。当前不具备。
+
+**威胁模型**：worker 是 host 自己 spawn 的、同一 OS 用户的子进程，本来就拥有整个文件系统；第二层防的是**跨会话串线、
+陈旧 worker 污染当前会话、第三方 Pi 扩展借 host 能力越权**，不是防同权限下完全恶意的 worker——后者只有第三层能防。
+
+**身份**：`ActorContext { authorityInstanceId, sessionId, runId, workerId, workerGeneration, workspaceId, grantedCapabilities }`
+只能由 broker 信封与 host 注册表生成，请求载荷里不再有 `sessionId`。broker 在 `session.open` / `session.create` 的方法
+响应成功后 pin 住 `{ sessionId, workerGeneration }`；worker 自己发出的 `session.snapshot` 只能验证与更新状态，不能重绑
+身份，不一致视为协议违规；`session.closed` 不能仅凭 worker 自报清空 pin；未 pin 的 worker 发出的 harness 请求一律拒绝。
+RunManifest 落地前，host 的能力集从会话创建时冻结的同一份设置推导（过渡方案，与 pi-host 同源各读一次）。
+
+**第一层的判定顺序**（真值表，实现必须与之一致）：
+
+| 规则匹配 | 高风险类别 | 本会话已授权 | 结果 |
+| --- | --- | --- | --- |
+| deny | — | — | 阻断 |
+| allow（含 bypass 模式、用户显式 allow 规则） | — | — | 放行 |
+| ask | 否 | 是 | 放行 |
+| ask | 否 | 否 | 弹窗；选 "Allow for this session" 记入本会话授权 |
+| ask | 是 | 任意 | 弹窗；"Allow for this session" **不**记入——高风险每次都问 |
+
+高风险类别：`bash` / `write_to_process` 的命令匹配 `rm | sudo | chmod | chown | mkfs | dd`、`git push | reset | checkout |
+rebase | clean`、包管理安装 / 卸载、路径含 `.env | id_rsa | .ssh`；`write` / `edit` / `apply_patch` 的路径含
+`.env | id_rsa | .ssh`。`bypass` 是用户说"别再问我"，高风险在 bypass 下同样放行。工作区提供的 regex 规则须有 ReDoS
+防护（长度上限与线性时间匹配），工作区只能收紧不能放宽（第 5.10 节）。
 
 ### 9.2 多 agent：主 agent 不面对角色，harness 面对
 
@@ -958,9 +1042,17 @@ Git 面板显示每条线程的 worktree 与差异，面板上的"合并这条�
 #### 9.2.6 长时间委派与缓存
 
 父等待子 agent 期间没有请求发出，前缀缓存在 provider TTL 后变冷（Anthropic 默认 5 分钟、可选 1 小时；各家不同），
-子返回时那一次请求要全价重写整个前缀。解法就是 `wait` 的超时：**由 harness 按当前 provider 的缓存 TTL 计算默认值**
-（5 分钟 TTL 约 4 分钟唤醒一次；1 小时 TTL 约 55 分钟或子完成时唤醒），模型不需要知道缓存的存在。每次唤醒是一次
-前缀全命中（0.1×）的请求加几十 token 输出，`wait` 返回极简状态：
+子返回时那一次请求要全价重写整个前缀。
+
+**`wait` 默认只因真实事件返回**（D-033）：目标线程的状态变化（含 `attention` 翻转为 stalled / looping / 等输入、Run
+结束、报告就绪）、用户输入或中止、调用方显式给的 `timeout_ms`；上限是 host 的请求时限（1 小时）。**没有按缓存 TTL 的
+默认唤醒**。原设想的"按 TTL 唤醒以续缓存"（5 分钟 TTL 约 4 分钟醒一次）降为默认关的实验开关 `harness.wait.cacheKeepaliveWake`，
+provider TTL 只作 telemetry；是否启用由回放数据决定。原因：下面的算账只在 30 分钟任务、5 分钟 TTL、每次唤醒完全续上
+缓存时成立，超过约 10 个 TTL 周期后多次 0.1× 已比一次冷启动贵；更重要的是每次唤醒都是一次行动机会，防轮询只靠一句提示
+词，而第 9.1 节的原则正是传感器优先于指南。原设想的第二个理由——顺便看到 stalled / looping——不需要 TTL：这两个标志由
+host 传感器翻转，翻转本身就是 `wait` 醒来的事件。
+
+若开关打开，每次唤醒是一次前缀全命中（0.1×）的请求加几十 token 输出，`wait` 返回极简状态：
 
 ```text
 2 running · 0 done
@@ -968,13 +1060,12 @@ Git 面板显示每条线程的 worktree 与差异，面板上的"合并这条�
   B  3 steps · no activity for 6 min ⚠
 ```
 
-唤醒同时完成三件事：刷新缓存、让父看到**增量**进度（第 8.7 节：只有自上次以来的变化）、由 host 标出 `stalled`（默认
-5 分钟无工具活动）与 `looping` 的线程供父干预。**超时返回是正常结果**，不是错误，也不意味着任何线程出了问题。算账：
-30 分钟委派、5 分钟 TTL，唤醒 7 次 ≈ 0.7× 上下文，低于一次冷 miss 的 1.0×，且多了监督；1 小时 TTL 下压倒性划算。
-提示词只需一句："若无完成且无异常，再次 `wait`"。
+唤醒让父看到**增量**进度（第 8.7 节：只有自上次以来的变化）。**超时返回是正常结果**，不是错误，也不意味着任何线程出
+了问题。原算账（30 分钟委派、5 分钟 TTL，唤醒 7 次 ≈ 0.7× 上下文，低于一次冷 miss 的 1.0×）保留在此作为实验的假设，
+不作为默认行为的依据。
 
 一个纯机械的可选优化：TTL 极短且父确实无事可做时，harness 自行发送同前缀、`max_tokens` 最小的保活请求刷新 TTL，
-零注意力成本但无监督价值；作为设置项，默认关，记入待决。
+零注意力成本但无监督价值；作为设置项，默认关，记入待决。线程的生命周期与正确性**不得依赖**任何缓存续命机制。
 
 **这与上下文整理无冲突。** 记忆 agent 的触发是"有未整理的新轨迹"（token 增长 + 工具调用），不是墙上时钟；父等待期间
 没有新步骤就没有东西可整理，不会触发；子返回时进入的是一条结构化结果，正常门控。压缩也永不按时间触发。因此长时间
@@ -1002,11 +1093,33 @@ Devin 的 MultiDevin 让用户能打开任何 worker 对话纠偏，但没有合
 
 #### 9.3.1 对象与状态
 
-线程是协议中的一等对象：`{ id, parentSessionId, forkPoint, brief, role?, worktree?, status, principals, createdBy }`。
-状态机：`queued → running ⇄ idle | waiting-for-input → done | failed | cancelled`，横切两个由 host 观察得出的标志
-`worker-lost`（进程没了、会话在）与 `stalled` / `looping`（活着但不对劲），以及终态之后的 `merged` 与 `archived`。
-注册表由 host 持久化，字段包括最近活动时间、步数、token 与花费、最近一次工具调用、`waitingFor`（人 / 权限 / 它自己
-的子线程）、退出原因、worktree 路径、diff 统计、最终报告。这份状态是唯一真相：父 agent、用户面板、Zone 2 读的是同一份。
+线程是协议中的一等对象，由**两个对象**构成（D-032）：**Thread** 是工作本身，**ThreadRun** 是一次执行尝试。
+
+```ts
+Thread {
+  id; parent: { kind: "session" | "thread"; id }; workspaceId; brief; kind: "discussion" | "implementation";
+  lifecycle:   "queued" | "active" | "settled" | "archived";
+  attention:   "none" | "user" | "permission" | "stalled" | "looping";     // 归 Thread：Run 崩了问题还在等
+  integration: "none" | "dirty" | "merge-ready" | "conflict" | "merged";   // 归 Thread：worktree 比 Run 活得久
+  worktree; report; activeRunId?; hidden; createdAt; updatedAt; eventSeq;
+}
+ThreadRun {
+  id; threadId; attempt; runtimeId /* "pi" */; sessionId;
+  workerState: "starting" | "running" | "lost" | "exited";
+  outcome?: "success" | "failure" | "cancelled" | "lost"; exitReason?;
+  tokens; costUsd; steps; lastToolCall; startedAt; endedAt?;
+}
+```
+
+状态是**正交维度**，不是一个枚举：`done + merge conflict`、`active + worker lost`、`archived + worktree retained`、
+`waiting-for-input + permission pending` 都是合法组合，一条状态机表达不了。worker 崩溃 = 当前 Run 以 `lost` 结束，
+恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；**不在同一条记录上把 worker-lost 清掉、改回 running**——那是把
+第二次尝试伪装成第一次没中断，与恢复子系统"标 incomplete、不说谎"的原则相悖。`parent` 是一条图边（根会话或嵌套线程），
+不是存储目录的所有者；注册表按工作区持久化，带 schema 版本，读取只吞"文件不存在"，损坏、权限错误、未来版本都抛出且绝不
+用空表覆盖；host 启动时对账——所有 `starting` / `running` 的 Run 标 `lost`。注册表是 host 的协调记录：它记录 host
+知道的事，worker 是否活着由 broker 事实说了算，二者靠对账一致，注册表不凭自己宣布 worker 在跑。这份状态是父 agent、
+用户面板、Zone 2 共同读的一份。将来接其他 runtime（ACP、Codex、Claude）换的是 `ThreadRun.runtimeId` 对应的 adapter，
+不重写线程系统。
 
 #### 9.3.2 一个原语，两种入口
 
@@ -1037,8 +1150,10 @@ Devin 的 MultiDevin 让用户能打开任何 worker 对话纠偏，但没有合
   开新线继续。
 - **回收是策略。** merge 成功自动删工作目录、保留分支引用 N 天（默认 7）；空闲线程到期（默认 14 天）提示归档，归档删
   worktree 不删对话；对话正文永不自动删除；最终报告与记忆块作为 `session` 节点进知识库，带 `spawned_from` 边，父会话之后
-  可以 `recall`。用户删除父会话时，运行中的线程停下（`cancelled`，worktree 保留）并归档，归档里可恢复。每条线的花费
-  可见。
+  可以 `recall`。**用户删除父会话**：现有的删除确认框写明后果（"还有 N 条运行中的线程，将停止并归档；worktree 保留"），
+  不弹第二个模态；删除后给可撤销提示；运行中的线程停下（`outcome: cancelled`，worktree 保留）并归档，归档区提供"恢复为
+  独立线程"——这是产品决定，不是技术约束（另一种可选设计是让它们直接成为工作区级的独立线程）。每条线的花费可见。
+  线程报告里的原始 trace 引用是 `TranscriptRef`（第 5.1 节），指向线程自己的会话文件，与线程同寿命。
 
 #### 9.3.5 活性与失败分类
 
@@ -1141,11 +1256,19 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 
 ### 12.1 顺序
 
-每一阶段是可单独 review 与提交的一组变更；阶段之间不共享半成品。逐项的文件、契约、测试与完成标准在
-[agent-harness-plan.md](agent-harness-plan.md)（执行计划，交付后删除）。
+交付单位是**可运行纵切**（协议 → host → worker → 一条真实 E2E），不是模块；能力状态按四级
+（implemented / wired / proven / default-on）记在 [agent-harness-status.md](agent-harness-status.md)，只有 `proven`
+算纵切完成（D-038）。逐项的文件、契约、测试与完成标准在 [agent-harness-plan.md](agent-harness-plan.md)（执行计划，
+交付后删除）。
 
-0. **前置**：对齐 Pi 版本（本检出 `node_modules` 为 0.83.0，security.md 基线为 0.84.3），在选定版本上复核第 4.1 节的
-   钩子形状；恢复的 coverage 从计划级二值改为路径级（见
+2026-09-04 复审后的顺序调整：阶段 0–1b 已交付（详见状态矩阵）；阶段 2、3、3b 的模块大部分处于 `implemented`，接线部分
+`wired`，真实 child session 尚未接通。下一步不是继续按阶段铺模块，而是：**P0 integrity 纵切**（broker 身份 pin、Host
+静态授权、注册表错误分类与对账、Thread + ThreadRun、两级输出引用、工作区级锁，共七项，见 plan）→ 一条**真实 child
+session 的线程纵切** → 权限纵切（Host enforcement + 插件并存）→ 上下文 shadow mode + 最小回放集 → 由回放数据决定压缩
+接管与记忆 agent 是否开启。阶段 4 与内核正交，并行推进；阶段 5、6 暂停到线程纵切 `proven` 之后——是顺序，不是取消。
+下面的阶段列表保留为原始规划。
+
+0. **前置**：对齐 Pi 版本并在该版本上复核第 4.1 节的钩子形状（已完成，D-001：0.84.3）；恢复的 coverage 从计划级二值改为路径级（见
    [native-workspace-recovery-design.md](native-workspace-recovery-design.md) R1），否则 `bash` 注册为 `process`
    writer 后几乎每一轮都会被标为 incomplete，组合回滚在实践中消失。
 1. **工具与 host 服务**：`harness-tools.ts`（`bash` / `grep` / `edit` / `write` 覆盖，`apply_patch`、`get_output` /
@@ -1173,12 +1296,24 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 `piarium serve` 检测到桌面 host 在运行时复用它而不起第二个（第 7.1 节）；子 agent worktree 由父 agent 的 `merge` 工具
 合并、Git 面板可选审阅（第 9.2.5b 节）；`event` 默认保留 30 天（第 7.2.1 节）。
 
+已于 2026-09-04 决定并移入正文的（决策日志 D-030–D-038）：Pi 0.84.3 消费 `session_before_compact` 返回的
+`{ compaction }` 并跳过自身摘要，`session_compact` 随后触发且 `fromExtension: true`（D-022，前置实验结论，第 8.4.2 节
+第 2 档据此实现）；线程对象拆为 Thread + ThreadRun、状态正交（第 9.3.1 节）；`wait` 只因真实事件返回、TTL 唤醒降为实验
+（第 9.2.6 节）；输出引用分 `OutputRef` / `TranscriptRef` 两级、偏移统一 UTF-8 字节（第 5.1 节）；权限三层与 Host 静态
+授权（第 9.1.2 节）；设置按字段所有权（第 5.10 节）；记忆 agent shadow mode 与回放门禁（第 8.4.1、8.6 节）；父会话删除
+时线程停下并归档、不弹第二个模态（第 9.3.4 节）。
+
+尚未决定、留待 P0 之后：
+
 | 问题 | 分叉 | 影响 |
 | --- | --- | --- |
+| 记忆 agent 的模型与前缀复用 | 主模型 + 承受 tools 变更的缓存失效 / 便宜模型 / 把 `memory_edit` 放进主 agent 工具集但用门控禁止主 agent 调用 | 按 provider 实测分段命中后决定（第 8.4.1 节）；第三种会让主 agent 看见一个它不能用的工具 |
+| Work Graph 目标形态 | 仅 Thread + ThreadRun / 加 Artifact、Relations、Checkout 对象 | 有第二个消费者（Fleet、知识库 `session` 节点、外部 runtime）之前不扩 |
+| RunManifest 的下发路径 | host 在 `session.open` 时计算并下发 / pi-host 继续自读设置 | 决定 Host 静态授权的能力集来源何时从"同源各读一次"收敛为单一来源（第 9.1.2 节过渡方案） |
 | 外部 agent 的协议兼容 | 严格版本匹配 / 能力协商 / N-1 窗口 | 第 5 阶段前必须决定；影响 DTO 对未知字段的容忍设计 |
 | 选装本地 embedding 模型 | CodeRankEmbed-137M / Qwen3-Embedding-0.6B / 不提供 | 影响下载体积与 ONNX 打包；不影响文件格式（维度由 Matryoshka 统一到 1024） |
-| TriviumDB 无向量节点 | 原生支持 / 占位向量 | 决定"未配置 embedding"模式的实现方式 |
-| Pi 上游缺口 | `session_before_compact` 能否表达"保留最近 K 步原样"；`tool_result` 钩子的执行顺序 | 若不能，在 harness 扩展内补或向 Pi 提交 |
+| TriviumDB 无向量节点 | 原生支持 / 占位向量（当前：占位 + JS 扫描，第 7.5 节） | 决定"未配置 embedding"模式的长期实现 |
+| Pi 上游缺口 | `tool_result` 钩子的执行顺序；TQL 字面量类型推断（TriviumDB 侧） | 若不能，在 harness 扩展内补或向上游提交 |
 | 模型槽位预设表 | 哪些 provider 给哪些槽位默认建议 | 只是 Settings 的便利，不影响规则本身 |
 | `explore` 无 LLM 时的查询扩展 | 启发式的具体规则（标识符提取、驼峰拆分、同义表、符号 BM25）与效果 | 决定零配置下 `explore` 的可用度；实现阶段用真实仓库调 |
 | 缓存保活请求 | 长时间委派时 harness 自行发送同前缀最小请求刷新 TTL / 只靠 `wait` 唤醒 | 前者零注意力成本但无监督价值；默认关，观察 `wait` 的实际开销后决定 |

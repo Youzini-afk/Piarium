@@ -241,7 +241,9 @@ post-tool feedback, and Piarium-owned compaction. The heavy services behind thos
 supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
 handing the worker host credentials. The harness contract, its cache rules, and the profile model
-are specified in [agent-harness.md](agent-harness.md).
+are specified in [agent-harness.md](agent-harness.md); which of its capabilities are implemented,
+wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
+[agent-harness-status.md](agent-harness-status.md).
 
 ### 4.5 Composable workbench and document authority
 

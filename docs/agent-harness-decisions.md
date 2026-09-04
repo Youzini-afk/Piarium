@@ -151,80 +151,7 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 
 ## 阶段小结 · 阶段 1
 
-### 模块已写并有单测
-
-| 工作项 | 模块 | 单测数 | 状态 |
-|--------|------|--------|------|
-| 1.1 | HarnessServiceMap, HostServicesBridge, HarnessRouter | 17 | ✓ |
-| 1.2 | Zone 0 violation fix + stability contract | 5 | ✓ |
-| 1.3 | ShellSupervisor (PTY), bash tool | 21 | ✓ |
-| 1.4 | OutputStore, tool-result-truncation | 12 | ✓ |
-| 1.5 | HarnessSearchService, grep tool | 6 | ✓ |
-| 1.6 | LspDiagnosticsService, apply_patch (Codex) | 6 | ✓ |
-| 1.7 | PathLockService, withPathLock | 13 | ✓ |
-| 1.8 | CounterTracker (toolErrors, toolRetries, outputBytes, cacheHitRatio) | 7 | ✓ |
-| 1.9 | HarnessSettings schema + Settings page | 6 | ✓ |
-| 1.10 | promptSnippet / promptGuidelines (via ToolDefinition) | — | ✓ |
-| 补齐 | get_output, write_to_process, kill_shell, diagnostics | 15 | ✓ |
-
-### 已接进运行系统
-
-| 接线点 | 位置 | 状态 |
-|--------|------|------|
-| Host 侧实例化 | `index.ts`: HarnessServiceHost after workspaceContentSearch | ✓ |
-| HarnessRouter | `index.ts`: after recoveryTurnCoordinator | ✓ |
-| Broker 事件消费 | `index.ts`: harnessRouter.processEvent in subscribe | ✓ |
-| 会话注册 | `index.ts`: session.snapshot event handler | ✓ |
-| pi-host 工具注册 | `session-host.ts`: selectHarnessTools → customTools | ✓ |
-| 截断扩展 | `session-host.ts`: extensionFactories | ✓ |
-| bash cwd | `service-host.ts`: env PWD for initial shell cwd | ✓ |
-| mutation journal 诊断 | `workspace-mutation-journal.ts`: hostServicesBridge | ✓ |
-| apply_patch OpenAI-only | `session-host.ts`: isOpenAIFamily check | ✓ |
-| harness.respond ok 字段 | `index.ts`: respond callback + `router.ts` | ✓ |
-| Settings 门控 | `session-host.ts`: mergeHarnessSettings → selectHarnessTools | ✓ |
-| registerWriter | `index.ts`: documents.registerWriterForScope | ✓ |
-| 诊断 provider | `index.ts`: createLanguageSupervisorDiagnosticsProvider | ✓ |
-| Settings 页控件 | `HarnessSettingsPage.tsx`: 工具开关 + shell + output + bash | ✓ |
-
-### E2E 集成测试（tool → bridge → router → service → content text, 6/6 pass）
-
-测试文件：`packages/pi-host/test/harness/harness-e2e.test.ts`
-
-测试方式：真实 HostServicesBridge + 真实 HarnessRouter + 真实 HarnessServiceHost（ShellSupervisor 用 PTY、OutputStore 用真实存储），工具函数（createBashTool / createGrepTool / createGetOutputTool）经 bridge.request → router.processEvent → service.handle → bridge.respond 完整链路返回 content text。
-
-| # | 断言 | 状态 |
-|---|------|------|
-| 1 | bash pwd 输出包含工作区目录名 | ✓ |
-| 2 | 两次独立调用：cd packages → pwd，pwd 行以 "packages" 结尾 | ✓ |
-| 3 | 超过 waitMs 的命令返回 sh_ id，get_output 取到非空输出 | ✓ |
-| 4 | grep 命中文本含 "hello"，miss 返回 "0 hits (searched" | ✓ |
-| 5 | cat big.txt (5000行) 返回 out_ 句柄，page1 含 "line 1"，page2 非空 | ✓ |
-| 6 | selectHarnessTools: grep=false 时无 grep，默认有 grep | ✓ |
-
-### Contract 测试（buildHarnessRespondParams → host-controller harness.respond → respondHarness → bridge, 3/3 pass）
-
-测试文件：`packages/pi-host/test/harness/router-bridge-contract.test.ts`
-
-测试方式：`buildHarnessRespondParams`（来自 `@piarium/protocol`，web application-host 同一函数）生成 `HarnessRespondParams`，经 host-controller 的 `harness.respond` 分支 → `sessionHost.respondHarness` → `bridge.respond` → bridge 等待方拿到结果。
-
-| # | 断言 | 状态 |
-|---|------|------|
-| 1 | ok result: buildHarnessRespondParams → respondHarness → bridge 等待方 resolves | ✓ |
-| 2 | error result: buildHarnessRespondParams → respondHarness → bridge 为 rejection | ✓ |
-| 3 | timeout error: buildHarnessRespondParams → respondHarness → bridge 为 retryable rejection | ✓ |
-
-> **注**：read 工具的 tool_result 截断（`createToolResultTruncationExtension`）尚未在 e2e 中验证。该扩展在 session-host 注册，对所有工具结果生效，但其端到端行为（截断 + output.store + get_output 句柄）留待阶段 2 的 Pi 会话级 e2e 验证。
-
-### 决策回退
-
-- D-010 (child_process.spawn) → D-013 (PTY)
-- D-012 (unified diff) → D-014 (Codex syntax)
-- D-005 (mode: controlled) → 修正为 mode: process
-
-### 已知偏离（进入阶段 2 前完成）
-
-- D-013 偏离：复用 PTY 模块而非终端运行时，后台 shell 尚不是终端 tab。方案：在 `lib/terminal/runtime.ts` 暴露 `createTerminalSession` / `attachTerminalSession`，harness shell 经它创建。
-- 诊断 provider 已接线但未在 e2e 中验证（需要真实 LSP server）。语义已实现：unavailable/pending/ready + snapshot diff，但端到端证明待阶段 2。
+本节原为阶段 1 的状态快照（模块 / 接线 / e2e 断言表），按 D-030 已整体迁入 [agent-harness-status.md](agent-harness-status.md)「历史快照：阶段 1 小结」。它曾存在于 1.11 交付点（提交 `9494a195` 前后）。
 
 ### D-016 · 2026-09-03 · 1b.1
 类型：决策
@@ -372,3 +299,192 @@ Status: append-only log kept by the executing agent during agent-harness-plan.md
 原因：前三条都是"测试和实现里的并发/路径假设在真实运行时不成立"，第四条是让上一轮加的防护真正生效。
 影响：上述六个测试文件；`packages/web/application-host/lib/harness/thread-registry.ts`；`.github/workflows/ci.yml`。
 状态：已实施
+
+### D-030 · 2026-09-04 · 交叉（决策日志治理）
+类型：默认值调整
+决定：本日志的治理规则改为四条。(1) **条目只追加，永不改写、重排或删除**，编号乱序（D-013、D-015 早于 D-011、D-012）与 D-005、D-013 的原地修订作为历史保留。(2) 新增"决策索引"一节（见文末），每条记录 `Current status`（active / implementation / experiment-result / superseded / reverted / contradicted / open-question / folded-in）、`Superseded by`、`Folded into`；索引可以随时更新，它不是条目。(3) 分类为 active-design 的条目**必须回写**到 `agent-harness.md` 或 `agent-harness-plan.md`，回写完成后索引标 `folded-in`；日志不是现行规格，执行 agent 以设计文档与 plan 为准，日志只解释"为什么"。(4) 状态快照（测试数、接线表、e2e 断言表）不属于日志，原"阶段小结 · 阶段 1"迁入 `agent-harness-status.md`，原位置保留一行链接。plan 交付完成后本日志**归档为交付历史**，不删除。
+原因：三轮验收发现设计漂移的主要来源就是这份日志：D-013、D-014、D-023、D-028 等已成为现行契约的决定只存在于此处，设计与 plan 仍写着旧形状，执行 agent 每次压缩后重读 plan 就会再走一遍旧路径。另一方面，D-026 被原地改写、D-005 被原地修订，说明"只追加"没有被当成硬规则。
+考虑过的替代：(a) 把日志直接改写成现行规格——历史消失，之后没人能回答"当时为什么这么定"。(b) 不加索引、靠阅读全文判断哪条还有效——每条的"状态"字段混着未完成与偏离，读不出来（D-027 已经证明这一点）。
+影响：本文件（索引节、阶段小结迁出）；`docs/agent-harness-status.md`（新文件）。
+状态：已实施
+
+### D-031 · 2026-09-04 · 1.9（取代 D-015）
+类型：偏离
+决定：`HarnessSettings` 不再作为一个整体决定"用户级"还是"用户级 + 工作区覆盖"，改为**按字段的所有权矩阵**：
+
+| 字段 | 所有权与合并规则 |
+| --- | --- |
+| `models.*`（模型槽位）、provider 凭据 | user-only；工作区无权设置 |
+| `knowledge.autoAcceptSuggestions.user` | user-only；工作区无权设置 |
+| `knowledge.autoAcceptSuggestions.workspace`、`knowledge.eventRetentionDays` | 工作区可设置 |
+| `tools.*`、`shell`、检索策略、`dispatch.concurrency` | user 默认 + 工作区覆盖 |
+| `permissions.mode`、`permissions.rules` | 工作区**只能收紧**：mode 的严格度全序为 `bypass < accept-edits < normal`，工作区只能向右移；工作区可追加 `ask` / `deny` 规则，不能追加 `allow` 规则覆盖用户的 `ask` / `deny`；`smart` 需用户显式开启，工作区不能开 |
+| `web.*`（域名策略等） | user 与工作区取更严格的组合 |
+| `output.*`、UI 偏好 | user 默认 + 工作区覆盖 |
+| `dispatch.askBefore` | 工作区只能增加需要询问的角色，不能取消 |
+| `threadRuntime` 及一切能力可用性 | **不是设置**；来自 host / RunManifest 的注入，只读。现有的 `threadRuntime` 设置键是过渡方案，RunManifest 落地后删除 |
+
+工作区级覆盖**只在项目已 trusted 时生效**（复用 Pi 的 project trust；未 trusted 的项目设置整体忽略）。
+原因：D-015 说"仅用户级"，plan 1.9 与代码（`session-host.ts:2678` 合并 `getProjectSettings().harness`）却是"用户级 + 工作区覆盖"，两者都不对：`autoAcceptSuggestions` 作为一个对象被工作区整体覆盖，意味着一个仓库的项目配置可以替用户打开"自动写入用户级长期记忆"；`permissions` 被工作区放宽则是仓库替用户降低安全等级。不同字段的 authority 不同，不能用一条规则。
+考虑过的替代：(a) 全用户级（D-015 原文）——"这个仓库只能用 PowerShell"这类项目事实无处放。(b) 全部允许覆盖（现代码）——见上。
+影响：`packages/protocol/src/harness-settings.ts`（`mergeHarnessSettings` 按矩阵实现，deep-merge 改为字段级）；`packages/pi-host/src/session-host.ts`（trust 门控）；`packages/ui` 设置页需按所有权显示哪些项来自工作区；设计文档 5.10 规则第 2 条与 plan 1.9 回写。D-015 在索引中标 superseded。
+状态：待实施（P0 之后的首个设置项工作；实施前 `autoAcceptSuggestions.user` 至少先改为 user-only，因为这是安全侧）
+
+### D-032 · 2026-09-04 · 3.4–3.5（取代 D-024 与 D-026 的对象模型部分）
+类型：偏离
+决定：线程对象模型改为 **Thread + ThreadRun**，状态改为**正交维度**：
+
+```ts
+Thread {
+  id; parent: { kind: "session" | "thread"; id: string }; workspaceId; brief; kind;
+  lifecycle: "queued" | "active" | "settled" | "archived";
+  attention: "none" | "user" | "permission" | "stalled" | "looping";   // 归 Thread：Run 崩了问题还在等
+  integration: "none" | "dirty" | "merge-ready" | "conflict" | "merged"; // 归 Thread：worktree 比 Run 活得久
+  worktree; report; activeRunId?; hidden; createdAt; updatedAt; eventSeq;
+}
+ThreadRun {
+  id; threadId; attempt; runtimeId /* "pi" */; sessionId;
+  workerState: "starting" | "running" | "lost" | "exited";
+  outcome?: "success" | "failure" | "cancelled" | "lost"; exitReason?;
+  tokens; costUsd; steps; lastToolCall; startedAt; endedAt?;
+}
+```
+
+worker 崩溃 = 当前 Run 以 `outcome: lost` 结束，恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；不再在同一条记录上清 `workerLost` 改回 `running`。`resumeThread` / `markWorkerLost` 因此废弃。存储改为按工作区一个目录：`PIARIUM_DATA_DIR/threads/<hostId>/<workspaceId>/{threads,runs}.json`，带 `schemaVersion`；父会话只是 `parent` 边，不再是目录所有者。读取只吞 `ENOENT`，其余（JSON 损坏、EACCES、未来 schema 版本）抛出且不缓存，绝不用空表覆盖。host 启动时对账：所有 `workerState ∈ {starting, running}` 的 Run 标 `lost`（host 重启后 worker 一定不在），线程 `attention` 按是否有未答问题恢复。
+原因：设计 9.3.1 原文把 worker-lost / stalled / looping 描述为横切标志、merged / archived 描述为终态之后，是实现把它们拍进一个 `status` 枚举；`sessionId` / `workerLost` / `tokens` / `exitReason` / `report` 已经是一次执行尝试的全部字段，只是没起名字。这个形状已落盘、已进 protocol 事件，等接真 child session 再拆，改的是有数据的持久格式。JSON catch-all 吞掉一切读取失败并在下次写入时用空表覆盖，直接违反不变量 3。
+考虑过的替代：(a) 保持单一 ThreadRecord，接通 child session 后再迁移——持久格式、UI、事件、恢复路径都会先依赖错误结构。(b) 完整 Work Graph（Artifact / Relations / Checkout 对象）——没有消费者之前不建，留在设计 12.2 作目标形态。(c) SQLite——几十条记录单写者，版本化 JSON + 原子写 + 对账足够。
+影响：`packages/protocol/src/harness-threads.ts`（`Thread` / `ThreadRun` 替代 `ThreadRecord`，事件载荷同步）；`packages/web/application-host/lib/harness/thread-registry.ts`（重写存储与 API）；`harness-services.ts`、`thread-tools.ts`、所有线程测试；设计 9.3.1 / 9.3.4 回写。
+状态：待实施（P0 第 4 项）
+
+### D-033 · 2026-09-04 · 3.5 / 9.2.6（取代 D-026 (8) 的默认超时部分）
+类型：偏离
+决定：`wait` **只因三种事件返回**：目标线程的状态变化（含 `attention` 翻转、Run 结束、报告就绪）、用户输入或中止（abort signal）、调用方显式给的 `timeout_ms`。不再有按 provider 缓存 TTL 推导的默认唤醒；`DEFAULT_WAIT_TIMEOUT_MS = 240_000` 废弃，默认上限即 router 的 `HARNESS_MAX_REQUEST_TIMEOUT_MS`。"按 TTL 唤醒以续缓存"降级为**默认关的实验开关** `harness.wait.cacheKeepaliveWake`，`DEFAULT_TTL_TABLE` 只作 telemetry。是否启用由回放集数据决定（D-037）。
+原因：设计 9.2.6 的 0.7× 对 1.0× 只在 30 分钟任务、5 分钟 TTL、每次唤醒完全续上缓存时成立，超过约 10 个 TTL 周期就比一次冷启动贵；更重要的是每次唤醒都是一次行动机会，防轮询只靠一句提示词，而设计 9.1 自己的原则是"传感器优先于指南"。TTL 唤醒的第二个理由——顺便看到 stalled / looping——不需要 TTL：这两个标志由 host 传感器翻转，翻转就是真实状态变化，`wait` 本来就在那里醒。
+考虑过的替代：保留 240s 默认——那事实上就是 TTL 唤醒，只是数字写死了。
+影响：`packages/protocol/src/harness-threads.ts`（常量废弃）；`thread-tools.ts` / `harness-services.ts`（wait 默认超时）；设计 2 节决策表"长时间委派"行、9.2.6、12.2 回写。
+状态：待实施（P0 第 4 项内一并改）
+
+### D-034 · 2026-09-04 · 1.4 / 3.5（输出引用的耐久契约）
+类型：偏离
+决定：两种引用，两种耐久级别，不再混用。
+
+`TranscriptRef { runtimeId; sessionId; fromEntryId; toEntryId; branchLeafId? }`：**耐久**，指向 Pi 会话文件（每步落盘，就是原始 trace）；`ThreadReport.traceHandle` 改名 `transcriptRef` 并改为此类型；`read_thread(steps)` 经 host 的 `session.entries` 读它。
+
+`OutputRef { handle; durability: "ephemeral"; generation }`：工具结果截断产生的 `out_` 句柄**临时**，不得写入任何持久记录。句柄编码 `out_<hostEpoch>_<sequence>_<mac>`，MAC 用 host 进程内每 epoch 随机密钥；store 按 session 保存 `{ nextSequence, evictedThrough }`，淘汰**必须是 FIFO**（水位方案的前提，写进契约）。判定：epoch 不同 → `expired`；MAC 无效 → `not-found`；`sequence ≤ evictedThrough` → `expired`；在表中 → `ready`；同 epoch、MAC 合法、`sequence ≥ nextSequence` → `not-found`。`dropSession` 后该 session 记入一张"已丢弃"表，其所有句柄判 `expired`。`expired` 与 `not-found` 是不同的错误码（不变量 3）。
+
+偏移单位统一为 **UTF-8 字节**（设计 5.1 与所有 `[output: N bytes]` 文本已经是字节）；切片在字节边界处向最近的字符边界回退；分页结果返回 `nextOffset` 与 `eof`，调用方不得假设 `next = offset + length`。
+原因：`OutputStore.total` 用 `Buffer.byteLength`、分页用 `text.slice` 字符索引，中文与 emoji 下两个字段单位不同；`ThreadReport` 落盘却引用 host 重启即消失的内存句柄，两个耐久承诺互相矛盾；淘汰后返回 `not-found` 把"曾经存在"折叠进"从未存在"。
+考虑过的替代：(a) 落盘 blob spool——为工具输出建内容寻址存储超出需要，而线程的原始 trace 已经在 Pi 会话文件里。(b) 有限墓碑集合——墓碑被淘汰后旧句柄退化回 `not-found`，三态不稳定，上限也没有依据；FIFO 水位只要一个整数。
+影响：`packages/web/application-host/lib/harness/output-store.ts`；`packages/protocol/src/harness.ts`（`OutputSlice` 加 `nextOffset` / `eof`；`HarnessError.code` 加 `expired`）；`harness-threads.ts`（`ThreadReport.transcriptRef`）；`output-tools.ts`、`tool-result-truncation.ts`；设计 5.1 原则 3 回写。
+状态：待实施（P0 第 5 项）
+
+### D-035 · 2026-09-04 · 3b.1 / 1.1（权限三层与 Host 静态授权）
+类型：偏离
+决定：权限不再寻找"唯一安全边界"，明确为三层，各有能管与不能管的范围：
+
+1. **pi-host `tool_call` gate**：唯一做 allow / ask / deny 与 UI 交互的层；也是 `edit` / `write` / `apply_patch` 这类在 worker 进程内直接写文件的工具**目前唯一可阻断的门**。
+2. **Host service authorization**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态 capability、workspace / path 包含。覆盖 `shell.* / output.* / search.* / thread.* / fs.lock / lsp.*` 等经 host 中介的能力。用户关掉 `bash` 后本次 Run 的 capability 不含 `process.shell`，直接到达的 `shell.exec` 必须被拒——这不是第二套策略，是防绕过工具入口。
+3. **OS containment**：将来限制 worker 绕过工具直接访问文件与网络（设计 9.1.1）；当前不具备，设计文档必须明说：**host 对 worker 本地文件写入只能观察，不能阻止**。
+
+威胁模型写明：worker 是 host 自己 spawn 的同 OS 用户子进程，本来就有整个文件系统；Host 授权防的是**跨会话串线、陈旧 worker 污染、第三方 Pi 扩展借 host 能力越权**，不是防同权限下完全恶意的 worker。
+
+`ActorContext { authorityInstanceId; sessionId; runId; workerId; workerGeneration; workspaceId; grantedCapabilities }` 只能由 broker 信封与 host 注册表生成。broker 规则：`session.open` / `session.create` 的**方法响应**成功后写入 `{ sessionId, workerGeneration }` 作为 pin；`session.snapshot` 只能验证与更新状态，不能重绑身份，不一致视为协议违规（诊断 + 忽略）；`session.closed` 不能仅凭 worker 自报清空 pin，关闭必须是 broker 发起成功或连接确认终止；未 pin 的 worker 发出的 harness 请求一律拒绝（catalog worker 没有会话，本就不该发）。Router 从信封取 ActorContext，`HarnessRequestData` 删除 `sessionId`。Host 授权按风险类别：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill / merge）、`write`（未来经 host 中介的文档写入）。
+
+过渡：RunManifest 落地前，host 的 capability 集从会话创建时冻结的同一份设置推导（与 pi-host 同源，各读一次），标为临时方案；RunManifest 由 host 计算、`session.open` 时下发 worker 后收敛为单一来源。
+
+真值表（pi-host gate，进设计 9.1.2）：
+
+| 规则匹配 | 高风险 | 本会话已授权 | 结果 |
+| --- | --- | --- | --- |
+| deny | — | — | 阻断 |
+| allow（含 bypass、用户显式 allow 规则） | — | — | 放行 |
+| ask | 否 | 是 | 放行 |
+| ask | 否 | 否 | 弹窗；"Allow for this session" 记入授权 |
+| ask | 是 | 任意 | 弹窗；"Allow for this session" **不**记入授权 |
+
+工作区提供的 regex 规则须做 ReDoS 防护（长度上限 + 简单模式检查或线性时间引擎）。
+原因：router 从 `envelope.data.sessionId`（worker 自报）取身份；broker 信封的 `sessionId` 又来自 worker 自己发出的 `session.snapshot`（`host-client.ts:340`），两层都不可信——worker 发一条伪造 snapshot 就能把自己重绑到别的会话，在别人的 shell 里执行命令。上一轮把 `parentSessionId` 从 params 挪到 `ctx.sessionId` 只是把信任下移了一层。
+考虑过的替代：(a) 只改 router 用信封字段——信封本身不可信，改了没用。(b) Host 也做 allow / ask / deny——与 pi-host gate 双重门控，两次弹窗或两处不一致，正是插件共存时出过的问题。
+影响：`packages/runtime-broker/src/{host-client,runtime-broker}.ts`（pin）；`packages/protocol/src/harness.ts`（删 `sessionId`，加 `ActorContext`）；`packages/web/application-host/lib/harness/{router,harness-services}.ts`；设计 9.1.2、architecture §5.1 回写。D-025 在索引中标 superseded。
+状态：待实施（P0 第 1、2 项）
+
+### D-036 · 2026-09-04 · 1.7（工作区级规范路径锁）
+类型：偏离
+决定：编辑锁的键从 `sessionId → path` 改为 `{ authorityId, workspaceId, canonicalResourceId }`；`acquire` 返回 `leaseId`，`release` 只凭 `leaseId`；路径身份规范化（realpath、Windows 大小写与 alias、符号链接）**复用 Documents authority**，harness 不再自行处理。锁只做进程内实现，其保证写明为："同一 Application Host authority 内，所有 Harness 管理的写操作按 workspace / resource 互斥"，不声称阻止其他 Piarium host、终端、Git 或外部进程写文件。
+原因：plan 1.7 参考形状原文就是 `Map<sessionId, Map<path, queue>>`，两个会话写同一文件互相看不见；`release(sessionId, path)` 没有所有权 token，同会话内另一个请求可以误释放。所有会话的 harness 服务都在同一个 host 进程内，双 host 共用工作区的情形由 plan 2.1 的"复用运行中的 host"处理，跨进程 lease 不在需要范围内。
+考虑过的替代：把锁做成 Documents 的 writer lease——Documents 的 lease 是按 scope 的写者模式，不是按文件互斥，形状不对；只借它的身份规范化。
+影响：`packages/web/application-host/lib/harness/path-lock.ts`；`packages/protocol/src/harness.ts`（`fs.lock` 参数与结果）；`packages/pi-host/src/harness/path-lock.ts`（`withPathLock` 持 leaseId）；plan 1.7 回写。
+状态：待实施（P0 第 6 项）
+
+### D-037 · 2026-09-04 · 2.4 / 2.6 / 8.6（记忆 agent shadow mode 与回放门禁）
+类型：偏离
+决定：(1) 记忆 agent 以 **shadow mode** 接入：维护块、进 Zone 2、进 UI 面板，但**不接管压缩**；Pi 默认摘要保留。(2) 压缩接管、`explore` 默认开启、TTL 唤醒等**影响模型行为**的能力，`default-on` 的前提是通过**回放集**对比；基础设施类能力（bash / grep 覆盖、截断、权限门）`proven` 即可默认开启。(3) 回放集第一版：5–8 个来自 Piarium 自身历史的真实任务（跨多文件修改、测试失败到修复、长上下文后回忆早前决定、编辑器有未保存改动时的恢复），固定起点（commit + 工作区状态）与判定标准；三个指标：任务是否成功、总 token、人工介入次数；每次失败附一个类别（`retrieval miss` / `lost context` / `wrong edit` / `permission interruption` / `tool-runtime failure` / `coordination failure`）。对比必须同模型、同 provider、同起点。Recovery、安全、崩溃等确定性行为由 E2E 与故障注入验证，不进回放集。(4) 设计 8.6 "不建立独立评测集"改为上述最小回放集。(5) 设计 8.4.1 关于记忆 agent "前缀逐字节相同、整段缓存命中"的论证标为**未验证假设**：记忆 agent 必须带 `memory_edit` 工具才能 `tool_choice`，而不变量 8 禁止主 agent 有此工具，两者的 tools 块必然不同；Anthropic 的缓存层级为 tools → system → messages，tools 变则整段前缀失效。按 provider 实测分段命中后再定记忆 agent 的模型与成本模型。
+原因：四个计数器只能回答"贵不贵、吵不吵"，回答不了"任务做对没有"；没有 baseline 就无法判断 explore 是否优于 grep、压缩接管是否丢关键事实、多线程是提速还是制造合并工作。记忆 agent 的成本论证有一个设计层面的洞（tools 不同），在它成立之前不能让压缩正确性依赖它。当前代码的接管条件（D-028 (5)：需存在 keeper 块）在记忆 agent 未接线时等价于 shadow mode，与本条一致。
+考虑过的替代：(a) 大 benchmark——超出需要，且会腐烂。(b) 只看计数器——见上。
+影响：设计 8.4.1、8.4.2、8.6 回写；`agent-harness-status.md` 的 `Default-on` 列以回放证据为门禁；回放集放 `packages/pi-host/test/replay/`（或独立脚本），与单测分开。
+状态：待实施（P0 之后、线程纵切之前建立第一版回放集）
+
+### D-038 · 2026-09-04 · 交叉（执行规则）
+类型：默认值调整
+决定：plan 0.1 的工作规则改为：
+
+(1) **暂停规则**。以下五类偏离**暂停该工作项**、提交设计差异待验收，不阻塞其他独立工作项：持久格式 / 数据 authority / 破坏性迁移；身份、安全默认值、能力边界；删除、重命名或不兼容修改公共协议；不改签名但改变已有方法核心语义（例：`wait` 从快照改为阻塞）；新增不可逆外部副作用。新增可选字段、可选方法、内部重构照常推进并记日志。
+
+(2) **交付单位**从"一个工作项一个提交"改为"一个可运行纵切一个交付组"：协议 → host → worker → 一条真实 E2E 全部到位才算交付，缺任何一段标 `implemented`（休眠）。
+
+(3) **四级能力状态**：`implemented`（模块存在且单测通过）→ `wired`（进入真实生产调用链）→ `proven`（E2E、崩溃、平台行为验证，证据链接到具体测试或 smoke）→ `default-on`（对普通用户默认启用；影响模型行为的能力需回放对比）。只有 `proven` 算纵切完成。状态矩阵在 `agent-harness-status.md`，由执行 agent 随交付维护，roadmap 只引用它。
+
+(4) **P0 integrity 纵切**的固定边界，七项做完立即进入真实 child session 的线程纵切，不顺手清其他债务：① broker 身份 pin；② Router `ActorContext` + Host 静态授权；③ 注册表错误分类、schema 版本、启动对账；④ 最小 Thread + ThreadRun 与正交状态；⑤ `OutputRef` / `TranscriptRef` 与 UTF-8 偏移；⑥ 工作区级规范路径锁；⑦ 对应的故障注入（崩溃、损坏、跨会话、Unicode）与契约测试。
+
+(5) **范围**：Phase 4（默认 runtime）与 harness 内核正交，继续；Phase 5（外部 agent）、Phase 6（research profile）暂停，等 harness 内核与线程纵切 `proven` 后再开始——是顺序，不是取消。
+
+(6) 报告规则：每条"已实施"附代码位置；"定义了但无调用点"不算已实施；推迟必须说明为什么现有骨架不可用。不做历史重写、不 force-push；误提交用正向删除提交处理。
+原因："不停下来问"让权限插件被提前移除又恢复、权限门上线即锁死所有会话；"一个工作项一个提交"产生了 90 个模块测试全绿而生产链路没接通的"完成品"；设计头、plan、日志、roadmap 对"完成"定义不同，执行 agent 才会把单测等同于阶段完成。
+考虑过的替代：暂停范围定义为"一切公共协议变更"——每加一个可选字段都要等人，执行会瘫。
+影响：`agent-harness-plan.md` 0.1 / 0.4 / 验收节重写；`agent-harness-status.md` 新建。
+状态：已实施（文档）
+
+## 决策索引
+
+按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-001 | experiment-result | — | plan 0.1（删除过期的 0.83.0 描述） |
+| D-002 | implementation | — | — |
+| D-003 | active-design | — | native-workspace-recovery-design.md（`uncoveredReasons`；状态头 R1 implemented）— 待回写 |
+| D-004 | active-design | — | native-workspace-recovery-design.md（`writerScope` 格式）— 待回写 |
+| D-005 | implementation | — | — |
+| D-006 | implementation | — | — |
+| D-007 | implementation | — | — |
+| D-008 | open-question | D-034（淘汰语义） | — |
+| D-009 | implementation | — | — |
+| D-010 | reverted | D-013 | — |
+| D-011 | implementation | — | — |
+| D-012 | reverted | D-014 | — |
+| D-013 | active-design | — | agent-harness.md 5.2（现状注记）、`lib/harness/DOCUMENTATION.md`（哨兵/环境变量）；前置条件"接进 terminal runtime"未兑现 → status Blocker |
+| D-014 | implementation | — | — |
+| D-015 | contradicted → superseded | D-031 | agent-harness.md 5.10 |
+| D-016 | implementation | — | — |
+| D-017 | implementation | — | — |
+| D-018 | implementation | — | status（1.11 未接渲染路径） |
+| D-019 | active-design | — | agent-harness.md 7.5 |
+| D-020 | active-design | — | agent-harness.md 7.5 |
+| D-021 | reverted | — | status（3b.3 真实状态） |
+| D-022 | experiment-result | — | agent-harness.md 12.2 |
+| D-023 | active-design | — | architecture.md §5.1（已有）、`lib/harness/DOCUMENTATION.md`— 待回写 |
+| D-024 | superseded in part | D-032（对象模型与存储布局） | agent-harness.md 9.3.1 |
+| D-025 | superseded in part | D-035（ask 走 UI、三层模型） | agent-harness.md 9.1.2 |
+| D-026 | superseded in part | D-032（对象模型）、D-033（wait 默认超时）、D-034（`traceHandle`） | agent-harness.md 9.3 |
+| D-027 | implementation（更正记录） | — | status（未完成项表） |
+| D-028 | active-design | — | agent-harness.md 9.2.2 / 9.1.2 / 8.4 / 5.9、architecture §5 |
+| D-029 | implementation | — | — |
+| D-030 | active-design | — | 本文件治理规则 |
+| D-031 | active-design（待实施） | — | agent-harness.md 5.10、plan 1.9 |
+| D-032 | active-design（待实施） | — | agent-harness.md 9.3.1 / 9.3.4、plan P0 |
+| D-033 | active-design（待实施） | — | agent-harness.md 2 / 9.2.6 / 12.2、plan P0 |
+| D-034 | active-design（待实施） | — | agent-harness.md 5.1、plan P0 |
+| D-035 | active-design（待实施） | — | agent-harness.md 9.1.2、architecture §5.1、plan P0 |
+| D-036 | active-design（待实施） | — | plan 1.7 / P0 |
+| D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
+| D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |
