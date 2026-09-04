@@ -44,10 +44,11 @@ import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
-import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
+import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
+import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
@@ -916,6 +917,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ? Number(configuredDirtyBarrierTimeout)
     : undefined;
   let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
+  let observeKnowledgeBlockChange = (_workspaceId: string, _sessionId: string, _change: BlockChange): void => {};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
@@ -1262,7 +1264,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       hostId,
       workspaceId,
       embedding: null, // Placeholder vectors — see D-019/D-020
-      onBlocksChanged: (sessionId) => {
+      onBlocksChanged: (sessionId, change) => {
+        observeKnowledgeBlockChange(workspaceId, sessionId, change);
         broadcastGlobalUiEvent?.({
           type: 'piarium:harness-blocks-changed',
           properties: { workspaceId, sessionId },
@@ -1316,6 +1319,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getStore: getKnowledgeStoreForWorkspace,
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
+  const decisionSuggestionRuntime = createDecisionSuggestionRuntime({
+    getStore: getKnowledgeStoreForWorkspace,
+    onChanged: (sessionId) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-knowledge-changed',
+        properties: { sessionId, scope: 'workspace' },
+      });
+    },
+    onError: (error) => console.error('[HarnessKnowledge] Decision suggestion failed:', errorMessage(error)),
+  });
+  observeKnowledgeBlockChange = decisionSuggestionRuntime.observeBlockChange;
   const symbolGraphRuntime = createSymbolGraphRuntime({
     getStore: getKnowledgeStoreForWorkspace,
     documents: documentsAuthority,
@@ -1858,7 +1872,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
+      observeKnowledgeBlockChange = () => undefined;
       await symbolGraphRuntime.dispose();
+      await decisionSuggestionRuntime.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));
       knowledgeStores.clear();

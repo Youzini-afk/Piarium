@@ -81,6 +81,11 @@ export interface BlockInput {
   expectedUpdatedAt?: number | null;
 }
 
+export interface BlockChange {
+  previous: Block | null;
+  current: Block | null;
+}
+
 export class KnowledgeBlockConflictError extends Error {
   readonly current: Block | null;
 
@@ -214,7 +219,7 @@ export interface OpenWorkspaceKnowledgeDeps {
   hostId: string;
   workspaceId: string;
   embedding: EmbeddingProvider | null;
-  onBlocksChanged?: (sessionId: string) => void;
+  onBlocksChanged?: (sessionId: string, change: BlockChange) => void;
 }
 
 export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): Promise<KnowledgeStore> {
@@ -242,9 +247,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("active");
 
   const placeholderVec = zeroVector(dim);
-  const publishBlocksChanged = (sessionId: string): void => {
+  const publishBlocksChanged = (sessionId: string, change: BlockChange): void => {
     try {
-      deps.onBlocksChanged?.(sessionId);
+      deps.onBlocksChanged?.(sessionId, change);
     } catch {
       // UI projection is observational and cannot turn a committed block write
       // into a reported storage failure.
@@ -379,7 +384,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       if (!BLOCK_NAME_RE.test(b.label)) {
         throw new Error(`Invalid block name: ${b.label}`);
       }
-      const result = await enqueueWrite(() => {
+      const { result, previous } = await enqueueWrite(() => {
         // Find existing block by sessionId + label
         const existing = scanNodes((p) =>
           p["type"] === "block" && p["sessionId"] === b.sessionId && p["label"] === b.label,
@@ -422,21 +427,21 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, b.content);
         db.flush();
 
-        return {
+        return { previous: current, result: {
           sessionId: b.sessionId,
           label: b.label,
           content: b.content,
           updatedBy: b.updatedBy,
           ...(b.cursorTurn !== undefined ? { cursorTurn: b.cursorTurn } : {}),
           updatedAt: now,
-        };
+        } };
       });
-      publishBlocksChanged(b.sessionId);
+      publishBlocksChanged(b.sessionId, { previous, current: result });
       return result;
     },
 
     async deleteBlock(sessionId: string, label: string): Promise<void> {
-      await enqueueWrite(() => {
+      const previous = await enqueueWrite(() => {
         const nodes = scanNodes((p) =>
           p["type"] === "block" && p["sessionId"] === sessionId && p["label"] === label,
         );
@@ -444,8 +449,17 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           db.delete(node.id);
         }
         db.flush();
+        const first = nodes[0]?.payload;
+        return first ? {
+          sessionId: first["sessionId"] as string,
+          label: first["label"] as string,
+          content: first["content"] as string,
+          updatedBy: first["updatedBy"] as BlockUpdatedBy,
+          ...(first["cursorTurn"] !== undefined ? { cursorTurn: first["cursorTurn"] as number } : {}),
+          updatedAt: first["updatedAt"] as number,
+        } satisfies Block : null;
       });
-      publishBlocksChanged(sessionId);
+      publishBlocksChanged(sessionId, { previous, current: null });
     },
 
     async putKnowledge(k: KnowledgeInput): Promise<NodeId> {

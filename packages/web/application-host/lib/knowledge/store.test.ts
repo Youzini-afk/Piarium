@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
+import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from "./store.js";
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "piarium-test-tdb");
@@ -14,7 +14,7 @@ function cleanup() {
 let store: KnowledgeStore;
 let storeCounter = 0;
 
-async function openStore(onBlocksChanged?: (sessionId: string) => void) {
+async function openStore(onBlocksChanged?: (sessionId: string, change: BlockChange) => void) {
   storeCounter++;
   const dir = join(TEST_DIR, `store-${storeCounter}`);
   mkdirSync(dir, { recursive: true });
@@ -116,10 +116,15 @@ describe("KnowledgeStore", () => {
     it("publishes block changes only after committed writes", async () => {
       await store.close();
       const changed: string[] = [];
-      store = await openStore((sessionId) => changed.push(sessionId));
+      const changes: BlockChange[] = [];
+      store = await openStore((sessionId, change) => { changed.push(sessionId); changes.push(change); });
       await store.upsertBlock({ sessionId: "s1", label: "progress", content: "one", updatedBy: "agent" });
       await store.deleteBlock("s1", "progress");
       expect(changed).toEqual(["s1", "s1"]);
+      expect(changes).toMatchObject([
+        { previous: null, current: { content: "one" } },
+        { previous: { content: "one" }, current: null },
+      ]);
     });
 
     it("upserts and retrieves blocks", async () => {

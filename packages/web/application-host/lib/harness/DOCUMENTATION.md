@@ -127,6 +127,10 @@ Blocks can be explicitly promoted into workspace or user knowledge suggestions.
 The authenticated review API keeps `(scope, id)` identities distinct, uses
 opened-value conflict checks for edits, validates same-scope supersedes before
 mutation, and broadcasts only invalidation identities over SSE.
+Committed `memory-agent` changes to a `decisions` block also feed a mechanical
+suggestion runtime: only new structured list entries are proposed, and any
+content previously suggested, accepted, or dismissed for that session is not
+proposed again. This path never invokes a model or auto-accepts.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

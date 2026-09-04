@@ -893,6 +893,24 @@ scope 在菜单中显式选择，不以当前页面或模型猜测。工具卡�
 
 状态：已实施并 proven（全部人工 user-mark 来源）
 
+### D-061 · 2026-09-04 · 2.7（memory decisions 的机械建议触发）
+
+类型：实现澄清
+
+决定：(1) KnowledgeStore 在 block 写入成功后向观察者提供 `{previous,current}`，保留原 session invalidation 通知；失败写不发布。
+(2) 只处理 `updatedBy: memory-agent` 且 label=`decisions` 的块，只把 Markdown bullet、numbered item 或显式 `Decision:` 行当作 entry；
+普通散文、progress、用户编辑块不猜。(3) previous/current 先做新增差分，再与该 session 来源为 `memory-decision` 的全部历史 knowledge
+比对；suggested/accepted/dismissed 任一状态已出现都不重提，避免用户驳回后下一次 keeper 重写又出现。(4) 新项固定写 workspace
+`suggested`、空 trigger，整批完成后只发一次 scope identity SSE；不调 suggestions model，不读取 auto-accept。per-session 写入串行，错误只报
+Host diagnostics，不阻断 memory block 已完成的提交。(5) memory shadow 默认关闭，因此默认不会产生后台 keeper 或建议写入。
+
+原因：这是设计列出的第二个触发，输入已经是 memory keeper 明确维护的结构化 decisions，不需要再让一个模型判断。若从任意新增文本
+猜“知识”，会把 progress 和叙述噪音灌进托盘；若不查 dismissed 历史，会违背用户驳回。
+
+影响：KnowledgeStore block observation、`decision-suggestions.ts`、Application Host wiring/global SSE、plan/status 2.7。
+
+状态：已实施并 proven；配置 suggestions model 后的用户消息判断仍未实施
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -959,3 +977,4 @@ scope 在菜单中显式选择，不以当前页面或模型猜测。工具卡�
 | D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |
 | D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
 | D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |
+| D-061 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / decision suggestion runtime |
