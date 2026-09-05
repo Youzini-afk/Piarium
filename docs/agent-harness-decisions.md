@@ -1290,6 +1290,103 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 
 状态：已实施；本地验证与仍缺外部证据见状态矩阵。
 
+### D-077 · 2026-09-05 · 3.4（worktree 生命周期：setup 命令、目录即缓存、磁盘预算；取代 D-057 的"暂不回收"）
+
+类型：偏离
+
+决定：isolated worktree 的生命周期由三件确定性的事组成，一起交付、缺一不可；闲置计时器只作兜底。
+
+(1) **setup 命令。** `git worktree add` + 父的 diff 与未跟踪文件给出的是源码不是环境：被 `.gitignore` 忽略的 `node_modules` /
+`target` / `.venv` / `.env*` 全不会过去，`check` 与并行实现者在里面什么都跑不起来。每工作区一条**用户在 Settings 显式写下**的
+`harness.worktree.setup`，worktree 就位后、Run 启动前以 login shell 执行，超时（可配置默认，首版 600 s）或非零退出 → 线程
+`outcome: failure` / `exitReason: setup-failed`、输出进 `OutputRef`，不带着坏环境开跑；**只对 `tools` 含 `bash` 的角色按需跑**；
+命令须幂等。被忽略文件复制走白名单 `harness.worktree.copyIgnored`（默认空，`.env*` 常含凭据）；依赖共享 `shareDependencies`
+（symlink / junction）是显式选项默认关。setup 在用户机器上执行任意命令，属 plan 0.1 暂停类别，本条即其决策：**不从仓库文件推断、
+不猜默认，用户配置是唯一来源**。
+
+(2) **目录是缓存，回收发生在边界。** D-057 已让 settle / merge 前把结果提交到 `piarium/<threadId>` 分支；结果一旦在分支且目录里
+没有活跃 Run，目录就是冗余的，可用 `git worktree add <原路径> piarium/<threadId>` **在同一路径重建**——重开 child session 的 cwd
+不变，D-057 不敢删目录的顾虑由此解除。回收触发点：merge 成功（立即）、cancelled / failed / 用户归档（先快照再回收）、Run 结束后
+idle 且无打开会话（`reclaimIdle` 默认 true）。硬前置条件：快照后 `status --porcelain` 为空、无 `starting | running` 的 Run、路径
+在 worktree 根之内；任一不满足不删并报 `{ reclaimed: false, reason }`。`ThreadWorktree` 加 `materialized` 字段；`materialize()`
+在重开或新建 Run 前重建并按需重跑 setup。
+
+(3) **磁盘预算，超出显式拒绝。** 每工作区 `harness.worktree.budget`（首版 `{ maxBytes: 8 GiB, minFreeRatio: 0.1 }` 取更严者，
+experimental），`prepare` 前累计已物化 worktree 占用；超出则 `dispatch` 返回 `unavailable`，文本含个数、总量与可释放候选。不因预算
+杀正在跑的线程。这是不变量 3 的磁盘版：把"磁盘被悄悄吃满"变成显式、可行动的失败。
+
+(4) **兜底与对账。** 启动时每工作区 `git worktree prune`，注册表与目录比对：满足前置条件的按 `reclaimIdle` 处理，注册表外的目录标
+`orphan` 报给用户不自动删；`branchRetentionDays`（首版 30，experimental）只作用于已回收目录的分支。可见性：线程面板显示
+`materialized` 与占用、总量与预算，≥ 80% 时父的 Zone 2 一行，"立即回收"动作。
+
+(5) **写明 index 影响。** 普通 `apply` 不碰 index；退到 `--3way` 且冲突时 Git 会写 unmerged 条目进用户 index，工具文本与 Git 面板
+如实说明。合并成功不等于合并后父树通过验证；团队提示要求父合并后自己验证。
+
+原因：D-057 把"暂不自动删除 live worktree"当成安全侧，理由是重开 child session 依赖 cwd——但同路径重建解决了这一点，而"暂不删"
+的代价是确定会发生的：并发 12、每个 worktree 装完依赖几百 MB 到几 GB，几天就把用户磁盘填满，远等不到任何"闲置 N 天"。把回收
+寄托在计时器上等于把用户磁盘当缓冲区。同时 setup 命令会让每个 worktree 显著变贵，所以它和回收、预算必须同批交付——只加 setup
+不加回收，是加速填满磁盘。
+
+考虑过的替代：(a) 只靠闲置计时器——磁盘先满；(b) symlink `node_modules` 作默认——bun hoisting 与平台原生模块不稳，只作显式选项；
+(c) 从仓库的 `package.json` / CI 配置推断 setup 命令——在用户机器上执行推断出来的任意命令，违反 0.1 暂停类别的精神；(d) 保留目录、
+只做预算——预算会很快命中，然后所有 isolated 派发都被拒绝。
+
+影响：`agent-harness.md` 决策表"线程"行、9.2.5b、9.3.4；`agent-harness-plan.md` 3.4（worktree 生命周期项、测试清单）；protocol
+`ThreadWorktree.materialized`、`HarnessSettings.worktree.*`；`thread-worktree.ts`（setup / reclaim / materialize / budget）、
+`thread-runtime`、线程面板；status 3.4/3.5 Blocker 列。D-057 在索引标 superseded in part（"暂不回收"部分）。
+
+状态：待实施（T1 硬化；三件一起交付）
+
+### D-078 · 2026-09-05 · 正式实施、默认交付与工作状态架构（用户重新授权）
+
+类型：设计修正（用户已决定）
+
+决定：
+
+1. **完成可用路径就交付并默认启用。** 用户明确要求当前早期项目大胆推进，撤销 D-037、D-070/D-072 中把独立回放集、配对实验、
+   测试者结果作为 explore、记忆、压缩接管和自动 review 默认启用前提的安排。相关生产路径、版本/权限/数据正确性与失败诊断由直接
+   测试验证；真实使用继续优化质量、成本和性能。T4 与检索对照保留为可选诊断工具，不新建评测项目充当开发或上线许可证。
+2. **权限按已有授权推进。** D-038 的五类变更不再自动暂停。正式设计内的持久格式、数据 authority、私有协议和默认值调整由执行者
+   连同迁移、消费者和文档完成，不为保住旧实现长期维持双权威或休眠 fallback。真正超出用户授权的不可逆动作、明确产品分歧或无法
+   保留用户数据的迁移才请求决定。决策由执行者及时写回，取消等待另一验收方、固定抽两条 mutation 测试等流程要求。
+3. **具体启用策略。** explore 的确定性路径接通后默认注册；辅助模型仍按用户槽位配置。记忆沿现有活动模型与 memory_edit 实现，
+   新配置默认维护记忆并在分支、修订、实际覆盖和必要来源检查满足时接管压缩；缺覆盖仅该次交还 Pi。已有明确关闭、assist 等用户
+   选择保留，缺省值与显式值在迁移中区分。自动 review 接通后默认作为不阻断传感器，使用已定义的 review 槽位。单会话配置与实际
+   用量一起交付，不以 record-only 模式、完整 RunManifest 或缓存对照实验为前置。todo 的自报置信度只作信息，不再默认弹确认。
+4. **工作状态与目录分离是正式架构。** Thread/ThreadRun 保留；新增由 Application Host 拥有的内容寻址工作状态、不可变结果修订、
+   按需物化与版本化 Integration。状态可 fork，工具读取固定基线加本分支修改；真实执行修改收回状态后目录才可回收。窗口草稿以
+   带版本快照加入基线，编辑器仍拥有可变缓冲，草稿集成不自动保存磁盘。非 Git 与无首次 commit 的目录通过 copy/CoW 后端支持。
+   Git 是可复用的基线/物化/导出后端，迁移期间既有 resultCommit 是有效结果来源；原生状态持久化并发布成功后切换权威，不建长期双写。
+5. **撤销不成立的性能与隔离形状。** 不用 live 父目录加 child delta 冒充固定基线；不默认硬链接可写依赖；不承诺首次采集、文件哈希
+   或端到端 fork 是 O(1)。Merkle 结构共享、Git tree 读取、CoW 与按变化路径收集直接实施，必要成本显式计量；不把普通消息变成全仓
+   捕获。需要真实路径的 Pi 工具、LSP、扩展与 shell 按需物化；受控工具虚拟分支与 shared 模式明确区分。
+6. **D-077 收敛为物化生命周期。** 保留 setup、同路径重建、回收和占用可见性；setup 使用用户配置，按真实环境需要执行，失败可诊断。
+   输入、可重建缓存、环境文件按用途处理，ignored 不是可删除或不重要的证明；回收须覆盖待保留结果和实际后台写者，git status 干净
+   只是检查之一。撤回未经定标的 8 GiB/10%、600 s、30 天和 80% 固定默认；配置预算可执行，缺省按真实空间、占用与可回收量处理，
+   不因猜测配额拒绝派发。结果引用保护实际对象，目录删除不等于释放结果历史。
+7. **集成、验证与提示直接实现。** 先修 merge 只消费选定结果修订（含新增文件正文、类型与 mode），再落实逐路径三方分类、受检修订
+   绑定和恢复操作；预期冲突保留可处理现场，意外部分失败条件补偿，文件/草稿/index 的实际影响分开记录。重叠提示非阻塞，投机合并
+   绑定子结果与父相关路径/草稿版本，不要求完整 WorkspaceHead。两者随调用链交付，不加离线收益门槛。结构感知合并可继续实现和优化，
+   不把文本合并成功解释成行为验证通过。
+
+事实更正：当前 thread-services.ts 已提示 conflict markers/index entries；缺口是逐路径应用记录和恢复。thread-runtime.ts 的
+withMergeWriter 在 index.ts 只注册 process writer，不是已接通的逐路径 before/after 集成事务。当前 prepare 要求 HEAD，不能声称
+无首次 commit 或非 Git 目录已经支持隔离。上述事实已回写 status，不抹去既有 T1 核心交付。
+
+保留：模型槽位/凭据的用户所有权、持久知识审阅、现有权限插件的单一提示权威、真实路径授权、失败分类和用户明确的设置；Windows
+沙箱排除与不自行发起付费记忆实验的要求不变。缓存保活仍为用户可选的额外请求，不再以回放作为开关的使用门槛。
+
+原因：项目尚处早期，长期关闭已设计能力、反复申请同类批准和为每个机制另建评测，会让工程流程阻碍实际使用。已证实的错误应修掉，
+工程复杂度由实现承担，不能泛化为整项功能的禁用依据。
+
+考虑过的替代：继续只保留候选与旧 Git 权威——违背用户本次决定；不区分实现状态直接改成已上线——会伪造交付；移除所有 fallback
+与确认——会破坏已有配置、真实服务缺失和权限边界。采用默认交付、局部失败局部处理与一次性迁移。
+
+影响：agent-harness.md 决策表、工具/记忆/检索/线程/度量；plan 执行规则、当前顺序、2.4–2.6、3.2–3.7 与验收；status 的政策和
+待做项；architecture 的目标架构说明。D-077 原始条目保留，已存在的未提交文档改动在其基础上整合。
+
+状态：正式设计已采用；本次只修订文档与验证文档，未修改运行时代码、未切换用户设置、未执行迁移或付费实验。实现进度只看 status。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1328,21 +1425,21 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 | D-030 | active-design | — | 本文件治理规则 |
 | D-031 | implementation | — | agent-harness.md 5.10、plan 1.9、protocol `harness-settings.ts` |
 | D-032 | folded-in | D-039（原子 catalog 文件形状） | agent-harness.md 9.3.1 / 9.3.4、plan P0、protocol / Host registry |
-| D-033 | folded-in | — | agent-harness.md 2 / 9.2.6 / 9.3.6 / 12.2、protocol 与 thread services |
+| D-033 | superseded in part（事件等待保留，取消保活回放门槛） | D-078 | agent-harness.md 9.2.6；plan 3.5 |
 | D-034 | folded-in | D-040（位强度与 schema 1 迁移） | agent-harness.md 5.1、plan P0、protocol / Host / pi-host |
 | D-035 | folded-in | D-042（过渡 capability 来源语义） | agent-harness.md 9.1.2、architecture §5.1、plan P0；protocol / broker / Host router 已落地 |
 | D-036 | folded-in | D-041（批量 acquire） | architecture §5.1、plan P0.6、Host / pi-host path lock |
-| D-037 | active-design（待实施） | — | agent-harness.md 8.4 / 8.6 |
-| D-038 | active-design | — | plan 0.1 / 0.4 / 验收 |
+| D-037 | superseded in part（撤销回放启用门槛与长期 shadow 默认） | D-078 | agent-harness 1.3/8.4/8.6；plan 2.4/2.6；status |
+| D-038 | superseded in part（撤销类别自动暂停与固定流程，交付事实保留） | D-078 | plan 0.1/0.4/验收 |
 | D-039 | implementation | — | architecture §5.1、plan P0.3–P0.4、thread-registry.ts |
 | D-040 | implementation | — | agent-harness.md 5.1、plan P0.5、output-store / transcript reader |
 | D-041 | implementation | — | architecture §5.1、plan P0.6、path authority / leases |
 | D-042 | implementation | — | agent-harness.md 9.1.2、service-host capability derivation |
 | D-043 | implementation | — | agent-harness.md 9.3、architecture §5.2、plan T1、status 3.4/3.5/3.10/3.11 |
 | D-044 | implementation | — | agent-harness.md 9.1.2、plan 3b、status 3b / 3.4；pi-host / broker / Host scope |
-| D-045 | implementation | D-046（面板项） | agent-harness.md 7.3 / 8.4、plan T3、status 2.2–2.6；Documents / knowledge / pi-host |
+| D-045 | superseded in part（已有 assist 实现保留，新默认已决定） | D-046 / D-078 | agent-harness 8.4；plan 2.4/2.6；status |
 | D-046 | implementation | — | agent-harness.md 8.4.1、status 2.4/2.5；Host routes / SSE / session state sidebar |
-| D-047 | implementation | — | agent-harness.md 8.6、plan/status T4；evaluation/harness / replay script |
+| D-047 | superseded in part（记录器保留，配对不再阻塞交付） | D-078 | agent-harness 8.6；plan 0.7；status T4 |
 | D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |
 | D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |
 | D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |
@@ -1352,7 +1449,7 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 | D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |
 | D-055 | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report |
 | D-056 | implementation | — | plan/status 3.6；protocol role catalog |
-| D-057 | active-design | — | agent-harness 9.2/9.3、plan/status 3.4；Thread worktree/runtime |
+| D-057 | superseded in part（既有 Git 结果是迁移来源；原生结果与回收已采用） | D-077 / D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4/3.5；status |
 | D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |
 | D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
 | D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |
@@ -1364,11 +1461,13 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 | D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |
 | D-067 | implementation | — | agent-harness 5.8、plan/status 1b.3/1b.5；protocol / Host providers+auth / pi-host / UI sources |
 | D-068 | implementation | — | agent-harness 8.5/8.6、plan/status 2.9；protocol / pi-host / UI |
-| D-069 | superseded in part（方向保留，规格降级） | D-070 / D-072 | agent-harness.md 6.1、plan 3.2、12.2；status 3.2 |
-| D-070 | superseded in part（候选方向保留，契约补正） | D-071 / D-072 | agent-harness.md 6.1、plan 3.2；status 3.2 |
-| D-071 | folded-in（用户取舍；仅文档） | D-073（数据库问题表述） | agent-harness 决策表/7.5、plan 0.7、status |
-| D-072 | folded-in（语义修订；实现待办） | — | agent-harness 5.7/6.1/8/10/12、plan 0.7/2.4/2.6/3.2、status |
+| D-069 | superseded in part（错误承诺撤销，检索正式采用） | D-070 / D-072 / D-078 | agent-harness 6.1；plan 3.2；status |
+| D-070 | superseded in part（来源/证据边界保留，撤销候选与回放门禁） | D-071 / D-072 / D-078 | agent-harness 6.1；plan 3.2；status |
+| D-071 | superseded in part（数据库/草稿/check/不付费实验/无 Windows 沙箱保留；推进与默认更新） | D-073 / D-078 | agent-harness 1.3/6/7/8/9；plan 0.7；status |
+| D-072 | superseded in part（版本/覆盖/来源正确性保留；默认与权威演进更新） | D-078 | agent-harness 6/8/9；plan 2/3；status |
 | D-073 | folded-in（用户补充；仅文档） | — | agent-harness 7.5、plan 2.1 |
 | D-074 | superseded in part（首个实现候选） | D-075 / D-076 | plan 0.7 step 1；原始失败形状保留 |
 | D-075 | superseded（第二个实现候选未通过验收） | D-076 | D-076 回归用例 |
 | D-076 | implementation | — | agent-harness 8.4/8.7、status 2.4/2.6/3.9；protocol / pi-host / Host |
+| D-077 | superseded in part（生命周期保留；补原生状态/实际写者/ignored 保留，撤销猜测默认） | D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4；status |
+| D-078 | folded-in（用户重新授权；正式实施与默认交付） | — | agent-harness 1.3/2/6/8/9/12；plan 0.1/0.7/2/3；status；architecture |

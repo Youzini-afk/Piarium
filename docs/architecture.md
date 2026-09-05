@@ -249,6 +249,12 @@ Session memory blocks remain in the Host store. The renderer reads and edits the
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block
 content. The same UI-auth boundary protects the thread metadata route.
 
+The accepted delivery policy in harness decision D-078 is to implement complete usable paths and ship them
+as defaults after focused correctness checks. Replay sets and external tester reports support diagnosis
+and optimization; they are not mandatory activation gates. Existing explicit user choices remain valid.
+This is the target policy: the current memory implementation is still opt-in assist and compaction
+takeover is still off. The capability matrix records those implementation facts until code changes ship.
+
 ### 4.5 Composable workbench and document authority
 
 The product UI is not a fixed shell. A Workbench Profile selects which extension provides
@@ -574,6 +580,9 @@ to its built-in equivalent.
 
 ## 6. Data ownership
 
+The following table describes current ownership. The accepted evolution for thread working state is
+specified immediately after it; that design has not yet replaced the current Git-backed implementation.
+
 | Data | Authority | Piarium behavior |
 | --- | --- | --- |
 | Pi session tree/messages | Pi SessionManager JSONL | Read and navigate through the SDK; conversation-only rollback stays Pi-native |
@@ -593,6 +602,41 @@ to its built-in equivalent.
 | Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |
 | IDE editor layout | `piarium.workbench.layout` v1 service, profile- and workspace-scoped | Missing/empty use the distribution default without writing it; malformed keeps the last valid document and raises a diagnostic |
 | Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel | Dirty buffers and view state are client-owned; disk revisions stay host-owned |
+
+### 6.1 Accepted working-state architecture (D-078; implementation pending)
+
+Thread and ThreadRun remain the coordination and execution objects. The Application Host will own a
+content-addressed working-state store: immutable file objects and path trees, a fixed branch baseline
+plus its delta, and versioned result publication. Materialization supplies an actual directory whenever
+Pi tools, a language server, an extension, or a command needs filesystem access. Controlled virtual
+tools use the same fixed branch view; live shared mode remains explicit. Commands write the materialized
+directory and their changes are captured into a new result before that directory may be reclaimed.
+
+The baseline includes captured disk inputs and revisioned drafts from the window that submitted the
+user message. The surface retains mutable-buffer ownership. Integration into a draft edits that buffer
+without implicitly saving it. Missing draft content is reported, never replaced with an unlabelled disk
+version. A captured baseline remains immutable even when its source directory subsequently changes.
+
+Integration records the selected child result, expected parent states for affected paths and drafts,
+actual per-path application, conflicts, index effects, and recovery operations. Existing recovery object,
+path-state, and conditional-compensation implementations are reused, with independent working-state and
+result retention references. Deleting recovery history cannot delete a still-referenced thread result.
+Revision checks coordinate controlled writers; they do not claim atomic isolation from arbitrary native
+processes. Conflict resolution and undo preserve later user edits and unrelated staged changes.
+
+Git trees and resultCommit are valid migration inputs and backend references. Publication switches to
+the new authority only after its records and content are readable; failure preserves the previous source.
+There is no permanent dual writer. Git can continue as a materialization or export backend, while copy
+and filesystem copy-on-write support non-Git and unborn repositories. Writable dependency/build trees are
+not hard-linked to the parent by default. Ignored status does not determine whether data is disposable.
+Reclamation follows actual result retention and process use, with observable disk usage and configurable
+budgets instead of guessed fixed limits. Full capture costs belong to branch creation/update when needed,
+not to every prompt or rollback; Merkle sharing does not make initial capture or file hashing constant time.
+
+The detailed contract and implementation sequence are in
+[agent-harness.md](agent-harness.md) section 9.2.5b and
+[agent-harness-plan.md](agent-harness-plan.md) sections 3.4–3.5. These are accepted implementation tasks,
+not a candidate direction awaiting a separate benchmark or another consumer.
 
 ## 7. Pi extension integration architecture
 
