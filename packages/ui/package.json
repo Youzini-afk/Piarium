@@ -49,7 +49,7 @@
     "@piarium/application-client": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-client": "workspace:*",
-    "@pierre/diffs": "1.3.0-beta.6",
+    "@pierre/diffs": "1.3.6",
     "@remixicon/react": "^4.7.0",
     "@replit/codemirror-vim": "^6.3.0",
     "@simplewebauthn/browser": "13.3.0",
