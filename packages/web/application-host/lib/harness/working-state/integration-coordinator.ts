@@ -5,9 +5,11 @@ import type {
   IntegrationApplyResult,
   RecoveryState,
   RegularFileState,
+  SymlinkState,
   ThreeWayMergePlan,
   ThreeWayPathPlan,
 } from "./types.js";
+import { statesEqual, buildThreeWayMergePlan } from "./three-way-merge.js";
 import type { SqliteDatabase } from "../../recovery/journal-catalog.js";
 import {
   writeOperationRow,
@@ -49,6 +51,34 @@ const computeChecksum = (data?: Buffer | string): string => {
   if (!data) return "";
   const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
   return createHash("sha256").update(buf).digest("hex");
+};
+
+export const diskMatchesState = (
+  disk: { state: RecoveryState; bytes?: Buffer },
+  expected: RecoveryState,
+): boolean => {
+  if (disk.state.kind !== expected.kind) return false;
+  if (expected.kind === "missing") return true;
+  if (expected.kind === "directory") return true;
+  if (expected.kind === "symlink") {
+    return (disk.state as SymlinkState).symlinkTarget === expected.symlinkTarget;
+  }
+  if (expected.kind === "regular-file") {
+    if (disk.bytes && expected.byteLength !== undefined) {
+      if (disk.bytes.length !== expected.byteLength) return false;
+    }
+    if (expected.objectHash && disk.bytes) {
+      if (expected.objectHash.startsWith("sha256-")) {
+        const hex = createHash("sha256").update(disk.bytes).digest("hex");
+        if (`sha256-${hex}` !== expected.objectHash) return false;
+      } else if (expected.objectHash.length === 64) {
+        const hex = createHash("sha256").update(disk.bytes).digest("hex");
+        if (hex !== expected.objectHash) return false;
+      }
+    }
+    return true;
+  }
+  return false;
 };
 
 export class IntegrationCoordinator {
@@ -129,6 +159,8 @@ export class IntegrationCoordinator {
     const conflictPaths: string[] = [];
     const now = new Date().toISOString();
 
+    const concurrencyDriftPaths: string[] = [];
+
     // Phase 1: Preflight and capture before-states
     for (const pathPlan of plan.paths) {
       const rel = pathPlan.path;
@@ -140,6 +172,12 @@ export class IntegrationCoordinator {
         allowMissing: true,
       });
       const current = await this.captureCurrentDiskState(abs);
+
+      // TOCTOU check: verify disk state matches parentState in plan
+      if (!diskMatchesState(current, pathPlan.parentState)) {
+        concurrencyDriftPaths.push(rel);
+      }
+
       const checksum = current.bytes
         ? computeChecksum(current.bytes)
         : current.state.kind === "symlink"
@@ -151,6 +189,17 @@ export class IntegrationCoordinator {
         bytes: current.bytes,
         checksum,
       });
+    }
+
+    if (concurrencyDriftPaths.length > 0) {
+      return {
+        operationId: plan.operationId,
+        status: "conflict",
+        appliedPaths: [],
+        conflictPaths: concurrencyDriftPaths,
+        diffStats: plan.diffStats,
+        text: `Parent workspace state changed concurrently for ${concurrencyDriftPaths.length} path(s) after merge plan was created: ${concurrencyDriftPaths.join(", ")}`,
+      };
     }
 
     // Persist operation start to database if present
@@ -195,6 +244,7 @@ export class IntegrationCoordinator {
       for (const pathPlan of plan.paths) {
         const rel = pathPlan.path;
         const abs = this.resolveWorkspaceFile(rel);
+        const before = beforeStates.get(rel);
 
         switch (pathPlan.decision) {
           case "identical":
@@ -203,6 +253,18 @@ export class IntegrationCoordinator {
             break;
 
           case "apply-child": {
+            const preCheck = await this.captureCurrentDiskState(abs);
+            if (!statesEqual(preCheck.state, before?.state)) {
+              throw new Error(`Parent file ${rel} was concurrently modified during merge apply`);
+            }
+            if (this.database && before) {
+              try {
+                updateOperationFilePhase(this.database, plan.operationId, rel, "apply-intent", {
+                  safetyJson: JSON.stringify(before.state),
+                  observedFingerprint: before.checksum,
+                });
+              } catch {}
+            }
             const childState = pathPlan.childState;
             if (childState.kind === "regular-file") {
               const content = await this.readContent(childState);
@@ -271,6 +333,18 @@ export class IntegrationCoordinator {
           }
 
           case "merge-clean": {
+            const preCheck = await this.captureCurrentDiskState(abs);
+            if (!statesEqual(preCheck.state, before?.state)) {
+              throw new Error(`Parent file ${rel} was concurrently modified during merge apply`);
+            }
+            if (this.database && before) {
+              try {
+                updateOperationFilePhase(this.database, plan.operationId, rel, "apply-intent", {
+                  safetyJson: JSON.stringify(before.state),
+                  observedFingerprint: before.checksum,
+                });
+              } catch {}
+            }
             if (pathPlan.mergedText !== undefined) {
               await this.fsPromises.mkdir(this.pathModule.dirname(abs), { recursive: true });
               const content = Buffer.from(pathPlan.mergedText, "utf8");
@@ -303,6 +377,18 @@ export class IntegrationCoordinator {
           case "conflict": {
             conflictPaths.push(rel);
             if (pathPlan.isText && pathPlan.conflictMarkers !== undefined) {
+              const preCheck = await this.captureCurrentDiskState(abs);
+              if (!statesEqual(preCheck.state, before?.state)) {
+                throw new Error(`Parent file ${rel} was concurrently modified during merge apply`);
+              }
+              if (this.database && before) {
+                try {
+                  updateOperationFilePhase(this.database, plan.operationId, rel, "apply-intent", {
+                    safetyJson: JSON.stringify(before.state),
+                    observedFingerprint: before.checksum,
+                  });
+                } catch {}
+              }
               await this.fsPromises.mkdir(this.pathModule.dirname(abs), { recursive: true });
               const content = Buffer.from(pathPlan.conflictMarkers, "utf8");
               await this.fsPromises.writeFile(abs, content);
@@ -556,6 +642,248 @@ export class IntegrationCoordinator {
       conflictPaths: [],
       diffStats: plan.diffStats,
       text: `Cleanly merged ${appliedPaths.length} file(s) for operation ${plan.operationId}.`,
+    };
+  }
+
+  async mergeWorktree(
+    parentRoot: string,
+    worktree: { path: string; base: string; resultCommit?: string | null },
+    threadId: string,
+    fallbackMerge?: (parentRoot: string, wt: any) => Promise<any>,
+  ): Promise<{
+    merged: number;
+    conflicts: string[];
+    changedFiles?: string[];
+    diffStats: { files: number; insertions: number; deletions: number };
+  }> {
+    const sourceDir = worktree.resultCommit ? `${worktree.path}.snapshot` : worktree.path;
+
+    try {
+      await this.fsPromises.stat(sourceDir);
+    } catch {
+      if (fallbackMerge) return await fallbackMerge(parentRoot, worktree);
+      return { merged: 0, conflicts: [], diffStats: { files: 0, insertions: 0, deletions: 0 } };
+    }
+
+    const listDir = async (dir: string, baseDir = dir): Promise<string[]> => {
+      const entries: string[] = [];
+      try {
+        const dirents = await this.fsPromises.readdir(dir, { withFileTypes: true });
+        for (const de of dirents) {
+          if (de.name === ".git" || de.name === ".piarium" || de.name === "node_modules") continue;
+          const full = this.pathModule.join(dir, de.name);
+          const rel = this.pathModule.relative(baseDir, full).replace(/\\/g, "/");
+          if (de.isDirectory()) {
+            const sub = await listDir(full, baseDir);
+            entries.push(...sub);
+          } else {
+            entries.push(rel);
+          }
+        }
+      } catch {}
+      return entries;
+    };
+
+    const sourceFiles = await listDir(sourceDir);
+    const parentFiles = await listDir(parentRoot);
+    const allPaths = Array.from(new Set([...sourceFiles, ...parentFiles]));
+
+    const baseState: Record<string, RecoveryState> = {};
+    const parentState: Record<string, RecoveryState> = {};
+    const childState: Record<string, RecoveryState> = {};
+    const fileBytes = new Map<string, Buffer>();
+
+    for (const rel of allPaths) {
+      const parentAbs = this.resolveWorkspaceFile(rel);
+      const childAbs = this.pathModule.resolve(sourceDir, rel);
+
+      const parentInfo = await this.captureCurrentDiskState(parentAbs);
+      parentState[rel] = parentInfo.state;
+      baseState[rel] = parentInfo.state;
+
+      const childInfo = await this.captureCurrentDiskState(childAbs);
+      childState[rel] = childInfo.state;
+
+      if (childInfo.bytes) {
+        fileBytes.set(`child:${rel}`, childInfo.bytes);
+      }
+      if (parentInfo.bytes) {
+        fileBytes.set(`parent:${rel}`, parentInfo.bytes);
+      }
+    }
+
+    const candidatePaths = allPaths.filter(
+      (p) => !statesEqual(parentState[p], childState[p]),
+    );
+
+    if (candidatePaths.length === 0) {
+      return {
+        merged: 0,
+        conflicts: [],
+        changedFiles: [],
+        diffStats: { files: 0, insertions: 0, deletions: 0 },
+      };
+    }
+
+    const plan = await buildThreeWayMergePlan({
+      operationId: `merge-${threadId}-${Date.now()}`,
+      workspaceId: this.pathModule.basename(this.workspaceRoot),
+      threadId,
+      resultRevision: worktree.resultCommit ?? 1,
+      allPaths: candidatePaths,
+      baseState,
+      parentState,
+      childState,
+      readContent: async (state) => {
+        for (const [, buf] of fileBytes.entries()) {
+          if (state.kind === "regular-file" && buf.length === state.byteLength) {
+            return buf;
+          }
+        }
+        return await this.readContent(state);
+      },
+    });
+
+    const applyResult = await this.apply(plan);
+
+    return {
+      merged: applyResult.appliedPaths.length,
+      conflicts: applyResult.conflictPaths,
+      changedFiles: applyResult.appliedPaths,
+      diffStats: applyResult.diffStats,
+    };
+  }
+
+  static async reconcileDatabase(
+    database: SqliteDatabase,
+    workspaceRoot: string,
+    options: {
+      fsPromises?: typeof fs.promises;
+      pathModule?: typeof path;
+    } = {},
+  ): Promise<{
+    reconciledOperations: string[];
+    compensatedOperations: string[];
+    needsAttentionOperations: string[];
+    abortedOperations: string[];
+  }> {
+    const fsPromises = options.fsPromises ?? fs.promises;
+    const pathModule = options.pathModule ?? path;
+
+    const rows = database.prepare(`
+      SELECT * FROM operations
+      WHERE kind = 'integration'
+      AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict')
+    `).all() as Array<{ id: string; workspace_id: string; state: string }>;
+
+    const reconciledOperations: string[] = [];
+    const compensatedOperations: string[] = [];
+    const needsAttentionOperations: string[] = [];
+    const abortedOperations: string[] = [];
+
+    for (const row of rows) {
+      const fileRows = database.prepare(`
+        SELECT * FROM operation_files WHERE operation_id = ? ORDER BY ordinal ASC
+      `).all(row.id) as Array<{
+        path: string;
+        expected_json: string | null;
+        target_json: string | null;
+        safety_json: string | null;
+        phase: string;
+      }>;
+
+      let hasNeedsAttention = false;
+      let hasTargetObserved = false;
+      let hasCompensateIntent = false;
+
+      for (const fRow of fileRows) {
+        const abs = pathModule.resolve(workspaceRoot, fRow.path);
+        let diskKind = "missing";
+        try {
+          const st = await fsPromises.lstat(abs);
+          if (st.isSymbolicLink()) diskKind = "symlink";
+          else if (st.isFile()) diskKind = "regular-file";
+          else if (st.isDirectory()) diskKind = "directory";
+        } catch {}
+
+        const targetState: RecoveryState | null = fRow.target_json ? JSON.parse(fRow.target_json) : null;
+        const safetyState: RecoveryState | null = fRow.safety_json
+          ? JSON.parse(fRow.safety_json)
+          : fRow.expected_json
+          ? JSON.parse(fRow.expected_json)
+          : null;
+
+        let phase = fRow.phase;
+        if (phase === "apply-intent") {
+          if (targetState && targetState.kind === diskKind) {
+            phase = "target-observed";
+            updateOperationFilePhase(database, row.id, fRow.path, "target-observed");
+          } else if (safetyState && safetyState.kind === diskKind) {
+            // Still at safety
+          } else {
+            phase = "needs-attention";
+            updateOperationFilePhase(database, row.id, fRow.path, "needs-attention");
+          }
+        } else if (phase === "compensate-intent") {
+          if (safetyState && safetyState.kind === diskKind) {
+            phase = "safety-observed";
+            updateOperationFilePhase(database, row.id, fRow.path, "safety-observed");
+          } else if (targetState && targetState.kind === diskKind) {
+            // Still at target
+          } else {
+            phase = "needs-attention";
+            updateOperationFilePhase(database, row.id, fRow.path, "needs-attention");
+          }
+        }
+
+        fRow.phase = phase;
+        if (phase === "needs-attention") hasNeedsAttention = true;
+        if (phase === "target-observed") hasTargetObserved = true;
+        if (phase === "compensate-intent") hasCompensateIntent = true;
+      }
+
+      const now = new Date().toISOString();
+      if (hasNeedsAttention) {
+        database.prepare("UPDATE operations SET state = 'needs-attention', updated_at = ? WHERE id = ?").run(now, row.id);
+        needsAttentionOperations.push(row.id);
+      } else if (hasTargetObserved || hasCompensateIntent) {
+        let compensationFailed = false;
+        for (const fRow of fileRows) {
+          if (fRow.phase === "target-observed" || fRow.phase === "compensate-intent") {
+            const abs = pathModule.resolve(workspaceRoot, fRow.path);
+            const safetyState: RecoveryState | null = fRow.safety_json
+              ? JSON.parse(fRow.safety_json)
+              : fRow.expected_json
+              ? JSON.parse(fRow.expected_json)
+              : null;
+            try {
+              if (!safetyState || safetyState.kind === "missing") {
+                await fsPromises.rm(abs, { recursive: true, force: true }).catch(() => {});
+              }
+              updateOperationFilePhase(database, row.id, fRow.path, "safety-observed");
+            } catch {
+              updateOperationFilePhase(database, row.id, fRow.path, "needs-attention");
+              compensationFailed = true;
+            }
+          }
+        }
+        const finalState = compensationFailed ? "needs-attention" : "compensated";
+        database.prepare("UPDATE operations SET state = ?, updated_at = ? WHERE id = ?").run(finalState, now, row.id);
+        if (compensationFailed) needsAttentionOperations.push(row.id);
+        else compensatedOperations.push(row.id);
+      } else {
+        database.prepare("UPDATE operations SET state = 'aborted', updated_at = ? WHERE id = ?").run(now, row.id);
+        abortedOperations.push(row.id);
+      }
+
+      reconciledOperations.push(row.id);
+    }
+
+    return {
+      reconciledOperations,
+      compensatedOperations,
+      needsAttentionOperations,
+      abortedOperations,
     };
   }
 }

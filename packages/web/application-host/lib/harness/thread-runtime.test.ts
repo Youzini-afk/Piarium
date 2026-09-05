@@ -536,4 +536,41 @@ describe("thread runtime", () => {
     expect(sessionAdapter.abort).toHaveBeenCalledWith("child-1");
     expect(sessionAdapter.close).toHaveBeenCalledWith("child-1");
   });
+
+  it("delegates merge to resolveIntegrationCoordinator when provided", async () => {
+    const mockMergeWorktree = vi.fn().mockResolvedValue({
+      merged: 2,
+      conflicts: [],
+      changedFiles: ["a.txt", "b.txt"],
+      diffStats: { files: 2, insertions: 5, deletions: 0 },
+    });
+    const coordinatorRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (wt) => ({ ...wt, branch: "piarium/thread", resultCommit: "result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
+        merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
+      },
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      resolveIntegrationCoordinator: async () => ({
+        mergeWorktree: mockMergeWorktree,
+      } as any),
+    });
+
+    const thread = await registry.createThread(createInput());
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      base: "zero-commit",
+      branch: "branch-coord",
+      path: "/mock/worktree",
+      resultCommit: "res-123",
+    });
+
+    const res = await coordinatorRuntime.merge(WORKSPACE, PARENT, thread.id);
+    expect(mockMergeWorktree).toHaveBeenCalled();
+    expect(res).toMatchObject({ merged: 2, conflicts: [] });
+    await coordinatorRuntime.dispose();
+  });
 });

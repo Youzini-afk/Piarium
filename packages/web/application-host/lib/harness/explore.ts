@@ -67,6 +67,8 @@ export interface ExploreDeps {
   getFileRecency?: (path: string) => number | null;
   /** Get PageRank score for a path */
   getPageRank?: (path: string) => number;
+  /** Optional file reader to fetch real text slices for snippet ranges */
+  readFile?: (path: string) => Promise<string | null>;
 }
 
 // ── Query expansion (pure algorithm) ───────────────────────────────
@@ -239,8 +241,8 @@ export async function explore(
     hitsByFile.set(hit.path, arr);
   }
 
-  // 4. Build snippets from hits (context 3 lines, merge adjacent)
-  const snippets = buildSnippetsFromHits(allHits, 3);
+  // 4. Build snippets from hits (context 3 lines, merge adjacent, slice real text)
+  const snippets = await buildSnippetsFromHits(allHits, 3, deps.readFile);
 
   // 5. Rank
   let ranked = rankSnippets(snippets, hitsByFile, deps, !!deps.semanticRecall);
@@ -275,7 +277,11 @@ export async function explore(
   };
 }
 
-function buildSnippetsFromHits(hits: RgHit[], contextLines: number): ExploreSnippet[] {
+async function buildSnippetsFromHits(
+  hits: RgHit[],
+  contextLines: number,
+  readFile?: (path: string) => Promise<string | null>,
+): Promise<ExploreSnippet[]> {
   // Group hits by file, merge adjacent windows
   const byFile = new Map<string, RgHit[]>();
   for (const hit of hits) {
@@ -288,6 +294,7 @@ function buildSnippetsFromHits(hits: RgHit[], contextLines: number): ExploreSnip
   for (const [path, fileHits] of byFile) {
     fileHits.sort((a, b) => a.line - b.line);
     // Merge adjacent hits (within contextLines of each other)
+    const windows: Array<{ start: number; end: number; fallbackText: string }> = [];
     let currentStart = fileHits[0]!.line - contextLines;
     let currentEnd = fileHits[0]!.line + contextLines;
     let currentText = fileHits[0]!.text;
@@ -299,27 +306,58 @@ function buildSnippetsFromHits(hits: RgHit[], contextLines: number): ExploreSnip
         currentEnd = hit.line + contextLines;
         currentText += "\n" + hit.text;
       } else {
-        // Flush current
-        snippets.push({
-          path,
-          startLine: Math.max(0, currentStart),
-          endLine: currentEnd,
-          text: currentText,
-          why: "",
+        // Flush current window
+        windows.push({
+          start: Math.max(1, currentStart),
+          end: currentEnd,
+          fallbackText: currentText,
         });
         currentStart = hit.line - contextLines;
         currentEnd = hit.line + contextLines;
         currentText = hit.text;
       }
     }
-    // Flush last
-    snippets.push({
-      path,
-      startLine: Math.max(0, currentStart),
-      endLine: currentEnd,
-      text: currentText,
-      why: "",
+    // Flush last window
+    windows.push({
+      start: Math.max(1, currentStart),
+      end: currentEnd,
+      fallbackText: currentText,
     });
+
+    let fileLines: string[] | null = null;
+    if (readFile) {
+      try {
+        const content = await readFile(path);
+        if (typeof content === "string") {
+          fileLines = content.split(/\r?\n/);
+        }
+      } catch {
+        fileLines = null;
+      }
+    }
+
+    for (const w of windows) {
+      if (fileLines && fileLines.length > 0) {
+        const start = Math.min(Math.max(1, w.start), fileLines.length);
+        const end = Math.min(Math.max(start, w.end), fileLines.length);
+        const snippetText = fileLines.slice(start - 1, end).join("\n");
+        snippets.push({
+          path,
+          startLine: start,
+          endLine: end,
+          text: snippetText,
+          why: "",
+        });
+      } else {
+        snippets.push({
+          path,
+          startLine: w.start,
+          endLine: w.end,
+          text: w.fallbackText,
+          why: "",
+        });
+      }
+    }
   }
 
   return snippets;

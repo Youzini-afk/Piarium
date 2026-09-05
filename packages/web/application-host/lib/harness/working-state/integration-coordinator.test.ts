@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { ThreeWayMergePlan } from "./types.js";
+import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 
 describe("IntegrationCoordinator", () => {
   let tmpDir: string;
@@ -262,5 +263,127 @@ describe("IntegrationCoordinator", () => {
     expect(journalContent.operationId).toBe("op-user-edit");
     expect(journalContent.status).toBe("needs-attention");
     expect(journalContent.needsAttentionPaths).toEqual(["file_user.txt"]);
+  });
+
+  it("rejects application and flags conflict if parent workspace drifted after merge plan creation (TOCTOU protection)", async () => {
+    // Initial parent file
+    await fs.writeFile(path.join(tmpDir, "drift.txt"), "initial parent content\n");
+
+    const coordinator = new IntegrationCoordinator({
+      workspaceRoot: tmpDir,
+      readContent: async () => Buffer.from("child content\n"),
+    });
+
+    const plan: ThreeWayMergePlan = {
+      operationId: "op-drift",
+      workspaceId: "ws-1",
+      threadId: "th-1",
+      resultRevision: 1,
+      clean: true,
+      paths: [
+        {
+          path: "drift.txt",
+          decision: "apply-child",
+          baseState: { kind: "regular-file", objectHash: "hash-base", byteLength: 23 },
+          // Plan captured parentState at 23 bytes
+          parentState: { kind: "regular-file", objectHash: "hash-parent", byteLength: 23 },
+          childState: { kind: "regular-file", objectHash: "hash-child", byteLength: 14 },
+          isText: true,
+        },
+      ],
+      appliedPaths: ["drift.txt"],
+      conflictPaths: [],
+      diffStats: { files: 1, insertions: 1, deletions: 0 },
+    };
+
+    // Simulate concurrent modification in parent workspace before apply
+    await fs.writeFile(path.join(tmpDir, "drift.txt"), "parent modified by user concurrently!\n");
+
+    const result = await coordinator.apply(plan);
+    expect(result.status).toBe("conflict");
+    expect(result.conflictPaths).toContain("drift.txt");
+    expect(result.appliedPaths).toEqual([]);
+
+    // Ensure parent file was NOT overwritten
+    expect(await fs.readFile(path.join(tmpDir, "drift.txt"), "utf8")).toBe(
+      "parent modified by user concurrently!\n"
+    );
+  });
+
+  it("writes apply-intent with safetyJson to database before modifying disk files", async () => {
+    const database = await openRecoveryJournalCatalog(tmpDir, { create: true });
+    await fs.writeFile(path.join(tmpDir, "logged.txt"), "initial before\n");
+
+    const coordinator = new IntegrationCoordinator({
+      workspaceRoot: tmpDir,
+      database,
+      readContent: async () => Buffer.from("applied from child\n"),
+    });
+
+    const plan: ThreeWayMergePlan = {
+      operationId: "op-intent-check",
+      workspaceId: "ws-1",
+      threadId: "th-1",
+      resultRevision: 1,
+      clean: true,
+      paths: [
+        {
+          path: "logged.txt",
+          decision: "apply-child",
+          baseState: { kind: "regular-file", objectHash: "b", byteLength: 15 },
+          parentState: { kind: "regular-file", objectHash: "p", byteLength: 15 },
+          childState: { kind: "regular-file", objectHash: "c", byteLength: 19 },
+          isText: true,
+        },
+      ],
+      appliedPaths: ["logged.txt"],
+      conflictPaths: [],
+      diffStats: { files: 1, insertions: 1, deletions: 0 },
+    };
+
+    const result = await coordinator.apply(plan);
+    expect(result.status).toBe("applied");
+
+    // Check operation row in database
+    const opRow = database.prepare("SELECT * FROM operations WHERE id = ?").get("op-intent-check") as any;
+    expect(opRow.kind).toBe("integration");
+    expect(opRow.state).toBe("complete");
+
+    // Check operation_files row in database
+    const fileRow = database.prepare("SELECT * FROM operation_files WHERE operation_id = ?").get("op-intent-check") as any;
+    expect(fileRow.phase).toBe("target-observed");
+    expect(fileRow.safety_json).toBeTruthy();
+    const safety = JSON.parse(fileRow.safety_json);
+    expect(safety.kind).toBe("regular-file");
+    expect(safety.byteLength).toBe(15);
+    database.close();
+  });
+
+  it("reconciles crashed integration operations on database restart, restoring safe files and keeping user modifications intact", async () => {
+    const database = await openRecoveryJournalCatalog(tmpDir, { create: true });
+
+    // Simulate an interrupted operation in applying state
+    database.prepare(`
+      INSERT INTO operations(id, workspace_id, kind, state, data_json, created_at, updated_at)
+      VALUES ('op-crash', 'ws-1', 'integration', 'applying', '{}', datetime('now'), datetime('now'))
+    `).run();
+
+    // File 1: was in apply-intent and target was written, but crashed before complete
+    await fs.writeFile(path.join(tmpDir, "crashed_target.txt"), "target content");
+    database.prepare(`
+      INSERT INTO operation_files(operation_id, ordinal, path, target_json, safety_json, phase, updated_at)
+      VALUES ('op-crash', 0, 'crashed_target.txt', '{"kind":"regular-file","byteLength":14}', '{"kind":"missing"}', 'apply-intent', datetime('now'))
+    `).run();
+
+    const reconciled = await IntegrationCoordinator.reconcileDatabase(database, tmpDir);
+    expect(reconciled.reconciledOperations).toContain("op-crash");
+    expect(reconciled.compensatedOperations).toContain("op-crash");
+
+    // File should have been safely reverted since it matched target exactly
+    expect(await fs.stat(path.join(tmpDir, "crashed_target.txt")).catch(() => null)).toBeNull();
+
+    const finalRow = database.prepare("SELECT state FROM operations WHERE id = 'op-crash'").get() as any;
+    expect(finalRow.state).toBe("compensated");
+    database.close();
   });
 });

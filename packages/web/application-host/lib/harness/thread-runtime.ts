@@ -16,6 +16,8 @@ import type {
 import { HARNESS_TOOL_META } from "@piarium/protocol";
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
+import type { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
+import type { WorkingStateStore } from "./working-state/working-state-store.js";
 
 export interface ThreadSessionAdapter {
   create(input: {
@@ -52,6 +54,8 @@ export interface ThreadRuntimeOptions {
   stalledAfterMs?(providerId: string | null): number;
   worktreeSettings?: HarnessWorktreeSettings | undefined;
   resolveWorktreeSettings?(workspaceId: string): Promise<HarnessWorktreeSettings | undefined> | HarnessWorktreeSettings | undefined;
+  workingStateStore?: WorkingStateStore | undefined;
+  resolveIntegrationCoordinator?(workspaceId: string): Promise<IntegrationCoordinator | null> | IntegrationCoordinator | null;
 }
 
 export interface SpawnThreadRunInput extends CreateThreadInput {
@@ -1190,7 +1194,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await options.registry.setWorktree(workspaceId, threadId, snapshotted);
     }
     const parentRoot = await options.resolveWorkspaceRoot(workspaceId);
-    const operation = () => options.worktrees.merge(parentRoot, snapshotted);
+    const coordinator = options.resolveIntegrationCoordinator
+      ? await options.resolveIntegrationCoordinator(workspaceId)
+      : null;
+    const operation = async () => {
+      if (coordinator) {
+        return await coordinator.mergeWorktree(parentRoot, snapshotted, threadId, (root, wt) =>
+          options.worktrees.merge(root, wt)
+        );
+      }
+      return await options.worktrees.merge(parentRoot, snapshotted);
+    };
     return options.withMergeWriter
       ? options.withMergeWriter(workspaceId, threadId, operation)
       : operation();

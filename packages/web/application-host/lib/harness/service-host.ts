@@ -105,6 +105,7 @@ export interface HarnessServiceHost {
   resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
+  resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   dispose(): Promise<void>;
 }
 
@@ -319,6 +320,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resolveActor,
     getShellSupervisor,
     getInterpreter,
+    resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
   };
 }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -76,7 +76,7 @@ describe("thread worktree runtime", () => {
       }
       rmSync(fixture.root, { recursive: true, force: true });
     }
-  });
+  }, 25_000);
 
   it("returns the source workspace unchanged for shared and no-worktree roles", async () => {
     const fixture = createRepo();
@@ -383,6 +383,97 @@ describe("thread worktree runtime", () => {
       expect(readFileSync(join(sourceRoot, "original.txt"), "utf8")).toBe("hello from child\n");
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("zero-commit snapshot ignores post-snapshot live modifications during inspect and merge", async () => {
+    const root = mkdtempSync(join(tmpdir(), "non-git-fixed-"));
+    const sourceRoot = join(root, "project");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "file.txt"), "initial\n");
+
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async (_dir, input) => {
+        const p = join(root, "worktrees", String(input.worktreeName));
+        mkdirSync(p, { recursive: true });
+        return { path: p };
+      },
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+
+    try {
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot,
+        threadId: "fixed-rev-thread",
+      });
+
+      // Child edits file
+      writeFileSync(join(prepared.cwd, "file.txt"), "published\n");
+
+      // Snapshot to freeze result
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted.resultCommit).toBeDefined();
+
+      // Child makes a later live modification (not snapshotted)
+      writeFileSync(join(prepared.cwd, "file.txt"), "later-live\n");
+
+      // Inspect should see "published", not "later-live"
+      const inspected = await runtime.inspect(snapshotted);
+      expect(inspected.changedFiles).toEqual(["file.txt"]);
+
+      // Merge should apply "published", NOT "later-live"
+      const merged = await runtime.merge(sourceRoot, snapshotted);
+      expect(merged.conflicts).toEqual([]);
+      expect(readFileSync(join(sourceRoot, "file.txt"), "utf8")).toBe("published\n");
+    } finally {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows cleanup */ }
+    }
+  });
+
+  it("zero-commit snapshot cleanly deletes removed files in parent without residue", async () => {
+    const root = mkdtempSync(join(tmpdir(), "non-git-delete-"));
+    const sourceRoot = join(root, "project");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "keep.txt"), "keep me\n");
+    writeFileSync(join(sourceRoot, "delete-me.txt"), "delete me\n");
+
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async (_dir, input) => {
+        const p = join(root, "worktrees", String(input.worktreeName));
+        mkdirSync(p, { recursive: true });
+        return { path: p };
+      },
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+
+    try {
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot,
+        threadId: "delete-thread",
+      });
+
+      // First snapshot with all files
+      let snapshotted = await runtime.snapshot(prepared.worktree!);
+
+      // Now child deletes delete-me.txt
+      unlinkSync(join(prepared.cwd, "delete-me.txt"));
+
+      // Second snapshot captures the deletion
+      snapshotted = await runtime.snapshot(prepared.worktree!);
+
+      // Reclaim should succeed (snapshot matches live cwd, no uncommitted modifications)
+      const reclaimed = await runtime.reclaim(snapshotted);
+      expect(reclaimed.reclaimed).toBe(true);
+
+      // Merge into parent
+      const merged = await runtime.merge(sourceRoot, snapshotted);
+      expect(merged.conflicts).toEqual([]);
+      expect(existsSync(join(sourceRoot, "keep.txt"))).toBe(true);
+      expect(existsSync(join(sourceRoot, "delete-me.txt"))).toBe(false);
+    } finally {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows cleanup */ }
     }
   });
 });

@@ -364,7 +364,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const inspect = async (worktree: ThreadWorktree): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
     if (worktree.base === "zero-commit") {
       const baselineDir = `${worktree.path}.baseline`;
-      const currentDir = (worktree.materialized === false && worktree.resultCommit)
+      const currentDir = worktree.resultCommit
         ? `${worktree.path}.snapshot`
         : worktree.path;
       const diff = await diffDirectories(baselineDir, currentDir);
@@ -429,6 +429,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
     if (worktree.base === "zero-commit") {
       const snapshotDir = `${worktree.path}.snapshot`;
+      await fsPromises.rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
       await copyDirRecursive(worktree.path, snapshotDir);
       const files = await listAllFilesRelative(snapshotDir);
       const hash = createHash("sha256");
@@ -470,6 +471,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const untrackedToCopy: Array<
       | { kind: "file"; source?: string; bytes?: Buffer; mode?: string; destination: string }
       | { kind: "symlink"; target: string; destination: string }
+      | { kind: "delete"; destination: string }
     > = [];
     const untrackedConflicts: string[] = [];
 
@@ -525,14 +527,43 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           untrackedConflicts.push(relativeValue);
         }
       } else {
-        const sourceDir = (worktree.materialized === false && worktree.resultCommit)
+        const sourceDir = worktree.resultCommit
           ? `${worktree.path}.snapshot`
           : worktree.path;
         const source = pathModule.resolve(sourceDir, relative);
         try {
-          await assertAbsolutePathInWorkspace(source, { root: sourceDir, fsPromises, pathModule });
+          await assertAbsolutePathInWorkspace(source, { root: sourceDir, fsPromises, pathModule, allowMissing: true });
           await assertAbsolutePathInWorkspace(destination, { root: parentRoot, fsPromises, pathModule, allowMissing: true });
-          const sourceInfo = await fsPromises.lstat(source);
+          let sourceInfo: fs.Stats | null = null;
+          try {
+            sourceInfo = await fsPromises.lstat(source);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+
+          if (!sourceInfo) {
+            // File was deleted in child
+            try {
+              const destinationInfo = await fsPromises.lstat(destination);
+              if (destinationInfo.isFile()) {
+                const [destBytes, baselineBytes] = await Promise.all([
+                  fsPromises.readFile(destination),
+                  fsPromises.readFile(pathModule.resolve(`${worktree.path}.baseline`, relative)).catch(() => null),
+                ]);
+                if (baselineBytes && destBytes.equals(baselineBytes)) {
+                  untrackedToCopy.push({ kind: "delete", destination });
+                } else {
+                  untrackedConflicts.push(relativeValue);
+                }
+              } else {
+                untrackedConflicts.push(relativeValue);
+              }
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
+            continue;
+          }
+
           try {
             const destinationInfo = await fsPromises.lstat(destination);
             if (sourceInfo.isSymbolicLink() && destinationInfo.isSymbolicLink()) {
@@ -636,6 +667,14 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       }
     }
     for (const entry of untrackedToCopy) {
+      if (entry.kind === "delete") {
+        try {
+          await fsPromises.unlink(entry.destination);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        continue;
+      }
       await fsPromises.mkdir(pathModule.dirname(entry.destination), { recursive: true });
       if (entry.kind === "symlink") {
         await fsPromises.symlink(entry.target, entry.destination);

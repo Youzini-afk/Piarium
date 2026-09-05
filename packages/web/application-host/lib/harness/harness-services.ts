@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
 import { HarnessServiceError } from "./service-error.js";
@@ -469,6 +471,22 @@ export function createExploreSearchService(host: HarnessServiceHost): HarnessSer
         return matches;
       };
       const searchSymbols = async () => [];
+      let workspaceRoot: string | null = null;
+      if (host.resolveWorkspaceRoot && workspaceId) {
+        try {
+          workspaceRoot = await host.resolveWorkspaceRoot(workspaceId);
+        } catch {
+          workspaceRoot = null;
+        }
+      }
+      const readFile = async (relPath: string): Promise<string | null> => {
+        try {
+          const fullPath = workspaceRoot ? path.resolve(workspaceRoot, relPath) : relPath;
+          return await fs.promises.readFile(fullPath, "utf8");
+        } catch {
+          return null;
+        }
+      };
       const result = await explore({
         question: params.question,
         ...(params.paths ? { paths: params.paths } : {}),
@@ -476,6 +494,7 @@ export function createExploreSearchService(host: HarnessServiceHost): HarnessSer
       }, {
         rgSearch,
         searchSymbols,
+        readFile,
       });
 
       const lines: string[] = [];

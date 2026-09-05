@@ -252,4 +252,37 @@ describe("createExploreSearchService", () => {
       } as any)
     ).rejects.toThrow(HarnessServiceError);
   });
+
+  it("extracts real multi-line slices for snippet ranges when readFile is provided", async () => {
+    const fileContent = [
+      "line 1: header",
+      "line 2: imports",
+      "line 3: const x = 1;",
+      "line 4: // comment",
+      "line 5: function doWork() {",
+      "line 6:   console.log('working');",
+      "line 7:   needle",
+      "line 8:   console.log('done');",
+      "line 9: }",
+      "line 10: export default doWork;",
+    ].join("\n");
+
+    const result = await explore({
+      question: "needle",
+    }, {
+      rgSearch: async () => [{ path: "src/worker.ts", line: 7, text: "  needle" }],
+      searchSymbols: async () => [],
+      readFile: async (p) => p === "src/worker.ts" ? fileContent : null,
+    });
+
+    expect(result.snippets.length).toBe(1);
+    const snippet = result.snippets[0]!;
+    expect(snippet.startLine).toBe(4); // 7 - 3 = 4
+    expect(snippet.endLine).toBe(10);  // 7 + 3 = 10
+    // Real text contains all lines 4 to 10!
+    expect(snippet.text.split("\n").length).toBe(7);
+    expect(snippet.text).toContain("line 4: // comment");
+    expect(snippet.text).toContain("needle");
+    expect(snippet.text).toContain("line 10: export default doWork;");
+  });
 });

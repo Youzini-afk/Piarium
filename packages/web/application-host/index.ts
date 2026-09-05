@@ -59,6 +59,9 @@ import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
+import { WorkingStateStore } from './lib/harness/working-state/working-state-store.js';
+import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
+import { openRecoveryJournalCatalog, type SqliteDatabase } from './lib/recovery/journal-catalog.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings } from '@piarium/protocol';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
@@ -1202,26 +1205,54 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
     return branch.entries.map((entry) => entry.id);
   };
+  const harnessWorkingStateStore = new WorkingStateStore({
+    storageDir: path.join(PIARIUM_DATA_DIR, 'harness', 'working-state'),
+    fsPromises,
+    pathModule: path,
+  });
+  const resolveIntegrationCoordinator = async (workspaceId: string): Promise<IntegrationCoordinator | null> => {
+    try {
+      const workspaceInfo = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
+      if (!workspaceInfo) return null;
+      const root = workspaceInfo.root;
+      let database: SqliteDatabase | undefined = undefined;
+      try {
+        const opened = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
+        if (opened) database = opened;
+      } catch {}
+      return new IntegrationCoordinator({
+        workspaceRoot: root,
+        database,
+        fsPromises,
+        pathModule: path,
+        readContent: async (state) => {
+          if (state.kind === 'regular-file' && state.objectHash) {
+            return await harnessWorkingStateStore.getObject(state.objectHash);
+          }
+          return null;
+        },
+      });
+    } catch {
+      return null;
+    }
+  };
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
+    workingStateStore: harnessWorkingStateStore,
+    resolveIntegrationCoordinator,
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
     resolveWorktreeSettings: async (workspaceId) => {
-      const userSettings = await readSettingsFromDisk().catch(() => null);
-      const userHarness = (userSettings as any)?.harness ?? {};
-      let workspaceHarness = {};
       try {
         const workspaceInfo = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
-        if (workspaceInfo?.root) {
-          const configPath = path.join(workspaceInfo.root, ".piarium", "settings.json");
-          if (fs.existsSync(configPath)) {
-            const raw = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
-            if (raw?.harness) workspaceHarness = raw.harness;
-          }
-        }
-      } catch {}
-      const effective = mergeHarnessSettings(userHarness, workspaceHarness);
-      return effective.worktree;
+        const { userConfig, projectConfig } = readPiConfigLayers(workspaceInfo?.root ?? undefined);
+        const userHarness = (userConfig as any)?.harness ?? {};
+        const projectHarness = (projectConfig as any)?.harness ?? {};
+        const effective = mergeHarnessSettings(userHarness, projectHarness);
+        return effective.worktree;
+      } catch {
+        return DEFAULT_HARNESS_SETTINGS.worktree;
+      }
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,

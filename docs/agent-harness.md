@@ -564,7 +564,7 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
 
 **结果必须诚实到来源级。** 每来源保留 `not-requested | ready | empty | unavailable | failed | stale | timed-out | cancelled`；
 每次模型调用保留 `not-requested | succeeded | failed | timed-out | cancelled`，另记结果 used/ignored/none 和用量 reported/unavailable。
-失败、超时、迟到但成功均按实际记录，已知费用照常归因，未知费用不补零。每个候选有 ID、来源版本、provenance 与关系，授权后才入 OutputStore。
+失败、超时、迟到但成功均按实际记录，已知费用照常归因，未知费用不补零。每个候选有 ID、来源版本、provenance 与关系，授权后才入 OutputStore。需要特别明确：`OutputStore` 句柄是经鉴权的会话局部临时存储（session-local ephemeral storage），用于长输出跨工具调用的安全分页读取，生命周期跟随会话进程与世代，不是持久模型资源或永久知识条目。
 `inContext` 必须证明**同一 revision 的相关 span 仍在实际请求中**，并考虑截断、压缩、分支与请求世代；read 发生过或路径相同都不够。
 覆盖未知就返回正文；只有覆盖成立的片段才换成指针。低置信提示说明实际缺口，`retrieval` 未配置时不建议调用一个不存在的角色。
 **永不跟随主模型**：`models.explore` 未配置就是纯算法模式。

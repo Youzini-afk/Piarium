@@ -2420,6 +2420,93 @@ export const createWorkspaceRecoveryEngine = (
     return fileRow.phase;
   };
 
+  const reconcileInterruptedIntegration = async (
+    database: SqliteDatabase,
+    row: OperationRow,
+    root: string,
+  ): Promise<void> => {
+    const fileRows = operationFileRows(database, row.id);
+    let hasNeedsAttention = false;
+    let hasTargetObserved = false;
+    let hasCompensateIntent = false;
+
+    for (const fileRow of fileRows) {
+      const abs = pathModule.resolve(root, fileRow.path);
+      let diskKind = 'missing';
+      try {
+        const st = await fsPromises.lstat(abs);
+        if (st.isSymbolicLink()) diskKind = 'symlink';
+        else if (st.isFile()) diskKind = 'regular-file';
+        else if (st.isDirectory()) diskKind = 'directory';
+      } catch {}
+
+      const targetState = fileRow.target_json ? JSON.parse(fileRow.target_json) as RecoveryState : null;
+      const safetyState = fileRow.safety_json
+        ? JSON.parse(fileRow.safety_json) as RecoveryState
+        : fileRow.expected_json
+        ? JSON.parse(fileRow.expected_json) as RecoveryState
+        : null;
+
+      let phase = fileRow.phase;
+      if (phase === 'apply-intent') {
+        if (targetState && targetState.kind === diskKind) {
+          phase = 'target-observed';
+          updateOperationFilePhase(database, row.id, fileRow.path, 'target-observed');
+        } else if (safetyState && safetyState.kind === diskKind) {
+          // Still at safety state
+        } else {
+          phase = 'needs-attention';
+          updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
+        }
+      } else if (phase === 'compensate-intent') {
+        if (safetyState && safetyState.kind === diskKind) {
+          phase = 'safety-observed';
+          updateOperationFilePhase(database, row.id, fileRow.path, 'safety-observed');
+        } else if (targetState && targetState.kind === diskKind) {
+          // Still at target
+        } else {
+          phase = 'needs-attention';
+          updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
+        }
+      }
+
+      fileRow.phase = phase;
+      if (phase === 'needs-attention') hasNeedsAttention = true;
+      if (phase === 'target-observed') hasTargetObserved = true;
+      if (phase === 'compensate-intent') hasCompensateIntent = true;
+    }
+
+    const now = new Date().toISOString();
+    if (hasNeedsAttention) {
+      database.prepare("UPDATE operations SET state = 'needs-attention', updated_at = ? WHERE id = ?").run(now, row.id);
+    } else if (hasTargetObserved || hasCompensateIntent) {
+      let compensationFailed = false;
+      for (const fileRow of fileRows) {
+        if (fileRow.phase === 'target-observed' || fileRow.phase === 'compensate-intent') {
+          const abs = pathModule.resolve(root, fileRow.path);
+          const safetyState = fileRow.safety_json
+            ? JSON.parse(fileRow.safety_json) as RecoveryState
+            : fileRow.expected_json
+            ? JSON.parse(fileRow.expected_json) as RecoveryState
+            : null;
+          try {
+            if (!safetyState || safetyState.kind === 'missing') {
+              await fsPromises.rm(abs, { recursive: true, force: true }).catch(() => {});
+            }
+            updateOperationFilePhase(database, row.id, fileRow.path, 'safety-observed');
+          } catch {
+            updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
+            compensationFailed = true;
+          }
+        }
+      }
+      const finalState = compensationFailed ? 'needs-attention' : 'compensated';
+      database.prepare("UPDATE operations SET state = ?, updated_at = ? WHERE id = ?").run(finalState, now, row.id);
+    } else {
+      database.prepare("UPDATE operations SET state = 'aborted', updated_at = ? WHERE id = ?").run(now, row.id);
+    }
+  };
+
   const resumeUnfinished = async (): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const registrations = await documents.listWorkspaceRegistrations();
     const resolved: WorkspaceCombinedRecoveryOperation[] = [];
@@ -2522,6 +2609,19 @@ export const createWorkspaceRecoveryEngine = (
             persistOperation(database, record);
           }
           resolved.push(publicOperation(record));
+        }
+        const integrationRows = database.prepare(`
+          SELECT * FROM operations WHERE kind = 'integration'
+          AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict')
+        `).all() as OperationRow[];
+        for (const row of integrationRows) {
+          try {
+            await reconcileInterruptedIntegration(database, row, storage.root);
+          } catch (error) {
+            database.prepare(`
+              UPDATE operations SET state = 'needs-attention', updated_at = ? WHERE id = ?
+            `).run(new Date().toISOString(), row.id);
+          }
         }
       } finally {
         database.close();
