@@ -5,15 +5,15 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 const ExploreParams = Type.Object({
   question: Type.String({ description: "Open question or code pattern to search for across the codebase" }),
   paths: Type.Optional(Type.Array(Type.String(), { description: "Optional subpaths or directories to restrict search to" })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum number of relevant snippets to return (default 20)" })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of excerpts to return (default 20)" })),
 });
 
 export function createExploreTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "explore",
     label: "Explore",
-    description: "Multi-pattern code and knowledge exploration for open questions across the workspace",
-    promptSnippet: "explore: multi-pattern code and knowledge exploration across the workspace",
+    description: "Search code using question terms and return current, versioned document excerpts with source gaps when a file cannot be read.",
+    promptSnippet: "explore: locate code and read current matching regions with source revisions",
     promptGuidelines: [
       "Use explore to locate relevant symbols, concepts, and code regions when asking broad questions about the codebase.",
     ],
@@ -32,13 +32,15 @@ export function createExploreTool(bridge: HostServicesBridge, _sessionId: string
         );
         return {
           content: [{ type: "text", text: result.text }],
-          details: { snippets: result.snippets, searched: result.searched, handle: result.handle },
+          details: { snippets: result.snippets, searched: result.searched, handle: result.handle, issues: result.issues, partial: result.partial },
         };
       } catch (error) {
+        signal?.throwIfAborted();
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `explore failed: ${message}` }],
-          details: { snippets: [] },
+          details: { error: message },
+          isError: true,
         };
       }
     },

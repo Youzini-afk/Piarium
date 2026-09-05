@@ -27,6 +27,8 @@ export interface ThreadReport {
   transcriptRef: TranscriptRef;
   blocksSnapshot: Record<string, string>;
   resultCommit?: string;
+  /** Native immutable working-state revision read by inspect/merge/reopen. */
+  resultRevision?: number;
 }
 
 export interface TranscriptRef {
@@ -51,12 +53,16 @@ export interface ThreadWorktree {
   branch?: string;
   /** Commit containing the complete child delta, suitable for later recovery or cleanup. */
   resultCommit?: string;
+  /** Immutable copy-backend result directory for legacy/non-native callers. */
+  resultPath?: string;
   /** Whether the physical directory is currently materialized on disk. */
   materialized?: boolean;
   /** Physical disk footprint in bytes, if measured. */
   diskBytes?: number;
   /** Files changed in the worktree if inspected or recorded. */
   changedFiles?: string[];
+  /** Why a materialized directory could not be reclaimed safely. */
+  retentionReason?: string;
 }
 
 /** Immutable launch inputs captured when the Thread is created. */
@@ -93,6 +99,10 @@ export interface Thread {
   createdBy: ThreadCreatedBy;
   kind: ThreadKind;
   worktree: ThreadWorktree | null;
+  /** Host-owned working-state branch associated with this Thread. */
+  workBranchId?: string;
+  /** Latest published immutable result on workBranchId. */
+  resultRevision?: number;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   waitingFor: ThreadWaitingFor | null;
@@ -100,6 +110,8 @@ export interface Thread {
   diffStats: ThreadDiffStats | null;
   report: ThreadReport | null;
   mergedCommit?: string;
+  /** Native result revision most recently integrated into the parent. */
+  mergedResultRevision?: number;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -222,6 +234,8 @@ export interface ThreadReadResult {
 
 export interface ThreadMergeParams {
   threadId: string;
+  /** Omit to integrate the latest published result. */
+  resultRevision?: number;
 }
 
 export interface ThreadMergeResult {
@@ -230,6 +244,8 @@ export interface ThreadMergeResult {
   conflicts: string[];
   status?: "applied" | "conflict" | "compensated" | "needs-attention";
   appliedPaths?: string[];
+  resultRevision?: number;
+  operationId?: string;
 }
 
 export interface ThreadKillParams {

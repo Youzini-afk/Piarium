@@ -57,12 +57,14 @@ import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recal
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
+import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
-import { WorkingStateStore } from './lib/harness/working-state/working-state-store.js';
+import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
+import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
+import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
-import { openRecoveryJournalCatalog, type SqliteDatabase } from './lib/recovery/journal-catalog.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS } from '@piarium/protocol';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
@@ -1205,54 +1207,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
     return branch.entries.map((entry) => entry.id);
   };
-  const harnessWorkingStateStore = new WorkingStateStore({
-    storageDir: path.join(PIARIUM_DATA_DIR, 'harness', 'working-state'),
-    fsPromises,
-    pathModule: path,
-  });
-  const resolveIntegrationCoordinator = async (workspaceId: string): Promise<IntegrationCoordinator | null> => {
-    try {
-      const workspaceInfo = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
-      if (!workspaceInfo) return null;
-      const root = workspaceInfo.root;
-      let database: SqliteDatabase | undefined = undefined;
-      try {
-        const opened = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
-        if (opened) database = opened;
-      } catch {}
-      return new IntegrationCoordinator({
-        workspaceRoot: root,
-        database,
-        fsPromises,
-        pathModule: path,
-        readContent: async (state) => {
-          if (state.kind === 'regular-file' && state.objectHash) {
-            return await harnessWorkingStateStore.getObject(state.objectHash);
-          }
-          return null;
-        },
-      });
-    } catch {
-      return null;
-    }
-  };
+  const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
+  const threadIntegrationCoordinator = new IntegrationCoordinator({ workingStates: harnessWorkingStates });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
-    workingStateStore: harnessWorkingStateStore,
-    resolveIntegrationCoordinator,
+    workingStates: harnessWorkingStates,
+    resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
+    canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
-    resolveWorktreeSettings: async (workspaceId) => {
-      try {
-        const workspaceInfo = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
-        const { userConfig, projectConfig } = readPiConfigLayers(workspaceInfo?.root ?? undefined);
-        const userHarness = (userConfig as any)?.harness ?? {};
-        const projectHarness = (projectConfig as any)?.harness ?? {};
-        const effective = mergeHarnessSettings(userHarness, projectHarness);
-        return effective.worktree;
-      } catch {
-        return DEFAULT_HARNESS_SETTINGS.worktree;
-      }
+    resolveWorktreeSettings: async (workspaceId, parent) => {
+      const sessionId = parent.kind === 'session'
+        ? parent.id
+        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
+      if (!sessionId) throw new Error('Parent thread has no Pi session for worktree settings');
+      return resolveThreadWorktreeSettings(await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}));
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
@@ -1268,11 +1237,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { kind: 'harness-thread', id: `merge:${threadId}` },
         { mode: 'process', purpose: 'harness-thread-merge' },
       );
-      try {
-        return await operation();
-      } finally {
-        await writer?.close();
+      if (!writer) throw new Error('Thread integration has no workspace writer authority');
+      const outcome = await Promise.resolve().then(operation).then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      const applied = outcome.ok ? recordOf(outcome.value).appliedPaths : undefined;
+      const changed = !outcome.ok || (Array.isArray(applied) && applied.length > 0);
+      const cleanupErrors: unknown[] = [];
+      try { if (changed) await writer.markMutated(); }
+      catch (error) { cleanupErrors.push(error); }
+      try { await writer.close(); }
+      catch (error) { cleanupErrors.push(error); }
+      if (!outcome.ok) {
+        for (const error of cleanupErrors) console.error('[HarnessThreads] Merge writer cleanup failed:', errorMessage(error));
+        throw outcome.error;
       }
+      if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Failed to finalize the merge writer');
+      return outcome.value;
     },
     sessions: {
       create: (input) => piRuntimeBroker.createSession(
@@ -1524,6 +1506,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   const harnessServiceHost = createHarnessServiceHost({
+    readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
     search: async (request, options) => workspaceContentSearch.searchContent({
       query: request.query,
       workspaceId: request.workspaceId,
@@ -1539,17 +1522,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
     registerWriter: async (sessionId, workspaceRoot) => {
-      try {
-        const writer = await documentsAuthority.registerWriterForScope(
-          workspaceRoot,
-          { kind: "harness-bash", id: sessionId },
-          { mode: "process", purpose: "harness-bash" },
-        );
-        if (!writer) return null;
-        return { close: async () => { await writer.close(); } };
-      } catch {
-        return null;
-      }
+      const writer = await documentsAuthority.registerWriterForScope(
+        workspaceRoot,
+        { kind: 'harness-bash', id: sessionId },
+        { mode: 'process', purpose: 'harness-bash' },
+      );
+      if (!writer) throw new Error('Harness shell has no workspace writer authority');
+      return { close: async () => { await writer.close(); } };
     },
     ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
     lspNavigationServices: createLspNavigationServices({
@@ -1571,8 +1550,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadRegistry,
     threadTranscriptReader,
     threadSpawnSession: (input) => threadRuntime!.spawn(input),
-    threadKillSession: (threadId) => threadRuntime!.kill(threadId),
-    threadApplyWorktreeDiff: (workspaceId, parent, threadId) => threadRuntime!.merge(workspaceId, parent, threadId),
+    threadKillSession: (threadId, keepWorktree) => threadRuntime!.kill(threadId, keepWorktree),
+    requireThreadMergeJournal: true,
+    threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId) => threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(

@@ -603,9 +603,9 @@ specified immediately after it; that design has not yet replaced the current Git
 | IDE editor layout | `piarium.workbench.layout` v1 service, profile- and workspace-scoped | Missing/empty use the distribution default without writing it; malformed keeps the last valid document and raises a diagnostic |
 | Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel | Dirty buffers and view state are client-owned; disk revisions stay host-owned |
 
-### 6.1 Accepted working-state architecture (D-078; implementation pending)
+### 6.1 Working-state architecture (D-078 / D-079)
 
-Thread and ThreadRun remain the coordination and execution objects. The Application Host will own a
+Thread and ThreadRun remain the coordination and execution objects. The Application Host owns a
 content-addressed working-state store: immutable file objects and path trees, a fixed branch baseline
 plus its delta, and versioned result publication. Materialization supplies an actual directory whenever
 Pi tools, a language server, an extension, or a command needs filesystem access. Controlled virtual
@@ -637,6 +637,17 @@ The detailed contract and implementation sequence are in
 [agent-harness.md](agent-harness.md) section 9.2.5b and
 [agent-harness-plan.md](agent-harness-plan.md) sections 3.4–3.5. These are accepted implementation tasks,
 not a candidate direction awaiting a separate benchmark or another consumer.
+
+The implemented disk path uses the recovery engine's selected storage, catalog, file-state primitives,
+and workspace lease. Native results are immutable and addressed by branch plus result revision; legacy
+Git results are imported before integration. Default integration leaves the user's Git index untouched.
+Its final compare/apply/verify and compensation share the same canonical path queue as Documents
+read/write/move/delete in that authority instance; directory operations cover descendants while unrelated
+paths remain concurrent. This queue does not cover raw filesystem or shell writes in other execution paths.
+Reclamation holds the Documents writer barrier through deletion and preserves materializations used by
+controlled processes or editor surfaces. Virtual file tools, surface draft transport, and the full space
+budget UI remain separately tracked in [agent-harness-status.md](agent-harness-status.md); their helper
+types do not count as delivered product paths.
 
 ## 7. Pi extension integration architecture
 

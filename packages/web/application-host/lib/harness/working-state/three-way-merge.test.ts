@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isBinaryBuffer,
+  lcsMatches,
   mergeText3Way,
   planThreeWayPath,
   buildThreeWayMergePlan,
@@ -12,6 +13,19 @@ describe("three-way-merge", () => {
     expect(isBinaryBuffer(Buffer.from("hello world"))).toBe(false);
     expect(isBinaryBuffer(Buffer.from([0x00, 0x01, 0x02]))).toBe(true);
     expect(isBinaryBuffer(Buffer.from("text\0more"))).toBe(true);
+    expect(isBinaryBuffer(Buffer.from([0x80, 0x41]))).toBe(true);
+    expect(isBinaryBuffer(Buffer.concat([Buffer.alloc(9000, 65), Buffer.from([0])]))).toBe(true);
+  });
+
+  it("matches a ten-thousand-line file with two small edits without a quadratic matrix", () => {
+    const base = Array.from({ length: 10_000 }, (_, index) => `line-${index}`);
+    const changed = [...base];
+    changed[123] = "changed-123";
+    changed[9_876] = "changed-9876";
+    const matches = lcsMatches(base, changed);
+    expect(matches).toHaveLength(9_998);
+    expect(matches[0]).toEqual([0, 0]);
+    expect(matches.at(-1)).toEqual([9_999, 9_999]);
   });
 
   describe("mergeText3Way", () => {
@@ -42,6 +56,14 @@ describe("three-way-merge", () => {
       expect(res.text).toBe("parent1\nline2\nchild3");
     });
 
+    it("preserves mixed line endings and a final line without a newline", () => {
+      const base = "one\r\ntwo\nthree";
+      const parent = "parent\r\ntwo\nthree";
+      const child = "one\r\ntwo\nchild";
+      const merged = mergeText3Way(base, parent, child);
+      expect(merged).toEqual({ clean: true, text: "parent\r\ntwo\nchild" });
+    });
+
     it("injects conflict markers for overlapping contradictory changes", () => {
       const base = "line1\nline2\nline3";
       const parent = "line1\nparent2\nline3";
@@ -49,6 +71,18 @@ describe("three-way-merge", () => {
       const res = mergeText3Way(base, parent, child);
       expect(res.clean).toBe(false);
       expect(res.text).toContain("<<<<<<< parent\nparent2\n=======\nchild2\n>>>>>>> child");
+    });
+
+    it("treats partially overlapping replacement ranges as a conflict", () => {
+      const merged = mergeText3Way(
+        "A\nB\nC\nD",
+        "P1\nP2\nC\nD",
+        "A\nC1\nC2\nD",
+      );
+      expect(merged.clean).toBe(false);
+      expect(merged.text).toContain("<<<<<<< parent");
+      expect(merged.text).toContain("P1\nP2\nC");
+      expect(merged.text).toContain("A\nC1\nC2");
     });
   });
 
@@ -106,15 +140,33 @@ describe("three-way-merge", () => {
         childState: fileState("h-child"),
         readContent: async (s) => {
           if (s === missingState) return null;
-          if ((s as any).objectHash === "h-base") return Buffer.from(base);
-          if ((s as any).objectHash === "h-parent") return Buffer.from(parent);
-          if ((s as any).objectHash === "h-child") return Buffer.from(child);
+          if (s.kind !== "regular-file") return null;
+          if (s.objectHash === "h-base") return Buffer.from(base);
+          if (s.objectHash === "h-parent") return Buffer.from(parent);
+          if (s.objectHash === "h-child") return Buffer.from(child);
           return null;
         },
       });
 
       expect(plan.decision).toBe("merge-clean");
       expect(plan.mergedText).toBe("parent1\nline2\nchild3");
+    });
+
+    it("preserves a parent-only mode change while merging independent child text", async () => {
+      const content = new Map([
+        ["base", Buffer.from("one\ntwo\nthree")],
+        ["parent", Buffer.from("parent\ntwo\nthree")],
+        ["child", Buffer.from("one\ntwo\nchild")],
+      ]);
+      const plan = await planThreeWayPath({
+        path: "script.sh",
+        baseState: { kind: "regular-file", objectHash: "base", byteLength: 13, mode: 0o644 },
+        parentState: { kind: "regular-file", objectHash: "parent", byteLength: 16, mode: 0o755 },
+        childState: { kind: "regular-file", objectHash: "child", byteLength: 13, mode: 0o644 },
+        readContent: async (state) => state.kind === "regular-file" ? content.get(state.objectHash) ?? null : null,
+      });
+      expect(plan.decision).toBe("merge-clean");
+      expect(plan.mergedMode).toBe(0o755);
     });
 
     it("flags conflict for binary files modified on both sides", async () => {
@@ -127,8 +179,9 @@ describe("three-way-merge", () => {
         parentState: fileState("h-parent"),
         childState: fileState("h-child"),
         readContent: async (s) => {
-          if ((s as any).objectHash === "h-base") return Buffer.from([0x00, 0x00]);
-          if ((s as any).objectHash === "h-parent") return bin1;
+          if (s.kind !== "regular-file") return null;
+          if (s.objectHash === "h-base") return Buffer.from([0x00, 0x00]);
+          if (s.objectHash === "h-parent") return bin1;
           return bin2;
         },
       });
@@ -171,7 +224,7 @@ describe("three-way-merge", () => {
           "clean.txt": { kind: "regular-file", objectHash: "c-clean", byteLength: 7 },
           "conflict.txt": { kind: "missing" },
         },
-        readContent: async (s) => Buffer.from("test"),
+        readContent: async () => Buffer.from("test"),
       });
 
       expect(plan.clean).toBe(false);

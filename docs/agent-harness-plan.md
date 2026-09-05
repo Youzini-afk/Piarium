@@ -293,11 +293,12 @@ UI/agent 共用 operationId，重试与新结果分别处理。
 
 接恢复逐路径 before/after、apply intent、核对、条件补偿；预期冲突保留现场，意外 I/O 部分失败补偿，后续用户修改不被覆盖。
 结果明确 applied/conflict/compensated/needs-attention 并给已应用/冲突路径，不用 merged:0 暗示父完全未改。
-冲突解决核对同一操作，不重放已写 patch。草稿在 surface 应用撤销，磁盘经 Host，index 记录相关条目实际影响并条件恢复，
-不整体覆盖用户随后暂存。当前 withMergeWriter 只有 process 注册；工具已提示 index entries，逐路径恢复仍需接线。
+冲突解决核对同一操作，不重放已写 patch。草稿在 surface 应用撤销，磁盘经 Host。原生路径集成不修改 index；旧 Git 结果先导入，
+不继续使用写入 index 的 --3way。集成完成状态与父回合 checkpoint 的变更绑定同事务提交；不能把 process writer 注册等同于可撤销日志。
 合并与验证分别记录；父对合并后状态做相关检查。结构感知优化沿合并策略实施，不把不同函数等同语义无冲突。
 
-验证正常/冲突/部分失败/中断、幂等、父并发、草稿不存盘、index 后续修改和报告绑定；用真实文件/Git 与现有 Pi E2E，
+验证正常/冲突/部分失败/中断、幂等、父并发、草稿不存盘、index 后续修改和报告绑定；覆盖重叠区间、权限位、无效 UTF-8、日志提交失败
+后重试、共享 catalog 工作区隔离，以及删除完成历史仍保留线程结果；用真实文件/Git 与现有 Pi E2E，
 不要求新评测集。
 
 ### 3.6 角色与嵌套

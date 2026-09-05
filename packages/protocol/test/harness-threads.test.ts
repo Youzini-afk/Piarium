@@ -195,6 +195,11 @@ describe("thread protocol types (§9.3)", () => {
     assert.equal(params.keepWorktree, false);
   });
 
+  it("ThreadMergeParams can select an immutable native result revision", () => {
+    const params: ThreadMergeParams = { threadId: "thread-1", resultRevision: 2 };
+    assert.equal(params.resultRevision, 2);
+  });
+
   it("ThreadDispatchResult includes queued", () => {
     const result: ThreadDispatchResult = {
       text: "queued as thread-abc",

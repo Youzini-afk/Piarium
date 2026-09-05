@@ -1,7 +1,7 @@
 /**
- * Harness settings — stored under the `harness` key in user-level settings.
- * Workspace overrides stored in `~/.config/piarium/projects/<path-id>.json` under `harness`.
- * Effective at next session creation; frozen into `session.harness` for the session lifetime.
+ * Harness settings live under `harness` in Pi's agent-directory settings.json.
+ * Trusted project overrides come from <workspace>/.pi/settings.json.
+ * Pi owns source loading and project trust; tool assembly resolves them at session creation.
  */
 
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";

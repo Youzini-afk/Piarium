@@ -1,13 +1,20 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
+import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
+import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
+import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
+import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
+import { IntegrationCoordinator } from "../../../web/application-host/lib/harness/working-state/integration-coordinator.js";
+import { createWorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
+import { createWorkspaceRecoveryEngine } from "../../../web/application-host/lib/recovery/engine.js";
 import { SessionHost } from "../../src/session-host.js";
 
 describe("thread runtime with real Pi sessions", () => {
@@ -54,8 +61,6 @@ describe("thread runtime with real Pi sessions", () => {
     let childRuntimeWorkspaceId: string | null = null;
     let childScope: string[] | undefined;
     let childInitialPrompt = "";
-    let runtime!: ReturnType<typeof createThreadRuntime>;
-
     const hostFor = (sessionId: string): SessionHost => {
       if (sessionId === parent.sessionId) return parentHost;
       const host = childHosts.get(sessionId);
@@ -64,9 +69,8 @@ describe("thread runtime with real Pi sessions", () => {
     };
 
     const createChildHost = (): SessionHost => {
-      let child!: SessionHost;
       const emit = <E extends HostEvent>(event: E, data: HostEventData<E>): void => {
-        const sessionId = child?.sessionId;
+        const sessionId = child.sessionId;
         if (!sessionId) return;
         runtime.processEvent({
           kind: "host",
@@ -74,7 +78,7 @@ describe("thread runtime with real Pi sessions", () => {
           envelope: { kind: "event", event, data },
         });
       };
-      child = new SessionHost({ agentDir, configureServices, emit, projectTrustOverride: true });
+      const child = new SessionHost({ agentDir, configureServices, emit, projectTrustOverride: true });
       return child;
     };
 
@@ -119,7 +123,7 @@ describe("thread runtime with real Pi sessions", () => {
       entries: async (sessionId, scope = "branch") => hostFor(sessionId).entries(sessionId, scope),
     };
 
-    runtime = createThreadRuntime({
+    const runtime = createThreadRuntime({
       registry,
       sessions,
       resolveWorkspaceRoot: async () => workspace,
@@ -262,6 +266,448 @@ describe("thread runtime with real Pi sessions", () => {
       await registry.dispose();
       faux.unregister();
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("thread runtime with native working-state integration", () => {
+  it("merges an explicitly selected old native result through a real parent Pi turn and undoes that turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thread-native-integration-"));
+    const workspace = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    const worktreeRoot = join(root, "thread-worktrees");
+    const dataDir = join(root, "recovery-data");
+    const workspaceId = "native-thread-workspace";
+    const authorityInstanceId = "native-thread-authority";
+    await mkdir(workspace, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({ harness: { permissions: { mode: "bypass" } } }),
+      "utf8",
+    );
+
+    const faux = registerFauxProvider();
+    let parentHost: SessionHost | null = null;
+    let router: ReturnType<typeof createHarnessRouter> | null = null;
+    let parentExecutionId: string | undefined;
+    let parentUserEntryId: string | undefined;
+    let parentAssistantEntryId: string | undefined;
+    let mergeToolResult: unknown;
+    let mergeOperationId: string | undefined;
+    const mergeExecutionIds: string[] = [];
+    let turnStartSeen = false;
+    let resolveTurnStart: (() => void) | undefined;
+    let rejectTurnStart: ((error: unknown) => void) | undefined;
+    let turnStartGate: Promise<void> = Promise.resolve();
+    const childHosts = new Map<string, SessionHost>();
+    const childSessionFiles = new Map<string, string>();
+    const childRunIds = new Map<string, string>();
+    let spawningRunId: string | undefined;
+
+    const model = faux.getModel();
+    const configureServices = async (services: AgentSessionServices) => {
+      services.modelRuntime.registerProvider(model.provider, {
+        api: model.api,
+        baseUrl: model.baseUrl,
+        models: [{
+          api: model.api,
+          baseUrl: model.baseUrl,
+          contextWindow: model.contextWindow,
+          cost: model.cost,
+          id: model.id,
+          input: model.input,
+          maxTokens: model.maxTokens,
+          name: model.name,
+          reasoning: model.reasoning,
+        }],
+      });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+      return { model };
+    };
+
+    const documents = {
+      inspectWorkspace: async () => ({ root: workspace, workspaceId }),
+      listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
+      beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
+      inspectDirtyBuffers: async () => [],
+    };
+    const recoveryEngine = createWorkspaceRecoveryEngine({
+      authorityId: authorityInstanceId,
+      dataDir,
+      documents,
+      sessionNavigation: {
+        prepare: async (input) => {
+          const entries = parentHost!.entries(input.sessionId, "branch").entries;
+          const targetIndex = entries.findIndex((entry) => entry.id === input.entryId);
+          return {
+            expectedLeafId: entries.at(-1)?.id ?? null,
+            removedEntryIds: entries.slice(targetIndex < 0 ? 0 : targetIndex).map((entry) => entry.id),
+            targetLeafId: null,
+          };
+        },
+        prepareLeaf: async () => ({ expectedLeafId: null, removedEntryIds: [], targetLeafId: null }),
+        commit: async () => ({ alreadyApplied: false, markerId: "native-undo-marker", snapshot: {} }),
+        commitLeaf: async () => ({ alreadyApplied: false, markerId: "native-undo-leaf-marker", snapshot: {} }),
+      },
+    });
+    const workingStates = createWorkspaceWorkingStateAccess(recoveryEngine);
+    const integrationCoordinator = new IntegrationCoordinator({ workingStates });
+    const worktrees = createThreadWorktreeRuntime({
+      createWorktree: async (_source, input) => {
+        const target = join(worktreeRoot, String(input.worktreeName));
+        await mkdir(target, { recursive: true });
+        return { path: target };
+      },
+      getWorktreeBootstrapStatus: async () => ({
+        status: "ready",
+        phase: "setup-ready",
+        error: null,
+        updatedAt: Date.now(),
+      }),
+    });
+    const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "native-thread-host" });
+
+    const hostFor = (sessionId: string): SessionHost => {
+      if (sessionId === parentHost?.sessionId) return parentHost!;
+      const host = childHosts.get(sessionId);
+      if (!host) throw new Error(`Unknown native integration session: ${sessionId}`);
+      return host;
+    };
+
+    const actorFor = (sessionId: string) => {
+      if (sessionId === parentHost?.sessionId) {
+        return {
+          authorityInstanceId,
+          sessionId,
+          workerId: "native-parent-worker",
+          workerGeneration: 1,
+          ...(parentExecutionId ? { runId: parentExecutionId } : {}),
+        } as const;
+      }
+      const runId = childRunIds.get(sessionId);
+      if (!runId) return null;
+      return {
+        authorityInstanceId,
+        sessionId,
+        runId,
+        workerId: `native-child-worker-${runId}`,
+        workerGeneration: 1,
+      } as const;
+    };
+
+    const configureParentRecoveryTurn = (executionId: string): void => {
+      parentExecutionId = executionId;
+      parentUserEntryId = undefined;
+      parentAssistantEntryId = undefined;
+      mergeToolResult = undefined;
+      turnStartSeen = false;
+      turnStartGate = new Promise<void>((resolve, reject) => {
+        resolveTurnStart = resolve;
+        rejectTurnStart = reject;
+      });
+    };
+
+    const emitFrom = (sessionId: string, event: HostEvent, data: unknown): void => {
+      if (event === "harness.request") {
+        const actor = actorFor(sessionId);
+        if (!actor) throw new Error(`Harness request has no registered actor: ${sessionId}`);
+        void router!.processEvent({
+          actor,
+          kind: "host",
+          envelope: { kind: "event", event: "harness.request", data },
+        });
+        return;
+      }
+      if (event === "agent.event") {
+        const projected = (data as HostEventData<"agent.event">).event;
+        if (sessionId === parentHost?.sessionId) {
+          if (projected.type === "entry_appended" && projected.entry.type === "message") {
+            if (projected.entry.message.role === "user" && parentExecutionId && !turnStartSeen) {
+              turnStartSeen = true;
+              parentUserEntryId = projected.entry.id;
+              void recoveryEngine.recordTurnStart({
+                activeWriterScopes: [],
+                executionId: parentExecutionId,
+                provenance: "caused-by",
+                runtimeGeneration: 1,
+                sessionId,
+                userEntryId: projected.entry.id,
+                workerId: "native-parent-worker",
+                workspaceId,
+              }).then((result) => {
+                assert.equal(result.status, "ready");
+                resolveTurnStart?.();
+              }, (error) => rejectTurnStart?.(error));
+            } else if (projected.entry.message.role === "assistant" && parentExecutionId) {
+              parentAssistantEntryId = projected.entry.id;
+            }
+          }
+          if (projected.type === "tool_execution_end" && projected.toolName === "merge") {
+            mergeToolResult = projected.result;
+          }
+        } else {
+          runtime!.processEvent({
+            kind: "host",
+            sessionId,
+            envelope: { kind: "event", event: "agent.event", data },
+          });
+        }
+      }
+    };
+
+    const createChildHost = (): SessionHost => {
+      const child = new SessionHost({
+        agentDir,
+        configureServices,
+        emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
+          const sessionId = child.sessionId;
+          if (!sessionId) return;
+          emitFrom(sessionId, event, data);
+        },
+        projectTrustOverride: true,
+      });
+      return child;
+    };
+
+    const sessions: ThreadSessionAdapter = {
+      create: async (input) => {
+        if (!spawningRunId) throw new Error("Native child session was created without a Run id");
+        const child = createChildHost();
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model);
+        childHosts.set(created.sessionId, child);
+        childRunIds.set(created.sessionId, spawningRunId);
+        if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
+        return created;
+      },
+      open: async (input) => {
+        const sessionFile = childSessionFiles.get(input.sessionId);
+        if (!sessionFile) throw new Error(`Missing native child session file: ${input.sessionId}`);
+        const child = createChildHost();
+        const opened = await child.open({
+          cwd: input.cwd,
+          sessionFile,
+          tools: input.tools,
+          ...(input.model ? { model: input.model } : {}),
+        });
+        childHosts.set(opened.sessionId, child);
+        if (opened.sessionFile) childSessionFiles.set(opened.sessionId, opened.sessionFile);
+        return opened;
+      },
+      prompt: async (sessionId, text, instructions) => {
+        const result = await hostFor(sessionId).prompt(sessionId, text, undefined, instructions);
+        if (!result.accepted) throw new Error(`Native child prompt was not accepted: ${sessionId}`);
+      },
+      send: async (sessionId, text) => { await hostFor(sessionId).followUp(sessionId, text); },
+      abort: async (sessionId) => { await hostFor(sessionId).abort(sessionId); },
+      close: async (sessionId) => { await hostFor(sessionId).close(sessionId); },
+      snapshot: async (sessionId) => hostFor(sessionId).snapshot(),
+      summary: async (sessionId) => hostFor(sessionId).summary(sessionId),
+      stats: async (sessionId) => hostFor(sessionId).stats(sessionId),
+      entries: async (sessionId, scope = "branch") => hostFor(sessionId).entries(sessionId, scope),
+    };
+
+    const runtime = createThreadRuntime({
+      registry,
+      sessions,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => workspaceId,
+      readBlocks: async () => [],
+      workingStates,
+      resolveIntegrationCoordinator: async () => integrationCoordinator,
+      worktrees,
+    });
+
+    const harnessServiceHost = createHarnessServiceHost({
+      search: async () => ({ status: "empty" as const, generation: undefined }),
+      resolveWorkspaceRoot: async () => workspace,
+      discoveredShells: {
+        hasBash: process.platform !== "win32",
+        hasPowerShell: process.platform === "win32",
+      },
+      threadRegistry: registry,
+      threadSpawnSession: async (input) => {
+        spawningRunId = input.runId;
+        try {
+          return await runtime!.spawn(input);
+        } finally {
+          spawningRunId = undefined;
+        }
+      },
+      threadKillSession: async (threadId, keepWorktree) => { await runtime!.kill(threadId, keepWorktree); },
+      threadApplyWorktreeDiff: async (workspaceIdForMerge, parent, threadId, resultRevision, executionId) => {
+        mergeExecutionIds.push(executionId ?? "");
+        await turnStartGate;
+        const result = await runtime!.merge(workspaceIdForMerge, parent, threadId, resultRevision, executionId);
+        mergeOperationId = "operationId" in result ? result.operationId : undefined;
+        return result;
+      },
+      requireThreadMergeJournal: true,
+    });
+
+    router = createHarnessRouter({
+      respond: async (sessionId, requestId, outcome) => {
+        hostFor(sessionId).respondHarness(sessionId, requestId, outcome);
+      },
+      resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    });
+    registerHarnessServices(router, harnessServiceHost);
+
+    parentHost = new SessionHost({
+      agentDir,
+      configureServices,
+      emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
+        const sessionId = parentHost?.sessionId;
+        if (!sessionId) return;
+        emitFrom(sessionId, event, data);
+      },
+      projectTrustOverride: true,
+    });
+    parentHost!.setHarnessThreadRuntimeEnabled(true);
+    await writeFile(join(workspace, "parent.txt"), "parent baseline\n", "utf8");
+
+    let parentFirstRoundTools = 0;
+    let childRoundTools = 0;
+    const firstRoundResponse = (context: { messages: unknown[] }) => {
+      const serialized = JSON.stringify(context.messages);
+      if (serialized.includes("You are working as the hard-implement thread")) {
+        childRoundTools += 1;
+        return childRoundTools === 1
+          ? fauxAssistantMessage([fauxToolCall("write", { path: "child-result.txt", content: "first child result\n" })])
+          : fauxAssistantMessage("Conclusion\nFirst child result is ready.\n\nDeviations from brief\n- none\n\nUnresolved issues\n- none");
+      }
+      parentFirstRoundTools += 1;
+      if (parentFirstRoundTools === 1) {
+        return fauxAssistantMessage([fauxToolCall("dispatch", {
+          role: "hard-implement",
+          task: "Write child-result.txt with the first child result.",
+        })]);
+      }
+      if (parentFirstRoundTools === 2) {
+        return fauxAssistantMessage([fauxToolCall("threads", {})]);
+      }
+      if (/"done":1/.test(serialized)) {
+        return fauxAssistantMessage("Conclusion\nThe child result is ready to revise.");
+      }
+      return fauxAssistantMessage([fauxToolCall("wait", { timeout_ms: 5_000 })]);
+    };
+    faux.setResponses(Array.from({ length: 24 }, () => firstRoundResponse));
+
+    try {
+      const parent = await parentHost!.create(workspace, "Native parent");
+      const parentActor = {
+        authorityInstanceId,
+        sessionId: parent.sessionId,
+        workerId: "native-parent-worker",
+        workerGeneration: 1,
+      } as const;
+      harnessServiceHost.registerSession({
+        actor: parentActor,
+        grantedCapabilities: ["context.session", "control.thread", "process.shell", "read.search", "read.output", "write.document"],
+        workspaceId,
+        workspaceRoot: workspace,
+      });
+
+      await parentHost!.prompt(parent.sessionId, "Delegate the child result and wait for it.");
+      await parentHost!.session.waitForIdle();
+      await runtime!.drain();
+
+      const created = (await registry.listThreads(workspaceId, { kind: "session", id: parent.sessionId }))[0];
+      assert.ok(created);
+      assert.equal(created.lifecycle, "settled");
+      assert.equal(created.integration, "merge-ready");
+      assert.equal(created.resultRevision, 1);
+      assert.ok(created.workBranchId);
+      assert.ok(created.worktree?.path);
+      const firstRevision = created.resultRevision;
+      const firstPath = join(created.worktree!.path, "child-result.txt");
+      assert.equal(await readFile(firstPath, "utf8"), "first child result\n");
+
+      await writeFile(firstPath, "live child result\n", "utf8");
+      const second = await workingStates.withStore(workspaceId, "native-live-result", (store) => (
+        store.publishDirectoryResult(created.workBranchId!, created.worktree!.path)
+      ));
+      assert.equal(second.resultRevision, 2);
+      await registry.setWorkingState(workspaceId, created.id, {
+        branchId: created.workBranchId,
+        resultRevision: second.resultRevision,
+        worktree: created.worktree,
+        diffStats: second.diffStats,
+      });
+
+      const refreshed = await registry.getThread(workspaceId, { kind: "session", id: parent.sessionId }, created.id);
+      assert.equal(refreshed?.resultRevision, 2);
+      assert.equal(await readFile(firstPath, "utf8"), "live child result\n");
+
+      const mergeResponse = faux.state.callCount;
+      configureParentRecoveryTurn("native-parent-merge-execution");
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("merge", { threadId: created.id, resultRevision: firstRevision })]),
+        () => fauxAssistantMessage("Conclusion\nThe selected old result was merged."),
+      ]);
+      await parentHost!.prompt(parent.sessionId, "Merge the first child result revision.");
+      await parentHost!.session.waitForIdle();
+      await runtime!.drain();
+
+      assert.equal(faux.state.callCount - mergeResponse, 2);
+      assert.deepEqual(mergeExecutionIds, ["native-parent-merge-execution"]);
+      assert.equal(await readFile(join(workspace, "child-result.txt"), "utf8"), "first child result\n");
+      assert.match(JSON.stringify(mergeToolResult), /operationId/);
+      assert.match(JSON.stringify(mergeToolResult), /resultRevision/);
+      assert.match(JSON.stringify(mergeToolResult), /applied/);
+      assert.ok(mergeOperationId);
+      assert.ok(parentUserEntryId);
+      assert.ok(parentAssistantEntryId);
+
+      const settled = await recoveryEngine.recordTurnSettled({
+        activeWriterScopes: [],
+        assistantEntryId: parentAssistantEntryId,
+        executionId: "native-parent-merge-execution",
+        mutationObserved: true,
+        observationComplete: true,
+        observedResourceIds: ["child-result.txt"],
+        provenance: "caused-by",
+        workspaceId,
+      });
+      assert.equal(settled.status, "ready");
+      assert.equal(settled.binding?.status, "ready");
+
+      await recoveryEngine.withWorkspaceStorage(workspaceId, { mode: "shared", purpose: "assert-native-merge", create: false }, ({ database }) => {
+        const integration = database.prepare("SELECT id, state FROM operations WHERE id = ? AND kind = 'integration'").get(mergeOperationId) as { id: string; state: string } | undefined;
+        assert.deepEqual(integration, { id: mergeOperationId, state: "complete" });
+        const change = database.prepare("SELECT tool_name, mutation_id FROM checkpoint_changes WHERE checkpoint_id = (SELECT checkpoint_id FROM turn_bindings WHERE execution_id = ?) AND path = 'child-result.txt'").get("native-parent-merge-execution") as { tool_name: string; mutation_id: string } | undefined;
+        assert.deepEqual(change, { tool_name: "thread.merge", mutation_id: mergeOperationId });
+      });
+
+      const prepared = await recoveryEngine.prepareCombinedRecovery({
+        entryId: parentUserEntryId,
+        sessionId: parent.sessionId,
+        workspaceId,
+      });
+      assert.equal(prepared.status, "ready");
+      if (prepared.status !== "ready") throw new Error("Native undo plan was not ready");
+      assert.equal(prepared.plan.coverage, "ready");
+      assert.deepEqual(prepared.plan.affectedPaths, ["child-result.txt"]);
+      const undone = await recoveryEngine.applyCombinedRecovery({
+        confirmedConflicts: [],
+        conflictPolicy: "abort",
+        expectedRevision: prepared.plan.revision,
+        operationId: prepared.plan.id,
+      });
+      assert.equal(undone.status, "ready");
+      if (undone.status !== "ready") throw new Error("Native undo did not complete");
+      assert.equal(undone.operation.state, "complete");
+      await assert.rejects(readFile(join(workspace, "child-result.txt"), "utf8"), { code: "ENOENT" });
+    } finally {
+      await runtime!.dispose();
+      for (const child of childHosts.values()) await child.dispose();
+      await parentHost!.dispose();
+      router.dispose();
+      await harnessServiceHost.dispose();
+      await registry.dispose();
+      await recoveryEngine.dispose();
+      faux.unregister();
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 });

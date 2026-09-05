@@ -1,4 +1,4 @@
-import type { RecoveryState, RegularFileState, SymlinkState } from "./types.js";
+import type { RecoveryState } from "./types.js";
 import type { WorkingStateStore } from "./working-state-store.js";
 
 export interface GitTreeEntry {
@@ -64,16 +64,15 @@ export const captureGitPathStates = async (
   for (const entry of entries) {
     const normalized = entry.path.replace(/\\/g, "/");
     entryMap.set(normalized, entry);
-    const modeNum = parseInt(entry.mode, 8);
+    const modeNum = parseInt(entry.mode, 8) & 0o7777;
 
     if (entry.mode === "120000") {
       // Symlink
       const catRes = await runGit(["cat-file", "-p", entry.objectHash]);
-      const target = (catRes.stdoutBuffer?.toString("utf8") ?? catRes.stdout).trim();
+      const target = catRes.stdoutBuffer?.toString("utf8") ?? catRes.stdout;
       states[normalized] = {
         kind: "symlink",
         symlinkTarget: target,
-        mode: modeNum,
       };
     } else if (entry.mode === "040000") {
       states[normalized] = {
@@ -88,7 +87,9 @@ export const captureGitPathStates = async (
         kind: "regular-file",
         objectHash: entry.objectHash,
         byteLength,
-        mode: modeNum,
+        // Git records 0644/0755; Windows exposes both writable files as 0666.
+        // Keep the original Git mode in entryMap, and compare physical states here.
+        mode: process.platform === "win32" ? 0o666 : modeNum,
       };
     }
   }

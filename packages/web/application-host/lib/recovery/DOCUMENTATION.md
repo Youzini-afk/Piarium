@@ -36,6 +36,15 @@ The small SQLite operation record is durable. If file application or Pi navigati
 compensates only paths already changed by that operation. Startup resolves an interrupted operation
 from those recorded paths; it never leaves the workspace locked while waiting for a conversation step.
 
+Thread result integration uses the same selected storage, content objects, exact path-state capture,
+conditional apply/compensation phases, and workspace lease through a trusted Host-only adapter. Its
+`expected`, `target`, and `safety` states reference readable objects before `apply-intent` is committed.
+Startup reconciles both conversation recovery and integration operations through these shared primitives;
+integration does not create a second catalog under the workspace root.
+For an agent-triggered merge, the final integration state and its safety-to-target changes are appended to
+the active parent turn checkpoint in the same SQLite transaction. Normal conversation undo therefore uses
+the existing checkpoint path; a missing parent binding prevents any integration write.
+
 ## Coverage boundary
 
 `write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation
@@ -59,3 +68,5 @@ Each selected recovery provider owns the same user-configurable storage-location
 The payload contains `catalog.sqlite`, `objects/`, and `staging/`. Content objects use SHA-256 over the
 uncompressed bytes. Checkpoints store only affected-path state references. Location transfer verifies
 the destination before switching authority; cleanup removes unreachable objects.
+Working branches and every published Thread result own independent object references in this catalog,
+so deleting recovery history cannot collect result or baseline content that a Thread still retains.

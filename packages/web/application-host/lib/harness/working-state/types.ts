@@ -39,6 +39,9 @@ export interface WorkingResult {
   branchId: string;
   parentRef?: string | undefined;
   changedPaths: string[];
+  /** Fixed baseline states for every changed path. */
+  baseStates: Record<string, RecoveryState>;
+  /** Fixed result states for every changed path. */
   pathStates: Record<string, RecoveryState>;
   diffStats: ThreadDiffStats;
   createdAt: string;
@@ -58,6 +61,7 @@ export interface ThreeWayPathPlan {
   parentState: RecoveryState;
   childState: RecoveryState;
   mergedText?: string;
+  mergedMode?: number;
   conflictMarkers?: string;
   conflictReason?: string;
   isText: boolean;

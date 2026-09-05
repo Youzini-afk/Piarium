@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadWorktree } from "@piarium/protocol";
 import type { WorktreeBootstrapState } from "../git/types.js";
 import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
 import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
+import type { WorkingStateStore } from "./working-state/working-state-store.js";
+import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
 
 export interface ThreadWorktreeCreateResult {
   path: string;
@@ -20,7 +22,7 @@ export interface ThreadWorktreeRuntimeOptions {
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
-  fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "cp" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
+  fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "cp" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
   interpreter?: ShellInterpreter | undefined;
@@ -45,8 +47,20 @@ export interface MergeThreadWorktreeResult {
   changedFiles: string[];
   diffStats: ThreadDiffStats;
   appliedPaths?: string[];
-  status?: "applied" | "conflict";
+  status?: "applied" | "conflict" | "compensated" | "needs-attention";
+  resultRevision?: number;
+  operationId?: string;
 }
+
+interface SetupFailure extends Error {
+  exitReason: "setup-failed";
+  output?: string;
+}
+
+const asSetupFailure = (error: Error, output?: string): SetupFailure => Object.assign(error, {
+  exitReason: "setup-failed" as const,
+  ...(output === undefined ? {} : { output }),
+});
 
 const abortError = (): DOMException => new DOMException("Thread worktree preparation aborted", "AbortError");
 
@@ -173,48 +187,44 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         await fsPromises.symlink(await fsPromises.readlink(source), destination);
       } else if (info.isFile()) {
         await fsPromises.copyFile(source, destination);
+        await fsPromises.chmod(destination, info.mode & 0o7777);
       }
     }
   };
 
   const copyDirRecursive = async (src: string, dst: string): Promise<void> => {
     const readdirFn = (fsPromises as typeof fs.promises).readdir ?? fs.promises.readdir;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = await readdirFn(src, { withFileTypes: true });
-    } catch {
-      return;
-    }
+    const entries = await readdirFn(src, { withFileTypes: true });
     await fsPromises.mkdir(dst, { recursive: true });
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".piarium") continue;
+      if (entry.name === ".git" || entry.name === ".piarium") continue;
       const s = pathModule.join(src, entry.name);
       const d = pathModule.join(dst, entry.name);
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        await fsPromises.rm(d, { recursive: true, force: true }).catch(() => undefined);
+        await fsPromises.symlink(await fsPromises.readlink(s), d);
+      } else if (entry.isDirectory()) {
         await copyDirRecursive(s, d);
       } else if (entry.isFile()) {
         await fsPromises.copyFile(s, d);
+        const mode = (await fsPromises.lstat(s)).mode & 0o7777;
+        await fsPromises.chmod(d, mode);
       }
     }
   };
 
   const listAllFilesRelative = async (dir: string, prefix = ""): Promise<string[]> => {
     const readdirFn = (fsPromises as typeof fs.promises).readdir ?? fs.promises.readdir;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = await readdirFn(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
+    const entries = await readdirFn(dir, { withFileTypes: true });
     const result: string[] = [];
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".piarium") continue;
+      if (entry.name === ".git" || entry.name === ".piarium") continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = pathModule.join(dir, entry.name);
       if (entry.isDirectory()) {
         const nested = await listAllFilesRelative(full, rel);
         result.push(...nested);
-      } else if (entry.isFile()) {
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
         result.push(rel);
       }
     }
@@ -247,11 +257,29 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         }
       } else {
         try {
-          const [baseBytes, targetBytes] = await Promise.all([
-            fsPromises.readFile(pathModule.join(baseDir, f)),
-            fsPromises.readFile(pathModule.join(targetDir, f)),
-          ]);
-          if (!baseBytes.equals(targetBytes)) {
+          const basePath = pathModule.join(baseDir, f);
+          const targetPath = pathModule.join(targetDir, f);
+          const [baseInfo, targetInfo] = await Promise.all([fsPromises.lstat(basePath), fsPromises.lstat(targetPath)]);
+          const sameType = baseInfo.isFile() === targetInfo.isFile()
+            && baseInfo.isSymbolicLink() === targetInfo.isSymbolicLink();
+          const sameMode = (baseInfo.mode & 0o7777) === (targetInfo.mode & 0o7777);
+          let sameContent = false;
+          let baseBytes = Buffer.alloc(0);
+          let targetBytes = Buffer.alloc(0);
+          if (sameType && baseInfo.isSymbolicLink()) {
+            const [baseTarget, targetTarget] = await Promise.all([
+              fsPromises.readlink(basePath),
+              fsPromises.readlink(targetPath),
+            ]);
+            sameContent = baseTarget === targetTarget;
+          } else if (sameType && baseInfo.isFile()) {
+            [baseBytes, targetBytes] = await Promise.all([
+              fsPromises.readFile(basePath),
+              fsPromises.readFile(targetPath),
+            ]);
+            sameContent = baseBytes.equals(targetBytes);
+          }
+          if (!sameType || !sameMode || !sameContent) {
             changed.push(f);
             const baseText = baseBytes.toString("utf8");
             const targetText = targetBytes.toString("utf8");
@@ -364,8 +392,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const inspect = async (worktree: ThreadWorktree): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
     if (worktree.base === "zero-commit") {
       const baselineDir = `${worktree.path}.baseline`;
-      const currentDir = worktree.resultCommit
-        ? `${worktree.path}.snapshot`
+      const currentDir = worktree.resultPath
+        ? worktree.resultPath
         : worktree.path;
       const diff = await diffDirectories(baselineDir, currentDir);
       return {
@@ -428,20 +456,32 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
 
   const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
     if (worktree.base === "zero-commit") {
-      const snapshotDir = `${worktree.path}.snapshot`;
-      await fsPromises.rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
-      await copyDirRecursive(worktree.path, snapshotDir);
-      const files = await listAllFilesRelative(snapshotDir);
+      const resultsRoot = `${worktree.path}.results`;
+      const staging = pathModule.join(resultsRoot, `.staging-${randomUUID()}`);
+      await fsPromises.mkdir(resultsRoot, { recursive: true });
+      await copyDirRecursive(worktree.path, staging);
+      const files = await listAllFilesRelative(staging);
       const hash = createHash("sha256");
       for (const f of files.sort()) {
         hash.update(f);
         try {
-          const content = await fsPromises.readFile(pathModule.join(snapshotDir, f));
-          hash.update(content);
+          const target = pathModule.join(staging, f);
+          const stat = await fsPromises.lstat(target);
+          hash.update(String(stat.mode & 0o7777));
+          if (stat.isSymbolicLink()) hash.update(await fsPromises.readlink(target));
+          else hash.update(await fsPromises.readFile(target));
         } catch { /* ignore */ }
       }
       const resultCommit = hash.digest("hex").slice(0, 40);
-      return { ...worktree, resultCommit };
+      const resultPath = pathModule.join(resultsRoot, resultCommit);
+      try {
+        await fsPromises.stat(resultPath);
+        await fsPromises.rm(staging, { recursive: true, force: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await fsPromises.rename(staging, resultPath);
+      }
+      return { ...worktree, resultCommit, resultPath };
     }
 
     const status = (await runGit(worktree.path, ["status", "--porcelain", "-z"])).stdout;
@@ -464,6 +504,47 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (!branch) throw new Error("Thread worktree is not attached to a retained branch");
     if (cleanResult.stdout.length > 0) throw new Error("Thread worktree changed while its result was being snapshotted");
     return { ...worktree, branch, resultCommit };
+  };
+
+  const importFixedResult = async (
+    workspaceId: string,
+    threadId: string,
+    worktree: ThreadWorktree,
+    store: WorkingStateStore,
+  ) => {
+    if (!worktree.resultCommit) throw new Error("Legacy thread result has no fixed result reference");
+    const branchId = `thread-${threadId}`;
+    if (worktree.base !== "zero-commit") {
+      const git = (args: string[]) => runGit(worktree.path, args).then((result) => ({ ...result, exitCode: 0 }));
+      const changedPaths = await captureGitChangedPaths(git, worktree.base, worktree.resultCommit);
+      const [baseState, resultState] = await Promise.all([
+        importGitPathsToStore(store, git, worktree.base, changedPaths),
+        importGitPathsToStore(store, git, worktree.resultCommit, changedPaths),
+      ]);
+      return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
+    }
+
+    const baselineDir = `${worktree.path}.baseline`;
+    const resultDir = worktree.resultPath ?? `${worktree.path}.snapshot`;
+    await fsPromises.stat(resultDir);
+    if (!worktree.resultPath) {
+      const files = await listAllFilesRelative(resultDir);
+      const hash = createHash("sha256");
+      for (const file of files.sort()) {
+        hash.update(file);
+        hash.update(await fsPromises.readFile(pathModule.join(resultDir, file)));
+      }
+      if (hash.digest("hex").slice(0, 40) !== worktree.resultCommit) {
+        throw new Error("Legacy copy result no longer matches its recorded snapshot id");
+      }
+    }
+    const diff = await diffDirectories(baselineDir, resultDir);
+    const changedPaths = [...diff.added, ...diff.changed, ...diff.removed];
+    const [baseState, resultState] = await Promise.all([
+      store.captureDirectory(baselineDir, changedPaths),
+      store.captureDirectory(resultDir, changedPaths),
+    ]);
+    return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
   };
 
   const merge = async (parentRoot: string, worktree: ThreadWorktree): Promise<MergeThreadWorktreeResult> => {
@@ -505,7 +586,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
             const destinationInfo = await fsPromises.lstat(destination);
             if (isSymlink && destinationInfo.isSymbolicLink()) {
               const destinationTarget = await fsPromises.readlink(destination);
-              const sourceTarget = sourceBytes.toString("utf8").trim();
+              const sourceTarget = sourceBytes.toString("utf8");
               if (sourceTarget !== destinationTarget) untrackedConflicts.push(relativeValue);
             } else if (!isSymlink && destinationInfo.isFile()) {
               const destinationBytes = await fsPromises.readFile(destination);
@@ -516,7 +597,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
             if (isSymlink) {
-              const target = sourceBytes.toString("utf8").trim();
+              const target = sourceBytes.toString("utf8");
               if (pathModule.isAbsolute(target) || path.win32.isAbsolute(target)) untrackedConflicts.push(relativeValue);
               else untrackedToCopy.push({ kind: "symlink", target, destination });
             } else {
@@ -527,8 +608,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           untrackedConflicts.push(relativeValue);
         }
       } else {
-        const sourceDir = worktree.resultCommit
-          ? `${worktree.path}.snapshot`
+        const sourceDir = worktree.resultPath
+          ? worktree.resultPath
           : worktree.path;
         const source = pathModule.resolve(sourceDir, relative);
         try {
@@ -710,8 +791,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       return { reclaimed: false, reason: "Thread worktree result has not been snapshotted" };
     }
     if (worktree.base === "zero-commit") {
-      const snapshotDir = `${worktree.path}.snapshot`;
+      const snapshotDir = worktree.resultPath;
       try {
+        if (!snapshotDir) throw new Error("Thread worktree result path missing");
         await fsPromises.stat(snapshotDir);
         const diff = await diffDirectories(snapshotDir, worktree.path);
         if (diff.diffStats.files > 0) {
@@ -768,10 +850,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       }
       await waitUntilReady(worktree.path, signal);
     } else {
-      const snapshotDir = `${worktree.path}.snapshot`;
+      const snapshotDir = worktree.resultPath;
       const baselineDir = `${worktree.path}.baseline`;
       let src = "";
       try {
+        if (!snapshotDir) throw new Error("Thread worktree result path missing");
         await fsPromises.stat(snapshotDir);
         src = snapshotDir;
       } catch {
@@ -788,40 +871,44 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return worktree;
   };
 
-  const runSetup = async (
+  const prepareInputs = async (
     sourceRoot: string,
+    worktree: ThreadWorktree,
+    settings?: HarnessWorktreeSettings,
+  ): Promise<void> => {
+    for (const rel of settings?.copyIgnored ?? []) {
+      const src = pathModule.resolve(sourceRoot, rel);
+      const dst = pathModule.resolve(worktree.path, rel);
+      await assertAbsolutePathInWorkspace(src, { root: sourceRoot, fsPromises, pathModule });
+      await assertAbsolutePathInWorkspace(dst, { root: worktree.path, fsPromises, pathModule, allowMissing: true });
+      const stat = await fsPromises.lstat(src);
+      await fsPromises.mkdir(pathModule.dirname(dst), { recursive: true });
+      if (stat.isSymbolicLink()) {
+        await fsPromises.rm(dst, { recursive: true, force: true }).catch(() => undefined);
+        await fsPromises.symlink(await fsPromises.readlink(src), dst);
+      } else if (stat.isDirectory()) {
+        const cpFn = (fsPromises as typeof fs.promises).cp ?? fs.promises.cp;
+        await cpFn(src, dst, { recursive: true, force: true });
+      } else if (stat.isFile()) {
+        await fsPromises.copyFile(src, dst);
+        await fsPromises.chmod(dst, stat.mode & 0o7777);
+      }
+    }
+  };
+
+  const runSetup = async (
+    _sourceRoot: string,
     worktree: ThreadWorktree,
     settings?: HarnessWorktreeSettings,
     setupSignal?: AbortSignal,
   ): Promise<{ output: string }> => {
     if (!settings?.setup) return { output: "" };
 
-    if (settings.copyIgnored && settings.copyIgnored.length > 0) {
-      for (const rel of settings.copyIgnored) {
-        const src = pathModule.resolve(sourceRoot, rel);
-        const dst = pathModule.resolve(worktree.path, rel);
-        try {
-          const stat = await fsPromises.lstat(src);
-          await fsPromises.mkdir(pathModule.dirname(dst), { recursive: true });
-          if (stat.isDirectory()) {
-            const cpFn = (fsPromises as typeof fs.promises).cp ?? fs.promises.cp;
-            if (cpFn) await cpFn(src, dst, { recursive: true });
-          } else if (stat.isFile()) {
-            await fsPromises.copyFile(src, dst);
-          }
-        } catch {
-          // Whitelist item missing or unreadable, ignore
-        }
-      }
-    }
-
     const timeoutMs = settings?.setupTimeoutMs;
     const command = settings.setup;
     return new Promise((resolve, reject) => {
       if (setupSignal?.aborted) {
-        const error = abortError();
-        (error as any).exitReason = "setup-failed";
-        reject(error);
+        reject(asSetupFailure(abortError()));
         return;
       }
 
@@ -851,24 +938,18 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       const timer = typeof timeoutMs === "number" && timeoutMs > 0 ? setTimeout(() => {
         child.kill();
         const output = Buffer.concat(chunks).toString("utf8");
-        const error = new Error(`Setup command timed out after ${timeoutMs}ms:\n${output}`);
-        (error as any).exitReason = "setup-failed";
-        (error as any).output = output;
-        reject(error);
+        reject(asSetupFailure(new Error(`Setup command timed out after ${timeoutMs}ms:\n${output}`), output));
       }, timeoutMs) : null;
 
       setupSignal?.addEventListener("abort", () => {
         if (timer) clearTimeout(timer);
         child.kill();
-        const error = abortError();
-        (error as any).exitReason = "setup-failed";
-        reject(error);
+        reject(asSetupFailure(abortError()));
       }, { once: true });
 
       child.once("error", (err) => {
         if (timer) clearTimeout(timer);
-        (err as any).exitReason = "setup-failed";
-        reject(err);
+        reject(asSetupFailure(err));
       });
 
       child.once("close", (code) => {
@@ -877,10 +958,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         if (code === 0) {
           resolve({ output });
         } else {
-          const error = new Error(`Setup command failed with exit code ${code}:\n${output}`);
-          (error as any).exitReason = "setup-failed";
-          (error as any).output = output;
-          reject(error);
+          reject(asSetupFailure(new Error(`Setup command failed with exit code ${code}:\n${output}`), output));
         }
       });
     });
@@ -889,21 +967,17 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const measureDiskUsage = async (worktree: ThreadWorktree): Promise<number> => {
     let totalBytes = 0;
     const scan = async (dir: string): Promise<void> => {
-      try {
-        const readdirFn = (fsPromises as typeof fs.promises).readdir ?? fs.promises.readdir;
-        const entries = await readdirFn(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.name === ".git") continue;
-          const full = pathModule.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            await scan(full);
-          } else if (entry.isFile()) {
-            const stat = await fsPromises.lstat(full);
-            totalBytes += stat.size;
-          }
+      const readdirFn = (fsPromises as typeof fs.promises).readdir ?? fs.promises.readdir;
+      const entries = await readdirFn(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name === ".git") continue;
+        const full = pathModule.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await scan(full);
+        } else {
+          const stat = await fsPromises.lstat(full);
+          totalBytes += stat.size;
         }
-      } catch {
-        // ignore unreadable
       }
     };
     await scan(worktree.path);
@@ -911,7 +985,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return totalBytes;
   };
 
-  return { prepare, inspect, snapshot, merge, reclaim, materialize, runSetup, measureDiskUsage };
+  return { prepare, inspect, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

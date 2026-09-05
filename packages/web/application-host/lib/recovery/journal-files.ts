@@ -158,7 +158,9 @@ export const normalizeResourceId = (value: unknown): string => String(value || '
 export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringify({
   byteLength: state.byteLength ?? null,
   kind: state.kind,
-  mode: state.mode ?? null,
+  // Symlink permissions are not portably settable and commonly describe the
+  // link implementation rather than the target's recoverable state.
+  mode: state.kind === 'symlink' ? null : state.mode ?? null,
   objectHash: state.objectHash ?? null,
   symlinkTarget: state.symlinkTarget ?? null,
 });
@@ -294,7 +296,6 @@ export const createRecoveryFileStore = ({
         path: resolved.relative,
         state: {
           kind: 'symlink',
-          mode: stat.mode & 0o7777,
           symlinkTarget: await fsPromises.readlink(resolved.absolute),
         },
       };
@@ -364,14 +365,24 @@ export const createRecoveryFileStore = ({
       return;
     }
     if (state.kind === 'directory') {
+      try {
+        const existing = await fsPromises.lstat(absolute);
+        if (!existing.isDirectory()) await fsPromises.unlink(absolute);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+      }
       await fsPromises.mkdir(absolute, { recursive: true });
       if (state.mode !== undefined) await fsPromises.chmod(absolute, state.mode);
       return;
     }
     if (state.kind === 'symlink') {
-      await fsPromises.rm(absolute, { force: true, recursive: false }).catch((error) => {
+      try {
+        const existing = await fsPromises.lstat(absolute);
+        if (existing.isDirectory() && !existing.isSymbolicLink()) await fsPromises.rmdir(absolute);
+        else await fsPromises.unlink(absolute);
+      } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
-      });
+      }
       await fsPromises.mkdir(pathModule.dirname(absolute), { recursive: true });
       await fsPromises.symlink(state.symlinkTarget, absolute);
       return;
@@ -381,6 +392,12 @@ export const createRecoveryFileStore = ({
     }
     await verifyObject(root, state);
     await fsPromises.mkdir(pathModule.dirname(absolute), { recursive: true });
+    try {
+      const existing = await fsPromises.lstat(absolute);
+      if (existing.isDirectory() && !existing.isSymbolicLink()) await fsPromises.rmdir(absolute);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+    }
     await replaceFile(objectPath(root, state.objectHash), absolute);
     if (state.mode !== undefined) await fsPromises.chmod(absolute, state.mode);
   };

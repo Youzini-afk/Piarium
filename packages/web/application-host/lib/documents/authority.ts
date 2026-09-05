@@ -22,7 +22,7 @@ import {
   type RecoveryJournalListRequest,
   type RecoveryJournalWriteRequest,
 } from './recovery-journal.js';
-import { createSerialQueues } from './serialize.js';
+import { createSerialQueues, type SerialQueueResource } from './serialize.js';
 import {
   createWorkspaceWatcher,
   type WatchEvent,
@@ -41,6 +41,11 @@ import {
 export interface DocumentResource {
   workspaceId: string;
   resourceId: string;
+}
+
+export interface DocumentResourceOperation {
+  resourceId: string;
+  scope: 'exact' | 'subtree';
 }
 
 export interface MutationToken {
@@ -278,7 +283,12 @@ export type DocumentFsPromises = typeof fs.promises;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-const resourceKey = (resource: DocumentResource): string => `${resource.workspaceId}\0${resource.resourceId}`;
+const resourceKey = (
+  workspaceId: string,
+  canonicalPath: string,
+  pathModule: typeof path,
+  platform: string,
+): string => `${workspaceId}\0${normalizePathIdentity(canonicalPath, { pathModule, platform }).replace(/\\/g, '/')}`;
 
 const toIso = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
 
@@ -414,6 +424,34 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     throw new DocumentPathError('Path is outside workspace');
   };
+
+  const withResolvedResourceOperation = async <Result>(
+    requests: ReadonlyArray<{ resource: DocumentResource; scope: 'exact' | 'subtree' }>,
+    operation: (resolved: readonly ResolveResourceResult[]) => Promise<Result>,
+  ): Promise<Result> => {
+    const resolved = await Promise.all(requests.map(({ resource }) => resolveResourcePath(resource, true)));
+    const canonicalPaths = await Promise.all(resolved.map((entry) => canonicalizePathIdentity(
+      entry.resolved.absolutePath,
+      { allowMissing: true, fsPromises, pathModule },
+    ))).catch((error) => fail(error));
+    const queueResources: SerialQueueResource[] = resolved.map((_entry, index) => ({
+      key: resourceKey(requests[index]!.resource.workspaceId, canonicalPaths[index]!, pathModule, platform),
+      scope: requests[index]!.scope,
+    }));
+    return queues.runResources(queueResources, () => operation(resolved));
+  };
+
+  const runResourceOperation = <Result>(
+    workspaceId: string,
+    resources: readonly DocumentResourceOperation[],
+    operation: () => Promise<Result>,
+  ): Promise<Result> => withResolvedResourceOperation(
+    resources.map((resource) => ({
+      resource: { workspaceId, resourceId: resource.resourceId },
+      scope: resource.scope,
+    })),
+    operation,
+  );
 
   const assertTokenWorkspace = (token: MutationToken | undefined, workspaceId: string | undefined): void => {
     if (!token || token.workspaceId !== workspaceId) {
@@ -603,22 +641,26 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const read = (resource: DocumentResource): Promise<DocumentReadResult> => queues.run(resourceKey(resource), async () => {
+  const read = (resource: DocumentResource): Promise<DocumentReadResult> => withResolvedResourceOperation([
+    { resource, scope: 'exact' },
+  ], async ([target]) => {
     try {
       const mutation = await mutations.inspect(resource.workspaceId);
-      const { resolved } = await resolveResourcePath(resource, true);
+      const { resolved } = target!;
       return { ...(await snapshotFile(resource, resolved.absolutePath)), epoch: mutation.epoch };
     } catch (error) {
       return fail(error);
     }
   });
 
-  const write = (request: WriteRequest): Promise<DocumentWriteResult> => queues.run(resourceKey(request.resource), async () => {
+  const write = (request: WriteRequest): Promise<DocumentWriteResult> => withResolvedResourceOperation([
+    { resource: request.resource, scope: 'subtree' },
+  ], async ([target]) => {
     let writer: DocumentWriter | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-write' });
-      const { resolved } = await resolveResourcePath(request.resource, true);
+      const { resolved } = target!;
       const current = {
         ...(await snapshotFile(request.resource, resolved.absolutePath)),
         epoch: request.token.epoch,
@@ -669,7 +711,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   });
 
-  const move = (request: MoveRequest): Promise<DocumentMoveResult> => queues.runMany([resourceKey(request.from), resourceKey(request.to)], async () => {
+  const move = (request: MoveRequest): Promise<DocumentMoveResult> => withResolvedResourceOperation([
+    { resource: request.from, scope: 'subtree' },
+    { resource: request.to, scope: 'subtree' },
+  ], async ([source, target]) => {
     let writer: DocumentWriter | undefined;
     try {
       if (request.from.workspaceId !== request.to.workspaceId) {
@@ -680,8 +725,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       assertTokenWorkspace(request.token, request.from.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-move' });
-      const source = await resolveResourcePath(request.from, true);
-      const target = await resolveResourcePath(request.to, true);
+      if (!source || !target) throw new DocumentAuthorityError('Document move resources are unavailable');
       const current = {
         ...(await snapshotFile(request.from, source.resolved.absolutePath)),
         epoch: request.token.epoch,
@@ -729,12 +773,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   });
 
-  const remove = (request: DeleteRequest): Promise<DocumentDeleteResult> => queues.run(resourceKey(request.resource), async () => {
+  const remove = (request: DeleteRequest): Promise<DocumentDeleteResult> => withResolvedResourceOperation([
+    { resource: request.resource, scope: 'subtree' },
+  ], async ([target]) => {
     let writer: DocumentWriter | undefined;
     try {
       assertTokenWorkspace(request.token, request.resource.workspaceId);
       writer = await mutations.registerWriter(request.token, { purpose: 'document-delete' });
-      const { resolved } = await resolveResourcePath(request.resource, true);
+      const { resolved } = target!;
       const current = {
         ...(await snapshotFile(request.resource, resolved.absolutePath)),
         epoch: request.token.epoch,
@@ -1186,6 +1232,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     resolveScopeId,
     registerWriterForScope,
     runMutationForScope,
+    runResourceOperation,
     read,
     write,
     move,

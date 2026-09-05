@@ -92,6 +92,22 @@ describe("thread registry", () => {
     });
   });
 
+  it("persists native result and merged revision identities independently", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.setWorkingState(WORKSPACE, thread.id, {
+      branchId: "thread-native",
+      resultRevision: 2,
+      diffStats: { files: 1, insertions: 1, deletions: 0 },
+    });
+    await registry.setIntegration(WORKSPACE, thread.id, "merged", undefined, undefined, 1);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      workBranchId: "thread-native",
+      resultRevision: 2,
+      mergedResultRevision: 1,
+      integration: "merged",
+    });
+  });
+
   it("records a lost attempt and starts attempt two without erasing history or attention", async () => {
     const thread = await registry.createThread(createInput());
     const first = await registry.startRun(WORKSPACE, thread.id);

@@ -46,7 +46,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 5;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 6;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -100,6 +100,13 @@ interface ThreadCatalogV4 {
   threads: Array<Omit<Thread, "manifest"> & {
     manifest: Omit<ThreadLaunchManifest, "carryBlocks">;
   }>;
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV5 {
+  schemaVersion: 5;
+  workspaceId: string;
+  threads: Thread[];
   runs: ThreadRun[];
 }
 
@@ -272,6 +279,8 @@ const isReport = (value: unknown): value is ThreadReport | null => (
     && Array.isArray(value.deviations) && value.deviations.every(isString)
     && isFiniteNumber(value.confidence)
     && isTranscriptRef(value.transcriptRef)
+    && (value.resultCommit === undefined || isString(value.resultCommit))
+    && (value.resultRevision === undefined || (Number.isSafeInteger(value.resultRevision) && Number(value.resultRevision) > 0))
     && isRecord(value.blocksSnapshot) && Object.values(value.blocksSnapshot).every(isString))
 );
 
@@ -303,13 +312,20 @@ const isThread = (value: unknown): value is Thread => {
       && isString(value.worktree.path)
       && isString(value.worktree.base)
       && (value.worktree.branch === undefined || isString(value.worktree.branch))
-      && (value.worktree.resultCommit === undefined || isString(value.worktree.resultCommit))))
+      && (value.worktree.resultCommit === undefined || isString(value.worktree.resultCommit))
+      && (value.worktree.resultPath === undefined || isString(value.worktree.resultPath))
+      && (value.worktree.materialized === undefined || typeof value.worktree.materialized === "boolean")
+      && (value.worktree.retentionReason === undefined || isString(value.worktree.retentionReason))))
+    && (value.workBranchId === undefined || isString(value.workBranchId))
+    && (value.resultRevision === undefined || (Number.isSafeInteger(value.resultRevision) && Number(value.resultRevision) > 0))
     && LIFECYCLES.has(value.lifecycle as ThreadLifecycle)
     && ATTENTIONS.has(value.attention as ThreadAttention)
     && isWaitingFor(value.waitingFor)
     && INTEGRATIONS.has(value.integration as ThreadIntegration)
     && isDiffStats(value.diffStats)
     && isReport(value.report)
+    && (value.mergedCommit === undefined || isString(value.mergedCommit))
+    && (value.mergedResultRevision === undefined || (Number.isSafeInteger(value.mergedResultRevision) && Number(value.mergedResultRevision) > 0))
     && isNullableString(value.activeRunId)
     && isString(value.createdAt)
     && isString(value.updatedAt)
@@ -483,7 +499,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -559,6 +575,17 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
         ...structuredClone(thread),
         manifest: { ...structuredClone(thread.manifest), carryBlocks: true },
       })),
+    };
+  } else if (schemaVersion === 5) {
+    if (!value.threads.every(isThread)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v5 thread records: ${path}`, path);
+    }
+    const v5 = value as unknown as ThreadCatalogV5;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: v5.workspaceId,
+      runs: structuredClone(v5.runs),
+      threads: structuredClone(v5.threads),
     };
   } else {
     if (!value.threads.every(isThread)) {
@@ -1139,6 +1166,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     integration: ThreadIntegration,
     diffStats?: ThreadDiffStats | null,
     mergedCommit?: string | null,
+    mergedResultRevision?: number | null,
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
@@ -1147,6 +1175,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (mergedCommit !== undefined) {
       if (mergedCommit) thread.mergedCommit = mergedCommit;
       else delete thread.mergedCommit;
+    }
+    if (mergedResultRevision !== undefined) {
+      if (mergedResultRevision) thread.mergedResultRevision = mergedResultRevision;
+      else delete thread.mergedResultRevision;
     }
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
@@ -1161,6 +1193,29 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       return { value: thread, changed: [thread] };
     })
   );
+
+  const setWorkingState = async (
+    workspaceId: string,
+    threadId: string,
+    input: {
+      branchId: string;
+      resultRevision?: number;
+      worktree?: ThreadWorktree;
+      diffStats?: ThreadDiffStats;
+    },
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    thread.workBranchId = input.branchId;
+    if (input.resultRevision !== undefined) thread.resultRevision = input.resultRevision;
+    if (input.worktree) thread.worktree = structuredClone(input.worktree);
+    if (input.diffStats) {
+      thread.diffStats = structuredClone(input.diffStats);
+      thread.integration = input.diffStats.files > 0 ? "merge-ready" : "none";
+    }
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
 
   const completeThread = async (
     workspaceId: string,
@@ -1534,6 +1589,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setAttention,
     setIntegration,
     setWorktree,
+    setWorkingState,
     completeThread,
     cancelThread,
     archiveThread,

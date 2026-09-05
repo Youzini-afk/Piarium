@@ -281,10 +281,12 @@ describe("thread worktree runtime", () => {
       childPath = prepared.worktree!.path;
 
       // Run setup with echo and copyIgnored
-      const setupResult = await runtime.runSetup(fixture.repo, prepared.worktree!, {
+      const settings = {
         setup: "echo setup completed",
         copyIgnored: [".env.local"],
-      });
+      };
+      await runtime.prepareInputs(fixture.repo, prepared.worktree!, settings);
+      const setupResult = await runtime.runSetup(fixture.repo, prepared.worktree!, settings);
       expect(setupResult.output).toMatch(/setup[\s\r\n]+completed/);
       expect(existsSync(join(childPath, ".env.local"))).toBe(true);
       expect(readFileSync(join(childPath, ".env.local"), "utf8")).toBe("SECRET_KEY=12345\n");
@@ -308,7 +310,7 @@ describe("thread worktree runtime", () => {
       });
       childPath = prepared.worktree!.path;
 
-      let caughtError: any = null;
+      let caughtError: unknown = null;
       try {
         await runtime.runSetup(fixture.repo, prepared.worktree!, {
           setup: "exit 1",
@@ -317,7 +319,7 @@ describe("thread worktree runtime", () => {
         caughtError = err;
       }
       expect(caughtError).not.toBeNull();
-      expect(caughtError.exitReason).toBe("setup-failed");
+      expect(caughtError).toMatchObject({ exitReason: "setup-failed" });
     } finally {
       if (childPath && existsSync(childPath)) {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
@@ -382,7 +384,7 @@ describe("thread worktree runtime", () => {
       expect(readFileSync(join(sourceRoot, "result.txt"), "utf8")).toBe("new result file\n");
       expect(readFileSync(join(sourceRoot, "original.txt"), "utf8")).toBe("hello from child\n");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows cleanup */ }
     }
   });
 
@@ -456,12 +458,15 @@ describe("thread worktree runtime", () => {
 
       // First snapshot with all files
       let snapshotted = await runtime.snapshot(prepared.worktree!);
+      const firstResultPath = snapshotted.resultPath!;
 
       // Now child deletes delete-me.txt
       unlinkSync(join(prepared.cwd, "delete-me.txt"));
 
       // Second snapshot captures the deletion
       snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted.resultPath).not.toBe(firstResultPath);
+      expect(readFileSync(join(firstResultPath, "delete-me.txt"), "utf8")).toBe("delete me\n");
 
       // Reclaim should succeed (snapshot matches live cwd, no uncommitted modifications)
       const reclaimed = await runtime.reclaim(snapshotted);
@@ -474,6 +479,41 @@ describe("thread worktree runtime", () => {
       expect(existsSync(join(sourceRoot, "delete-me.txt"))).toBe(false);
     } finally {
       try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows cleanup */ }
+    }
+  });
+
+  it("keeps the previous immutable copy result when a later snapshot fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "non-git-snapshot-failure-"));
+    const sourceRoot = join(root, "project");
+    const worktreeRoot = join(root, "worktrees");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "file.txt"), "base\n");
+    const createWorktree = async (_dir: string, input: Record<string, unknown>) => {
+      const target = join(worktreeRoot, String(input.worktreeName));
+      mkdirSync(target, { recursive: true });
+      return { path: target };
+    };
+    const bootstrap = async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() } as const);
+    try {
+      const runtime = createThreadWorktreeRuntime({ createWorktree, getWorktreeBootstrapStatus: bootstrap });
+      const prepared = await runtime.prepare({ mode: "isolated", sourceRoot, threadId: "failure" });
+      writeFileSync(join(prepared.cwd, "file.txt"), "first\n");
+      const first = await runtime.snapshot(prepared.worktree!);
+      const failedRuntime = createThreadWorktreeRuntime({
+        createWorktree,
+        getWorktreeBootstrapStatus: bootstrap,
+        fsPromises: new Proxy(fs.promises, {
+          get(target, property, receiver) {
+            if (property === "copyFile") return async () => { throw new Error("injected snapshot failure"); };
+            return Reflect.get(target, property, receiver);
+          },
+        }),
+      });
+      writeFileSync(join(prepared.cwd, "file.txt"), "second\n");
+      await expect(failedRuntime.snapshot(first)).rejects.toThrow("injected snapshot failure");
+      expect(readFileSync(join(first.resultPath!, "file.txt"), "utf8")).toBe("first\n");
+    } finally {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows may retain the injected-failure staging path briefly. */ }
     }
   });
 });

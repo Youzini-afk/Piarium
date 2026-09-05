@@ -365,6 +365,7 @@
         "bun-pty": "^0.4.5",
         "compression": "^1.8.1",
         "cron-parser": "^4.9.0",
+        "diff": "9.0.0",
         "express": "^5.1.0",
         "http-proxy-middleware": "^4.2.0",
         "ignore": "7.0.5",

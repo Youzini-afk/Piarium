@@ -58,6 +58,90 @@ it('publishes committed document mutations without letting an observer fail the 
   }
 });
 
+it('queues a document mutation behind a Host subtree operation without locking unrelated paths', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  let releaseDirectory: (() => void) | undefined;
+  let announceDirectory: (() => void) | undefined;
+  const directoryStarted = new Promise<void>((resolve) => { announceDirectory = resolve; });
+  const directoryRelease = new Promise<void>((resolve) => { releaseDirectory = resolve; });
+  try {
+    const held = harness.authority.runResourceOperation(
+      harness.identity.workspaceId,
+      [{ resourceId: 'nested', scope: 'subtree' }],
+      async () => {
+        announceDirectory?.();
+        await directoryRelease;
+      },
+    );
+    await directoryStarted;
+    let nestedSettled = false;
+    const nested = harness.authority.write({
+      resource: harness.resource('nested/note.txt'),
+      token: harness.token(),
+      content: 'nested',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+    }).finally(() => { nestedSettled = true; });
+    const unrelated = harness.authority.write({
+      resource: harness.resource('other.txt'),
+      token: harness.token(),
+      content: 'unrelated',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+    });
+    await expect(unrelated).resolves.toMatchObject({ status: 'written' });
+    expect(nestedSettled).toBe(false);
+    releaseDirectory?.();
+    await held;
+    await expect(nested).resolves.toMatchObject({ status: 'written' });
+  } finally {
+    releaseDirectory?.();
+    await harness.cleanup();
+  }
+});
+
+it('uses one Host resource queue for Windows case aliases', async () => {
+  if (process.platform !== 'win32') return;
+  const harness = await createDocumentAuthorityHarness();
+  let release: (() => void) | undefined;
+  let announce: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { announce = resolve; });
+  const heldUntil = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'Case-Alias.txt'), 'base');
+    const original = await harness.authority.read(harness.resource('Case-Alias.txt'));
+    if (original.status !== 'ready') throw new Error('Expected the case-alias fixture to be readable');
+    const held = harness.authority.runResourceOperation(
+      harness.identity.workspaceId,
+      [{ resourceId: 'Case-Alias.txt', scope: 'exact' }],
+      async () => {
+        announce?.();
+        await heldUntil;
+      },
+    );
+    await started;
+    let settled = false;
+    const aliasedWrite = harness.authority.write({
+      resource: harness.resource('CASE-ALIAS.TXT'),
+      token: harness.token(),
+      content: 'updated',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: original.revision,
+    }).finally(() => { settled = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    release?.();
+    await held;
+    await expect(aliasedWrite).resolves.toMatchObject({ status: 'written' });
+  } finally {
+    release?.();
+    await harness.cleanup();
+  }
+});
+
 const createPeerAuthority = (
   harness: DocumentAuthorityHarness,
   options: Partial<Omit<DocumentAuthorityOptions, 'dataDir' | 'hostId'>> = {},

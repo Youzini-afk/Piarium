@@ -1,12 +1,11 @@
 import type {
   RecoveryState,
-  RegularFileState,
-  SymlinkState,
   ThreeWayMergePlan,
-  ThreeWayPathDecision,
   ThreeWayPathPlan,
 } from "./types.js";
 import type { ThreadDiffStats } from "@piarium/protocol";
+import { diffArrays } from "diff";
+import { sameState } from "../../recovery/journal-files.js";
 
 export interface TextMergeResult {
   clean: boolean;
@@ -14,57 +13,29 @@ export interface TextMergeResult {
 }
 
 export const isBinaryBuffer = (buffer: Buffer): boolean => {
-  const checkLen = Math.min(buffer.length, 8000);
-  for (let i = 0; i < checkLen; i++) {
-    if (buffer[i] === 0) return true;
+  if (buffer.includes(0)) return true;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    return false;
+  } catch {
+    return true;
   }
-  return false;
 };
 
-const splitLines = (text: string): { lines: string[]; eol: string } => {
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const lines = text.split(/\r?\n/);
-  return { lines, eol };
-};
+const splitLineTokens = (text: string): string[] => (
+  text.match(/[^\r\n]*(?:\r\n|\n|\r|$)/gu)?.filter((token) => token.length > 0) ?? []
+);
 
-/**
- * Computes the Longest Common Subsequence of lines between a and b.
- * Returns array of [aIndex, bIndex] matches.
- */
+/** Adapt the existing Myers implementation without allocating a line-pair matrix. */
 export const lcsMatches = (a: string[], b: string[]): Array<[number, number]> => {
-  const m = a.length;
-  const n = b.length;
-  // If either is empty, no matches
-  if (m === 0 || n === 0) return [];
-
-  // Standard DP matrix
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) {
-      if (a[i] === b[j]) {
-        dp[i + 1]![j + 1] = dp[i]![j]! + 1;
-      } else {
-        dp[i + 1]![j + 1] = Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
-      }
-    }
-  }
-
-  // Backtrace
   const matches: Array<[number, number]> = [];
-  let i = m;
-  let j = n;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      matches.push([i - 1, j - 1]);
-      i--;
-      j--;
-    } else if (dp[i - 1]![j]! >= dp[i]![j - 1]!) {
-      i--;
-    } else {
-      j--;
-    }
+  let oldIndex = 0;
+  let newIndex = 0;
+  for (const change of diffArrays(a, b)) {
+    if (change.added) newIndex += change.count;
+    else if (change.removed) oldIndex += change.count;
+    else for (let index = 0; index < change.count; index += 1) matches.push([oldIndex++, newIndex++]);
   }
-  matches.reverse();
   return matches;
 };
 
@@ -73,6 +44,10 @@ interface ChunkMapping {
   baseEnd: number;
   lines: string[];
 }
+
+const appendLines = (output: string[], lines: string[]): void => {
+  for (const line of lines) output.push(line);
+};
 
 const computeChunks = (baseLines: string[], targetLines: string[]): ChunkMapping[] => {
   const matches = lcsMatches(baseLines, targetLines);
@@ -118,93 +93,109 @@ export const mergeText3Way = (
   if (parentText === baseText) return { clean: true, text: childText };
   if (childText === baseText) return { clean: true, text: parentText };
 
-  const { lines: baseLines, eol } = splitLines(baseText);
-  const { lines: parentLines } = splitLines(parentText);
-  const { lines: childLines } = splitLines(childText);
+  const baseLines = splitLineTokens(baseText);
+  const parentLines = splitLineTokens(parentText);
+  const childLines = splitLineTokens(childText);
 
   const parentChunks = computeChunks(baseLines, parentLines);
   const childChunks = computeChunks(baseLines, childLines);
 
   const pLabel = options.parentLabel ?? "parent";
   const cLabel = options.childLabel ?? "child";
+  const markerEol = parentText.match(/\r\n|\n|\r/u)?.[0]
+    ?? childText.match(/\r\n|\n|\r/u)?.[0]
+    ?? baseText.match(/\r\n|\n|\r/u)?.[0]
+    ?? "\n";
 
   let clean = true;
   const resultLines: string[] = [];
-
-  // Align base line by line
-  let bIdx = 0;
+  let cursor = 0;
   let pChunkIdx = 0;
   let cChunkIdx = 0;
 
-  while (bIdx <= baseLines.length) {
-    const nextP = parentChunks[pChunkIdx];
-    const nextC = childChunks[cChunkIdx];
+  const overlaps = (left: ChunkMapping, right: ChunkMapping): boolean => {
+    const leftInsertion = left.baseStart === left.baseEnd;
+    const rightInsertion = right.baseStart === right.baseEnd;
+    if (leftInsertion && rightInsertion) return left.baseStart === right.baseStart;
+    if (leftInsertion) return left.baseStart >= right.baseStart && left.baseStart < right.baseEnd;
+    if (rightInsertion) return right.baseStart >= left.baseStart && right.baseStart < left.baseEnd;
+    return Math.max(left.baseStart, right.baseStart) < Math.min(left.baseEnd, right.baseEnd);
+  };
 
-    const pAffects = nextP && nextP.baseStart <= bIdx && bIdx <= nextP.baseEnd;
-    const cAffects = nextC && nextC.baseStart <= bIdx && bIdx <= nextC.baseEnd;
+  const render = (start: number, end: number, chunks: ChunkMapping[]): string[] => {
+    const output: string[] = [];
+    let at = start;
+    for (const chunk of chunks) {
+      appendLines(output, baseLines.slice(at, chunk.baseStart));
+      appendLines(output, chunk.lines);
+      at = chunk.baseEnd;
+    }
+    appendLines(output, baseLines.slice(at, end));
+    return output;
+  };
 
-    if (pAffects && cAffects) {
-      // Overlapping changes
-      const maxEnd = Math.max(nextP.baseEnd, nextC.baseEnd);
-      // Gather all overlapping parent/child chunks up to maxEnd
-      const pCombined: string[] = [...nextP.lines];
-      pChunkIdx++;
-      while (pChunkIdx < parentChunks.length && parentChunks[pChunkIdx]!.baseStart <= maxEnd) {
-        pCombined.push(...parentChunks[pChunkIdx]!.lines);
-        pChunkIdx++;
+  while (pChunkIdx < parentChunks.length || cChunkIdx < childChunks.length) {
+    const parent = parentChunks[pChunkIdx];
+    const child = childChunks[cChunkIdx];
+    if (parent && child && overlaps(parent, child)) {
+      const parentGroup: ChunkMapping[] = [parent];
+      const childGroup: ChunkMapping[] = [child];
+      pChunkIdx += 1;
+      cChunkIdx += 1;
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        const nextParent = parentChunks[pChunkIdx];
+        if (nextParent && childGroup.some((change) => overlaps(nextParent, change))) {
+          parentGroup.push(nextParent);
+          pChunkIdx += 1;
+          expanded = true;
+        }
+        const nextChild = childChunks[cChunkIdx];
+        if (nextChild && parentGroup.some((change) => overlaps(nextChild, change))) {
+          childGroup.push(nextChild);
+          cChunkIdx += 1;
+          expanded = true;
+        }
       }
-
-      const cCombined: string[] = [...nextC.lines];
-      cChunkIdx++;
-      while (cChunkIdx < childChunks.length && childChunks[cChunkIdx]!.baseStart <= maxEnd) {
-        cCombined.push(...childChunks[cChunkIdx]!.lines);
-        cChunkIdx++;
-      }
-
-      if (pCombined.join(eol) === cCombined.join(eol)) {
-        // Both made the exact same change
-        resultLines.push(...pCombined);
+      const start = Math.min(parent.baseStart, child.baseStart);
+      const end = Math.max(parentGroup.at(-1)!.baseEnd, childGroup.at(-1)!.baseEnd);
+      appendLines(resultLines, baseLines.slice(cursor, start));
+      const parentOutput = render(start, end, parentGroup);
+      const childOutput = render(start, end, childGroup);
+      if (parentOutput.join("") === childOutput.join("")) {
+        appendLines(resultLines, parentOutput);
       } else {
         clean = false;
-        resultLines.push(`<<<<<<< ${pLabel}`);
-        resultLines.push(...pCombined);
-        resultLines.push("=======");
-        resultLines.push(...cCombined);
-        resultLines.push(`>>>>>>> ${cLabel}`);
+        resultLines.push(`<<<<<<< ${pLabel}${markerEol}`);
+        appendLines(resultLines, parentOutput);
+        if (parentOutput.length > 0 && !/[\r\n]$/u.test(parentOutput.at(-1)!)) resultLines.push(markerEol);
+        resultLines.push(`=======${markerEol}`);
+        appendLines(resultLines, childOutput);
+        if (childOutput.length > 0 && !/[\r\n]$/u.test(childOutput.at(-1)!)) resultLines.push(markerEol);
+        resultLines.push(`>>>>>>> ${cLabel}${markerEol}`);
       }
-      bIdx = maxEnd;
-    } else if (pAffects) {
-      resultLines.push(...nextP.lines);
-      bIdx = nextP.baseEnd;
-      pChunkIdx++;
-    } else if (cAffects) {
-      resultLines.push(...nextC.lines);
-      bIdx = nextC.baseEnd;
-      cChunkIdx++;
-    } else {
-      if (bIdx < baseLines.length) {
-        resultLines.push(baseLines[bIdx]!);
-      }
-      bIdx++;
+      cursor = end;
+      continue;
     }
-  }
 
-  return { clean, text: resultLines.join(eol) };
+    const takeParent = Boolean(parent && (!child || parent.baseStart <= child.baseStart));
+    const change = takeParent ? parent! : child!;
+    appendLines(resultLines, baseLines.slice(cursor, change.baseStart));
+    appendLines(resultLines, change.lines);
+    cursor = change.baseEnd;
+    if (takeParent) pChunkIdx += 1;
+    else cChunkIdx += 1;
+  }
+  appendLines(resultLines, baseLines.slice(cursor));
+
+  return { clean, text: resultLines.join("") };
 };
 
 export const statesEqual = (a?: RecoveryState | null, b?: RecoveryState | null): boolean => {
   if (!a && !b) return true;
   if (!a || !b) return false;
-  if (a.kind !== b.kind) return false;
-  if (a.kind === "missing") return true;
-  if (a.kind === "directory") return a.mode === (b as typeof a).mode;
-  if (a.kind === "symlink") {
-    return a.symlinkTarget === (b as SymlinkState).symlinkTarget;
-  }
-  if (a.kind === "regular-file") {
-    return a.objectHash === (b as RegularFileState).objectHash && a.mode === (b as RegularFileState).mode;
-  }
-  return false;
+  return sameState(a, b);
 };
 
 export interface PathMergeContext {
@@ -214,6 +205,17 @@ export interface PathMergeContext {
   childState: RecoveryState;
   readContent(state: RecoveryState): Promise<Buffer | null>;
 }
+
+const mergeMode = (
+  baseMode: number | undefined,
+  parentMode: number | undefined,
+  childMode: number | undefined,
+): { clean: true; mode: number | undefined } | { clean: false } => {
+  if (parentMode === childMode) return { clean: true, mode: parentMode };
+  if (parentMode === baseMode) return { clean: true, mode: childMode };
+  if (childMode === baseMode) return { clean: true, mode: parentMode };
+  return { clean: false };
+};
 
 export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayPathPlan> => {
   const { path, baseState, parentState, childState, readContent } = ctx;
@@ -291,6 +293,22 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
     const childStr = childBuf.toString("utf8");
 
     const merged = mergeText3Way(baseStr, parentStr, childStr);
+    const mode = mergeMode(
+      baseState.kind === "regular-file" ? baseState.mode : undefined,
+      parentState.mode,
+      childState.mode,
+    );
+    if (!mode.clean) {
+      return {
+        path,
+        decision: "conflict",
+        conflictReason: "File mode changed differently on both sides",
+        baseState,
+        parentState,
+        childState,
+        isText: false,
+      };
+    }
     if (merged.clean) {
       return {
         path,
@@ -299,6 +317,7 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
         parentState,
         childState,
         mergedText: merged.text,
+        ...(mode.mode === undefined ? {} : { mergedMode: mode.mode }),
         isText: true,
       };
     }
@@ -355,7 +374,7 @@ export const buildThreeWayMergePlan = async (input: BuildPlanInput): Promise<Thr
   const appliedPaths: string[] = [];
   const conflictPaths: string[] = [];
   let insertions = 0;
-  let deletions = 0;
+  const deletions = 0;
 
   for (const p of input.allPaths) {
     const bState = input.baseState[p] ?? { kind: "missing" };

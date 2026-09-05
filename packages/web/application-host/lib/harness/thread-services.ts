@@ -408,23 +408,48 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       const workspaceId = workspaceFor(ctx);
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
-      if (thread.integration === "merged" && (!thread.worktree?.resultCommit || thread.mergedCommit === thread.worktree.resultCommit)) {
-        return { text: `thread ${thread.id} is already merged`, merged: 0, conflicts: [] };
+      const selectedRevision = params.resultRevision ?? thread.resultRevision;
+      const alreadyMerged = selectedRevision !== undefined
+        ? thread.mergedResultRevision === selectedRevision
+        : Boolean(thread.worktree?.resultCommit && thread.mergedCommit === thread.worktree.resultCommit);
+      if (thread.integration === "merged" && alreadyMerged) {
+        return {
+          text: `thread ${thread.id} is already merged`,
+          merged: 0,
+          conflicts: [],
+          ...(selectedRevision === undefined ? {} : { resultRevision: selectedRevision }),
+        };
       }
       const run = await registry.getActiveRun(workspaceId, thread.id);
-      if (thread.lifecycle !== "settled" || run?.outcome !== "success") {
+      const hasPublishedResult = Boolean(
+        (thread.workBranchId && selectedRevision !== undefined) || thread.worktree?.resultCommit,
+      );
+      if (thread.lifecycle !== "settled" || !run?.outcome) {
         return { text: `thread ${thread.id} is not complete (state: ${thread.lifecycle}/${run?.outcome ?? "none"})`, merged: 0, conflicts: [] };
       }
-      const result = await host.threadApplyWorktreeDiff(workspaceId, parentFor(ctx), thread.id);
-      if (result.conflicts.length > 0 || result.status === "compensated" || result.status === "needs-attention") {
+      if (!hasPublishedResult) throw new HarnessServiceError("unavailable", `Thread ${thread.id} has no published result to merge`);
+      if (host.requireThreadMergeJournal && !ctx.actor.runId) {
+        throw new HarnessServiceError("unavailable", "Thread integration requires an active parent turn recovery binding");
+      }
+      const result = await host.threadApplyWorktreeDiff(
+        workspaceId,
+        parentFor(ctx),
+        thread.id,
+        params.resultRevision,
+        ctx.actor.runId,
+      );
+      const appliedRevision = result.resultRevision ?? selectedRevision;
+      if (result.conflicts.length > 0 || result.status === "conflict" || result.status === "compensated" || result.status === "needs-attention") {
         await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
         const resolution = result.status === "needs-attention"
-          ? "Merge failed and subsequent user edits were preserved; manual resolution required."
+          ? "Some paths could not be restored automatically. Inspect the integration operation and resolve them before retrying."
           : result.status === "compensated"
             ? "Merge failed unexpectedly; changes were safely compensated."
             : result.conflictState === "markers"
               ? "Conflict markers placed in the parent. Resolve those paths; no further merge step is needed."
-              : "The parent was left unchanged and the child worktree was preserved. Resolve the parent changes, then retry merge.";
+              : result.appliedPaths?.length
+                ? "The listed paths were written; conflicting paths require a version choice. The published child result is retained."
+                : "The parent was left unchanged. The published child result is retained; resolve conflicting paths, then retry merge.";
         const lines = [
           result.conflicts.length > 0
             ? `merge could not apply ${result.conflicts.length} files cleanly:`
@@ -432,7 +457,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
           ...result.conflicts,
         ];
         if (result.appliedPaths && result.appliedPaths.length > 0) {
-          lines.push(`applied cleanly (${result.appliedPaths.length}): ${result.appliedPaths.join(", ")}`);
+          lines.push(`written paths (${result.appliedPaths.length}): ${result.appliedPaths.join(", ")}`);
         }
         lines.push(resolution);
         return {
@@ -441,15 +466,26 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
           conflicts: result.conflicts,
           status: result.status ?? "conflict",
           ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
+          ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
+          ...(result.operationId ? { operationId: result.operationId } : {}),
         };
       }
-      await registry.setIntegration(workspaceId, thread.id, "merged", result.diffStats, thread.worktree?.resultCommit);
+      await registry.setIntegration(
+        workspaceId,
+        thread.id,
+        "merged",
+        result.diffStats,
+        appliedRevision === undefined ? thread.worktree?.resultCommit : undefined,
+        appliedRevision,
+      );
       return {
-        text: `merged ${result.merged} files: ${thread.report?.changedFiles.join(", ") ?? ""}`,
+        text: `merged ${result.merged} files from ${appliedRevision === undefined ? "the fixed Git result" : `result revision ${appliedRevision}`}: ${result.changedFiles?.join(", ") ?? ""}`,
         merged: result.merged,
         conflicts: [],
         status: "applied",
         ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
+        ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
+        ...(result.operationId ? { operationId: result.operationId } : {}),
       };
     },
   };
@@ -463,14 +499,8 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const workspaceId = workspaceFor(ctx);
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
-      const keepWorktree = params.keepWorktree ?? true;
-      if (!keepWorktree && thread.worktree) {
-        throw new HarnessServiceError(
-          "unavailable",
-          "Stopping a thread without preserving its worktree is not implemented; retry with keep_worktree enabled",
-        );
-      }
-      if (thread.lifecycle !== "queued" && host.threadKillSession) await host.threadKillSession(thread.id);
+      const keepWorktree = params.keepWorktree ?? false;
+      if (thread.lifecycle !== "queued" && host.threadKillSession) await host.threadKillSession(thread.id, keepWorktree);
       await registry.cancelThread(workspaceId, thread.id, "killed by parent");
       return { text: `killed ${thread.id}${keepWorktree ? " (worktree kept)" : ""}` };
     },

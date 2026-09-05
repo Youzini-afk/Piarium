@@ -3,6 +3,7 @@ import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import { createHarnessSearchService, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
+import type { ExploreFileReader } from "./explore-file-reader.js";
 import type { WorkspaceContentSearchResult } from "../search/content.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
 import type { MemoryAgentSettings } from "@piarium/protocol";
@@ -50,7 +51,7 @@ export function deriveHarnessCapabilities(
     "read.lsp",
     "read.output",
   ]);
-  if (tools.has("grep")) capabilities.add("read.search");
+  if (tools.has("grep") || tools.has("explore")) capabilities.add("read.search");
   if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
   if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
@@ -87,8 +88,9 @@ export interface HarnessServiceHost {
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
-  threadKillSession: ((threadId: string) => Promise<void>) | null;
-  threadApplyWorktreeDiff: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent, threadId: string) => Promise<{
+  threadKillSession: ((threadId: string, keepWorktree?: boolean) => Promise<void>) | null;
+  requireThreadMergeJournal: boolean;
+  threadApplyWorktreeDiff: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent, threadId: string, resultRevision?: number, executionId?: string) => Promise<{
     merged: number;
     conflicts: string[];
     conflictState?: "none" | "markers" | "parent-unchanged";
@@ -96,6 +98,8 @@ export interface HarnessServiceHost {
     diffStats?: import("@piarium/protocol").ThreadDiffStats;
     appliedPaths?: string[];
     status?: "applied" | "conflict" | "compensated" | "needs-attention";
+    operationId?: string;
+    resultRevision?: number;
   }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
@@ -106,12 +110,14 @@ export interface HarnessServiceHost {
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
+  readExploreFile?: ExploreFileReader;
   dispose(): Promise<void>;
 }
 
 export interface HarnessServiceHostOptions {
   search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  readExploreFile?: ExploreFileReader;
   diagnosticsProvider?: DiagnosticsProvider;
   lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
@@ -143,8 +149,9 @@ export interface HarnessServiceHostOptions {
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
-  threadKillSession?: (threadId: string) => Promise<void>;
+  threadKillSession?: (threadId: string, keepWorktree?: boolean) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
+  requireThreadMergeJournal?: boolean;
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
 }
@@ -312,6 +319,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadSpawnSession,
     threadKillSession,
     threadApplyWorktreeDiff,
+    requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,
     threadSendToSession,
     threadTranscriptReader,
     registerSession,
@@ -322,5 +330,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     getInterpreter,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
+    ...(options.readExploreFile ? { readExploreFile: options.readExploreFile } : {}),
   };
 }

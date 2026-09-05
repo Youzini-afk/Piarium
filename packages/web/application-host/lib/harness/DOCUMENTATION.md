@@ -15,12 +15,13 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── output.store → OutputStore (global)
                            ├── output.read  → OutputStore
                            ├── search.content → HarnessSearchService
+                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
                            ├── memory.blocks.* → KnowledgeStore block validator
                            ├── zone2.assemble → Knowledge material + ThreadRegistry projection
-                           └── thread.*     → ThreadRegistry + ThreadRuntime + Git worktree
+                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state
 ```
 
 ## Components
@@ -57,6 +58,7 @@ PTY-based persistent shell per session:
 
 Stores large tool outputs (default 256 MiB per session) with handle-based
 retrieval. Handles are `out_XXX` format.
+These are authenticated session-local ephemeral references, not durable files or knowledge records.
 
 ### PathLockService (`path-lock.ts`)
 
@@ -91,6 +93,19 @@ launching ripgrep, passes those canonical workspace-contained roots to the
 search process, and validates returned resource IDs again. Returns
 `SearchContentResult` with files, hits, and totals.
 
+### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
+
+The Pi tool sends the question and optional roots through the normal actor-scoped router.
+The deterministic engine extracts literal terms, merges ranked search hits, then reads each
+candidate through Documents and the same canonical path authority. Snippets contain the actual
+contiguous text, disk revision, and range. Search hits that no longer match the document are
+reported as stale; missing, forbidden, binary, or failed reads never fabricate expanded excerpts.
+Partial results retain usable snippets and explicit issues. The formatted body is stored in the
+session OutputStore before its handle is returned. The file count describes files with hits,
+not an unavailable estimate of all scanned files. Source cancellation propagates to search/read.
+Surface drafts, symbol expansion, and optional model enrichment are separate planned consumers;
+the disk path does not claim those services are already present.
+
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
 Fans committed Documents mutations out to the active sessions in that
@@ -121,11 +136,15 @@ Thread launch includes a tagged snapshot of the parent's current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
-An isolated child is snapshotted to its retained `piarium/thread-*` branch at
-settlement and again immediately before merge. The live directory remains in
-place after merge because reopening the full child session still depends on its
-cwd; deletion is deferred until the UI has a read-only transcript or explicit
-rehome path.
+An isolated child captures its execution baseline into the Host working-state
+store before the Pi session starts. Settlement publishes an immutable native
+result revision before the Thread catalog points at it; Git commits and immutable
+copy snapshots remain migration/reconstruction sources. Merge reads the selected
+native revision, never the live child directory, and applies only baseline-to-result
+paths through the recovery store's selected location, SQLite journal, object store,
+and workspace lease. Reopen materializes the recorded result at the same path.
+Idle reclaim runs only after the session closes, a durable result exists, and the
+Documents authority confirms that no related controlled writer or user remains.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

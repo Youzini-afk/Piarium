@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
 import { HarnessServiceError } from "./service-error.js";
@@ -25,7 +23,8 @@ import { executeRecall } from "./recall-tool.js";
 import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
-import { explore } from "./explore.js";
+import { createExploreSearchService } from "./explore-service.js";
+export { createExploreSearchService } from "./explore-service.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -439,82 +438,5 @@ export function registerHarnessServices(
   router.register("explore.search", createExploreSearchService(host));
 }
 
-export function createExploreSearchService(host: HarnessServiceHost): HarnessService<"explore.search"> {
-  return {
-    handle: async (params, ctx) => {
-      const workspaceId = ctx.workspaceId ?? "";
-      const rgSearch = async (pattern: string, options: { fixedStrings: boolean; paths?: string[] | undefined; limit: number }) => {
-        const res = await host.searchService.search({
-          pattern,
-          limit: options.limit,
-          ...(options.paths && options.paths.length > 0 ? { path: options.paths[0] } : {}),
-        }, {
-          workspaceId,
-          ...(ctx.workspaceScope ? { workspaceScope: ctx.workspaceScope } : {}),
-          signal: ctx.signal,
-        });
-        if (res.status === "unavailable") {
-          throw new HarnessServiceError("unavailable", "Search service is unavailable");
-        }
-        const matches: Array<{ path: string; line: number; text: string }> = [];
-        if (res.status === "ready") {
-          for (const file of res.files) {
-            for (const hit of file.hits) {
-              matches.push({
-                path: file.path,
-                line: hit.line,
-                text: hit.text,
-              });
-            }
-          }
-        }
-        return matches;
-      };
-      const searchSymbols = async () => [];
-      let workspaceRoot: string | null = null;
-      if (host.resolveWorkspaceRoot && workspaceId) {
-        try {
-          workspaceRoot = await host.resolveWorkspaceRoot(workspaceId);
-        } catch {
-          workspaceRoot = null;
-        }
-      }
-      const readFile = async (relPath: string): Promise<string | null> => {
-        try {
-          const fullPath = workspaceRoot ? path.resolve(workspaceRoot, relPath) : relPath;
-          return await fs.promises.readFile(fullPath, "utf8");
-        } catch {
-          return null;
-        }
-      };
-      const result = await explore({
-        question: params.question,
-        ...(params.paths ? { paths: params.paths } : {}),
-        ...(params.limit ? { limit: params.limit } : {}),
-      }, {
-        rgSearch,
-        searchSymbols,
-        readFile,
-      });
-
-      const lines: string[] = [];
-      lines.push(`Found ${result.snippets.length} snippet(s) for question "${params.question}":`);
-      for (const s of result.snippets) {
-        lines.push(`--- ${s.path}:${s.startLine}-${s.endLine} (${s.why}) ---`);
-        lines.push(s.text);
-      }
-
-      const fullText = lines.join("\n");
-      const stored = host.outputStore.store(ctx.sessionId, fullText, "explore");
-
-      return {
-        text: fullText,
-        snippets: result.snippets,
-        searched: result.searched,
-        handle: stored.ref.handle,
-      };
-    },
-  };
-}
 
 export type { HarnessServiceMap };

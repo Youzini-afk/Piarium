@@ -91,7 +91,6 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
   });
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
-  let bridge: HostServicesBridge;
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => { bridge.respond(sessionId, requestId, outcome); },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
@@ -99,7 +98,7 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
   });
   registerHarnessServices(router, harnessServiceHost);
   const emittedRequests: Array<{ method: string; timeoutMs?: number }> = [];
-  bridge = new HostServicesBridge({
+  const bridge = new HostServicesBridge({
     emit: (_event, data) => {
       emittedRequests.push({ method: data.method, ...(data.timeoutMs === undefined ? {} : { timeoutMs: data.timeoutMs }) });
       void router.processEvent({ actor: ACTOR, kind: "host", envelope: { kind: "event", event: "harness.request", data } });
@@ -249,6 +248,11 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       assert.match(readResult.text, /completed successfully/);
       const steps = await executeTool(createReadThreadTool(harness.bridge, SESSION_ID), { threadId: thread.id, what: "steps", since: 1 });
       assert.match(steps.text, /child-1: durable transcript/);
+      const unpublished = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
+      assert.equal(unpublished.isError, true);
+      assert.match(unpublished.text, /no published result/);
+      assert.equal(harness.getMergeCalls(), 0);
+      await harness.threadRegistry.setWorkingState(WORKSPACE_ID, thread.id, { branchId: `branch-${thread.id}`, resultRevision: 1 });
       const mergeResult = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
       assert.match(mergeResult.text, /merged 3 files/);
       assert.equal((await harness.threadRegistry.getThread(WORKSPACE_ID, PARENT, thread.id))?.integration, "merged");

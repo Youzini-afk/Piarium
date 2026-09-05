@@ -296,7 +296,11 @@ export interface HarnessServiceMap {
         endLine: number;
         text: string;
         why: string;
+        revision: string;
+        source: "disk";
       }>;
+      issues: Array<{ path: string; status: "unavailable" | "failed" | "stale" | "forbidden"; message: string }>;
+      partial: boolean;
       searched: { patterns: number; files: number; ms: number };
       handle: string;
     };

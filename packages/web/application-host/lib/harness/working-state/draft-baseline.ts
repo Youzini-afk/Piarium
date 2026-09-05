@@ -120,15 +120,13 @@ export async function createBranchWithDraftBaseline(
     putObject: (bytes) => store.putObject(bytes),
   });
 
-  const branch = store.createBranch(workspaceId, branchId, baseState, baseRef);
+  const branch = await store.createBranch(workspaceId, branchId, baseState, baseRef);
 
   if (changedPaths.length > 0) {
-    const deltas: Record<string, RecoveryState> = {};
-    for (const p of changedPaths) {
-      deltas[p] = effectiveState[p]!;
-    }
-    store.updateBranchDeltas(branchId, deltas);
+    // Publish the draft overlay as the first immutable revision; callers that
+    // only need the branch can still read the returned branch baseline.
+    await store.publishStates(branchId, effectiveState, changedPaths);
   }
 
-  return branch;
+  return store.getBranch(branchId) ?? branch;
 }

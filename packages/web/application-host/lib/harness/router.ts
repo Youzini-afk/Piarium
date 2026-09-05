@@ -68,6 +68,12 @@ const requestPaths = (
   const record = params && typeof params === "object" && !Array.isArray(params)
     ? params as Record<string, unknown>
     : {};
+  if (method === "explore.search") {
+    if (record.paths === undefined) return [];
+    return Array.isArray(record.paths) && record.paths.every((path) => typeof path === "string" && path.trim())
+      ? record.paths.map((path) => ({ allowMissing: false, path: path as string }))
+      : "invalid";
+  }
   if (method === "search.content") {
     if (record.path === undefined) return [];
     return typeof record.path === "string" && record.path.trim()

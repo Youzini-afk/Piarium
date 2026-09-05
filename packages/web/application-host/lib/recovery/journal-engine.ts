@@ -96,6 +96,11 @@ import {
   type RecoveryLocationRegistry,
 } from './locations.js';
 import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
+import {
+  reconcileInterruptedIntegrationOperations,
+  type HostResourceOperation,
+  type HostResourceOperationGate,
+} from './durable-file-operation.js';
 
 type FsPromises = typeof fs.promises;
 type PathModule = typeof path;
@@ -133,6 +138,11 @@ interface RecoveryDocumentsAuthority {
   inspectDirtyBuffers(workspaceId: string): Promise<DirtyBufferPublication[]>;
   inspectWorkspace(workspaceId: string): Promise<{ root: string; workspaceId: string }>;
   listWorkspaceRegistrations(): Promise<WorkspaceRegistration[]>;
+  runResourceOperation?<Result>(
+    workspaceId: string,
+    resources: readonly HostResourceOperation[],
+    operation: () => Promise<Result>,
+  ): Promise<Result>;
 }
 
 interface NavigationPrepared {
@@ -271,7 +281,25 @@ export interface WorkspaceRecoveryEngine {
   setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveResult>;
   status(workspaceId: string): Promise<WorkspaceRecoveryStatusResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
+  /**
+   * Trusted Host-only adapter for subsystems that share recovery's selected
+   * storage, object store, path capture/apply primitives, and workspace lease.
+   * The database is valid only for the duration of the callback.
+   */
+  withWorkspaceStorage<T>(
+    workspaceId: string,
+    options: { mode: "exclusive" | "shared"; purpose: string; create?: boolean },
+    operation: (context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
+  ): Promise<T>;
   dispose(): Promise<void>;
+}
+
+export interface WorkspaceRecoveryStorageContext {
+  database: SqliteDatabase;
+  fileStore: RecoveryFileStore;
+  identity: RecoveryIdentity;
+  resourceOperationGate: HostResourceOperationGate;
+  root: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -529,6 +557,11 @@ export const createWorkspaceRecoveryEngine = (
     storageOwnerId,
   });
   const fileStore = fileStoreOverride ?? createRecoveryFileStore({ fsModule, fsPromises, pathModule });
+  const resourceOperationGateFor = (workspaceId: string): HostResourceOperationGate => ({
+    run: (resources, operation) => documents.runResourceOperation
+      ? documents.runResourceOperation(workspaceId, resources, operation)
+      : operation(),
+  });
   const leases = createRecoveryWorkspaceLeaseManager({ fsModule, fsPromises, pathModule });
   const queues = new Map<string, Promise<unknown>>();
   const startupFailures = new Map<string, WorkspaceRecoveryFailure[]>();
@@ -1346,8 +1379,8 @@ export const createWorkspaceRecoveryEngine = (
       }
       if (!database) continue;
       try {
-        const row = database.prepare("SELECT * FROM operations WHERE id = ? AND kind = 'combined'")
-          .get(operationId) as OperationRow | undefined;
+        const row = database.prepare("SELECT * FROM operations WHERE id = ? AND workspace_id = ? AND kind = 'combined'")
+          .get(operationId, identity.workspaceId) as OperationRow | undefined;
         if (row) return { identity, record: parseCombinedOperationRecord(row), root: storage.root };
       } finally {
         database.close();
@@ -2327,6 +2360,19 @@ export const createWorkspaceRecoveryEngine = (
     try {
       let recordsDeleted = 0;
       runImmediateTransaction(database, 'Workspace history deletion', () => {
+        const unfinishedIntegration = database.prepare(`
+          SELECT id FROM operations
+          WHERE workspace_id = ? AND kind = 'integration'
+          AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted')
+          LIMIT 1
+        `).get(workspaceId) as { id: string } | undefined;
+        if (unfinishedIntegration) {
+          throw new RecoveryPrimitiveError(
+            'needs-attention',
+            `Cannot delete recovery history while integration ${unfinishedIntegration.id} is unfinished`,
+            { operationId: unfinishedIntegration.id, origin: 'storage' },
+          );
+        }
         // Delete only this workspace's rows. Other workspaces sharing the same
         // physical store keep their data. Cascade deletes handle checkpoint_changes
         // via foreign keys; operations are deleted directly.
@@ -2346,7 +2392,10 @@ export const createWorkspaceRecoveryEngine = (
         const checkpointsResult = database.prepare('DELETE FROM checkpoints WHERE workspace_id = ?').run(workspaceId);
         recordsDeleted += checkpointsResult.changes;
         // Delete operations for this workspace.
-        const operationsResult = database.prepare("DELETE FROM operations WHERE workspace_id = ? AND kind = 'combined'").run(workspaceId);
+        const operationsResult = database.prepare(`
+          DELETE FROM operations WHERE workspace_id = ?
+          AND (kind = 'combined' OR (kind = 'integration' AND state IN ('complete', 'conflict', 'compensated', 'aborted')))
+        `).run(workspaceId);
         recordsDeleted += operationsResult.changes;
         database.prepare("DELETE FROM object_references WHERE workspace_id = ? AND owner_kind IN ('checkpoint-change', 'operation', 'operation-file')").run(workspaceId);
         database.prepare('DELETE FROM metadata WHERE key IN (?, ?)')
@@ -2420,93 +2469,6 @@ export const createWorkspaceRecoveryEngine = (
     return fileRow.phase;
   };
 
-  const reconcileInterruptedIntegration = async (
-    database: SqliteDatabase,
-    row: OperationRow,
-    root: string,
-  ): Promise<void> => {
-    const fileRows = operationFileRows(database, row.id);
-    let hasNeedsAttention = false;
-    let hasTargetObserved = false;
-    let hasCompensateIntent = false;
-
-    for (const fileRow of fileRows) {
-      const abs = pathModule.resolve(root, fileRow.path);
-      let diskKind = 'missing';
-      try {
-        const st = await fsPromises.lstat(abs);
-        if (st.isSymbolicLink()) diskKind = 'symlink';
-        else if (st.isFile()) diskKind = 'regular-file';
-        else if (st.isDirectory()) diskKind = 'directory';
-      } catch {}
-
-      const targetState = fileRow.target_json ? JSON.parse(fileRow.target_json) as RecoveryState : null;
-      const safetyState = fileRow.safety_json
-        ? JSON.parse(fileRow.safety_json) as RecoveryState
-        : fileRow.expected_json
-        ? JSON.parse(fileRow.expected_json) as RecoveryState
-        : null;
-
-      let phase = fileRow.phase;
-      if (phase === 'apply-intent') {
-        if (targetState && targetState.kind === diskKind) {
-          phase = 'target-observed';
-          updateOperationFilePhase(database, row.id, fileRow.path, 'target-observed');
-        } else if (safetyState && safetyState.kind === diskKind) {
-          // Still at safety state
-        } else {
-          phase = 'needs-attention';
-          updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
-        }
-      } else if (phase === 'compensate-intent') {
-        if (safetyState && safetyState.kind === diskKind) {
-          phase = 'safety-observed';
-          updateOperationFilePhase(database, row.id, fileRow.path, 'safety-observed');
-        } else if (targetState && targetState.kind === diskKind) {
-          // Still at target
-        } else {
-          phase = 'needs-attention';
-          updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
-        }
-      }
-
-      fileRow.phase = phase;
-      if (phase === 'needs-attention') hasNeedsAttention = true;
-      if (phase === 'target-observed') hasTargetObserved = true;
-      if (phase === 'compensate-intent') hasCompensateIntent = true;
-    }
-
-    const now = new Date().toISOString();
-    if (hasNeedsAttention) {
-      database.prepare("UPDATE operations SET state = 'needs-attention', updated_at = ? WHERE id = ?").run(now, row.id);
-    } else if (hasTargetObserved || hasCompensateIntent) {
-      let compensationFailed = false;
-      for (const fileRow of fileRows) {
-        if (fileRow.phase === 'target-observed' || fileRow.phase === 'compensate-intent') {
-          const abs = pathModule.resolve(root, fileRow.path);
-          const safetyState = fileRow.safety_json
-            ? JSON.parse(fileRow.safety_json) as RecoveryState
-            : fileRow.expected_json
-            ? JSON.parse(fileRow.expected_json) as RecoveryState
-            : null;
-          try {
-            if (!safetyState || safetyState.kind === 'missing') {
-              await fsPromises.rm(abs, { recursive: true, force: true }).catch(() => {});
-            }
-            updateOperationFilePhase(database, row.id, fileRow.path, 'safety-observed');
-          } catch {
-            updateOperationFilePhase(database, row.id, fileRow.path, 'needs-attention');
-            compensationFailed = true;
-          }
-        }
-      }
-      const finalState = compensationFailed ? 'needs-attention' : 'compensated';
-      database.prepare("UPDATE operations SET state = ?, updated_at = ? WHERE id = ?").run(finalState, now, row.id);
-    } else {
-      database.prepare("UPDATE operations SET state = 'aborted', updated_at = ? WHERE id = ?").run(now, row.id);
-    }
-  };
-
   const resumeUnfinished = async (): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const registrations = await documents.listWorkspaceRegistrations();
     const resolved: WorkspaceCombinedRecoveryOperation[] = [];
@@ -2548,8 +2510,9 @@ export const createWorkspaceRecoveryEngine = (
       try {
         const rows = database.prepare(`
           SELECT * FROM operations WHERE kind = 'combined'
+          AND workspace_id = ?
           AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention')
-        `).all() as OperationRow[];
+        `).all(workspaceId) as OperationRow[];
         for (const row of rows) {
           const record = parseCombinedOperationRecord(row);
           if (record.state === 'planned') continue;
@@ -2610,19 +2573,13 @@ export const createWorkspaceRecoveryEngine = (
           }
           resolved.push(publicOperation(record));
         }
-        const integrationRows = database.prepare(`
-          SELECT * FROM operations WHERE kind = 'integration'
-          AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict')
-        `).all() as OperationRow[];
-        for (const row of integrationRows) {
-          try {
-            await reconcileInterruptedIntegration(database, row, storage.root);
-          } catch (error) {
-            database.prepare(`
-              UPDATE operations SET state = 'needs-attention', updated_at = ? WHERE id = ?
-            `).run(new Date().toISOString(), row.id);
-          }
-        }
+        await reconcileInterruptedIntegrationOperations({
+          database,
+          fileStore,
+          identity,
+          resourceOperationGate: resourceOperationGateFor(workspaceId),
+          root: storage.root,
+        });
       } finally {
         database.close();
         await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));
@@ -2792,6 +2749,28 @@ export const createWorkspaceRecoveryEngine = (
       };
     }),
     storageStatus: (workspaceId?: string) => safe(async () => ({ status: 'ready', storage: await storageStatusInternal(workspaceId) })),
+    withWorkspaceStorage: <T>(
+      workspaceId: string,
+      accessOptions: { mode: "exclusive" | "shared"; purpose: string; create?: boolean },
+      operation: (context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
+    ): Promise<T> => runWorkspace(workspaceId, async () => {
+      const identity = await inspectIdentity(workspaceId);
+      const storage = await storageFor(identity, accessOptions.create !== false);
+      const database = accessOptions.create === false
+        ? await openExistingCatalog(storage.root)
+        : await openWritableCatalog(storage.root);
+      try {
+        return await operation({
+          database,
+          fileStore,
+          identity,
+          resourceOperationGate: resourceOperationGateFor(workspaceId),
+          root: storage.root,
+        });
+      } finally {
+        database.close();
+      }
+    }, { mode: accessOptions.mode, purpose: accessOptions.purpose }),
     dispose: async () => {
       if (disposed) return;
       disposed = true;

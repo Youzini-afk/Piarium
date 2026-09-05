@@ -15,7 +15,7 @@ Last updated: 2026-09-05
 | `default-on` | 代码对普通用户默认启用；正式能力完成生产接线与相关正确性验证后在同一交付中启用，不再要求独立回放或测试者批准（D-078） |
 
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
-Default-on 列只记当前代码，设计新默认单独列为待实施；本次文档修改不改变任何实现或启用勾选。
+Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -34,9 +34,10 @@ provider 请求；用户改动后的 LSP 诊断、当前 blocks、context usage 
 worker 响应送达后推进 observation/thread cursors 已接生产路径。它不改变 assist/default-off，也不把本地 faux-provider 证据当作
 外部语义验证；具体边界见下表。
 
-**D-078 采用正式实施与默认交付政策。** explore、记忆维护/按覆盖接管、自动 review 的回放启用门槛已撤销；工作状态独立于目录、
-内容寻址结果、草稿基线、物化与 Integration 是正式目标。本次只改文档，当前 memory/compaction 默认仍关闭，explore/review
-仍未接线，原生工作状态及默认值迁移尚未实现。旧测试者/独立 baseline 要求不再作为它们的 Blocker。
+**D-078 的正式实施与默认交付政策保持。D-079 修复实际数据链路。** 磁盘 explore 默认接入真实 Documents 正文，原生结果与集成
+使用实际 recovery storage。旧实现曾把 helper、构造器和测试总数当作完整交付，本表已按真实消费者重新校准；窗口草稿、无目录工具、
+双修订预览与完整空间治理仍是待完成行为。memory 缺省 shadowMode 已改为 true（assist），显式关闭保持；压缩接管及自动 review
+的剩余工作分别见矩阵，不再以独立 baseline 或测试者许可阻止交付。
 
 ## 矩阵
 
@@ -67,7 +68,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.1** 知识库 v1（TriviumDB） | host knowledge | ✓ | ✓（按工作区懒加载） | `knowledge/store.test.ts`；`store.smoke.test.ts`（Node 加载构建产物，CI `test:node-smoke`） | ✓（仅被 todo / recall 使用） | — | TQL 与全零向量约束已写入设计 7.5（D-019/D-020）；Electron asar 打包 smoke 未做 |
 | **2.2** Zone 2 组装 | host / pi-host | ✓ | ✓ | `host/zone2.test.ts`；`knowledge/context-runtime.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（Documents 用户写入在下一真实 Pi turn 出现、event cursor 不重复、system 不变） | ✓ | 无材料时不追加消息 | user terminal 尚缺 shell integration；Git 与 prompt-relevant accepted knowledge 已接 |
 | **2.3** host 观察者 | host knowledge | ✓ | ✓（Documents + user-change LSP + Git status） | `documents/authority.test.ts`（提交后通知且观察失败不反噬写入）；`knowledge/context-runtime.test.ts`（多会话 fan-out、agent 过滤、诊断因果、raw Git status → workspace → event → Zone 2 与去重）；`git-status.test.ts` / `git-status-runtime.test.ts`（最小投影与 Documents workspace 解析）；`git/routes.test.ts` / `workspace-routes.test.ts`（两个生产刷新边界且 observer 失败不反噬）；`session-e2e.test.ts`（Documents 纵切） | ✓（已接部分） | 观察失败只降级本轮上下文并记录 Host 错误；不新增 Git 轮询 | user terminal 需要 shell integration 才有可靠的逐命令/退出码；Git 外部变化在现有 status 下一次刷新时可见，不声称后台实时；Harness shell / agent 自身事件不重复进 Zone 2（D-054） |
-| **2.4** 记忆 agent assist（旧称 shadow） | protocol / pi-host / host / ui | ✓ | ✓（用户显式开启） | `memory-agent-extension.test.ts`；`phase2-e2e.test.ts`（Host 校验并顺序 apply）；`session-e2e.test.ts`（当前模型真实后台调用、块落盘且 memory_edit 不进主对话）；`context-routes.test.ts` / `harnessBlockPresentation.test.ts`（鉴权、用户编辑、UI 投影） | ✗（当前 Settings 仍默认关闭） | 不维护块，Pi 行为不变 | D-078 默认模式/旧设置迁移、辅助调用费用/失败投影与事件加速待接；缓存收益未测只作优化信息，不再要求 T4 才启用 |
+| **2.4** 记忆 agent assist（旧称 shadow） | protocol / pi-host / host / ui | ✓ | ✓ | `memory-agent-extension.test.ts`；`phase2-e2e.test.ts`（Host 校验并顺序 apply）；`session-e2e.test.ts`（当前模型后台调用、块落盘且 memory_edit 不进主对话）；`context-routes.test.ts` / `harnessBlockPresentation.test.ts` | ✓（缺省 shadowMode:true；保留显式 false） | 用户关闭时不维护块 | assist 不等于压缩接管；辅助调用费用/失败投影与事件加速待接；缓存收益未测只作优化信息 |
 | **2.5** `todo` / `plan` 块 | host / pi-host / ui | ✓ | ✓ | `host/todo-tool.test.ts`；`pi-host/test/harness/todo-tool.test.ts`（当前低置信度真 UI、同会话只问一次、取消不写 Host）；`phase2-e2e.test.ts`；session state 侧栏可见可编辑（D-046） | ✓ | 不注册 | D-078 将默认低置信度确认改为用户显式审批策略，尚未改代码 |
 | **2.6** 接管压缩 | host / pi-host | ✓ | ✓（能力存在，当前默认关闭） | `host/compaction.test.ts`（assist 交还 Pi；显式 takeover 接管）；`session-e2e.test.ts`（显式测试设置接管）；`pi-hooks-contract.test.ts`（D-022）；D-076 覆盖测试见下表 | ✗ | Pi 默认压缩 | 默认接线/设置迁移、必要来源可读状态与压缩后版本化恢复待补；无覆盖/错分支仍只回退该次请求，取消独立回放门槛（D-078） |
 | **2.7** 知识建议 / 审阅托盘 / 取代链 | host / ui | ✓ | ✓（全部 user-mark + memory decisions） | `knowledge-suggestions.test.ts`（同 scope 取代与状态）；`context-routes.test.ts`（UI auth、workspace/user 创建→编辑→原子接受/驳回、409、取代链）；`decision-suggestions.test.ts`（committed previous/current、结构化新增、历史/驳回去重、用户块忽略）；`recall-tool.test.ts`（user store scope）；`harnessKnowledgePresentation.test.ts` / `HarnessKnowledgeReviewSection.test.tsx`（双 scope id、malformed、编辑与候选渲染）；`RememberKnowledgeButton.test.ts` / `PiTimelineEntries.renderMode.test.tsx`（持久 user/assistant/tool 来源）；`piariumEvents.test.ts`（失效通知） | ✓（用户显式动作；memory shadow 开启时 decisions） | 未标记且 memory shadow 关闭时零写入、零模型调用；建议未接受不参与 recall | 配置 suggestions model 后的用户消息提议、Settings 全量知识/取代链管理未接（D-058/D-060/D-061） |
@@ -75,9 +76,9 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.9** 模型槽位 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-model-slots.test.ts`、`roles.test.ts`（统一 fallback）；`pi-host/test/harness/counter-tracker.test.ts` 与 `session-e2e.test.ts`（reader / permissionJudge 真请求归因）；`harnessCounterPresentation.test.ts`；Harness Settings 与 Context sidebar 生产入口 | ✓（依赖能力各自按配置启用） | 未配置辅助槽位不注册或走无 LLM 路径；仅 hardImplement / review 明示回退主模型 | 三套预设从已连接 provider 的真实 model id 匹配且只填空槽位；线程角色的 model/token 由 `ThreadRun` 记录，不在父 SessionStats 双计 |
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；显式审阅/写入已接，Settings 全量知识管理仍待 2.7 |
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✓（file/symbol/defines） | `knowledge/store.test.ts`（真实节点、defines edges、代际替换、坏 range 不破坏旧图）；`symbol-runtime.test.ts`（Documents post-commit → LSP → graph、buffer 不覆盖、unavailable 保留、delete、嵌套 symbols） | ✓（随 Documents mutation） | 未知语言只 touch file；LSP unavailable 保留最后图，ready 空结果才清空 | 不做启动全仓扫描；references/calls/imports 边未接，需基于 LSP 请求成本设计批处理/背压（D-059） |
-| **3.2** `explore` 管线 | pi-host Coordinator / host Engine | ✓ | ✓ | `host/explore.test.ts`（20，含 workspaceScope 传递、signal 中断、unavailable 映射、outputStore 分页落盘与 handle 返回、多行切片 [startLine, endLine] 提取）；`pi-host/src/harness/explore-tool.ts`；`harness-services.ts` | ✓ | 不注册 | —（可用链路已验证并接通生产 bridge） |
+| **3.2** `explore` 磁盘检索纵切 | pi-host tool / host Engine | ✓ | ✓ | `explore.test.ts`；`explore-service.test.ts`（真实 rg、Documents、多路径/scope、会话 OutputStore）；`pi-host/test/harness/session-e2e.test.ts`（真实 Pi：连续正文/revision/handle、查询后文件修改与删除） | ✓ | 来源失败返回具体缺口；全部正文不可用则报错 | LSP 结构展开、上下文覆盖、窗口草稿与模型增强尚未接通；已删除未使用的 Host 模型/向量/PageRank 桩 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
-| **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`（真实持久 Pi child、父 blocks、冻结模型/工具/scope、报告）；`thread-worktree.test.ts`（真实 Git、dirty baseline、zero-commit/non-Git 复制后端、reclaim/rematerialize、result branch/commit、冲突、.snapshot 目录隔离与删除清理）；`thread-runtime.test.ts`（含通过 resolveIntegrationCoordinator 委托版本化集成）；`thread-registry.test.ts`；`path-authority.test.ts` / `search-service.test.ts`；`phase3-e2e.test.ts`；`zone2-threads.test.ts`（含 overlapWarning 计算与折叠渲染）；`thread-runtime-capability.test.ts`；`runtime-dispatcher-session-launch.test.ts`；`session-delete-coordinator.test.ts` | ✓（Web/Application Host） | Host 未声明 harnessThreads 时不注册 | zero-commit 生命周期与非 Git 复制后端已贯通；快照固定至 .snapshot 隔离；条件补偿、用户编辑保护与 TOCTOU 父盘校验已落盘；设置层级对齐 .pi 与 agentDir；生产已接入 WorkingStateStore 与 IntegrationCoordinator；scope 非 OS 沙箱 |
+| **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`；`thread-worktree.test.ts`（Git/non-Git、不可变 copy 修订、回收重建）；`thread-runtime.test.ts`；`thread-registry.test.ts`；`phase3-e2e.test.ts`；`worktree-reclaim-guard.test.ts`（真实 Documents 写者屏障与编辑器）；`thread-worktree-settings.test.ts`（Pi projectTrusted、显式配置与失败） | ✓（Web/Application Host） | Host 未声明 harnessThreads 时不注册 | 内部目录仍在 Run 启动时物化；空间总预算、完整结果验证记录、窗口草稿/虚拟工具与归档 UI 待接；scope 非 OS 沙箱 |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
 | **3.7** review 传感器 | host | ✓ | ✗ | `host/review-sensor.test.ts`（6，含对父不可见） | — | — | 未挂 agent_settled、结果修订/用量与 review Zone 2；D-078 要求接通后默认不阻断运行，不等 T4 |
 | **3.8** LSP 导航工具 | protocol / host / pi-host | ✓ | ✓ | `host/lsp-nav.test.ts`（真实 fixture LanguageSupervisor、编辑器 buffer 不覆盖、版本/一基位置/三态）；`lsp-tools.test.ts`；`thread-runtime-capability.test.ts`（握手能力门） | ✓（Web/Application Host） | Host 不声明 `harnessLspNavigation` 时四个工具不注册 | `symbols` 需一个代表文件路径来选择语言 provider；未知后缀明确 unavailable（D-051） |
@@ -88,8 +89,8 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.2** Smart fallback | pi-host | ✓ | ✓ | `session-e2e.test.ts`（配置槽位后真实模型调用）；`permission-gate-extension.test.ts`（普通 ask 可放行、高风险不调用 judge） | 用户选择后 | 无槽位时不可选、判断失败时 ask | 插件活跃时应使用其显式 `authorizerChain`，原生 Smart 不参与裁决 |
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 可选配对回放记录器 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor、记录、配对与失败分类） | — | 不运行不产生模型请求/设置变化 | 自动执行尚缺单会话配置；只有实际安排配对时才需要，不再阻塞其他功能或默认启用（D-078） |
-| **3.4a** 内容寻址工作分支与按需物化 | host / protocol / pi-host / ui | ✓ | ✓ | `working-state/working-state-store.test.ts`（4，SHA-256 内容寻址、分支、提交、目录快照与磁盘持久化及重载）；`working-state/materializer.test.ts`（4，物化、权限、软链与移除文件清理）；`working-state/draft-baseline.test.ts`（2，草稿基线整合、编辑覆盖与删除） | ✓ | 当前 Git worktree/resultCommit | 生产已在 index.ts 实例化 WorkingStateStore 接入生命周期；完整空间策略与引用保留按需执行 |
-| **3.5a** 版本化 Integration 与合并预览 | host / protocol / ui | ✓ | ✓ | `working-state/three-way-merge.test.ts`（13 用例：二进制检测、三方文本合并、冲突标记注入、结构冲突）；`working-state/integration-coordinator.test.ts`（7 用例：干净应用、文本冲突标记、I/O失败条件补偿回退、用户后续编辑安全保护不被覆盖并报告 needs-attention、TOCTOU 父盘漂移防冲撞、apply-intent 意图日志与 safetyJson、崩溃对账与恢复）；`recovery/journal-catalog.test.ts`（17 用例：持久化事务日志）；`recovery/journal-engine.ts`（启动对账恢复 interrupted integration） | ✓ | 当前合并流程 | 生产已在 index.ts 提供 resolveIntegrationCoordinator 并在 thread-runtime.ts 委托 mergeWorktree；验证绑定与双修订预览进一步丰富 |
+| **3.4a** 内容寻址工作分支与结果物化 | host / protocol | ✓ | ✓（磁盘分支） | `working-state/working-state-store.test.ts`（持久重载、固定多修订、独立引用、物化匹配）；`working-state/materializer.test.ts`；`thread-runtime.test.ts`（真实存储发布）；`thread-worktree.test.ts` | ✓（隔离线程） | 旧 Git base/resultCommit 是导入来源；不作为正常合并写入旁路 | 草稿 helper 有单测但无 surface 正文调用链；Merkle 结构/无目录工具、跨平台 CoW、完整预算与引用释放 UI 尚未交付 |
+| **3.5a** 固定修订 Integration 与条件恢复 | host / protocol | ✓ | ✓ | `working-state/three-way-merge.test.ts`；`working-state/integration-coordinator.test.ts`（固定结果、类型/mode、故障补偿、真实 Documents 保存排队、共享存储隔离、冲突重试）；`pi-host/test/harness/thread-runtime-session.e2e.test.ts`（父 Pi 选择旧结果 → checkpoint → 撤销）；`recovery/journal-catalog.test.ts` | ✓（原生磁盘合并） | 恢复失败保留具体路径与 needs-attention；不回到旧 git apply | 双修订投机预览、独立冲突解决 UI 与验证绑定尚未交付；文本检查不保证行为兼容 |
 
 ## 当前缺口与后续顺序
 
@@ -100,16 +101,17 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | 2.4 记忆写入 | 已实现并接线：block 以 source leaf 修订，活动祖先路径按 label 解析最近值；后代 copy-on-write，删除写 tombstone；create/update/delete 原子 CAS；keeper 仅 mark plan；todo、Zone 2、UI、memory、compaction、thread snapshot 共用 Host 解析的分支视图 | `memory-agent.test.ts` 覆盖后代更新、兄弟隔离、tombstone、同 label 折叠、create 竞态与顺序 op；`context-routes.test.ts` 覆盖 Host 自动分支。真实用户多分支与语义质量仍由测试者验证 |
 | 2.6 覆盖与证据 | 已实现并接线：coverage 使用 keeper 实际 context entry ID；removed range 按上次 boundary 与本次 first-kept 计算，缺失/不全回退；partial patch 不推进；水位在 Host 内存，重启丢失不冒充持久 checkpoint | `compaction-extension.test.ts`、`compaction.test.ts`、`phase2-e2e.test.ts` 保留机械覆盖证据；当前代码默认关闭，新默认/来源/恢复按 D-078 接线，语义质量在使用中优化 |
 | 3.9 / 线程观察 | 已实现并接线到 worker 送达边界：observation 使用单调 revision CAS；pending 跨 clear 失效；Router success commit / failure abort；shell、diagnostics、Zone 2 threads、thread list/wait 延迟推进，线程游标按 eventSeq 防倒退 | cursor/router/phase3 focused tests 已覆盖并发、固定时钟、clear、响应失败与增量行为。确认只到 pi-host 响应，不宣称 tool result 已耐久落盘；更强 acknowledgement 仍待独立纵切 |
-| 窗口读取 / 3.2 | 已实现并接线：explore 管线完整贯通，传递 workspaceScope 与 signal 级联取消，unavailable 错误映射，outputStore 溢出分页与 handle 返回，基于 readFile 连续多行范围 [startLine, endLine] 切片；pi-host 默认注册 explore 工具；草稿基线支持从编辑器 buffer 快照读取 | `host/explore.test.ts`（20）覆盖范围与取消、多行切片；`explore-tool.ts`、`select-tools.ts` 接通真实调用链；headless 读磁盘 |
+| 窗口读取 / 3.2 | 已接通的是磁盘正文：Host 经 actor 路径授权与 Documents 读取 revision，核对搜索命中是否仍存在，返回真实连续片段、partial/issues 与当前会话 handle；草稿正文传输没有生产调用链 | `explore-service.test.ts` 与真实 Pi `session-e2e.test.ts` 覆盖修改/删除、范围、正文和句柄；`draft-baseline.test.ts` 仅证明输入快照已有时的转换，不证明能从窗口取得正文 |
 | T4 / 执行配置 | 无单会话覆盖与完整实际配置记录；record-only 未实现；Workbench/Agent Profile 职责分开 | 单会话配置和归因随相关能力完成，record-only/T4 非前置；不要求完整跨 runtime RunManifest |
-| 结果与集成 | 已实现并接线：固定结果消费，逐路径三方合并，TOCTOU 盘面状态前置防冲撞检查，修改前记录 apply-intent 意图与 safetyJson，条件补偿安全检查（仅当磁盘内容仍等于本次写入时才回退，用户后续编辑安全保留并报告 needs-attention），持久化事务日志落盘到 SQLite 与 JSON；journal-engine 启动自动恢复中断的 integration；index.ts 与 thread-runtime.ts 真实委托 IntegrationCoordinator.mergeWorktree；thread-services.ts 真实返回 appliedPaths、status 与 diffStats | `integration-coordinator.test.ts`（7）覆盖合并、冲突标记、条件补偿、用户编辑保护、TOCTOU 防冲撞、apply-intent、崩溃对账；`three-way-merge.test.ts`（13）；`journal-catalog.test.ts`（17）；`working-state-store.test.ts`（4）覆盖持久化与重载 |
-| 物化生命周期 | 已实现并接线：zero-commit 与非 Git 复制后端已贯通，快照固定至 .snapshot 隔离且快照前清空旧目录，reclaim/materialize 目录重建与文件保留，合并正确消费 untracked/changedFiles 并彻底清理已删除文件的父盘残留；动态 worktree settings 对齐 readPiConfigLayers（.pi/settings.json 与 agentDir/settings.json），取消硬编码超时；Zone 2 支持 active 线程 overlapWarning 预警；materializer.ts 与 draft-baseline.ts 模块健全交付 | `thread-worktree.test.ts` 覆盖零提交/非 Git 线程的完整生命周期（prepare/reclaim/materialize/merge、快照目录隔离、删除清理）；`materializer.test.ts`（4）；`draft-baseline.test.ts`（2）；`zone2-threads.test.ts` 覆盖重叠路径警告与折叠 |
+| 结果与集成 | 基线与结果从原生对象读取，merge 选择固定 resultRevision，只处理 changedPaths；实际 recovery storage/catalog/lease 负责日志与对象。最终操作与父回合 checkpoint 同事务，已有冲突重试不叠加标记。最终比较/写入/补偿与同一 Documents 实例的保存共用资源队列；默认不改 index | 真实文件/故障注入与 Pi 会话测试；Pi e2e 使用 faux provider、手工提供 broker actor/turn 生命周期适配，未启动完整桌面。资源队列不覆盖独立 Harness 路径租约、直接 fs/命令、其他实例与外部进程 |
+| 物化生命周期 | Git/非 Git 结果已独立发布；copy snapshot 按修订保留，不清空旧版本。先保存结果、关闭 session，再持有 Documents 写者屏障回收；活跃写者、编辑器或未收集内容保留目录并记录原因。设置来自父 Pi settings.get 与 projectTrusted，坏配置不吞成默认 | `thread-worktree.test.ts`、`thread-runtime.test.ts`、`worktree-reclaim-guard.test.ts`、`thread-worktree-settings.test.ts`、`working-state/git-migration.test.ts`；未分类的 setup/ignored 产物会保留目录，Git filters/LFS 的 blob/checkout 适配、完整预算、CoW 与归档 UI 仍待实施 |
 | `check` | 现有角色含 bash 且 shared，具备命令执行能力 | 不称只读 agent，不阻止测试/构建正常生成文件；不新增统一副本要求 |
 
-**D-078 本地实施证据**：
-- 全量单元测试：Host harness 测试套件 `390 passed, 1 skipped (Windows symlink), 0 failed`（37 个文件）；pi-host 测试套件 `138 passed, 0 failed`；working-state 套件 `30 passed, 0 failed`（5 个文件：three-way-merge 13、integration-coordinator 7、materializer 4、working-state-store 4、draft-baseline 2）；recovery 套件 `71 passed, 0 failed`（3 个文件：engine 30、journal-catalog 17、piRecoveryPolicy 24）。
-- 全单体与跨包类型校验：根目录 `bun run type-check` 全包 0 错误（含 protocol、pi-host、runtime-broker、settings-store、ui、web、electron、cli、sdk 等所有 monorepo 子包及 exactOptionalPropertyTypes 校验）。
-- 工程文档与链接校验：`bun run test:docs` 19/19 全通过；`git diff --check` 无格式异常。
+**D-079 本地实施证据**：最终 Host 定向组覆盖 working-state、线程、explore、Documents 与 recovery，共 21 个文件，228 项通过，
+1 项 Windows 符号链接权限跳过。Protocol 71 项；Pi 线程 service/bridge 8 项、能力门 3 项；真实 Pi 原生线程测试文件 2 项、explore
+纵切 3 项通过。测试使用本地 faux provider，没有执行真实付费模型或完整桌面 smoke；不以旧报告的全仓数字代替当前证据。
+Protocol、pi-host 与 Application Host 类型检查通过，Host 构建与本轮修改文件 ESLint 通过；工程文档测试 19 项、文档链接校验
+和 git diff --check 通过。未重复运行无关平台或全仓测试。
 
 **D-076 本地证据**：protocol 70/70；关键 Host focused（分支/CAS/coverage/cursor/router/route/thread）全通过；pi-host 关键纵切 38/38；UI block projection 2/2；protocol/pi-host/UI/
 Application Host type-check 与四包 lint、文档 19/19、链接校验、`git diff --check` 通过。扩大并行运行时 Host 另有 3 个计时用例、

@@ -1,310 +1,402 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  RecoveryState,
-  RegularFileState,
-  SymlinkState,
-  WorkingBranch,
-  WorkingResult,
-} from "./types.js";
-import type { SqliteDatabase } from "../../recovery/journal-catalog.js";
-import {
-  replaceObjectReferences,
-  deleteObjectReferences,
-} from "../../recovery/journal-catalog.js";
+import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
+import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
+import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
+import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
+import type { RecoveryState, WorkingBranch, WorkingResult } from "./types.js";
+import { materializeWorkingState } from "./materializer.js";
 
-export interface WorkingStateStoreOptions {
-  storageDir: string;
-  database?: SqliteDatabase | undefined;
-  fsPromises?: typeof fs.promises | undefined;
-  pathModule?: typeof path | undefined;
+const SCHEMA_VERSION = 1;
+const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
+
+interface WorkingStateDocument {
+  schemaVersion: typeof SCHEMA_VERSION;
+  workspaceId: string;
+  branches: Record<string, WorkingBranch>;
+  results: Record<string, WorkingResult>;
 }
 
+export interface WorkingStateStoreOptions extends WorkspaceRecoveryStorageContext {
+  fsPromises?: typeof fs.promises;
+  pathModule?: typeof path;
+}
+
+export interface WorkspaceWorkingStateAccess {
+  withStore<T>(
+    workspaceId: string,
+    purpose: string,
+    operation: (store: WorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
+    mode?: "exclusive" | "shared",
+  ): Promise<T>;
+}
+
+const clone = <T>(value: T): T => structuredClone(value);
+const normalizeRelative = (value: string): string => {
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`Invalid working-state path: ${value}`);
+  }
+  return normalized;
+};
+
+const parseStates = (value: unknown, label: string): Record<string, RecoveryState> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  return Object.fromEntries(Object.entries(value).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
+};
+
+const parseBranch = (value: unknown, key: string, workspaceId: string): WorkingBranch => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working branch ${key} is malformed`);
+  const row = value as Record<string, unknown>;
+  if (row.branchId !== key || row.workspaceId !== workspaceId || !Number.isSafeInteger(row.headRevision)
+    || Number(row.headRevision) < 0 || typeof row.createdAt !== "string" || typeof row.updatedAt !== "string"
+    || (row.baseRef !== undefined && typeof row.baseRef !== "string")) {
+    throw new Error(`Working branch ${key} is malformed`);
+  }
+  return {
+    branchId: key,
+    workspaceId,
+    ...(row.baseRef === undefined ? {} : { baseRef: row.baseRef as string }),
+    baseState: parseStates(row.baseState, `Working branch ${key} baseline`),
+    deltas: parseStates(row.deltas, `Working branch ${key} deltas`),
+    headRevision: row.headRevision as number,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+};
+
+const parseResult = (value: unknown, key: string): WorkingResult => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working result ${key} is malformed`);
+  const row = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(row.resultRevision) || Number(row.resultRevision) <= 0 || typeof row.branchId !== "string"
+    || key !== `${row.branchId}@${row.resultRevision}` || !Array.isArray(row.changedPaths)
+    || !(row.changedPaths as unknown[]).every((entry) => typeof entry === "string")
+    || typeof row.createdAt !== "string" || !row.diffStats || typeof row.diffStats !== "object") {
+    throw new Error(`Working result ${key} is malformed`);
+  }
+  const diff = row.diffStats as Record<string, unknown>;
+  if (![diff.files, diff.insertions, diff.deletions].every((entry) => typeof entry === "number" && Number.isFinite(entry))) {
+    throw new Error(`Working result ${key} diff stats are malformed`);
+  }
+  const changedPaths = (row.changedPaths as string[]).map(normalizeRelative);
+  const baseStates = parseStates(row.baseStates, `Working result ${key} baseline`);
+  const pathStates = parseStates(row.pathStates, `Working result ${key} paths`);
+  if (changedPaths.some((file) => !baseStates[file] || !pathStates[file])) {
+    throw new Error(`Working result ${key} does not contain every changed path`);
+  }
+  return {
+    resultRevision: row.resultRevision as number,
+    branchId: row.branchId,
+    ...(typeof row.parentRef === "string" ? { parentRef: row.parentRef } : {}),
+    changedPaths,
+    baseStates,
+    pathStates,
+    diffStats: { files: diff.files as number, insertions: diff.insertions as number, deletions: diff.deletions as number },
+    createdAt: row.createdAt,
+  };
+};
+
 export class WorkingStateStore {
-  private readonly storageDir: string;
-  private readonly objectsDir: string;
-  private readonly database?: SqliteDatabase | undefined;
+  private readonly context: WorkspaceRecoveryStorageContext;
   private readonly fsPromises: typeof fs.promises;
   private readonly pathModule: typeof path;
+  private readonly catalogPath: string;
+  private document: WorkingStateDocument;
 
-  private readonly branches = new Map<string, WorkingBranch>();
-  private readonly results = new Map<string, WorkingResult>();
-
-  constructor(options: WorkingStateStoreOptions) {
-    this.storageDir = options.storageDir;
-    this.pathModule = options.pathModule ?? path;
-    this.objectsDir = this.pathModule.join(this.storageDir, "objects");
-    this.database = options.database;
+  private constructor(options: WorkingStateStoreOptions, document: WorkingStateDocument) {
+    this.context = options;
     this.fsPromises = options.fsPromises ?? fs.promises;
-    this.loadMetadata();
+    this.pathModule = options.pathModule ?? path;
+    this.catalogPath = this.pathModule.join(options.root, "working-state", catalogName(options.identity.workspaceId));
+    this.document = document;
   }
 
-  private loadMetadata(): void {
+  static async open(options: WorkingStateStoreOptions): Promise<WorkingStateStore> {
+    const catalogPath = (options.pathModule ?? path).join(options.root, "working-state", catalogName(options.identity.workspaceId));
+    let raw: unknown;
     try {
-      const branchesFile = this.pathModule.join(this.storageDir, "branches.json");
-      if (fs.existsSync(branchesFile)) {
-        const raw = fs.readFileSync(branchesFile, "utf8");
-        const parsed = JSON.parse(raw);
-        for (const [k, v] of Object.entries(parsed)) {
-          this.branches.set(k, v as WorkingBranch);
-        }
-      }
-      const resultsFile = this.pathModule.join(this.storageDir, "results.json");
-      if (fs.existsSync(resultsFile)) {
-        const raw = fs.readFileSync(resultsFile, "utf8");
-        const parsed = JSON.parse(raw);
-        for (const [k, v] of Object.entries(parsed)) {
-          this.results.set(k, v as WorkingResult);
-        }
-      }
-    } catch {
-      // Best effort load
+      raw = await readRecoveryJsonAtomic(catalogPath, { fsPromises: options.fsPromises ?? fs.promises });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      raw = null;
     }
+    if (raw === null) {
+      return new WorkingStateStore(options, {
+        schemaVersion: SCHEMA_VERSION,
+        workspaceId: options.identity.workspaceId,
+        branches: {},
+        results: {},
+      });
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
+    const record = raw as Record<string, unknown>;
+    if (record.schemaVersion !== SCHEMA_VERSION || record.workspaceId !== options.identity.workspaceId
+      || !record.branches || typeof record.branches !== "object" || Array.isArray(record.branches)
+      || !record.results || typeof record.results !== "object" || Array.isArray(record.results)) {
+      throw new Error("Working-state catalog schema or workspace identity is malformed");
+    }
+    const branches = Object.fromEntries(Object.entries(record.branches as Record<string, unknown>)
+      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId)]));
+    const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
+      .map(([key, value]) => [key, parseResult(value, key)]));
+    return new WorkingStateStore(options, { schemaVersion: SCHEMA_VERSION, workspaceId: options.identity.workspaceId, branches, results });
   }
 
-  private persistMetadata(): void {
-    try {
-      if (!fs.existsSync(this.storageDir)) {
-        fs.mkdirSync(this.storageDir, { recursive: true });
-      }
-      const branchesFile = this.pathModule.join(this.storageDir, "branches.json");
-      const resultsFile = this.pathModule.join(this.storageDir, "results.json");
-      const branchesObj = Object.fromEntries(this.branches.entries());
-      const resultsObj = Object.fromEntries(this.results.entries());
-      fs.writeFileSync(branchesFile, JSON.stringify(branchesObj, null, 2), "utf8");
-      fs.writeFileSync(resultsFile, JSON.stringify(resultsObj, null, 2), "utf8");
-    } catch {
-      // Best effort persist
-    }
+  private references(states: Record<string, RecoveryState>, prefix: string) {
+    return Object.entries(states).flatMap(([file, state]) => state.kind === "regular-file"
+      ? [{ slot: `${prefix}:${file}`, objectHash: state.objectHash }]
+      : []);
   }
 
-  private objectPath(hash: string): string {
-    const raw = hash.startsWith("sha256-") ? hash.slice(7) : hash;
-    const prefix = raw.slice(0, 2);
-    const remainder = raw.slice(2);
-    return this.pathModule.join(this.objectsDir, prefix, remainder);
+  private protectBranch(branch: WorkingBranch): void {
+    replaceObjectReferences(this.context.database, branch.workspaceId, "work-branch", branch.branchId, [
+      ...this.references(branch.baseState, "base"),
+      ...this.references(branch.deltas, "delta"),
+    ]);
+  }
+
+  private protectResult(result: WorkingResult): void {
+    replaceObjectReferences(this.context.database, this.document.workspaceId, "thread-result", `${result.branchId}@${result.resultRevision}`, [
+      ...this.references(result.baseStates, "base"),
+      ...this.references(result.pathStates, "result"),
+    ]);
+  }
+
+  private async persist(next: WorkingStateDocument, protect: () => void): Promise<void> {
+    this.context.database.transaction(protect).immediate();
+    await writeRecoveryJsonAtomic(this.catalogPath, next, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    this.document = next;
   }
 
   async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
-    const hex = createHash("sha256").update(bytes).digest("hex");
-    const hash = `sha256-${hex}`;
-    const target = this.objectPath(hash);
-    await this.fsPromises.mkdir(this.pathModule.dirname(target), { recursive: true });
+    const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+    const target = objectPath(this.context.root, hash);
+    await this.fsPromises.mkdir(this.pathModule.dirname(target), { recursive: true, mode: 0o700 });
     try {
-      await this.fsPromises.stat(target);
-    } catch {
-      await this.fsPromises.writeFile(target, bytes);
+      const existing = await this.fsPromises.readFile(target);
+      const actual = `sha256-${createHash("sha256").update(existing).digest("hex")}`;
+      if (actual !== hash) throw new Error(`Working-state object is corrupt: ${hash}`);
+      return { hash, byteLength: bytes.length };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const staging = this.pathModule.join(this.context.root, "staging", `${randomUUID()}.working-object`);
+    await this.fsPromises.mkdir(this.pathModule.dirname(staging), { recursive: true, mode: 0o700 });
+    let handle: fs.promises.FileHandle | undefined;
+    try {
+      handle = await this.fsPromises.open(staging, "wx", 0o600);
+      await handle.writeFile(bytes);
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      try {
+        await this.fsPromises.rename(staging, target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        await this.fsPromises.rm(staging, { force: true });
+      }
+    } finally {
+      await handle?.close().catch(() => undefined);
+      await this.fsPromises.rm(staging, { force: true }).catch(() => undefined);
     }
     return { hash, byteLength: bytes.length };
   }
 
   async getObject(hash: string): Promise<Buffer | null> {
-    const target = this.objectPath(hash);
     try {
-      return await this.fsPromises.readFile(target);
-    } catch {
-      return null;
+      const bytes = await this.fsPromises.readFile(objectPath(this.context.root, hash));
+      const actual = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+      if (actual !== hash) throw new Error(`Working-state object is corrupt: ${hash}`);
+      return bytes;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   }
 
-  async hasObject(hash: string): Promise<boolean> {
-    const target = this.objectPath(hash);
-    try {
-      await this.fsPromises.stat(target);
-      return true;
-    } catch {
-      return false;
-    }
+  getBranch(branchId: string): WorkingBranch | null {
+    const branch = this.document.branches[branchId];
+    return branch ? clone(branch) : null;
   }
 
-  createBranch(
-    workspaceId: string,
-    branchId: string,
-    baseState: Record<string, RecoveryState> = {},
-    baseRef?: string,
-  ): WorkingBranch {
+  getResult(branchId: string, revision: number): WorkingResult | null {
+    const result = this.document.results[`${branchId}@${revision}`];
+    return result ? clone(result) : null;
+  }
+
+  resultState(branchId: string, revision: number): Record<string, RecoveryState> | null {
+    const branch = this.document.branches[branchId];
+    const result = this.document.results[`${branchId}@${revision}`];
+    if (!branch || !result) return null;
+    return { ...clone(branch.baseState), ...clone(result.pathStates) };
+  }
+
+  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string): Promise<WorkingBranch> {
+    if (workspaceId !== this.document.workspaceId) throw new Error(`Working-state workspace mismatch: ${workspaceId}`);
+    const existing = this.document.branches[branchId];
+    if (existing) return clone(existing);
     const now = new Date().toISOString();
     const branch: WorkingBranch = {
       branchId,
       workspaceId,
-      baseRef,
-      baseState: { ...baseState },
+      ...(baseRef ? { baseRef } : {}),
+      baseState: clone(baseState),
       deltas: {},
       headRevision: 0,
       createdAt: now,
       updatedAt: now,
     };
-    this.branches.set(branchId, branch);
-    this.protectBranchObjects(branch);
-    this.persistMetadata();
-    return branch;
+    const next = clone(this.document);
+    next.branches[branchId] = branch;
+    await this.persist(next, () => this.protectBranch(branch));
+    return clone(branch);
   }
 
-  getBranch(branchId: string): WorkingBranch | null {
-    return this.branches.get(branchId) ?? null;
+  async importFixedResult(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, resultState: Record<string, RecoveryState>, changedPaths: string[], parentRef?: string): Promise<WorkingResult> {
+    let branch = this.document.branches[branchId];
+    if (!branch) branch = await this.createBranch(workspaceId, branchId, baseState, parentRef);
+    return this.publishStates(branchId, resultState, changedPaths);
   }
 
-  updateBranchDeltas(
-    branchId: string,
-    deltas: Record<string, RecoveryState>,
-  ): WorkingBranch {
-    const branch = this.branches.get(branchId);
+  async publishStates(branchId: string, capturedState: Record<string, RecoveryState>, knownChangedPaths?: string[]): Promise<WorkingResult> {
+    const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-
-    branch.deltas = { ...branch.deltas, ...deltas };
-    branch.updatedAt = new Date().toISOString();
-    this.protectBranchObjects(branch);
-    this.persistMetadata();
-    return branch;
-  }
-
-  commitRevision(
-    branchId: string,
-    changedPaths: string[],
-  ): WorkingResult {
-    const branch = this.branches.get(branchId);
-    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-
-    branch.headRevision += 1;
-    const rev = branch.headRevision;
-
-    // Collect effective path states for this revision
-    const pathStates: Record<string, RecoveryState> = {};
-    for (const p of changedPaths) {
-      pathStates[p] = branch.deltas[p] ?? branch.baseState[p] ?? { kind: "missing" };
+    const candidates = knownChangedPaths
+      ? [...new Set(knownChangedPaths.map(normalizeRelative))]
+      : [...new Set([...Object.keys(branch.baseState), ...Object.keys(capturedState)])];
+    const changedPaths = candidates.filter((file) => !sameState(
+      branch.baseState[file] ?? { kind: "missing" },
+      capturedState[file] ?? { kind: "missing" },
+    )).sort();
+    const baseStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
+      file,
+      clone(branch.baseState[file] ?? { kind: "missing" as const }),
+    ]));
+    const pathStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
+      file,
+      clone(capturedState[file] ?? { kind: "missing" as const }),
+    ]));
+    const previous = this.document.results[`${branchId}@${branch.headRevision}`];
+    if (previous && previous.changedPaths.length === changedPaths.length
+      && previous.changedPaths.every((file, index) => file === changedPaths[index]
+        && sameState(previous.baseStates[file]!, baseStates[file]!)
+        && sameState(previous.pathStates[file]!, pathStates[file]!))) {
+      return clone(previous);
     }
-
+    const revision = branch.headRevision + 1;
     const result: WorkingResult = {
-      resultRevision: rev,
+      resultRevision: revision,
       branchId,
-      parentRef: branch.baseRef,
-      changedPaths: [...changedPaths],
+      ...(branch.baseRef ? { parentRef: branch.baseRef } : {}),
+      changedPaths,
+      baseStates,
       pathStates,
-      diffStats: {
-        files: changedPaths.length,
-        insertions: 0,
-        deletions: 0,
-      },
+      diffStats: { files: changedPaths.length, insertions: 0, deletions: 0 },
       createdAt: new Date().toISOString(),
     };
-
-    this.results.set(`${branchId}@${rev}`, result);
-    this.protectResultObjects(branch.workspaceId, branchId, rev, result);
-    this.persistMetadata();
-    return result;
+    const next = clone(this.document);
+    next.branches[branchId] = { ...clone(branch), deltas: clone(pathStates), headRevision: revision, updatedAt: result.createdAt };
+    next.results[`${branchId}@${revision}`] = result;
+    await this.persist(next, () => {
+      this.protectBranch(next.branches[branchId]!);
+      this.protectResult(result);
+    });
+    return clone(result);
   }
 
-  getResult(branchId: string, revision: number): WorkingResult | null {
-    return this.results.get(`${branchId}@${revision}`) ?? null;
-  }
-
-  deleteBranch(workspaceId: string, branchId: string): void {
-    this.branches.delete(branchId);
-    if (this.database) {
-      deleteObjectReferences(this.database, workspaceId, "work-branch", branchId);
-    }
-    this.persistMetadata();
-  }
-
-  deleteResult(workspaceId: string, branchId: string, revision: number): void {
-    this.results.delete(`${branchId}@${revision}`);
-    if (this.database) {
-      deleteObjectReferences(this.database, workspaceId, "thread-result", `${branchId}@${revision}`);
-    }
-    this.persistMetadata();
-  }
-
-  private protectBranchObjects(branch: WorkingBranch): void {
-    if (!this.database) return;
-    const refs: Array<{ slot: string; objectHash: string }> = [];
-    for (const [path, state] of Object.entries(branch.deltas)) {
-      if (state.kind === "regular-file") {
-        refs.push({ slot: `delta:${path}`, objectHash: state.objectHash });
+  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[]): Promise<WorkingResult> {
+    if (!changedPaths) return this.publishStates(branchId, await this.captureDirectory(directory));
+    const branch = this.document.branches[branchId];
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const changed = changedPaths.map(normalizeRelative);
+    const ancestors = changed.flatMap((file) => {
+      const result: string[] = [];
+      let parent = this.pathModule.posix.dirname(file);
+      while (parent !== "." && parent !== "/") {
+        result.push(parent);
+        parent = this.pathModule.posix.dirname(parent);
       }
-    }
-    replaceObjectReferences(this.database, branch.workspaceId, "work-branch", branch.branchId, refs);
+      return result;
+    });
+    const candidates = [...new Set([...Object.keys(branch.baseState), ...changed, ...ancestors])];
+    return this.publishStates(branchId, await this.captureDirectory(directory, candidates), candidates);
   }
 
-  private protectResultObjects(
-    workspaceId: string,
-    branchId: string,
-    revision: number,
-    result: WorkingResult,
-  ): void {
-    if (!this.database) return;
-    const refs: Array<{ slot: string; objectHash: string }> = [];
-    for (const [path, state] of Object.entries(result.pathStates)) {
-      if (state.kind === "regular-file") {
-        refs.push({ slot: `result:${path}`, objectHash: state.objectHash });
-      }
-    }
-    replaceObjectReferences(
-      this.database,
-      workspaceId,
-      "thread-result",
-      `${branchId}@${revision}`,
-      refs,
-    );
+  async materializeResult(branchId: string, revision: number, directory: string): Promise<void> {
+    const states = this.resultState(branchId, revision);
+    if (!states) throw new Error(`Working result not found: ${branchId}@${revision}`);
+    await materializeWorkingState({
+      targetDir: directory,
+      states,
+      readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
+      cleanUnreferenced: true,
+      fsPromises: this.fsPromises,
+      pathModule: this.pathModule,
+    });
   }
 
-  /**
-   * Captures path states from an existing directory (fallback or non-git workspaces).
-   */
-  async captureDirectory(
-    root: string,
-    relativePaths?: string[],
-  ): Promise<Record<string, RecoveryState>> {
+  async directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean> {
+    const expected = this.resultState(branchId, revision);
+    if (!expected) return false;
+    const files = await this.scanDirectoryRelative(directory);
+    const candidates = new Set([...Object.keys(expected), ...files]);
+    const identity = { ...this.context.identity, canonicalRoot: directory };
+    for (const file of candidates) {
+      const actual = (await this.context.fileStore.captureState(identity, this.context.root, file, { store: false })).state;
+      if (!sameState(actual, expected[file] ?? { kind: "missing" })) return false;
+    }
+    return true;
+  }
+
+  async deleteBranch(branchId: string): Promise<void> {
+    if (!this.document.branches[branchId]) return;
+    const next = clone(this.document);
+    delete next.branches[branchId];
+    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "work-branch", branchId));
+  }
+
+  async deleteResult(branchId: string, revision: number): Promise<void> {
+    const key = `${branchId}@${revision}`;
+    if (!this.document.results[key]) return;
+    const next = clone(this.document);
+    delete next.results[key];
+    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "thread-result", key));
+  }
+
+  async captureDirectory(directory: string, relativePaths?: string[]): Promise<Record<string, RecoveryState>> {
     const result: Record<string, RecoveryState> = {};
-    const pathsToScan = relativePaths ?? (await this.scanDirectoryRelative(root));
-
-    for (const rel of pathsToScan) {
-      const abs = this.pathModule.resolve(root, rel);
-      try {
-        const info = await this.fsPromises.lstat(abs);
-        if (info.isSymbolicLink()) {
-          const target = await this.fsPromises.readlink(abs);
-          result[rel] = { kind: "symlink", symlinkTarget: target, mode: info.mode };
-        } else if (info.isDirectory()) {
-          result[rel] = { kind: "directory", mode: info.mode };
-        } else if (info.isFile()) {
-          const bytes = await this.fsPromises.readFile(abs);
-          const { hash, byteLength } = await this.putObject(bytes);
-          result[rel] = { kind: "regular-file", objectHash: hash, byteLength, mode: info.mode };
-        } else {
-          result[rel] = { kind: "unsupported" };
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          result[rel] = { kind: "missing" };
-        } else {
-          result[rel] = { kind: "unsupported" };
-        }
-      }
+    const files = relativePaths?.map(normalizeRelative) ?? await this.scanDirectoryRelative(directory);
+    const identity = { ...this.context.identity, canonicalRoot: directory };
+    for (const file of files) {
+      const captured = await this.context.fileStore.captureState(identity, this.context.root, file, { store: true });
+      result[file] = captured.state;
     }
-
     return result;
   }
 
-  private async scanDirectoryRelative(dir: string, baseDir = dir): Promise<string[]> {
-    const list: string[] = [];
-    let entries: fs.Dirent[];
-    try {
-      entries = await this.fsPromises.readdir(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
+  private async scanDirectoryRelative(directory: string, base = directory): Promise<string[]> {
+    const result: string[] = [];
+    const entries = await this.fsPromises.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const full = this.pathModule.join(dir, entry.name);
-      const rel = this.pathModule.relative(baseDir, full).replace(/\\/g, "/");
+      if (entry.name === ".git" || entry.name === ".piarium") continue;
+      const absolute = this.pathModule.join(directory, entry.name);
+      const relative = normalizeRelative(this.pathModule.relative(base, absolute));
       if (entry.isDirectory()) {
-        const sub = await this.scanDirectoryRelative(full, baseDir);
-        list.push(...sub);
+        result.push(relative);
+        result.push(...await this.scanDirectoryRelative(absolute, base));
       } else {
-        list.push(rel);
+        result.push(relative);
       }
     }
-    return list;
+    return result.sort();
   }
 }
+
+export const createWorkspaceWorkingStateAccess = (recovery: Pick<WorkspaceRecoveryEngine, "withWorkspaceStorage">): WorkspaceWorkingStateAccess => ({
+  withStore: (workspaceId, purpose, operation, mode = "exclusive") => recovery.withWorkspaceStorage(
+    workspaceId,
+    { mode, purpose },
+    async (context) => operation(await WorkingStateStore.open(context), context),
+  ),
+});

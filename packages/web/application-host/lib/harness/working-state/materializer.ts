@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { RecoveryState, RegularFileState, SymlinkState } from "./types.js";
+import type { RecoveryState } from "./types.js";
 import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
 
 export interface MaterializeOptions {
@@ -106,6 +106,14 @@ export async function materializeWorkingState(
     }
 
     if (state.kind === "directory") {
+      try {
+        const existing = await fsPromises.lstat(absPath);
+        if (!existing.isDirectory() || existing.isSymbolicLink()) {
+          await fsPromises.rm(absPath, { recursive: true, force: true });
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       await fsPromises.mkdir(absPath, { recursive: true });
       if (preservePermissions && state.mode !== undefined) {
         await fsPromises.chmod(absPath, state.mode).catch(() => {});
@@ -114,6 +122,14 @@ export async function materializeWorkingState(
     } else if (state.kind === "regular-file") {
       const parentDir = pathModule.dirname(absPath);
       await fsPromises.mkdir(parentDir, { recursive: true });
+      try {
+        const existing = await fsPromises.lstat(absPath);
+        if (!existing.isFile() || existing.isSymbolicLink()) {
+          await fsPromises.rm(absPath, { recursive: true, force: true });
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
 
       const content = await readContent(state);
       if (content === null) {

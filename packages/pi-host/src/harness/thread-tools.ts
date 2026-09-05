@@ -63,6 +63,7 @@ const ThreadReadParams = Type.Object({
 
 const ThreadMergeParams = Type.Object({
   threadId: Type.String(),
+  resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Published result revision to integrate; defaults to the thread's latest result." })),
 });
 
 const ThreadKillParams = Type.Object({
@@ -252,7 +253,7 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
   return defineTool({
     name: "merge",
     label: "Merge",
-    description: "Merge a completed sub-agent thread's worktree diff into the parent. Reports whether Git left conflict entries or kept the parent unchanged.",
+    description: "Integrate a completed sub-agent's published result into the parent. Reports applied paths, conflicts, and any recovery required.",
     promptSnippet: "merge: merge a completed teammate's changes into your worktree",
     promptGuidelines: [],
     parameters: ThreadMergeParams,
@@ -261,9 +262,10 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
       try {
         const result = await bridge.request<"thread.merge">("thread.merge", {
           threadId: params.threadId,
+          ...(params.resultRevision !== undefined ? { resultRevision: params.resultRevision } : {}),
         });
         const typed = result as ThreadMergeResult;
-        return { content: [{ type: "text", text: typed.text }], details: { merged: typed.merged, conflicts: typed.conflicts } };
+        return { content: [{ type: "text", text: typed.text }], details: { merged: typed.merged, conflicts: typed.conflicts, status: typed.status, appliedPaths: typed.appliedPaths, operationId: typed.operationId, resultRevision: typed.resultRevision } };
       } catch (error) {
         return threadErrorResult("merge", error);
       }
@@ -275,8 +277,8 @@ export function createKillTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "kill",
     label: "Kill",
-    description: "Kill a sub-agent thread. Default keeps worktree (half-finished work is never lost).",
-    promptSnippet: "kill: stop a teammate; worktree is kept by default",
+    description: "Stop a sub-agent and retain its published work. Idle materializations can be reclaimed after the result is saved; keep_worktree explicitly preserves the directory.",
+    promptSnippet: "kill: stop a teammate; published work is retained",
     promptGuidelines: [],
     parameters: ThreadKillParams,
     executionMode: "sequential",

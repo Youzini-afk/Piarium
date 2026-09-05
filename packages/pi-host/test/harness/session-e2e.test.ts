@@ -38,6 +38,9 @@ import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/applic
 import { createWebSearchService } from "../../../web/application-host/lib/harness/web-search.js";
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
+import { createExploreFileReader } from "../../../web/application-host/lib/harness/explore-file-reader.js";
+import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
+import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";
 
 import { SessionHost } from "../../src/session-host.js";
 
@@ -589,6 +592,197 @@ describe("session e2e — configured web search", () => {
         assert.match(finalToolResult, /authority boundaries/);
       } finally {
         await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+// ── Explore ─────────────────────────────────────────────────────────
+
+/**
+ * Connect the real Documents reader and ripgrep search to setupSession. The
+ * regular session fixture intentionally has an empty search provider, so these
+ * tests opt into the same Host-side services used by the application host.
+ */
+async function createExploreFixture(root: string) {
+  const workspaceRoot = join(root, "explore-workspace");
+  await mkdir(workspaceRoot, { recursive: true });
+  const documents = createDocumentAuthority({
+    hostId: "explore-session-e2e-host",
+    dataDir: join(root, "document-data"),
+    isAllowedRoot: async () => true,
+    isTrusted: async () => true,
+  });
+  const identity = await documents.resolveWorkspace({ path: workspaceRoot });
+  const paths = createHarnessPathAuthority({
+    authorityId: "explore-session-e2e-authority",
+    documents,
+  });
+  const search = createWorkspaceContentSearch({ documents, pathModule: path, spawn });
+  return { documents, identity, paths, search, workspaceRoot };
+}
+
+describe("session e2e — explore", () => {
+  it("delivers a contiguous, versioned Documents excerpt and a usable output handle to the model", async () => {
+    await withTempRoot("piarium-s-explore-snapshot-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "target.ts"), [
+        "export const before = 1;",
+        "export const contextLine = 2;",
+        "export function needle() { return 3; }",
+        "export const after = 4;",
+      ].join("\n"), "utf8");
+      const faux = registerFauxProvider();
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("I found the current implementation.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: (request, options) => fixture.search.searchContent(request, options),
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        assert.ok(snapshot.activeTools.includes("explore"));
+        await session.host.prompt(snapshot.sessionId, "locate needle");
+        await session.host.session.waitForIdle();
+
+        assert.match(exploreResult, /target\.ts:1-4/);
+        assert.match(
+          exploreResult,
+          /export const before = 1;\\nexport const contextLine = 2;\\nexport function needle\(\) \{ return 3; \}\\nexport const after = 4;/,
+          "the model must receive the contiguous current excerpt",
+        );
+        assert.match(exploreResult, /revision d1_[A-Za-z0-9_-]+/);
+        assert.match(exploreResult, /Source: disk document snapshots/);
+        const handle = exploreResult.match(/Output: (out_[A-Za-z0-9_-]+)/)?.[1];
+        assert.ok(handle, "the model-visible result must contain the real output handle");
+        const stored = session.harnessServiceHost.outputStore.read(snapshot.sessionId, handle);
+        assert.equal(stored.status, "ready");
+        assert.match(stored.slice.text, /target\.ts:1-4/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("reports a stale changed hit as partial through the real Pi tool result", async () => {
+    await withTempRoot("piarium-s-explore-stale-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
+      await writeFile(join(fixture.workspaceRoot, "changed.ts"), "export const needle = \"before search\";", "utf8");
+      let searched = false;
+      const faux = registerFauxProvider();
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("The changed hit was omitted.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: async (request, options) => {
+            const result = await fixture.search.searchContent(request, options);
+            if (!searched && result.status === "ready") {
+              searched = true;
+              await writeFile(join(fixture.workspaceRoot, "changed.ts"), "export const replacement = \"current\";", "utf8");
+            }
+            return result;
+          },
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "find needle");
+        await session.host.session.waitForIdle();
+
+        assert.equal(searched, true, "the test must mutate the source after real search completes");
+        assert.match(exploreResult, /partial result/);
+        assert.match(exploreResult, /current\.ts/);
+        assert.match(exploreResult, /changed\.ts: stale/);
+        assert.doesNotMatch(exploreResult, /before search/);
+        assert.doesNotMatch(exploreResult, /replacement/);
+        assert.match(exploreResult, /Output: out_[A-Za-z0-9_-]+/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("reports a missing hit as an unavailable source gap through the real Pi tool result", async () => {
+    await withTempRoot("piarium-s-explore-missing-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
+      await writeFile(join(fixture.workspaceRoot, "missing.ts"), "export const needle = \"to be removed\";", "utf8");
+      let searched = false;
+      const faux = registerFauxProvider();
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("The missing hit was omitted.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: async (request, options) => {
+            const result = await fixture.search.searchContent(request, options);
+            if (!searched && result.status === "ready") {
+              searched = true;
+              await rm(join(fixture.workspaceRoot, "missing.ts"), { force: true });
+            }
+            return result;
+          },
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "find needle");
+        await session.host.session.waitForIdle();
+
+        assert.equal(searched, true, "the test must remove the source after real search completes");
+        assert.match(exploreResult, /partial result/);
+        assert.match(exploreResult, /current\.ts/);
+        assert.match(exploreResult, /missing\.ts: unavailable/);
+        assert.doesNotMatch(exploreResult, /to be removed/);
+        assert.match(exploreResult, /Output: out_[A-Za-z0-9_-]+/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
         faux.unregister();
       }
     });

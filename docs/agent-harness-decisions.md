@@ -1387,6 +1387,42 @@ withMergeWriter 在 index.ts 只注册 process writer，不是已接通的逐路
 
 状态：正式设计已采用；本次只修订文档与验证文档，未修改运行时代码、未切换用户设置、未执行迁移或付费实验。实现进度只看 status。
 
+### D-079 · 2026-09-05 · 修复工作状态、集成恢复与检索正文的真实调用链
+
+类型：实现修正（D-078 范围内）
+
+决定：保留既有 Thread/Run 和正式原生工作状态方向，替换 a08fbdd5/9b07c9be 中只有表面接线的实现。工作状态通过 recovery engine
+提供的可信 storage 访问取得当前实际存储位置、catalog、对象捕获与 workspace queue/lease；基线、结果和未完成集成各自登记引用，
+删除恢复历史不得删除它们。操作记录不再同时依赖 workspace 根目录猜测数据库和 best-effort JSON，写前保存真实内容对象与操作阶段。
+
+集成比较实际基线与选定子结果，只处理其变化路径；原始父内容、子内容和恢复内容按哈希读取，不按字节数或文件种类猜相等。Git
+和非 Git 使用同一结果/集成语义；非 Git 修订原子发布，重建/第二次捕获不能改变旧结果。默认逐路径集成不修改用户暂存区，不沿
+git apply --3way 产生额外 index 改动；已有用户 index 保持其自身状态。漂移、正常冲突、意外失败和重启后的条件恢复分别记录。
+这些检查协调受控调用，并不承诺对任意同用户外部进程提供 OS 原子比较交换。
+集成的最终比较、写入和补偿与同一 DocumentAuthority 实例的 Documents 读写/移动/删除共用规范路径资源队列；目录操作覆盖子树，
+无关路径仍可并行。Harness 路径租约、直接 fs/命令写入与其他 Host 实例的范围单独保持，不能把共享资源队列写成全部进程隔离。
+同一结果重试在父相关路径状态仍等于首次输出时复用原冲突操作，不再次写入标记，也不把旧操作的写入数算作本次新写入。
+
+补齐最终操作提交与父回合 checkpoint 的同事务绑定，避免“磁盘已合并、恢复历史没有这次变化”。日志阶段或最终提交失败必须进入
+条件补偿；未完成操作先恢复再计算新计划，不能先算 no-op 后回滚旧结果。重启只对当前工作区记录操作对应目录；显式删除恢复历史
+清除已完成 Integration 的恢复材料，保留工作分支/结果和仍待处理操作。文本合并按真实重叠区间与独立 mode 三方分类，无效 UTF-8
+按不透明内容处理；不可应用的符号链接权限不作为伪造的目标身份。
+
+setup 读取父 Pi 会话实际配置与 projectTrusted，不由 Host 绕过信任直接执行项目配置。目录删除期间持有现有 Documents 写入屏障，
+活跃进程和编辑器使用者保留目录；shell 注册写入者失败不得继续执行未登记命令。
+
+检索正文经 Documents 与 Host actor 路径 authority 读取，返回实际磁盘 revision/range。读取失败或搜索后内容变化不得回到
+“扩展行号加单行命中”的假片段；可用结果与具体缺口一起返回，全部不可读则明确不可用。确定性检索不保留未接线的 Host 模型、
+向量和 PageRank 桩；问题词项使用实际搜索、排序与当前片段，取消和多个请求路径贯通，不新增固定工具输出条数上限。
+
+原因：真实复现确认了父新增文件被当作子删除、空 hash 漏掉内容修改、选旧结果读到新 snapshot、恢复只比 kind 删除用户内容、
+Git 协调器立即 fallback，以及检索读取失败仍声明连续正文。单测总数和“已构造对象”不能证明这些行为成立。
+
+影响：Host working-state/thread/recovery、index 生产装配、相关 protocol/Pi 工具、explore 服务和 Documents reader；更新 status
+只记录实际调用与验证。窗口草稿/无目录工具等未接面按事实保留待做，不再以 helper 的存在标为交付。
+
+状态：方案已采用并进入实现；最终交付证据见 agent-harness-status.md。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1471,3 +1507,4 @@ withMergeWriter 在 index.ts 只注册 process writer，不是已接通的逐路
 | D-076 | implementation | — | agent-harness 8.4/8.7、status 2.4/2.6/3.9；protocol / pi-host / Host |
 | D-077 | superseded in part（生命周期保留；补原生状态/实际写者/ignored 保留，撤销猜测默认） | D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4；status |
 | D-078 | folded-in（用户重新授权；正式实施与默认交付） | — | agent-harness 1.3/2/6/8/9/12；plan 0.1/0.7/2/3；status；architecture |
+| D-079 | implementation（修复实际调用与数据正确性） | — | Host working-state/thread/recovery/explore；status |
