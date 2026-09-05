@@ -6,6 +6,11 @@ export interface HarnessSessionBlock {
   updatedAt: number;
 }
 
+export interface HarnessSessionBlockResponse {
+  blocks: HarnessSessionBlock[];
+  branchLeafId: string | null;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -27,3 +32,8 @@ export const parseHarnessSessionBlocks = (value: unknown): HarnessSessionBlock[]
     }];
   }).sort((left, right) => left.label.localeCompare(right.label));
 };
+
+export const parseHarnessSessionBlockResponse = (value: unknown): HarnessSessionBlockResponse => ({
+  blocks: parseHarnessSessionBlocks(value),
+  branchLeafId: isRecord(value) && typeof value.branchLeafId === 'string' ? value.branchLeafId : null,
+});

@@ -12,7 +12,7 @@ import {
   type HarnessThreadSnapshot,
   type HarnessThreadState,
 } from './harnessThreadPresentation';
-import { parseHarnessSessionBlocks, type HarnessSessionBlock } from './harnessBlockPresentation';
+import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
   harnessKnowledgeKey,
   parseHarnessKnowledgeSuggestions,
@@ -71,6 +71,7 @@ export const HarnessThreadsPanel: React.FC<{
   const unpinSource = useWebSourcesStore((state) => state.unpinSource);
   const deleteSource = useWebSourcesStore((state) => state.deleteSource);
   const [blocks, setBlocks] = React.useState<HarnessSessionBlock[]>([]);
+  const [blocksBranchLeafId, setBlocksBranchLeafId] = React.useState<string | null>(null);
   const [suggestions, setSuggestions] = React.useState<HarnessKnowledgeSuggestion[]>([]);
   const [knowledgeDrafts, setKnowledgeDrafts] = React.useState<Record<string, KnowledgeDraft>>({});
   const [knowledgeBusy, setKnowledgeBusy] = React.useState<string | null>(null);
@@ -113,11 +114,15 @@ export const HarnessThreadsPanel: React.FC<{
     if (!response.ok) {
       if (response.status === 404) {
         setBlocks([]);
+        setBlocksBranchLeafId(null);
         return;
       }
       throw new Error(`Unable to load session blocks (${response.status})`);
     }
-    setBlocks(parseHarnessSessionBlocks(await response.json()));
+    const body = await response.json();
+    const parsed = parseHarnessSessionBlockResponse(body);
+    setBlocks(parsed.blocks);
+    setBlocksBranchLeafId(parsed.branchLeafId);
   }, [parentSessionId]);
 
   const reloadKnowledge = React.useCallback(async (signal?: AbortSignal) => {
@@ -240,7 +245,11 @@ export const HarnessThreadsPanel: React.FC<{
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: blockDraft, expectedUpdatedAt: block.updatedAt }),
+          body: JSON.stringify({
+            content: blockDraft,
+            expectedUpdatedAt: block.updatedAt,
+            expectedBranchLeafId: blocksBranchLeafId,
+          }),
         },
       );
       if (response.status === 409) {
@@ -256,11 +265,12 @@ export const HarnessThreadsPanel: React.FC<{
     } finally {
       setSavingBlock(false);
     }
-  }, [blockDraft, parentSessionId, reloadBlocks, savingBlock, t]);
+  }, [blockDraft, blocksBranchLeafId, parentSessionId, reloadBlocks, savingBlock, t]);
 
   React.useEffect(() => {
     const controller = new AbortController();
     setBlocks([]);
+    setBlocksBranchLeafId(null);
     setSuggestions([]);
     setKnowledgeDrafts({});
     setEditingBlock(null);

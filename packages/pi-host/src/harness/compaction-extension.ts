@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { sessionEntryToContextMessages, type ExtensionFactory, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { CompactionBeforeResult, CompactionAfterParams } from "@piarium/protocol";
 
@@ -24,15 +24,44 @@ export interface CompactionExtensionOptions {
   bridge: HostServicesBridge;
 }
 
+export function deriveCompactionCoverage(
+  branchEntries: SessionEntry[],
+  firstKeptEntryId: string,
+): { branchEntryIds: string[]; removedEntryIds: string[] } | null {
+  const branchEntryIds = branchEntries.map((entry) => entry.id);
+  const firstKeptIndex = branchEntries.findIndex((entry) => entry.id === firstKeptEntryId);
+  if (firstKeptIndex < 0) return null;
+  const previousCompactionIndex = branchEntries.findLastIndex((entry) => entry.type === "compaction");
+  let boundaryStart = 0;
+  if (previousCompactionIndex >= 0) {
+    const previousCompaction = branchEntries[previousCompactionIndex]!;
+    const previousFirstKept = previousCompaction.type === "compaction"
+      ? branchEntries.findIndex((entry) => entry.id === previousCompaction.firstKeptEntryId)
+      : -1;
+    boundaryStart = previousFirstKept >= 0 ? previousFirstKept : previousCompactionIndex + 1;
+  }
+  const removedEntryIds = branchEntries
+    .slice(boundaryStart, firstKeptIndex)
+    .flatMap((entry) => (
+      entry.type !== "compaction" && sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
+    ));
+  return { branchEntryIds, removedEntryIds };
+}
+
 export function createCompactionExtension(options: CompactionExtensionOptions): ExtensionFactory {
   const { bridge } = options;
 
   return (pi) => {
     pi.on("session_before_compact", async (event) => {
       try {
+        const firstKept = event.preparation.firstKeptEntryId;
+        const coverage = deriveCompactionCoverage(event.branchEntries, firstKept);
+        if (!coverage || coverage.removedEntryIds.length === 0) return undefined;
         const result = await bridge.request<"compaction.before">("compaction.before", {
-          firstKeptEntryId: event.preparation.firstKeptEntryId,
+          firstKeptEntryId: firstKept,
           tokensBefore: event.preparation.tokensBefore,
+          branchEntryIds: coverage.branchEntryIds,
+          removedEntryIds: coverage.removedEntryIds,
         }, { timeoutMs: 5_000, signal: event.signal });
         const compaction = result as CompactionBeforeResult;
         // Only return { compaction } when firstKeptEntryId is non-empty.

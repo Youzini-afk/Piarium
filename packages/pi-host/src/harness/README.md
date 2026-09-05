@@ -61,7 +61,8 @@ if (isOpenAIFamily) {
   approval owner rather than two dialogs. Smart mode is part of this fallback.
 - `createMemoryAgentExtension` — user-enabled shadow observer. It captures the
   real session context at Pi hooks, calls the active model in the background,
-  and submits only `memory_edit` operations to Host validation. Its tool call
+  and submits only `memory_edit` operations plus the active ancestor path and
+  exact context-producing entry IDs to Host validation. Its tool call
   and response never enter the main conversation, and it does not enable
   compaction takeover.
 

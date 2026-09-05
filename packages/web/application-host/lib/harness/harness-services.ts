@@ -21,7 +21,7 @@ import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { applyOps } from "./memory-agent.js";
-import { projectZone2Threads } from "./zone2-threads.js";
+import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
@@ -56,7 +56,7 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
       const randomAccess = params.id.startsWith("out_") || params.offset !== undefined || params.length !== undefined;
       if (randomAccess) return supervisor.read(params.id, params.offset, params.length);
 
-      return host.observationCursors.observe<{ offset: number }, Awaited<ReturnType<typeof supervisor.read>> & {
+      const pending = await host.observationCursors.prepare<{ offset: number }, Awaited<ReturnType<typeof supervisor.read>> & {
         observation: NonNullable<import("@piarium/protocol").ShellReadResult["observation"]>;
       }>(ctx.sessionId, "shell", params.id, async (previous) => {
         const result = await supervisor.read(params.id, previous?.value.offset ?? 0);
@@ -74,6 +74,9 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
           },
         };
       });
+      if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pending.commit, pending.abort);
+      else pending.commit();
+      return pending.result;
     },
   };
 }
@@ -184,18 +187,22 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
         sinceTurn: params.sinceTurn,
         ...(params.afterEventId === undefined ? {} : { afterEventId: params.afterEventId }),
         ...(params.query === undefined ? {} : { query: params.query }),
+        ...(params.branchEntryIds === undefined ? {} : { branchEntryIds: params.branchEntryIds }),
         contextUsage: params.contextUsage ?? null,
       });
       let threads = null;
       if (host.threadRegistry && ctx.workspaceId) {
         try {
-          threads = await projectZone2Threads({
+          const pendingThreads = await prepareZone2Threads({
             registry: host.threadRegistry,
             cursors: host.observationCursors,
           }, {
             sessionId: ctx.sessionId,
             workspaceId: ctx.workspaceId,
           });
+          if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pendingThreads.commit, pendingThreads.abort);
+          else pendingThreads.commit();
+          threads = pendingThreads.result;
         } catch (error) {
           threads = {
             status: "unavailable" as const,
@@ -216,11 +223,23 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
         throw new HarnessServiceError("unavailable", "Compaction deps not configured");
       }
       const deps = await host.compactionDepsProvider(ctx.sessionId);
-      // Use Pi's preparation directly — no broker round-trip for entry ID
+      // Merge the host's keeperCoverageStore into the deps. The provider
+      // may not include it, but the host always has one (created by default
+      // in createHarnessServiceHost). This ensures the mandatory coverage
+      // check can run.
+      const depsWithCoverage = {
+        ...deps,
+        ...(deps.coverageStore ? {} : { coverageStore: host.keeperCoverageStore }),
+      };
       const result = await handleBeforeCompact(
         ctx.sessionId,
-        deps,
-        { firstKeptEntryId: params.firstKeptEntryId, tokensBefore: params.tokensBefore },
+        depsWithCoverage,
+        {
+          firstKeptEntryId: params.firstKeptEntryId,
+          tokensBefore: params.tokensBefore,
+          branchEntryIds: params.branchEntryIds,
+          removedEntryIds: params.removedEntryIds,
+        },
       );
       return result;
     },
@@ -232,6 +251,7 @@ export function createCompactionAfterService(host: HarnessServiceHost): HarnessS
     handle: async (_params, ctx: HarnessServiceContext) => {
       host.observationCursors.clearObserver(ctx.sessionId);
       host.threadRegistry?.clearCursorsForSession(ctx.sessionId);
+      host.keeperCoverageStore.clear(ctx.sessionId);
       host.onSessionCompacted?.(ctx.sessionId);
       return { acknowledged: true };
     },
@@ -240,16 +260,21 @@ export function createCompactionAfterService(host: HarnessServiceHost): HarnessS
 
 export function createMemoryBlocksGetService(host: HarnessServiceHost): HarnessService<"memory.blocks.get"> {
   return {
-    handle: async (_params, ctx) => {
+    handle: async (params, ctx) => {
       if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
       const deps = await host.memoryDepsProvider(ctx.sessionId);
-      const blocks = await deps.store.getBlocks(ctx.sessionId);
+      const blocks = await deps.store.getBlocks(
+        ctx.sessionId,
+        params.branchEntryIds,
+      );
       return {
         blocks: blocks.map((block) => ({
           label: block.label,
           content: block.content,
           updatedBy: block.updatedBy,
+          revision: block.updatedAt,
           ...(block.cursorTurn === undefined ? {} : { cursorTurn: block.cursorTurn }),
+          ...(block.sourceLeafId === undefined ? {} : { sourceLeafId: block.sourceLeafId }),
         })),
       };
     },
@@ -261,7 +286,27 @@ export function createMemoryBlocksApplyService(host: HarnessServiceHost): Harnes
     handle: async (params, ctx) => {
       if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
       const deps = await host.memoryDepsProvider(ctx.sessionId);
-      return applyOps(params.ops, deps.store, ctx.sessionId, params.cursorTurn, deps.settings);
+      // The source leaf is the last entry ID in the branch path — the
+      // current leaf at apply time. Blocks written here will be visible
+      // on this branch and its descendants via ancestor resolution.
+      const sourceLeafId = params.branchEntryIds && params.branchEntryIds.length > 0
+        ? params.branchEntryIds[params.branchEntryIds.length - 1]!
+        : null;
+      const branchSet = new Set(params.branchEntryIds);
+      if (params.coveredEntryIds.some((entryId) => !branchSet.has(entryId))) {
+        throw new HarnessServiceError("invalid-params", "Keeper coverage contains an entry outside the submitted branch");
+      }
+      const result = await applyOps(params.ops, deps.store, ctx.sessionId, params.cursorTurn, deps.settings, {
+        branchEntryIds: params.branchEntryIds,
+        sourceLeafId,
+      });
+      // Only a fully accepted, material block update can certify the context
+      // entries used for that update. Partial patches and no-op/stale results
+      // deliberately leave coverage unchanged so takeover falls back to Pi.
+      if (result.rejected === 0 && result.changedBlocks && params.coveredEntryIds.length > 0) {
+        host.keeperCoverageStore.extend(ctx.sessionId, params.coveredEntryIds);
+      }
+      return result;
     },
   };
 }
@@ -277,6 +322,7 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
         { items: params.items, ...(params.confidence !== undefined ? { confidence: params.confidence } : {}) },
         deps,
         params.confirmed === true,
+        params.branchEntryIds,
       );
       return {
         text: result.text,

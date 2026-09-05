@@ -380,9 +380,10 @@ context: 41% of window used
 - 设计：agent-harness.md 第 8.4.1 节。
 - 当前模型调度在 pi-host `src/harness/memory-agent-extension.ts`，Host `lib/harness/memory-agent.ts` 只校验和提交块操作。
   保留 `memory_edit` 与用户开启后使用活动模型的现状，不重建 Host 模型栈、不开展输出协议或缓存付费实验。
-- **先补正确性**：get 返回块修订及分支/来源区间，apply 携带读取时版本；Host 在同一写任务检查冲突、只允许 keeper 标记 plan 条目，
-  禁止整块 replace plan。分支改变或用户编辑后的旧结果不能提交；块修订与检查点一起落盘，部分失败不推进整段覆盖水位。
-  当前协议仅有 cursorTurn，所以上述状态仍是待实现。
+- **D-076 已接的正确性**：get 返回活动祖先路径上每个 label 最近的 block 修订；apply 携带读取时版本、来源 leaf 与实际 context entry。
+  Store 以 copy-on-write/tombstone 保留兄弟分支，create/update/delete 在写队列内 CAS，同一块多操作前传 revision；keeper 只可 mark plan。
+  UI route 从 Host 活动 Pi session 自动解析分支，todo、Zone 2、compaction、thread snapshot 同路。部分失败不推进覆盖；Host 崩溃只丢
+  内存水位并回退 Pi。真实多分支与语义质量仍需测试者验证。
 - 关闭保持默认；已有 `shadowMode:true` 对应 assist（块进入 Zone 2，Pi 压缩）。record-only 仅记录/展示、不注入主请求，待增加；
   takeover 需 2.6 的覆盖契约与测试者证据。模式迁移保留用户既有 assist 行为。
 
@@ -426,8 +427,8 @@ blocked. Emit edits through the memory_edit tool only.
   应用与校验：块名 `^[a-z][a-z0-9_-]{0,31}$`；`plan` 只接受 `mark_plan`；每块 ≤ `blockBudgetTokens`（默认 2000）；总量 ≤
   `totalBudgetTokens`（默认 12000），超出拒绝该 op 并记录；`updatedBy: 'memory-agent'`，`cursorTurn`。模型固定主模型。
 - pi-host 在本地评估门控；事件加速仍需接线。每次真实调用的用量、无效输出和失败都要归因，不能因为未更新块就漏计费用。
-- 测试：用户编辑后旧 patch/replace/delete 被拒；分支切换后迟到结果不写；plan 只能标状态；块与覆盖水位同次提交；部分失败不伪造
-  全段覆盖；record-only 不注入、assist 不接管。沿现有真 Pi faux-provider 骨架验证，不为此调用付费 provider。
+- 测试：用户编辑后旧 patch/replace/delete 被拒；后代更新不改兄弟、删除为 branch tombstone、同 label 只取最近祖先、create 并发不覆盖；
+  plan 只能标状态；partial apply 不推进覆盖；record-only 不注入、assist 不接管。沿现有真 Pi faux-provider 骨架验证，不调用付费 provider。
 - 判断要点：主 agent 不承担记忆维护；版本、分支、来源和费用必须诚实。门控参数先保持可配置现状，实际质量与缓存收益由测试者观察，
   不增加无定标的比例门槛，也不以缓存命中作为记忆正确性的前提。
 
@@ -471,9 +472,9 @@ last checkpoint: 2026-09-03T10:12Z
 </piarium-compaction>
 ```
 
-  `firstKeptEntryId` 只取 Pi 支持的安全切点，不自行按 K 步计算。候选 MemoryCheckpoint 至少表达分支祖先路径、连续处理区间、
-  sourceRefs、读取时块修订与提交后块修订；字段名在实现时按真实消费者定。块与水位原子提交，缺区间、错分支或必要来源不可用时
-  不接管；能用 Pi 安全切点保留缺口才调整，否则交还 Pi 默认压缩。不能只附 stale note 后删除缺口。
+  `firstKeptEntryId` 只取 Pi 支持的安全切点，不自行按 K 步计算。D-076 以 `buildContextEntries()` 的真实 context-producing entry IDs
+  记录 keeper 覆盖；压缩按上一次 Pi compaction boundary 与本次 first-kept 推导移除区间。缺区间、错分支、partial patch 或必要来源
+  不可用时不接管。水位在 block 成功后更新，崩溃窗口保守回退，不声称跨重启持久 checkpoint；不能只附 stale note 后删除缺口。
   压缩后重注入按实际请求中丢失的版本/片段与可用来源决定，仍是待实现；不把“最近 read 过这个路径”当成当前有效正文证明。
 - 触发：host 在子任务边界（测试 / 构建命令结束、`todo` 条目勾掉、上一步无工具）且 `contextUsage >= threshold`（默认 0.8）
   时调用 `ctx.compact()`；用户空闲超过 provider TTL 且积压时同样。压缩计数写入 Zone 2（`compactions: 3`）与 UI 信息条。
@@ -780,7 +781,7 @@ sendToThread(threadId, message, { from: 'user' | 'parent-agent' }); resumeThread
 
 - 设计：agent-harness.md 第 5.7、8.7、9.2.5b、9.2.6、9.3.6、9.3.7 节。
 - **观察游标（host）**：`threadViewCursors[(observerSessionId, threadId)] = { eventSeq; status; progressVersion; decisionsCount;
-  diffStats; viewedAt }`。`threads` / `wait` / `read_thread(steps)` 读后推进游标；`session_compact` 钩子把压缩事件报给 host
+  diffStats; viewedAt }`。`threads` / `wait` 在 Router 成功把结果交给 pi-host 后推进游标，失败允许重放；`session_compact` 钩子把压缩事件报给 host
   （经 1.1 的通道，`compaction.after` 方法）→ host 清空该会话的全部游标；用户面板是另一个观察者。
 - pi-host：
   - `dispatch(role, task, { scope? })`：`createThread({ role, kind: 'implementation', createdBy: 'agent', autoRun: true, … })`。角色
@@ -879,7 +880,8 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 
 - 设计：agent-harness.md 第 5.5、8.7 节。3.5 的线程游标是同一机制，本项把它推到其余观察类工具。
 - host：通用 `ObservationCursorStore`——键 `(observerSessionId, objectKind, objectId)`，值由对象类型定义；`compaction.after`
-  清空该会话全部游标。游标随对象实际销毁清理；当前 shell 为保留显式历史回看，退出且读尽后仍存活，到会话结束才与输出一起释放。
+  清空该会话全部游标。D-076 使用 store-local 单调 revision 做 prepare/commit CAS，pending 在 commit/abort 前受 namespace generation
+  保护；Router response 成功 commit、失败 abort。游标随对象实际销毁清理；当前 shell 到会话结束才与输出一起释放。
 - `get_output(shellId)`（无 `offset`）：返回上次读取之后的新输出，引头 `[shell ${id} · +${bytes} since last read (${ago}) ·
   ${running ? 'still running' : `exited ${code}`}]`；无新输出 → `[shell ${id} · no new output since last read (${ago}); ${running ?
   'still running' : 'exited'}; last output ${ago2}]`。显式 `offset` / `length` 是随机访问，不动游标。已完成的 `out_` 句柄保持
@@ -887,13 +889,15 @@ You can hand work to teammates with dispatch(role, task). Teammates: quick-imple
 - `diagnostics(path)` 重复查询：只报自上次以来新增与消失的条目，引头 `[${path} · +${added} −${resolved} since last check]`，全量加
   `full: true`。
 - 计数器：观察类调用次数（`threads` / `wait` / `read_thread` / `get_output` 无 offset / `diagnostics`）按会话累计，进诊断面板。
-- 测试：两次读取之间有 / 无新输出的文本；显式 offset 不动游标；压缩后第一次读取为全量；shell 退出后最后一次增量含退出码。
+- 测试：两次读取之间有 / 无新输出；显式 offset 不动游标；固定时钟与逆序提交不倒退；clear 后 pending 不复活；Router 发送失败不推进；
+  压缩后第一次读取为全量；shell 退出后最后一次增量含退出码。
 - 判断要点：这项的价值是让"再看一眼"几乎不占上下文，副作用是模型更愿意看——"无新输出"那一行的措辞和 `promptGuidelines`
   里"要等就用 wait / 不要循环查看"是防轮询的全部手段，不要加频率限制之类的机制。1.4 已交付的 `get_output` 是显式 offset
   语义，这里是加默认行为，不改已有参数。
 - **状态（2026-09-04）**：已接通并 proven。通用 Host 游标覆盖 shell/diagnostics，会话结束与压缩清理；后台 PTY 在 timeout 后
   继续采集并识别退出；`harness-e2e.test.ts` 已改掉旧的错误参数假绿，验证默认增量、退出码与诊断新增/消失。观察调用数进入现有
-  Context 侧栏。对象自动销毁尚无独立保留策略，当前随会话生命周期统一释放，不为此猜测额外上限（D-052）。
+  Context 侧栏。D-076 又把 shell/diagnostics/Zone 2 threads/thread list/wait 推进移到 worker 响应送达后；持久 tool-result entry
+  acknowledgement 仍是更强的后续边界。对象自动销毁尚无独立保留策略，当前随会话生命周期统一释放（D-052）。
 
 ### 3.10 线程侧栏与讨论线
 

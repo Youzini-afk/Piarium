@@ -155,6 +155,27 @@ describe("tool-result-truncation", () => {
     assert.equal(result.details.customField, "value");
     assert.ok(result.details.truncated);
   });
+
+  it("includes the ephemeral generation in the truncation marker", async () => {
+    const stored = new Map<string, string>();
+    const bridge = createFakeBridge(stored);
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 10, sessionId: "s1" })(pi as never);
+
+    const event = {
+      type: "tool_result",
+      toolName: "read",
+      content: [{ type: "text", text: "a".repeat(100) }],
+      details: undefined,
+      isError: false,
+    };
+    const result = await getHandler()!(event) as { content: Array<{ text: string }> };
+    const text = result.content[0]!.text;
+    // The truncation marker must include the ephemeral generation so consumers
+    // know the output is session-scoped and may be unavailable after restart.
+    assert.ok(text.includes("ephemeral"), `text should include 'ephemeral': ${text}`);
+    assert.ok(text.includes("generation"), `text should include 'generation': ${text}`);
+  });
 });
 
 

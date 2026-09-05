@@ -182,18 +182,18 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
         lastToolCall: { name: "read", at: new Date().toISOString() },
       });
 
-      const active = await harness.bridge.request("zone2.assemble", { sinceTurn: 0 });
+      const active = await harness.bridge.request("zone2.assemble", { sinceTurn: 0, branchEntryIds: [] });
       assert.match(active.content ?? "", /<threads>/);
       assert.match(active.content ?? "", new RegExp(`${thread.id}.*running.*2 steps`));
 
       await harness.threadRegistry.completeThread(WORKSPACE_ID, thread.id, report("zone2 complete"));
-      const completed = await harness.bridge.request("zone2.assemble", { sinceTurn: 1 });
+      const completed = await harness.bridge.request("zone2.assemble", { sinceTurn: 1, branchEntryIds: [] });
       assert.match(completed.content ?? "", /completed.*conclusion: zone2 complete/);
-      const unchanged = await harness.bridge.request("zone2.assemble", { sinceTurn: 2 });
+      const unchanged = await harness.bridge.request("zone2.assemble", { sinceTurn: 2, branchEntryIds: [] });
       assert.equal(unchanged.content, null);
 
       await harness.bridge.request("compaction.after", { summary: "summary", firstKeptEntryId: "entry", tokensBefore: 100 });
-      const reset = await harness.bridge.request("zone2.assemble", { sinceTurn: 3 });
+      const reset = await harness.bridge.request("zone2.assemble", { sinceTurn: 3, branchEntryIds: [] });
       assert.match(reset.content ?? "", /completed.*conclusion: zone2 complete/);
     } finally {
       await harness.dispose();

@@ -51,7 +51,7 @@ import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
-import { DEFAULT_COMPACTION_SETTINGS, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
+import { DEFAULT_COMPACTION_SETTINGS, createKeeperCoverageStore, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
@@ -1194,6 +1194,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       PATH: platformEnvironmentRuntime.buildAugmentedPath(),
     },
   });
+  const branchEntryIdsForSession = async (sessionId: string): Promise<string[]> => {
+    const branch = await piRuntimeBroker.requestForSession(sessionId, 'session.entries', {
+      sessionId,
+      scope: 'branch',
+    });
+    return branch.entries.map((entry) => entry.id);
+  };
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
@@ -1202,7 +1209,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readBlocks: async (sessionId) => {
       const store = await getKnowledgeStoreForSession(sessionId);
       if (!store) return null;
-      return (await store.getBlocks(sessionId)).map((block) => ({ label: block.label, content: block.content }));
+      return (await store.getBlocks(sessionId, await branchEntryIdsForSession(sessionId)))
+        .map((block) => ({ label: block.label, content: block.content }));
     },
     withMergeWriter: async (workspaceId, threadId, operation) => {
       const writer = await documentsAuthority.registerWriterForScope(
@@ -1274,6 +1282,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerHarnessContextRoutes(app, {
     getStore: getKnowledgeStoreForSession,
+    getBranchEntryIds: branchEntryIdsForSession,
     getUserStore: getUserKnowledgeStore,
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
@@ -1417,12 +1426,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Compaction deps provider — uses Pi's preparation (firstKeptEntryId /
   // tokensBefore) passed directly through the service params, no broker
   // round-trip for entry ID resolution.
+  // Keeper coverage store — shared between the compaction deps provider
+  // (which checks coverage before takeover) and the service host (which
+  // clears it on compaction.after and session drop).
+  const keeperCoverageStore = createKeeperCoverageStore();
+
   async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
     const store = await getKnowledgeStoreForSession(sessionId);
     if (!store) throw new Error('No knowledge store for session');
     return {
       store,
       settings: DEFAULT_COMPACTION_SETTINGS,
+      coverageStore: keeperCoverageStore,
       getFacts: async (): Promise<CompactionFacts> => ({
         touchedFiles: [],
         unresolvedDiagnostics: [],
@@ -1500,6 +1515,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
     memoryDepsProvider,
     compactionDepsProvider,
+    keeperCoverageStore,
     todoDepsProvider,
     recallDepsProvider,
     threadRegistry,

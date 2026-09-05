@@ -46,6 +46,7 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
         }
         const result = await bridge.request<"todo.upsert">("todo.upsert", {
           items: params.items,
+          branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
           ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
           ...(sessionConfirmed ? { confirmed: true } : {}),
         });

@@ -195,6 +195,48 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("commits deferred observation state only after the success response is delivered", async () => {
+    const commit = vi.fn();
+    const abort = vi.fn();
+    const router = createHarnessRouter({
+      respond: async () => undefined,
+      resolveActor: async () => resolvedActor(["read.output"]),
+    });
+    router.register("output.store", {
+      handle: async (_params, ctx) => {
+        ctx.deferResponseDelivery?.(commit, abort);
+        return { ref: { durability: "ephemeral", generation: "g", handle: "out_1" }, total: 1 };
+      },
+    });
+    await router.processEvent(harnessEvent("output.store", { text: "x" }));
+    expect(commit).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
+    router.dispose();
+  });
+
+  it("aborts deferred observation state when the success response cannot be delivered", async () => {
+    const commit = vi.fn();
+    const abort = vi.fn();
+    let responses = 0;
+    const router = createHarnessRouter({
+      respond: async () => {
+        responses += 1;
+        if (responses === 1) throw new Error("delivery failed");
+      },
+      resolveActor: async () => resolvedActor(["read.output"]),
+    });
+    router.register("output.store", {
+      handle: async (_params, ctx) => {
+        ctx.deferResponseDelivery?.(commit, abort);
+        return { ref: { durability: "ephemeral", generation: "g", handle: "out_1" }, total: 1 };
+      },
+    });
+    await router.processEvent(harnessEvent("output.store", { text: "x" }));
+    expect(abort).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    router.dispose();
+  });
+
   it("responds with unavailable for unknown method names", async () => {
     const responses: Array<{ ok: boolean; code?: string }> = [];
     const router = createHarnessRouter({

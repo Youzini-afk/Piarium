@@ -125,4 +125,39 @@ describe("output store", () => {
     })).rejects.toMatchObject({ harnessCode: "expired" });
     store.dispose();
   });
+
+  it("recovers the complete original output through paging (truncation recovery path)", () => {
+    const store = createStore();
+    // Simulate a large tool output that was truncated for the transcript
+    const fullText = "HEAD_LINE\n" + "x".repeat(100_000) + "\nTAIL_LINE";
+    const { ref, total } = store.store("session-1", fullText, "bash");
+    expect(total).toBe(Buffer.byteLength(fullText, "utf8"));
+
+    // The transcript only has a truncated preview, but the full text is
+    // recoverable through output.read with paging
+    let offset = 0;
+    let rebuilt = "";
+    while (offset < total) {
+      const result = store.read("session-1", ref.handle, offset, 32_768);
+      expect(result.status).toBe("ready");
+      if (result.status !== "ready") break;
+      rebuilt += result.slice.text;
+      offset = result.slice.nextOffset;
+    }
+    expect(rebuilt).toBe(fullText);
+    expect(rebuilt.startsWith("HEAD_LINE\n")).toBe(true);
+    expect(rebuilt.endsWith("\nTAIL_LINE")).toBe(true);
+    store.dispose();
+  });
+
+  it("reports expired (not not-found) when the Host generation changes", () => {
+    const store = createStore();
+    const { ref } = store.store("session-1", "some output");
+    // Host restarts — new generation, old handles are expired
+    const restarted = createOutputStore({ generation: NEXT_GENERATION, macKey: MAC_KEY });
+    const result = restarted.read("session-1", ref.handle);
+    expect(result.status).toBe("expired");
+    restarted.dispose();
+    store.dispose();
+  });
 });

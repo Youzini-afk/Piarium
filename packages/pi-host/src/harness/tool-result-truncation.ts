@@ -70,7 +70,7 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
         return undefined;
       }
 
-      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output("${ref.handle}", offset, length) for more]`;
+      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output("${ref.handle}", offset, length) for more (ephemeral, generation ${ref.generation})]`;
 
       // Replace text content
       const newContent = [{ type: "text" as const, text: truncatedText }];

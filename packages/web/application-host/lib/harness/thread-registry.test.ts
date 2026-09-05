@@ -497,6 +497,27 @@ describe("thread registry", () => {
     unsubscribe();
   });
 
+  it("rejects a deferred cursor commit from before a compaction reset", async () => {
+    const thread = await registry.createThread(createInput());
+    const cursor = {
+      eventSeq: thread.eventSeq,
+      lifecycle: thread.lifecycle,
+      attention: thread.attention,
+      integration: thread.integration,
+      activeRunId: null,
+      workerState: null,
+      outcome: null,
+      progressVersion: 0,
+      decisionsCount: 0,
+      diffStats: null,
+      viewedAt: "2026-09-05T00:00:00.000Z",
+    };
+    const epoch = registry.getCursorEpoch("observer-1");
+    registry.clearCursorsForSession("observer-1");
+    expect(registry.setCursor("observer-1", thread.id, cursor, epoch)).toBe(false);
+    expect(registry.getCursor("observer-1", thread.id)).toBeNull();
+  });
+
   it("archives active children when their parent session is deleted", async () => {
     const thread = await registry.createThread(createInput());
     const run = await registry.startRun(WORKSPACE, thread.id);

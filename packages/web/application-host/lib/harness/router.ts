@@ -28,6 +28,8 @@ export interface HarnessServiceContext {
   sessionId: HarnessActorContext["sessionId"];
   workspaceId: HarnessActorContext["workspaceId"];
   signal: AbortSignal;
+  /** Register state that advances only after the Host response reaches pi-host. */
+  deferResponseDelivery?(commit: () => void, abort: () => void): void;
 }
 
 export interface HarnessService<M extends HarnessMethod> {
@@ -147,6 +149,19 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     }
     const method = data.method;
     const controller = new AbortController();
+    const deferredDeliveries: Array<{ commit: () => void; abort: () => void }> = [];
+    let deliveriesSettled = false;
+    const settleDeliveries = (outcome: "commit" | "abort"): void => {
+      if (deliveriesSettled) return;
+      deliveriesSettled = true;
+      for (const delivery of deferredDeliveries) {
+        try {
+          delivery[outcome]();
+        } catch {
+          // Delivery bookkeeping cannot rewrite an already-sent response.
+        }
+      }
+    };
     // Per-request timeout override (e.g. thread.wait carries a longer
     // timeout), clamped so a worker cannot pin a handler open forever.
     const requestTimeoutMs = (typeof data.timeoutMs === "number" && data.timeoutMs > 0)
@@ -208,9 +223,19 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         sessionId: actor.sessionId,
         workspaceId: actor.workspaceId,
         signal: controller.signal,
+        deferResponseDelivery: (commit, abort) => {
+          deferredDeliveries.push({ commit, abort });
+        },
       });
-      await respond({ ok: true, result });
+      try {
+        await respond({ ok: true, result });
+      } catch (error) {
+        settleDeliveries("abort");
+        throw error;
+      }
+      settleDeliveries("commit");
     } catch (error) {
+      settleDeliveries("abort");
       let code: HarnessError["code"];
       let message: string;
       let retryable = false;

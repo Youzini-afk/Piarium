@@ -12,10 +12,12 @@ import {
   type MemoryAgentSettings,
   type MemoryAgentState,
   type MemoryApplyResult,
+  type MemoryBlockConflict,
   type MemoryEditOp,
   type MemoryTurnEndMeta,
 } from "@piarium/protocol";
 import type { KnowledgeStore } from "../knowledge/store.js";
+import { KnowledgeBlockConflictError } from "../knowledge/store.js";
 
 export {
   DEFAULT_MEMORY_AGENT_SETTINGS,
@@ -27,6 +29,7 @@ export type {
   MemoryAgentSettings,
   MemoryAgentState,
   MemoryApplyResult as ApplyOpsResult,
+  MemoryBlockConflict,
   MemoryEditOp,
   MemoryTurnEndMeta as TurnEndMeta,
 };
@@ -96,13 +99,26 @@ export async function applyOps(
   sessionId: string,
   cursorTurn: number,
   settings: MemoryAgentSettings,
+  options?: { branchEntryIds?: readonly string[]; sourceLeafId?: string | null },
 ): Promise<MemoryApplyResult> {
-  const blocks = await store.getBlocks(sessionId);
+  const branchEntryIds = options?.branchEntryIds;
+  const sourceLeafId = options?.sourceLeafId ?? null;
+  const blocks = await store.getBlocks(sessionId, branchEntryIds);
   const current = new Map(blocks.map((block) => [block.label, block.content]));
+  // Track revisions per block. For sequential ops on the same block within
+  // one apply call, the revision is threaded forward: after the first op
+  // succeeds, the store returns the new updatedAt, which becomes the
+  // expectedUpdatedAt for the next op on the same block.
+  const revisions = new Map(blocks.map((block) => [block.label, block.updatedAt]));
+  // Blocks that have been modified in this apply call. For these blocks,
+  // the threaded-forward revision (from the store's response) is used
+  // instead of the keeper's original expectedRevision.
+  const modifiedInThisApply = new Set<string>();
   let applied = 0;
   let rejected = 0;
   let changedBlocks = false;
   const errors: string[] = [];
+  const conflicts: MemoryBlockConflict[] = [];
 
   const reject = (message: string): void => {
     rejected += 1;
@@ -110,20 +126,57 @@ export async function applyOps(
   };
 
   for (const op of ops) {
-    if (op.block === "plan" && op.op !== "mark_plan" && op.op !== "replace") {
-      reject(`plan block only accepts mark_plan or replace, got ${op.op}`);
+    // The plan block belongs structurally to the main agent. The keeper may
+    // only mark plan entries (mark_plan), not replace, patch, create, or
+    // delete the block. Replacing the plan with keeper text silently discards
+    // the main agent's task structure.
+    if (op.block === "plan" && op.op !== "mark_plan") {
+      reject(`plan block only accepts mark_plan, got ${op.op}`);
       continue;
     }
+
     const validation = validateOp(op, new Set(current.keys()), settings);
     if (!validation.valid) {
       reject(validation.error ?? "invalid op");
       continue;
     }
 
+    // Determine which block this op targets (mark_plan targets "plan" implicitly).
+    const targetBlock = op.op === "mark_plan" ? "plan" : op.block ?? "plan";
+
+    // Build the expectedUpdatedAt for atomic CAS. The keeper sends
+    // expectedRevision (the revision it read at submission time). We pass
+    // it to the store's atomic write as expectedUpdatedAt, so the CAS
+    // check happens inside the write transaction — no race between read
+    // and write.
+    //
+    // A create is an atomic "still absent" assertion. Passing null prevents a
+    // concurrent user/agent create between the snapshot and this write from
+    // being overwritten.
+    //
+    // For sequential ops on the same block within one apply call: if a
+    // previous op on this block already succeeded, use the threaded-forward
+    // revision (from the store's response) instead of the keeper's original
+    // expectedRevision. This prevents false conflicts when the keeper sends
+    // multiple ops on the same block with the same initial revision.
+    const expectedUpdatedAt = op.op === "create"
+      ? null
+      : modifiedInThisApply.has(targetBlock)
+        ? revisions.get(targetBlock)
+        : op.expectedRevision;
+
     try {
       if (op.op === "delete") {
-        await store.deleteBlock(sessionId, op.block!);
+        await store.deleteBlock(sessionId, op.block!, {
+          ...(branchEntryIds !== undefined ? { branchEntryIds } : {}),
+          ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}),
+          sourceLeafId,
+          updatedBy: "memory-agent",
+          cursorTurn,
+        });
         current.delete(op.block!);
+        revisions.delete(op.block!);
+        modifiedInThisApply.add(op.block!);
         applied += 1;
         changedBlocks = true;
         continue;
@@ -169,21 +222,40 @@ export async function applyOps(
       }
       const changed = current.get(block) !== content;
       if (changed) {
-        await store.upsertBlock({
+        const updated = await store.upsertBlock({
           sessionId,
           label: block,
           content,
           updatedBy: "memory-agent",
           cursorTurn,
+          sourceLeafId,
+          ...(branchEntryIds !== undefined ? { branchEntryIds } : {}),
+          ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}),
         });
         current.set(block, content);
+        // Thread the new revision forward for subsequent ops on the same block.
+        revisions.set(block, updated.updatedAt);
+        modifiedInThisApply.add(block);
         changedBlocks = true;
       }
       applied += 1;
     } catch (error) {
+      if (error instanceof KnowledgeBlockConflictError) {
+        const actualRev = error.current?.updatedAt ?? 0;
+        conflicts.push({
+          block: targetBlock,
+          expected: op.op === "create" ? null : op.expectedRevision ?? expectedUpdatedAt ?? null,
+          actual: actualRev,
+        });
+        reject(`block "${targetBlock}" changed since read (expected revision ${op.expectedRevision ?? expectedUpdatedAt}, actual ${actualRev})`);
+        // Update the tracked revision so subsequent ops on the same block
+        // see the current state.
+        if (error.current) revisions.set(targetBlock, error.current.updatedAt);
+        continue;
+      }
       reject(error instanceof Error ? error.message : String(error));
     }
   }
 
-  return { applied, rejected, errors, changedBlocks };
+  return { applied, rejected, errors, changedBlocks, ...(conflicts.length > 0 ? { conflicts } : {}) };
 }

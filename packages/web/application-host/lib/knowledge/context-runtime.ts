@@ -24,6 +24,8 @@ export interface Zone2MaterialRequest {
   query?: string;
   sessionId: string;
   sinceTurn: number;
+  /** Branch entry IDs for ancestor-resolution block filtering. */
+  branchEntryIds?: string[];
 }
 
 export interface Zone2MaterialResult {
@@ -201,7 +203,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         };
       }
     }
-    material.blocks = (await store.getBlocks(request.sessionId)).map((block) => ({
+    material.blocks = (await store.getBlocks(
+      request.sessionId,
+      request.branchEntryIds === undefined ? undefined : request.branchEntryIds,
+    )).map((block) => ({
       label: block.label,
       content: block.content,
     }));

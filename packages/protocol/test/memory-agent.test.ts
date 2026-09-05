@@ -16,6 +16,20 @@ describe("memory agent protocol", () => {
     assert.equal(parseMemoryEditOps({ ops: [{ op: "invent" }] }), null);
   });
 
+  it("parses expectedRevision when present", () => {
+    assert.deepEqual(parseMemoryEditOps({
+      ops: [{ op: "replace", block: "progress", content: "new", expectedRevision: 12345 }],
+    }), [{ op: "replace", block: "progress", content: "new", expectedRevision: 12345 }]);
+  });
+
+  it("rejects an invalid expectedRevision", () => {
+    for (const expectedRevision of [NaN, -1, 1.5]) {
+      assert.equal(parseMemoryEditOps({
+        ops: [{ op: "replace", block: "progress", content: "new", expectedRevision }],
+      }), null);
+    }
+  });
+
   it("does not schedule the first run before meaningful context exists", () => {
     const state = createInitialMemoryAgentState(DEFAULT_MEMORY_AGENT_SETTINGS);
     assert.deepEqual(evaluateMemoryAgentGate(state, {

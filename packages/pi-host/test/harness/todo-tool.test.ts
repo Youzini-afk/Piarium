@@ -13,6 +13,7 @@ describe("todo confirmation UI", () => {
     };
     let prompts = 0;
     const context = {
+      sessionManager: { getBranch: () => [{ id: "entry-1" }] },
       ui: { select: async () => { prompts += 1; return "Use plan"; } },
     };
     const tool = createTodoTool(bridge as never);
@@ -23,6 +24,7 @@ describe("todo confirmation UI", () => {
     assert.equal(requests.length, 2);
     assert.equal(requests[0]?.confirmed, true);
     assert.equal(requests[1]?.confirmed, true);
+    assert.deepEqual(requests[0]?.branchEntryIds, ["entry-1"]);
   });
 
   it("does not call the Host when the user cancels", async () => {
@@ -35,7 +37,7 @@ describe("todo confirmation UI", () => {
       { items: [{ text: "Risky guess", status: "open" }], confidence: 0.1 } as never,
       undefined,
       undefined,
-      { ui: { select: async () => "Cancel" } } as never,
+      { sessionManager: { getBranch: () => [] }, ui: { select: async () => "Cancel" } } as never,
     );
     assert.equal(requests, 0);
     assert.match(result.content[0]?.type === "text" ? result.content[0].text : "", /cancelled/);

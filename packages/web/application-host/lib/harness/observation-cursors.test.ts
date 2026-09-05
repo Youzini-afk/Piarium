@@ -6,14 +6,14 @@ describe("observation cursor store", () => {
     let now = 10;
     const store = createObservationCursorStore({ now: () => now });
     const value = { offset: 4 };
-    expect(store.set("observer-1", "shell", "same-id", value)).toEqual({ observedAt: 10, value: { offset: 4 } });
+    expect(store.set("observer-1", "shell", "same-id", value)).toEqual({ observedAt: 10, revision: 1, value: { offset: 4 } });
     value.offset = 99;
     now = 20;
     store.set("observer-1", "diagnostics", "same-id", { diagnostics: ["a"] });
 
-    expect(store.get<{ offset: number }>("observer-1", "shell", "same-id")).toEqual({ observedAt: 10, value: { offset: 4 } });
+    expect(store.get<{ offset: number }>("observer-1", "shell", "same-id")).toEqual({ observedAt: 10, revision: 1, value: { offset: 4 } });
     expect(store.get("observer-2", "shell", "same-id")).toBeNull();
-    expect(store.get("observer-1", "diagnostics", "same-id")).toEqual({ observedAt: 20, value: { diagnostics: ["a"] } });
+    expect(store.get("observer-1", "diagnostics", "same-id")).toEqual({ observedAt: 20, revision: 2, value: { diagnostics: ["a"] } });
     store.clearKind("observer-1", "shell");
     expect(store.get("observer-1", "shell", "same-id")).toBeNull();
     expect(store.get("observer-1", "diagnostics", "same-id")).not.toBeNull();
@@ -69,6 +69,153 @@ describe("observation cursor store", () => {
     await Promise.all([first, second]);
     expect(seen).toEqual([null, 5]);
     expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 9 } });
+    store.dispose();
+  });
+
+  // ── Delivery-safe prepare/commit with CAS ────────────────────────
+
+  it("prepare does not advance the cursor until commit is called", async () => {
+    const store = createObservationCursorStore();
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    // Cursor not advanced yet
+    expect(store.get("observer", "shell", "sh_1")).toBeNull();
+    expect(pending.result).toBe("data");
+    // Commit advances the cursor
+    expect(pending.commit()).toBe(true);
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 10 } });
+    store.dispose();
+  });
+
+  it("abort prevents cursor advancement — next observation includes undelivered changes", async () => {
+    const store = createObservationCursorStore();
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    // Simulate delivery failure — abort instead of commit
+    pending.abort();
+    expect(store.get("observer", "shell", "sh_1")).toBeNull();
+    // The next observation should see no previous cursor (include all changes)
+    const seen: Array<number | null> = [];
+    await store.observe<{ offset: number }, void>(
+      "observer", "shell", "sh_1",
+      async (previous) => {
+        seen.push(previous?.value.offset ?? null);
+        return { cursor: { offset: 20 }, result: undefined };
+      },
+    );
+    expect(seen).toEqual([null]); // No previous cursor — includes undelivered changes
+    store.dispose();
+  });
+
+  it("commit is idempotent — calling it twice does not advance the cursor twice", async () => {
+    const store = createObservationCursorStore();
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    expect(pending.commit()).toBe(true);
+    expect(pending.commit()).toBe(false); // Already committed — no-op
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 10 } });
+    store.dispose();
+  });
+
+  it("abort after commit is a no-op", async () => {
+    const store = createObservationCursorStore();
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    pending.commit();
+    pending.abort(); // Should not undo the commit
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 10 } });
+    store.dispose();
+  });
+
+  it("prepare with a previous cursor provides it to the task", async () => {
+    const store = createObservationCursorStore();
+    store.set("observer", "shell", "sh_1", { offset: 5 });
+    const seen: Array<number | null> = [];
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async (previous) => {
+        seen.push(previous?.value.offset ?? null);
+        return { cursor: { offset: 15 }, result: "incremental" };
+      },
+    );
+    expect(seen).toEqual([5]);
+    expect(pending.commit()).toBe(true);
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 15 } });
+    store.dispose();
+  });
+
+  it("CAS prevents cursor regression when stale commit arrives after newer commit", async () => {
+    const store = createObservationCursorStore();
+    // Two prepares read the same baseline (null)
+    const pending1 = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "older" }),
+    );
+    const pending2 = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 20 }, result: "newer" }),
+    );
+    // Newer commits first
+    expect(pending2.commit()).toBe(true);
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 20 } });
+    // Older commits second — CAS should reject this (baseline changed)
+    expect(pending1.commit()).toBe(false);
+    // Cursor stays at 20, does NOT regress to 10
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 20 } });
+    store.dispose();
+  });
+
+  it("CAS rejects stale commit after an observe advances the cursor", async () => {
+    const store = createObservationCursorStore();
+    // Prepare reads baseline null
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    // An observe call advances the cursor in the meantime
+    await store.observe<{ offset: number }, void>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 15 }, result: undefined }),
+    );
+    // The stale prepare's commit should be rejected by CAS
+    expect(pending.commit()).toBe(false);
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 15 } });
+    store.dispose();
+  });
+
+  it("uses a monotonic revision when the clock does not advance", async () => {
+    const store = createObservationCursorStore({ now: () => 1 });
+    store.set("observer", "shell", "sh_1", { offset: 5 });
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "older" }),
+    );
+    await store.observe<{ offset: number }, void>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 20 }, result: undefined }),
+    );
+    expect(pending.commit()).toBe(false);
+    expect(store.get("observer", "shell", "sh_1")).toMatchObject({ value: { offset: 20 } });
+    store.dispose();
+  });
+
+  it("does not let a pending delivery resurrect a cursor cleared by compaction", async () => {
+    const store = createObservationCursorStore();
+    const pending = await store.prepare<{ offset: number }, string>(
+      "observer", "shell", "sh_1",
+      async () => ({ cursor: { offset: 10 }, result: "data" }),
+    );
+    store.clearObserver("observer");
+    expect(pending.commit()).toBe(false);
+    expect(store.get("observer", "shell", "sh_1")).toBeNull();
     store.dispose();
   });
 });

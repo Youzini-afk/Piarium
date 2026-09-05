@@ -33,13 +33,13 @@ Piarium protocol types, schemas, and event/method definitions.
 | `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
-| `zone2.assemble` | `{ sinceTurn, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble cursor-based Zone 2 context |
-| `compaction.before` | `{ firstKeptEntryId, tokensBefore }` | `CompactionBeforeResult` | Pre-compaction hook |
+| `zone2.assemble` | `{ sinceTurn, branchEntryIds, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
+| `compaction.before` | `{ firstKeptEntryId, tokensBefore, branchEntryIds, removedEntryIds }` | `CompactionBeforeResult` | Verify keeper coverage before optional takeover |
 | `compaction.after` | `{ summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
-| `todo.upsert` | `{ items, confidence?, confirmed? }` | `{ text, confirmed?, askedConfirmation }` | Upsert todo items after pi-host confirmation when needed |
+| `todo.upsert` | `{ items, branchEntryIds, confidence?, confirmed? }` | `{ text, confirmed?, askedConfirmation }` | Upsert the active branch plan after pi-host confirmation when needed |
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
-| `memory.blocks.get` | `{}` | `{ blocks[] }` | Read current session blocks for the shadow keeper |
-| `memory.blocks.apply` | `{ cursorTurn, ops[] }` | `MemoryApplyResult` | Validate and apply shadow keeper block operations |
+| `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
+| `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |
 | `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |

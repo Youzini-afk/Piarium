@@ -34,8 +34,13 @@ describe("harness protocol", () => {
     } satisfies HarnessRequestData;
     assert.equal("sessionId" in request, false);
     assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
-    const todo = { items: [] } satisfies HarnessServiceMap["todo.upsert"]["params"];
-    const compact = { firstKeptEntryId: "entry-1", tokensBefore: 100 } satisfies HarnessServiceMap["compaction.before"]["params"];
+    const todo = { items: [], branchEntryIds: [] } satisfies HarnessServiceMap["todo.upsert"]["params"];
+    const compact = {
+      branchEntryIds: ["entry-1"],
+      firstKeptEntryId: "entry-1",
+      removedEntryIds: [],
+      tokensBefore: 100,
+    } satisfies HarnessServiceMap["compaction.before"]["params"];
     assert.equal("sessionId" in todo, false);
     assert.equal("sessionId" in compact, false);
   });

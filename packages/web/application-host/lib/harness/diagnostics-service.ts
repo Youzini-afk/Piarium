@@ -137,7 +137,7 @@ export function createLspDiagnosticsSnapshotService(
         }
         const canonicalResourceId = ctx.authorizedPaths[0]?.canonicalResourceId ?? params.path;
         const objectId = `${ctx.workspaceId}\0${canonicalResourceId}`;
-        return cursors.observe<DiagnosticsCursor, import("@piarium/protocol").DiagnosticsResult>(
+        const pending = await cursors.prepare<DiagnosticsCursor, import("@piarium/protocol").DiagnosticsResult>(
           ctx.sessionId,
           "diagnostics",
           objectId,
@@ -169,6 +169,9 @@ export function createLspDiagnosticsSnapshotService(
             };
           },
         );
+        if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pending.commit, pending.abort);
+        else pending.commit();
+        return pending.result;
       } catch {
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }

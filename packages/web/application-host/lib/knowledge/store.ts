@@ -70,6 +70,14 @@ export interface Block {
   updatedBy: BlockUpdatedBy;
   cursorTurn?: number;
   updatedAt: number;
+  /**
+   * The Pi session leaf entry ID at the time this block was written.
+   * Used for branch-aware visibility: a block is visible on the current
+   * branch if its sourceLeafId is in the current branch's ancestor path
+   * (i.e. in `sessionManager.getBranch().map(e => e.id)`).
+   * null/undefined = legacy block written before branch tracking.
+   */
+  sourceLeafId?: string | null;
 }
 
 export interface BlockInput {
@@ -79,6 +87,12 @@ export interface BlockInput {
   updatedBy: BlockUpdatedBy;
   cursorTurn?: number;
   expectedUpdatedAt?: number | null;
+  /**
+   * The Pi session leaf entry ID at write time. See Block.sourceLeafId.
+   */
+  sourceLeafId?: string | null;
+  /** Active branch ancestor path used to resolve the visible prior revision. */
+  branchEntryIds?: readonly string[];
 }
 
 export interface BlockChange {
@@ -175,9 +189,31 @@ export interface KnowledgeStore {
   putEvent(e: EventInput): Promise<NodeId>;
   listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
   putSession(s: SessionInput): Promise<NodeId>;
-  getBlocks(sessionId: string): Promise<Block[]>;
+  /**
+   * Read blocks for a session. If `branchEntryIds` is provided, only blocks
+   * whose `sourceLeafId` is in that array (or null/undefined for legacy
+   * blocks) are returned — this is the ancestor-resolution view. If omitted,
+   * all blocks for the session are returned (legacy/debug behavior).
+   */
+  getBlocks(sessionId: string, branchEntryIds?: readonly string[]): Promise<Block[]>;
   upsertBlock(b: BlockInput): Promise<Block>;
-  deleteBlock(sessionId: string, label: string): Promise<void>;
+  /**
+   * Delete a block. A branch-scoped delete writes a tombstone at the active
+   * leaf so sibling branches retain their inherited revision. If
+   * `expectedUpdatedAt` is provided, deletion is conditional on the visible
+   * block revision matching.
+   */
+  deleteBlock(
+    sessionId: string,
+    label: string,
+    options?: {
+      branchEntryIds?: readonly string[];
+      expectedUpdatedAt?: number | null;
+      sourceLeafId?: string | null;
+      updatedBy?: BlockUpdatedBy;
+      cursorTurn?: number;
+    },
+  ): Promise<void>;
   putKnowledge(k: KnowledgeInput): Promise<NodeId>;
   updateSuggestedKnowledge(
     id: NodeId,
@@ -268,6 +304,57 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     }
     return results;
   }
+
+  type StoredBlockNode = { id: number; payload: Record<string, unknown> };
+  const blockFromPayload = (payload: Record<string, unknown>): Block => ({
+    sessionId: payload["sessionId"] as string,
+    label: payload["label"] as string,
+    content: typeof payload["content"] === "string" ? payload["content"] : "",
+    updatedBy: payload["updatedBy"] as BlockUpdatedBy,
+    ...(payload["cursorTurn"] !== undefined ? { cursorTurn: payload["cursorTurn"] as number } : {}),
+    updatedAt: payload["updatedAt"] as number,
+    ...(payload["sourceLeafId"] !== undefined ? { sourceLeafId: payload["sourceLeafId"] as string | null } : {}),
+  });
+  const blockNodes = (sessionId: string, label?: string): StoredBlockNode[] => scanNodes((payload) => (
+    payload["type"] === "block"
+    && payload["sessionId"] === sessionId
+    && (label === undefined || payload["label"] === label)
+  ));
+  const isDeletedBlock = (node: StoredBlockNode): boolean => node.payload["deleted"] === true;
+  const sourceLeafOf = (node: StoredBlockNode): string | null => (
+    typeof node.payload["sourceLeafId"] === "string" ? node.payload["sourceLeafId"] as string : null
+  );
+  const newestNode = (nodes: StoredBlockNode[]): StoredBlockNode | null => (
+    nodes.toSorted((left, right) => (
+      Number(right.payload["updatedAt"] ?? 0) - Number(left.payload["updatedAt"] ?? 0)
+      || right.id - left.id
+    ))[0] ?? null
+  );
+  /** Resolve one label to the closest revision on the active ancestor path. */
+  const visibleBlockNode = (
+    nodes: StoredBlockNode[],
+    branchEntryIds: readonly string[],
+  ): StoredBlockNode | null => {
+    const rank = new Map(branchEntryIds.map((entryId, index) => [entryId, index]));
+    let selected: StoredBlockNode | null = null;
+    let selectedRank = Number.NEGATIVE_INFINITY;
+    for (const node of nodes) {
+      const sourceLeafId = sourceLeafOf(node);
+      const nodeRank = sourceLeafId === null ? -1 : rank.get(sourceLeafId);
+      if (nodeRank === undefined) continue;
+      const updatedAt = Number(node.payload["updatedAt"] ?? 0);
+      const selectedUpdatedAt = Number(selected?.payload["updatedAt"] ?? 0);
+      if (
+        selected === null
+        || nodeRank > selectedRank
+        || (nodeRank === selectedRank && (updatedAt > selectedUpdatedAt || (updatedAt === selectedUpdatedAt && node.id > selected.id)))
+      ) {
+        selected = node;
+        selectedRank = nodeRank;
+      }
+    }
+    return selected;
+  };
 
   const graphFileIds = new Map<string, Set<number>>();
   const graphSymbolIds = new Map<string, Set<number>>();
@@ -367,37 +454,53 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async getBlocks(sessionId: string): Promise<Block[]> {
-      const nodes = scanNodes((p) => p["type"] === "block" && p["sessionId"] === sessionId);
-      const blocks: Block[] = nodes.map(({ payload: p }) => ({
-        sessionId: p["sessionId"] as string,
-        label: p["label"] as string,
-        content: p["content"] as string,
-        updatedBy: p["updatedBy"] as BlockUpdatedBy,
-        ...(p["cursorTurn"] !== undefined ? { cursorTurn: p["cursorTurn"] as number } : {}),
-        updatedAt: p["updatedAt"] as number,
-      }));
-      return blocks.sort((a, b) => a.label.localeCompare(b.label));
+    async getBlocks(sessionId: string, branchEntryIds?: readonly string[]): Promise<Block[]> {
+      const nodes = blockNodes(sessionId);
+      if (branchEntryIds === undefined) {
+        // This unscoped view is retained only for migration/debug callers.
+        // Production model/UI consumers resolve an explicit active branch.
+        return nodes
+          .filter((node) => !isDeletedBlock(node))
+          .map((node) => blockFromPayload(node.payload))
+          .sort((a, b) => a.label.localeCompare(b.label) || a.updatedAt - b.updatedAt);
+      }
+      const byLabel = new Map<string, StoredBlockNode[]>();
+      for (const node of nodes) {
+        const label = node.payload["label"] as string;
+        const group = byLabel.get(label) ?? [];
+        group.push(node);
+        byLabel.set(label, group);
+      }
+      const visible: Block[] = [];
+      for (const candidates of byLabel.values()) {
+        const selected = visibleBlockNode(candidates, branchEntryIds);
+        if (selected && !isDeletedBlock(selected)) visible.push(blockFromPayload(selected.payload));
+      }
+      return visible.sort((a, b) => a.label.localeCompare(b.label));
     },
 
     async upsertBlock(b: BlockInput): Promise<Block> {
       if (!BLOCK_NAME_RE.test(b.label)) {
         throw new Error(`Invalid block name: ${b.label}`);
       }
+      const inputSourceLeaf = b.sourceLeafId ?? null;
+      const branchEntryIds = b.branchEntryIds;
+      if (
+        inputSourceLeaf !== null
+        && branchEntryIds !== undefined
+        && branchEntryIds[branchEntryIds.length - 1] !== inputSourceLeaf
+      ) {
+        throw new Error("Block sourceLeafId must be the active branch leaf");
+      }
       const { result, previous } = await enqueueWrite(() => {
-        // Find existing block by sessionId + label
-        const existing = scanNodes((p) =>
-          p["type"] === "block" && p["sessionId"] === b.sessionId && p["label"] === b.label,
-        );
-        const existingNode = existing[0] ?? null;
-        const current = existingNode ? {
-          sessionId: existingNode.payload["sessionId"] as string,
-          label: existingNode.payload["label"] as string,
-          content: existingNode.payload["content"] as string,
-          updatedBy: existingNode.payload["updatedBy"] as BlockUpdatedBy,
-          ...(existingNode.payload["cursorTurn"] !== undefined ? { cursorTurn: existingNode.payload["cursorTurn"] as number } : {}),
-          updatedAt: existingNode.payload["updatedAt"] as number,
-        } satisfies Block : null;
+        const candidates = blockNodes(b.sessionId, b.label);
+        const resolvedNode = branchEntryIds === undefined
+          ? newestNode(candidates.filter((node) => sourceLeafOf(node) === inputSourceLeaf))
+          : visibleBlockNode(candidates, branchEntryIds);
+        const current = resolvedNode && !isDeletedBlock(resolvedNode)
+          ? blockFromPayload(resolvedNode.payload)
+          : null;
+        // Atomic CAS: check expectedUpdatedAt inside the write transaction.
         if (
           b.expectedUpdatedAt !== undefined
           && ((b.expectedUpdatedAt === null && current !== null)
@@ -415,12 +518,15 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           updatedBy: b.updatedBy,
           ...(b.cursorTurn !== undefined ? { cursorTurn: b.cursorTurn } : {}),
           updatedAt: now,
+          sourceLeafId: inputSourceLeaf,
+          deleted: false,
         };
 
+        const targetNode = newestNode(candidates.filter((node) => sourceLeafOf(node) === inputSourceLeaf));
         let id: number;
-        if (existingNode) {
-          db.updatePayload(existingNode.id, payload);
-          id = existingNode.id;
+        if (targetNode) {
+          db.updatePayload(targetNode.id, payload);
+          id = targetNode.id;
         } else {
           id = db.insert(placeholderVec, payload);
         }
@@ -434,30 +540,69 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           updatedBy: b.updatedBy,
           ...(b.cursorTurn !== undefined ? { cursorTurn: b.cursorTurn } : {}),
           updatedAt: now,
+          sourceLeafId: inputSourceLeaf,
         } };
       });
       publishBlocksChanged(b.sessionId, { previous, current: result });
       return result;
     },
 
-    async deleteBlock(sessionId: string, label: string): Promise<void> {
+    async deleteBlock(
+      sessionId: string,
+      label: string,
+      options?: {
+        branchEntryIds?: readonly string[];
+        expectedUpdatedAt?: number | null;
+        sourceLeafId?: string | null;
+        updatedBy?: BlockUpdatedBy;
+        cursorTurn?: number;
+      },
+    ): Promise<void> {
+      const branchEntryIds = options?.branchEntryIds;
+      const expectedUpdatedAt = options?.expectedUpdatedAt;
+      const sourceLeafId = options?.sourceLeafId
+        ?? (branchEntryIds && branchEntryIds.length > 0 ? branchEntryIds[branchEntryIds.length - 1]! : null);
       const previous = await enqueueWrite(() => {
-        const nodes = scanNodes((p) =>
-          p["type"] === "block" && p["sessionId"] === sessionId && p["label"] === label,
-        );
-        for (const node of nodes) {
-          db.delete(node.id);
+        const nodes = blockNodes(sessionId, label);
+        const resolvedNode = branchEntryIds === undefined
+          ? newestNode(nodes.filter((node) => sourceLeafOf(node) === sourceLeafId))
+          : visibleBlockNode(nodes, branchEntryIds);
+        const currentBlock = resolvedNode && !isDeletedBlock(resolvedNode)
+          ? blockFromPayload(resolvedNode.payload)
+          : null;
+        // Atomic CAS for delete: check expectedUpdatedAt inside the write transaction.
+        if (expectedUpdatedAt !== undefined) {
+          if (
+            (expectedUpdatedAt === null && currentBlock !== null)
+            || (typeof expectedUpdatedAt === "number" && currentBlock?.updatedAt !== expectedUpdatedAt)
+          ) {
+            throw new KnowledgeBlockConflictError(currentBlock);
+          }
         }
+        if (branchEntryIds === undefined) {
+          // Legacy unscoped deletion retains its historical whole-session behavior.
+          for (const node of nodes) db.delete(node.id);
+          db.flush();
+          return currentBlock;
+        }
+        if (!currentBlock) return null;
+        const timestamp = Math.max(Date.now(), currentBlock.updatedAt + 1);
+        const tombstone = {
+          type: "block",
+          sessionId,
+          label,
+          content: "",
+          updatedBy: options?.updatedBy ?? "memory-agent",
+          ...(options?.cursorTurn !== undefined ? { cursorTurn: options.cursorTurn } : {}),
+          updatedAt: timestamp,
+          sourceLeafId,
+          deleted: true,
+        };
+        const targetNode = newestNode(nodes.filter((node) => sourceLeafOf(node) === sourceLeafId));
+        if (targetNode) db.updatePayload(targetNode.id, tombstone);
+        else db.insert(placeholderVec, tombstone);
         db.flush();
-        const first = nodes[0]?.payload;
-        return first ? {
-          sessionId: first["sessionId"] as string,
-          label: first["label"] as string,
-          content: first["content"] as string,
-          updatedBy: first["updatedBy"] as BlockUpdatedBy,
-          ...(first["cursorTurn"] !== undefined ? { cursorTurn: first["cursorTurn"] as number } : {}),
-          updatedAt: first["updatedAt"] as number,
-        } satisfies Block : null;
+        return currentBlock;
       });
       publishBlocksChanged(sessionId, { previous, current: null });
     },

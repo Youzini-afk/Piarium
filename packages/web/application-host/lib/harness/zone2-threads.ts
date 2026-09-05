@@ -3,7 +3,7 @@ import type {
   ThreadParent,
   ThreadRun,
 } from "@piarium/protocol";
-import type { ObservationCursorStore } from "./observation-cursors.js";
+import type { ObservationCursorEntry, ObservationCursorStore, PendingObservation } from "./observation-cursors.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { Zone2Thread, Zone2Threads } from "./zone2.js";
 
@@ -47,39 +47,63 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
  * present; terminal work appears only when its event sequence changed for this
  * observer. The cursor is separate from the explicit `threads` tool cursor.
  */
-export async function projectZone2Threads(
+const zone2ThreadTask = (
+  options: Zone2ThreadProjectionOptions,
+  input: { workspaceId: string },
+  parent: ThreadParent,
+) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
+  const snapshots = await options.registry.listThreadSnapshots(input.workspaceId, parent);
+  const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
+  const selected = snapshots
+    .filter(({ thread }) => (
+      thread.lifecycle === "active"
+      || thread.lifecycle === "queued"
+      || previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq
+    ))
+    .toSorted((left, right) => (
+      priority(left.thread) - priority(right.thread)
+      || right.thread.updatedAt.localeCompare(left.thread.updatedAt)
+      || left.thread.id.localeCompare(right.thread.id)
+    ));
+  return {
+    cursor: { eventSeqByThread },
+    result: { status: "ready", items: selected.map(({ thread, activeRun }) => projectThread(thread, activeRun)) },
+  };
+};
+
+const zone2Scope = async (
   options: Zone2ThreadProjectionOptions,
   input: { sessionId: string; workspaceId: string },
-): Promise<Zone2Threads> {
+): Promise<{ objectId: string; parent: ThreadParent }> => {
   const owner = await options.registry.getThreadForSession(input.workspaceId, input.sessionId);
   const parent: ThreadParent = owner
     ? { kind: "thread", id: owner.id }
     : { kind: "session", id: input.sessionId };
-  const objectId = `${input.workspaceId}\0${parent.kind}\0${parent.id}`;
+  return { objectId: `${input.workspaceId}\0${parent.kind}\0${parent.id}`, parent };
+};
 
+export async function projectZone2Threads(
+  options: Zone2ThreadProjectionOptions,
+  input: { sessionId: string; workspaceId: string },
+): Promise<Zone2Threads> {
+  const scope = await zone2Scope(options, input);
   return options.cursors.observe<Zone2ThreadCursor, Zone2Threads>(
     input.sessionId,
     "zone2-threads",
-    objectId,
-    async (previous) => {
-      const snapshots = await options.registry.listThreadSnapshots(input.workspaceId, parent);
-      const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
-      const selected = snapshots
-        .filter(({ thread }) => (
-          thread.lifecycle === "active"
-          || thread.lifecycle === "queued"
-          || previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq
-        ))
-        .toSorted((left, right) => (
-          priority(left.thread) - priority(right.thread)
-          || right.thread.updatedAt.localeCompare(left.thread.updatedAt)
-          || left.thread.id.localeCompare(right.thread.id)
-        ));
-      const items = selected.map(({ thread, activeRun }) => projectThread(thread, activeRun));
-      return {
-        cursor: { eventSeqByThread },
-        result: { status: "ready", items },
-      };
-    },
+    scope.objectId,
+    zone2ThreadTask(options, input, scope.parent),
+  );
+}
+
+export async function prepareZone2Threads(
+  options: Zone2ThreadProjectionOptions,
+  input: { sessionId: string; workspaceId: string },
+): Promise<PendingObservation<Zone2Threads>> {
+  const scope = await zone2Scope(options, input);
+  return options.cursors.prepare(
+    input.sessionId,
+    "zone2-threads",
+    scope.objectId,
+    zone2ThreadTask(options, input, scope.parent),
   );
 }

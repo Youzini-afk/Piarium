@@ -78,6 +78,7 @@ const advanceCursor = (
   observerSessionId: string,
   snapshot: ThreadSnapshot,
   registry: NonNullable<HarnessServiceHost["threadRegistry"]>,
+  expectedEpoch?: number,
 ): void => {
   const { thread, activeRun } = snapshot;
   registry.setCursor(observerSessionId, thread.id, {
@@ -92,7 +93,21 @@ const advanceCursor = (
     decisionsCount: 0,
     diffStats: thread.diffStats,
     viewedAt: new Date().toISOString(),
-  });
+  }, expectedEpoch);
+};
+
+const deferCursorAdvancement = (
+  ctx: HarnessServiceContext,
+  observerSessionId: string,
+  snapshots: readonly ThreadSnapshot[],
+  registry: NonNullable<HarnessServiceHost["threadRegistry"]>,
+): void => {
+  const expectedEpoch = registry.getCursorEpoch(observerSessionId);
+  const commit = () => {
+    for (const snapshot of snapshots) advanceCursor(observerSessionId, snapshot, registry, expectedEpoch);
+  };
+  if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(commit, () => undefined);
+  else commit();
 };
 
 const snapshotsFor = async (
@@ -176,12 +191,13 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
       if (params.ids) snapshots = snapshots.filter(({ thread }) => params.ids!.includes(thread.id));
       const full = params.full ?? false;
       let changed = 0;
+      const cursorUpdates: ThreadSnapshot[] = [];
       const lines = snapshots.map((snapshot) => {
         const cursor = registry.getCursor(observer, snapshot.thread.id);
         if (full || cursorChanged(snapshot, cursor)) {
           changed += 1;
           const line = formatThreadLine(snapshot, cursor, full);
-          if (!full) advanceCursor(observer, snapshot, registry);
+          if (!full) cursorUpdates.push(snapshot);
           return line;
         }
         return `${snapshot.thread.id} — no change since last view; still ${threadState(snapshot)}, last activity ${snapshot.activeRun?.lastActivityAt ?? snapshot.thread.updatedAt}`;
@@ -189,6 +205,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
       const header = changed === 0 && snapshots.length > 0
         ? "no changes since last view; use wait to block instead of polling"
         : `${snapshots.length} threads · ${changed} changed since last view`;
+      deferCursorAdvancement(ctx, observer, cursorUpdates, registry);
       return {
         text: snapshots.length === 0 ? "no threads" : `${header}\n${lines.join("\n")}`,
         threads: snapshots.map(({ thread, activeRun }) => ({
@@ -276,16 +293,14 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         } else {
           lines.push(`✔ ${thread.id} (${thread.role ?? "unknown"}) — ${threadState(snapshot)}`);
         }
-        advanceCursor(observer, snapshot, registry);
       }
       for (const snapshot of [...running, ...waiting]) {
         lines.push(formatThreadLine(snapshot, registry.getCursor(observer, snapshot.thread.id), false));
-        advanceCursor(observer, snapshot, registry);
       }
       for (const snapshot of queued) {
         lines.push(`⏳ ${snapshot.thread.id} (${snapshot.thread.role ?? "unknown"}) · queued`);
-        advanceCursor(observer, snapshot, registry);
       }
+      deferCursorAdvancement(ctx, observer, targets, registry);
       return {
         text: lines.join("\n"),
         done: done.length,

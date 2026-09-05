@@ -35,6 +35,14 @@ export interface MemoryAgentExtensionOptions {
   bridge: HostServicesBridge;
   enabled: boolean;
   callModel: (model: Model<Api> | undefined, context: Context, signal: AbortSignal) => Promise<MemoryEditOp[] | null>;
+  /**
+   * Returns the current Pi session branch entry IDs (ancestor path from
+   * root to current leaf), or null. Used for branch-aware block visibility
+   * via ancestor resolution. Typically `sessionManager.getBranch().map(e => e.id)`.
+   */
+  getBranchEntryIds?: () => string[] | null;
+  /** Entry IDs that actually materialize into the keeper's current context. */
+  getContextEntryIds?: () => string[] | null;
   now?: () => number;
   onError?: (error: unknown) => void;
   settings?: MemoryAgentSettings;
@@ -100,7 +108,16 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
       abortController = new AbortController();
       const task = (async () => {
         try {
-          const snapshot = await options.bridge.request<"memory.blocks.get">("memory.blocks.get", {});
+          const branchEntryIds = options.getBranchEntryIds?.() ?? [];
+          const coveredEntryIds = options.getContextEntryIds?.() ?? [];
+          const snapshot = await options.bridge.request<"memory.blocks.get">("memory.blocks.get", {
+            branchEntryIds,
+          });
+          // Attach the revision read at submission time so the Host can detect
+          // stale writes if a user or agent edits the block between get and
+          // apply. The Host uses the store's atomic expectedUpdatedAt CAS
+          // inside the write transaction, so the check is race-free.
+          const revisionMap = new Map(snapshot.blocks.map((b) => [b.label ?? "", b.revision]));
           const ops = await options.callModel(ctx.model, {
             systemPrompt: ctx.getSystemPrompt(),
             messages: [
@@ -114,9 +131,18 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
             state.interval = Math.min(state.interval * 1.5, settings.maxInterval);
             return;
           }
+          const opsWithRevision: MemoryEditOp[] = ops.map((op) => {
+            const { expectedRevision: _modelRevision, ...parsedOp } = op;
+            const blockLabel = op.op === "mark_plan" ? "plan" : op.block;
+            if (blockLabel === undefined) return parsedOp;
+            const expectedRevision = revisionMap.get(blockLabel);
+            return expectedRevision === undefined ? parsedOp : { ...parsedOp, expectedRevision };
+          });
           const applied = await options.bridge.request<"memory.blocks.apply">("memory.blocks.apply", {
             cursorTurn: event.turnIndex,
-            ops,
+            ops: opsWithRevision,
+            branchEntryIds,
+            coveredEntryIds,
           });
           state.lastRunChangedBlocks = applied.changedBlocks;
           state.interval = applied.changedBlocks

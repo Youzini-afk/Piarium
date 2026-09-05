@@ -41,6 +41,7 @@ describe("harness context routes", () => {
     app.use(express.json());
     registerHarnessContextRoutes(app, {
       getStore: async (sessionId) => sessionId === "session-1" ? store : null,
+      getBranchEntryIds: async () => [],
       requireAuth: (req, res, next) => {
         if (req.header("x-test-auth") === "yes") next();
         else res.status(401).json({ error: "auth required" });
@@ -52,7 +53,7 @@ describe("harness context routes", () => {
     await request(app)
       .put("/api/harness/sessions/session-1/blocks/progress")
       .set("x-test-auth", "yes")
-      .send({ content: "User corrected the current state", expectedUpdatedAt: null })
+      .send({ content: "User corrected the current state", expectedUpdatedAt: null, expectedBranchLeafId: null })
       .expect(200)
       .expect(({ body }) => {
         expect(body.block).toMatchObject({ label: "progress", updatedBy: "user" });
@@ -72,10 +73,53 @@ describe("harness context routes", () => {
     await request(app)
       .put("/api/harness/sessions/session-1/blocks/progress")
       .set("x-test-auth", "yes")
-      .send({ content: "Stale editor draft", expectedUpdatedAt: openedRevision })
+      .send({ content: "Stale editor draft", expectedUpdatedAt: openedRevision, expectedBranchLeafId: null })
       .expect(409)
       .expect(({ body }) => expect(body.current).toMatchObject({ content: "Background update" }));
     await expect(store.getBlocks("session-1")).resolves.toMatchObject([{ content: "Background update" }]);
+  });
+
+  it("derives the active branch server-side for reads and user block edits", async () => {
+    let branchEntryIds = ["root", "leaf-a"];
+    const ancestor = await store.upsertBlock({
+      sessionId: "session-1",
+      label: "progress",
+      content: "ancestor",
+      updatedBy: "memory-agent",
+      sourceLeafId: "leaf-a",
+    });
+    const app = express();
+    app.use(express.json());
+    registerHarnessContextRoutes(app, {
+      getStore: async () => store,
+      getBranchEntryIds: async () => branchEntryIds,
+    });
+
+    await request(app)
+      .get("/api/harness/sessions/session-1/blocks")
+      .expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({
+        branchLeafId: "leaf-a",
+        blocks: [{ content: "ancestor" }],
+      }));
+
+    branchEntryIds = ["root", "leaf-a", "leaf-a1"];
+    await request(app)
+      .put("/api/harness/sessions/session-1/blocks/progress")
+      .send({ content: "descendant edit", expectedUpdatedAt: ancestor.updatedAt, expectedBranchLeafId: "leaf-a1" })
+      .expect(200);
+
+    await expect(store.getBlocks("session-1", branchEntryIds))
+      .resolves.toMatchObject([{ content: "descendant edit", sourceLeafId: "leaf-a1" }]);
+    await expect(store.getBlocks("session-1", ["root", "leaf-a", "leaf-a2"]))
+      .resolves.toMatchObject([{ content: "ancestor", sourceLeafId: "leaf-a" }]);
+
+    branchEntryIds = ["root", "leaf-b"];
+    await request(app)
+      .put("/api/harness/sessions/session-1/blocks/progress")
+      .send({ content: "stale branch draft", expectedUpdatedAt: ancestor.updatedAt, expectedBranchLeafId: "leaf-a1" })
+      .expect(409)
+      .expect(({ body }) => expect(body.code).toBe("branch-conflict"));
   });
 
   it("reviews workspace and user suggestions through authenticated scoped actions", async () => {
@@ -90,6 +134,7 @@ describe("harness context routes", () => {
     app.use(express.json());
     registerHarnessContextRoutes(app, {
       getStore: async (sessionId) => sessionId === "session-1" ? store : null,
+      getBranchEntryIds: async () => [],
       getUserStore: async () => userStore,
       onKnowledgeChanged: (sessionId) => { changed.push(sessionId); },
       requireAuth: (req, res, next) => {

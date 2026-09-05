@@ -78,6 +78,7 @@ export async function executeTodoTool(
   input: TodoToolInput,
   deps: TodoToolDeps,
   sessionConfirmed: boolean,
+  branchEntryIds?: readonly string[],
 ): Promise<TodoToolResult> {
   const { store, sessionId, settings } = deps;
   const items = input.items;
@@ -99,6 +100,10 @@ export async function executeTodoTool(
     label: "plan",
     content,
     updatedBy: "agent",
+    ...(branchEntryIds === undefined ? {} : {
+      branchEntryIds,
+      sourceLeafId: branchEntryIds[branchEntryIds.length - 1] ?? null,
+    }),
   });
 
   // Build summary

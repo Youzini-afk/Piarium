@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
-import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { sessionEntryToContextMessages, type AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import { DEFAULT_MEMORY_AGENT_SETTINGS, type HostEvent, type HostEventData } from "@piarium/protocol";
 
@@ -721,10 +721,19 @@ async function runCompactionCase(options: {
     () => fauxAssistantMessage("pi-generated summary 2"),
   ]);
 
+  // Create a shared keeper coverage store and extend it with all branch
+  // entry IDs before compaction, simulating that the keeper has processed
+  // the full conversation history.
+  const { createKeeperCoverageStore } = await import("../../../web/application-host/lib/harness/compaction.js");
+  const keeperCoverageStore = createKeeperCoverageStore();
+
   const session = await setupSession({
     root: options.root,
     faux,
-    serviceHostOptions: { compactionDepsProvider: options.compactionDepsProvider },
+    serviceHostOptions: {
+      compactionDepsProvider: options.compactionDepsProvider,
+      keeperCoverageStore,
+    },
   });
 
   try {
@@ -734,6 +743,11 @@ async function runCompactionCase(options: {
       await session.host.session.waitForIdle();
     }
     const callsBefore = faux.state.callCount;
+    // Simulate one fully accepted keeper patch using exactly the entries that
+    // Pi materializes into context, rather than the complete append-only branch.
+    const contextEntryIds = session.host.session.sessionManager.buildContextEntries()
+      .flatMap((entry) => sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []);
+    keeperCoverageStore.extend(snapshot.sessionId, contextEntryIds);
     await session.host.session.compact();
     const callsAfter = faux.state.callCount;
     return {

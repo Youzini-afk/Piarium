@@ -3,6 +3,7 @@ import { sliceUtf8ByBytes, type DiagnosticItem, type HarnessActorContext } from 
 import { createLspDiagnosticsSnapshotService, type DiagnosticsProvider } from "./diagnostics-service.js";
 import { createCompactionAfterService, createShellExecService, createShellReadService } from "./harness-services.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
+import { createKeeperCoverageStore } from "./compaction.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -70,6 +71,7 @@ describe("incremental shell observation", () => {
       observationCursors: cursors,
       getShellSupervisor: () => supervisor,
       threadRegistry: { clearCursorsForSession: () => { clearedThreadCursors += 1; } },
+      keeperCoverageStore: createKeeperCoverageStore(),
     } as unknown as HarnessServiceHost;
     const service = createShellReadService(host);
 

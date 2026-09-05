@@ -14,8 +14,8 @@
  * <facts>files touched: …, unresolved diagnostics: …, last checkpoint: …</facts>
  * </piarium-compaction>
  *
- * Non-stacking: second compaction's summary must be current blocks + facts,
- * not include first compaction's summary text.
+ * Mechanical coverage is checked against the exact context-producing entry
+ * IDs Pi will remove. Semantic completeness remains a separate evaluation.
  */
 
 import type { KnowledgeStore, Block } from "../knowledge/store.js";
@@ -59,6 +59,87 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   reinjectTotalTokens: 50000,
   reinjectSkillsTokens: 25000,
 };
+
+// ── Keeper coverage tracking ───────────────────────────────────────
+
+/**
+ * Tracks which Pi session entry IDs the memory keeper has processed.
+ * Compaction takeover requires that the keeper has observed every entry
+ * being removed; an uncovered entry means the summary would silently drop
+ * work the keeper never saw.
+ *
+ * Entry IDs are stable, monotonically appended Pi session transcript
+ * identifiers. Unlike `turnIndex` (which resets on each `agent_start`),
+ * entry IDs uniquely identify a position in the session history.
+ */
+export interface KeeperCoverageEntry {
+  /** Entry IDs the keeper has processed. */
+  coveredEntryIds: Set<string>;
+  /** Last time the coverage was extended. */
+  updatedAt: number;
+}
+
+export type KeeperCoverageStatus = "ready" | "partial" | "none";
+
+export interface KeeperCoverageState {
+  status: KeeperCoverageStatus;
+  entry: KeeperCoverageEntry | null;
+  /** Entry IDs from the removed range that are NOT covered. */
+  uncovered: string[];
+}
+
+export interface KeeperCoverageStore {
+  /** Returns the current coverage entry for a session, or null. */
+  get(sessionId: string): KeeperCoverageEntry | null;
+  /**
+   * Extends coverage to include the given entry IDs. Called after a
+   * successful `memory.blocks.apply` with the branch entry IDs that
+   * were processed.
+   */
+  extend(sessionId: string, entryIds: readonly string[], now?: number): KeeperCoverageEntry;
+  /** Clears coverage for a session (called after compaction or session drop). */
+  clear(sessionId: string): void;
+}
+
+export function createKeeperCoverageStore(now: () => number = Date.now): KeeperCoverageStore {
+  const entries = new Map<string, KeeperCoverageEntry>();
+  return {
+    get(sessionId: string): KeeperCoverageEntry | null {
+      const entry = entries.get(sessionId);
+      return entry ? { coveredEntryIds: new Set(entry.coveredEntryIds), updatedAt: entry.updatedAt } : null;
+    },
+    extend(sessionId: string, entryIds: readonly string[], at: number = now()): KeeperCoverageEntry {
+      const existing = entries.get(sessionId);
+      const covered = existing ? new Set(existing.coveredEntryIds) : new Set<string>();
+      for (const id of entryIds) covered.add(id);
+      const entry: KeeperCoverageEntry = { coveredEntryIds: covered, updatedAt: at };
+      entries.set(sessionId, entry);
+      return { coveredEntryIds: new Set(covered), updatedAt: at };
+    },
+    clear(sessionId: string): void {
+      entries.delete(sessionId);
+    },
+  };
+}
+
+/**
+ * Evaluates whether the keeper has covered all entries being removed by
+ * compaction. Every entry ID in `removedEntryIds` must be in the coverage
+ * set; any uncovered entry means the summary would drop unobserved work.
+ */
+export function evaluateKeeperCoverage(
+  coverage: KeeperCoverageEntry | null,
+  removedEntryIds: readonly string[],
+): KeeperCoverageState {
+  if (!coverage || coverage.coveredEntryIds.size === 0) {
+    return { status: "none", entry: coverage, uncovered: [...removedEntryIds] };
+  }
+  const uncovered = removedEntryIds.filter((id) => !coverage.coveredEntryIds.has(id));
+  if (uncovered.length === 0) {
+    return { status: "ready", entry: coverage, uncovered: [] };
+  }
+  return { status: "partial", entry: coverage, uncovered };
+}
 
 // ── Summary assembly ───────────────────────────────────────────────
 
@@ -107,15 +188,17 @@ export interface CompactionHandlerDeps {
   getFacts: () => Promise<CompactionFacts>;
   /** Memory agent pre-compaction refresh */
   requestPreCompactionRefresh?: () => Promise<void>;
+  /** Keeper coverage store for verifying continuous processing. */
+  coverageStore?: KeeperCoverageStore;
 }
 
 export async function handleBeforeCompact(
   sessionId: string,
   deps: CompactionHandlerDeps,
-  preparation: { firstKeptEntryId: string; tokensBefore: number },
+  preparation: { firstKeptEntryId: string; tokensBefore: number; branchEntryIds: string[]; removedEntryIds: string[] },
   options?: { staleNote?: boolean },
 ): Promise<CompactionResult> {
-  const { store, settings, getFacts } = deps;
+  const { store, settings, getFacts, coverageStore } = deps;
   const { firstKeptEntryId, tokensBefore } = preparation;
 
   if (settings.takeoverEnabled !== true) {
@@ -125,7 +208,7 @@ export async function handleBeforeCompact(
     );
   }
 
-  const blocks = await store.getBlocks(sessionId);
+  const blocks = await store.getBlocks(sessionId, preparation.branchEntryIds);
   const planBlock = blocks.find((b) => b.label === "plan");
   const plan = planBlock?.content ?? "";
   const facts = await getFacts();
@@ -140,6 +223,34 @@ export async function handleBeforeCompact(
     throw new HarnessServiceError(
       "unavailable",
       "compaction.before: no memory-keeper blocks to carry — Pi summarizes instead",
+    );
+  }
+
+  // MANDATORY coverage check: the keeper must have continuously processed
+  // every entry being removed. This is not optional — if `removedEntryIds`
+  // is not provided, or if any removed entry is not covered, takeover is
+  // rejected and Pi performs default compaction. There is no "fields
+  // missing → skip check" path.
+  if (!coverageStore) {
+    throw new HarnessServiceError(
+      "unavailable",
+      "compaction.before: keeper coverage store not configured — Pi summarizes instead",
+    );
+  }
+  if (preparation.removedEntryIds.length === 0) {
+    throw new HarnessServiceError(
+      "unavailable",
+      "compaction.before: removed entry IDs not provided — cannot verify coverage, Pi summarizes instead",
+    );
+  }
+  const coverage = coverageStore.get(sessionId);
+  const coverageState = evaluateKeeperCoverage(coverage, preparation.removedEntryIds);
+  if (coverageState.status !== "ready") {
+    throw new HarnessServiceError(
+      "unavailable",
+      `compaction.before: keeper coverage is ${coverageState.status}` +
+      (coverageState.uncovered.length > 0 ? ` (${coverageState.uncovered.length} uncovered entries)` : "") +
+      " — Pi summarizes instead",
     );
   }
 

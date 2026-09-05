@@ -707,6 +707,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const mutationTails = new Map<string, Promise<void>>();
   const legacyImports = new Set<string>();
   const cursors = new Map<string, ThreadViewCursor>();
+  const cursorEpochs = new Map<string, number>();
   const waiters = new Map<string, Set<() => void>>();
   const draining = new Set<string>();
   const retiredParents = new Set<string>();
@@ -1377,10 +1378,22 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const getCursor = (observerSessionId: string, threadId: string): ThreadViewCursor | null => (
     structuredClone(cursors.get(cursorKey(observerSessionId, threadId)) ?? null)
   );
-  const setCursor = (observerSessionId: string, threadId: string, cursor: ThreadViewCursor): void => {
-    cursors.set(cursorKey(observerSessionId, threadId), structuredClone(cursor));
+  const getCursorEpoch = (observerSessionId: string): number => cursorEpochs.get(observerSessionId) ?? 0;
+  const setCursor = (
+    observerSessionId: string,
+    threadId: string,
+    cursor: ThreadViewCursor,
+    expectedEpoch?: number,
+  ): boolean => {
+    if (expectedEpoch !== undefined && getCursorEpoch(observerSessionId) !== expectedEpoch) return false;
+    const key = cursorKey(observerSessionId, threadId);
+    const current = cursors.get(key);
+    if (current && current.eventSeq > cursor.eventSeq) return false;
+    cursors.set(key, structuredClone(cursor));
+    return true;
   };
   const clearCursorsForSession = (observerSessionId: string): void => {
+    cursorEpochs.set(observerSessionId, getCursorEpoch(observerSessionId) + 1);
     for (const key of cursors.keys()) if (key.startsWith(`${observerSessionId}\0`)) cursors.delete(key);
   };
 
@@ -1495,6 +1508,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     await Promise.allSettled(mutationTails.values());
     waiters.clear();
     cursors.clear();
+    cursorEpochs.clear();
     cache.clear();
     retiredParents.clear();
   };
@@ -1525,6 +1539,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     cancelAllForParent,
     deleteThread,
     getCursor,
+    getCursorEpoch,
     setCursor,
     clearCursorsForSession,
     subscribeToChanges,

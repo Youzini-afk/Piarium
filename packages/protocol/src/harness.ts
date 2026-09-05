@@ -180,6 +180,11 @@ export interface Zone2AssembleParams {
   contextUsage?: { used: number; window: number };
   query?: string;
   sinceTurn: number;
+  /**
+   * Current Pi session branch entry IDs (ancestor path from root to leaf).
+   * Used to resolve the single visible revision of each memory block.
+   */
+  branchEntryIds: string[];
 }
 
 export interface Zone2AssembleResult {
@@ -190,6 +195,15 @@ export interface Zone2AssembleResult {
 export interface CompactionBeforeParams {
   firstKeptEntryId: string;
   tokensBefore: number;
+  /** Complete active ancestor path used to resolve branch-local blocks. */
+  branchEntryIds: string[];
+  /**
+   * Entry IDs of the conversation history being removed by compaction,
+   * in branch order (oldest first). The Host uses this to verify the
+   * memory keeper has continuously processed the entire range before
+   * allowing takeover.
+   */
+  removedEntryIds: string[];
 }
 
 export interface CompactionBeforeResult {
@@ -210,6 +224,7 @@ export interface CompactionAfterResult {
 
 export interface TodoUpsertParams {
   items: Array<{ text: string; status: "open" | "done" | "blocked" }>;
+  branchEntryIds: string[];
   confidence?: number;
   confirmed?: boolean;
 }
@@ -261,8 +276,8 @@ export interface HarnessServiceMap {
   "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
-  "memory.blocks.get": { params: Record<string, never>; result: { blocks: MemoryBlockSnapshot[] } };
-  "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[] }; result: MemoryApplyResult };
+  "memory.blocks.get": { params: { branchEntryIds: string[] }; result: { blocks: MemoryBlockSnapshot[] } };
+  "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[]; branchEntryIds: string[]; coveredEntryIds: string[] }; result: MemoryApplyResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.list": { params: ThreadListParams; result: ThreadListResult };

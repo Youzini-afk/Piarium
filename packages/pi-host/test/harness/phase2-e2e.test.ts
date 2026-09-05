@@ -139,7 +139,9 @@ async function executeTool(
   tool: ToolDefinition,
   params: Record<string, unknown>,
 ): Promise<{ text: string; details: unknown }> {
-  const result = await tool.execute("test-call", params as never, undefined, undefined, undefined as never) as { content: Array<{ type: string; text: string }>; details?: unknown };
+  const result = await tool.execute("test-call", params as never, undefined, undefined, {
+    sessionManager: { getBranch: () => [] },
+  } as never) as { content: Array<{ type: string; text: string }>; details?: unknown };
   return { text: result.content.map((c) => c.text).join("\n"), details: result.details };
 }
 
@@ -196,7 +198,7 @@ describe("Phase 2 e2e integration", () => {
   it("zone2.assemble → bridge → router → service: returns assembled content", async () => {
     const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
     try {
-      const result = await bridge.request("zone2.assemble", { sinceTurn: 0 });
+      const result = await bridge.request("zone2.assemble", { sinceTurn: 0, branchEntryIds: [] });
       assert.ok(result.content, "zone2.assemble should return non-null content");
       assert.match(result.content!, /piarium-context/, "zone2 content should contain piarium-context marker");
       assert.match(result.content!, /plan/, "zone2 content should contain plan section");
@@ -211,17 +213,32 @@ describe("Phase 2 e2e integration", () => {
   it("memory blocks → bridge → router → validated Host apply", async () => {
     const { workspaceRoot, dataDir, bridge, knowledgeStore, harnessServiceHost } = await setupP2E2E();
     try {
-      const before = await bridge.request("memory.blocks.get", {});
+      const before = await bridge.request("memory.blocks.get", { branchEntryIds: ["e1"] });
       assert.deepEqual(before.blocks, []);
       const applied = await bridge.request("memory.blocks.apply", {
         cursorTurn: 4,
+        branchEntryIds: ["e1"],
+        coveredEntryIds: ["e1"],
         ops: [
           { op: "create", block: "progress", content: "implemented observer wiring" },
           { op: "patch", block: "progress", find: "implemented", replace: "verified" },
         ],
       });
       assert.deepEqual(applied, { applied: 2, rejected: 0, errors: [], changedBlocks: true });
-      assert.equal((await knowledgeStore.getBlocks(SESSION_ID))[0]?.content, "verified observer wiring");
+      assert.equal((await knowledgeStore.getBlocks(SESSION_ID, ["e1"]))[0]?.content, "verified observer wiring");
+      assert.equal(harnessServiceHost.keeperCoverageStore.get(SESSION_ID)?.coveredEntryIds.has("e1"), true);
+
+      const partial = await bridge.request("memory.blocks.apply", {
+        cursorTurn: 5,
+        branchEntryIds: ["e1", "e2"],
+        coveredEntryIds: ["e1", "e2"],
+        ops: [
+          { op: "create", block: "partial", content: "written" },
+          { op: "patch", block: "partial", find: "missing", replace: "nope" },
+        ],
+      });
+      assert.equal(partial.rejected, 1);
+      assert.equal(harnessServiceHost.keeperCoverageStore.get(SESSION_ID)?.coveredEntryIds.has("e2"), false);
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
@@ -240,8 +257,11 @@ describe("Phase 2 e2e integration", () => {
         content: "Wired the compaction service",
         updatedBy: "memory-agent",
       });
+      harnessServiceHost.keeperCoverageStore.extend(SESSION_ID, ["e1"]);
       const result = await bridge.request("compaction.before", {
+        branchEntryIds: ["e1", "test-entry"],
         firstKeptEntryId: "test-entry",
+        removedEntryIds: ["e1"],
         tokensBefore: 50000,
       });
       assert.ok(result.summary, "compaction.before should return a summary");

@@ -29,7 +29,7 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 Global singleton that owns:
 - `OutputStore` — large output storage with per-session isolation
-- `ObservationCursorStore` — atomic per-observer shell/diagnostics baselines, reset by compaction
+- `ObservationCursorStore` — per-observer shell/diagnostics/thread baselines with prepare/commit delivery CAS, reset by compaction
 - `PathLockService` — owner-bound canonical-resource leases
 - `HarnessSearchService` — wraps `createWorkspaceContentSearch`
 - `DiagnosticsProvider` — LSP diagnostics (optional)
@@ -107,6 +107,12 @@ file's real `file -> defines -> symbol` graph, unavailable servers preserve the
 last graph, and deletes remove it. There is no startup repository scan.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
+Blocks are branch revisions: readers choose the closest ancestor revision for
+each label, descendant writes copy on write, and deletes create branch-local
+tombstones. UI routes resolve the active Pi branch on the Host rather than
+accepting branch identity from the renderer. Keeper coverage records only the
+context-producing session entries used by a fully accepted material update;
+compaction checks Pi's actual removal boundary and otherwise falls back.
 Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
@@ -162,6 +168,7 @@ The harness is wired in `packages/web/application-host/index.ts`:
   triggers `harnessServiceHost.registerSession()` which creates a
   `ShellSupervisor` for the session.
 - **Drop**: `harnessServiceHost.dropSession()` disposes the shell supervisor
-  and clears session-scoped output entries and observation cursors.
+  and clears session-scoped output entries, observation cursors, and the
+  conservative in-memory keeper coverage watermark.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.

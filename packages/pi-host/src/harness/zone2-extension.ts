@@ -50,6 +50,7 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
           sinceTurn: Math.max(0, turnIndex - 1),
           ...(event.prompt.trim() ? { query: event.prompt } : {}),
           ...(eventCursor === undefined ? {} : { afterEventId: eventCursor }),
+          branchEntryIds: ctx.sessionManager.getBranch().map((e: { id: string }) => e.id),
           ...(usage?.tokens === null || usage?.tokens === undefined
             ? {}
             : { contextUsage: { used: usage.tokens, window: usage.contextWindow } }),

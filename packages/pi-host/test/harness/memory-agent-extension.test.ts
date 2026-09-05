@@ -19,7 +19,7 @@ describe("memory agent extension", () => {
     const bridge = {
       request: async (method: string, params: unknown) => {
         if (method === "memory.blocks.get") {
-          return { blocks: [{ label: "progress", content: "old", updatedBy: "agent" }] };
+          return { blocks: [{ label: "progress", content: "old", updatedBy: "agent", revision: 7 }] };
         }
         if (method === "memory.blocks.apply") {
           applyRequests.push(params);
@@ -43,6 +43,8 @@ describe("memory agent extension", () => {
         modelContext = context;
         return [{ op: "replace", block: "progress", content: "current" }];
       },
+      getBranchEntryIds: () => ["entry-1", "entry-2"],
+      getContextEntryIds: () => ["entry-1"],
     })({
       on: (event: string, handler: (event: never, ctx: never) => unknown) => {
         handlers.set(event, handler);
@@ -71,7 +73,9 @@ describe("memory agent extension", () => {
     assert.match(JSON.stringify(captured.messages), /\[progress\].*old/);
     assert.deepEqual(applyRequests[0], {
       cursorTurn: 2,
-      ops: [{ op: "replace", block: "progress", content: "current" }],
+      ops: [{ op: "replace", block: "progress", content: "current", expectedRevision: 7 }],
+      branchEntryIds: ["entry-1", "entry-2"],
+      coveredEntryIds: ["entry-1"],
     });
 
     const turnEnd = handlers.get("turn_end")!;

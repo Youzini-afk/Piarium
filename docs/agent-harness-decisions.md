@@ -1239,6 +1239,57 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 
 状态：已回写文档；数据库问题在本轮回复说明。
 
+### D-074 · 2026-09-05 · 记忆版本/分支、压缩覆盖、证据标记、观察游标延迟推进
+
+类型：实现决策（纵切 1）
+
+决定：按 plan 0.7 步骤 1 的顺序，完成四项本地可实现的一致性修复，每项包含协议、生产接线、测试和文档同步。
+
+1. **记忆版本与分支归属**。`MemoryBlockSnapshot` 新增 `revision`（store `updatedAt`）；`MemoryEditOp` 新增可选 `expectedRevision`；`memory.blocks.get/apply` params 新增可选 `branchLeafId`；`MemoryApplyResult` 新增可选 `conflicts`。`KnowledgeStore.Block` 和 `BlockInput` 新增 `branchLeafId`，`getBlocks`/`upsertBlock`/`deleteBlock` 按 `(sessionId, branchLeafId, label)` 过滤。旧块（`branchLeafId` undefined）归默认分支（null），保持向后兼容。`applyOps` 检查 `expectedRevision`，不匹配时拒绝并记录 conflict，不静默覆盖。pi-host `memory-agent-extension` 从 `sessionManager.getLeafId()` 获取 branchLeafId，从 get 结果的 revision 附加到 ops 的 expectedRevision。
+
+2. **Keeper plan 变更限制**。`applyOps` 拒绝 keeper 对 `plan` 的 `replace`/`patch`/`create`/`delete`，仅允许 `mark_plan`。原代码允许 `replace`，违反 main agent 对 plan 结构的所有权。
+
+3. **压缩接管覆盖检查**。新增 `KeeperCoverageStore` 跟踪 keeper 连续处理区间。`memory.blocks.apply` 成功后扩展覆盖；`handleBeforeCompact` 在 `firstRemovedTurn`/`lastRemovedTurn` 提供时检查覆盖是否跨越整个移除区间；不满足时返回 `unavailable`，Pi 执行压缩。`compaction.after` 和 `dropSession` 清除覆盖。仅 keeper 块存在不再足够。
+
+4. **证据标记与观察游标延迟推进**。截断标记包含 `ephemeral, generation <gen>` 明确标记 OutputRef 的生命周期。`OutputStore` 全文通过 `output.read` 分页可恢复；Host 重启后 handle 过期返回 `expired`。`ObservationCursorStore` 新增 `prepare`/`commit` 方法：`prepare` 运行任务但不推进游标，`commit` 在响应成功交付后推进，`abort` 不推进使下次观察包含未交付变更。现有 `observe` 保持立即推进语义，消费者按需切换。
+
+原因：D-072 列出的缺口（2.4/2.6/3.9）在当前实现中会导致静默覆盖用户编辑、跨分支污染、keeper 未观察的历史被压缩后丢失、截断输出在 Host 重启后不可恢复、以及观察游标在响应未交付时已推进。这些是协议级完整性问题，不是可选增强。
+
+影响：protocol `memory-agent.ts`/`harness.ts`；application-host `store.ts`/`memory-agent.ts`/`harness-services.ts`/`compaction.ts`/`observation-cursors.ts`/`service-host.ts`/`index.ts`；pi-host `memory-agent-extension.ts`/`session-host.ts`/`tool-result-truncation.ts`。测试：`memory-agent.test.ts`、`compaction.test.ts`、`output-store.test.ts`、`observation-cursors.test.ts`、protocol `memory-agent.test.ts`、`tool-result-truncation.test.ts`、`memory-agent-extension.test.ts`。
+
+未完成：`observe` 调用点未改为 `prepare`/`commit`；后台调用用量归因仍待补；TranscriptRef 恢复仍限于 Pi transcript 持久 entry；真实 Pi session E2E、外部测试者、macOS/Linux smoke、Electron 打包证据未获取。
+
+状态：首个实现候选；后由 D-075/D-076 修正。
+
+### D-075 · 2026-09-05 · D-074 第一轮验收返工
+
+类型：问题与解法（后由 D-076 完成）
+
+决定：第一轮返工把 `branchLeafId` 改为 `sourceLeafId + branchEntryIds`，把已有记录的 revision 检查移入 Store CAS，把覆盖改成 entry ID set，并以 `observedAt` 做 observation CAS。该候选没有通过第二轮验收：写入仍按 source leaf 精确等值，后代无法更新祖先；读取未按每个 label 选择最近祖先，分支删除会物理删除兄弟仍需的祖先；UI、todo、thread snapshot、compaction 未全部使用活动分支。create 未以 `expectedUpdatedAt:null` 断言仍不存在。coverage 把完整 `getBranch()` 冒充 keeper 实际 context，且部分 op 成功即可推进。毫秒时间戳 CAS 会碰撞，clear 后 pending commit 还能复活游标；生产观察调用仍提前推进。
+
+原因：这些问题均由真实最小复现确认，不能靠增加已有 happy-path 测试或修改状态文字解决。本条恢复 D-074 原始记录，纠正此前在未提交工作区直接改写 D-074 的 append-only 违规。
+
+影响：D-076 接管最终实现；D-074/D-075 在索引标为被修正，保留失败形状供后续回归。
+
+状态：superseded by D-076。
+
+### D-076 · 2026-09-05 · 分支块、覆盖水位与送达游标的最终修正
+
+类型：实现修正
+
+决定：
+
+1. block 采用分支 copy-on-write：读取按 `branchEntryIds` 为每个 label 只选最近祖先；后代更新在当前 leaf 写新修订，祖先保留；删除在当前 leaf 写 tombstone，兄弟分支仍继承祖先。create 用 `expectedUpdatedAt:null` 原子断言缺席，update/delete 在 Store 写队列内 CAS，同一 apply 内修订顺序前传。UI route 从 broker 活动分支自动解析，todo、Zone 2、memory、compaction 和 thread blocks snapshot 使用同一分支视图。
+2. keeper 单独提交 `coveredEntryIds`，来源是 `SessionManager.buildContextEntries()` 中真实产生 context message 的 entry；Host 先验证其属于提交分支，只有全部 op 接受且确有 material block 更新才扩展水位。compaction 依照 Pi 上一次 compaction 的 boundaryStart 与本次 firstKeptEntryId 推导真正被摘要的 context entry，强制检查后才接管；当前仍 default-off。
+3. observation cursor 新增 store-local 单调 revision，pending 在 commit/abort 前持续占有 namespace generation；同毫秒提交不会绕过 CAS，compaction/clear 会使旧 pending 失效。shell、diagnostics、Zone 2 threads 和 thread list/wait 均把游标推进延迟到 Router 成功把响应交给 pi-host；响应失败 abort，线程游标另按 eventSeq 防倒退。持久 tool-result entry acknowledgement 仍是更强的后续边界，不在本次冒充完成。
+4. OutputRef 的 ephemeral generation 标记保留，它只说明生命周期，不声称 Host 重启后恢复全文。
+
+原因：分支版本必须保留共同祖先而不是改写或删除它；coverage 必须描述 keeper 真正读到的输入而不是可枚举的整条 transcript；送达优化必须能承受并发、固定时钟和压缩清理。
+
+影响：protocol memory/compaction/todo/Zone 2 参数；KnowledgeStore block revision/tombstone；Host routes/services/router/thread cursors；pi-host memory/compaction/todo；相关测试与 status 2.4/2.6/3.9。
+
+状态：已实施；本地验证与仍缺外部证据见状态矩阵。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1318,3 +1369,6 @@ TQL 的字符串类型转换错误应从查询语言/绑定/执行链调查；�
 | D-071 | folded-in（用户取舍；仅文档） | D-073（数据库问题表述） | agent-harness 决策表/7.5、plan 0.7、status |
 | D-072 | folded-in（语义修订；实现待办） | — | agent-harness 5.7/6.1/8/10/12、plan 0.7/2.4/2.6/3.2、status |
 | D-073 | folded-in（用户补充；仅文档） | — | agent-harness 7.5、plan 2.1 |
+| D-074 | superseded in part（首个实现候选） | D-075 / D-076 | plan 0.7 step 1；原始失败形状保留 |
+| D-075 | superseded（第二个实现候选未通过验收） | D-076 | D-076 回归用例 |
+| D-076 | implementation | — | agent-harness 8.4/8.7、status 2.4/2.6/3.9；protocol / pi-host / Host |

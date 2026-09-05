@@ -7,7 +7,8 @@ import type { WorkspaceContentSearchResult } from "../search/content.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
 import type { MemoryAgentSettings } from "@piarium/protocol";
 import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
-import type { CompactionHandlerDeps, CompactionSettings } from "./compaction.js";
+import type { CompactionHandlerDeps, CompactionSettings, KeeperCoverageStore } from "./compaction.js";
+import { createKeeperCoverageStore } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
@@ -79,6 +80,7 @@ export interface HarnessServiceHost {
   onSessionCompacted: ((sessionId: string) => void) | null;
   compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
   compactionSettings: CompactionSettings;
+  keeperCoverageStore: KeeperCoverageStore;
   todoSettings: TodoToolSettings;
   recallDepsProvider: ((sessionId: string) => Promise<RecallToolDeps>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
@@ -130,6 +132,8 @@ export interface HarnessServiceHostOptions {
   onSessionCompacted?: (sessionId: string) => void;
   compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
   compactionSettings?: CompactionSettings;
+  /** External keeper coverage store; if omitted, the host creates one. */
+  keeperCoverageStore?: KeeperCoverageStore;
   todoSettings?: TodoToolSettings;
   recallDepsProvider?: (sessionId: string) => Promise<RecallToolDeps>;
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
@@ -162,6 +166,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const onSessionCompacted = options.onSessionCompacted ?? null;
   const compactionDepsProvider = options.compactionDepsProvider ?? null;
   const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
+  const keeperCoverageStore = options.keeperCoverageStore ?? createKeeperCoverageStore();
   const todoSettings = options.todoSettings ?? { confirmBelow: 0.6 };
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
@@ -233,6 +238,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     observationCursors.clearObserver(sessionId);
     threadRegistry?.clearCursorsForSession(sessionId);
     pathLockService.dropSession(sessionId);
+    keeperCoverageStore.clear(sessionId);
   };
 
   const getShellSupervisor = (sessionId: string): ShellSupervisor | null => {
@@ -295,6 +301,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     onSessionCompacted,
     compactionDepsProvider,
     compactionSettings,
+    keeperCoverageStore,
     todoSettings,
     recallDepsProvider,
     todoDepsProvider,

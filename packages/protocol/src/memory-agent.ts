@@ -24,6 +24,14 @@ export interface MemoryEditOp {
   replace?: string;
   item?: number;
   status?: "done" | "blocked" | "open";
+  /**
+   * The block revision (`updatedAt`) from the keeper input snapshot. The
+   * pi-host coordinator attaches it after parsing model output; it is not a
+   * model-owned field. When present, the Host rejects the op if modified
+   * since that revision, preserving conflict evidence instead of silently
+   * overwriting a concurrent user or agent edit.
+   */
+  expectedRevision?: number;
 }
 
 export interface MemoryAgentState {
@@ -52,6 +60,23 @@ export interface MemoryBlockSnapshot {
   content: string;
   updatedBy: "agent" | "memory-agent" | "user";
   cursorTurn?: number;
+  /**
+   * The block's current revision (store `updatedAt`). The coordinator returns
+   * this as `expectedRevision` with parsed ops so the Host can detect
+   * stale writes without a separate round-trip.
+   */
+  revision: number;
+  /**
+   * The Pi session leaf entry ID at the time this block was last written.
+   * Used for branch-aware visibility via ancestor resolution.
+   */
+  sourceLeafId?: string | null;
+}
+
+export interface MemoryBlockConflict {
+  block: string;
+  expected: number | null;
+  actual: number;
 }
 
 export interface MemoryApplyResult {
@@ -59,6 +84,8 @@ export interface MemoryApplyResult {
   rejected: number;
   errors: string[];
   changedBlocks: boolean;
+  /** Blocks that changed between the keeper's read and its apply attempt. */
+  conflicts?: MemoryBlockConflict[];
 }
 
 export function parseMemoryEditOps(value: unknown): MemoryEditOp[] | null {
@@ -76,6 +103,7 @@ export function parseMemoryEditOps(value: unknown): MemoryEditOp[] | null {
     if (record.replace !== undefined && typeof record.replace !== "string") return null;
     if (record.item !== undefined && !Number.isSafeInteger(record.item)) return null;
     if (record.status !== undefined && record.status !== "done" && record.status !== "blocked" && record.status !== "open") return null;
+    if (record.expectedRevision !== undefined && (!Number.isSafeInteger(record.expectedRevision) || Number(record.expectedRevision) < 0)) return null;
     parsed.push({
       op: record.op as MemoryEditOp["op"],
       ...(record.block === undefined ? {} : { block: record.block as string }),
@@ -86,6 +114,7 @@ export function parseMemoryEditOps(value: unknown): MemoryEditOp[] | null {
       ...(record.status === undefined ? {} : {
         status: record.status as Exclude<MemoryEditOp["status"], undefined>,
       }),
+      ...(record.expectedRevision === undefined ? {} : { expectedRevision: record.expectedRevision as number }),
     });
   }
   return parsed;

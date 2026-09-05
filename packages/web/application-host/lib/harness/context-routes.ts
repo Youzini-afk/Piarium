@@ -15,6 +15,7 @@ import {
 
 export interface HarnessContextRoutesOptions {
   getStore(sessionId: string): Promise<KnowledgeStore | null>;
+  getBranchEntryIds(sessionId: string): Promise<string[]>;
   getUserStore?: () => Promise<KnowledgeStore>;
   onKnowledgeChanged?: (sessionId: string, scope: KnowledgeScope) => void;
   requireAuth?: RequestHandler;
@@ -34,6 +35,7 @@ export function registerHarnessContextRoutes(
   app: Express,
   {
     getStore,
+    getBranchEntryIds,
     getUserStore,
     onKnowledgeChanged,
     requireAuth = noAuth,
@@ -64,7 +66,12 @@ export function registerHarnessContextRoutes(
         response.status(404).json({ error: "Session knowledge store is unavailable" });
         return;
       }
-      response.json({ sessionId, blocks: await store.getBlocks(sessionId) });
+      const branchEntryIds = await getBranchEntryIds(sessionId);
+      response.json({
+        sessionId,
+        branchLeafId: branchEntryIds[branchEntryIds.length - 1] ?? null,
+        blocks: await store.getBlocks(sessionId, branchEntryIds),
+      });
     } catch (error) {
       response.status(500).json({ error: error instanceof Error ? error.message : "Unable to read session blocks" });
     }
@@ -75,14 +82,16 @@ export function registerHarnessContextRoutes(
     const label = labelOf(request);
     const content = request.body?.content;
     const expectedUpdatedAt = request.body?.expectedUpdatedAt;
+    const expectedBranchLeafId = request.body?.expectedBranchLeafId;
     if (
       !sessionId
       || !label
       || typeof content !== "string"
       || (expectedUpdatedAt !== null && typeof expectedUpdatedAt !== "number")
       || (typeof expectedUpdatedAt === "number" && !Number.isFinite(expectedUpdatedAt))
+      || (expectedBranchLeafId !== null && typeof expectedBranchLeafId !== "string")
     ) {
-      response.status(400).json({ error: "sessionId, label, content, and expectedUpdatedAt are required" });
+      response.status(400).json({ error: "sessionId, label, content, expectedUpdatedAt, and expectedBranchLeafId are required" });
       return;
     }
     try {
@@ -91,9 +100,23 @@ export function registerHarnessContextRoutes(
         response.status(404).json({ error: "Session knowledge store is unavailable" });
         return;
       }
+      const branchEntryIds = await getBranchEntryIds(sessionId);
+      const branchLeafId = branchEntryIds[branchEntryIds.length - 1] ?? null;
+      if (branchLeafId !== expectedBranchLeafId) {
+        response.status(409).json({ error: "Session branch changed while the block was being edited", code: "branch-conflict" });
+        return;
+      }
       response.json({
         sessionId,
-        block: await store.upsertBlock({ sessionId, label, content, updatedBy: "user", expectedUpdatedAt }),
+        block: await store.upsertBlock({
+          sessionId,
+          label,
+          content,
+          updatedBy: "user",
+          expectedUpdatedAt,
+          branchEntryIds,
+          sourceLeafId: branchLeafId,
+        }),
       });
     } catch (error) {
       if (error instanceof KnowledgeBlockConflictError) {

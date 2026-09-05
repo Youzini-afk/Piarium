@@ -30,6 +30,10 @@ provider 请求；用户改动后的 LSP 诊断、当前 blocks、context usage 
 record-only、分支/版本提交、压缩覆盖检查点和窗口草稿读取尚未交付。TriviumDB 优先保留，Windows 沙箱不在交付计划中；
 记忆真实效果由用户招募测试者验证，不安排付费协议/缓存实验。本轮仅文档修订，不执行实现或实验，不提交。
 
+**随后 D-076 已完成第一组本地正确性纵切**：branch copy-on-write/tombstone、原子 CAS、实际 context entry coverage，以及
+worker 响应送达后推进 observation/thread cursors 已接生产路径。它不改变 assist/default-off，也不把本地 faux-provider 证据当作
+外部语义验证；具体边界见下表。
+
 ## 矩阵
 
 Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
@@ -81,19 +85,23 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 最小配对回放集 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个真实历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor 校验、非覆盖记录、配对汇总、失败分类） | — | 不运行即不产生模型调用或设置变化 | 缺 per-session Harness profile override；需同 provider/model/machine 跑完 native + harness-shadow 配对（D-047） |
 
-## 当前新增缺口与后续顺序（只登记，未开始实现）
+## 当前缺口与后续顺序
 
-顺序见 plan 0.7；以下是新发现或目标契约与当前实现的差距，不取消上表已有范围的测试证据，也不把它们算成已交付。
+顺序见 plan 0.7；D-076 已收口第一组本地正确性问题，以下区分已接线行为与仍缺证据。
 
 | 范围 | 已确认现状 / 待做 | 验证与外部边界 |
 | --- | --- | --- |
-| 2.4 记忆写入 | `memory.blocks.get/apply` 无读取时版本/分支；`applyOps` 允许 replace plan；后台调用用量需补归因 | 先用现有 faux-provider 路径覆盖用户并发编辑、切分支、迟到写入及 plan 所有权；真实语义由测试者验证 |
-| 2.6 覆盖与证据 | takeover 默认关闭且只检查 keeper 块存在，无连续区间检查点；TranscriptRef 可能只找回预览 | 补分支/块修订/处理区间一致性与必要来源可恢复性；不能仅因 hash 或持久 entry 存在声称全文可恢复 |
-| 3.9 / 线程观察 | Host 生成响应时已推进内存游标，尚无持久接收确认；Host/会话清理会重置 | 验证响应未落盘但基线仍在的故障窗口，允许重放，避免漏报 |
+| 2.4 记忆写入 | 已实现并接线：block 以 source leaf 修订，活动祖先路径按 label 解析最近值；后代 copy-on-write，删除写 tombstone；create/update/delete 原子 CAS；keeper 仅 mark plan；todo、Zone 2、UI、memory、compaction、thread snapshot 共用 Host 解析的分支视图 | `memory-agent.test.ts` 覆盖后代更新、兄弟隔离、tombstone、同 label 折叠、create 竞态与顺序 op；`context-routes.test.ts` 覆盖 Host 自动分支。真实用户多分支与语义质量仍由测试者验证 |
+| 2.6 覆盖与证据 | 已实现并接线：coverage 使用 keeper 实际 context entry ID；Pi compaction 的 removed range 按上次 boundary 与本次 first-kept 计算，缺失/不全强制回退；部分 patch 不推进。水位为 Host 内存，重启后保守丢失并回退，不冒充持久 checkpoint | `compaction-extension.test.ts` 覆盖首轮/后续边界与非 context entry；`compaction.test.ts` 覆盖 ready/partial/none；`phase2-e2e.test.ts` 覆盖 partial apply 不推进。真实长会话 takeover 与外部语义仍未验证，默认关闭 |
+| 3.9 / 线程观察 | 已实现并接线到 worker 送达边界：observation 使用单调 revision CAS；pending 跨 clear 失效；Router success commit / failure abort；shell、diagnostics、Zone 2 threads、thread list/wait 延迟推进，线程游标按 eventSeq 防倒退 | cursor/router/phase3 focused tests 已覆盖并发、固定时钟、clear、响应失败与增量行为。确认只到 pi-host 响应，不宣称 tool result 已耐久落盘；更强 acknowledgement 仍待独立纵切 |
 | 窗口读取 / 3.2 | 默认看本窗口草稿是已接受目标；dirty publication 当前只有路径与版本，无自动来源/正文读取纵切 | 无显式开关/绑定；自动传播来源，正文快照按版本读，多窗口和断开状态诚实；headless 读磁盘 |
 | T4 / 执行配置 | 无单会话实验覆盖与完整实际配置记录；record-only 未实现；Workbench/Agent Profile 职责需分开 | 本地只准备记录与可运行场景，不以完整跨 runtime RunManifest 为前置；用户组织真实测试 |
 | 结果与集成 | 有 resultCommit，但报告/验证未绑定不可变结果修订，merge 仍检查 live worktree；暂存区和父状态影响需明确 | 后续按消费者补结果/验证/集成记录与恢复；不先造完整 Work Graph |
 | `check` | 现有角色含 bash 且 shared，具备命令执行能力 | 不称只读 agent，不阻止测试/构建正常生成文件；不新增统一副本要求 |
+
+**D-076 本地证据**：protocol 70/70；关键 Host focused（分支/CAS/coverage/cursor/router/route/thread）全通过；pi-host 关键纵切 38/38；UI block projection 2/2；protocol/pi-host/UI/
+Application Host type-check 与四包 lint、文档 19/19、链接校验、`git diff --check` 通过。扩大并行运行时 Host 另有 3 个计时用例、
+pi-host 有 1 个后台 shell 计时用例失败，全部单独复跑通过；不把并行负载下的偶发超时记成本纵切失败，也不伪报全量零失败。
 
 TriviumDB 的数据库问题按版本和通用语义向用户说明，不转嫁 Piarium 领域职责；迁移未立项。Windows 沙箱是用户排除项，
 不是缺平台测试而暂时 blocked。macOS/Linux smoke、Electron 打包、真实 provider/测试者结果继续分别记录真实阻塞。

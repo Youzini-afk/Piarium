@@ -16,6 +16,7 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SessionManager,
+  sessionEntryToContextMessages,
   type SessionEntry as NativeSessionEntry,
   type SessionTreeNode as NativeSessionTreeNode,
   SettingsManager,
@@ -2817,6 +2818,10 @@ export class SessionHost {
                 bridge: hostServicesBridge,
                 enabled: harnessSettings.memory.shadowMode,
                 callModel: (model, context, signal) => callMemoryModel?.(model, context, signal) ?? Promise.resolve(null),
+                getBranchEntryIds: () => sessionManager.getBranch().map((e) => e.id),
+                getContextEntryIds: () => sessionManager.buildContextEntries().flatMap((entry) => (
+                  sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
+                )),
                 onError: (error) => {
                   this.#emit("host.log", {
                     level: "warn",
