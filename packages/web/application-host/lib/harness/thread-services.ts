@@ -408,7 +408,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       const workspaceId = workspaceFor(ctx);
       const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
-      if (thread.integration === "merged") {
+      if (thread.integration === "merged" && (!thread.worktree?.resultCommit || thread.mergedCommit === thread.worktree.resultCommit)) {
         return { text: `thread ${thread.id} is already merged`, merged: 0, conflicts: [] };
       }
       const run = await registry.getActiveRun(workspaceId, thread.id);
@@ -416,22 +416,40 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         return { text: `thread ${thread.id} is not complete (state: ${thread.lifecycle}/${run?.outcome ?? "none"})`, merged: 0, conflicts: [] };
       }
       const result = await host.threadApplyWorktreeDiff(workspaceId, parentFor(ctx), thread.id);
-      if (result.conflicts.length > 0) {
+      if (result.conflicts.length > 0 || result.status === "compensated" || result.status === "needs-attention") {
         await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
-        const resolution = result.conflictState === "markers"
-          ? "Git left conflict markers/index entries in the parent. Resolve those paths; no further merge step is needed."
-          : "The parent was left unchanged and the child worktree was preserved. Resolve the parent changes, then retry merge.";
+        const resolution = result.status === "needs-attention"
+          ? "Merge failed and subsequent user edits were preserved; manual resolution required."
+          : result.status === "compensated"
+            ? "Merge failed unexpectedly; changes were safely compensated."
+            : result.conflictState === "markers"
+              ? "Conflict markers placed in the parent. Resolve those paths; no further merge step is needed."
+              : "The parent was left unchanged and the child worktree was preserved. Resolve the parent changes, then retry merge.";
+        const lines = [
+          result.conflicts.length > 0
+            ? `merge could not apply ${result.conflicts.length} files cleanly:`
+            : `merge encountered failure (${result.status}):`,
+          ...result.conflicts,
+        ];
+        if (result.appliedPaths && result.appliedPaths.length > 0) {
+          lines.push(`applied cleanly (${result.appliedPaths.length}): ${result.appliedPaths.join(", ")}`);
+        }
+        lines.push(resolution);
         return {
-          text: `merge could not apply ${result.conflicts.length} files cleanly:\n${result.conflicts.join("\n")}\n${resolution}`,
-          merged: 0,
+          text: lines.join("\n"),
+          merged: result.appliedPaths?.length ?? 0,
           conflicts: result.conflicts,
+          status: result.status ?? "conflict",
+          ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
         };
       }
-      await registry.setIntegration(workspaceId, thread.id, "merged", result.diffStats);
+      await registry.setIntegration(workspaceId, thread.id, "merged", result.diffStats, thread.worktree?.resultCommit);
       return {
         text: `merged ${result.merged} files: ${thread.report?.changedFiles.join(", ") ?? ""}`,
         merged: result.merged,
         conflicts: [],
+        status: "applied",
+        ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
       };
     },
   };

@@ -1138,11 +1138,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     threadId: string,
     integration: ThreadIntegration,
     diffStats?: ThreadDiffStats | null,
+    mergedCommit?: string | null,
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     thread.integration = integration;
     if (diffStats !== undefined) thread.diffStats = diffStats;
+    if (mergedCommit !== undefined) {
+      if (mergedCommit) thread.mergedCommit = mergedCommit;
+      else delete thread.mergedCommit;
+    }
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });

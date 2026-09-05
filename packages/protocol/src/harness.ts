@@ -286,6 +286,21 @@ export interface HarnessServiceMap {
   "thread.read": { params: ThreadReadParams; result: ThreadReadResult };
   "thread.merge": { params: ThreadMergeParams; result: ThreadMergeResult };
   "thread.kill": { params: ThreadKillParams; result: ThreadKillResult };
+  "explore.search": {
+    params: { question: string; paths?: string[]; limit?: number };
+    result: {
+      text: string;
+      snippets: Array<{
+        path: string;
+        startLine: number;
+        endLine: number;
+        text: string;
+        why: string;
+      }>;
+      searched: { patterns: number; files: number; ms: number };
+      handle: string;
+    };
+  };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -336,6 +351,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.read": "control.thread",
   "thread.merge": "control.thread",
   "thread.kill": "control.thread",
+  "explore.search": "read.search",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -352,6 +368,7 @@ export interface HarnessActorIdentity {
 /** Identity completed with workspace and frozen authority by the Host. */
 export interface HarnessActorContext extends HarnessActorIdentity {
   workspaceId: string | null;
+  workspaceScope?: readonly string[];
   grantedCapabilities: readonly HarnessCapability[];
 }
 
@@ -386,6 +403,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.read",
   "thread.merge",
   "thread.kill",
+  "explore.search",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

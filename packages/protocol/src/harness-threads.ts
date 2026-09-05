@@ -26,6 +26,7 @@ export interface ThreadReport {
   confidence: number;
   transcriptRef: TranscriptRef;
   blocksSnapshot: Record<string, string>;
+  resultCommit?: string;
 }
 
 export interface TranscriptRef {
@@ -50,6 +51,12 @@ export interface ThreadWorktree {
   branch?: string;
   /** Commit containing the complete child delta, suitable for later recovery or cleanup. */
   resultCommit?: string;
+  /** Whether the physical directory is currently materialized on disk. */
+  materialized?: boolean;
+  /** Physical disk footprint in bytes, if measured. */
+  diskBytes?: number;
+  /** Files changed in the worktree if inspected or recorded. */
+  changedFiles?: string[];
 }
 
 /** Immutable launch inputs captured when the Thread is created. */
@@ -92,6 +99,7 @@ export interface Thread {
   integration: ThreadIntegration;
   diffStats: ThreadDiffStats | null;
   report: ThreadReport | null;
+  mergedCommit?: string;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -220,6 +228,8 @@ export interface ThreadMergeResult {
   text: string;
   merged: number;
   conflicts: string[];
+  status?: "applied" | "conflict" | "compensated" | "needs-attention";
+  appliedPaths?: string[];
 }
 
 export interface ThreadKillParams {

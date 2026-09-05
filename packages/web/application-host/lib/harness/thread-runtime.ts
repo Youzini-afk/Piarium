@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  HarnessWorktreeSettings,
   PiMessage,
   PiSessionMessageEntry,
   SessionEntriesResult,
@@ -40,7 +41,8 @@ export interface ThreadSessionAdapter {
 export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
-  worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge">;
+  worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
+    Partial<Pick<ThreadWorktreeRuntime, "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -48,6 +50,8 @@ export interface ThreadRuntimeOptions {
   onError?: (error: unknown) => void;
   /** Alert threshold only; it does not cancel or limit a Run. */
   stalledAfterMs?(providerId: string | null): number;
+  worktreeSettings?: HarnessWorktreeSettings | undefined;
+  resolveWorktreeSettings?(workspaceId: string): Promise<HarnessWorktreeSettings | undefined> | HarnessWorktreeSettings | undefined;
 }
 
 export interface SpawnThreadRunInput extends CreateThreadInput {
@@ -297,6 +301,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     eventTails.set(threadId, tracked);
   };
 
+  const resolveEffectiveWorktreeSettings = async (workspaceId: string): Promise<HarnessWorktreeSettings | undefined> => {
+    if (options.resolveWorktreeSettings) {
+      try {
+        const resolved = await options.resolveWorktreeSettings(workspaceId);
+        if (resolved) return resolved;
+      } catch {
+        // fallback
+      }
+    }
+    return options.worktreeSettings;
+  };
+
   const parentSession = async (workspaceId: string, parent: ThreadParent): Promise<{ id: string; file: string; cwd: string }> => {
     let sessionId: string;
     if (parent.kind === "session") sessionId = parent.id;
@@ -432,20 +448,63 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       ? parent.cwd
       : await options.resolveWorkspaceRoot(input.workspaceId);
     const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
-    const prepared = existing?.worktree
-      ? { cwd: existing.worktree.path, worktree: existing.worktree }
-      : await options.worktrees.prepare({
-          mode: input.worktree,
-          sourceRoot,
-          threadId: input.threadId,
-          signal: abortController.signal,
-        });
-    if (prepared.worktree) await options.registry.setWorktree(input.workspaceId, input.threadId, prepared.worktree);
-    const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
+    let preparedCwd: string;
+    let worktree = existing?.worktree;
+    if (!worktree) {
+      const prep = await options.worktrees.prepare({
+        mode: input.worktree,
+        sourceRoot,
+        threadId: input.threadId,
+        signal: abortController.signal,
+      });
+      preparedCwd = prep.cwd;
+      worktree = prep.worktree;
+      if (worktree) await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
+    } else {
+      if (worktree.materialized === false && options.worktrees.materialize) {
+        await options.worktrees.materialize(sourceRoot, worktree, abortController.signal);
+        await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
+      }
+      preparedCwd = worktree.path;
+    }
+
+    const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId);
+    if (worktree && input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup) {
+      try {
+        await options.worktrees.runSetup(sourceRoot, worktree, effectiveSettings, abortController.signal);
+      } catch (setupErr) {
+        const exitReason = (setupErr as any)?.exitReason ?? "setup-failed";
+        const message = setupErr instanceof Error ? setupErr.message : String(setupErr);
+        await options.registry.endRun(
+          input.workspaceId,
+          input.threadId,
+          input.runId,
+          "failure",
+          exitReason,
+          {
+            conclusion: `Worktree setup failed: ${message}`,
+            changedFiles: [],
+            unresolved: ["Setup command failed"],
+            deviations: [],
+            confidence: 0,
+            transcriptRef: {
+              runtimeId: "pi",
+              sessionId: "",
+              fromEntryId: null,
+              toEntryId: null,
+            },
+            blocksSnapshot: {},
+          },
+        );
+        throw new ThreadRuntimeError("unavailable", `Worktree setup failed: ${message}`);
+      }
+    }
+
+    const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(preparedCwd);
     let sessionId: string | null = null;
     try {
       const snapshot = await options.sessions.create({
-        cwd: prepared.cwd,
+        cwd: preparedCwd,
         name: `${input.role ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession: parent.file,
         ...(input.model ? { model: input.model } : {}),
@@ -460,7 +519,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         threadId: input.threadId,
         runId: input.runId,
         sessionId,
-        cwd: prepared.cwd,
+        cwd: preparedCwd,
         kind: input.kind,
         providerId: input.model?.providerId ?? null,
         baseline: { cost: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0 } },
@@ -644,6 +703,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       } catch (error) {
         unresolved.push(`Unable to inspect worktree: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (options.worktrees.measureDiskUsage) {
+        try {
+          await options.worktrees.measureDiskUsage(currentWorktree);
+          await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
+        } catch {
+          // ignore disk measurement failure
+        }
+      }
+      const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId);
+      if (options.worktrees.reclaim && effectiveSettings?.reclaimIdle && changedFiles.length === 0) {
+        try {
+          const reclaimed = await options.worktrees.reclaim(currentWorktree);
+          if (reclaimed.reclaimed) {
+            await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
+          }
+        } catch {
+          // ignore reclaim failure
+        }
+      }
     }
     if (stats) {
       await options.registry.updateRunProgress(binding.workspaceId, binding.threadId, {
@@ -682,6 +760,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ...(entries?.leafId ? { branchLeafId: entries.leafId } : {}),
       },
       blocksSnapshot,
+      ...(currentWorktree?.resultCommit ? { resultCommit: currentWorktree.resultCommit } : {}),
     };
     const outcome: ThreadRunOutcome = conclusion.error ? "failure" : "success";
     await options.registry.endRun(
@@ -1104,8 +1183,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree) return { merged: 0, conflicts: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } };
-    const snapshotted = await options.worktrees.snapshot(thread.worktree);
-    await options.registry.setWorktree(workspaceId, threadId, snapshotted);
+    const snapshotted = thread.worktree.resultCommit
+      ? thread.worktree
+      : await options.worktrees.snapshot(thread.worktree);
+    if (!thread.worktree.resultCommit) {
+      await options.registry.setWorktree(workspaceId, threadId, snapshotted);
+    }
     const parentRoot = await options.resolveWorkspaceRoot(workspaceId);
     const operation = () => options.worktrees.merge(parentRoot, snapshotted);
     return options.withMergeWriter

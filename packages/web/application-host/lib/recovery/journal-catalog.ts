@@ -471,7 +471,7 @@ export const replaceObjectReferences = (database: SqliteDatabase, workspaceId: s
 };
 
 const rebuildObjectReferencesInTransaction = (database: SqliteDatabase): void => {
-  database.prepare('DELETE FROM object_references').run();
+  database.prepare("DELETE FROM object_references WHERE owner_kind IN ('checkpoint-change', 'operation', 'operation-file')").run();
   for (const row of database.prepare(`
     SELECT c.workspace_id, cc.checkpoint_id, cc.path, cc.before_json, cc.after_json
     FROM checkpoint_changes cc

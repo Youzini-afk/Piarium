@@ -2348,7 +2348,7 @@ export const createWorkspaceRecoveryEngine = (
         // Delete operations for this workspace.
         const operationsResult = database.prepare("DELETE FROM operations WHERE workspace_id = ? AND kind = 'combined'").run(workspaceId);
         recordsDeleted += operationsResult.changes;
-        database.prepare('DELETE FROM object_references WHERE workspace_id = ?').run(workspaceId);
+        database.prepare("DELETE FROM object_references WHERE workspace_id = ? AND owner_kind IN ('checkpoint-change', 'operation', 'operation-file')").run(workspaceId);
         database.prepare('DELETE FROM metadata WHERE key IN (?, ?)')
           .run(retentionPolicyKey(workspaceId), retentionRunKey(workspaceId));
         // Rebuild object_references from remaining source rows so refs owned by

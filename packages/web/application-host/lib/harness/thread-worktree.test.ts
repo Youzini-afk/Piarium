@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -27,7 +27,11 @@ const createRepo = (): { root: string; repo: string; worktrees: string } => {
 const runtimeFor = (worktrees: string) => createThreadWorktreeRuntime({
   createWorktree: async (directory, input) => {
     const target = join(worktrees, String(input.worktreeName));
-    git(directory, ["worktree", "add", "-b", String(input.branchName), target, String(input.startRef)]);
+    if (input.mode === "existing") {
+      git(directory, ["worktree", "add", "--force", target, String(input.branchName ?? input.startRef)]);
+    } else {
+      git(directory, ["worktree", "add", "-b", String(input.branchName), target, String(input.startRef)]);
+    }
     return { path: target };
   },
   getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
@@ -51,7 +55,8 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(childPath, "tracked.txt"), "child result\n");
       writeFileSync(join(childPath, "child-note.txt"), "new child file\n");
       const snapshotted = await runtime.snapshot(prepared.worktree!);
-      expect(snapshotted).toMatchObject({ branch: "piarium/thread-one", resultCommit: expect.stringMatching(/^[0-9a-f]{40}$/) });
+      expect(snapshotted.branch).toBe("piarium/thread-one");
+      expect(snapshotted.resultCommit).toMatch(/^[0-9a-f]{40}$/);
       expect(git(childPath, ["status", "--porcelain"])).toBe("");
       const inspected = await runtime.inspect(snapshotted);
       expect(inspected.changedFiles.toSorted()).toEqual(["child-note.txt", "tracked.txt"]);
@@ -174,6 +179,210 @@ describe("thread worktree runtime", () => {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("consumes fixed result commit and ignores post-snapshot live modifications", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    let childPath = "";
+    try {
+      const prepared = await runtime.prepare({ mode: "isolated", sourceRoot: fixture.repo, threadId: "thread-fixed-rev" });
+      childPath = prepared.cwd;
+      writeFileSync(join(childPath, "tracked.txt"), "clean child tracked\n");
+      writeFileSync(join(childPath, "new.txt"), "clean child new\n");
+      const binaryPayload = Buffer.from([0x00, 0x01, 0x02, 0xfe, 0xff]);
+      fs.writeFileSync(join(childPath, "binary.bin"), binaryPayload);
+
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted.resultCommit).toBeDefined();
+
+      // Post-snapshot live modifications: dirty changes, new files, binary alterations
+      writeFileSync(join(childPath, "tracked.txt"), "DIRTY LIVE TRACKED\n");
+      writeFileSync(join(childPath, "new.txt"), "DIRTY LIVE NEW\n");
+      writeFileSync(join(childPath, "leak.txt"), "SHOULD NEVER LEAK\n");
+      fs.writeFileSync(join(childPath, "binary.bin"), Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+
+      const inspected = await runtime.inspect(snapshotted);
+      expect(inspected.changedFiles.toSorted()).toEqual(["binary.bin", "new.txt", "tracked.txt"]);
+
+      const merged = await runtime.merge(fixture.repo, snapshotted);
+      expect(merged.conflicts).toEqual([]);
+      expect(merged.conflictState).toBe("none");
+      expect(merged.merged).toBe(3);
+
+      expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("clean child tracked\n");
+      expect(readFileSync(join(fixture.repo, "new.txt"), "utf8")).toBe("clean child new\n");
+      expect(fs.readFileSync(join(fixture.repo, "binary.bin"))).toEqual(binaryPayload);
+      expect(existsSync(join(fixture.repo, "leak.txt"))).toBe(false);
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims directory after snapshot and rematerializes at the same path", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    let childPath: string | null = null;
+    try {
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot: fixture.repo,
+        threadId: "thread-lifecycle",
+      });
+      childPath = prepared.worktree!.path;
+      writeFileSync(join(childPath, "work.txt"), "some work done\n");
+      git(childPath, ["add", "-A"]);
+      git(childPath, ["commit", "-m", "child work"]);
+
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted.resultCommit).toBeDefined();
+
+      // Measure disk usage
+      const bytes = await runtime.measureDiskUsage(snapshotted);
+      expect(bytes).toBeGreaterThan(0);
+      expect(snapshotted.diskBytes).toBe(bytes);
+
+      // Reclaim directory
+      const reclaimResult = await runtime.reclaim(snapshotted);
+      expect(reclaimResult.reclaimed).toBe(true);
+      expect(snapshotted.materialized).toBe(false);
+      expect(existsSync(childPath)).toBe(false);
+
+      // Materialize at same path
+      const materialized = await runtime.materialize(fixture.repo, snapshotted);
+      expect(materialized.materialized).toBe(true);
+      expect(existsSync(childPath)).toBe(true);
+      expect(readFileSync(join(childPath, "work.txt"), "utf8")).toBe("some work done\n");
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs setup command and copies ignored whitelist files", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    let childPath: string | null = null;
+    try {
+      // Create an ignored file in source repo
+      writeFileSync(join(fixture.repo, ".env.local"), "SECRET_KEY=12345\n");
+
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot: fixture.repo,
+        threadId: "thread-setup",
+      });
+      childPath = prepared.worktree!.path;
+
+      // Run setup with echo and copyIgnored
+      const setupResult = await runtime.runSetup(fixture.repo, prepared.worktree!, {
+        setup: "echo setup completed",
+        copyIgnored: [".env.local"],
+      });
+      expect(setupResult.output).toMatch(/setup[\s\r\n]+completed/);
+      expect(existsSync(join(childPath, ".env.local"))).toBe(true);
+      expect(readFileSync(join(childPath, ".env.local"), "utf8")).toBe("SECRET_KEY=12345\n");
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails setup cleanly when command fails with exitReason setup-failed", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    let childPath: string | null = null;
+    try {
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot: fixture.repo,
+        threadId: "thread-setup-fail",
+      });
+      childPath = prepared.worktree!.path;
+
+      let caughtError: any = null;
+      try {
+        await runtime.runSetup(fixture.repo, prepared.worktree!, {
+          setup: "exit 1",
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+      expect(caughtError).not.toBeNull();
+      expect(caughtError.exitReason).toBe("setup-failed");
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves non-git / zero-commit thread results across reclaim, rematerialize, and merge", async () => {
+    const root = mkdtempSync(join(tmpdir(), "non-git-root-"));
+    const sourceRoot = join(root, "project");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "original.txt"), "hello world\n");
+
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async (_dir, input) => {
+        const p = join(root, "worktrees", String(input.worktreeName));
+        mkdirSync(p, { recursive: true });
+        return { path: p };
+      },
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+
+    try {
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        sourceRoot,
+        threadId: "zero-commit-thread",
+      });
+      expect(prepared.worktree).not.toBeNull();
+      expect(prepared.worktree!.base).toBe("zero-commit");
+
+      // Child edits a file and creates a new one
+      writeFileSync(join(prepared.cwd, "original.txt"), "hello from child\n");
+      writeFileSync(join(prepared.cwd, "result.txt"), "new result file\n");
+
+      // Cannot reclaim before snapshot!
+      const unSnapshottedReclaim = await runtime.reclaim(prepared.worktree!);
+      expect(unSnapshottedReclaim.reclaimed).toBe(false);
+
+      // Snapshot
+      const snapshotted = await runtime.snapshot(prepared.worktree!);
+      expect(snapshotted.resultCommit).toBeDefined();
+      expect(snapshotted.resultCommit!.length).toBe(40);
+
+      // Reclaim
+      const reclaimed = await runtime.reclaim(snapshotted);
+      expect(reclaimed.reclaimed).toBe(true);
+      expect(existsSync(prepared.cwd)).toBe(false);
+
+      // Rematerialize
+      const rematerialized = await runtime.materialize(sourceRoot, snapshotted);
+      expect(rematerialized.materialized).toBe(true);
+      expect(existsSync(prepared.cwd)).toBe(true);
+      expect(readFileSync(join(prepared.cwd, "result.txt"), "utf8")).toBe("new result file\n");
+      expect(readFileSync(join(prepared.cwd, "original.txt"), "utf8")).toBe("hello from child\n");
+
+      // Merge into parent
+      const merged = await runtime.merge(sourceRoot, rematerialized);
+      expect(merged.conflicts).toEqual([]);
+      expect(merged.merged).toBe(2);
+      expect(readFileSync(join(sourceRoot, "result.txt"), "utf8")).toBe("new result file\n");
+      expect(readFileSync(join(sourceRoot, "original.txt"), "utf8")).toBe("hello from child\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

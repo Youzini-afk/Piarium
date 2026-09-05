@@ -59,6 +59,7 @@ import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings } from '@piarium/protocol';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
@@ -1204,6 +1205,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
+    worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
+    resolveWorktreeSettings: async (workspaceId) => {
+      const userSettings = await readSettingsFromDisk().catch(() => null);
+      const userHarness = (userSettings as any)?.harness ?? {};
+      let workspaceHarness = {};
+      try {
+        const workspaceInfo = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
+        if (workspaceInfo?.root) {
+          const configPath = path.join(workspaceInfo.root, ".piarium", "settings.json");
+          if (fs.existsSync(configPath)) {
+            const raw = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+            if (raw?.harness) workspaceHarness = raw.harness;
+          }
+        }
+      } catch {}
+      const effective = mergeHarnessSettings(userHarness, workspaceHarness);
+      return effective.worktree;
+    },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
     readBlocks: async (sessionId) => {

@@ -27,6 +27,7 @@ export interface HarnessServiceContext {
   authorizedPaths: readonly HarnessAuthorizedPath[];
   sessionId: HarnessActorContext["sessionId"];
   workspaceId: HarnessActorContext["workspaceId"];
+  workspaceScope?: readonly string[];
   signal: AbortSignal;
   /** Register state that advances only after the Host response reaches pi-host. */
   deferResponseDelivery?(commit: () => void, abort: () => void): void;
@@ -222,6 +223,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         authorizedPaths,
         sessionId: actor.sessionId,
         workspaceId: actor.workspaceId,
+        ...(actor.workspaceScope ? { workspaceScope: actor.workspaceScope } : {}),
         signal: controller.signal,
         deferResponseDelivery: (commit, abort) => {
           deferredDeliveries.push({ commit, abort });

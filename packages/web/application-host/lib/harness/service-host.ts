@@ -94,6 +94,8 @@ export interface HarnessServiceHost {
     conflictState?: "none" | "markers" | "parent-unchanged";
     changedFiles?: string[];
     diffStats?: import("@piarium/protocol").ThreadDiffStats;
+    appliedPaths?: string[];
+    status?: "applied" | "conflict" | "compensated" | "needs-attention";
   }>) | null;
   threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;

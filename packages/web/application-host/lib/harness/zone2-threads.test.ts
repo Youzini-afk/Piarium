@@ -120,4 +120,25 @@ describe("Zone 2 thread projection", () => {
     });
     expect(result.content).toContain('<threads status="unavailable">thread state unavailable (corrupt)</threads>');
   });
+
+  it("calculates overlapWarning when multiple active threads touch overlapping paths", async () => {
+    const thread1 = await registry.createThread(input({
+      brief: "task 1",
+      scope: ["packages/web/index.ts", "packages/web/utils.ts"],
+      worktree: "none",
+    }));
+    const thread2 = await registry.createThread(input({
+      brief: "task 2",
+      scope: ["packages/web/utils.ts", "packages/web/other.ts"],
+      worktree: "none",
+    }));
+
+    const options = { registry, cursors };
+    const result = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    expect(result.status).toBe("ready");
+    if (result.status === "ready") {
+      expect(result.overlapWarning).toBeDefined();
+      expect(result.overlapWarning).toContain("overlap on packages/web/utils.ts");
+    }
+  });
 });

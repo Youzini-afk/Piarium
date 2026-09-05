@@ -22,6 +22,20 @@ export interface HarnessWebSearchSettings {
   credentialRef?: string;
 }
 
+export interface HarnessWorktreeBudget {
+  maxBytes?: number;
+  minFreeRatio?: number;
+}
+
+export interface HarnessWorktreeSettings {
+  setup?: string;
+  setupTimeoutMs?: number;
+  copyIgnored?: string[];
+  shareDependencies?: boolean;
+  reclaimIdle?: boolean;
+  budget?: HarnessWorktreeBudget;
+}
+
 export interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
@@ -34,6 +48,7 @@ export interface HarnessSettings {
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
   memory: { shadowMode: boolean };
+  worktree?: HarnessWorktreeSettings;
   web?: {
     maxFetchesPerTurn?: number;
     render?: boolean;
@@ -68,7 +83,12 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
-  memory: { shadowMode: false },
+  memory: { shadowMode: true },
+  worktree: {
+    copyIgnored: [],
+    shareDependencies: false,
+    reclaimIdle: true,
+  },
   permissions: { mode: "normal", rules: [] },
 };
 
@@ -143,6 +163,19 @@ export function mergeHarnessSettings(
           },
         }
       : {}),
+    worktree: {
+      ...DEFAULT_HARNESS_SETTINGS.worktree,
+      ...user.worktree,
+      ...workspace.worktree,
+      ...(user.worktree?.budget || workspace.worktree?.budget
+        ? {
+            budget: {
+              ...user.worktree?.budget,
+              ...workspace.worktree?.budget,
+            },
+          }
+        : {}),
+    },
     permissions,
   };
   return merged;

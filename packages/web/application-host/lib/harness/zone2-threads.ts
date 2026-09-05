@@ -42,6 +42,46 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
   deviations: [...(thread.report?.deviations ?? [])],
 });
 
+const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: ThreadRun | null }>): string | null => {
+  const threadPaths = new Map<string, string[]>();
+  for (const { thread } of snapshots) {
+    if (thread.lifecycle === "archived" || thread.integration === "merged") continue;
+    const paths = new Set<string>();
+    const scope = thread.manifest?.scope ?? (thread as any).scope;
+    if (scope && Array.isArray(scope)) {
+      for (const s of scope) paths.add(s);
+    }
+    if (thread.report?.changedFiles) {
+      for (const f of thread.report.changedFiles) paths.add(f);
+    }
+    if (thread.worktree?.changedFiles) {
+      for (const f of thread.worktree.changedFiles) paths.add(f);
+    }
+    if (paths.size > 0) {
+      threadPaths.set(thread.id, Array.from(paths));
+    }
+  }
+
+  const warnings: string[] = [];
+  const threadIds = Array.from(threadPaths.keys());
+  for (let i = 0; i < threadIds.length; i++) {
+    for (let j = i + 1; j < threadIds.length; j++) {
+      const idA = threadIds[i]!;
+      const idB = threadIds[j]!;
+      const pathsA = threadPaths.get(idA)!;
+      const pathsB = new Set(threadPaths.get(idB)!);
+      const common = pathsA.filter((p) => pathsB.has(p));
+      if (common.length > 0) {
+        warnings.push(
+          `${idA} and ${idB} overlap on ${common.slice(0, 3).join(", ")}${common.length > 3 ? ` (+${common.length - 3} more)` : ""}`,
+        );
+      }
+    }
+  }
+
+  return warnings.length > 0 ? warnings.join("; ") : null;
+};
+
 /**
  * Builds the per-turn thread snapshot for one session. Active work is always
  * present; terminal work appears only when its event sequence changed for this
@@ -65,9 +105,14 @@ const zone2ThreadTask = (
       || right.thread.updatedAt.localeCompare(left.thread.updatedAt)
       || left.thread.id.localeCompare(right.thread.id)
     ));
+  const overlapWarning = computeOverlapWarning(snapshots);
   return {
     cursor: { eventSeqByThread },
-    result: { status: "ready", items: selected.map(({ thread, activeRun }) => projectThread(thread, activeRun)) },
+    result: {
+      status: "ready",
+      items: selected.map(({ thread, activeRun }) => projectThread(thread, activeRun)),
+      ...(overlapWarning ? { overlapWarning } : {}),
+    },
   };
 };
 

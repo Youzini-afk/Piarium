@@ -87,10 +87,11 @@ export interface Zone2Thread {
   diffStats: ThreadDiffStats | null;
   conclusion: string | null;
   deviations: string[];
+  overlapWarning?: string | null | undefined;
 }
 
 export type Zone2Threads =
-  | { status: "ready"; items: Zone2Thread[] }
+  | { status: "ready"; items: Zone2Thread[]; overlapWarning?: string | null | undefined }
   | { status: "unavailable"; reason: string };
 
 export interface Zone2Material {
@@ -167,6 +168,7 @@ function formatThread(thread: Zone2Thread, now: number): string {
   }
   if (thread.integration !== "none") parts.push(`integration ${thread.integration}`);
   if (thread.deviations.length > 0) parts.push(`deviations: ${thread.deviations.map(oneLine).join("; ")}`);
+  if (thread.overlapWarning) parts.push(`overlap: ${thread.overlapWarning}`);
   return parts.join(" · ");
 }
 
@@ -198,7 +200,7 @@ export function assembleZone2Content(
     (!git || (!git.branch && !git.changed && !git.note)) &&
     knowledge.length === 0 &&
     blocks.length === 0 &&
-    (!threads || (threads.status === "ready" && threads.items.length === 0)) &&
+    (!threads || (threads.status === "ready" && threads.items.length === 0 && !threads.overlapWarning)) &&
     (!contextUsage || contextUsage.used === 0);
 
   if (allEmpty) return null;
@@ -256,8 +258,11 @@ export function assembleZone2Content(
   let threadLines: string[] = [];
   if (threads?.status === "unavailable") {
     sections.push(`<threads status="unavailable">thread state unavailable (${threads.reason})</threads>`);
-  } else if (threads && threads.items.length > 0) {
+  } else if (threads && (threads.items.length > 0 || threads.overlapWarning)) {
     threadLines = threads.items.map((thread) => formatThread(thread, now));
+    if (threads.overlapWarning) {
+      threadLines.push(`overlap warning: ${threads.overlapWarning}`);
+    }
     sections.push(`<threads>\n${threadLines.join("\n")}\n</threads>`);
   }
 

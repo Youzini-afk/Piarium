@@ -13,6 +13,7 @@ import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
+import { createExploreTool } from "./explore-tool.js";
 import { createLspNavigationTools } from "./lsp-tools.js";
 import {
   createDispatchTool,
@@ -122,6 +123,9 @@ export function selectHarnessTools(
   }
   if (tools.recall !== false) {
     result.push(createRecallTool(bridge, sessionId));
+  }
+  if (tools.explore !== false) {
+    result.push(createExploreTool(bridge, sessionId));
   }
   // Phase 3 thread tools — only registered when the host provides a
   // thread runtime (thread registry + spawn capability).

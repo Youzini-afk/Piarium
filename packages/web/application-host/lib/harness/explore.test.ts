@@ -165,3 +165,91 @@ describe("explore (pure algorithm mode)", () => {
     expect(result.snippets.length).toBeLessThanOrEqual(5);
   });
 });
+
+describe("createExploreSearchService", () => {
+  it("forwards workspaceScope and signal, stores formatted output into outputStore, and returns handle", async () => {
+    const { createExploreSearchService } = await import("./harness-services.js");
+    const { createOutputStore } = await import("./output-store.js");
+    const outputStore = createOutputStore();
+
+    let capturedCtx: any = null;
+    const mockSearchService = {
+      search: async (_params: any, searchCtx: any) => {
+        capturedCtx = searchCtx;
+        return {
+          status: "ready" as const,
+          files: [
+            {
+              path: "src/auth/login.ts",
+              hits: [{ line: 10, text: "function loginUser() {" }],
+            },
+          ],
+          totalHits: 1,
+          totalFiles: 1,
+          searchedFiles: 1,
+          partial: false,
+        };
+      },
+    };
+
+    const service = createExploreSearchService({
+      searchService: mockSearchService as any,
+      outputStore,
+    } as any);
+
+    const abortController = new AbortController();
+    const result = await service.handle({
+      question: "how does login work",
+    }, {
+      sessionId: "session-explore-test",
+      workspaceId: "ws-1",
+      workspaceScope: ["src/auth"],
+      signal: abortController.signal,
+    } as any);
+
+    expect(capturedCtx).not.toBeNull();
+    expect(capturedCtx.workspaceScope).toEqual(["src/auth"]);
+    expect(capturedCtx.signal).toBe(abortController.signal);
+
+    expect(result.snippets.length).toBeGreaterThan(0);
+    expect(result.handle).toMatch(/^out_[0-9a-f]{32}_[0-9a-z]+_[0-9a-f]{32}$/);
+    expect(result.text).toContain("Found 1 snippet(s)");
+
+    // Verify handle can be read from outputStore
+    const readResult = outputStore.read("session-explore-test", result.handle!);
+    expect(readResult.status).toBe("ready");
+    if (readResult.status === "ready") {
+      expect(readResult.slice.text).toBe(result.text);
+    }
+  });
+
+  it("throws HarnessServiceError with unavailable when search service returns unavailable", async () => {
+    const { createExploreSearchService } = await import("./harness-services.js");
+    const { createOutputStore } = await import("./output-store.js");
+    const { HarnessServiceError } = await import("./service-error.js");
+
+    const mockSearchService = {
+      search: async () => ({
+        status: "unavailable" as const,
+        files: [],
+        totalHits: 0,
+        totalFiles: 0,
+        searchedFiles: 0,
+        partial: false,
+      }),
+    };
+
+    const service = createExploreSearchService({
+      searchService: mockSearchService as any,
+      outputStore: createOutputStore(),
+    } as any);
+
+    await expect(
+      service.handle({ question: "any query" }, {
+        sessionId: "session-err",
+        workspaceId: "ws-1",
+        signal: new AbortController().signal,
+      } as any)
+    ).rejects.toThrow(HarnessServiceError);
+  });
+});

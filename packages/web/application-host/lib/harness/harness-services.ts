@@ -23,6 +23,7 @@ import { executeRecall } from "./recall-tool.js";
 import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
+import { explore } from "./explore.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
@@ -433,6 +434,68 @@ export function registerHarnessServices(
   if (host.threadRegistry && host.threadApplyWorktreeDiff) {
     router.register("thread.merge", createThreadMergeService(host));
   }
+  router.register("explore.search", createExploreSearchService(host));
+}
+
+export function createExploreSearchService(host: HarnessServiceHost): HarnessService<"explore.search"> {
+  return {
+    handle: async (params, ctx) => {
+      const workspaceId = ctx.workspaceId ?? "";
+      const rgSearch = async (pattern: string, options: { fixedStrings: boolean; paths?: string[] | undefined; limit: number }) => {
+        const res = await host.searchService.search({
+          pattern,
+          limit: options.limit,
+          ...(options.paths && options.paths.length > 0 ? { path: options.paths[0] } : {}),
+        }, {
+          workspaceId,
+          ...(ctx.workspaceScope ? { workspaceScope: ctx.workspaceScope } : {}),
+          signal: ctx.signal,
+        });
+        if (res.status === "unavailable") {
+          throw new HarnessServiceError("unavailable", "Search service is unavailable");
+        }
+        const matches: Array<{ path: string; line: number; text: string }> = [];
+        if (res.status === "ready") {
+          for (const file of res.files) {
+            for (const hit of file.hits) {
+              matches.push({
+                path: file.path,
+                line: hit.line,
+                text: hit.text,
+              });
+            }
+          }
+        }
+        return matches;
+      };
+      const searchSymbols = async () => [];
+      const result = await explore({
+        question: params.question,
+        ...(params.paths ? { paths: params.paths } : {}),
+        ...(params.limit ? { limit: params.limit } : {}),
+      }, {
+        rgSearch,
+        searchSymbols,
+      });
+
+      const lines: string[] = [];
+      lines.push(`Found ${result.snippets.length} snippet(s) for question "${params.question}":`);
+      for (const s of result.snippets) {
+        lines.push(`--- ${s.path}:${s.startLine}-${s.endLine} (${s.why}) ---`);
+        lines.push(s.text);
+      }
+
+      const fullText = lines.join("\n");
+      const stored = host.outputStore.store(ctx.sessionId, fullText, "explore");
+
+      return {
+        text: fullText,
+        snippets: result.snippets,
+        searched: result.searched,
+        handle: stored.ref.handle,
+      };
+    },
+  };
 }
 
 export type { HarnessServiceMap };
