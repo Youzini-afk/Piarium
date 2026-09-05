@@ -1423,6 +1423,23 @@ Git 协调器立即 fallback，以及检索读取失败仍声明连续正文。�
 
 状态：方案已采用并进入实现；最终交付证据见 agent-harness-status.md。
 
+### D-080 · 2026-09-06 · 取消辅助模型分项统计，保留正常会话统计
+
+类型：产品简化（用户明确决定）
+
+决定：移除 Context 面板“智能体 Harness → 模型槽位用量”的调用次数、Token 和估算费用明细，并删除专为该区块提供的
+modelSlotUsage 聚合与传输。后续记忆、explore、review 不再新增同类成本或辅助 Token 看板。保留右上角原有的普通会话费用、
+输入/输出/缓存 Token、上下文容量，以及模型槽位的配置与功能；不修改 SDK 原始用量、单价配置或历史会话记录。
+
+原因：用户认为额外分项统计占用视觉空间、实际意义不大，并明确澄清正常会话已有的费用和 Token 展示需要保留。
+
+考虑过的替代：删除所有费用/Token 展示——超出用户范围，已撤回；把辅助金额换成 Token 看板——仍保留用户不需要的统计区块。
+
+影响：ContextSidebarTab、harnessCounterPresentation、pi-host counter/session 装配、SessionStats、i18n；设计 8.4–8.6、
+plan 0.7/2.4/2.9/3.2/3.7 和 status。D-068、D-078 中要求辅助模型分项用量/费用展示的部分由本决定取代，其余规则保留。
+
+状态：已按本范围实施；验证记录见 agent-harness-status.md。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1496,7 +1513,7 @@ Git 协调器立即 fallback，以及检索读取失败仍声明连续正文。�
 | D-065 | implementation | — | status 1.4/1.6；Host diagnostics adapter/service、真实 LSP 与 Pi session E2E |
 | D-066 | implementation | — | architecture、plan/status 1b.2；protocol / pi-host session-local reader / Host fetch |
 | D-067 | implementation | — | agent-harness 5.8、plan/status 1b.3/1b.5；protocol / Host providers+auth / pi-host / UI sources |
-| D-068 | implementation | — | agent-harness 8.5/8.6、plan/status 2.9；protocol / pi-host / UI |
+| D-068 | superseded in part（槽位配置保留，取消分项统计） | D-080 | agent-harness 8.5/8.6、plan/status 2.9；protocol / pi-host / UI |
 | D-069 | superseded in part（错误承诺撤销，检索正式采用） | D-070 / D-072 / D-078 | agent-harness 6.1；plan 3.2；status |
 | D-070 | superseded in part（来源/证据边界保留，撤销候选与回放门禁） | D-071 / D-072 / D-078 | agent-harness 6.1；plan 3.2；status |
 | D-071 | superseded in part（数据库/草稿/check/不付费实验/无 Windows 沙箱保留；推进与默认更新） | D-073 / D-078 | agent-harness 1.3/6/7/8/9；plan 0.7；status |
@@ -1508,3 +1525,4 @@ Git 协调器立即 fallback，以及检索读取失败仍声明连续正文。�
 | D-077 | superseded in part（生命周期保留；补原生状态/实际写者/ignored 保留，撤销猜测默认） | D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4；status |
 | D-078 | folded-in（用户重新授权；正式实施与默认交付） | — | agent-harness 1.3/2/6/8/9/12；plan 0.1/0.7/2/3；status；architecture |
 | D-079 | implementation（修复实际调用与数据正确性） | — | Host working-state/thread/recovery/explore；status |
+| D-080 | implementation（取消辅助分项统计，保留会话统计） | — | protocol / pi-host / UI；设计 8.4–8.6、plan、status |

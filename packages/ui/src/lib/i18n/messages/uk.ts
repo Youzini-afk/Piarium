@@ -1600,7 +1600,6 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.harness.outputBytes": "Вивід інструментів",
   "contextSidebar.harness.observationCalls": "Перевірки спостережень",
   "contextSidebar.harness.cacheHitRatio": "Влучання кешу промпту",
-  "contextSidebar.harness.modelSlots": "Використання слотів моделей",
   "contextSidebar.section.lastAssistantMessage": "Останнє повідомлення асистента",
   "contextSidebar.section.rawMessages": "Необроблені повідомлення",
   "contextSidebar.context.percentUsed": "{percent}% використано",

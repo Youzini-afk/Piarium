@@ -99,31 +99,6 @@ describe("harness counter tracker", () => {
     assert.equal(counters.cacheHitRatio, null);
   });
 
-  it("attributes auxiliary model usage to its slot without mutating returned snapshots", () => {
-    const tracker = createHarnessCounterTracker();
-    const usage = {
-      input: 10,
-      output: 3,
-      cacheRead: 20,
-      cacheWrite: 4,
-      totalTokens: 37,
-      cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.004, total: 0.037 },
-    };
-    tracker.recordModelUsage("reader", usage);
-    tracker.recordModelUsage("reader", usage);
-    tracker.recordModelUsage("permissionJudge", { ...usage, totalTokens: 12, cost: { ...usage.cost, total: 0.01 } });
-
-    const first = tracker.getCounters();
-    assert.deepEqual(first.modelSlotUsage.reader, {
-      calls: 2,
-      cost: 0.074,
-      tokens: { cacheRead: 40, cacheWrite: 8, input: 20, output: 6, total: 74 },
-    });
-    assert.equal(first.modelSlotUsage.permissionJudge?.calls, 1);
-    first.modelSlotUsage.reader!.calls = 99;
-    assert.equal(tracker.getCounters().modelSlotUsage.reader?.calls, 2);
-  });
-
   it("counts default observation views without counting explicit output slices", () => {
     const tracker = createHarnessCounterTracker();
     const { pi, emit } = createFakePi();
@@ -156,6 +131,5 @@ describe("harness counter tracker", () => {
     assert.equal(counters.outputBytes, 0);
     assert.equal(counters.observationCalls, 0);
     assert.equal(counters.toolRetries, 0);
-    assert.deepEqual(counters.modelSlotUsage, {});
   });
 });

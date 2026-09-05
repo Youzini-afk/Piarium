@@ -303,21 +303,6 @@ export const ContextPanelContent: React.FC = () => {
                 </div>
               ) : null}
             </div>
-            {harnessCounters.modelSlots?.length ? (
-              <div className="mt-3 border-t border-border/50 pt-3">
-                <div className="mb-2 typography-micro text-muted-foreground/70">{t('contextSidebar.harness.modelSlots')}</div>
-                <div className="space-y-1.5">
-                  {harnessCounters.modelSlots.map((slot) => (
-                    <div key={slot.slot} className="flex items-baseline justify-between gap-3 typography-micro">
-                      <span className="truncate text-foreground/80">{slot.slot}</span>
-                      <span className="shrink-0 tabular-nums text-muted-foreground">
-                        {`${formatNumber(slot.calls)}× · ${formatNumber(slot.totalTokens)} tok · ${formatMoney(slot.cost)}`}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : null}
 

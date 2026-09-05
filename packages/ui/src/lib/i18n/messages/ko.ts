@@ -1547,7 +1547,6 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.harness.outputBytes': '도구 출력량',
   'contextSidebar.harness.observationCalls': '관찰 확인',
   'contextSidebar.harness.cacheHitRatio': '프롬프트 캐시 적중률',
-  'contextSidebar.harness.modelSlots': '모델 슬롯 사용량',
   'contextSidebar.section.lastAssistantMessage': '마지막 어시스턴트 메시지',
   'contextSidebar.section.rawMessages': '원본 메시지',
   'contextSidebar.context.percentUsed': '{percent}% 사용됨',

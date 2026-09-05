@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -74,7 +74,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索走用户配置的 API provider，无真实 provider 就不注册；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
-| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、预设只填表；仅 hardImplement 与 review 默认主模型，其余未配不调用主模型。memory 使用活动会话模型，是明确的内置例外；按 8.4 默认提供，显示实际辅助用量与费用，不承诺缓存命中（D-078） |
+| 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、预设只填表；仅 hardImplement 与 review 默认主模型，其余未配不调用主模型。memory 使用活动会话模型，是明确的内置例外；按 8.4 默认提供，保留模式与失败诊断，不增加辅助用量/费用看板，不承诺缓存命中（D-078/D-080） |
 | 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | Windows 沙箱不在交付计划中（用户选择，D-071）；macOS/Linux 留作后续候选。现有权限与路径边界保持，不把工具限制或 worktree 称为 OS 隔离 |
@@ -565,7 +565,7 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
 
 **结果必须诚实到来源级。** 每来源保留 `not-requested | ready | empty | unavailable | failed | stale | timed-out | cancelled`；
 每次模型调用保留 `not-requested | succeeded | failed | timed-out | cancelled`，另记结果 used/ignored/none 和用量 reported/unavailable。
-失败、超时、迟到但成功均按实际记录，已知费用照常归因，未知费用不补零。每个候选有 ID、来源版本、provenance 与关系，授权后才入 OutputStore。需要特别明确：`OutputStore` 句柄是经鉴权的会话局部临时存储（session-local ephemeral storage），用于长输出跨工具调用的安全分页读取，生命周期跟随会话进程与世代，不是持久模型资源或永久知识条目。
+失败、超时、迟到但成功均按实际记录，不增加辅助调用费用统计（D-080）。每个候选有 ID、来源版本、provenance 与关系，授权后才入 OutputStore。需要特别明确：`OutputStore` 句柄是经鉴权的会话局部临时存储（session-local ephemeral storage），用于长输出跨工具调用的安全分页读取，生命周期跟随会话进程与世代，不是持久模型资源或永久知识条目。
 `inContext` 必须证明**同一 revision 的相关 span 仍在实际请求中**，并考虑截断、压缩、分支与请求世代；read 发生过或路径相同都不够。
 覆盖未知就返回正文；只有覆盖成立的片段才换成指针。低置信提示说明实际缺口，`retrieval` 未配置时不建议调用一个不存在的角色。
 **永不跟随主模型**：`models.explore` 未配置就是纯算法模式。
@@ -851,7 +851,7 @@ GET 重取；用户编辑走鉴权 PUT、带 `updatedAt` 做冲突检查并写 `
 且不把块正文放进广播事件。线程列表路由同样必须经过 UI auth，不能因
 “通常只绑定 localhost”而暴露任务说明、worktree 路径或报告元数据（D-046）。
 
-**正式默认与用户选择（D-078）。** 新默认维护块、注入 Zone 2，并在每次覆盖检查满足时接管压缩。实现连同实际配置、后台用量与错误
+**正式默认与用户选择（D-078）。** 新默认维护块、注入 Zone 2，并在每次覆盖检查满足时接管压缩。实现连同实际配置和错误
 投影交付，不等待测试者或付费缓存实验。off 停止维护；record-only 只记录展示；assist 注入 Zone 2、仍由 Pi 压缩；takeover 启用逐次
 覆盖检查。record-only 是可选诊断模式，不是默认路径的前置。现有代码 shadowMode:true 实际为 assist、缺省为关闭，尚未改成新默认。
 迁移保留显式 off/assist；缺省采用产品新默认，按原始设置与版本区分历史默认，无法区分的旧值保留原行为，不覆盖用户选择。
@@ -870,9 +870,9 @@ keeper 覆盖水位只记录 `buildContextEntries()` 实际物化进其输入的
 水位在 block 写成功后更新，Host 崩溃窗口只会丢水位并回退 Pi，不会产生虚假的覆盖；当前不宣称它是跨 Host 重启的持久 checkpoint。
 检查点证明机械处理区间，不证明保存了所有未来重要的信息；来源无法重新读取时仍须说明，不能用 hash 冒充正文。
 
-**成本按真实调用记录。** keeper 使用活动模型但工具集不同，不保证命中主请求缓存；这不阻止默认交付。保留 memory_edit 输出协议和
-session-local 模型归属，未返回有效操作就是未更新，不从散文猜操作。主/辅助请求分别记录实际 cache-read、用量、耗时与错误；
-失败或无效操作也保留已知费用，未知用量不伪造为零。本地不自行发起付费记忆输出协议/缓存对照实验。
+**执行事实与失败诊断。** keeper 使用活动模型但工具集不同，不保证命中主请求缓存；这不阻止默认交付。保留 memory_edit 输出协议和
+session-local 模型归属，未返回有效操作就是未更新，不从散文猜操作。取消辅助调用分项费用/Token 看板及其专用聚合（D-080），
+保留正常会话已有费用、Token 和上下文容量展示。本地不自行发起付费记忆输出协议/缓存对照实验。
 Anthropic 的工具定义变更影响整个前缀，`tool_choice` 变更影响 messages 缓存；缓存只作优化，不作为正确性前提。
 
 **触发。** 频率过高浪费，过低模糊，所以分层：
@@ -960,7 +960,7 @@ Handoff（把当前会话提炼为一条草稿 prompt 开新分支，Amp 的做�
 | `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
 | `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
 
-记忆 agent 不走槽位，直接使用该会话活动模型，默认与迁移规则见 8.4。工具集不同，实际缓存与费用分别记账；不用 T4 或缓存实验
+记忆 agent 不走槽位，直接使用该会话活动模型，默认与迁移规则见 8.4。工具集不同，不承诺缓存命中，也不增加辅助费用统计；不用 T4 或缓存实验
 决定是否允许使用。后续模型/协议优化按具体问题实施，不复制 Host 模型与凭据权威。
 
 Settings 提供**预设**一键填充多个槽位（如 Anthropic 预设：explore / retrievalAgent / quickImplement / check / reader /
@@ -969,18 +969,17 @@ suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只
 - 依赖未配置槽位的能力**不注册、退化为无 LLM 路径**，**永不静默回退到主模型**。`websearch` 与 `grep` 本来不用 LLM。
 - 只有 `hardImplement` 与 `review` 默认等于主模型，因此零配置时这两个角色可用：即便同模型，新上下文与 worktree 隔离、
   干净审阅本身就有价值。
-- 每个槽位的用量单独归因：reader、permission judge 等会话内辅助请求进入
-  `SessionStats.modelSlotUsage`；子线程的角色、模型与 token 已由 `ThreadRun` 记录，不在父会话重复累计。只有真实发生过请求的槽位
-  才出现，未配置或尚未调用不显示为 0。
+- 模型槽位保留配置和功能；取消 `SessionStats.modelSlotUsage` 及“模型槽位用量”区块（D-080）。子线程的角色、模型与 token
+  继续由自身 `ThreadRun` 记录，普通会话已有统计保持。
 
-槽位选择遵循用户配置；前缀一致只是可能获得缓存收益的条件。memory 的活动模型例外及自动 review 的默认费用在设置与会话用量中明示。
+槽位选择遵循用户配置；前缀一致只是可能获得缓存收益的条件。设置明确 memory 的活动模型例外及自动 review 的启用状态。
 
 ### 8.6 度量
 
 Piarium 已按轮聚合 token 用量并显示 cache-read / cache-write（0.9.8）。harness 增加会话级计数器：缓存命中率、
 工具错误次数、近三步同工具同参数的重复次数、工具输出 UTF-8 字节。这四项随 `SessionStats` 进入现有 Context 侧栏；runtime
-不发布字段时整段不显示，不把“无能力”渲染成四个 0；会话内辅助模型请求还按模型槽位显示调用次数、token 与成本。
-它们回答"这次改动有没有把体验做贵、做吵"；回答不了"任务做对没有"。
+不发布字段时整段不显示，不把“无能力”渲染成四个 0。普通会话已有 Token、缓存、费用和上下文容量展示保留；不再按辅助模型槽位
+展示调用次数、Token 与成本（D-080）。操作计数器用于定位重复调用、错误和输出噪声，不能判断任务是否做对。
 
 **验证服务于交付（D-078）。** 来源读取、分支/CAS、压缩覆盖、工具配对、取消、崩溃恢复、数据保留与集成结果用对应生产链测试验证。
 涉及模型请求时沿现有真 Pi 会话加 faux provider，验证发出的真实请求和回写结果；不要求纯存储或 UI 改动穿过无关的 agent loop。
@@ -1539,7 +1538,7 @@ P0、T1/T2/T3 核心和 D-076 已交付；当前直接实施工作状态/集成�
 
 | 范围 | 已确定方向与实施选择 |
 | --- | --- |
-| 记忆 | 活动模型、memory_edit、版本与覆盖；默认提供，实际成本/失败可见，后续针对实际问题优化 |
+| 记忆 | 活动模型、memory_edit、版本与覆盖；默认提供，模式与失败可见，取消辅助分项统计，后续针对实际问题优化 |
 | 工作状态与结果 | Host 原生内容对象/树/分支/Integration，Git 基线与物化可复用；一次性迁移、独立引用、真实执行写回，见 9.2.5b |
 | RunManifest | Host 执行意图、runtime 解析模型/工具、Host 确认能力、worker 报实际装配；沿 launch 消费者收敛，不复制凭据权威 |
 | 外部 runtime | 对实际 adapter 做版本和能力协商，不先解决全部未来版本兼容问题 |

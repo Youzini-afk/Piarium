@@ -54,7 +54,8 @@ if (isOpenAIFamily) {
 - `createToolResultTruncationExtension` — truncates large tool results,
   stores full text via `output.store`, adds `[output: N bytes]` marker.
 - `createHarnessCounterTracker` — tracks `toolErrors`, `toolRetries`,
-  `outputBytes`, `cacheHitRatio`.
+  `outputBytes`, `observationCalls`, and `cacheHitRatio`. Auxiliary per-model usage
+  aggregation was removed in D-080; ordinary Pi session cost and token statistics remain unchanged.
 - `createPermissionGateExtension` — Harness-tool fallback for sessions without
   `pi-permission-system`. It resolves the plugin's session-keyed service on every
   call and yields completely while that service is active, so there is one

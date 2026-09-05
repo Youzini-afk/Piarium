@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
@@ -88,7 +88,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 
 1. **工作状态与集成（3.4/3.5）**：修 merge 固定结果读取，接原生状态、迁移、可撤销集成与物化生命周期。D-077 的 setup/回收/
    占用同路推进，非 Git 和无首次 commit 后端是正式任务。
-2. **默认记忆与配置（2.4/2.6）**：利用 D-076 版本/分支/覆盖，补必要来源检查、费用/失败记录、单会话模式和默认/旧设置迁移。
+2. **默认记忆与配置（2.4/2.6）**：利用 D-076 版本/分支/覆盖，补必要来源检查、失败诊断、单会话模式和默认/旧设置迁移。
    record-only、T4 自动执行器、完整跨 runtime RunManifest 都不阻塞。
 3. **窗口读取与 explore（3.2）**：自动消息来源、版本草稿、分支读视图；可用搜索/LSP/符号来源先交付，缺覆盖就返回正文，不等
    全图/向量/索引/BM25 基线。模型增强按槽位接入。
@@ -160,11 +160,11 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 不要求先跑 shadow。已有显式 shadowMode:true 保持 assist、明确关闭保留，缺省采用新默认。迁移从原始设置与版本判断；
 来源不明的旧值保留原行为，不能从解析后的默认 false 猜用户意图。单会话覆盖/实际配置记录沿 launch 实现，不暗改全局设置。
 
-每次辅助调用记录模型、耗时、用量/成本、结局、有效操作/拒绝原因；失败和无更新照记已知费用，不补零。UI 显示实际模式，
-主/辅助不双计，不承诺相同模型就命中缓存。事件加速接 steering、计划编辑、子返回、真实命令完成；沿已有 token 增长/单个
+辅助调用保留执行和失败诊断所需的模型、结局、有效操作/拒绝原因，UI 显示实际模式与需要处理的失败；不新增辅助费用或 Token
+看板，普通会话已有费用/Token 展示保留（D-080）。不承诺相同模型就命中缓存。事件加速接 steering、计划编辑、子返回、真实命令完成；沿已有 token 增长/单个
 在飞/去抖调度，有积压才工作，用户“记住这个”不被普通去抖忽略。
 
-验证旧操作冲突、兄弟隔离、分支删除、partial apply 不推进覆盖、主历史无 memory_edit、默认/关闭/assist 与费用投影。
+验证旧操作冲突、兄弟隔离、分支删除、partial apply 不推进覆盖、主历史无 memory_edit、默认/关闭/assist 与失败投影。
 使用现有真 Pi faux-provider，不做付费协议/缓存对照，不等测试者批准。
 
 ### 2.5 todo 与计划面板
@@ -196,8 +196,8 @@ fake HTTP 验证契约/错误，实际代际/native 按消费者验证；选装�
 
 ### 2.9 模型槽位与执行配置
 
-protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardImplement/review 默认主模型。补 memory、suggestions、
-explore 的调用归因，子线程按 ThreadRun 记录，不在父双计。单会话覆盖不放宽 workspace 权限、不改模型凭据，显示实际装配。
+protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardImplement/review 默认主模型。保留模型选择和执行身份，
+取消辅助模型分项统计（D-080）；子线程按 ThreadRun 记录。单会话覆盖不放宽 workspace 权限、不改模型凭据，显示实际装配。
 完整 RunManifest 按这些消费者收敛，不作为所有功能共同前置。
 
 ### 2.10 recall
@@ -229,7 +229,7 @@ explore 的调用归因，子线程按 ThreadRun 记录，不在父双计。单�
 
 现有来源是 search.content、需代表文件选语言的 LSP 导航、file/defines 图、dirty 路径信息。草稿正文/自动来源待接；
 related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
-stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时，失败也记已知费用。
+stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。
 
 验证中文/Unicode、正文/range/版本、草稿/多窗口、父子隔离、派生授权、取消、分页、来源/模型失败和零回退。
@@ -310,7 +310,7 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 ### 3.7 自动 review
 
 接已有 review-sensor 到 agent_settled 和真实结果 diff/修订，使用 review 槽位（默认主模型），默认运行、不阻断，用户可关闭
-或显式设完成门。同结果去重，输入为 diff/任务/项目知识，不含父完整对话；结论/费用/失败可见，带严重度/file:line 进 Zone 2。
+或显式设完成门。同结果去重，输入为 diff/任务/项目知识，不含父完整对话；结论和失败可见，带严重度/file:line 进 Zone 2。
 旧修订审阅不标成当前已审；链路测试通过直接启用，不等 T4。
 
 ### 3.8 LSP 导航
@@ -326,7 +326,7 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 ### 3.10 线程 UI
 
 rail/overlay/时间线共用 session feed/SSE。接归档/独立恢复、结果修订、占用/保留原因和集成状态；重开按需物化，在原 Pi
-session 继续，讨论转实现新分支/Run 保留 transcript。子消息不进父正文；未知费用/占用不补零；新文案 i18n。
+session 继续，讨论转实现新分支/Run 保留 transcript。子消息不进父正文；未知占用不补零；新文案 i18n。
 
 ## 阶段 3b：权限与插件
 
@@ -352,7 +352,7 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 | 变更 | 验证与同步 |
 | --- | --- |
 | 文档 | test:docs、docs:validate、diff whitespace；设计/计划/状态/索引一致 |
-| 工具/模型请求 | 真实协议和 Pi 请求结果链；默认/用户选择/费用；所属模块 README |
+| 工具/模型请求 | 真实协议和 Pi 请求结果链；默认/用户选择/运行结果；所属模块 README |
 | 状态/集成/回收 | 后端文件、并发/中断/迁移/引用保留；线程/恢复模块文档与 architecture |
 | UI | 投影、入口、i18n，不为纯展示要求模型请求 |
 | 平台/打包 | 相应 smoke，缺平台如实写未验证，不扩大成跨平台禁用 |
