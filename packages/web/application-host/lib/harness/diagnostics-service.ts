@@ -2,22 +2,36 @@ import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { DiagnosticItem } from "@piarium/protocol";
 import type { ObservationCursorStore } from "./observation-cursors.js";
 
+export type BindDocumentResult =
+  | { status: "bound"; revision: string; source: "disk" | "surface-draft" }
+  | { status: "unavailable"; message: string }
+  | { status: "unsupported" };
+
 export interface DiagnosticsProvider {
   getDiagnostics(workspaceId: string, path: string): Promise<DiagnosticItem[]>;
-  syncDocument(workspaceId: string, path: string, content: string, reason: "change" | "save"): Promise<{ status: string }>;
+  /**
+   * Bind the path in the Host language view to its current disk text and report
+   * the revision the answer will describe (D-087).
+   */
+  bindDocument(workspaceId: string, path: string): Promise<BindDocumentResult>;
+  /**
+   * Diagnostics the language server published for exactly this text identity,
+   * or null while it has not answered for that revision yet.
+   */
+  getDiagnosticsForRevision(workspaceId: string, path: string, revision: string): Promise<DiagnosticItem[] | null>;
   getSnapshot(workspaceId: string, path: string): Promise<string | null>;
   /** Check if a language server is available for the given workspace + path. */
   isAvailable(workspaceId: string, path: string): Promise<boolean>;
 }
 
 /**
- * Diagnostics service semantics:
- * - No server → unavailable (text: "[diagnostics: unavailable — <reason>]")
- * - Server available, afterSnapshot provided → sync document, wait for
- *   diagnostics newer than the before-snapshot, up to waitMs (default 5000).
- *   If diagnostics arrive → ready (only return NEW diagnostics vs before).
- *   If timeout → pending (text: "[diagnostics: pending — call diagnostics(\"<path>\")]")
- * - Server available, no afterSnapshot → ready (return current diagnostics).
+ * Diagnostics service semantics (D-087):
+ * - No language server for this file type → unavailable.
+ * - Otherwise the path is bound in the Host language view to its current disk
+ *   text — the text an agent just wrote, never the editor's buffer — and the
+ *   answer waits for the publication computed from that exact revision, up to
+ *   waitMs (default 5000). An authoritative empty list is a clean result.
+ * - No publication for that revision within waitMs → pending.
  */
 export function createLspDiagnosticsService(provider: DiagnosticsProvider): HarnessService<"lsp.diagnostics"> {
   return {
@@ -25,57 +39,39 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
       if (!ctx.workspaceId) {
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
-      const available = await provider.isAvailable(ctx.workspaceId, params.path);
-      if (!available) {
-        return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
-      }
       try {
-        // If afterSnapshot is provided, sync the document and wait for new diagnostics
-        if (params.afterSnapshot) {
-          const waitMs = params.waitMs ?? 5000;
-          // Subscribe and capture the publication cursor before didOpen/didChange.
-          // A language server may publish synchronously after the notification;
-          // reading the baseline afterwards would swallow that update.
-          const [beforeDiags, beforeSnapshot] = await Promise.all([
-            provider.getDiagnostics(ctx.workspaceId, params.path),
-            provider.getSnapshot(ctx.workspaceId, params.path),
-          ]);
-          const beforeKeys = new Set(beforeDiags.map((d) => `${d.line}:${d.character}:${d.message}`));
-          const synced = await provider.syncDocument(ctx.workspaceId, params.path, params.afterSnapshot, "save");
-          if (synced.status === "failed" || synced.status === "unsupported") {
-            return { status: "unavailable", diagnostics: [], reason: "language server rejected document synchronization" };
-          }
-          // Wait for a publication, including an authoritative empty list when
-          // an edit resolves the final diagnostic.
-          const deadline = Date.now() + waitMs;
-          let lastDiags = beforeDiags;
-          let snapshot = beforeSnapshot;
-          while (Date.now() < deadline) {
-            [lastDiags, snapshot] = await Promise.all([
-              provider.getDiagnostics(ctx.workspaceId, params.path),
-              provider.getSnapshot(ctx.workspaceId, params.path),
-            ]);
-            if (snapshot !== beforeSnapshot) break;
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
-          if (snapshot === beforeSnapshot) {
-            return { status: "pending", diagnostics: [], reason: "diagnostics not yet published" };
-          }
-          const newDiags = lastDiags.filter((d) => !beforeKeys.has(`${d.line}:${d.character}:${d.message}`));
-          return {
-            status: "ready",
-            ...(snapshot !== null ? { snapshot } : {}),
-            diagnostics: newDiags,
-          };
+        const bound = await provider.bindDocument(ctx.workspaceId, params.path);
+        if (bound.status === "unsupported") {
+          return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
         }
-        // No afterSnapshot — just return current diagnostics
-        const diagnostics = await provider.getDiagnostics(ctx.workspaceId, params.path);
-        const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
-        return {
-          status: "ready",
-          ...(snapshot !== null ? { snapshot } : {}),
-          diagnostics,
-        };
+        if (bound.status === "unavailable") {
+          return { status: "unavailable", diagnostics: [], reason: bound.message };
+        }
+        const waitMs = params.waitMs ?? 5000;
+        const deadline = Date.now() + waitMs;
+        for (;;) {
+          const diagnostics = await provider.getDiagnosticsForRevision(ctx.workspaceId, params.path, bound.revision);
+          if (diagnostics) {
+            const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
+            return {
+              status: "ready",
+              ...(snapshot !== null ? { snapshot } : {}),
+              revision: bound.revision,
+              source: bound.source,
+              diagnostics,
+            };
+          }
+          if (Date.now() >= deadline) {
+            return {
+              status: "pending",
+              diagnostics: [],
+              revision: bound.revision,
+              source: bound.source,
+              reason: "diagnostics not yet published for this revision",
+            };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
       } catch {
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }
@@ -121,10 +117,16 @@ export function createLspDiagnosticsSnapshotService(
       if (!ctx.workspaceId) {
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
-      const available = await provider.isAvailable(ctx.workspaceId, params.path);
-      if (!available) {
+      // Binding both starts the Host view on demand and reports the text the
+      // observation describes; an incremental observer never waits for it.
+      const bound = await provider.bindDocument(ctx.workspaceId, params.path);
+      if (bound.status === "unsupported") {
         return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
       }
+      if (bound.status === "unavailable") {
+        return { status: "unavailable", diagnostics: [], reason: bound.message };
+      }
+      const provenance = { revision: bound.revision, source: bound.source };
       try {
         if (params.full === true) {
           const diagnostics = await provider.getDiagnostics(ctx.workspaceId, params.path);
@@ -132,6 +134,7 @@ export function createLspDiagnosticsSnapshotService(
           return {
             status: "ready",
             ...(snapshot !== null ? { snapshot } : {}),
+            ...provenance,
             diagnostics,
           };
         }
@@ -156,6 +159,7 @@ export function createLspDiagnosticsSnapshotService(
               result: {
                 status: "ready",
                 ...(snapshot !== null ? { snapshot } : {}),
+                ...provenance,
                 diagnostics: added,
                 resolvedDiagnostics: resolved,
                 observation: {

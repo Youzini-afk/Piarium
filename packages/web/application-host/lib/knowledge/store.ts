@@ -180,6 +180,12 @@ export interface SymbolGraphSearchResult extends SymbolGraphSymbolInput {
   id: NodeId;
   path: string;
   score: number;
+  /**
+   * Disk revision the range was computed from, or null for rows written before
+   * ranges carried a text identity (D-087). A consumer that cannot match it
+   * against the current text must degrade instead of trusting the range.
+   */
+  documentRevision: string | null;
 }
 
 // ── Store interface ────────────────────────────────────────────────
@@ -231,7 +237,17 @@ export interface KnowledgeStore {
   recordRecall(ids: NodeId[]): Promise<void>;
   recall(query: string, k: number): Promise<RecallResult[]>;
   touchFile(path: string, language: string): Promise<NodeId>;
-  replaceFileSymbols(path: string, language: string, symbols: SymbolGraphSymbolInput[]): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
+  /**
+   * Replace one file's symbols. `documentRevision` is the disk revision the
+   * ranges were computed from; the graph records committed facts, so a range
+   * derived from an editor buffer is never stored (D-087).
+   */
+  replaceFileSymbols(
+    path: string,
+    language: string,
+    symbols: SymbolGraphSymbolInput[],
+    documentRevision: string,
+  ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score">>>;
@@ -856,10 +872,11 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async replaceFileSymbols(path, language, symbols) {
+    async replaceFileSymbols(path, language, symbols, documentRevision) {
       return enqueueWrite(() => {
         const normalizedPath = assertGraphText(path, "File path");
         const normalizedLanguage = assertGraphText(language, "File language");
+        const normalizedRevision = assertGraphText(documentRevision, "Document revision");
         for (const symbol of symbols) {
           assertGraphText(symbol.name, "Symbol name");
           assertGraphText(symbol.kind, "Symbol kind");
@@ -875,6 +892,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           modifiedAt: Date.now(),
           active: true,
           generation,
+          documentRevision: normalizedRevision,
         });
         graphFileIds.set(normalizedPath, new Set([fileId, ...previousFiles.slice(1).map(({ id }) => id)]));
         const pendingPayloads = symbols.map((symbol) => ({
@@ -885,6 +903,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           kind: symbol.kind,
           range: { ...symbol.range },
           generation,
+          documentRevision: normalizedRevision,
           active: false,
         }));
         const symbolIds = pendingPayloads.length > 0
@@ -899,6 +918,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           modifiedAt: Date.now(),
           active: true,
           generation,
+          documentRevision: normalizedRevision,
         };
         const operations: TransactionOperation[] = [
           { type: "updatePayload", id: fileId, payload: filePayload },
@@ -952,10 +972,11 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
           const range = payload["range"] as SymbolGraphRange | undefined;
           if (!name || !path || !range || !validRange(range)) return [];
+          const documentRevision = typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null;
           const normalizedName = name.toLowerCase();
           const haystack = `${normalizedName} ${path.toLowerCase()}`;
           const score = terms.reduce((total, term) => total + (normalizedName === term ? 4 : normalizedName.includes(term) ? 2 : haystack.includes(term) ? 1 : 0), 0);
-          return score > 0 ? [{ id, name, path, kind, range: { ...range }, score }] : [];
+          return score > 0 ? [{ id, name, path, kind, range: { ...range }, score, documentRevision }] : [];
         })
         .toSorted((left, right) => right.score - left.score || left.name.localeCompare(right.name) || left.path.localeCompare(right.path))
         .slice(0, k);
@@ -983,6 +1004,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
                 path: payload["path"],
                 kind: payload["kind"],
                 range: { ...range },
+                documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
               }]
             : [];
         })

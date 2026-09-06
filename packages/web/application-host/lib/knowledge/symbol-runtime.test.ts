@@ -26,8 +26,6 @@ describe("symbol graph runtime", () => {
 
   it("projects committed document changes through the live LSP and preserves the last graph while unavailable", async () => {
     let available = true;
-    let synced = false;
-    let version: number | null = null;
     let symbols: unknown[] = [{
       name: "Outer",
       kind: 5,
@@ -45,15 +43,14 @@ describe("symbol graph runtime", () => {
       epoch: 1,
     }));
     const supervisor = {
-      getStatus: () => ({ status: available ? "ready" : "unavailable" }),
-      hasSyncedDocument: () => synced,
-      syncedDocumentVersion: () => version,
-      syncDocument: vi.fn(async () => { synced = true; version = 1; return { status: "synced", documentVersion: 1 }; }),
-      documentSymbols: vi.fn(async () => ({ status: "ready", value: symbols })),
+      syncDocument: vi.fn(async () => ({ status: "synced", documentVersion: 1 })),
+      documentSymbols: vi.fn(async () => (available
+        ? { status: "ready", value: symbols }
+        : { status: "failed", message: "language server exited" })),
     };
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
-      documents: { read } as never,
+      documents: { read, readAgentInputSnapshot: () => ({ status: "disk" as const }) } as never,
       supervisor: supervisor as never,
     });
     const mutation = { workspaceId: "workspace", resourceId: "src/a.ts", kind: "modified" as const, owner: { kind: "web-route", id: "editor" } };
@@ -62,14 +59,23 @@ describe("symbol graph runtime", () => {
       await runtime.drain();
       expect((await store.searchSymbols("Outer", 10)).map((entry) => entry.name)).toEqual(["Outer"]);
       expect((await store.searchSymbols("inner", 10)).map((entry) => entry.name)).toEqual(["inner"]);
-      expect(read).toHaveBeenCalledTimes(1);
+      // The graph records committed facts, so each collection binds the file's
+      // disk text and stores the revision it saw.
+      expect((await store.searchSymbols("Outer", 10))[0]?.documentRevision).toBe("r1");
+      expect(supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
+        view: "agent",
+        contentRevision: "r1",
+      }));
+      expect(supervisor.documentSymbols).toHaveBeenCalledWith(expect.objectContaining({
+        view: "agent",
+        expectedRevision: "r1",
+      }));
 
       symbols = [{ name: "Replacement", kind: 13, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 11 } } }];
       runtime.observeDocumentMutation(mutation);
       await runtime.drain();
       expect(await store.searchSymbols("Outer", 10)).toEqual([]);
       expect(await store.searchSymbols("Replacement", 10)).toHaveLength(1);
-      expect(read).toHaveBeenCalledTimes(1);
 
       available = false;
       symbols = [];
@@ -91,9 +97,6 @@ describe("symbol graph runtime", () => {
       authority: { onMutation: (event) => observe(event) },
     });
     const supervisor = {
-      getStatus: () => ({ status: "ready" }),
-      hasSyncedDocument: () => false,
-      syncedDocumentVersion: () => null,
       syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
       documentSymbols: async () => ({
         status: "ready",
@@ -117,10 +120,11 @@ describe("symbol graph runtime", () => {
         operationId: randomUUID(),
       });
       expect(written.status).toBe("written");
+      const writtenRevision = written.status === "written" ? written.revision : null;
       await Promise.resolve();
       await runtime.drain();
       expect(await store.searchSymbols("ObservedSymbol", 5)).toEqual([
-        expect.objectContaining({ name: "ObservedSymbol", path: "observed.ts" }),
+        expect.objectContaining({ name: "ObservedSymbol", path: "observed.ts", documentRevision: writtenRevision }),
       ]);
     } finally {
       observe = () => undefined;

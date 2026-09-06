@@ -1089,16 +1089,12 @@ describe("session e2e — real LSP diagnostics", () => {
         source: "host",
       });
       const diagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(language, {
+        documents: harness.authority,
         resolveWorkspaceId: async () => harness.identity.workspaceId,
       });
-      await diagnosticsProvider.getSnapshot(harness.identity.workspaceId, resourceId);
-      await language.syncDocument({
-        resource: { workspaceId: harness.identity.workspaceId, resourceId },
-        languageId: "typescript",
-        documentVersion: 1,
-        reason: "open",
-        content: "FIXTURE_ERROR\n",
-      });
+      // The provider binds the file's disk text in the Host language view; the
+      // editor view is not involved (D-087).
+      await diagnosticsProvider.bindDocument(harness.identity.workspaceId, resourceId);
       await waitUntil(async () => (
         (await diagnosticsProvider.getDiagnostics(harness.identity.workspaceId, resourceId))
           .some((diagnostic) => diagnostic.message === "fixture error")

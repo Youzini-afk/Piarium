@@ -1,4 +1,7 @@
+import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
+import { createLanguageViewBinder } from "../lsp/language-view.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import { languageIdForPath } from "./language-id.js";
 
@@ -15,19 +18,30 @@ interface CachedDiagnostics {
   }>;
   generation: number | undefined;
   revision: number;
+  contentRevision: string | undefined;
 }
+
+const normalizeResourceId = (value: string): string => (
+  value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "")
+);
 
 /**
  * Adapts the LanguageSupervisor's event-based diagnostics into the
  * DiagnosticsProvider interface expected by the harness diagnostics service.
  *
- * Subscribes to diagnostics events for each workspace and caches the latest
- * items per resource. When getDiagnostics is called, returns the cached items.
+ * Only the Host-owned view is consumed: diagnostics reported to an agent must
+ * describe the file as written to disk, not whatever text the editor happens to
+ * hold. Documents are bound on demand and each cache entry keeps the text
+ * identity its items were computed from (D-087).
  */
 export function createLanguageSupervisorDiagnosticsProvider(
   supervisor: LanguageSupervisor,
-  _options: { resolveWorkspaceId: (workspaceRoot: string) => Promise<string | null> },
+  options: {
+    resolveWorkspaceId: (workspaceRoot: string) => Promise<string | null>;
+    documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
+  },
 ): DiagnosticsProvider {
+  const binder = createLanguageViewBinder({ documents: options.documents, supervisor });
   // workspaceId → resourceId → cached diagnostics
   const cache = new Map<string, Map<string, CachedDiagnostics>>();
   // workspaceId → subscriptions
@@ -36,8 +50,16 @@ export function createLanguageSupervisorDiagnosticsProvider(
   const ensureSubscription = (workspaceId: string): void => {
     if (subscriptions.has(workspaceId)) return;
     const sub = supervisor.subscribe(workspaceId, (event: unknown) => {
-      const e = event as { kind?: string; resourceId?: string; generation?: number; items?: unknown[] };
+      const e = event as {
+        kind?: string;
+        resourceId?: string;
+        generation?: number;
+        items?: unknown[];
+        view?: string;
+        contentRevision?: string;
+      };
       if (e.kind !== "diagnostics" || typeof e.resourceId !== "string") return;
+      if (e.view !== AGENT_LANGUAGE_VIEW) return;
       let wsCache = cache.get(workspaceId);
       if (!wsCache) {
         wsCache = new Map();
@@ -61,68 +83,69 @@ export function createLanguageSupervisorDiagnosticsProvider(
           source: typeof d.source === "string" ? d.source : "unknown",
         };
       }) : [];
-      const previous = wsCache.get(e.resourceId);
-      wsCache.set(e.resourceId, {
+      const key = normalizeResourceId(e.resourceId);
+      const previous = wsCache.get(key);
+      wsCache.set(key, {
         items,
         generation: e.generation,
         revision: (previous?.revision ?? 0) + 1,
+        contentRevision: e.contentRevision,
       });
     });
     subscriptions.set(workspaceId, () => sub.close());
   };
 
+  const cachedFor = (workspaceId: string, path: string): CachedDiagnostics | null => (
+    cache.get(workspaceId)?.get(normalizeResourceId(path)) ?? null
+  );
+
   const getDiagnostics: DiagnosticsProvider["getDiagnostics"] = async (workspaceId, path) => {
     ensureSubscription(workspaceId);
-    const wsCache = cache.get(workspaceId);
-    if (!wsCache) return [];
-    // Try exact match, then prefix match (path may be relative or absolute)
-    const exact = wsCache.get(path);
-    if (exact) return exact.items;
-    // Try matching by suffix (resourceId may be a full URI or path)
-    for (const [resourceId, cached] of wsCache) {
-      if (resourceId.endsWith(path) || path.endsWith(resourceId)) {
-        return cached.items;
-      }
-    }
-    return [];
+    // Exact resource identity only. Suffix matching returned another file's
+    // diagnostics whenever one path ended with the other (`src/lib/a.ts` for
+    // `a.ts`).
+    return cachedFor(workspaceId, path)?.items ?? [];
   };
 
-  const syncDocument: DiagnosticsProvider["syncDocument"] = async (workspaceId, path, content, reason) => {
+  const getDiagnosticsForRevision: DiagnosticsProvider["getDiagnosticsForRevision"] = async (workspaceId, path, revision) => {
+    ensureSubscription(workspaceId);
+    const cached = cachedFor(workspaceId, path);
+    if (!cached || cached.contentRevision !== revision) return null;
+    return cached.items;
+  };
+
+  const bindDocument: DiagnosticsProvider["bindDocument"] = async (workspaceId, path) => {
     ensureSubscription(workspaceId);
     const languageId = languageIdForPath(path);
     if (!languageId) return { status: "unsupported" };
-    const documentVersion = (supervisor.syncedDocumentVersion(workspaceId, languageId, path) ?? 0) + 1;
-    const result = await supervisor.syncDocument({
-      resource: { workspaceId, resourceId: path },
-      content,
-      languageId,
-      documentVersion,
-      reason,
-    });
-    return { status: typeof result === "object" && result !== null && "status" in result ? (result as { status: string }).status : "ok" };
+    const bound = await binder.bind({ workspaceId, resourceId: path, languageId, text: "disk" });
+    if (bound.status !== "bound") return { status: "unavailable", message: bound.message };
+    return { status: "bound", revision: bound.revision, source: bound.source };
   };
 
   const getSnapshot: DiagnosticsProvider["getSnapshot"] = async (workspaceId, path) => {
     ensureSubscription(workspaceId);
-    const wsCache = cache.get(workspaceId);
-    if (!wsCache) return null;
-    const cached = wsCache.get(path);
+    const cached = cachedFor(workspaceId, path);
     if (!cached) return null;
     return `${cached.generation ?? 0}:${cached.revision}`;
   };
 
   const isAvailable: DiagnosticsProvider["isAvailable"] = async (workspaceId, path) => {
     ensureSubscription(workspaceId);
-    // Check if the supervisor has a ready session for this workspace.
     const languageId = languageIdForPath(path);
     if (!languageId) return false;
-    const status = supervisor.getStatus(workspaceId, languageId);
-    return status.status === "ready" || status.status === "degraded";
+    // A Host view starts on demand, so availability is a provider question:
+    // either view already running for this language proves one exists.
+    const agent = supervisor.getStatus(workspaceId, languageId, AGENT_LANGUAGE_VIEW).status;
+    if (agent === "ready" || agent === "degraded") return true;
+    const bound = await bindDocument(workspaceId, path);
+    return bound.status === "bound";
   };
 
   return {
     getDiagnostics,
-    syncDocument,
+    getDiagnosticsForRevision,
+    bindDocument,
     getSnapshot,
     isAvailable,
   };

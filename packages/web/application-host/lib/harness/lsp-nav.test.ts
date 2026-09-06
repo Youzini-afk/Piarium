@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import type { HarnessServiceContext } from "./router.js";
 import { createLspNavigationServices } from "./lsp-nav.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
-import { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { AGENT_LANGUAGE_VIEW, SURFACE_LANGUAGE_VIEW, createLanguageSupervisor } from "../lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 
 const context: HarnessServiceContext = {
@@ -26,11 +26,10 @@ const context: HarnessServiceContext = {
 const createDeps = () => {
   const documents = {
     read: vi.fn(async () => ({ status: "ready", content: "export const value = 1;", resource: { workspaceId: "workspace-1", resourceId: "src/a.ts" }, revision: "r1", encoding: "utf-8", bom: false, byteLength: 23, epoch: 1 })),
+    readAgentInputSnapshot: vi.fn(() => ({ status: "disk" as const })),
   };
   const supervisor = {
-    hasSyncedDocument: vi.fn(() => false),
-    syncedDocumentVersion: vi.fn(() => null),
-    syncDocument: vi.fn(async () => ({ status: "synced", documentVersion: 0 })),
+    syncDocument: vi.fn(async () => ({ status: "synced", documentVersion: 1 })),
     workspaceSymbols: vi.fn(async () => ({
       status: "ready",
       value: [{ name: "value", kind: 13, resource: { workspaceId: "workspace-1", resourceId: "src/a.ts" }, range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } } }],
@@ -52,26 +51,64 @@ const createDeps = () => {
 };
 
 describe("LSP navigation services", () => {
-  it("opens an unsynced disk document and formats one-based symbol locations", async () => {
+  it("binds the queried document in the Host view and reports its revision", async () => {
     const deps = createDeps();
     const services = createLspNavigationServices(deps as never);
     const result = await services.symbols.handle({ path: "src/a.ts", query: "value" }, context);
-    expect(result).toMatchObject({ status: "ready" });
+    expect(result).toMatchObject({ status: "ready", revision: "r1", source: "disk" });
     expect(result.text).toContain("src/a.ts:1:14 — value");
+    expect(result.text).toContain("queried src/a.ts @ r1 (disk)");
     expect(deps.documents.read).toHaveBeenCalledOnce();
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
+      view: AGENT_LANGUAGE_VIEW,
       languageId: "typescript",
-      documentVersion: 0,
+      contentRevision: "r1",
       reason: "open",
+    }));
+    expect(deps.supervisor.workspaceSymbols).toHaveBeenCalledWith(expect.objectContaining({
+      view: AGENT_LANGUAGE_VIEW,
+      expectedRevision: "r1",
     }));
   });
 
-  it("does not overwrite a document already synchronized from an editor buffer", async () => {
+  it("reads the turn's fixed editor draft instead of disk for a dirty path", async () => {
     const deps = createDeps();
-    deps.supervisor.hasSyncedDocument.mockReturnValue(true);
-    deps.supervisor.syncedDocumentVersion.mockReturnValue(7 as never);
+    deps.documents.readAgentInputSnapshot = vi.fn(() => ({
+      status: "ready" as const,
+      content: "export const value = 2;",
+      revision: "surface-draft:ref-1:4",
+      encoding: "utf-8",
+      bom: false,
+      source: "surface-draft" as const,
+    })) as never;
     const services = createLspNavigationServices(deps as never);
-    await services.hover.handle({ path: "src/a.ts", line: 1, character: 1 }, context);
+    const draftContext = {
+      ...context,
+      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+    };
+    const result = await services.hover.handle({ path: "src/a.ts", line: 1 }, draftContext);
+    expect(result).toMatchObject({ status: "ready", revision: "surface-draft:ref-1:4", source: "surface-draft" });
+    expect(deps.documents.read).not.toHaveBeenCalled();
+    expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
+      content: "export const value = 2;",
+      contentRevision: "surface-draft:ref-1:4",
+    }));
+  });
+
+  it("never falls back to disk when a known dirty path has no fixed draft", async () => {
+    const deps = createDeps();
+    deps.documents.readAgentInputSnapshot = vi.fn(() => ({
+      status: "unavailable" as const,
+      message: "The editor source snapshot expired on the application host.",
+    })) as never;
+    const services = createLspNavigationServices(deps as never);
+    const expiredContext = {
+      ...context,
+      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+    };
+    await expect(services.hover.handle({ path: "src/a.ts", line: 1 }, expiredContext)).resolves.toMatchObject({
+      status: "unavailable",
+    });
     expect(deps.documents.read).not.toHaveBeenCalled();
     expect(deps.supervisor.syncDocument).not.toHaveBeenCalled();
   });
@@ -93,18 +130,41 @@ describe("LSP navigation services", () => {
     expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "workspace-1", resourceId: "src/a.ts" });
   });
 
-  it("converts agent-facing one-based positions to LSP zero-based positions", async () => {
+  it("converts agent-facing one-based positions and marks positions in other files unpinned", async () => {
     const deps = createDeps();
     const services = createLspNavigationServices(deps as never);
     const definition = await services.definition.handle({ path: "src/a.ts", line: 7, character: 3 }, context);
-    expect(definition.text).toBe("src/b.ts:5:3");
+    expect(definition.text).toContain("src/b.ts:5:3 [unpinned]");
+    expect(definition).toMatchObject({ unpinnedPaths: ["src/b.ts"] });
     expect(deps.supervisor.definition).toHaveBeenCalledWith(expect.objectContaining({
       position: { line: 6, character: 2 },
     }));
     const references = await services.references.handle({ path: "src/a.ts", line: 7 }, context);
-    expect(references.text).toContain("1 references\nsrc/c.ts:9:2");
+    expect(references.text).toContain("1 references · queried src/a.ts @ r1 (disk)");
+    expect(references.text).toContain("src/c.ts:9:2 [unpinned]");
     const hover = await services.hover.handle({ path: "src/a.ts", line: 7 }, context);
-    expect(hover.text).toBe("`value: number`\n\nCurrent value");
+    expect(hover.text).toContain("`value: number`\n\nCurrent value");
+    expect(hover.unpinnedPaths).toBeUndefined();
+  });
+
+  it("re-binds once when the view moved to another revision, then reports it", async () => {
+    const deps = createDeps();
+    deps.supervisor.hover = vi.fn()
+      .mockResolvedValueOnce({ status: "stale", reason: "revision", contentRevision: "r2" })
+      .mockResolvedValueOnce({ status: "ready", value: { contents: [{ kind: "plaintext", value: "second try" }] } }) as never;
+    const services = createLspNavigationServices(deps as never);
+    await expect(services.hover.handle({ path: "src/a.ts", line: 1 }, context)).resolves.toMatchObject({
+      status: "ready",
+    });
+    expect(deps.supervisor.hover).toHaveBeenCalledTimes(2);
+
+    const looping = createDeps();
+    looping.supervisor.hover = vi.fn(async () => ({ status: "stale", reason: "revision" })) as never;
+    const loopingServices = createLspNavigationServices(looping as never);
+    await expect(loopingServices.hover.handle({ path: "src/a.ts", line: 1 }, context)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    expect(looping.supervisor.hover).toHaveBeenCalledTimes(2);
   });
 
   it("keeps unsupported files, empty results, and provider failures distinct", async () => {
@@ -114,10 +174,10 @@ describe("LSP navigation services", () => {
     deps.supervisor.references.mockResolvedValueOnce({ status: "ready", value: [] });
     await expect(services.references.handle({ path: "src/a.ts", line: 1 }, context)).resolves.toMatchObject({ status: "empty" });
     deps.supervisor.definition.mockResolvedValueOnce({ status: "failed", message: "server exited" } as never);
-    await expect(services.definition.handle({ path: "src/a.ts", line: 1 }, context)).resolves.toMatchObject({ status: "unavailable", text: "Definition unavailable: server exited" });
+    await expect(services.definition.handle({ path: "src/a.ts", line: 1 }, context)).resolves.toMatchObject({ status: "unavailable", text: "LSP unavailable: server exited" });
   });
 
-  it("serves navigation through a real LanguageSupervisor process", async () => {
+  it("serves navigation through a real LanguageSupervisor process without touching the editor view", async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({
       documents: harness.authority,
@@ -136,13 +196,15 @@ describe("LSP navigation services", () => {
       });
       const services = createLspNavigationServices({ documents: harness.authority, supervisor: language });
       const realContext = { ...context, workspaceId: harness.identity.workspaceId, actor: { ...context.actor, workspaceId: harness.identity.workspaceId } };
-      await expect(services.hover.handle({ path: "fixture.ts", line: 1, character: 1 }, realContext)).resolves.toMatchObject({
-        status: "ready",
-        text: "fixture-hover",
-      });
+      const hover = await services.hover.handle({ path: "fixture.ts", line: 1, character: 1 }, realContext);
+      expect(hover).toMatchObject({ status: "ready", source: "disk" });
+      expect(hover.text).toContain("fixture-hover");
+      expect(hover.revision).toBeTruthy();
       await expect(services.symbols.handle({ path: "fixture.ts", query: "fixture" }, realContext)).resolves.toMatchObject({
         status: "ready",
       });
+      expect(language.getStatus(harness.identity.workspaceId, "typescript", AGENT_LANGUAGE_VIEW).status).toBe("ready");
+      expect(language.getStatus(harness.identity.workspaceId, "typescript", SURFACE_LANGUAGE_VIEW).status).toBe("absent");
     } finally {
       await language.dispose();
       await harness.cleanup();

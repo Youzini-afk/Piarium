@@ -249,6 +249,127 @@ describe('language supervisor', () => {
     }
   });
 
+  it('isolates the editor view from the Host view and lets each own its documents', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      const resource = harness.resource('shared.ts');
+      // The editor holds an unsaved buffer while the Host view is bound to the
+      // committed text of the same file.
+      expect(await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 4,
+        reason: 'open',
+        content: 'const buffer = "unsaved";\n',
+      })).toMatchObject({ status: 'synced' });
+      const hostSync = await language.syncDocument({
+        view: 'agent',
+        resource,
+        languageId: 'typescript',
+        reason: 'open',
+        content: 'const disk = true;\n',
+        contentRevision: 'disk-r1',
+      });
+      // The Host view assigns its own version instead of borrowing the editor's.
+      expect(hostSync).toMatchObject({ status: 'synced', documentVersion: 1, contentRevision: 'disk-r1' });
+      expect(language.syncedDocumentVersion(harness.identity.workspaceId, 'typescript', resource.resourceId)).toBe(4);
+      expect(language.syncedContentRevision(harness.identity.workspaceId, 'typescript', resource.resourceId)).toBe('disk-r1');
+      expect(language.inspectViews().map((view) => view.view).toSorted()).toEqual(['agent', 'surface']);
+
+      // Re-binding the same text neither notifies nor bumps the version.
+      expect(await language.syncDocument({
+        view: 'agent',
+        resource,
+        languageId: 'typescript',
+        reason: 'open',
+        content: 'const disk = true;\n',
+        contentRevision: 'disk-r1',
+      })).toMatchObject({ documentVersion: 1 });
+
+      // An answer bound to a superseded revision is stale, not silently mixed.
+      expect(await language.hover({
+        view: 'agent',
+        resource,
+        languageId: 'typescript',
+        expectedRevision: 'disk-r0',
+        position: { line: 0, character: 1 },
+      })).toMatchObject({ status: 'stale', reason: 'revision', contentRevision: 'disk-r1' });
+      expect(await language.hover({
+        view: 'agent',
+        resource,
+        languageId: 'typescript',
+        expectedRevision: 'disk-r1',
+        position: { line: 0, character: 1 },
+      })).toMatchObject({ status: 'ready', contentRevision: 'disk-r1' });
+
+      // Closing the editor's last tab must not cancel the agent's view.
+      expect(await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 4,
+        reason: 'close',
+      })).toMatchObject({ status: 'synced' });
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('absent');
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript', 'agent').status).toBe('ready');
+      expect(await language.hover({
+        view: 'agent',
+        resource,
+        languageId: 'typescript',
+        expectedRevision: 'disk-r1',
+        position: { line: 0, character: 1 },
+      })).toMatchObject({ status: 'ready' });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('bounds the Host view open documents and releases the view when it goes idle', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    let clock = 1_000;
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+      hostViewDocumentLimit: 2,
+      hostViewIdleMs: 500,
+      now: () => clock,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      for (const name of ['a.ts', 'b.ts', 'c.ts']) {
+        clock += 10;
+        expect(await language.syncDocument({
+          view: 'agent',
+          resource: harness.resource(name),
+          languageId: 'typescript',
+          reason: 'open',
+          content: `const ${name.replace('.ts', '')} = true;\n`,
+          contentRevision: `disk-${name}`,
+        })).toMatchObject({ status: 'synced' });
+      }
+      expect(language.inspectViews()).toEqual([expect.objectContaining({ view: 'agent', openDocuments: 2 })]);
+      expect(language.syncedContentRevision(harness.identity.workspaceId, 'typescript', 'a.ts')).toBeNull();
+      expect(language.syncedContentRevision(harness.identity.workspaceId, 'typescript', 'c.ts')).toBe('disk-c.ts');
+
+      clock += 501;
+      language.releaseIdleHostViews();
+      expect(language.inspectViews()).toEqual([]);
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript', 'agent').status).toBe('absent');
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
   it('keeps an activation failure distinct from an absent provider', async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({

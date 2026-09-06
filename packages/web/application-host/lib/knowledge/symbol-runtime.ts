@@ -1,16 +1,18 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
+import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { languageIdForPath } from "../harness/language-id.js";
-import { createSymbolCollector, type SymbolCollector } from "./symbols.js";
+import { createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
 import type { KnowledgeStore, SymbolGraphSymbolInput, SymbolGraphRange } from "./store.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
-  "getStatus" | "hasSyncedDocument" | "syncedDocumentVersion" | "syncDocument" | "documentSymbols">;
+  "syncDocument" | "documentSymbols">;
 
 export interface SymbolGraphRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
-  documents: Pick<DocumentAuthority, "read">;
+  documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
   onError?: (error: unknown) => void;
 }
@@ -56,34 +58,27 @@ const flattenSymbols = (value: unknown): SymbolGraphSymbolInput[] => {
 export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const collectors = new Map<string, Promise<SymbolCollector | null>>();
   const pending = new Set<Promise<void>>();
+  const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor });
   let disposed = false;
 
-  const loadSymbols = async (workspaceId: string, path: string, languageId: string): Promise<SymbolGraphSymbolInput[] | null> => {
-    const status = options.supervisor.getStatus(workspaceId, languageId);
-    if (status.status !== "ready" && status.status !== "degraded") return null;
-    let documentVersion = options.supervisor.syncedDocumentVersion(workspaceId, languageId, path);
-    if (!options.supervisor.hasSyncedDocument(workspaceId, languageId, path) || documentVersion === null) {
-      const resource = { workspaceId, resourceId: path };
-      const snapshot = await options.documents.read(resource);
-      if (snapshot.status !== "ready") return null;
-      const synced = await options.supervisor.syncDocument({
-        resource,
-        languageId,
-        documentVersion: 0,
-        content: snapshot.content,
-        reason: "open",
-      });
-      const sync = recordOf(synced);
-      if (sync.status !== "synced" && sync.status !== "stale") return null;
-      documentVersion = typeof sync.documentVersion === "number" ? sync.documentVersion : 0;
-    }
+  /**
+   * The graph holds committed facts, so collection binds the Host language view
+   * to the file's disk text and never reads an editor buffer. The range set is
+   * returned with that revision, or null so the last known graph survives
+   * (D-087).
+   */
+  const loadSymbols = async (workspaceId: string, path: string, languageId: string): Promise<CollectedSymbols | null> => {
+    const bound = await binder.bind({ workspaceId, resourceId: path, languageId, text: "disk" });
+    if (bound.status !== "bound") return null;
     const response = await options.supervisor.documentSymbols({
+      view: AGENT_LANGUAGE_VIEW,
       resource: { workspaceId, resourceId: path },
       languageId,
-      documentVersion,
+      expectedRevision: bound.revision,
     });
     const result = recordOf(response);
-    return result.status === "ready" ? flattenSymbols(result.value) : null;
+    if (result.status !== "ready") return null;
+    return { symbols: flattenSymbols(result.value), documentRevision: bound.revision };
   };
 
   const collectorFor = (workspaceId: string): Promise<SymbolCollector | null> => {

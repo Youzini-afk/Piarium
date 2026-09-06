@@ -1,6 +1,7 @@
 import { isDocumentAuthorityError } from '../documents/errors.js';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import type { createLanguageSupervisor } from './supervisor.js';
+import { SURFACE_LANGUAGE_VIEW } from './supervisor.js';
 
 type LanguageRuntime = ReturnType<typeof createLanguageSupervisor>;
 
@@ -15,10 +16,24 @@ const sendError = (res: Response, error: unknown) => {
   return res.status(500).json({ error: message, reason: 'failed' });
 };
 
-const readBody = (req: Request): Record<string, unknown> => (
-  req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Record<string, unknown> : {}
-);
+/**
+ * The editor owns the `surface` view. A renderer request can never select
+ * another view, and the event stream carries only that view's status and
+ * diagnostics, so the agent view's answers never reach the editor (D-087).
+ */
+const readBody = (req: Request): Record<string, unknown> => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : {};
+  return { ...body, view: SURFACE_LANGUAGE_VIEW };
+};
 const stringField = (value: unknown): string => typeof value === 'string' ? value : '';
+const isSurfaceViewEvent = (event: unknown): boolean => {
+  if (!event || typeof event !== 'object') return false;
+  const record = event as { view?: unknown; snapshot?: { view?: unknown } };
+  const view = record.view ?? record.snapshot?.view;
+  return view === undefined || view === SURFACE_LANGUAGE_VIEW;
+};
 
 const FEATURES = new Set([
   'completion',
@@ -84,7 +99,10 @@ export const registerLanguageRoutes = (app: Express, {
       }
       const handler = language[method as keyof LanguageRuntime];
       if (typeof handler !== 'function') throw new Error(`Language feature is unavailable: ${method}`);
-      return res.json(await (handler as (request: unknown) => unknown)(body.request ?? {}));
+      const request = body.request && typeof body.request === 'object' && !Array.isArray(body.request)
+        ? { ...body.request as Record<string, unknown>, view: SURFACE_LANGUAGE_VIEW }
+        : { view: SURFACE_LANGUAGE_VIEW };
+      return res.json(await (handler as (request: unknown) => unknown)(request));
     } catch (error) {
       return sendError(res, error);
     }
@@ -121,6 +139,7 @@ export const registerLanguageRoutes = (app: Express, {
     let closed = false;
     const write = (event: unknown): void => {
       if (closed || res.writableEnded || res.destroyed) return;
+      if (!isSurfaceViewEvent(event)) return;
       const payload = JSON.stringify(event);
       if (event && typeof event === 'object' && Object.prototype.hasOwnProperty.call(event, 'content')) return;
       res.write(`data: ${payload}\n\n`);

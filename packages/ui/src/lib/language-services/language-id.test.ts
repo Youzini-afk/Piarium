@@ -20,7 +20,17 @@ afterEach(() => {
 test('Monaco tokenization aliases JSX host language identifiers without changing Host IDs', () => {
   expect(monacoLanguageIdForHostLanguage('typescriptreact')).toBe('typescript');
   expect(monacoLanguageIdForHostLanguage('javascriptreact')).toBe('javascript');
+  expect(monacoLanguageIdForHostLanguage('shellscript')).toBe('shell');
   expect(monacoLanguageIdForHostLanguage('rust')).toBe('rust');
+});
+
+test('resolves one language identity for the Host language view and the editor', () => {
+  // A second table made `.sh` two Host sessions and hid `.mts` from the agent.
+  expect(languageIdFromResourceId('scripts/build.sh')).toBe('shellscript');
+  expect(languageIdFromResourceId('src/entry.mts')).toBe('typescript');
+  expect(languageIdFromResourceId('src/entry.cjs')).toBe('javascript');
+  expect(languageIdFromResourceId('infra/Dockerfile')).toBe('dockerfile');
+  expect(languageIdFromResourceId('Main.java')).toBe('java');
 });
 
 test('Monaco tokenization resolves registered filenames, patterns, and longest extensions', () => {

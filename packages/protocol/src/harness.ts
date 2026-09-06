@@ -128,9 +128,15 @@ export interface DiagnosticItem {
   source: string;
 }
 
+/** Which text a Host language answer was computed from (D-087). */
+export type LanguageTextProvenance = "disk" | "surface-draft";
+
 export interface DiagnosticsResult {
   status: "ready" | "pending" | "unavailable";
   snapshot?: string;
+  /** Text identity the diagnosed document was bound to. */
+  revision?: string;
+  source?: LanguageTextProvenance;
   diagnostics: DiagnosticItem[];
   resolvedDiagnostics?: DiagnosticItem[];
   observation?: {
@@ -147,6 +153,14 @@ export interface LspNavigationResult {
   status: "ready" | "empty" | "unavailable";
   text: string;
   value?: JsonValue;
+  /** Text identity the queried document was bound to (D-087). */
+  revision?: string;
+  source?: LanguageTextProvenance;
+  /**
+   * Files whose positions the language server computed from its own read. LSP
+   * does not report the version it used, so they carry no bound revision.
+   */
+  unpinnedPaths?: string[];
 }
 
 export type FsLockParams =
@@ -296,7 +310,7 @@ export interface HarnessServiceMap {
   "output.store": { params: { text: string; label?: string }; result: { ref: OutputRef; total: number } };
   "output.read": { params: { handle: string; offset?: number; length?: number }; result: OutputSlice };
   "search.content": { params: SearchContentParams; result: SearchContentResult };
-  "lsp.diagnostics": { params: { path: string; afterSnapshot?: string; waitMs?: number }; result: DiagnosticsResult };
+  "lsp.diagnostics": { params: { path: string; waitMs?: number }; result: DiagnosticsResult };
   "lsp.diagnosticsSnapshot": { params: { path: string; full?: boolean }; result: DiagnosticsResult };
   "lsp.symbols": { params: { path: string; query: string }; result: LspNavigationResult };
   "lsp.definition": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };

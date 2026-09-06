@@ -76,6 +76,13 @@ interface LanguageProvider {
 interface OpenLanguageDocument {
   content: string;
   documentVersion: number;
+  /**
+   * Identity of the text this document was synchronized from: a Documents disk
+   * revision or `surface-draft:<ref>:<n>`. Only Host-owned views set it; the
+   * editor view's identity is its own `documentVersion` (D-087).
+   */
+  contentRevision?: string;
+  usedAt?: number;
 }
 
 type ResolveCollectionName =
@@ -102,6 +109,8 @@ interface LanguageSessionRecord {
   rpc: JsonRpcClient | null;
   serverCapabilities: ServerCapabilities;
   status: 'degraded' | 'failed' | 'ready' | 'starting';
+  usedAt: number;
+  view: LanguageViewId;
   workspaceId: string;
 }
 
@@ -112,6 +121,7 @@ interface LanguageStatusSnapshot extends Record<string, unknown> {
   message?: string;
   providerId?: string;
   status: string;
+  view?: LanguageViewId;
   workspaceId: string;
 }
 
@@ -122,8 +132,10 @@ interface LanguageRequest extends Record<string, unknown> {
   color?: unknown;
   command?: string;
   content?: string;
+  contentRevision?: string;
   diagnostics?: Array<Record<string, unknown>>;
   documentVersion?: number;
+  expectedRevision?: string;
   formatting?: unknown;
   languageId?: string;
   newName?: string;
@@ -138,6 +150,7 @@ interface LanguageRequest extends Record<string, unknown> {
   source?: string;
   triggerCharacter?: string;
   triggerKind?: string;
+  view?: LanguageViewId;
 }
 
 type FeatureMapper = (raw: unknown, record: LanguageSessionRecord) => unknown;
@@ -164,6 +177,11 @@ interface LanguageSupervisorOptions {
     args: readonly string[],
     options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>,
   ) => ChildProcessWithoutNullStreams;
+  /** Host-owned views release their server after this much inactivity. */
+  hostViewIdleMs?: number;
+  /** Documents a Host-owned view keeps open before closing the least recently used. */
+  hostViewDocumentLimit?: number;
+  now?: () => number;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -175,7 +193,24 @@ const asCapabilities = (value: unknown): ServerCapabilities => {
   return record ? record as ServerCapabilities : {};
 };
 
-const sessionKey = (workspaceId: string, languageId: string): string => `${workspaceId}\0${languageId}`;
+/**
+ * One language server session cannot be both the editor's live buffer and an
+ * agent turn's fixed text: the last writer decides the content while the
+ * version number belongs to the editor. Views separate the two owners (D-087).
+ */
+export type LanguageViewId = 'agent' | 'surface';
+
+export const SURFACE_LANGUAGE_VIEW: LanguageViewId = 'surface';
+export const AGENT_LANGUAGE_VIEW: LanguageViewId = 'agent';
+
+const asView = (value: unknown): LanguageViewId => (value === AGENT_LANGUAGE_VIEW ? AGENT_LANGUAGE_VIEW : SURFACE_LANGUAGE_VIEW);
+
+/** Host-owned views assign their own document versions and own their lifecycle. */
+const isHostOwnedView = (view: LanguageViewId): boolean => view !== SURFACE_LANGUAGE_VIEW;
+
+const sessionKey = (workspaceId: string, languageId: string, view: LanguageViewId): string => (
+  `${workspaceId}\0${languageId}\0${view}`
+);
 
 const SEMANTIC_TOKEN_TYPES = [
   'namespace', 'type', 'class', 'enum', 'interface', 'struct', 'typeParameter', 'parameter',
@@ -280,6 +315,9 @@ export const createLanguageSupervisor = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
+  hostViewIdleMs = 300_000,
+  hostViewDocumentLimit = 64,
+  now = () => Date.now(),
 }: LanguageSupervisorOptions) => {
   const providers: LanguageProvider[] = [];
   const sessions = new Map<string, LanguageSessionRecord>();
@@ -314,6 +352,7 @@ export const createLanguageSupervisor = ({
       workspaceId: record.workspaceId,
       languageId: record.languageId,
     };
+    snapshot.view = record.view;
     if (record.providerId) snapshot.providerId = record.providerId;
     if (typeof record.generation === 'number') snapshot.generation = record.generation;
     if (record.message) snapshot.message = record.message;
@@ -339,10 +378,10 @@ export const createLanguageSupervisor = ({
     return snapshot;
   };
 
-  const getStatus = (workspaceId: string, languageId: string): LanguageStatusSnapshot => {
-    const existing = sessions.get(sessionKey(workspaceId, languageId));
-    if (existing) return snapshotFor(existing) ?? { status: 'absent', workspaceId, languageId };
-    return { status: 'absent', workspaceId, languageId };
+  const getStatus = (workspaceId: string, languageId: string, view: LanguageViewId = SURFACE_LANGUAGE_VIEW): LanguageStatusSnapshot => {
+    const existing = sessions.get(sessionKey(workspaceId, languageId, view));
+    if (existing) return snapshotFor(existing) ?? { status: 'absent', workspaceId, languageId, view };
+    return { status: 'absent', workspaceId, languageId, view };
   };
 
   const waitForChildExit = (child: ChildProcessWithoutNullStreams | null): Promise<void> => new Promise((resolve) => {
@@ -370,6 +409,7 @@ export const createLanguageSupervisor = ({
         kind: 'diagnostics',
         workspaceId: record.workspaceId,
         languageId: record.languageId,
+        view: record.view,
         resourceId,
         providerId: record.providerId,
         generation: record.generation,
@@ -387,6 +427,7 @@ export const createLanguageSupervisor = ({
         status: 'absent',
         workspaceId: record.workspaceId,
         languageId: record.languageId,
+        view: record.view,
         providerId: record.providerId,
         generation: record.generation,
       },
@@ -420,11 +461,50 @@ export const createLanguageSupervisor = ({
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
   };
 
-  const ensureSession = async (workspaceId: string, languageId: string): Promise<LanguageSessionRecord | null> => {
-    const key = sessionKey(workspaceId, languageId);
+  const createRecord = (input: {
+    workspaceId: string;
+    languageId: string;
+    view: LanguageViewId;
+    providerId: string;
+    providerOwnerKey: string;
+    generation: number;
+    status: LanguageSessionRecord['status'];
+    message: string;
+    failureReason: string | null;
+    root: string;
+  }): LanguageSessionRecord => ({
+    workspaceId: input.workspaceId,
+    languageId: input.languageId,
+    view: input.view,
+    providerId: input.providerId,
+    providerOwnerKey: input.providerOwnerKey,
+    generation: input.generation,
+    status: input.status,
+    message: input.message,
+    failureReason: input.failureReason,
+    documents: new Map<string, OpenLanguageDocument>(),
+    child: null,
+    rpc: null,
+    root: input.root,
+    serverCapabilities: {},
+    completionResolveItems: new Map<string, unknown>(),
+    codeActionResolveItems: new Map<string, unknown>(),
+    inlayHintResolveItems: new Map<string, unknown>(),
+    documentLinkResolveItems: new Map<string, unknown>(),
+    resolveCounter: 0,
+    usedAt: now(),
+  });
+
+  const ensureSession = async (
+    workspaceId: string,
+    languageId: string,
+    view: LanguageViewId,
+  ): Promise<LanguageSessionRecord | null> => {
+    const key = sessionKey(workspaceId, languageId, view);
     if (inflight.has(key)) return inflight.get(key) ?? null;
     const existing = sessions.get(key);
     if (existing && (existing.status === 'ready' || existing.status === 'degraded')) {
+      existing.usedAt = now();
       return existing;
     }
     let provider = findProvider(workspaceId, languageId);
@@ -432,26 +512,18 @@ export const createLanguageSupervisor = ({
       try {
         await activateProviders({ workspaceId, languageId });
       } catch (error) {
-        const failed: LanguageSessionRecord = {
+        const failed = createRecord({
           workspaceId,
           languageId,
+          view,
           providerId: 'piarium.workspace-match',
           providerOwnerKey: 'piarium.host\0activation',
           generation: nextGeneration(key, existing),
           status: 'failed',
           message: error instanceof Error ? error.message : 'Language extension activation failed',
           failureReason: 'provider-failed',
-          documents: new Map<string, OpenLanguageDocument>(),
-          child: null,
-          rpc: null,
           root: '',
-          serverCapabilities: {},
-          completionResolveItems: new Map<string, unknown>(),
-          codeActionResolveItems: new Map<string, unknown>(),
-          inlayHintResolveItems: new Map<string, unknown>(),
-          documentLinkResolveItems: new Map<string, unknown>(),
-          resolveCounter: 0,
-        };
+        });
         sessions.set(key, failed);
         emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
         return failed;
@@ -460,7 +532,7 @@ export const createLanguageSupervisor = ({
     }
     if (!provider) return null;
     if (existing) disposeRecord(existing);
-    const run = startSession(workspaceId, languageId, provider, existing);
+    const run = startSession(workspaceId, languageId, view, provider, existing);
     inflight.set(key, run);
     try {
       return await run;
@@ -472,86 +544,63 @@ export const createLanguageSupervisor = ({
   const startSession = async (
     workspaceId: string,
     languageId: string,
+    view: LanguageViewId,
     provider: LanguageProvider,
     existing?: LanguageSessionRecord | null,
   ): Promise<LanguageSessionRecord> => {
-    const key = sessionKey(workspaceId, languageId);
+    const key = sessionKey(workspaceId, languageId, view);
 
     let workspace;
     try {
       workspace = await documents.inspectWorkspace(workspaceId);
     } catch (error) {
-      const failed: LanguageSessionRecord = {
+      const failed = createRecord({
         workspaceId,
         languageId,
+        view,
         providerId: provider.providerId,
         providerOwnerKey: provider.ownerKey,
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
         failureReason: 'provider-failed',
-        documents: new Map<string, OpenLanguageDocument>(),
-        child: null,
-        rpc: null,
         root: '',
-        serverCapabilities: {},
-        completionResolveItems: new Map<string, unknown>(),
-        codeActionResolveItems: new Map<string, unknown>(),
-        inlayHintResolveItems: new Map<string, unknown>(),
-        documentLinkResolveItems: new Map<string, unknown>(),
-        resolveCounter: 0,
-      };
+      });
       sessions.set(key, failed);
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
       return failed;
     }
 
     if (provider.source === 'workspace' && !await isTrusted(workspace.root)) {
-      const failed: LanguageSessionRecord = {
+      const failed = createRecord({
         workspaceId,
         languageId,
+        view,
         providerId: provider.providerId,
         providerOwnerKey: provider.ownerKey,
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: 'Untrusted workspace cannot execute project-provided language server commands',
         failureReason: 'untrusted',
-        documents: new Map<string, OpenLanguageDocument>(),
-        child: null,
-        rpc: null,
         root: workspace.root,
-        serverCapabilities: {},
-        completionResolveItems: new Map<string, unknown>(),
-        codeActionResolveItems: new Map<string, unknown>(),
-        inlayHintResolveItems: new Map<string, unknown>(),
-        documentLinkResolveItems: new Map<string, unknown>(),
-        resolveCounter: 0,
-      };
+      });
       sessions.set(key, failed);
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
       return failed;
     }
 
-    const record: LanguageSessionRecord = {
+    const record = createRecord({
       workspaceId,
       languageId,
+      view,
       providerId: provider.providerId,
       providerOwnerKey: provider.ownerKey,
       generation: nextGeneration(key, existing),
       status: 'starting',
       message: '',
       failureReason: null,
-      documents: new Map<string, OpenLanguageDocument>(),
-      child: null,
-      rpc: null,
       root: workspace.root,
-      serverCapabilities: {},
-      completionResolveItems: new Map<string, unknown>(),
-      codeActionResolveItems: new Map<string, unknown>(),
-      inlayHintResolveItems: new Map<string, unknown>(),
-      documentLinkResolveItems: new Map<string, unknown>(),
-      resolveCounter: 0,
-    };
+    });
     sessions.set(key, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
 
@@ -604,7 +653,9 @@ export const createLanguageSupervisor = ({
         kind: 'diagnostics',
         workspaceId,
         languageId,
+        view: record.view,
         resourceId,
+        ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
         providerId: record.providerId,
         generation: record.generation,
         items,
@@ -702,7 +753,11 @@ export const createLanguageSupervisor = ({
         if (sessions.get(key) === record) sessions.delete(key);
         return record;
       }
-      const desired = desiredDocuments.get(key);
+      // The editor owns its buffers, so a replacement server must be handed the
+      // current ones. A Host-owned view instead re-synchronizes the documents a
+      // caller actually asks for, so a restart never replays every file the
+      // agent ever touched (D-087).
+      const desired = isHostOwnedView(view) ? null : desiredDocuments.get(key);
       if (desired) {
         for (const [resourceId, document] of desired) {
           const uri = toFileUri(pathModule.resolve(record.root, resourceId));
@@ -726,14 +781,72 @@ export const createLanguageSupervisor = ({
     return record;
   };
 
+  /**
+   * A Host-owned view opens whatever a caller asks about, so without a bound it
+   * would grow for the life of the workspace. The least recently used documents
+   * are closed instead of accumulating (D-087).
+   */
+  const closeExcessHostDocuments = (
+    record: LanguageSessionRecord,
+    desired: Map<string, OpenLanguageDocument>,
+    keepResourceId: string,
+  ): void => {
+    while (record.documents.size > hostViewDocumentLimit) {
+      let oldestId: string | null = null;
+      let oldestAt = Number.POSITIVE_INFINITY;
+      for (const [candidateId, document] of record.documents) {
+        if (candidateId === keepResourceId) continue;
+        const usedAt = document.usedAt ?? 0;
+        if (usedAt < oldestAt) {
+          oldestAt = usedAt;
+          oldestId = candidateId;
+        }
+      }
+      if (!oldestId) return;
+      record.documents.delete(oldestId);
+      desired.delete(oldestId);
+      try {
+        record.rpc?.notify('textDocument/didClose', {
+          textDocument: { uri: toFileUri(pathModule.resolve(record.root, oldestId)) },
+        });
+      } catch {
+        // A closing server cannot block eviction.
+      }
+    }
+  };
+
+  let idleTimer: ReturnType<typeof setInterval> | null = null;
+
+  const releaseIdleHostViews = (): void => {
+    const deadline = now() - hostViewIdleMs;
+    for (const [key, record] of [...sessions]) {
+      if (!isHostOwnedView(record.view) || record.usedAt > deadline) continue;
+      disposeRecord(record, 'Host language view released after idle');
+      sessions.delete(key);
+      inflight.delete(key);
+      desiredDocuments.delete(key);
+    }
+    if (idleTimer && ![...sessions.values()].some((record) => isHostOwnedView(record.view))) {
+      clearInterval(idleTimer);
+      idleTimer = null;
+    }
+  };
+
+  const ensureIdleReaper = (): void => {
+    if (idleTimer || hostViewIdleMs <= 0) return;
+    idleTimer = setInterval(releaseIdleHostViews, Math.max(1000, Math.floor(hostViewIdleMs / 4)));
+    idleTimer.unref?.();
+  };
+
   const syncDocument = async (request: LanguageRequest) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
+    const view = asView(request.view);
     if (!workspaceId || !resourceId || !languageId) {
       return { status: 'failed', message: 'Document identity is required' };
     }
-    const documentVersion = typeof request.documentVersion === 'number' && Number.isFinite(request.documentVersion)
+    const requestedVersion = typeof request.documentVersion === 'number' && Number.isFinite(request.documentVersion)
       ? request.documentVersion
       : 0;
     let absolutePath;
@@ -749,7 +862,8 @@ export const createLanguageSupervisor = ({
       return { status: 'failed', message: error instanceof Error ? error.message : 'Workspace is unavailable' };
     }
 
-    const key = sessionKey(workspaceId, languageId);
+    const key = sessionKey(workspaceId, languageId, view);
+    const hostOwned = isHostOwnedView(view);
     const desired = desiredDocuments.get(key) ?? new Map<string, OpenLanguageDocument>();
     desiredDocuments.set(key, desired);
     const previousDesired = desired.get(resourceId);
@@ -758,30 +872,31 @@ export const createLanguageSupervisor = ({
       if (desired.size === 0) desiredDocuments.delete(key);
       const record = sessions.get(key);
       const open = record?.documents.get(resourceId);
+      const releaseEmptyRecord = (): void => {
+        // Only the editor view disappears with its last tab. A Host-owned view
+        // stays until it goes idle so closing one document cannot cancel work in
+        // the other view (D-087).
+        if (!record || hostOwned || desired.size > 0) return;
+        disposeRecord(record, 'Last language document closed');
+        sessions.delete(key);
+        inflight.delete(key);
+      };
       if (!record || !record.rpc || !open) {
-        if (record && desired.size === 0) {
-          disposeRecord(record, 'Last language document closed');
-          sessions.delete(key);
-          inflight.delete(key);
-        }
+        releaseEmptyRecord();
         return { status: 'absent' };
       }
       record.documents.delete(resourceId);
       record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
       const result = {
         status: 'synced',
-        documentVersion,
+        documentVersion: open.documentVersion,
         providerId: record.providerId,
         generation: record.generation,
       };
-      if (desired.size === 0) {
-        disposeRecord(record, 'Last language document closed');
-        sessions.delete(key);
-        inflight.delete(key);
-      }
+      releaseEmptyRecord();
       return result;
     }
-    if (previousDesired && documentVersion < previousDesired.documentVersion) {
+    if (!hostOwned && previousDesired && requestedVersion < previousDesired.documentVersion) {
       return { status: 'stale', documentVersion: previousDesired.documentVersion };
     }
     const incrementalChanges = Array.isArray(request.changes)
@@ -794,10 +909,20 @@ export const createLanguageSupervisor = ({
             previousDesired.content,
           )
         : previousDesired?.content ?? '');
-    const nextDesired: OpenLanguageDocument = { documentVersion, content: nextContent };
-    desired.set(resourceId, nextDesired);
+    // The editor owns its own version sequence; a Host-owned view assigns its
+    // own so the two writers never share one namespace.
+    const documentVersion = hostOwned
+      ? (previousDesired?.documentVersion ?? 0) + 1
+      : requestedVersion;
+    const contentRevision = typeof request.contentRevision === 'string' ? request.contentRevision : undefined;
+    const nextDesired: OpenLanguageDocument = {
+      documentVersion,
+      content: nextContent,
+      ...(contentRevision ? { contentRevision } : {}),
+      usedAt: now(),
+    };
 
-    const record = await ensureSession(workspaceId, languageId);
+    const record = await ensureSession(workspaceId, languageId, view);
     if (!record) return { status: 'absent' };
     if (record.status === 'failed' || !record.rpc) {
       return { status: 'failed', message: record.message || 'Language server is unavailable' };
@@ -807,9 +932,24 @@ export const createLanguageSupervisor = ({
     }
     const uri = toFileUri(absolutePath);
     const open = record.documents.get(resourceId);
-    if (open && documentVersion < open.documentVersion) {
+    if (hostOwned && open && open.contentRevision === contentRevision && open.content === nextContent) {
+      // Already bound to this exact text: no notification, no version bump.
+      open.usedAt = now();
+      record.usedAt = now();
+      desired.set(resourceId, open);
+      return {
+        status: 'synced',
+        documentVersion: open.documentVersion,
+        ...(open.contentRevision ? { contentRevision: open.contentRevision } : {}),
+        providerId: record.providerId,
+        generation: record.generation,
+      };
+    }
+    if (!hostOwned && open && documentVersion < open.documentVersion) {
       return { status: 'stale', documentVersion: open.documentVersion };
     }
+    desired.set(resourceId, nextDesired);
+    record.usedAt = now();
     if (!open) {
       record.documents.set(resourceId, nextDesired);
       record.rpc.notify('textDocument/didOpen', {
@@ -834,9 +974,14 @@ export const createLanguageSupervisor = ({
     if (request.reason === 'save') {
       record.rpc.notify('textDocument/didSave', { textDocument: { uri } });
     }
+    if (hostOwned) {
+      closeExcessHostDocuments(record, desired, resourceId);
+      ensureIdleReaper();
+    }
     return {
       status: 'synced',
       documentVersion,
+      ...(contentRevision ? { contentRevision } : {}),
       providerId: record.providerId,
       generation: record.generation,
     };
@@ -940,8 +1085,9 @@ export const createLanguageSupervisor = ({
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
+    const view = asView(request.view);
     if (!workspaceId || !languageId) return { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
-    const record = await ensureSession(workspaceId, languageId);
+    const record = await ensureSession(workspaceId, languageId, view);
     if (!record) return { status: 'absent', workspaceId, languageId };
     if (!findProvider(workspaceId, languageId) && record.status !== 'failed') {
       return { status: 'absent', workspaceId, languageId };
@@ -950,23 +1096,33 @@ export const createLanguageSupervisor = ({
       return featureFailure(record, record?.message || 'Language server is unavailable', record?.failureReason ?? 'provider-failed');
     }
     const open = resourceId ? record.documents.get(resourceId) : null;
+    const staleResult = (reason: 'generation' | 'revision' | 'version') => ({
+      status: 'stale',
+      documentVersion: open?.documentVersion ?? request.documentVersion ?? 0,
+      ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
+      reason,
+      providerId: record.providerId,
+      generation: record.generation,
+    });
     if (
       (typeof request.providerId === 'string' && request.providerId !== record.providerId)
       || (Number.isFinite(request.generation) && request.generation !== record.generation)
     ) {
-      return {
-        status: 'stale',
-        documentVersion: open?.documentVersion ?? request.documentVersion ?? 0,
-        providerId: record.providerId,
-        generation: record.generation,
-      };
+      return staleResult('generation');
     }
     if (!supportsMethod(record, method, request)) {
       return featureFailure(record, `Language provider does not support ${method}`, 'unsupported');
     }
-    if (open && Number.isFinite(request.documentVersion) && request.documentVersion !== open.documentVersion) {
-      return { status: 'stale', documentVersion: open.documentVersion, providerId: record.providerId, generation: record.generation };
+    // A Host-owned view asserts the text identity it resolved; the editor view
+    // keeps asserting its own document version (D-087).
+    if (typeof request.expectedRevision === 'string' && open?.contentRevision !== request.expectedRevision) {
+      return staleResult('revision');
     }
+    if (open && Number.isFinite(request.documentVersion) && request.documentVersion !== open.documentVersion) {
+      return staleResult('version');
+    }
+    record.usedAt = now();
+    if (open) open.usedAt = now();
     let uri;
     if (resourceId) {
       const inspected = await documents.inspectWorkspace(workspaceId);
@@ -980,15 +1136,27 @@ export const createLanguageSupervisor = ({
     const params = options.params ?? featureParams(method, request, uri);
     try {
       const raw = await record.rpc.request(method, params);
-      if (sessions.get(sessionKey(workspaceId, languageId)) !== record) {
-        return { status: 'stale', documentVersion: open?.documentVersion ?? request.documentVersion ?? 0, providerId: record.providerId, generation: record.generation };
+      if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) {
+        return staleResult('generation');
       }
-      if (open && request.documentVersion !== open.documentVersion) {
-        return { status: 'stale', documentVersion: open.documentVersion, providerId: record.providerId, generation: record.generation };
+      const current = resourceId ? record.documents.get(resourceId) : null;
+      if (typeof request.expectedRevision === 'string' && current?.contentRevision !== request.expectedRevision) {
+        return {
+          status: 'stale',
+          documentVersion: current?.documentVersion ?? 0,
+          ...(current?.contentRevision ? { contentRevision: current.contentRevision } : {}),
+          reason: 'revision',
+          providerId: record.providerId,
+          generation: record.generation,
+        };
+      }
+      if (open && request.documentVersion !== undefined && request.documentVersion !== open.documentVersion) {
+        return staleResult('version');
       }
       return {
         status: 'ready',
         documentVersion: request.documentVersion ?? open?.documentVersion ?? 0,
+        ...(open?.contentRevision ? { contentRevision: open.contentRevision } : {}),
         providerId: record.providerId,
         generation: record.generation,
         value: mapResult(raw, record),
@@ -1021,7 +1189,7 @@ export const createLanguageSupervisor = ({
   ) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
-    const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId)) : null;
+    const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId, asView(request.view))) : null;
     const raw = request.resolveToken ? record?.[collectionName].get(request.resolveToken) : undefined;
     if (!record || !record.rpc || !raw) {
       return record
@@ -1123,12 +1291,44 @@ export const createLanguageSupervisor = ({
         },
       };
     },
-    hasSyncedDocument(workspaceId: string, languageId: string, resourceId: string): boolean {
-      return desiredDocuments.get(sessionKey(workspaceId, languageId))?.has(resourceId) === true;
+    hasSyncedDocument(
+      workspaceId: string,
+      languageId: string,
+      resourceId: string,
+      view: LanguageViewId = SURFACE_LANGUAGE_VIEW,
+    ): boolean {
+      return desiredDocuments.get(sessionKey(workspaceId, languageId, view))?.has(resourceId) === true;
     },
-    syncedDocumentVersion(workspaceId: string, languageId: string, resourceId: string): number | null {
-      return desiredDocuments.get(sessionKey(workspaceId, languageId))?.get(resourceId)?.documentVersion ?? null;
+    syncedDocumentVersion(
+      workspaceId: string,
+      languageId: string,
+      resourceId: string,
+      view: LanguageViewId = SURFACE_LANGUAGE_VIEW,
+    ): number | null {
+      return desiredDocuments.get(sessionKey(workspaceId, languageId, view))?.get(resourceId)?.documentVersion ?? null;
     },
+    /** Text identity a Host-owned view currently holds for one document. */
+    syncedContentRevision(
+      workspaceId: string,
+      languageId: string,
+      resourceId: string,
+      view: LanguageViewId = AGENT_LANGUAGE_VIEW,
+    ): string | null {
+      return desiredDocuments.get(sessionKey(workspaceId, languageId, view))?.get(resourceId)?.contentRevision ?? null;
+    },
+    /** Live server processes per view; occupancy is reported, not hidden. */
+    inspectViews(): Array<{ workspaceId: string; languageId: string; view: LanguageViewId; status: string; openDocuments: number; idleMs: number }> {
+      const at = now();
+      return [...sessions.values()].map((record) => ({
+        workspaceId: record.workspaceId,
+        languageId: record.languageId,
+        view: record.view,
+        status: record.status,
+        openDocuments: record.documents.size,
+        idleMs: Math.max(0, at - record.usedAt),
+      }));
+    },
+    releaseIdleHostViews,
     syncDocument,
     completion: (request: LanguageRequest) => requestFeature('textDocument/completion', request, (raw, record) => {
       const rawRecord = asRecord(raw);
@@ -1254,14 +1454,15 @@ export const createLanguageSupervisor = ({
     colorPresentations: (request: LanguageRequest) => requestFeature('textDocument/colorPresentation', request, (raw) => (
       (Array.isArray(raw) ? raw : []).map(mapColorPresentation).filter(Boolean)
     )),
-    async restart(workspaceId: string, languageId: string) {
-      const key = sessionKey(workspaceId, languageId);
+    async restart(workspaceId: string, languageId: string, view: LanguageViewId = SURFACE_LANGUAGE_VIEW) {
+      // Restarting one view leaves the other owner's session alone.
+      const key = sessionKey(workspaceId, languageId, view);
       const existing = sessions.get(key);
       disposeRecord(existing, 'Language server restart');
       if (existing) sessions.delete(key);
       inflight.delete(key);
-      const record = await ensureSession(workspaceId, languageId);
-      return snapshotFor(record) ?? { status: 'absent', workspaceId, languageId };
+      const record = await ensureSession(workspaceId, languageId, view);
+      return snapshotFor(record) ?? { status: 'absent', workspaceId, languageId, view };
     },
     async disposeWorkspace(workspaceId: string, owner?: LanguageOwner) {
       const ownerKey = owner ? exactOwnerKey(owner) : null;
@@ -1287,6 +1488,10 @@ export const createLanguageSupervisor = ({
       inflight.clear();
       workspaceListeners.clear();
       providers.length = 0;
+      if (idleTimer) {
+        clearInterval(idleTimer);
+        idleTimer = null;
+      }
       await Promise.all([...pendingExits]);
     },
   };

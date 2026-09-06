@@ -271,18 +271,20 @@ describe("KnowledgeStore", () => {
       const first = await store.replaceFileSymbols("src/a.ts", "typescript", [
         { name: "Alpha", kind: "function", range },
         { name: "Beta", kind: "class", range: { ...range, startLine: 2, endLine: 4 } },
-      ]);
+      ], "disk-r1");
       expect(first).toMatchObject({ symbols: 2, edges: 2 });
       expect(await store.searchSymbols("Alpha", 10)).toEqual([
-        expect.objectContaining({ name: "Alpha", path: "src/a.ts", score: expect.any(Number) }),
+        expect.objectContaining({ name: "Alpha", path: "src/a.ts", score: expect.any(Number), documentRevision: "disk-r1" }),
       ]);
       expect((await store.getDefinedSymbols("src/a.ts")).map((symbol) => symbol.name)).toEqual(["Alpha", "Beta"]);
+      expect((await store.getDefinedSymbols("src/a.ts")).map((symbol) => symbol.documentRevision)).toEqual(["disk-r1", "disk-r1"]);
 
       await store.touchFile("src/a.ts", "typescript");
       expect(await store.searchSymbols("Beta", 10)).toHaveLength(1);
       await store.replaceFileSymbols("src/a.ts", "typescript", [
         { name: "Gamma", kind: "variable", range },
-      ]);
+      ], "disk-r2");
+      expect((await store.searchSymbols("Gamma", 10))[0]?.documentRevision).toBe("disk-r2");
       expect(await store.searchSymbols("Alpha", 10)).toEqual([]);
       expect(await store.searchSymbols("Gamma", 10)).toHaveLength(1);
       expect((await store.getDefinedSymbols("src/a.ts")).map((symbol) => symbol.name)).toEqual(["Gamma"]);
@@ -292,13 +294,20 @@ describe("KnowledgeStore", () => {
     });
 
     it("rejects malformed ranges before replacing the previous graph", async () => {
-      await store.replaceFileSymbols("src/a.ts", "typescript", [{ name: "Stable", kind: "class", range }]);
+      await store.replaceFileSymbols("src/a.ts", "typescript", [{ name: "Stable", kind: "class", range }], "disk-r1");
       await expect(store.replaceFileSymbols("src/a.ts", "typescript", [{
         name: "Broken",
         kind: "class",
         range: { startLine: 2, startCharacter: 0, endLine: 1, endCharacter: 0 },
-      }])).rejects.toMatchObject({ code: "invalid" });
+      }], "disk-r2")).rejects.toMatchObject({ code: "invalid" });
       expect(await store.searchSymbols("Stable", 10)).toHaveLength(1);
+    });
+
+    it("requires a document revision so a stored range can be attributed", async () => {
+      await expect(store.replaceFileSymbols("src/a.ts", "typescript", [
+        { name: "Unattributed", kind: "class", range },
+      ], "")).rejects.toMatchObject({ code: "invalid" });
+      expect(await store.searchSymbols("Unattributed", 10)).toEqual([]);
     });
   });
 

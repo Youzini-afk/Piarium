@@ -1611,6 +1611,64 @@ Windows nocase 语义筛选 find pattern，不在协议或事件中传正文。
 
 状态：已实施；生产接线与验证见 status 3.2。
 
+### D-087 · 2026-09-06 · 3.8 / 3.1（语言服务视图隔离与正文修订绑定）
+
+类型：实现决策（D-082 固定来源的语言服务纵切；含协议与符号图 schema 变更）
+
+决定：`LanguageSupervisor` 的会话键从 `(workspaceId, languageId)` 扩为 `(workspaceId, languageId, viewId)`。`surface` 视图由 UI 独占，
+沿用现有 `localEditRevision` 语义与生产行为，renderer 请求不能选择别的视图，事件流也只投递该视图。`agent` 视图由 Application Host
+独占，每个文档单独绑定到一个命名的正文身份：导航工具用 D-082 的 `AgentInputContext`（脏路径取 `readAgentInputSnapshot` 的固定草稿，
+其余取磁盘），符号采集与诊断只取磁盘。同一视图内两类需求对同一文档冲突时，由修订断言分出胜负——导航重绑一次后重试，采集直接放弃
+并保留上一张图，不循环。
+
+agent 视图惰性创建：首次发生 agent 查询或符号采集时才为该语言起进程，空闲超时、`disposeWorkspace` 与 `dispose` 释放它，进程数、
+开文档数与空闲时长由 `inspectViews()` 报告。**代价如实记账**：只有一侧活动时仍是一个进程，编辑器与 agent 同时活动才是两个；不常驻
+第二套服务器，也不为省内存改回单会话逐次重同步。
+
+文档版本号由 Host 按 (视图, 资源) 自行单调分配，不再与编辑器 `localEditRevision` 共用命名空间；**内容身份**单独携带——固定草稿为
+`surface-draft:<ref>:<localEditRevision>`，磁盘为 Documents `revision`。绑定到同一身份时不再发通知、不推进版本。每个 agent 侧结果
+声明它实际使用的修订与来源（`disk | surface-draft`）。被查询文档是精确绑定，请求前后都断言该修订，不符即 `stale`；跨文件位置由语言
+服务器自己读盘计算，LSP 不报告它使用的版本，因此这些位置一律标为 `unpinned` 并说明原因，不给它们编造修订，也不冒充已绑定。
+
+每个视图拥有自己打开的文档：`surface` 关闭最后一个标签页不再销毁其他视图，agent 视图在回合结束、会话结束或空闲时关闭文档并设开
+文档上限，provider 重注册与 restart 只影响本视图。现有 harness 与符号采集只开不关、`desiredDocuments` 单向增长并在服务器重启时全量
+重放 `didOpen` 的行为一并修掉。语言身份收敛为 Host 单一解析器（含扩展贡献），harness 与 UI 不再各持一张扩展名表：`.mts/.cts/.mjs/.cjs`
+在 agent 侧不再判为 unsupported，`.sh` 不再因 `shellscript`/`shell` 分裂成两个会话。
+
+符号图按用户选择只绑磁盘：`replaceFileSymbols` 要求并记录该文件的 document revision，空修订被拒；旧行缺该字段时读作 `null`（unknown），
+可被下一次采集替换，无需数据迁移。脏缓冲算出的范围不入图——采集不再"已同步就沿用别人的正文"，每次都绑定磁盘正文，代价是每次采集
+一次 Documents 读取。`explore` 的结构展开只使用带修订且与当前正文一致的范围，不一致时退回行窗口并说明来源状态。
+`lsp.symbols/definition/references/hover` 与 `lsp.diagnostics` 的结果一并带修订与来源；诊断适配器按规范化 resourceId 精确查找，删除现有
+`endsWith` 双向后缀匹配（`src/lib/a.ts` 会被 `a.ts` 命中）。
+
+**诊断读磁盘。** `lsp.diagnostics` 绑定该路径的当前磁盘正文并等待针对同一修订的发布（默认 5 s，权威空列表就是 clean），超时为
+`pending`。理由是它是"刚写完的反馈"，必须描述 agent 自己写上磁盘的正文；导航则跟随本轮固定来源以便与 `read`/`grep` 对齐。两者各自
+声明来源，不混。按 D-085 的先例，公开但无生产调用方的 `lsp.diagnostics.afterSnapshot` 参数与其驱动的 provider `syncDocument` 一并从
+协议和 provider 契约删除——版本命名空间冲突的唯一可达路径随之消失。
+
+边界与事实更正：`syncedDocumentVersion + 1` 的版本冲突只在调用方传 `afterSnapshot` 时可达，此前没有生产调用方，因此那是潜在故障而非
+已发生的用户故障，本决定按结构消除，不声称修复了正在发生的问题。已可复现的是另外两条：文件在编辑器里脏时 agent 的 `lsp.*` 与符号
+采集读到未保存缓冲，而同一回合的 `read`/`grep` 按 D-085 给固定草稿；UI 在 agent 查询之间同步一次就让该查询返回 `unavailable`。
+**跨文件位置不做 stale 判定**：可用的只有 Documents mutation 观察，而它不覆盖 Pi 原生 `write`/`edit`（不经 Documents authority），在不
+完整的信号上标"未变化"等于伪造事实，因此只标 `unpinned`。隔离线程今天已因 `resolveRuntimeWorkspaceId(cwd)` 取得自己的 workspaceId
+而拥有独立会话，即每个运行中线程一个语言服务器进程；本切片只度量并说明该成本，进程复用不在范围内。语言身份表是 Host 静态表，
+renderer 在运行时由编辑器注册表贡献的语言仍然只在 renderer 可见，agent 侧对它们明确不可用。
+
+原因：三个写者共用一条会话，正文由最后一个写者决定，而版本号是编辑器的计数器。于是 agent 的符号范围取决于用户当时有没有打开该文件、
+有没有在打字，跨回合也无法归因到任何一份可取得的正文。在这种结构上只补一个 revision 字段，等于给来源不明的正文贴标签，并让下游开始
+信它；隔离视图加内容绑定才让"这些范围来自哪份正文"成为可回答的问题。
+
+考虑过的替代：给草稿文件另一套影子 URI——模块身份改变，import 解析与 references 失真；为父会话每回合物化整个工作区——正是 D-078/D-083
+拒绝的普通消息全仓成本；单会话每次查询前重新同步——与编辑器互相覆盖并抬高延迟，等于把当前故障做成机制；始终双进程——内存占用最高
+且常见情况没有收益。
+
+影响：`lib/lsp/supervisor.ts`（视图键、版本分配、生命周期）、`lib/lsp/routes.ts`、UI `language-services/session.ts`；
+`lib/harness/lsp-nav.ts`、`diagnostics-adapter.ts`、`diagnostics-service.ts`、`lib/knowledge/symbol-runtime.ts` / `symbols.ts` / `store.ts`
+（符号 schema 与迁移）、`lib/harness/language-id.ts` 与 UI `language-services/language-id.ts` 合并；protocol `LspNavigationResult` /
+`DiagnosticsResult` 增加修订与来源；设计 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8 与相关模块文档。
+
+状态：已实施；生产接线与验证见 status 3.1/3.2/3.8。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1667,7 +1725,7 @@ Windows nocase 语义筛选 find pattern，不在协议或事件中传正文。
 | D-048 | implementation | — | agent-harness.md 5.1、status 1.11；toolSummary / PiTimelineEntries |
 | D-049 | implementation | — | agent-harness.md 8.6、status 1.8；SessionStats / Context sidebar |
 | D-050 | implementation | — | architecture 4.4、plan/status 1b；protocol / pi-host / Web broker |
-| D-051 | implementation | — | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |
+| D-051 | superseded in part（工具、授权与一基位置保留；共享会话与 documentVersion 语义改为按视图隔离） | D-087 | agent-harness/plan/status 3.8、architecture 5.1；protocol / Host LSP / pi-host |
 | D-052 | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI |
 | D-053 | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors |
 | D-054 | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime |
@@ -1675,7 +1733,7 @@ Windows nocase 语义筛选 find pattern，不在协议或事件中传正文。
 | D-056 | implementation | — | plan/status 3.6；protocol role catalog |
 | D-057 | superseded in part（既有 Git 结果是迁移来源；原生结果与回收已采用） | D-077 / D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4/3.5；status |
 | D-058 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI |
-| D-059 | implementation | — | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
+| D-059 | superseded in part（事件驱动逐文件采集保留；正文来源收窄为磁盘并记录 document revision） | D-087 | agent-harness 6.2/7.2、plan/status 3.1；Documents / LSP / KnowledgeStore graph |
 | D-060 | implementation | — | agent-harness 7.2.2、plan/status 2.7；Pi timeline / scoped review API |
 | D-061 | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / decision suggestion runtime |
 | D-062 | implementation | — | agent-harness 9.3.8、plan/status 3.10；session state rail / mobile overlay |
@@ -1703,3 +1761,4 @@ Windows nocase 语义筛选 find pattern，不在协议或事件中传正文。
 | D-084 | implementation（copyIgnored 持久 captureScopes 与结果发布） | — | Host WorkingState/Thread runtime；设计 9.2.5b、plan 3.4、status、architecture |
 | D-085 | implementation（普通 read/grep 固定 surface 来源） | — | protocol / pi-host / Host Documents+search；设计 5.3/6.1、plan 3.2、status、architecture |
 | D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |
+| D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |

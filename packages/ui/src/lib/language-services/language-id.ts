@@ -1,33 +1,4 @@
-const LANGUAGE_BY_EXTENSION: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'typescriptreact',
-  mts: 'typescript',
-  cts: 'typescript',
-  js: 'javascript',
-  jsx: 'javascriptreact',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  py: 'python',
-  rs: 'rust',
-  go: 'go',
-  json: 'json',
-  jsonc: 'json',
-  json5: 'json',
-  jsonl: 'json',
-  ndjson: 'json',
-  geojson: 'json',
-  md: 'markdown',
-  mdx: 'mdx',
-  css: 'css',
-  html: 'html',
-  htm: 'html',
-  sh: 'shell',
-  bash: 'shell',
-  zsh: 'shell',
-  fish: 'shell',
-  yaml: 'yaml',
-  yml: 'yaml',
-};
+import { editorLanguageIdForLanguage, languageIdForPath } from '@piarium/protocol';
 
 type LanguageDefinition = {
   id: string;
@@ -50,12 +21,9 @@ const patternMatchesFilename = (pattern: string, filename: string): boolean => {
   return new RegExp(`^${source}$`, 'i').test(filename);
 };
 
-export const languageIdFromResourceId = (resourceId: string): string => {
-  const name = filenameFromResourceId(resourceId);
-  const index = name.lastIndexOf('.');
-  const extension = index >= 0 ? name.slice(index + 1) : '';
-  return LANGUAGE_BY_EXTENSION[extension] ?? 'plaintext';
-};
+export const languageIdFromResourceId = (resourceId: string): string => (
+  languageIdForPath(resourceId) ?? 'plaintext'
+);
 
 export const monacoLanguageIdFromResourceId = (
   resourceId: string,
@@ -93,8 +61,6 @@ export const languageIdsFromResourceId = (
   };
 };
 
-export const monacoLanguageIdForHostLanguage = (languageId: string): string => {
-  if (languageId === 'typescriptreact') return 'typescript';
-  if (languageId === 'javascriptreact') return 'javascript';
-  return languageId;
-};
+export const monacoLanguageIdForHostLanguage = (languageId: string): string => (
+  editorLanguageIdForLanguage(languageId)
+);

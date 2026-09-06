@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
-import { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { AGENT_LANGUAGE_VIEW, SURFACE_LANGUAGE_VIEW, createLanguageSupervisor } from "../lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "./diagnostics-adapter.js";
 import { createLspDiagnosticsService, type DiagnosticsProvider } from "./diagnostics-service.js";
@@ -24,16 +24,8 @@ const contextFor = (workspaceId: string): HarnessServiceContext => ({
   signal: new AbortController().signal,
 });
 
-const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
-  const deadline = Date.now() + 2_000;
-  while (!await predicate()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for fixture diagnostics");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
-
 describe("LanguageSupervisor diagnostics adapter", () => {
-  it("observes real versioned publications, including a final empty diagnostic list", async () => {
+  it("binds the file's disk text and reports the revision its diagnostics describe", async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({
       documents: harness.authority,
@@ -43,7 +35,8 @@ describe("LanguageSupervisor diagnostics adapter", () => {
     });
     try {
       const resourceId = "fixture.ts";
-      await fs.promises.writeFile(path.join(harness.workspaceRoot, resourceId), "export const fixture = true;\n");
+      const absolute = path.join(harness.workspaceRoot, resourceId);
+      await fs.promises.writeFile(absolute, "export const fixture = true;\n");
       language.registerProvider({
         providerId: "fixture",
         command: process.execPath,
@@ -52,53 +45,65 @@ describe("LanguageSupervisor diagnostics adapter", () => {
         source: "host",
       });
       const provider = createLanguageSupervisorDiagnosticsProvider(language, {
+        documents: harness.authority,
         resolveWorkspaceId: async () => harness.identity.workspaceId,
       });
-      // Establish the subscription and a clean ready language session.
-      await provider.getSnapshot(harness.identity.workspaceId, resourceId);
-      await language.syncDocument({
-        resource: { workspaceId: harness.identity.workspaceId, resourceId },
-        languageId: "typescript",
-        documentVersion: 1,
-        reason: "open",
-        content: "export const fixture = true;\n",
-      });
-      await waitUntil(async () => (await provider.getSnapshot(harness.identity.workspaceId, resourceId)) !== null);
-
       const service = createLspDiagnosticsService(provider);
-      const broken = await service.handle({
-        path: resourceId,
-        afterSnapshot: "FIXTURE_ERROR\n",
-        waitMs: 1_000,
-      }, contextFor(harness.identity.workspaceId));
+
+      const clean = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
+      expect(clean).toMatchObject({ status: "ready", diagnostics: [], source: "disk" });
+      const cleanRevision = (clean as { revision?: string }).revision;
+      expect(cleanRevision).toBeTruthy();
+
+      // An agent write changes disk; the answer must describe the new text.
+      await fs.promises.writeFile(absolute, "FIXTURE_ERROR\n");
+      const broken = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
       expect(broken).toMatchObject({
         status: "ready",
+        source: "disk",
         diagnostics: [expect.objectContaining({ message: "fixture error", severity: "error" })],
       });
+      expect((broken as { revision?: string }).revision).not.toBe(cleanRevision);
 
-      const fixed = await service.handle({
-        path: resourceId,
-        afterSnapshot: "export const fixture = true;\n",
-        waitMs: 1_000,
-      }, contextFor(harness.identity.workspaceId));
+      await fs.promises.writeFile(absolute, "export const fixture = true;\n");
+      const fixed = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
       expect(fixed).toMatchObject({ status: "ready", diagnostics: [] });
-      expect(language.syncedDocumentVersion(harness.identity.workspaceId, "typescript", resourceId)).toBe(3);
+      // Diagnostics ran entirely in the Host view; the editor view is untouched.
+      expect(language.getStatus(harness.identity.workspaceId, "typescript", SURFACE_LANGUAGE_VIEW).status).toBe("absent");
+      expect(language.getStatus(harness.identity.workspaceId, "typescript", AGENT_LANGUAGE_VIEW).status).toBe("ready");
     } finally {
       await language.dispose();
       await harness.cleanup();
     }
   });
 
+  it("does not answer with another file's diagnostics for a shared path suffix", async () => {
+    const items = [{ line: 1, character: 0, severity: "error", message: "nested", source: "fixture" }];
+    const suffixed: DiagnosticsProvider = {
+      getDiagnostics: async (_workspaceId, pathValue) => (pathValue === "src/lib/a.ts" ? items : []),
+      getDiagnosticsForRevision: async (_workspaceId, pathValue) => (pathValue === "src/lib/a.ts" ? items : []),
+      bindDocument: async () => ({ status: "bound", revision: "r1", source: "disk" }),
+      getSnapshot: async () => "0:1",
+      isAvailable: async () => true,
+    };
+    const service = createLspDiagnosticsService(suffixed);
+    await expect(service.handle({ path: "a.ts", waitMs: 10 }, contextFor("workspace")))
+      .resolves.toMatchObject({ status: "ready", diagnostics: [] });
+  });
+
   it("keeps an available server with no publication distinct from an unavailable file type", async () => {
     const silent: DiagnosticsProvider = {
       getDiagnostics: async () => [],
+      getDiagnosticsForRevision: async () => null,
+      bindDocument: async (_workspaceId, pathValue) => (pathValue.endsWith(".ts")
+        ? { status: "bound", revision: "r1", source: "disk" }
+        : { status: "unsupported" }),
       getSnapshot: async () => null,
       isAvailable: async (_workspaceId, pathValue) => pathValue.endsWith(".ts"),
-      syncDocument: async () => ({ status: "synced" }),
     };
     const service = createLspDiagnosticsService(silent);
-    await expect(service.handle({ path: "slow.ts", afterSnapshot: "x", waitMs: 10 }, contextFor("workspace")))
-      .resolves.toMatchObject({ status: "pending" });
+    await expect(service.handle({ path: "slow.ts", waitMs: 10 }, contextFor("workspace")))
+      .resolves.toMatchObject({ status: "pending", revision: "r1" });
     await expect(service.handle({ path: "README.unknown" }, contextFor("workspace")))
       .resolves.toMatchObject({ status: "unavailable" });
   });

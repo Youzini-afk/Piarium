@@ -149,9 +149,12 @@ Successful Git status reads from both workbench APIs pass through Documents
 workspace resolution and a per-session deduplicating observer; this reuses the
 existing SCM refresh boundary and does not add a second Git poller.
 The same Documents post-commit boundary drives an event-based symbol graph:
-known languages reuse the live LanguageSupervisor buffer/version to replace one
-file's real `file -> defines -> symbol` graph, unavailable servers preserve the
-last graph, and deletes remove it. There is no startup repository scan.
+known languages bind the file's disk text in the Host language view and replace
+one file's real `file -> defines -> symbol` graph together with the document
+revision the ranges were computed from, unavailable servers preserve the last
+graph, and deletes remove it. Ranges derived from an editor buffer are never
+stored, so a consumer can check a range against a named text. There is no
+startup repository scan.
 Model-produced memory block operations return through `memory.blocks.apply` and
 are validated and applied in order here; model scheduling remains in pi-host.
 Blocks are branch revisions: readers choose the closest ancestor revision for
@@ -218,13 +221,24 @@ the fixed snapshot; the same-name `read` override obtains save-compatible bytes
 from `document.readSource`. Expired or unavailable dirty sources never fall back
 to disk. Other files retain the existing disk path. Thread dispatch copies the
 fixed content into persistent WorkingState before the temporary surface reference
-can be released. Find/ls and LSP still require their fixed-view adapters.
+can be released.
+
+### LspNavigationServices (`lsp-nav.ts`)
+
+`symbols` / `definition` / `references` / `hover` bind the queried document in
+the Host language view through `createLanguageViewBinder`, following the same
+fixed source as `read`/`grep` for this turn, and assert that revision on the
+request. A `stale` answer re-binds once and retries. Results carry `revision` and
+`source`; positions in other files are marked `[unpinned]` because the language
+server read those files itself and LSP does not report the version it used.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 
-Provides `lsp.diagnostics` (sync document + wait) and
-`lsp.diagnosticsSnapshot` (immediate snapshot). Uses `DiagnosticsProvider`
-interface to abstract the LSP supervisor.
+`lsp.diagnostics` binds the path to its current disk text — the text an agent
+just wrote, never the editor buffer — and waits for the publication computed from
+that exact revision, returning `pending` on timeout. `lsp.diagnosticsSnapshot`
+binds without waiting and stays incremental. Both report `revision` and `source`.
+Cache lookups use the exact normalized resource identity.
 Snapshot calls are incremental per observer and canonical resource by default;
 `full: true` is a non-mutating full view. `shell.read` follows the same rule when
 neither `offset` nor `length` is supplied, while static `out_*` handles remain

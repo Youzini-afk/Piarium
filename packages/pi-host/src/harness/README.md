@@ -20,8 +20,8 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
-| `diagnostics` | Get LSP diagnostics for a file | `lsp.diagnosticsSnapshot` |
-| `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions | `lsp.*` |
+| `diagnostics` | Get LSP diagnostics for a file, bound to its disk revision | `lsp.diagnosticsSnapshot` |
+| `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
 | `explore` | Search versioned disk and latest accepted surface-draft excerpts | `explore.search` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
@@ -82,8 +82,11 @@ steer, and follow-up temporarily select a new context, commit it after Pi
 accepts the input, and restore/release it when delivery fails. Snapshot
 bookkeeping failure after `agent_start` degrades the source to unavailable and
 cannot turn an already-running prompt into a failed submission.
-`grep`, `explore`, and the Host-advertised same-name read/find/ls overrides consume this same fixed
-source. An expired related dirty source is unavailable, never a disk fallback.
+`grep`, `explore`, the Host-advertised same-name read/find/ls overrides, and the `lsp.*` navigation
+tools consume this same fixed source. An expired related dirty source is unavailable, never a disk
+fallback. Navigation answers report the revision and source they were computed from; positions in
+files the language server read itself are marked unpinned. `diagnostics` is deliberately different:
+it describes the file as written to disk, because it is feedback about what an agent just wrote.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
@@ -117,8 +120,9 @@ unavailable or disabled.
 ## Mutation Journal Integration
 
 `createWorkspaceMutationJournalTools` accepts an optional
-`HostServicesBridge`. After each edit/write, it fetches `lsp.diagnostics`
-and appends a summary to the tool result (three states: unavailable,
+`HostServicesBridge`. After each edit/write, it fetches `lsp.diagnostics`,
+which binds the file's new disk revision and waits for the publication computed
+from it, and appends a summary to the tool result (three states: unavailable,
 pending, clean).
 
 `apply_patch` also goes through `workspace.mutation.request` before/after

@@ -27,12 +27,16 @@ Piarium protocol types, schemas, and event/method definitions.
 | `document.readSource` | `{ path }` | disk sentinel or fixed draft bytes | Select the authenticated source for native `read` without changing its schema |
 | `document.pathOverlay` | `{ path, pattern? }` | disk sentinel or fixed relative path entries | Content-free fixed dirty paths and virtual directory ancestors for native `find` / `ls` |
 | `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |
-| `lsp.diagnostics` | `{ path, afterSnapshot?, waitMs? }` | `DiagnosticsResult` | Get diagnostics (sync + wait) |
+| `lsp.diagnostics` | `{ path, waitMs? }` | `DiagnosticsResult` | Bind the path's current disk revision and wait for the publication computed from it |
 | `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |
 | `lsp.symbols` | `{ path, query }` | `LspNavigationResult` | Find workspace symbols using the path's language provider |
 | `lsp.definition` | `{ path, line, character? }` | `LspNavigationResult` | Find a definition at a one-based position |
 | `lsp.references` | `{ path, line, character? }` | `LspNavigationResult` | Find references at a one-based position |
 | `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
+
+`LspNavigationResult` and `DiagnosticsResult` carry the `revision` and `source` (`disk | surface-draft`)
+their answer was computed from. Navigation also lists `unpinnedPaths`: files whose positions the
+language server read itself, which LSP cannot attribute to a version.
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
 | `zone2.assemble` | `{ sinceTurn, branchEntryIds, memoryMode, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
@@ -146,6 +150,7 @@ does not make those paths available.
 ## Exports
 
 - `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `OutputRef`, `OutputSlice`, `ShellExecResult`, `DiagnosticsResult`
+- `language-id.ts` — `languageIdForPath`, `editorLanguageIdForLanguage`. Single language identity for the Host language views, provider matching, and the editor; a second table split one file across two sessions and hid extensions from one side
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
 - `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
 - `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest`, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)

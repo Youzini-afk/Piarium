@@ -1,15 +1,24 @@
 import type { JsonValue, LspNavigationResult } from "@piarium/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
+import { createLanguageViewBinder, type LanguageTextSource } from "../lsp/language-view.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { languageIdForPath } from "./language-id.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
-  "hasSyncedDocument" | "syncedDocumentVersion" | "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
+  "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
 
 interface LspNavigationDeps {
-  documents: Pick<DocumentAuthority, "read">;
+  documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
+}
+
+interface PreparedDocument {
+  languageId: string;
+  resource: { workspaceId: string; resourceId: string };
+  revision: string;
+  source: LanguageTextSource;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> => (
@@ -18,48 +27,6 @@ const recordOf = (value: unknown): Record<string, unknown> => (
 
 const unavailable = (message: string): LspNavigationResult => ({ status: "unavailable", text: message });
 const empty = (message: string): LspNavigationResult => ({ status: "empty", text: message });
-
-const prepareDocument = async (
-  path: string,
-  ctx: HarnessServiceContext,
-  deps: LspNavigationDeps,
-): Promise<{ documentVersion: number; languageId: string; resource: { workspaceId: string; resourceId: string } } | LspNavigationResult> => {
-  if (!ctx.workspaceId) return unavailable("LSP unavailable: no workspace");
-  const resourceId = ctx.authorizedPaths.find((entry) => entry.inputPath === path)?.resourceId ?? path;
-  const languageId = languageIdForPath(resourceId);
-  if (!languageId) return unavailable(`LSP unavailable: unsupported file type for ${path}`);
-  const resource = { workspaceId: ctx.workspaceId, resourceId };
-  let documentVersion = deps.supervisor.syncedDocumentVersion(ctx.workspaceId, languageId, resourceId);
-  if (!deps.supervisor.hasSyncedDocument(ctx.workspaceId, languageId, resourceId) || documentVersion === null) {
-    const snapshot = await deps.documents.read(resource);
-    if (snapshot.status !== "ready") {
-      return unavailable(`LSP unavailable: cannot read ${path} (${snapshot.status})`);
-    }
-    const synced = await deps.supervisor.syncDocument({
-      resource,
-      languageId,
-      documentVersion: 0,
-      content: snapshot.content,
-      reason: "open",
-    });
-    const syncStatus = recordOf(synced).status;
-    if (syncStatus !== "synced" && syncStatus !== "stale") {
-      return unavailable(`LSP unavailable: ${String(recordOf(synced).message ?? syncStatus ?? "document sync failed")}`);
-    }
-    documentVersion = typeof recordOf(synced).documentVersion === "number"
-      ? recordOf(synced).documentVersion as number
-      : 0;
-  }
-  return { documentVersion, languageId, resource };
-};
-
-const featureValue = (result: unknown): { failure?: string; value?: unknown } => {
-  const record = recordOf(result);
-  if (record.status !== "ready") {
-    return { failure: String(record.message ?? `language service ${record.status ?? "unavailable"}`) };
-  }
-  return { value: record.value };
-};
 
 const startOf = (value: unknown): { line: number; character: number } | null => {
   const record = recordOf(value);
@@ -75,26 +42,55 @@ const resourcePath = (value: unknown): string | null => {
   return typeof resource.resourceId === "string" ? resource.resourceId : null;
 };
 
-const symbolLines = (value: unknown, inheritedPath: string): string[] => {
+/**
+ * Piarium synchronizes the queried document, so its positions are bound to a
+ * named revision. Positions in other files come from the language server's own
+ * read of those files and LSP does not report the version it used, so they are
+ * reported as unpinned rather than claimed against a revision (D-087).
+ */
+const UNPINNED_NOTE = "[unpinned] positions came from the language server's own file read, not a bound revision; re-read those files before acting.";
+
+interface AnnotatedLines {
+  lines: string[];
+  unpinnedPaths: string[];
+}
+
+const annotate = (
+  entries: Array<{ path: string; text: string }>,
+  prepared: PreparedDocument,
+): AnnotatedLines => {
+  const unpinned = new Set<string>();
+  const lines = entries.map((entry) => {
+    if (entry.path === prepared.resource.resourceId) return entry.text;
+    unpinned.add(entry.path);
+    return `${entry.text} [unpinned]`;
+  });
+  return { lines, unpinnedPaths: [...unpinned].sort() };
+};
+
+const symbolEntries = (value: unknown, inheritedPath: string): Array<{ path: string; text: string }> => {
   if (!Array.isArray(value)) return [];
-  const lines: string[] = [];
+  const entries: Array<{ path: string; text: string }> = [];
   const visit = (raw: unknown, fallbackPath: string): void => {
     const symbol = recordOf(raw);
     if (typeof symbol.name !== "string") return;
     const path = resourcePath(symbol) ?? fallbackPath;
     const start = startOf(symbol);
-    lines.push(`${path}${start ? `:${start.line}:${start.character}` : ""} — ${symbol.name}${typeof symbol.kind === "number" ? ` (kind ${symbol.kind})` : ""}`);
+    entries.push({
+      path,
+      text: `${path}${start ? `:${start.line}:${start.character}` : ""} — ${symbol.name}${typeof symbol.kind === "number" ? ` (kind ${symbol.kind})` : ""}`,
+    });
     if (Array.isArray(symbol.children)) for (const child of symbol.children) visit(child, path);
   };
   for (const symbol of value) visit(symbol, inheritedPath);
-  return lines;
+  return entries;
 };
 
-const locationLines = (value: unknown): string[] => (
+const locationEntries = (value: unknown): Array<{ path: string; text: string }> => (
   Array.isArray(value) ? value.flatMap((entry) => {
     const path = resourcePath(entry);
     const start = startOf(entry);
-    return path && start ? [`${path}:${start.line}:${start.character}`] : [];
+    return path && start ? [{ path, text: `${path}:${start.line}:${start.character}` }] : [];
   }) : []
 );
 
@@ -107,9 +103,21 @@ const hoverText = (value: unknown): string => {
   }).join("\n\n");
 };
 
-const ready = (text: string, value: unknown): LspNavigationResult => ({
+const boundTo = (prepared: PreparedDocument): string => (
+  `${prepared.resource.resourceId} @ ${prepared.revision} (${prepared.source})`
+);
+
+const ready = (
+  prepared: PreparedDocument,
+  text: string,
+  value: unknown,
+  unpinnedPaths: string[] = [],
+): LspNavigationResult => ({
   status: "ready",
-  text,
+  text: unpinnedPaths.length > 0 ? `${text}\n${UNPINNED_NOTE}` : text,
+  revision: prepared.revision,
+  source: prepared.source,
+  ...(unpinnedPaths.length > 0 ? { unpinnedPaths } : {}),
   ...(value === undefined ? {} : { value: value as JsonValue }),
 });
 
@@ -119,65 +127,123 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
   references: HarnessService<"lsp.references">;
   hover: HarnessService<"lsp.hover">;
 } {
+  const binder = createLanguageViewBinder({ documents: deps.documents, supervisor: deps.supervisor });
+
+  const prepareDocument = async (
+    path: string,
+    ctx: HarnessServiceContext,
+  ): Promise<PreparedDocument | LspNavigationResult> => {
+    if (!ctx.workspaceId) return unavailable("LSP unavailable: no workspace");
+    const resourceId = ctx.authorizedPaths.find((entry) => entry.inputPath === path)?.resourceId ?? path;
+    const languageId = languageIdForPath(resourceId);
+    if (!languageId) return unavailable(`LSP unavailable: unsupported file type for ${path}`);
+    const resource = { workspaceId: ctx.workspaceId, resourceId };
+    // Navigation follows the same fixed source as read/grep for this turn, so a
+    // reported position refers to text the agent can actually obtain.
+    const bound = await binder.bind({
+      workspaceId: ctx.workspaceId,
+      resourceId,
+      languageId,
+      text: "input-context",
+      ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+      ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
+    });
+    if (bound.status !== "bound") return unavailable(`LSP unavailable: ${bound.message}`);
+    return { languageId, resource, revision: bound.revision, source: bound.source };
+  };
+
+  /**
+   * Binds the document, asks the language server, and re-binds once when the
+   * view moved to another revision between the two steps. A second stale answer
+   * is reported instead of looping.
+   */
+  const query = async (
+    path: string,
+    ctx: HarnessServiceContext,
+    run: (prepared: PreparedDocument) => Promise<unknown>,
+  ): Promise<{ prepared: PreparedDocument; value: unknown } | LspNavigationResult> => {
+    let lastStatus = "unavailable";
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const prepared = await prepareDocument(path, ctx);
+      if ("status" in prepared) return prepared;
+      const result = recordOf(await run(prepared));
+      if (result.status === "ready") return { prepared, value: result.value };
+      lastStatus = typeof result.status === "string" ? result.status : "unavailable";
+      if (lastStatus === "stale") continue;
+      return unavailable(`LSP unavailable: ${String(result.message ?? `language service ${lastStatus}`)}`);
+    }
+    return unavailable(`LSP unavailable: ${path} changed while the language view was answering`);
+  };
+
+  const requestFor = (prepared: PreparedDocument) => ({
+    view: AGENT_LANGUAGE_VIEW,
+    resource: prepared.resource,
+    languageId: prepared.languageId,
+    expectedRevision: prepared.revision,
+  });
+
   return {
     symbols: {
       handle: async (params, ctx) => {
-        const prepared = await prepareDocument(params.path, ctx, deps);
-        if ("status" in prepared) return prepared;
-        const result = featureValue(await deps.supervisor.workspaceSymbols({
-          resource: prepared.resource,
-          languageId: prepared.languageId,
-          documentVersion: prepared.documentVersion,
+        const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.workspaceSymbols({
+          ...requestFor(prepared),
           query: params.query,
         }));
-        if (result.failure) return unavailable(`Symbols unavailable: ${result.failure}`);
-        const lines = symbolLines(result.value, params.path);
-        return lines.length === 0 ? empty("No symbols found") : ready(`${lines.length} symbols\n${lines.join("\n")}`, result.value);
+        if ("status" in outcome) return outcome;
+        const { lines, unpinnedPaths } = annotate(symbolEntries(outcome.value, params.path), outcome.prepared);
+        if (lines.length === 0) return empty("No symbols found");
+        return ready(
+          outcome.prepared,
+          `${lines.length} symbols · queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
+          outcome.value,
+          unpinnedPaths,
+        );
       },
     },
     definition: {
       handle: async (params, ctx) => {
-        const prepared = await prepareDocument(params.path, ctx, deps);
-        if ("status" in prepared) return prepared;
-        const result = featureValue(await deps.supervisor.definition({
-          resource: prepared.resource,
-          languageId: prepared.languageId,
-          documentVersion: prepared.documentVersion,
+        const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.definition({
+          ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
-        if (result.failure) return unavailable(`Definition unavailable: ${result.failure}`);
-        const lines = locationLines(result.value);
-        return lines.length === 0 ? empty("No definition found") : ready(lines.join("\n"), result.value);
+        if ("status" in outcome) return outcome;
+        const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
+        if (lines.length === 0) return empty("No definition found");
+        return ready(
+          outcome.prepared,
+          `queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
+          outcome.value,
+          unpinnedPaths,
+        );
       },
     },
     references: {
       handle: async (params, ctx) => {
-        const prepared = await prepareDocument(params.path, ctx, deps);
-        if ("status" in prepared) return prepared;
-        const result = featureValue(await deps.supervisor.references({
-          resource: prepared.resource,
-          languageId: prepared.languageId,
-          documentVersion: prepared.documentVersion,
+        const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.references({
+          ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
-        if (result.failure) return unavailable(`References unavailable: ${result.failure}`);
-        const lines = locationLines(result.value);
-        return lines.length === 0 ? empty("No references found") : ready(`${lines.length} references\n${lines.join("\n")}`, result.value);
+        if ("status" in outcome) return outcome;
+        const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
+        if (lines.length === 0) return empty("No references found");
+        return ready(
+          outcome.prepared,
+          `${lines.length} references · queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
+          outcome.value,
+          unpinnedPaths,
+        );
       },
     },
     hover: {
       handle: async (params, ctx) => {
-        const prepared = await prepareDocument(params.path, ctx, deps);
-        if ("status" in prepared) return prepared;
-        const result = featureValue(await deps.supervisor.hover({
-          resource: prepared.resource,
-          languageId: prepared.languageId,
-          documentVersion: prepared.documentVersion,
+        const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.hover({
+          ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
-        if (result.failure) return unavailable(`Hover unavailable: ${result.failure}`);
-        const text = hoverText(result.value);
-        return text ? ready(text, result.value) : empty("No hover information");
+        if ("status" in outcome) return outcome;
+        const text = hoverText(outcome.value);
+        if (!text) return empty("No hover information");
+        return ready(outcome.prepared, `${boundTo(outcome.prepared)}\n${text}`, outcome.value);
       },
     },
   };

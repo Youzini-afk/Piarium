@@ -94,7 +94,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 度量 | 记录错误、重试、输出、缓存、普通会话用量、耗时与人工介入；不建立辅助模型分项费用/Token 看板。直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078/D-080） |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | grep → 默认提供的 explore（确定性召回、结构展开、版本化正文与关系打包）→ retrieval 角色。explore 接通即注册，可用来源逐步扩展；intent/judge/查询修复按已配置 explore 槽位和查询需要运行，无槽位走纯算法；不等完整图、向量或独立评测（D-078） |
-| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read`/`find`/`ls` 与 thread 基线已消费同一引用，LSP 继续接入（第 6.1 节，D-071/D-082/D-085/D-086） |
+| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read`/`find`/`ls` 与 thread 基线已消费同一引用，语言服务按视图隔离后消费同一引用（第 6.1 / 6.4 节，D-071/D-082/D-085/D-086/D-087） |
 | 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`read` / `edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
@@ -195,7 +195,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 | `dispatch` / `threads` / `wait` / `send` / `read_thread` / `merge` / `kill` | 新增 | `dispatch` / `threads` / `read_thread` 并行、`wait` 独占当前步、`send` / `merge` / `kill` 串行 | 开一条线程交给团队中的一个角色（异步）、看增量状态、订阅等待、给线程传话、读它的记忆块或报告、把线程 worktree 三方合并回来、终止（第 5.7、9.2、9.3 节） |
 | `webfetch` / `websearch` | 新增 | 并行 | 抓取与搜索，SSRF 策略、阅读子 agent、provider 抽象（第 5.8 节） |
 | `related` / `recall` | 新增（第 3 阶段） | 并行 | 知识库结构与记忆（第 6.2、7.4 节） |
-| `symbols` / `definition` / `references` / `hover` | 新增（第 3 阶段） | 并行 | 真实 LanguageSupervisor 导航；路径受 Host authority/scope 约束，位置对 agent 一基（D-051） |
+| `symbols` / `definition` / `references` / `hover` | 新增（第 3 阶段） | 并行 | 真实 LanguageSupervisor 导航；路径受 Host authority/scope 约束，位置对 agent 一基（D-051）；正文来自 agent 视图并携带修订与来源，跨文件位置区分已固定与未固定（第 6.4 节，D-087） |
 
 不在 v1：沙箱（第 9.1.1 节）；浏览器操作（点击、表单——
 research 与 knowledge-work profile 再评估）。
@@ -497,8 +497,9 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 目标是尽快返回主 agent 能直接使用的代码单元及其关系。确定性召回、结构展开、版本化正文和关系打包作为默认实现，接通后投入使用。
 工程测试保证来源、版本、路径与输出正确；实际任务用于优化召回和延迟，不作为批准这个方向的前提。依赖与实施形状见 plan 3.2。
 当前纵切已接通实际 rg、多路径与 actor scope、Documents 版本化连续正文、发起窗口的固定 dirty snapshot 和会话 OutputStore。
-`explore`、`grep` 与同名 `read`/`find`/`ls` 已读取该固定来源；后续编辑不改变本轮结果，来源过期不回退磁盘。结构展开、LSP revision
-与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082/D-085/D-086）。
+`explore`、`grep` 与同名 `read`/`find`/`ls` 已读取该固定来源；后续编辑不改变本轮结果，来源过期不回退磁盘。结构展开按第 6.4 节的
+agent 视图取带修订的符号范围，与当前正文不一致时退回行窗口并说明来源状态；可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源
+已接通（D-079/D-082/D-085/D-086/D-087）。
 
 **设计依据与性能边界。** 以下研究记录说明取舍，不是必须复现的上线门槛；真实使用发现反例时修正算法及相应结论：
 
@@ -618,10 +619,41 @@ RETURN scored, graph_score(scored) AS rank ORDER BY rank DESC LIMIT 15
 `file → defines → symbol` 图；不做启动全仓扫描，LSP 暂不可用时保留最后图，权威空结果才清旧符号。`references` / `calls` /
 `imports` 边与 `related` 工具仍未接生产；它们不能通过对每个 symbol 无界请求 references 来伪装完成。
 
+图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
+也不是任何一轮输入的固定草稿。消费者据修订判断范围是否仍然成立，不成立时按来源状态降级，而不是拿一份无身份的范围继续用。
+
 ### 6.3 第三层：我们之前做过什么
 
 由知识库拥有。轨迹信号（编辑 diff、终端命令与退出码、诊断、会话决定）**不追加进对话**，存为可检索事件；
 Zone 2 只放 top-k 指针，正文由模型通过 `recall` 拉取。见第 7 节。
+
+### 6.4 语言服务视图：谁的正文、哪个修订（D-087）
+
+第 5 节的导航与诊断工具、6.1 的结构展开、6.2 的符号图都从同一个语言服务器取答案。**一条会话不能同时是编辑器的实时缓冲和
+agent 本回合的固定正文**：正文由最后一个写者决定，版本号又是编辑器的 `localEditRevision`，于是符号范围无法归因到任何一份可取得的
+正文。在这种结构上补一个 revision 字段只是给来源不明的内容贴标签。
+
+会话键因此是 `(workspaceId, languageId, viewId)`：
+
+| 视图 | 拥有者 | 正文 | 版本与修订 |
+| --- | --- | --- | --- |
+| `surface` | UI | 编辑器实时缓冲 | 沿用 `localEditRevision`，行为不变 |
+| `agent` | Application Host | 导航：D-082 的 `AgentInputContext`（脏路径取固定草稿，其余取磁盘）；符号采集与诊断：只取磁盘 | 版本号 Host 按 (视图, 资源) 单调分配；修订为 `surface-draft:<ref>:<localEditRevision>` 或磁盘 `revision` |
+
+三条约束：
+
+- **惰性。** 首次发生 agent 查询或符号采集才为该语言起进程，空闲超时与 workspace dispose 释放，进程数/开文档数/空闲时长可查询。
+  只有一侧活动时仍是一个进程，编辑器与 agent 同时活动才是两个——这份成本如实记账，不藏在"视图"这个词后面。
+- **绑定到哪一层就说到哪一层。** 被查询文档是精确绑定，请求前后都断言修订。跨文件位置由语言服务器自己读盘算出，LSP 不报告它用的
+  版本，所以一律标 `unpinned` 并说明原因；不给它们编造修订，也不用覆盖不全的信号（Documents mutation 观察不含 Pi 原生写入）去判
+  "未变化"。
+- **视图各管自己的文档。** 用户关闭标签页不销毁 agent 视图，agent 视图打开的文档按 LRU 设上限、空闲释放，不再单向增长、不再在
+  服务器重启时全量重放。语言身份由 Host 单一静态解析器给出；运行时由编辑器注册表贡献的语言仍只在 renderer 可见，agent 侧明确不可用。
+
+诊断是"刚写完的反馈"，因此 `lsp.diagnostics` 绑定当前磁盘正文并等待同一修订的发布，权威空列表即 clean，超时为 `pending`；导航则跟随
+本轮固定来源，与 `read`/`grep` 对齐。两者各自声明来源，不混为一谈。
+
+隔离线程另有自己的 workspaceId 与目录，因此本就是独立视图（第 9.2.5b 节）；那份"每个运行中线程一个语言服务器"的成本单独度量。
 
 ## 7. 知识库（优先保留 TriviumDB）
 

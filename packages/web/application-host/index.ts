@@ -29,7 +29,7 @@ import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capabil
 import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
 import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
-import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
+import { createLanguageSupervisor, SURFACE_LANGUAGE_VIEW } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
 import {
@@ -1106,6 +1106,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ? createWebSearchService(async () => configuredWebSearchProvider!)
     : null;
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
+    documents: documentsAuthority,
     resolveWorkspaceId: async (workspaceRoot) => {
       try {
         const workspace = await documentsAuthority.inspectWorkspace(workspaceRoot);
@@ -1440,6 +1441,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
       const event = recordOf(value);
       if (event.kind !== 'diagnostics' || typeof event.resourceId !== 'string') return;
+      // Zone 2 reports diagnostics that follow a user edit, so only the editor
+      // view qualifies; the agent view's answers are the agent's own feedback.
+      if (event.view !== SURFACE_LANGUAGE_VIEW) return;
       const diagnostics = Array.isArray(event.items)
         ? event.items.map(recordOf).filter((item) => item.severity === 'error' || item.severity === 'warning')
         : [];

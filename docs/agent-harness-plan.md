@@ -90,9 +90,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    草稿基线已进入生产链；虚拟分支工具、surface 写回、空间总预算和归档产品面随对应消费者继续。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
-3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls 及线程草稿基线已接；下一步为
-   LSP/符号来源 document revision 隔离。缺可选来源仍返回已有正文，不等全图/
-   向量/索引/BM25 基线；模型增强按槽位接入。
+3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls 及线程草稿基线已接；
+   下一步是 3.8 的语言服务视图隔离与正文修订绑定（D-087），它同时解锁 3.1 的符号修订与 6.1 的结构展开。缺可选来源仍返回已有正文，
+   不等全图/向量/索引/BM25 基线；模型增强按槽位接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
 
@@ -217,6 +217,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 
 已有 file/defines/symbol。继续按实际查询建 references/imports/calls，来源/版本明确，LSP references 不冒充调用图。
 复用背压和按变化路径采集，未知语言/不可用不清最后图；不把全图或所有索引完成作为 explore 前置。
+范围只从磁盘正文采集并逐文件记 document revision（D-087，随 3.8 第 6 步交付）；脏缓冲结果不入图，消费者据修订判断范围是否仍成立。
 
 ### 3.2 explore：正式默认工具
 
@@ -235,8 +236,8 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 注册 | 可用来源、正文、授权、句柄和工具链通过相关验证即默认注册，不等所有增强或独立评测 |
 
 现有来源是 search.content、Documents disk、固定 surface draft、需代表文件选语言的 LSP 导航、file/defines 图。surface snapshot 已能
-替换 explore/grep 的 dirty path 磁盘命中，由同名 read 返回固定正文，并为同名 find/ls 提供固定文件与虚拟目录；线程基线也消费同一来源。LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺
-document revision，先补绑定再接结构范围。related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
+替换 explore/grep 的 dirty path 磁盘命中，由同名 read 返回固定正文，并为同名 find/ls 提供固定文件与虚拟目录；线程基线也消费同一来源。
+LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺 document revision：按 3.8（D-087）先做视图隔离与修订绑定，再接结构范围。related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。
 
@@ -328,10 +329,31 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 或显式设完成门。同结果去重，输入为 diff/任务/项目知识，不含父完整对话；结论和失败可见，带严重度/file:line 进 Zone 2。
 旧修订审阅不标成当前已审；链路测试通过直接启用，不等 T4。
 
-### 3.8 LSP 导航
+### 3.8 LSP 导航与语言服务视图（D-087）
 
-保持现有 workspace/scope、documentVersion、一基位置与编辑器 buffer 不被磁盘覆盖；隔离线程用自身版本/物化目录，
-不能借父缓冲冒充子状态。缺某语言服务器只说明该来源不可用。
+保持现有 workspace/scope、一基位置与"编辑器 buffer 不被磁盘覆盖"；隔离线程用自身版本/物化目录，不能借父缓冲冒充子状态。
+缺某语言服务器只说明该来源不可用。本切片把共享会话拆成按来源隔离的视图，并让范围携带正文修订，交付顺序：
+
+1. **语言身份统一（已交付）。** `@piarium/protocol` 的 `languageIdForPath` 取代 `lib/harness/language-id.ts` 与 UI
+   `language-services/language-id.ts` 两张表。`.mts/.cts/.mjs/.cjs` 在 agent 侧不再判 unsupported，`.sh` 统一为 `shellscript`
+   （编辑器显示经 `editorLanguageIdForLanguage` 映射回 `shell`）。运行时由编辑器注册表贡献的语言仍只在 renderer 可见。
+2. **视图键与版本命名空间（已交付）。** 会话键加 `viewId`；Host 视图按 (视图, 资源) 单调分配版本，`surface` 视图沿用
+   `localEditRevision` 且行为不变；renderer 路由固定 `surface`，事件流按视图过滤。
+3. **agent 视图的正文绑定（已交付）。** `createLanguageViewBinder` 统一解析正文：导航按 `AgentInputContext` 取固定草稿或磁盘，
+   符号采集与诊断只取磁盘；已知脏路径草稿不可用时不回退磁盘。惰性起进程，`inspectViews()` 报告进程数/开文档数/空闲时长。
+4. **修订出现在结果里（已交付）。** `LspNavigationResult` / `DiagnosticsResult` 带 `revision` 与 `disk | surface-draft`；被查询
+   文档请求前后断言修订，`stale` 重绑一次后重试；跨文件位置标 `unpinned`，不编造修订、不在覆盖不全的信号上判 stale。
+5. **生命周期归位（已交付）。** 视图各管自己打开的文档：关标签页只销毁 `surface`，Host 视图按 LRU 设上限、空闲释放、重启不重放
+   `didOpen`；`restart` 与 provider 重注册只影响本视图。
+6. **符号图记修订（已交付）。** `replaceFileSymbols` 要求 document revision（空值拒绝），旧行缺该字段读作 `null`；脏缓冲结果不
+   入图。`explore` 结构展开只用修订一致的范围——该消费者仍待接。
+7. **诊断精确化（已交付）。** 删除 `endsWith` 双向后缀匹配；`lsp.diagnostics` 绑定磁盘正文并等待同一修订的发布，超时 `pending`；
+   无生产调用方的 `afterSnapshot` 参数与 provider `syncDocument` 一并删除。
+
+已验证：视图隔离与 Host 版本分配、同修订不重复通知、`expectedRevision` 不符即 stale、关闭编辑器最后一个标签页不影响 agent 视图、
+LRU 上限与空闲释放、导航的固定草稿与"草稿不可用不回退磁盘"、跨文件 `unpinned`、stale 重试一次后不循环、真实 fixture 进程下
+`surface` 视图保持 absent、诊断按磁盘修订变化、后缀同名不串台、符号行携带 revision、语言身份统一。
+待接：`explore` 结构展开消费带修订的符号范围；Host 视图占用的 UI 呈现。
 
 ### 3.9 观察游标
 

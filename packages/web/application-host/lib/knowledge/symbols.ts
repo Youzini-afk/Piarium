@@ -5,9 +5,15 @@ import type {
   SymbolGraphSymbolInput,
 } from "./store.js";
 
+export interface CollectedSymbols {
+  symbols: SymbolGraphSymbolInput[];
+  /** Disk revision the ranges were computed from. */
+  documentRevision: string;
+}
+
 export interface SymbolCollectorDeps {
   store: Pick<KnowledgeStore, "touchFile" | "replaceFileSymbols" | "removeFileSymbols">;
-  getDocumentSymbols(path: string, language: string): Promise<SymbolGraphSymbolInput[] | null>;
+  getDocumentSymbols(path: string, language: string): Promise<CollectedSymbols | null>;
   getLanguage(path: string): string | null;
   onError?: (error: unknown) => void;
 }
@@ -20,7 +26,8 @@ export interface SymbolDocumentChange {
 /**
  * Replaces one file graph at a time. A null LSP result means unavailable and
  * preserves the last known symbols while refreshing the file fact; an empty
- * array is an authoritative successful result and removes stale symbols.
+ * array is an authoritative successful result and removes stale symbols. Ranges
+ * are always stored with the disk revision they were computed from (D-087).
  */
 export function createSymbolCollector(deps: SymbolCollectorDeps) {
   const tails = new Map<string, Promise<void>>();
@@ -37,9 +44,9 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
       await deps.store.touchFile(change.path, language);
       return;
     }
-    const symbols = await deps.getDocumentSymbols(change.path, language);
-    if (symbols === null) await deps.store.touchFile(change.path, language);
-    else await deps.store.replaceFileSymbols(change.path, language, symbols);
+    const collected = await deps.getDocumentSymbols(change.path, language);
+    if (collected === null) await deps.store.touchFile(change.path, language);
+    else await deps.store.replaceFileSymbols(change.path, language, collected.symbols, collected.documentRevision);
   };
 
   const observe = (change: SymbolDocumentChange): void => {

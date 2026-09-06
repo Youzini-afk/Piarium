@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ## 1. Context
 

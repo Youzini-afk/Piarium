@@ -46,10 +46,11 @@ describe("knowledge store — Node smoke (built artifact)", () => {
         name: "Example",
         kind: "class",
         range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
-      }]);
+      }], "disk-r1");
       assert.equal(graph.symbols, 1);
       assert.equal((await store.getDefinedSymbols("src/example.ts"))[0]?.name, "Example");
       assert.equal((await store.searchSymbols("Example", 5))[0]?.path, "src/example.ts");
+      assert.equal((await store.searchSymbols("Example", 5))[0]?.documentRevision, "disk-r1");
 
       await store.close();
     } finally {
