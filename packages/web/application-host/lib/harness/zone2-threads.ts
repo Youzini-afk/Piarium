@@ -47,7 +47,8 @@ const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: Thr
   for (const { thread } of snapshots) {
     if (thread.lifecycle === "archived" || thread.integration === "merged") continue;
     const paths = new Set<string>();
-    const scope = thread.manifest?.scope ?? (thread as any).scope;
+    const legacyScope = (thread as Thread & { scope?: string[] }).scope;
+    const scope = thread.manifest?.scope ?? legacyScope;
     if (scope && Array.isArray(scope)) {
       for (const s of scope) paths.add(s);
     }

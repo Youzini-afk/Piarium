@@ -89,8 +89,9 @@ may promote the oldest queued Thread.
 
 ### HarnessSettings
 
-Read once at session creation and frozen into the session snapshot, so a
-settings change takes effect in the next session (plan §1.9).
+Most fields are resolved while the session runtime is assembled. Memory is the
+intentional live exception: the user-owned global default is read on each hook
+boundary and a durable session-wide override can select a mode or inherit again.
 
 ```typescript
 interface HarnessSettings {
@@ -104,7 +105,7 @@ interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
-  memory: { shadowMode: boolean };           // user-only, default false
+  memory: { mode: "off" | "assist" | "takeover" }; // user-only, default takeover
   web?: {
     maxFetchesPerTurn?: number;
     render?: boolean;
@@ -113,6 +114,11 @@ interface HarnessSettings {
   permissions?: { mode?: PermissionMode };   // default "normal"
 }
 ```
+
+Legacy persisted `memory.shadowMode` values remain readable (`false` → `off`,
+`true` → `assist`); new writes use `memory.mode`. `SessionSnapshot.harness.memory`
+reports configured/effective mode, a session override, and the latest keeper or
+compaction failure when the runtime supports the Harness.
 
 Thread-runtime availability is not a user setting. The Application Host
 advertises `capabilities.harnessThreads` in the private Host handshake; only

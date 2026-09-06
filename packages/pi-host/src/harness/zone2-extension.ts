@@ -1,6 +1,6 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { Zone2AssembleResult } from "@piarium/protocol";
+import type { HarnessMemoryMode, Zone2AssembleResult } from "@piarium/protocol";
 
 /**
  * Zone 2 extension — hooks before_agent_start to request assembled
@@ -18,6 +18,7 @@ import type { Zone2AssembleResult } from "@piarium/protocol";
  */
 export interface Zone2ExtensionOptions {
   bridge: HostServicesBridge;
+  getMemoryMode: () => HarnessMemoryMode;
 }
 
 export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionFactory {
@@ -48,6 +49,7 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
       try {
         const result = await bridge.request<"zone2.assemble">("zone2.assemble", {
           sinceTurn: Math.max(0, turnIndex - 1),
+          memoryMode: options.getMemoryMode(),
           ...(event.prompt.trim() ? { query: event.prompt } : {}),
           ...(eventCursor === undefined ? {} : { afterEventId: eventCursor }),
           branchEntryIds: ctx.sessionManager.getBranch().map((e: { id: string }) => e.id),

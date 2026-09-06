@@ -18,6 +18,7 @@
  * IDs Pi will remove. Semantic completeness remains a separate evaluation.
  */
 
+import type { HarnessMemoryMode } from "@piarium/protocol";
 import type { KnowledgeStore, Block } from "../knowledge/store.js";
 import { HarnessServiceError } from "./service-error.js";
 
@@ -27,6 +28,33 @@ export interface CompactionFacts {
   touchedFiles: string[];
   unresolvedDiagnostics: Array<{ path: string; count: number }>;
   checkpoints: string[];
+}
+
+/** Build compaction facts from the durable session event stream. */
+export async function collectCompactionFacts(
+  store: Pick<KnowledgeStore, "listEvents">,
+  sessionId: string,
+): Promise<CompactionFacts> {
+  const events = await store.listEvents({ sessionId });
+  const touchedFiles = new Set<string>();
+  for (const event of events) {
+    const data = event.data ?? {};
+    const path = typeof event.refs?.path === "string"
+      ? event.refs.path
+      : typeof data.path === "string"
+        ? data.path
+        : undefined;
+    if (!path) continue;
+    if (event.kind === "edit") touchedFiles.add(path);
+  }
+  return {
+    touchedFiles: [...touchedFiles],
+    // Knowledge events currently record diagnostic arrivals but not reliable
+    // resolution events, so they cannot establish the current unresolved set.
+    unresolvedDiagnostics: [],
+    // The current recovery/checkpoint authority has no reliable session query.
+    checkpoints: [],
+  };
 }
 
 export interface CompactionMaterials {
@@ -43,7 +71,6 @@ export interface CompactionResult {
 }
 
 export interface CompactionSettings {
-  takeoverEnabled?: boolean;
   keepTurns: number; // default 8
   reinjectFileLimit: number; // default 5
   reinjectFileTokens: number; // default 5000
@@ -52,7 +79,6 @@ export interface CompactionSettings {
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
-  takeoverEnabled: false,
   keepTurns: 8,
   reinjectFileLimit: 5,
   reinjectFileTokens: 5000,
@@ -73,13 +99,17 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
  * entry IDs uniquely identify a position in the session history.
  */
 export interface KeeperCoverageEntry {
+  /** Active ancestor path at the accepted keeper apply. */
+  branchEntryIds: string[];
+  /** Visible block identity used by the accepted keeper apply. */
+  blockRevisions: Array<{ label: string; revision: number }>;
   /** Entry IDs the keeper has processed. */
   coveredEntryIds: Set<string>;
   /** Last time the coverage was extended. */
   updatedAt: number;
 }
 
-export type KeeperCoverageStatus = "ready" | "partial" | "none";
+export type KeeperCoverageStatus = "ready" | "partial" | "none" | "wrong-branch" | "stale-blocks";
 
 export interface KeeperCoverageState {
   status: KeeperCoverageStatus;
@@ -96,25 +126,48 @@ export interface KeeperCoverageStore {
    * successful `memory.blocks.apply` with the branch entry IDs that
    * were processed.
    */
-  extend(sessionId: string, entryIds: readonly string[], now?: number): KeeperCoverageEntry;
+  extend(
+    sessionId: string,
+    entryIds: readonly string[],
+    evidence: {
+      branchEntryIds: readonly string[];
+      blocks: readonly { label: string; revision: number }[];
+    },
+    now?: number,
+  ): KeeperCoverageEntry;
   /** Clears coverage for a session (called after compaction or session drop). */
   clear(sessionId: string): void;
 }
 
 export function createKeeperCoverageStore(now: () => number = Date.now): KeeperCoverageStore {
   const entries = new Map<string, KeeperCoverageEntry>();
+  const clone = (entry: KeeperCoverageEntry): KeeperCoverageEntry => ({
+    branchEntryIds: [...entry.branchEntryIds],
+    blockRevisions: entry.blockRevisions.map((block) => ({ ...block })),
+    coveredEntryIds: new Set(entry.coveredEntryIds),
+    updatedAt: entry.updatedAt,
+  });
   return {
     get(sessionId: string): KeeperCoverageEntry | null {
       const entry = entries.get(sessionId);
-      return entry ? { coveredEntryIds: new Set(entry.coveredEntryIds), updatedAt: entry.updatedAt } : null;
+      return entry ? clone(entry) : null;
     },
-    extend(sessionId: string, entryIds: readonly string[], at: number = now()): KeeperCoverageEntry {
+    extend(sessionId, entryIds, evidence, at: number = now()): KeeperCoverageEntry {
       const existing = entries.get(sessionId);
-      const covered = existing ? new Set(existing.coveredEntryIds) : new Set<string>();
+      const continuesBranch = existing !== undefined
+        && existing.branchEntryIds.every((entryId, index) => evidence.branchEntryIds[index] === entryId);
+      const covered = continuesBranch ? new Set(existing.coveredEntryIds) : new Set<string>();
       for (const id of entryIds) covered.add(id);
-      const entry: KeeperCoverageEntry = { coveredEntryIds: covered, updatedAt: at };
+      const entry: KeeperCoverageEntry = {
+        branchEntryIds: [...evidence.branchEntryIds],
+        blockRevisions: evidence.blocks
+          .map((block) => ({ label: block.label, revision: block.revision }))
+          .toSorted((left, right) => left.label.localeCompare(right.label)),
+        coveredEntryIds: covered,
+        updatedAt: at,
+      };
       entries.set(sessionId, entry);
-      return { coveredEntryIds: new Set(covered), updatedAt: at };
+      return clone(entry);
     },
     clear(sessionId: string): void {
       entries.delete(sessionId);
@@ -130,15 +183,32 @@ export function createKeeperCoverageStore(now: () => number = Date.now): KeeperC
 export function evaluateKeeperCoverage(
   coverage: KeeperCoverageEntry | null,
   removedEntryIds: readonly string[],
+  evidence: {
+    branchEntryIds: readonly string[];
+    blocks: readonly { label: string; revision: number }[];
+  },
 ): KeeperCoverageState {
   if (!coverage || coverage.coveredEntryIds.size === 0) {
     return { status: "none", entry: coverage, uncovered: [...removedEntryIds] };
   }
-  const uncovered = removedEntryIds.filter((id) => !coverage.coveredEntryIds.has(id));
-  if (uncovered.length === 0) {
-    return { status: "ready", entry: coverage, uncovered: [] };
+  if (!coverage.branchEntryIds.every((entryId, index) => evidence.branchEntryIds[index] === entryId)) {
+    return { status: "wrong-branch", entry: coverage, uncovered: [...removedEntryIds] };
   }
-  return { status: "partial", entry: coverage, uncovered };
+  const uncovered = removedEntryIds.filter((id) => !coverage.coveredEntryIds.has(id));
+  if (uncovered.length > 0) return { status: "partial", entry: coverage, uncovered };
+  const currentBlocks = evidence.blocks
+    .map((block) => ({ label: block.label, revision: block.revision }))
+    .toSorted((left, right) => left.label.localeCompare(right.label));
+  if (
+    currentBlocks.length !== coverage.blockRevisions.length
+    || currentBlocks.some((block, index) => (
+      block.label !== coverage.blockRevisions[index]?.label
+      || block.revision !== coverage.blockRevisions[index]?.revision
+    ))
+  ) {
+    return { status: "stale-blocks", entry: coverage, uncovered: [] };
+  }
+  return { status: "ready", entry: coverage, uncovered: [] };
 }
 
 // ── Summary assembly ───────────────────────────────────────────────
@@ -195,29 +265,34 @@ export interface CompactionHandlerDeps {
 export async function handleBeforeCompact(
   sessionId: string,
   deps: CompactionHandlerDeps,
-  preparation: { firstKeptEntryId: string; tokensBefore: number; branchEntryIds: string[]; removedEntryIds: string[] },
+  preparation: {
+    firstKeptEntryId: string;
+    tokensBefore: number;
+    branchEntryIds: string[];
+    removedEntryIds: string[];
+    mode: HarnessMemoryMode;
+  },
   options?: { staleNote?: boolean },
 ): Promise<CompactionResult> {
   const { store, settings, getFacts, coverageStore } = deps;
   const { firstKeptEntryId, tokensBefore } = preparation;
 
-  if (settings.takeoverEnabled !== true) {
+  if (preparation.mode !== "takeover") {
     throw new HarnessServiceError(
       "unavailable",
-      "compaction.before: memory shadow mode does not replace Pi compaction",
+      `compaction.before: ${preparation.mode} mode leaves compaction to Pi`,
     );
   }
 
   const blocks = await store.getBlocks(sessionId, preparation.branchEntryIds);
   const planBlock = blocks.find((b) => b.label === "plan");
   const plan = planBlock?.content ?? "";
-  const facts = await getFacts();
 
   // Taking compaction over means Pi does not summarize, so the replacement
   // has to actually carry the conversation. Only the memory keeper's blocks
   // do that: a `plan` block written by the todo tool is a checklist, not a
-  // summary, and swapping the history for it loses the work. Until the
-  // memory agent is wired, this leaves compaction to Pi (§8.4.1).
+  // summary, and swapping the history for it loses the work. A missing keeper
+  // block therefore leaves this compaction to Pi (§8.4.1).
   const hasKeeperBlocks = blocks.some((b) => b.updatedBy === "memory-agent" && b.label !== "plan");
   if (!hasKeeperBlocks) {
     throw new HarnessServiceError(
@@ -244,7 +319,10 @@ export async function handleBeforeCompact(
     );
   }
   const coverage = coverageStore.get(sessionId);
-  const coverageState = evaluateKeeperCoverage(coverage, preparation.removedEntryIds);
+  const coverageState = evaluateKeeperCoverage(coverage, preparation.removedEntryIds, {
+    branchEntryIds: preparation.branchEntryIds,
+    blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
+  });
   if (coverageState.status !== "ready") {
     throw new HarnessServiceError(
       "unavailable",
@@ -253,6 +331,8 @@ export async function handleBeforeCompact(
       " — Pi summarizes instead",
     );
   }
+
+  const facts = await getFacts();
 
   let summary = assembleCompactionSummary({
     blocks,

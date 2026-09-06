@@ -25,6 +25,7 @@ import type {
   ThreadDispatchResult,
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
+import type { HarnessMemoryMode } from "./harness-settings.js";
 import type { JsonValue } from "./types.js";
 
 export interface OutputSlice {
@@ -178,6 +179,8 @@ export interface SearchResultItem {
 export interface Zone2AssembleParams {
   afterEventId?: number;
   contextUsage?: { used: number; window: number };
+  /** Effective session memory mode; `off` excludes stored blocks from Zone 2. */
+  memoryMode: HarnessMemoryMode;
   query?: string;
   sinceTurn: number;
   /**
@@ -204,6 +207,8 @@ export interface CompactionBeforeParams {
    * allowing takeover.
    */
   removedEntryIds: string[];
+  /** Effective session mode at the Pi hook that requested takeover. */
+  mode: HarnessMemoryMode;
 }
 
 export interface CompactionBeforeResult {

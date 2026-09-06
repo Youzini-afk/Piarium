@@ -35,5 +35,17 @@ describe("Pi session feature protocol", () => {
       () => parsePiSessionFeatureMutation({ entryId: "entry", pinned: true, type: "context.set" }),
       /Unsupported session feature mutation/,
     );
+    assert.deepEqual(
+      parsePiSessionFeatureMutation({ mode: "takeover", ignored: true, type: "memory.mode.set" }),
+      { mode: "takeover", type: "memory.mode.set" },
+    );
+    assert.deepEqual(
+      parsePiSessionFeatureMutation({ mode: "inherit", type: "memory.mode.set" }),
+      { mode: "inherit", type: "memory.mode.set" },
+    );
+    assert.throws(
+      () => parsePiSessionFeatureMutation({ mode: "shadow", type: "memory.mode.set" }),
+      /mode must be one of/,
+    );
   });
 });

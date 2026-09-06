@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_HARNESS_SETTINGS,
   mergeHarnessSettings,
+  resolveHarnessMemoryMode,
+  HarnessSettingsValidationError,
   type HarnessSettings,
 } from "../src/index.js";
 
@@ -76,15 +78,28 @@ describe("harness settings", () => {
     assert.deepEqual(merged.models.check, { providerId: "trusted", modelId: "user-model" });
   });
 
-  it("does not let a workspace enable background memory model calls", () => {
+  it("defaults memory takeover and migrates the legacy shadow boolean", () => {
+    assert.equal(mergeHarnessSettings({}, {}).memory.mode, "takeover");
+    assert.equal(resolveHarnessMemoryMode({ shadowMode: false }), "off");
+    assert.equal(resolveHarnessMemoryMode({ shadowMode: true }), "assist");
+    assert.equal(resolveHarnessMemoryMode({ mode: "takeover", shadowMode: false }), "takeover");
+  });
+
+  it("does not let a workspace change the user-owned memory mode", () => {
     assert.equal(mergeHarnessSettings(
       { memory: { shadowMode: false } },
-      { memory: { shadowMode: true } },
-    ).memory.shadowMode, false);
+      { memory: { mode: "takeover" } },
+    ).memory.mode, "off");
     assert.equal(mergeHarnessSettings(
-      { memory: { shadowMode: true } },
-      { memory: { shadowMode: false } },
-    ).memory.shadowMode, true);
+      { memory: { mode: "assist" } },
+      { memory: { mode: "off" } },
+    ).memory.mode, "assist");
+  });
+
+  it("rejects unknown and malformed user memory modes", () => {
+    assert.throws(() => resolveHarnessMemoryMode({ mode: "automatic" }), HarnessSettingsValidationError);
+    assert.throws(() => resolveHarnessMemoryMode({ shadowMode: "yes" }), /must be a boolean/);
+    assert.throws(() => resolveHarnessMemoryMode(false), /must be an object/);
   });
 
   it("keeps web search provider and credential selection user-owned", () => {

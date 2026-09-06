@@ -1,3 +1,5 @@
+import type { HarnessMemoryMode } from "./harness-settings.js";
+
 export const PIARIUM_SESSION_FEATURES_SCHEMA_VERSION = 1 as const;
 
 export type PiSessionGoalStatus =
@@ -38,6 +40,8 @@ export interface PiSessionAssistState {
 export interface PiSessionFeatureState {
   assist?: PiSessionAssistState;
   goal?: PiSessionGoalState;
+  /** Session-wide runtime override. Omitted means inherit global settings. */
+  memoryMode?: HarnessMemoryMode;
   revision: number;
   schemaVersion: typeof PIARIUM_SESSION_FEATURES_SCHEMA_VERSION;
 }
@@ -79,6 +83,10 @@ export type PiSessionFeatureMutation =
       field?: "all" | "recap" | "suggestion";
       forEntryId?: string;
       type: "assist.clear";
+    }
+  | {
+      mode: HarnessMemoryMode | "inherit";
+      type: "memory.mode.set";
     };
 
 export class PiSessionFeatureValidationError extends Error {
@@ -95,6 +103,8 @@ const GOAL_STATUSES = [
   "budgetLimited",
   "complete",
 ] as const satisfies readonly PiSessionGoalStatus[];
+
+const MEMORY_MODES = ["off", "assist", "takeover", "inherit"] as const;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -226,6 +236,15 @@ export function parsePiSessionFeatureMutation(value: unknown): PiSessionFeatureM
         ...(forEntryId === undefined ? {} : { forEntryId }),
         type,
       };
+    }
+    case "memory.mode.set": {
+      const mode = stringValue(source, "mode");
+      if (!MEMORY_MODES.includes(mode as (typeof MEMORY_MODES)[number])) {
+        throw new PiSessionFeatureValidationError(
+          `mode must be one of: ${MEMORY_MODES.join(", ")}`,
+        );
+      }
+      return { mode: mode as HarnessMemoryMode | "inherit", type };
     }
     default:
       throw new PiSessionFeatureValidationError(`Unsupported session feature mutation: ${String(type)}`);

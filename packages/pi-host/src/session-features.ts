@@ -10,9 +10,11 @@ import {
   type PiSessionFeatureState,
   type PiSessionGoalState,
   type PiSessionGoalStatus,
+  type HarnessMemoryMode,
 } from "@piarium/protocol";
 
 export const PIARIUM_SESSION_FEATURES_ENTRY_TYPE = "piarium.session-features/v1";
+export const PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE = "piarium.session-memory-mode/v1";
 
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
@@ -119,6 +121,40 @@ function parseStoredState(value: unknown): PiSessionFeatureState | undefined {
   };
 }
 
+interface StoredMemoryMode {
+  mode?: HarnessMemoryMode;
+  revision: number;
+}
+
+function parseStoredMemoryMode(value: unknown): StoredMemoryMode | undefined {
+  if (!isRecord(value) || value.schemaVersion !== PIARIUM_SESSION_FEATURES_SCHEMA_VERSION) {
+    return undefined;
+  }
+  const revision = nonNegativeInteger(value.revision);
+  if (value.mode === null) return { revision };
+  if (value.mode !== "off" && value.mode !== "assist" && value.mode !== "takeover") {
+    return undefined;
+  }
+  return { mode: value.mode, revision };
+}
+
+function readSessionMemoryMode(
+  manager: Pick<SessionManager, "getEntries">,
+): StoredMemoryMode | undefined {
+  const entries = manager.getEntries();
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (
+      entry?.type !== "custom"
+      || entry.customType !== PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE
+    ) continue;
+    const parsed = parseStoredMemoryMode(entry.data);
+    if (!parsed) throw new SessionFeatureConflictError("Stored session memory mode is malformed");
+    return parsed;
+  }
+  return undefined;
+}
+
 export function emptySessionFeatures(): PiSessionFeatureState {
   return {
     revision: 0,
@@ -127,9 +163,10 @@ export function emptySessionFeatures(): PiSessionFeatureState {
 }
 
 export function readSessionFeatures(
-  manager: Pick<SessionManager, "getBranch">,
+  manager: Pick<SessionManager, "getBranch" | "getEntries">,
 ): PiSessionFeatureState {
   const branch = manager.getBranch();
+  let branchState = emptySessionFeatures();
   for (let index = branch.length - 1; index >= 0; index -= 1) {
     const entry = branch[index];
     if (!entry) continue;
@@ -137,9 +174,17 @@ export function readSessionFeatures(
       continue;
     }
     const parsed = parseStoredState(entry.data);
-    if (parsed) return parsed;
+    if (parsed) {
+      branchState = parsed;
+      break;
+    }
   }
-  return emptySessionFeatures();
+  const memory = readSessionMemoryMode(manager);
+  return {
+    ...branchState,
+    ...(memory?.mode === undefined ? {} : { memoryMode: memory.mode }),
+    revision: Math.max(branchState.revision, memory?.revision ?? 0),
+  };
 }
 
 function assignOptionalText(
@@ -159,17 +204,20 @@ function appendState(
   current: PiSessionFeatureState,
   update: Omit<PiSessionFeatureState, "revision" | "schemaVersion">,
 ): PiSessionFeatureState {
+  const { memoryMode, ...branchUpdate } = update;
   const next: PiSessionFeatureState = {
-    ...update,
+    ...branchUpdate,
+    ...(memoryMode === undefined ? {} : { memoryMode }),
     revision: current.revision + 1,
     schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
   };
-  manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, next);
+  const { memoryMode: _sessionMemoryMode, ...stored } = next;
+  manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, stored);
   return next;
 }
 
 export function mutateSessionFeatures(
-  manager: Pick<SessionManager, "appendCustomEntry" | "getBranch">,
+  manager: Pick<SessionManager, "appendCustomEntry" | "getBranch" | "getEntries">,
   mutation: PiSessionFeatureMutation,
   options: { tokenBaseline?: number } = {},
 ): PiSessionFeatureState {
@@ -280,6 +328,14 @@ export function mutateSessionFeatures(
         ...current,
         assist,
       });
+    }
+    case "memory.mode.set": {
+      manager.appendCustomEntry(PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE, {
+        mode: mutation.mode === "inherit" ? null : mutation.mode,
+        revision: current.revision + 1,
+        schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
+      });
+      return readSessionFeatures(manager);
     }
   }
 }

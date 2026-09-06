@@ -6,6 +6,7 @@ import {
   createSessionFeaturesExtension,
   mutateSessionFeatures,
   PIARIUM_SESSION_FEATURES_ENTRY_TYPE,
+  PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE,
   readSessionFeatures,
   SessionFeatureConflictError,
 } from "../src/session-features.js";
@@ -95,6 +96,44 @@ describe("Piarium session features", () => {
       revision: 7,
       schemaVersion: 1,
     });
+  });
+
+  it("keeps the memory override session-wide without importing goal or assist from another branch", () => {
+    const manager = SessionManager.inMemory("/workspace");
+    const root = manager.appendMessage({ content: "root", role: "user", timestamp: 1 });
+    mutateSessionFeatures(manager, { objective: "branch A goal", type: "goal.start" });
+    mutateSessionFeatures(manager, {
+      forEntryId: "assistant-a",
+      suggestion: "branch A suggestion",
+      type: "assist.set",
+    });
+    const overridden = mutateSessionFeatures(manager, { mode: "off", type: "memory.mode.set" });
+    assert.equal(overridden.memoryMode, "off");
+    assert.ok(manager.getEntries().some((entry) => (
+      entry.type === "custom" && entry.customType === PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE
+    )));
+
+    manager.branch(root);
+    assert.deepEqual(readSessionFeatures(manager), {
+      memoryMode: "off",
+      revision: overridden.revision,
+      schemaVersion: 1,
+    });
+    const inherited = mutateSessionFeatures(manager, { mode: "inherit", type: "memory.mode.set" });
+    assert.equal(inherited.memoryMode, undefined);
+    assert.equal(inherited.goal, undefined);
+    assert.equal(inherited.assist, undefined);
+  });
+
+  it("does not silently revive an older mode when the latest session override is malformed", () => {
+    const manager = SessionManager.inMemory("/workspace");
+    mutateSessionFeatures(manager, { mode: "assist", type: "memory.mode.set" });
+    manager.appendCustomEntry(PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE, {
+      mode: "automatic",
+      revision: 2,
+      schemaVersion: 1,
+    });
+    assert.throws(() => readSessionFeatures(manager), /Stored session memory mode is malformed/);
   });
 
   it("injects only the active goal through the native Pi hook", async () => {

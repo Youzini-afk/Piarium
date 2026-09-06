@@ -69,7 +69,7 @@ async function setupP2E2E() {
   async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
     return {
       store: knowledgeStore,
-      settings: { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true },
+      settings: DEFAULT_COMPACTION_SETTINGS,
       getFacts: async (): Promise<CompactionFacts> => ({
         touchedFiles: ["src/index.ts"],
         unresolvedDiagnostics: [],
@@ -198,11 +198,22 @@ describe("Phase 2 e2e integration", () => {
   it("zone2.assemble → bridge → router → service: returns assembled content", async () => {
     const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
     try {
-      const result = await bridge.request("zone2.assemble", { sinceTurn: 0, branchEntryIds: [] });
+      const result = await bridge.request("zone2.assemble", {
+        sinceTurn: 0,
+        branchEntryIds: [],
+        memoryMode: "assist",
+      });
       assert.ok(result.content, "zone2.assemble should return non-null content");
       assert.match(result.content!, /piarium-context/, "zone2 content should contain piarium-context marker");
       assert.match(result.content!, /plan/, "zone2 content should contain plan section");
       assert.equal(result.eventCursor, 7);
+
+      const off = await bridge.request("zone2.assemble", {
+        sinceTurn: 0,
+        branchEntryIds: [],
+        memoryMode: "off",
+      });
+      assert.doesNotMatch(off.content ?? "", /<plan>/, "off mode should not inject stored memory blocks");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
@@ -257,10 +268,15 @@ describe("Phase 2 e2e integration", () => {
         content: "Wired the compaction service",
         updatedBy: "memory-agent",
       });
-      harnessServiceHost.keeperCoverageStore.extend(SESSION_ID, ["e1"]);
+      const visibleBlocks = await knowledgeStore.getBlocks(SESSION_ID, ["e1", "test-entry"]);
+      harnessServiceHost.keeperCoverageStore.extend(SESSION_ID, ["e1"], {
+        branchEntryIds: ["e1", "test-entry"],
+        blocks: visibleBlocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
+      });
       const result = await bridge.request("compaction.before", {
         branchEntryIds: ["e1", "test-entry"],
         firstKeptEntryId: "test-entry",
+        mode: "takeover",
         removedEntryIds: ["e1"],
         tokensBefore: 50000,
       });

@@ -1440,6 +1440,41 @@ plan 0.7/2.4/2.9/3.2/3.7 和 status。D-068、D-078 中要求辅助模型分项�
 
 状态：已按本范围实施；验证记录见 agent-harness-status.md。
 
+### D-081 · 2026-09-06 · 2.4 / 2.6（默认记忆与逐次压缩接管）
+
+类型：默认值与运行契约落地（D-078）
+
+决定：记忆设置收敛为 `off | assist | takeover` 三态，缺省为 `takeover`。`off` 停止 keeper、排除 Zone 2 中的 memory blocks
+并始终交还 Pi 压缩；`assist` 维护和注入 blocks、由 Pi 压缩；`takeover` 在相同维护路径上逐次检查接管条件。旧
+`shadowMode:false/true` 分别迁移为 `off/assist`，显式 `mode` 优先；错误类型和值拒绝读取或写入，不吞成默认。memory 是 user-only，
+workspace 设置不能覆盖。全局值由活动 `SettingsManager` 实时读取；每个 Pi session 可持久设置覆盖或恢复继承，覆盖独立于分支上的
+Goal/Assist 记录，不改全局文件。
+
+接管要求同一次已接受且确有 material block 变化的 keeper 提交提供实际 context entry IDs、当时的完整活动分支祖先路径和可见 block
+修订集合。压缩前重新解析 Pi 实际移除区间、当前分支与 block 修订；任何一项缺失、不连续、错分支或过期，都只让这次请求回到 Pi
+自身摘要，不阻断会话。Host 重启后的内存 coverage 为空，不能冒充持久 checkpoint；下一次有效 keeper 更新可重新建立证据。
+`compaction.after` 清旧 coverage，连续压缩各自重新证明。Host facts 当前只提供事件权威能可靠证明的 touched files；诊断事件缺少
+resolution authority、恢复层缺少 session checkpoint 查询，因此暂不伪造“当前未解决诊断”或 checkpoint 正文。
+
+运行失败投影到可选的 `SessionSnapshot.harness.memory`，区分 keeper/compaction，包含配置模式、有效模式、会话模式覆盖和最近失败；Context
+可即时切换当前会话，Settings 修改继承中的活动会话。无效设置可在 UI 中修复。成功的同阶段运行或模式变更清除陈旧失败。主会话历史
+不写 `memory_edit`，keeper 无文件/shell 工具；D-080 的普通会话费用/Token 展示保留，不恢复辅助分项看板。`record-only` 不加入本次
+模式契约，也不作为默认交付前置。
+
+原因：D-076 已提供 block 分支/CAS 与实际 entry 覆盖；此前剩余问题是这些证据未绑定完整分支和 block 修订、设置只在会话构造时读取、
+默认仍停在 assist，以及失败对用户不可见。本次直接完成可用路径；局部证据不足时使用已经可靠的 Pi 摘要，比维持整个功能默认关闭更符合
+D-078。`off` 若仍注入旧 blocks 也不是真正关闭，因此模式随 Zone 2 请求传递，只排除该来源而保留其他上下文。
+
+考虑过的替代：继续 `shadowMode` 加独立 takeover 开关会保留两个冲突权威；持久化 coverage 会把 Host 进程内观察误写成 durable
+checkpoint；无 keeper 证据时同步阻塞跑一次模型会增加压缩等待，当前直接交还 Pi；为当前诊断/checkpoint 造空值会把缺 authority
+伪装成已采集事实。
+
+影响：protocol harness settings、session feature/snapshot 与 Zone 2/compaction 请求；pi-host session 装配、memory/compaction/Zone 2
+extensions；Application Host coverage、facts 与服务；Harness Settings、Context sidebar、i18n；设计 8.4、plan 0.7/2.4/2.6、status、
+architecture 与两侧模块文档。
+
+状态：已实施；本地验证与外部边界见 agent-harness-status.md。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1526,3 +1561,4 @@ plan 0.7/2.4/2.9/3.2/3.7 和 status。D-068、D-078 中要求辅助模型分项�
 | D-078 | folded-in（用户重新授权；正式实施与默认交付） | — | agent-harness 1.3/2/6/8/9/12；plan 0.1/0.7/2/3；status；architecture |
 | D-079 | implementation（修复实际调用与数据正确性） | — | Host working-state/thread/recovery/explore；status |
 | D-080 | implementation（取消辅助分项统计，保留会话统计） | — | protocol / pi-host / UI；设计 8.4–8.6、plan、status |
+| D-081 | implementation（默认记忆、动态模式与逐次压缩接管） | — | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture |

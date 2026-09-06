@@ -212,7 +212,10 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
           };
         }
       }
-      const content = assembleZone2Content({ ...result.material, threads }, { eventCursor: result.eventCursor });
+      const material = params.memoryMode === "off"
+        ? { ...result.material, blocks: [] }
+        : result.material;
+      const content = assembleZone2Content({ ...material, threads }, { eventCursor: result.eventCursor });
       return { content, eventCursor: result.eventCursor };
     },
   };
@@ -241,6 +244,7 @@ export function createCompactionBeforeService(host: HarnessServiceHost): Harness
           tokensBefore: params.tokensBefore,
           branchEntryIds: params.branchEntryIds,
           removedEntryIds: params.removedEntryIds,
+          mode: params.mode,
         },
       );
       return result;
@@ -306,7 +310,11 @@ export function createMemoryBlocksApplyService(host: HarnessServiceHost): Harnes
       // entries used for that update. Partial patches and no-op/stale results
       // deliberately leave coverage unchanged so takeover falls back to Pi.
       if (result.rejected === 0 && result.changedBlocks && params.coveredEntryIds.length > 0) {
-        host.keeperCoverageStore.extend(ctx.sessionId, params.coveredEntryIds);
+        const blocks = await deps.store.getBlocks(ctx.sessionId, params.branchEntryIds);
+        host.keeperCoverageStore.extend(ctx.sessionId, params.coveredEntryIds, {
+          branchEntryIds: params.branchEntryIds,
+          blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
+        });
       }
       return result;
     },

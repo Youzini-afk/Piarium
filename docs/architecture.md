@@ -237,7 +237,9 @@ server backend and current command set are not yet sufficient as the sole produc
 Direct workers are also where Piarium's own agent harness lives. The session worker overrides Pi's
 built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
 recovery journal already uses, and mounts in-process extension hooks for tail-appended turn context,
-post-tool feedback, an opt-in memory shadow, and explicitly gated compaction takeover. The heavy services behind those tools — shell
+post-tool feedback, a background memory keeper, and per-compaction takeover. Memory defaults to `takeover`; `assist` keeps Pi's
+summarizer and `off` stops keeper injection. The effective mode is read live from the user-owned global setting plus a durable
+session override. The heavy services behind those tools — shell
 supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
 handing the worker host credentials. The harness contract, its cache rules, and the profile model
@@ -252,8 +254,10 @@ content. The same UI-auth boundary protects the thread metadata route.
 The accepted delivery policy in harness decision D-078 is to implement complete usable paths and ship them
 as defaults after focused correctness checks. Replay sets and external tester reports support diagnosis
 and optimization; they are not mandatory activation gates. Existing explicit user choices remain valid.
-This is the target policy: the current memory implementation is still opt-in assist and compaction
-takeover is still off. The capability matrix records those implementation facts until code changes ship.
+Decision D-081 implements that policy for memory: takeover requires the keeper's actual context-entry coverage,
+the active branch path, and the current visible block revisions to match. Missing or stale evidence falls back
+to Pi for that compaction; Host restart never promotes its empty in-memory coverage into a durable checkpoint.
+The capability matrix records the remaining implementation boundaries.
 
 ### 4.5 Composable workbench and document authority
 

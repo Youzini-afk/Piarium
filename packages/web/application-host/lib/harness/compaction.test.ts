@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import {
   assembleCompactionSummary,
+  collectCompactionFacts,
   handleBeforeCompact,
   assembleReinjectMessage,
   createKeeperCoverageStore,
@@ -13,7 +14,7 @@ import {
   type CompactionFacts,
 } from "./compaction.js";
 
-const TAKEOVER_SETTINGS = { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true };
+const TAKEOVER_SETTINGS = { ...DEFAULT_COMPACTION_SETTINGS };
 
 // Scratch stores live in the OS temp dir; see recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "piarium-test-compaction");
@@ -30,6 +31,19 @@ async function openStore() {
   mkdirSync(dir, { recursive: true });
   return openWorkspaceKnowledge({
     dataDir: dir, hostId: "test-host", workspaceId: "ws-test", embedding: null,
+  });
+}
+
+async function extendCoverage(
+  coverage: ReturnType<typeof createKeeperCoverageStore>,
+  sessionId: string,
+  coveredEntryIds: string[],
+  branchEntryIds: string[],
+): Promise<void> {
+  const blocks = await store.getBlocks(sessionId, branchEntryIds);
+  coverage.extend(sessionId, coveredEntryIds, {
+    branchEntryIds,
+    blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
   });
 }
 
@@ -122,6 +136,32 @@ describe("assembleCompactionSummary", () => {
   });
 });
 
+describe("collectCompactionFacts", () => {
+  beforeEach(async () => {
+    cleanup();
+    store = await openStore();
+  });
+  afterEach(async () => {
+    await store.close();
+    cleanup();
+  });
+
+  it("derives touched files without presenting historical diagnostics as unresolved", async () => {
+    await store.putEvent({ kind: "edit", at: 1, sessionId: "s1", text: "edit a", refs: { path: "a.ts" }, source: "agent" });
+    await store.putEvent({ kind: "edit", at: 2, sessionId: "s1", text: "edit b", data: { path: "b.ts" }, source: "user" });
+    await store.putEvent({ kind: "diagnostic", at: 3, sessionId: "s1", text: "two", refs: { path: "a.ts" }, data: { count: 2 }, source: "external" });
+    await store.putEvent({ kind: "diagnostic", at: 4, sessionId: "s1", text: "cleared", refs: { path: "a.ts" }, data: { count: 0 }, source: "external" });
+    await store.putEvent({ kind: "diagnostic", at: 5, sessionId: "s1", text: "one", data: { path: "b.ts", count: 1 }, source: "external" });
+    await store.putEvent({ kind: "edit", at: 6, sessionId: "other", text: "other", refs: { path: "other.ts" }, source: "user" });
+
+    await expect(collectCompactionFacts(store, "s1")).resolves.toEqual({
+      touchedFiles: ["a.ts", "b.ts"],
+      unresolvedDiagnostics: [],
+      checkpoints: [],
+    });
+  });
+});
+
 describe("handleBeforeCompact", () => {
   beforeEach(async () => {
     cleanup();
@@ -143,7 +183,7 @@ describe("handleBeforeCompact", () => {
     });
 
     const coverage = createKeeperCoverageStore();
-    coverage.extend("s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+    await extendCoverage(coverage, "s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"]);
     const result = await handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
@@ -153,7 +193,7 @@ describe("handleBeforeCompact", () => {
         checkpoints: ["2026-09-03T10:00Z"],
       }),
       coverageStore: coverage,
-    }, { firstKeptEntryId: "entry-8", tokensBefore: 50000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"] });
+    }, { firstKeptEntryId: "entry-8", tokensBefore: 50000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], mode: "takeover" });
 
     expect(result.summary).toContain("<piarium-compaction");
     expect(result.summary).toContain("Working");
@@ -167,13 +207,13 @@ describe("handleBeforeCompact", () => {
       updatedBy: "memory-agent",
     });
     const coverage = createKeeperCoverageStore();
-    coverage.extend("s1", ["e1"]);
+    await extendCoverage(coverage, "s1", ["e1"], ["e1", "entry"]);
     const result = await handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["e1", "entry"], removedEntryIds: ["e1"] }, { staleNote: true });
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["e1", "entry"], removedEntryIds: ["e1"], mode: "takeover" }, { staleNote: true });
 
     expect(result.summary).toContain("memory blocks may be stale");
   });
@@ -184,7 +224,7 @@ describe("handleBeforeCompact", () => {
         store,
         settings: TAKEOVER_SETTINGS,
         getFacts: async () => emptyFacts,
-      }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [] });
+      }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [], mode: "takeover" });
       expect.fail("should have thrown");
     } catch (e) {
       expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
@@ -207,7 +247,7 @@ describe("handleBeforeCompact", () => {
           unresolvedDiagnostics: [],
           checkpoints: ["2026-09-03T10:00Z"],
         }),
-      }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [] });
+      }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [], mode: "takeover" });
       expect.fail("should have thrown");
     } catch (e) {
       expect((e as { harnessCode?: string }).harnessCode).toBe("unavailable");
@@ -223,7 +263,7 @@ describe("handleBeforeCompact", () => {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
-    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [], mode: "takeover" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });
@@ -238,19 +278,19 @@ describe("handleBeforeCompact", () => {
       updatedBy: "memory-agent",
     });
     const coverage = createKeeperCoverageStore();
-    coverage.extend("s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+    await extendCoverage(coverage, "s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"]);
     const result = await handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "entry-8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"] });
+    }, { firstKeptEntryId: "entry-8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "entry-8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], mode: "takeover" });
 
     expect(result.summary).toContain("Chose PTY over spawn");
     expect(result.firstKeptEntryId).toBe("entry-8");
   });
 
-  it("keeps Pi compaction authoritative while the memory keeper is in shadow mode", async () => {
+  it("keeps Pi compaction authoritative while the memory keeper is in assist mode", async () => {
     await store.upsertBlock({
       sessionId: "s1", label: "progress", content: "Observed only",
       updatedBy: "memory-agent",
@@ -259,7 +299,7 @@ describe("handleBeforeCompact", () => {
       store,
       settings: DEFAULT_COMPACTION_SETTINGS,
       getFacts: async () => emptyFacts,
-    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "entry", tokensBefore: 1000, branchEntryIds: ["entry"], removedEntryIds: [], mode: "assist" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });
@@ -295,14 +335,14 @@ describe("keeper coverage store", () => {
   it("returns none when no coverage exists", () => {
     const store = createKeeperCoverageStore();
     expect(store.get("s1")).toBeNull();
-    const state = evaluateKeeperCoverage(null, ["e1", "e2", "e3"]);
+    const state = evaluateKeeperCoverage(null, ["e1", "e2", "e3"], { branchEntryIds: [], blocks: [] });
     expect(state.status).toBe("none");
     expect(state.uncovered).toEqual(["e1", "e2", "e3"]);
   });
 
   it("extends coverage with entry IDs", () => {
     const store = createKeeperCoverageStore();
-    store.extend("s1", ["e1", "e2", "e3"]);
+    store.extend("s1", ["e1", "e2", "e3"], { branchEntryIds: ["e1", "e2", "e3"], blocks: [] });
     const entry = store.get("s1");
     expect(entry).not.toBeNull();
     expect(entry!.coveredEntryIds.has("e1")).toBe(true);
@@ -312,8 +352,8 @@ describe("keeper coverage store", () => {
 
   it("accumulates coverage across multiple extends", () => {
     const store = createKeeperCoverageStore();
-    store.extend("s1", ["e1", "e2"]);
-    store.extend("s1", ["e3", "e4"]);
+    store.extend("s1", ["e1", "e2"], { branchEntryIds: ["e1", "e2"], blocks: [] });
+    store.extend("s1", ["e3", "e4"], { branchEntryIds: ["e1", "e2", "e3", "e4"], blocks: [] });
     const entry = store.get("s1");
     expect(entry!.coveredEntryIds.size).toBe(4);
     expect(entry!.coveredEntryIds.has("e4")).toBe(true);
@@ -321,9 +361,9 @@ describe("keeper coverage store", () => {
 
   it("reports ready when all removed entries are covered", () => {
     const store = createKeeperCoverageStore();
-    store.extend("s1", ["e1", "e2", "e3", "e4", "e5"]);
+    store.extend("s1", ["e1", "e2", "e3", "e4", "e5"], { branchEntryIds: ["e1", "e2", "e3", "e4", "e5"], blocks: [] });
     const entry = store.get("s1");
-    const state = evaluateKeeperCoverage(entry, ["e1", "e2", "e3"]);
+    const state = evaluateKeeperCoverage(entry, ["e1", "e2", "e3"], { branchEntryIds: ["e1", "e2", "e3", "e4", "e5"], blocks: [] });
     expect(state.status).toBe("ready");
     expect(state.uncovered).toHaveLength(0);
   });
@@ -331,16 +371,16 @@ describe("keeper coverage store", () => {
   it("reports partial when some removed entries are not covered", () => {
     const store = createKeeperCoverageStore();
     // Keeper only processed e3-e5, but compaction removes e1-e4
-    store.extend("s1", ["e3", "e4", "e5"]);
+    store.extend("s1", ["e3", "e4", "e5"], { branchEntryIds: ["e1", "e2", "e3", "e4", "e5"], blocks: [] });
     const entry = store.get("s1");
-    const state = evaluateKeeperCoverage(entry, ["e1", "e2", "e3", "e4"]);
+    const state = evaluateKeeperCoverage(entry, ["e1", "e2", "e3", "e4"], { branchEntryIds: ["e1", "e2", "e3", "e4", "e5"], blocks: [] });
     expect(state.status).toBe("partial");
     expect(state.uncovered).toEqual(["e1", "e2"]);
   });
 
   it("clears coverage for a session", () => {
     const store = createKeeperCoverageStore();
-    store.extend("s1", ["e1", "e2"]);
+    store.extend("s1", ["e1", "e2"], { branchEntryIds: ["e1", "e2"], blocks: [] });
     store.clear("s1");
     expect(store.get("s1")).toBeNull();
   });
@@ -362,14 +402,14 @@ describe("handleBeforeCompact with coverage", () => {
       updatedBy: "memory-agent",
     });
     const coverage = createKeeperCoverageStore();
-    // Keeper processed entries e1 through e10
-    coverage.extend("s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10"]);
+    // Keeper processed the complete active branch.
+    await extendCoverage(coverage, "s1", ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"]);
     const result = await handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"] });
+    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], mode: "takeover" });
     expect(result.summary).toContain("Working");
   });
 
@@ -383,7 +423,7 @@ describe("handleBeforeCompact with coverage", () => {
       updatedBy: "memory-agent", sourceLeafId: "b",
     });
     const coverage = createKeeperCoverageStore();
-    coverage.extend("s1", ["root", "a"]);
+    await extendCoverage(coverage, "s1", ["root", "a"], ["root", "a"]);
     const result = await handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
@@ -394,9 +434,89 @@ describe("handleBeforeCompact with coverage", () => {
       tokensBefore: 1000,
       branchEntryIds: ["root", "a", "kept"],
       removedEntryIds: ["root", "a"],
+      mode: "takeover",
     });
     expect(result.summary).toContain("branch A");
     expect(result.summary).not.toContain("branch B");
+  });
+
+  it("rejects takeover when a visible block revision changes after keeper coverage", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "keeper state",
+      updatedBy: "memory-agent", sourceLeafId: "a",
+    });
+    const coverage = createKeeperCoverageStore();
+    await extendCoverage(coverage, "s1", ["root", "a"], ["root", "a"]);
+    await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "user changed state",
+      updatedBy: "user", sourceLeafId: "a",
+    });
+    await expect(handleBeforeCompact("s1", {
+      store,
+      settings: TAKEOVER_SETTINGS,
+      getFacts: async () => emptyFacts,
+      coverageStore: coverage,
+    }, {
+      firstKeptEntryId: "kept",
+      tokensBefore: 1000,
+      branchEntryIds: ["root", "a", "kept"],
+      removedEntryIds: ["root", "a"],
+      mode: "takeover",
+    })).rejects.toMatchObject({ harnessCode: "unavailable" });
+  });
+
+  it("rejects sibling-branch coverage even when entry names and block content overlap", async () => {
+    await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "branch A",
+      updatedBy: "memory-agent", sourceLeafId: "a",
+    });
+    await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "branch B",
+      updatedBy: "memory-agent", sourceLeafId: "b",
+    });
+    const coverage = createKeeperCoverageStore();
+    await extendCoverage(coverage, "s1", ["root"], ["root", "a"]);
+    await expect(handleBeforeCompact("s1", {
+      store,
+      settings: TAKEOVER_SETTINGS,
+      getFacts: async () => emptyFacts,
+      coverageStore: coverage,
+    }, {
+      firstKeptEntryId: "kept",
+      tokensBefore: 1000,
+      branchEntryIds: ["root", "b", "kept"],
+      removedEntryIds: ["root"],
+      mode: "takeover",
+    })).rejects.toThrow(/wrong-branch/);
+  });
+
+  it("falls back after Host restart and recovers after the next accepted keeper update", async () => {
+    const block = await store.upsertBlock({
+      sessionId: "s1", label: "progress", content: "durable keeper state",
+      updatedBy: "memory-agent", sourceLeafId: "a",
+    });
+    const restartedCoverage = createKeeperCoverageStore();
+    const preparation = {
+      firstKeptEntryId: "kept",
+      tokensBefore: 1000,
+      branchEntryIds: ["root", "a", "kept"],
+      removedEntryIds: ["root", "a"],
+      mode: "takeover" as const,
+    };
+    const deps = {
+      store,
+      settings: TAKEOVER_SETTINGS,
+      getFacts: async () => emptyFacts,
+      coverageStore: restartedCoverage,
+    };
+    await expect(handleBeforeCompact("s1", deps, preparation)).rejects.toThrow(/coverage is none/);
+    restartedCoverage.extend("s1", ["root", "a"], {
+      branchEntryIds: preparation.branchEntryIds,
+      blocks: [{ label: block.label, revision: block.updatedAt }],
+    });
+    await expect(handleBeforeCompact("s1", deps, preparation)).resolves.toMatchObject({
+      firstKeptEntryId: "kept",
+    });
   });
 
   it("rejects takeover when coverage is partial", async () => {
@@ -405,14 +525,14 @@ describe("handleBeforeCompact with coverage", () => {
       updatedBy: "memory-agent",
     });
     const coverage = createKeeperCoverageStore();
-    // Only covered e5-e10, but removing e1-e7
-    coverage.extend("s1", ["e5", "e6", "e7", "e8", "e9", "e10"]);
+    // Only covered e5-e8, but compaction removes e1-e7.
+    await extendCoverage(coverage, "s1", ["e5", "e6", "e7", "e8"], ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"]);
     await expect(handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], mode: "takeover" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });
@@ -429,7 +549,7 @@ describe("handleBeforeCompact with coverage", () => {
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], removedEntryIds: ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], mode: "takeover" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });
@@ -440,14 +560,14 @@ describe("handleBeforeCompact with coverage", () => {
       updatedBy: "memory-agent",
     });
     const coverage = createKeeperCoverageStore();
-    coverage.extend("s1", ["e1", "e2"]);
+    await extendCoverage(coverage, "s1", ["e1", "e2"], ["e8"]);
     // An empty removal range cannot authorize takeover.
     await expect(handleBeforeCompact("s1", {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
       coverageStore: coverage,
-    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e8"], removedEntryIds: [] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e8"], removedEntryIds: [], mode: "takeover" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });
@@ -462,7 +582,7 @@ describe("handleBeforeCompact with coverage", () => {
       store,
       settings: TAKEOVER_SETTINGS,
       getFacts: async () => emptyFacts,
-    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e8"], removedEntryIds: ["e1", "e2"] })).rejects.toMatchObject({
+    }, { firstKeptEntryId: "e8", tokensBefore: 1000, branchEntryIds: ["e1", "e2", "e8"], removedEntryIds: ["e1", "e2"], mode: "takeover" })).rejects.toMatchObject({
       harnessCode: "unavailable",
     });
   });

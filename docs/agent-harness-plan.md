@@ -48,7 +48,7 @@ Last updated: 2026-09-06
     bun run test:docs
     bun run docs:validate
 
-本次文档任务只运行 test:docs、docs:validate 与 git diff --check；不运行模型、迁移或 runtime 全量测试。
+按本轮实际改动选择命令；文档改动跑文档检查，运行时改动补所属包类型与定向行为验证，不因计划文件列出命令就机械跑全仓。
 
 ### 0.4 不变量
 
@@ -86,17 +86,17 @@ Last updated: 2026-09-06
 
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
-1. **工作状态与集成（3.4/3.5）**：修 merge 固定结果读取，接原生状态、迁移、可撤销集成与物化生命周期。D-077 的 setup/回收/
-   占用同路推进，非 Git 和无首次 commit 后端是正式任务。
-2. **默认记忆与配置（2.4/2.6）**：利用 D-076 版本/分支/覆盖，补必要来源检查、失败诊断、单会话模式和默认/旧设置迁移。
-   record-only、T4 自动执行器、完整跨 runtime RunManifest 都不阻塞。
-3. **窗口读取与 explore（3.2）**：自动消息来源、版本草稿、分支读视图；可用搜索/LSP/符号来源先交付，缺覆盖就返回正文，不等
+1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化与安全回收已进入生产链；
+   窗口草稿、虚拟分支工具、空间总预算和归档产品面随对应消费者继续。
+2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
+   分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
+3. **当前：窗口读取与 explore（3.2）**：自动消息来源、版本草稿、分支读视图；可用搜索/LSP/符号来源先交付，缺覆盖就返回正文，不等
    全图/向量/索引/BM25 基线。模型增强按槽位接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
 
 TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台与外部 provider 的未验证范围如实报告，不把缺另一平台机器
-写成已验证平台的禁用条件。不自行发起付费记忆实验。本轮仅写文档是当前任务范围，不是后续实施任务的停工指令。
+写成已验证平台的禁用条件。不自行发起付费记忆实验；完成一个切片后按本节顺序继续，不把文档同步解释为停工点。
 
 ## 阶段 0 / 1 / 1b 与 P0：已交付入口
 
@@ -156,16 +156,18 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 模型调度在 pi-host，Host memory-agent/KnowledgeStore 校验写块。保持活动模型与 memory_edit，不建第二个凭据栈。
 复用 D-076 最近祖先/COW/tombstone/CAS/修订前传和实际 entry 覆盖，keeper 只 mark_plan，主 agent 无维护义务。
 
-新配置默认维护、注入 Zone 2，并允许通过 2.6 检查的接管。设置区分 off/record-only/assist/takeover；record-only 可后补，
-不要求先跑 shadow。已有显式 shadowMode:true 保持 assist、明确关闭保留，缺省采用新默认。迁移从原始设置与版本判断；
-来源不明的旧值保留原行为，不能从解析后的默认 false 猜用户意图。单会话覆盖/实际配置记录沿 launch 实现，不暗改全局设置。
+现行设置区分 `off/assist/takeover`，缺省 `takeover`。`off` 不维护或注入 memory blocks，`assist` 维护并注入但由 Pi 压缩，
+`takeover` 在同一路径上通过 2.6 的逐次检查后接管。旧 `shadowMode:false/true` 分别迁移为 `off/assist`，显式 mode 优先；错误值
+拒绝而非猜测。memory 是 user-only；全局值对继承中的活动会话实时生效，session-wide 覆盖独立持久并可恢复继承，不暗改全局设置。
+`record-only` 可按实际诊断需求后补，不是现行模式或前置。
 
-辅助调用保留执行和失败诊断所需的模型、结局、有效操作/拒绝原因，UI 显示实际模式与需要处理的失败；不新增辅助费用或 Token
-看板，普通会话已有费用/Token 展示保留（D-080）。不承诺相同模型就命中缓存。事件加速接 steering、计划编辑、子返回、真实命令完成；沿已有 token 增长/单个
-在飞/去抖调度，有积压才工作，用户“记住这个”不被普通去抖忽略。
+SessionSnapshot 与 Context 已显示配置/有效模式、session override 和最近 keeper/compaction 失败；Host 拒绝原因进入失败信息，
+Settings 可修复坏配置。不新增辅助费用或 Token 看板，普通会话已有费用/Token 展示保留（D-080）。
+不承诺相同模型就命中缓存。事件加速接 steering、计划编辑、子返回、真实命令完成；沿已有 token 增长/单个在飞/去抖调度，
+有积压才工作，用户“记住这个”不被普通去抖忽略。
 
-验证旧操作冲突、兄弟隔离、分支删除、partial apply 不推进覆盖、主历史无 memory_edit、默认/关闭/assist 与失败投影。
-使用现有真 Pi faux-provider，不做付费协议/缓存对照，不等测试者批准。
+版本/分支/CAS、partial apply、主历史无 memory_edit、默认/关闭/assist、实时模式与失败投影已由 protocol、Host 和真 Pi
+faux-provider 测试覆盖。剩余触发优化随实际事件入口推进，不做付费协议/缓存对照，不等测试者批准。
 
 ### 2.5 todo 与计划面板
 
@@ -174,12 +176,15 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 
 ### 2.6 压缩默认接线
 
-D-022 已验证 Pi 消费扩展 compaction 并跳过默认摘要，不重复前置实验。沿 compaction.before/after 和 Pi preparation 安全
-切点，检查实际 removedEntryIds。当前分支、块修订、覆盖和必要来源一致才组装；缺失仅该次交还 Pi，不拆 tool call/result。
+D-022 已验证 Pi 消费扩展 compaction 并跳过默认摘要。当前实现沿 compaction.before/after 和 Pi preparation 安全切点推导
+实际 removedEntryIds；已接受 keeper 更新的 context entry、完整分支祖先路径与所有可见 block 修订必须同时匹配，才组装接管结果。
+缺失、不连续、错分支或修订漂移只让该次交还 Pi，不拆 tool call/result。
 
-D-076 水位在 Host 内存，重启重新维护或使用 Pi，不先建通用持久 checkpoint。补来源可读状态与压缩后版本化恢复，OutputRef
-过期不能当正文，TranscriptRef 不保证截断全文；直接扩展现有服务。off/record-only/assist 明确不接管，更新默认连同配置/UI，
-不只删条件。验证覆盖缺口、连续压缩、来源过期、分支冲突、Host 重启、用户模式和请求前缀。没有 T4 门槛。
+D-076 水位留在 Host 内存，重启后本次使用 Pi，下一次 material keeper 更新重新建立证据，不先建伪持久 checkpoint。
+Host facts 只采事件 authority 能可靠证明的 touched files；诊断没有 resolution authority、恢复没有 session checkpoint 查询时返回空，
+不冒充当前事实。`off/assist` 明确不接管，默认 `takeover` 与配置/UI 已接。覆盖缺口、连续压缩、block 修订漂移、错分支、Host 重启、
+用户模式和 Pi fallback 已有定向验证；来源恢复能力随真实消费者继续，OutputRef 过期不能当正文，TranscriptRef 不保证截断全文。
+没有 T4 门槛。
 provider 原生上下文编辑按实际 API 使用，缺能力不阻塞本地压缩。
 
 ### 2.7 知识建议与管理

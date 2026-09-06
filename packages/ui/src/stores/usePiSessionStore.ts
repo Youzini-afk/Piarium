@@ -1265,7 +1265,21 @@ export const createPiSessionStore = (
           lastError: null,
           records: upsertRecord(state.records, sessionId, (current) => ({
             ...current,
-            snapshot: updateSnapshot(current.snapshot, { features: result }),
+            snapshot: updateSnapshot(current.snapshot, {
+              features: result,
+              ...(mutation.type === 'memory.mode.set' && current.snapshot?.harness?.memory
+                ? {
+                    harness: {
+                      ...current.snapshot.harness,
+                      memory: {
+                        configuredMode: current.snapshot.harness.memory.configuredMode,
+                        effectiveMode: result.memoryMode ?? current.snapshot.harness.memory.configuredMode,
+                        ...(result.memoryMode === undefined ? {} : { overrideMode: result.memoryMode }),
+                      },
+                    },
+                  }
+                : {}),
+            }),
           })),
         }));
         return result;

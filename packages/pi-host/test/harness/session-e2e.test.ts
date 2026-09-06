@@ -390,7 +390,78 @@ describe("session e2e — zone2 extension", () => {
   });
 });
 
-describe("session e2e — memory shadow extension", () => {
+describe("session e2e — memory keeper extension", () => {
+  it("projects the new default, legacy migration, live global setting, and session override", async () => {
+    await withTempRoot("piarium-s-memory-mode-", async (root) => {
+      const faux = registerFauxProvider();
+      let session: Awaited<ReturnType<typeof setupSession>> | undefined;
+      try {
+        session = await setupSession({ root, faux });
+        const created = await session.host.create(root);
+        assert.deepEqual(created.harness?.memory, {
+          configuredMode: "takeover",
+          effectiveMode: "takeover",
+        });
+
+        const overridden = session.host.mutateFeatures(created.sessionId, {
+          mode: "off",
+          type: "memory.mode.set",
+        });
+        assert.equal(overridden.memoryMode, "off");
+        assert.deepEqual(session.host.snapshot().harness?.memory, {
+          configuredMode: "takeover",
+          effectiveMode: "off",
+          overrideMode: "off",
+        });
+
+        const settings = await session.host.getSettings();
+        await assert.rejects(
+          session.host.updateSettings("global", {
+            harness: { memory: { mode: "automatic" } },
+          }, [], settings.globalRevision),
+          /harness\.memory\.mode must be one of/,
+        );
+        await session.host.updateSettings("global", {
+          harness: { memory: { mode: "assist" } },
+        }, [], settings.globalRevision);
+        assert.deepEqual(session.host.snapshot().harness?.memory, {
+          configuredMode: "assist",
+          effectiveMode: "off",
+          overrideMode: "off",
+        });
+        session.host.mutateFeatures(created.sessionId, {
+          mode: "inherit",
+          type: "memory.mode.set",
+        });
+        assert.deepEqual(session.host.snapshot().harness?.memory, {
+          configuredMode: "assist",
+          effectiveMode: "assist",
+        });
+        await session.dispose();
+        session = undefined;
+
+        await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
+          harness: { memory: { shadowMode: false } },
+        }), "utf8");
+        session = await setupSession({ root, faux });
+        const legacyOff = await session.host.create(root);
+        assert.equal(legacyOff.harness?.memory.configuredMode, "off");
+        await session.dispose();
+        session = undefined;
+
+        await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
+          harness: { memory: { shadowMode: true } },
+        }), "utf8");
+        session = await setupSession({ root, faux });
+        const legacyAssist = await session.host.create(root);
+        assert.equal(legacyAssist.harness?.memory.configuredMode, "assist");
+      } finally {
+        await session?.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
   it("uses the active session model to maintain blocks without taking over the conversation", async () => {
     await withTempRoot("piarium-s-memory-shadow-", async (root) => {
       const agentDir = join(root, "agent");
@@ -432,6 +503,77 @@ describe("session e2e — memory shadow extension", () => {
         assert.equal(keeperContexts[0]!.tools?.[0]?.name, "memory_edit");
         assert.match((await store.getBlocks(snapshot.sessionId))[0]!.content, /long turn is complete/);
         assert.doesNotMatch(JSON.stringify(session.host.session.messages), /memory_edit/);
+      } finally {
+        await session.dispose();
+        await store.close();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("projects a rejected keeper apply while the real Pi conversation continues", async () => {
+    await withTempRoot("piarium-s-memory-failure-", async (root) => {
+      const store = await openWorkspaceKnowledge({
+        dataDir: join(root, "data"),
+        hostId: "memory-failure-host",
+        workspaceId: WORKSPACE_ID,
+        embedding: null,
+      });
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage("x".repeat(50_000)),
+        () => fauxAssistantMessage([fauxToolCall("memory_edit", {
+          ops: [{ op: "create", block: "Invalid!", content: "rejected" }],
+        })]),
+        () => fauxAssistantMessage(`${"y".repeat(50_000)} the next user turn still completed`),
+        () => fauxAssistantMessage("Pi fallback summary after unavailable Host compaction"),
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: {
+          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
+        },
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "produce a long answer");
+        await session.host.session.waitForIdle();
+        await waitUntil(async () => session.host.snapshot().harness?.memory.lastFailure?.phase === "keeper");
+        assert.match(
+          session.host.snapshot().harness?.memory.lastFailure?.message ?? "",
+          /Invalid block name/,
+        );
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
+        assert.equal(
+          session.host.snapshot().harness?.memory.lastFailure,
+          undefined,
+          "a deliberate mode change must retire failures from the previous mode",
+        );
+        await session.host.prompt(snapshot.sessionId, "continue after the background failure");
+        await session.host.session.waitForIdle();
+        assert.match(JSON.stringify(session.host.session.messages), /next user turn still completed/);
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
+        await session.host.session.compact();
+        assert.equal(session.host.snapshot().harness?.memory.lastFailure?.phase, "compaction");
+        let settings = await session.host.getSettings();
+        await session.host.updateSettings("global", {
+          harness: { tools: { grep: false } },
+        }, [], settings.globalRevision);
+        assert.equal(
+          session.host.snapshot().harness?.memory.lastFailure?.phase,
+          "compaction",
+          "an unrelated Harness setting must not hide a memory failure",
+        );
+        settings = await session.host.getSettings();
+        await session.host.updateSettings("global", {
+          harness: { memory: { mode: "assist" }, tools: { grep: false } },
+        }, [], settings.globalRevision);
+        assert.equal(
+          session.host.snapshot().harness?.memory.lastFailure,
+          undefined,
+          "a successful global memory setting update must retire the previous mode's failure",
+        );
       } finally {
         await session.dispose();
         await store.close();
@@ -898,7 +1040,7 @@ describe("session e2e — Harness counters", () => {
 async function runCompactionCase(options: {
   root: string;
   compactionDepsProvider: (sessionId: string) => Promise<CompactionHandlerDeps>;
-}): Promise<{ callsBefore: number; callsAfter: number; messagesJson: string }> {
+}): Promise<{ callsBefore: number; callsAfter: number; messagesJson: string; snapshot: ReturnType<SessionHost["snapshot"]> }> {
   const faux = registerFauxProvider();
   const largeText = "x".repeat(30000); // ~7500 tokens per response
   faux.setResponses([
@@ -917,18 +1059,27 @@ async function runCompactionCase(options: {
   // the full conversation history.
   const { createKeeperCoverageStore } = await import("../../../web/application-host/lib/harness/compaction.js");
   const keeperCoverageStore = createKeeperCoverageStore();
+  const compactionDeps = new Map<string, CompactionHandlerDeps>();
+  const resolveCompactionDeps = async (sessionId: string): Promise<CompactionHandlerDeps> => {
+    const existing = compactionDeps.get(sessionId);
+    if (existing) return existing;
+    const created = await options.compactionDepsProvider(sessionId);
+    compactionDeps.set(sessionId, created);
+    return created;
+  };
 
   const session = await setupSession({
     root: options.root,
     faux,
     serviceHostOptions: {
-      compactionDepsProvider: options.compactionDepsProvider,
+      compactionDepsProvider: resolveCompactionDeps,
       keeperCoverageStore,
     },
   });
 
   try {
     const snapshot = await session.host.create(options.root);
+    session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
     for (const prompt of ["turn 1", "turn 2", "turn 3", "say done"]) {
       await session.host.prompt(snapshot.sessionId, prompt);
       await session.host.session.waitForIdle();
@@ -938,13 +1089,21 @@ async function runCompactionCase(options: {
     // Pi materializes into context, rather than the complete append-only branch.
     const contextEntryIds = session.host.session.sessionManager.buildContextEntries()
       .flatMap((entry) => sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []);
-    keeperCoverageStore.extend(snapshot.sessionId, contextEntryIds);
+    const branchEntryIds = session.host.session.sessionManager.getBranch().map((entry) => entry.id);
+    const deps = await resolveCompactionDeps(snapshot.sessionId);
+    const blocks = await deps.store.getBlocks(snapshot.sessionId, branchEntryIds);
+    keeperCoverageStore.extend(snapshot.sessionId, contextEntryIds, {
+      branchEntryIds,
+      blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
+    });
+    session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
     await session.host.session.compact();
     const callsAfter = faux.state.callCount;
     return {
       callsBefore,
       callsAfter,
       messagesJson: JSON.stringify(session.host.session.messages),
+      snapshot: session.host.snapshot(),
     };
   } finally {
     await session.dispose();
@@ -984,7 +1143,7 @@ describe("session e2e — compaction extension", () => {
             });
             return {
               store: openStore,
-              settings: { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true },
+              settings: DEFAULT_COMPACTION_SETTINGS,
               getFacts: async (): Promise<CompactionFacts> => ({
                 touchedFiles: ["a.ts"],
                 unresolvedDiagnostics: [],
@@ -1009,6 +1168,7 @@ describe("session e2e — compaction extension", () => {
           result.callsBefore,
           "taking compaction over must cost zero model calls",
         );
+        assert.equal(result.snapshot.harness?.memory.lastFailure, undefined);
       } finally {
         await store?.close();
       }
@@ -1038,7 +1198,7 @@ describe("session e2e — compaction extension", () => {
             });
             return {
               store: openStore,
-              settings: { ...DEFAULT_COMPACTION_SETTINGS, takeoverEnabled: true },
+              settings: DEFAULT_COMPACTION_SETTINGS,
               getFacts: async (): Promise<CompactionFacts> => ({
                 touchedFiles: ["a.ts"],
                 unresolvedDiagnostics: [],
@@ -1060,8 +1220,99 @@ describe("session e2e — compaction extension", () => {
           result.callsAfter > result.callsBefore,
           `Pi must run its own summarization (calls ${result.callsBefore} → ${result.callsAfter})`,
         );
+        assert.equal(result.snapshot.harness?.memory.lastFailure?.phase, "compaction");
+        assert.match(result.snapshot.harness?.memory.lastFailure?.message ?? "", /no memory-keeper blocks/);
       } finally {
         await store?.close();
+      }
+    });
+  });
+
+  it("takes over two consecutive compactions after coverage is rebuilt", async () => {
+    await withTempRoot("piarium-s-compact-twice-", async (root) => {
+      const store = await openWorkspaceKnowledge({
+        dataDir: join(root, "data"),
+        hostId: "twice-host",
+        workspaceId: WORKSPACE_ID,
+        embedding: null,
+      });
+      const faux = registerFauxProvider();
+      const largeText = "x".repeat(30_000);
+      faux.setResponses([
+        () => fauxAssistantMessage(`${largeText} first 1`),
+        () => fauxAssistantMessage(`${largeText} first 2`),
+        () => fauxAssistantMessage(`${largeText} first 3`),
+        () => fauxAssistantMessage("first done"),
+        () => fauxAssistantMessage(`${largeText} second 1`),
+        () => fauxAssistantMessage(`${largeText} second 2`),
+        () => fauxAssistantMessage(`${largeText} second 3`),
+        () => fauxAssistantMessage("second done"),
+        () => fauxAssistantMessage("unexpected Pi summary"),
+      ]);
+      const coverage = (await import("../../../web/application-host/lib/harness/compaction.js"))
+        .createKeeperCoverageStore();
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: {
+          keeperCoverageStore: coverage,
+          compactionDepsProvider: async () => ({
+            store,
+            settings: DEFAULT_COMPACTION_SETTINGS,
+            getFacts: async () => ({ touchedFiles: [], unresolvedDiagnostics: [], checkpoints: [] }),
+          }),
+        },
+      });
+      const coverCurrentBranch = async (sessionId: string, marker: string): Promise<void> => {
+        const branchEntryIds = session.host.session.sessionManager.getBranch().map((entry) => entry.id);
+        const contextEntryIds = session.host.session.sessionManager.buildContextEntries()
+          .flatMap((entry) => sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []);
+        const sourceLeafId = branchEntryIds.at(-1) ?? null;
+        await store.upsertBlock({
+          sessionId,
+          label: "progress",
+          content: marker,
+          updatedBy: "memory-agent",
+          branchEntryIds,
+          sourceLeafId,
+        });
+        const blocks = await store.getBlocks(sessionId, branchEntryIds);
+        coverage.extend(sessionId, contextEntryIds, {
+          branchEntryIds,
+          blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
+        });
+      };
+      try {
+        const snapshot = await session.host.create(root);
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
+        for (const prompt of ["first 1", "first 2", "first 3", "first done"]) {
+          await session.host.prompt(snapshot.sessionId, prompt);
+          await session.host.session.waitForIdle();
+        }
+        await coverCurrentBranch(snapshot.sessionId, "first-compaction-marker");
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
+        const callsBeforeFirst = faux.state.callCount;
+        await session.host.session.compact();
+        assert.equal(faux.state.callCount, callsBeforeFirst);
+        assert.equal(coverage.get(snapshot.sessionId), null, "compaction.after must clear old coverage");
+
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
+        for (const prompt of ["second 1", "second 2", "second 3", "second done"]) {
+          await session.host.prompt(snapshot.sessionId, prompt);
+          await session.host.session.waitForIdle();
+        }
+        await coverCurrentBranch(snapshot.sessionId, "second-compaction-marker");
+        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
+        const callsBeforeSecond = faux.state.callCount;
+        await session.host.session.compact();
+        assert.equal(faux.state.callCount, callsBeforeSecond);
+        const messages = JSON.stringify(session.host.session.messages);
+        assert.match(messages, /second-compaction-marker/);
+        assert.equal(session.host.snapshot().harness?.memory.lastFailure, undefined);
+      } finally {
+        await session.dispose();
+        await store.close();
+        faux.unregister();
       }
     });
   });

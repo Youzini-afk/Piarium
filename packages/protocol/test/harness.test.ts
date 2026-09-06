@@ -11,6 +11,7 @@ import {
   type HarnessServiceMap,
   type FsLockParams,
   type FsLockResult,
+  type HarnessRuntimeState,
 } from "../src/index.js";
 
 describe("harness protocol", () => {
@@ -38,6 +39,7 @@ describe("harness protocol", () => {
     const compact = {
       branchEntryIds: ["entry-1"],
       firstKeptEntryId: "entry-1",
+      mode: "takeover",
       removedEntryIds: [],
       tokensBefore: 100,
     } satisfies HarnessServiceMap["compaction.before"]["params"];
@@ -48,6 +50,18 @@ describe("harness protocol", () => {
   it("keeps authorization, expiry, absence, and service failure distinct", () => {
     const codes: HarnessError["code"][] = ["forbidden", "denied", "expired", "not-found", "unavailable", "failed"];
     assert.equal(new Set(codes).size, codes.length);
+  });
+
+  it("defines the optional snapshot projection for memory runtime state", () => {
+    const harness = {
+      memory: {
+        configuredMode: "takeover",
+        effectiveMode: "assist",
+        overrideMode: "assist",
+        lastFailure: { phase: "keeper", message: "block conflict", at: 1 },
+      },
+    } satisfies HarnessRuntimeState;
+    assert.equal(harness.memory.effectiveMode, "assist");
   });
 
   it("uses a batch acquire and lease-only release contract for path locks", () => {

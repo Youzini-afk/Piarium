@@ -60,12 +60,17 @@ if (isOpenAIFamily) {
   `pi-permission-system`. It resolves the plugin's session-keyed service on every
   call and yields completely while that service is active, so there is one
   approval owner rather than two dialogs. Smart mode is part of this fallback.
-- `createMemoryAgentExtension` — user-enabled shadow observer. It captures the
-  real session context at Pi hooks, calls the active model in the background,
-  and submits only `memory_edit` operations plus the active ancestor path and
-  exact context-producing entry IDs to Host validation. Its tool call
-  and response never enter the main conversation, and it does not enable
-  compaction takeover.
+- `createMemoryAgentExtension` — background memory keeper. It captures the real
+  session context at Pi hooks, calls the active model, and submits only
+  `memory_edit` operations plus the active ancestor path and exact
+  context-producing entry IDs to Host validation. Its tool call and response
+  never enter the main conversation. The effective `off | assist | takeover`
+  mode is read at every hook boundary; `off` also excludes stored blocks from
+  Zone 2, while only `takeover` asks the Host for a compaction replacement.
+- `createCompactionExtension` — derives Pi's actual removed context entries and
+  accepts a Host replacement only in `takeover` mode. Missing coverage, branch
+  drift, block-revision drift, or Host unavailability leaves that compaction to
+  Pi and reports the failure through the session memory runtime state.
 
 ## HostServicesBridge
 

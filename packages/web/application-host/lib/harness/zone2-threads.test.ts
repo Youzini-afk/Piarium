@@ -104,7 +104,7 @@ describe("Zone 2 thread projection", () => {
         },
       }),
     } as unknown as HarnessServiceHost;
-    const result = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [] }, {
+    const result = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [], memoryMode: "assist" }, {
       actor: {
         authorityInstanceId: "authority",
         sessionId: PARENT.id,
@@ -122,12 +122,12 @@ describe("Zone 2 thread projection", () => {
   });
 
   it("calculates overlapWarning when multiple active threads touch overlapping paths", async () => {
-    const thread1 = await registry.createThread(input({
+    await registry.createThread(input({
       brief: "task 1",
       scope: ["packages/web/index.ts", "packages/web/utils.ts"],
       worktree: "none",
     }));
-    const thread2 = await registry.createThread(input({
+    await registry.createThread(input({
       brief: "task 2",
       scope: ["packages/web/utils.ts", "packages/web/other.ts"],
       worktree: "none",

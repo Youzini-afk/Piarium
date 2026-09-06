@@ -51,7 +51,7 @@ import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
-import { DEFAULT_COMPACTION_SETTINGS, createKeeperCoverageStore, type CompactionHandlerDeps, type CompactionFacts } from './lib/harness/compaction.js';
+import { DEFAULT_COMPACTION_SETTINGS, collectCompactionFacts, createKeeperCoverageStore, type CompactionHandlerDeps } from './lib/harness/compaction.js';
 import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
@@ -1470,11 +1470,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       store,
       settings: DEFAULT_COMPACTION_SETTINGS,
       coverageStore: keeperCoverageStore,
-      getFacts: async (): Promise<CompactionFacts> => ({
-        touchedFiles: [],
-        unresolvedDiagnostics: [],
-        checkpoints: [],
-      }),
+      getFacts: () => collectCompactionFacts(store, sessionId),
     };
   }
 

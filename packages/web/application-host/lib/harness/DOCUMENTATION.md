@@ -126,8 +126,15 @@ Blocks are branch revisions: readers choose the closest ancestor revision for
 each label, descendant writes copy on write, and deletes create branch-local
 tombstones. UI routes resolve the active Pi branch on the Host rather than
 accepting branch identity from the renderer. Keeper coverage records only the
-context-producing session entries used by a fully accepted material update;
-compaction checks Pi's actual removal boundary and otherwise falls back.
+context-producing session entries used by a fully accepted material update,
+together with that update's complete branch path and visible block revisions.
+Compaction rechecks Pi's actual removal boundary, branch, and block revisions;
+any mismatch falls back to Pi for that request. Coverage remains an in-memory
+observation, is cleared after compaction, and is rebuilt by the next material
+keeper update rather than pretending to survive a Host restart. Compaction
+facts currently expose only reliably recorded touched files; diagnostics
+without resolution events and recovery checkpoints without a session query
+are omitted.
 Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
@@ -188,6 +195,6 @@ The harness is wired in `packages/web/application-host/index.ts`:
   `ShellSupervisor` for the session.
 - **Drop**: `harnessServiceHost.dropSession()` disposes the shell supervisor
   and clears session-scoped output entries, observation cursors, and the
-  conservative in-memory keeper coverage watermark.
+  in-memory keeper coverage evidence.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.

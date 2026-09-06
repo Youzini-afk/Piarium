@@ -4,6 +4,7 @@ import {
   DEFAULT_MEMORY_AGENT_SETTINGS,
   createInitialMemoryAgentState,
   evaluateMemoryAgentGate,
+  type HarnessMemoryMode,
   type MemoryAgentSettings,
   type MemoryEditOp,
 } from "@piarium/protocol";
@@ -33,8 +34,9 @@ export const MEMORY_EDIT_TOOL = {
 
 export interface MemoryAgentExtensionOptions {
   bridge: HostServicesBridge;
-  enabled: boolean;
   callModel: (model: Model<Api> | undefined, context: Context, signal: AbortSignal) => Promise<MemoryEditOp[] | null>;
+  /** Read on every hook boundary so settings and session overrides apply live. */
+  getMode: () => HarnessMemoryMode;
   /**
    * Returns the current Pi session branch entry IDs (ancestor path from
    * root to current leaf), or null. Used for branch-aware block visibility
@@ -45,6 +47,8 @@ export interface MemoryAgentExtensionOptions {
   getContextEntryIds?: () => string[] | null;
   now?: () => number;
   onError?: (error: unknown) => void;
+  onFailure?: (message: string) => void;
+  onSuccess?: () => void;
   settings?: MemoryAgentSettings;
 }
 
@@ -54,7 +58,6 @@ const keeperInstruction = (cursorTurn: number, blocks: Array<{ label: string; co
 
 export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions): ExtensionFactory {
   return (pi) => {
-    if (!options.enabled) return;
     const settings = options.settings ?? DEFAULT_MEMORY_AGENT_SETTINGS;
     const now = options.now ?? Date.now;
     const state = createInitialMemoryAgentState(settings);
@@ -70,6 +73,10 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
     };
 
     pi.on("context", (event) => {
+      if (options.getMode() === "off") {
+        latestMessages = [];
+        return;
+      }
       try {
         latestMessages = structuredClone(event.messages) as Message[];
       } catch {
@@ -78,7 +85,10 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
     });
 
     pi.on("turn_end", (event, ctx) => {
-      if (disposed) return;
+      if (disposed || options.getMode() === "off") {
+        latestMessages = [];
+        return;
+      }
       const stepToolCalls = event.message.role === "assistant"
         ? event.message.content.filter((part) => part.type === "toolCall").length
         : 0;
@@ -108,11 +118,13 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
       abortController = new AbortController();
       const task = (async () => {
         try {
+          if (options.getMode() === "off") return;
           const branchEntryIds = options.getBranchEntryIds?.() ?? [];
           const coveredEntryIds = options.getContextEntryIds?.() ?? [];
           const snapshot = await options.bridge.request<"memory.blocks.get">("memory.blocks.get", {
             branchEntryIds,
           });
+          if (options.getMode() === "off") return;
           // Attach the revision read at submission time so the Host can detect
           // stale writes if a user or agent edits the block between get and
           // apply. The Host uses the store's atomic expectedUpdatedAt CAS
@@ -126,9 +138,13 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
             ],
             tools: [MEMORY_EDIT_TOOL],
           }, abortController!.signal);
-          if (!ops || disposed) {
+          // A live switch to off revokes this background run before it can
+          // mutate Host state, even when the model has already returned.
+          if (disposed || options.getMode() === "off") return;
+          if (!ops) {
             state.lastRunChangedBlocks = false;
             state.interval = Math.min(state.interval * 1.5, settings.maxInterval);
+            options.onSuccess?.();
             return;
           }
           const opsWithRevision: MemoryEditOp[] = ops.map((op) => {
@@ -144,10 +160,22 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
             branchEntryIds,
             coveredEntryIds,
           });
+          if (applied.rejected > 0) {
+            options.onFailure?.(
+              applied.errors.join("; ") || `${applied.rejected} memory block operation(s) were rejected`,
+            );
+          } else {
+            options.onSuccess?.();
+          }
           state.lastRunChangedBlocks = applied.changedBlocks;
           state.interval = applied.changedBlocks
             ? settings.interval
             : Math.min(state.interval * 1.5, settings.maxInterval);
+        } catch (error) {
+          if (!disposed && options.getMode() !== "off") {
+            options.onFailure?.(error instanceof Error ? error.message : String(error));
+          }
+          throw error;
         } finally {
           state.hasRun = true;
           state.lastEndAt = now();

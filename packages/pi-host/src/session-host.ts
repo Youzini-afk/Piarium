@@ -74,6 +74,10 @@ import type {
   PiSessionEntry,
   PiSessionFeatureMutation,
   PiSessionFeatureState,
+  HarnessMemoryFailurePhase,
+  HarnessMemoryMode,
+  HarnessMemoryRuntimeFailure,
+  HarnessMemoryRuntimeState,
   SessionEntriesResult,
   SessionHeader,
   SessionSnapshot,
@@ -101,7 +105,7 @@ import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { createPermissionSystemStateBridgeExtension } from "./permission-system-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
-import { JsonObjectFileEditor } from "./json-object-file-editor.js";
+import { applyTopLevelJsonChanges, JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { FleetProviderRegistry, createFleetRegistryExtension } from "./fleet/registry.js";
@@ -146,7 +150,16 @@ import { createCompactionExtension } from "./harness/compaction-extension.js";
 import { createMemoryAgentExtension } from "./harness/memory-agent-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mergeHarnessSettings, parseMemoryEditOps, resolveRoles, type HarnessSettings, type MemoryEditOp, type ModelSelection } from "@piarium/protocol";
+import {
+  HarnessSettingsValidationError,
+  mergeHarnessSettings,
+  parseMemoryEditOps,
+  resolveHarnessMemoryMode,
+  resolveRoles,
+  type HarnessSettingsInput,
+  type MemoryEditOp,
+  type ModelSelection,
+} from "@piarium/protocol";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -612,6 +625,8 @@ export class SessionHost {
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
+  #memoryModeReader: (() => Omit<HarnessMemoryRuntimeState, "lastFailure">) | undefined;
+  #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -795,6 +810,7 @@ export class SessionHost {
       features: readSessionFeatures(session.sessionManager),
       followUp: [...session.getFollowUpMessages()],
       followUpMode: session.followUpMode,
+      harness: { memory: this.#memoryRuntimeState() },
       isCompacting: session.isCompacting,
       isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
@@ -1304,6 +1320,7 @@ export class SessionHost {
       const state = mutateSessionFeatures(this.session.sessionManager, mutation, {
         tokenBaseline: this.session.getSessionStats().tokens.total,
       });
+      if (mutation.type === "memory.mode.set") this.#memoryLastFailure = undefined;
       this.#emit("session.snapshot", this.snapshot());
       return state;
     } catch (error) {
@@ -2456,7 +2473,49 @@ export class SessionHost {
     const settingsPath = scope === "global"
       ? join(this.#agentDir, "settings.json")
       : join(this.runtime.cwd, ".pi", "settings.json");
-    await new JsonObjectFileEditor(settingsPath).updateRevisioned(
+    const editor = new JsonObjectFileEditor(settingsPath);
+    let globalMemorySettingChanged = false;
+    if (scope === "global") {
+      if (typeof set !== "object" || set === null || Array.isArray(set)) {
+        throw new HostError("invalid_config", "Configuration set must be an object");
+      }
+      const current = await editor.read();
+      const currentHarness = current.document.harness;
+      const currentMemory = typeof currentHarness === "object" && currentHarness !== null && !Array.isArray(currentHarness)
+        ? (currentHarness as Record<string, unknown>).memory
+        : undefined;
+      let currentMemoryMode: HarnessMemoryMode | undefined;
+      try {
+        currentMemoryMode = resolveHarnessMemoryMode(currentMemory);
+      } catch {
+        // A valid candidate may repair malformed persisted memory settings.
+      }
+      const candidate = applyTopLevelJsonChanges(
+        current.document,
+        set,
+        remove,
+      );
+      try {
+        const harness = candidate.harness;
+        if (harness !== undefined && (
+          typeof harness !== "object" || harness === null || Array.isArray(harness)
+        )) {
+          throw new HarnessSettingsValidationError("harness must be an object");
+        }
+        const memory = typeof harness === "object" && harness !== null && !Array.isArray(harness)
+          ? (harness as Record<string, unknown>).memory
+          : undefined;
+        const candidateMemoryMode = resolveHarnessMemoryMode(memory);
+        globalMemorySettingChanged = currentMemoryMode === undefined
+          || currentMemoryMode !== candidateMemoryMode;
+      } catch (error) {
+        if (error instanceof HarnessSettingsValidationError) {
+          throw new HostError("invalid_settings", error.message);
+        }
+        throw error;
+      }
+    }
+    await editor.updateRevisioned(
       set,
       remove,
       expectedRevision,
@@ -2469,7 +2528,9 @@ export class SessionHost {
         reloadErrors.map((entry) => entry.error.message).join("; "),
       );
     }
+    if (globalMemorySettingChanged) this.#memoryLastFailure = undefined;
     await this.session.reload();
+    this.#emit("session.snapshot", this.snapshot());
     return this.#settingsSnapshot();
   }
 
@@ -2677,6 +2738,7 @@ export class SessionHost {
 
   async #replaceWith(manager: SessionManager): Promise<void> {
     if (this.#disposed) throw new HostError("host_disposed", "Pi session host is disposed");
+    this.#memoryLastFailure = undefined;
     await this.#disposeRuntime();
     const cwd = manager.getCwd();
     const factory = this.#createRuntimeFactory();
@@ -2729,13 +2791,45 @@ export class SessionHost {
         projectTrusted: initialTrust,
       });
       // Read merged HarnessSettings from Pi settings (user + project)
-      const userHarness = (settingsManager.getGlobalSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {};
+      const userHarness = (settingsManager.getGlobalSettings() as { harness?: HarnessSettingsInput }).harness ?? {};
       const projectHarness = settingsManager.isProjectTrusted()
-        ? (settingsManager.getProjectSettings() as { harness?: Partial<HarnessSettings> }).harness ?? {}
+        ? (settingsManager.getProjectSettings() as { harness?: HarnessSettingsInput }).harness ?? {}
         : {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
+      const memoryModeReader = (): Omit<HarnessMemoryRuntimeState, "lastFailure"> => {
+        const currentHarness = (settingsManager.getGlobalSettings() as {
+          harness?: { memory?: unknown };
+        }).harness;
+        const configuredMode = resolveHarnessMemoryMode(currentHarness?.memory);
+        const overrideMode = readSessionFeatures(sessionManager).memoryMode;
+        return {
+          configuredMode,
+          effectiveMode: overrideMode ?? configuredMode,
+          ...(overrideMode === undefined ? {} : { overrideMode }),
+        };
+      };
+      this.#memoryModeReader = memoryModeReader;
       let permissionJudge: ((toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">) | undefined;
-      let callMemoryModel: ((model: Model<Api> | undefined, context: Context, signal: AbortSignal) => Promise<MemoryEditOp[] | null>) | undefined;
+      const serviceRef: { current?: AgentSessionServices } = {};
+      const callMemoryModel = async (
+        model: Model<Api> | undefined,
+        context: Context,
+        signal: AbortSignal,
+      ): Promise<MemoryEditOp[] | null> => {
+        if (!model) return null;
+        const modelRuntime = serviceRef.current?.modelRuntime;
+        if (!modelRuntime) throw new Error("Memory keeper model runtime is not ready");
+        const response = await modelRuntime.completeSimple(model, context, {
+          reasoning: "minimal",
+          signal,
+          toolChoice: "auto",
+        });
+        const call = response.content.find((part) => part.type === "toolCall" && part.name === "memory_edit");
+        if (call?.type !== "toolCall") return null;
+        const ops = parseMemoryEditOps(call.arguments);
+        if (!ops) throw new Error("Memory keeper returned invalid memory_edit operations");
+        return ops;
+      };
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -2799,6 +2893,7 @@ export class SessionHost {
             {
               factory: createZone2Extension({
                 bridge: hostServicesBridge,
+                getMemoryMode: () => memoryModeReader().effectiveMode,
               }),
               hidden: true,
               name: "piarium-zone2",
@@ -2806,6 +2901,17 @@ export class SessionHost {
             {
               factory: createCompactionExtension({
                 bridge: hostServicesBridge,
+                getMode: () => memoryModeReader().effectiveMode,
+                onFailure: (message) => {
+                  if (this.#memoryModeReader === memoryModeReader) {
+                    this.#setMemoryFailure("compaction", message);
+                  }
+                },
+                onSuccess: () => {
+                  if (this.#memoryModeReader === memoryModeReader) {
+                    this.#clearMemoryFailure("compaction");
+                  }
+                },
               }),
               hidden: true,
               name: "piarium-compaction",
@@ -2813,8 +2919,8 @@ export class SessionHost {
             {
               factory: createMemoryAgentExtension({
                 bridge: hostServicesBridge,
-                enabled: harnessSettings.memory.shadowMode,
-                callModel: (model, context, signal) => callMemoryModel?.(model, context, signal) ?? Promise.resolve(null),
+                getMode: () => memoryModeReader().effectiveMode,
+                callModel: callMemoryModel,
                 getBranchEntryIds: () => sessionManager.getBranch().map((e) => e.id),
                 getContextEntryIds: () => sessionManager.buildContextEntries().flatMap((entry) => (
                   sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
@@ -2822,12 +2928,22 @@ export class SessionHost {
                 onError: (error) => {
                   this.#emit("host.log", {
                     level: "warn",
-                    message: `Memory shadow update failed: ${error instanceof Error ? error.message : String(error)}`,
+                    message: `Memory keeper update failed: ${error instanceof Error ? error.message : String(error)}`,
                   });
+                },
+                onFailure: (message) => {
+                  if (this.#memoryModeReader === memoryModeReader) {
+                    this.#setMemoryFailure("keeper", message);
+                  }
+                },
+                onSuccess: () => {
+                  if (this.#memoryModeReader === memoryModeReader) {
+                    this.#clearMemoryFailure("keeper");
+                  }
                 },
               }),
               hidden: true,
-              name: "piarium-memory-shadow",
+              name: "piarium-memory-keeper",
             },
             {
               factory: createPermissionGateExtension({
@@ -2868,6 +2984,7 @@ export class SessionHost {
             }
           : {}),
       });
+      serviceRef.current = services;
       const providerWarnings = await this.#providerConfiguration.apply(
         services.modelRuntime,
         cwd,
@@ -2956,18 +3073,6 @@ export class SessionHost {
           "model_not_found",
           `Unknown model: ${this.#sessionModelSelection.providerId}/${this.#sessionModelSelection.modelId}`,
         );
-      }
-      if (harnessSettings.memory.shadowMode) {
-        callMemoryModel = async (model, context, signal) => {
-          if (!model) return null;
-          const response = await services.modelRuntime.completeSimple(model, context, {
-            reasoning: "minimal",
-            signal,
-            toolChoice: "auto",
-          });
-          const call = response.content.find((part) => part.type === "toolCall" && part.name === "memory_edit");
-          return call?.type === "toolCall" ? parseMemoryEditOps(call.arguments) : null;
-        };
       }
       // Build custom tools: workspace mutation journal tools + harness tools
       const customTools: ToolDefinition[] = [];
@@ -3190,6 +3295,7 @@ export class SessionHost {
     this.#hostServicesBridge = undefined;
     this.#harnessCounters?.reset();
     this.#harnessCounters = undefined;
+    this.#memoryModeReader = undefined;
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
@@ -3206,6 +3312,30 @@ export class SessionHost {
   get mcpConfig(): PiMcpConfigBridge {
     if (!this.#mcpConfig) throw new HostError("mcp_config_unavailable", "MCP config bridge is unavailable");
     return this.#mcpConfig;
+  }
+
+  #memoryRuntimeState(): HarnessMemoryRuntimeState {
+    const mode = this.#memoryModeReader?.() ?? {
+      configuredMode: "takeover" as HarnessMemoryMode,
+      effectiveMode: "takeover" as HarnessMemoryMode,
+    };
+    return {
+      ...mode,
+      ...(this.#memoryLastFailure === undefined
+        ? {}
+        : { lastFailure: { ...this.#memoryLastFailure } }),
+    };
+  }
+
+  #setMemoryFailure(phase: HarnessMemoryFailurePhase, message: string): void {
+    this.#memoryLastFailure = { at: Date.now(), message, phase };
+    if (this.#runtime) this.#emit("session.snapshot", this.snapshot());
+  }
+
+  #clearMemoryFailure(phase: HarnessMemoryFailurePhase): void {
+    if (this.#memoryLastFailure?.phase !== phase) return;
+    this.#memoryLastFailure = undefined;
+    if (this.#runtime) this.#emit("session.snapshot", this.snapshot());
   }
 
   #assertRecoveryReady(sessionId: string): void {

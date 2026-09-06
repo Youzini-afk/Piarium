@@ -75,12 +75,12 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索走用户配置的 API provider，无真实 provider 就不注册；桌面端 Electron 离屏渲染 JS；`pi-web-access` 启用时自动让位 |
 | 模型槽位 | **每个用模型的能力一个独立槽位**（explore / retrievalAgent / quickImplement / hardImplement / frontend / review / check / reader / suggestions / permissionJudge），用户填、预设只填表；仅 hardImplement 与 review 默认主模型，其余未配不调用主模型。memory 使用活动会话模型，是明确的内置例外；按 8.4 默认提供，保留模式与失败诊断，不增加辅助用量/费用看板，不承诺缓存命中（D-078/D-080） |
-| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；开关下一会话生效；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入 |
+| 可关可换 | 每项 harness 能力有独立开关，关掉后行为明确（回 Pi 默认或不注册）；默认不按插件存在与否偷偷改变行为，已定义明确共存契约的例外是 web 工具对 `pi-web-access` 让位，以及原生权限 fallback 对 `pi-permission-system` 让位；设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性不是设置而是 host 注入。memory 模式是实时读取的 user-only 全局默认，活动会话可单独覆盖；其他设置按各自运行契约生效 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | Windows 沙箱不在交付计划中（用户选择，D-071）；macOS/Linux 留作后续候选。现有权限与路径边界保持，不把工具限制或 worktree 称为 OS 隔离 |
 | 缓存契约 | Zone 0 会话内冻结；Zone 1 只追加、序列化确定；所有前缀失效操作批处理到压缩时刻 |
-| 工作状态归属 | 主 agent 对记忆系统零义务，plan/todo 服务自身注意力；keeper 维护记忆，Host 拥有事实与分支版本。记忆按正式路径默认提供，可关闭；keeper 只能标记 plan 状态，不能改其结构。当前代码仍是 opt-in assist，后续按 D-078 更新默认与用量投影 |
-| 压缩 | 正式默认路径使用 keeper 块与 Host 事实，逐次检查分支、块修订、实际 context entry 覆盖与必要来源，使用 Pi 安全切点；缺覆盖仅该次交还 Pi。D-076 水位重启会丢失，按实际结果回退；默认接线属于实施任务，不等待付费实验或回放批准（D-078） |
+| 工作状态归属 | 主 agent 对记忆系统零义务，plan/todo 服务自身注意力；keeper 维护记忆，Host 拥有事实与分支版本。缺省 `takeover`，可选 `assist` 或 `off`，活动会话可覆盖全局默认；keeper 只能标记 plan 状态，不能改其结构（D-081） |
+| 压缩 | 默认 `takeover` 使用 keeper 块与 Host 事实，逐次检查完整分支、块修订和实际 context entry 覆盖，使用 Pi 安全切点；缺证据只让该次回到 Pi。coverage 是 Host 内存证据，重启后由下一次有效 keeper 更新重建，不冒充持久 checkpoint（D-081） |
 | 长任务连续性 | 有覆盖检查和来源说明的上下文恢复 + 向新上下文子 agent 委派；压缩质量需真实验证，不承诺无损。没有自动停下来的 Handoff，Handoff 仅为用户手动命令 |
 | 持久知识治理 | agent 只提议（带触发描述），用户审阅接受；自动接受按作用域显式开启；更新用双时态取代不覆盖；召回按触发相关性；保留由用户裁剪 |
 | 多 agent | 原生子会话 worker；角色按模型槽位与任务性质定义，dispatch 异步、wait 订阅。并行写者各有独立工作分支，受控工具读写该分支，需要真实路径时按需物化；shared 明示实时共享。嵌套按角色与既有并发背压实现，不加深度配额；兄弟通信经父协调（D-078） |
@@ -91,7 +91,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 验证器 | 是有名字的 profile 声明；post-tool 反馈注入是统一通道 |
 | 默认 runtime | 内置钉住的 Pi 作为默认；数据目录共享 `~/.pi/agent`；用户自有 Pi 是显式选项并带"未测试版本"诊断 |
 | 领域顺序 | code → research → knowledge-work-in-files；SaaS 连接器不在前三个 profile 的范围内 |
-| 度量 | 记录错误、重试、输出、缓存、主/辅助用量、耗时与人工介入；直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078） |
+| 度量 | 记录错误、重试、输出、缓存、普通会话用量、耗时与人工介入；不建立辅助模型分项费用/Token 看板。直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078/D-080） |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | grep → 默认提供的 explore（确定性召回、结构展开、版本化正文与关系打包）→ retrieval 角色。explore 接通即注册，可用来源逐步扩展；intent/judge/查询修复按已配置 explore 槽位和查询需要运行，无槽位走纯算法；不等完整图、向量或独立评测（D-078） |
 | 未保存内容 | Agent 默认看到发起用户消息的窗口草稿，无显式开启/绑定操作；来源与版本由内部协议自动传播，其他窗口仅打开或聚焦不抢占来源。Host 读取不可变快照，surface 保持缓冲所有权（第 6.1 节，D-071） |
@@ -851,12 +851,13 @@ GET 重取；用户编辑走鉴权 PUT、带 `updatedAt` 做冲突检查并写 `
 且不把块正文放进广播事件。线程列表路由同样必须经过 UI auth，不能因
 “通常只绑定 localhost”而暴露任务说明、worktree 路径或报告元数据（D-046）。
 
-**正式默认与用户选择（D-078）。** 新默认维护块、注入 Zone 2，并在每次覆盖检查满足时接管压缩。实现连同实际配置和错误
-投影交付，不等待测试者或付费缓存实验。off 停止维护；record-only 只记录展示；assist 注入 Zone 2、仍由 Pi 压缩；takeover 启用逐次
-覆盖检查。record-only 是可选诊断模式，不是默认路径的前置。现有代码 shadowMode:true 实际为 assist、缺省为关闭，尚未改成新默认。
-迁移保留显式 off/assist；缺省采用产品新默认，按原始设置与版本区分历史默认，无法区分的旧值保留原行为，不覆盖用户选择。
+**正式默认与用户选择（D-078/D-081）。** 现行模式是 `off | assist | takeover`，缺省 `takeover`。`off` 停止 keeper、从 Zone 2
+排除 memory blocks 并由 Pi 压缩；`assist` 维护并注入 blocks、仍由 Pi 压缩；`takeover` 在相同维护路径上逐次检查接管证据。旧
+`shadowMode:false/true` 分别解析为 `off/assist`，显式 `mode` 优先；无设置使用新默认，损坏值不吞成默认。memory 是 user-only，
+活动会话实时继承全局值，也可用独立、持久的 session override 选择三态或恢复继承。`record-only` 仍可作为未来诊断模式，但不是
+现行契约或默认路径的前置。
 
-**记忆 agent 的上下文。** 当前 assist（旧称 shadow）实现从 Pi 的 `context` hook 捕获本步真实 provider-neutral messages，在 `turn_end`
+**记忆 agent 的上下文。** keeper 从 Pi 的 `context` hook 捕获本步真实 provider-neutral messages，在 `turn_end`
 补上本次 assistant 与 tool results，复用活动会话的 system 与 model，只暴露 `memory_edit`，尾部追加当前块、游标与编辑指令。
 输出必须是结构化块操作，由 Host 逐项验证、按本次前一项的结果顺序应用并记账；自由文本、陈旧 patch 与越过预算的操作都不写。
 它没有文件与 shell 工具，不写持久知识（那走第 7.2.2 节的建议流程），`memory_edit` 也不进入主会话历史。
@@ -866,13 +867,15 @@ GET 重取；用户编辑走鉴权 PUT、带 `updatedAt` 做冲突检查并写 `
 使用同一分支视图；UI 的路径由 Host 从活动 Pi session 自动取得。更新、创建和删除在 Store 写队列内做 expected-revision CAS，
 同一 patch 内的后续操作使用前一项返回的新修订；`plan` 只允许 keeper 标记条目。
 
-keeper 覆盖水位只记录 `buildContextEntries()` 实际物化进其输入的 entry ID；部分失败或无 material 更新不推进。
-水位在 block 写成功后更新，Host 崩溃窗口只会丢水位并回退 Pi，不会产生虚假的覆盖；当前不宣称它是跨 Host 重启的持久 checkpoint。
-检查点证明机械处理区间，不证明保存了所有未来重要的信息；来源无法重新读取时仍须说明，不能用 hash 冒充正文。
+keeper 覆盖水位只记录 `buildContextEntries()` 实际物化进其输入的 entry ID，并绑定提交时的完整活动分支路径与所有可见 block 修订；
+部分失败或无 material 更新不推进。压缩前重新核对移除区间、当前分支和 block 修订。水位在 block 写成功后更新，Host 崩溃窗口只会
+丢水位并让本次回到 Pi，下一次有效 keeper 更新可重建；它不是跨 Host 重启的持久 checkpoint。
+这组证据证明机械处理区间，不证明保存了所有未来重要的信息；来源无法重新读取时仍须说明，不能用 hash 冒充正文。
 
 **执行事实与失败诊断。** keeper 使用活动模型但工具集不同，不保证命中主请求缓存；这不阻止默认交付。保留 memory_edit 输出协议和
-session-local 模型归属，未返回有效操作就是未更新，不从散文猜操作。取消辅助调用分项费用/Token 看板及其专用聚合（D-080），
-保留正常会话已有费用、Token 和上下文容量展示。本地不自行发起付费记忆输出协议/缓存对照实验。
+session-local 模型归属，未返回有效操作就是未更新，不从散文猜操作。有效模式、session override 以及最近一次 keeper/compaction
+失败进入 SessionSnapshot 和 Context；成功的同阶段运行或模式变更清除陈旧失败。取消辅助调用分项费用/Token 看板及其专用聚合
+（D-080），保留正常会话已有费用、Token 和上下文容量展示。本地不自行发起付费记忆输出协议/缓存对照实验。
 Anthropic 的工具定义变更影响整个前缀，`tool_choice` 变更影响 messages 缓存；缓存只作优化，不作为正确性前提。
 
 **触发。** 频率过高浪费，过低模糊，所以分层：
@@ -888,8 +891,8 @@ Anthropic 的工具定义变更影响整个前缀，`tool_choice` 变更影响 m
 - *空闲整理*：用户空闲超过 provider 缓存 TTL **且存在未整理的轨迹**时做一次更完整的整理——缓存已冷，此时最便宜。
   这不是定时器：没有新轨迹就没有东西可整理，父 agent 等待子 agent 的时间再长也不会触发（第 9.2.6 节）。
 
-所有触发都以"有未整理的新轨迹"为前提，**没有任何按墙上时钟重复运行的触发**。所有值为可配置默认；计数器记录每会话的
-记忆 agent 运行次数、token 与每次改动的块数。
+所有触发都以"有未整理的新轨迹"为前提，**没有任何按墙上时钟重复运行的触发**。所有值为可配置默认；运行失败和实际 block
+变化进入现有状态通道，不新增辅助调用费用/Token 明细面板。
 
 与 Devin 的差异：Devin 的压缩**调用**一个 Cognition 专门微调的小模型识别历史中的 key details、events、decisions。
 Piarium 没有这样的模型，替代品是**分工**——记忆 agent 持续把这三类信息维护成显式的块，host 维护事实，压缩时刻不需要
@@ -902,16 +905,17 @@ Piarium 没有这样的模型，替代品是**分工**——记忆 agent 持续�
 1. **清理工具结果。** 工具结果进入历史前可截断，历史中的清理集中在压缩或支持的 provider 请求投影中。是否有完整可读正文按来源
    判断，不从临时句柄或 TranscriptRef 推导。Anthropic tool-result clearing 会使相关缓存前缀失效并产生重新写入成本，后续请求可复用
    新前缀；不是“服务端清理免费保留原缓存”。见 [官方文档](https://platform.claude.com/docs/en/build-with-claude/context-editing)。
-2. **替换（正式默认路径）。** 材料是 memory blocks、主 agent 计划与 Host 事实。接管前必须验证 MemoryCheckpoint：分支祖先路径
-   匹配，待移除历史落在已处理的连续区间，blocksRevision 与检查点同次提交，必要来源可读。仅有 `updatedBy: memory-agent` 的块不够。
+2. **替换（正式默认路径）。** 材料是 memory blocks、主 agent 计划与 Host 事实。接管前验证 keeper evidence：完整分支祖先路径
+   匹配，待移除历史全部属于 keeper 实际处理的 context entry，当前可见 block 的 label/revision 集合与提交时一致。仅有
+   `updatedBy: memory-agent` 的块不够。
    例如处理到第 100 条而 Pi 准备保留第 121 条之后，101–120 的缺口不能靠 stale 提示丢掉。只可用 Pi 支持的安全切点保留缺口，或完成
-   维护后重检；不能安全满足时交还 Pi 默认压缩，不自行切断 tool call/result 配对。覆盖检查已实现（D-076）：使用稳定 entry ID 集合
-   追踪 keeper 实际 context，生产压缩按 Pi 上一次 compaction boundary 与本次安全切点传入 `removedEntryIds`，`handleBeforeCompact` 强制检查——无移除区间或覆盖不全时
-   该次交还 Pi 压缩。当前代码 takeoverEnabled 仍为 false；默认接线按 plan 2.6 直接实施，覆盖/来源检查和用户关闭选择继续有效。
+   维护后重检；不能安全满足时交还 Pi 默认压缩，不自行切断 tool call/result 配对。生产压缩按 Pi 上一次 compaction boundary 与
+   本次安全切点推导 `removedEntryIds`，`handleBeforeCompact` 同时检查覆盖、分支和 block 修订；无移除区间、覆盖不全、错分支、修订
+   漂移或 Host 重启后无 coverage 时，该次交还 Pi。`takeover` 已是新默认；`assist`/`off` 始终不请求接管（D-081）。
    不复制上次摘要文本不等于没有累计语义损失；承诺的是来源可追溯、覆盖缺口可检测、保留来源可重新读取，而非无损记忆。
-3. **兜底（调一次模型）。** 仅当块缺失或落后超过容忍（导入的长会话、记忆 agent 连续失败）时使用：以**同步且有界**的方式
-   运行一次记忆 agent（同一机制，不是另一个组件）；有服务端压缩的 provider（Anthropic `compact_20260112`，用
-   `pause_after_compaction` 追加最近步与块）可替代。这是唯一可能出现可感知等待的路径。
+3. **兜底。** 当前块缺失、覆盖落后、分支/修订不符或 keeper 失败时，直接让 Pi 完成本次摘要；会话继续运行，失败状态可见。
+   若实际使用证明值得在压缩前同步刷新 keeper，可复用同一机制实现；有服务端压缩的 provider 也可按其真实 API 接入，不让候选优化
+   阻塞当前可靠兜底。
 
 #### 8.4.3 触发时机
 
@@ -926,7 +930,7 @@ Piarium 没有这样的模型，替代品是**分工**——记忆 agent 持续�
 
 agent 现在跑的是数小时的自主任务，任何要求用户介入才能继续的机制都不可用。连续性靠两件事，都不产生停顿：
 
-- **有检查点的压缩与来源恢复**（第 8.4.2 节第 2 档）：机械覆盖可检查，多次压缩后的语义遗漏由测试者验证，不从结构推定无损。
+- **有检查点的压缩与来源恢复**（第 8.4.2 节第 2 档）：机械覆盖可检查，多次压缩后的语义遗漏在真实使用中观察，不从结构推定无损。
 - **委派**。子接收任务与父计划快照，在独立分支及其按需物化目录，或明确的 shared 视图中工作；结果以带修订的结构回到父。
   同一执行视图按路径和进程写入语义协调，不把独立分支的并行写者锁成串行。子会话由 broker 启动，不依赖插件。
 - 压缩计数超过阈值（默认 3）时，信号给 **agent**（Zone 2："本会话已压缩 3 次，考虑将剩余子任务委派给新上下文的子
@@ -1530,7 +1534,7 @@ P0、T1/T2/T3 核心和 D-076 已交付；当前直接实施工作状态/集成�
 `{ compaction }` 并跳过自身摘要，`session_compact` 随后触发且 `fromExtension: true`（D-022，前置实验结论，第 8.4.2 节
 第 2 档据此实现）；线程对象拆为 Thread + ThreadRun、状态正交（第 9.3.1 节）；wait 默认事件驱动、缓存保活可选
 （第 9.2.6 节）；输出引用分 `OutputRef` / `TranscriptRef` 两级、偏移统一 UTF-8 字节（第 5.1 节）；权限三层与 Host 静态
-授权（第 9.1.2 节）；设置按字段所有权（第 5.10 节）；已交付 assist 模式，新默认见第 8.4.1/8.6 节；父会话删除
+授权（第 9.1.2 节）；设置按字段所有权（第 5.10 节）；记忆三态与默认 takeover 见第 8.4.1/8.6 节（D-081）；父会话删除
 时线程停下并归档、不弹第二个模态（第 9.3.4 节）。
 
 **D-078 已收口的决定**：工作状态/内容寻址结果、物化、草稿基线与版本化集成正式采用；explore、记忆与自动 review 按第 1.3 节
@@ -1538,7 +1542,7 @@ P0、T1/T2/T3 核心和 D-076 已交付；当前直接实施工作状态/集成�
 
 | 范围 | 已确定方向与实施选择 |
 | --- | --- |
-| 记忆 | 活动模型、memory_edit、版本与覆盖；默认提供，模式与失败可见，取消辅助分项统计，后续针对实际问题优化 |
+| 记忆 | 活动模型、memory_edit、分支/块修订/实际 entry 覆盖；默认 takeover，off/assist/session override 与失败可见，缺证据逐次回到 Pi，取消辅助分项统计（D-081） |
 | 工作状态与结果 | Host 原生内容对象/树/分支/Integration，Git 基线与物化可复用；一次性迁移、独立引用、真实执行写回，见 9.2.5b |
 | RunManifest | Host 执行意图、runtime 解析模型/工具、Host 确认能力、worker 报实际装配；沿 launch 消费者收敛，不复制凭据权威 |
 | 外部 runtime | 对实际 adapter 做版本和能力协商，不先解决全部未来版本兼容问题 |

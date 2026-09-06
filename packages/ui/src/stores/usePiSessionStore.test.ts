@@ -7,6 +7,7 @@ import {
   type PiAgentEvent,
   type PiAssistantMessage,
   type PiSessionEntry,
+  type PiSessionFeatureState,
   type RecoveryStatus,
   type RuntimeEventEnvelope,
   type RuntimeMethod,
@@ -966,6 +967,51 @@ describe('Pi session store', () => {
       },
     });
     expect(store.getState().records['session-a']?.snapshot?.features).toEqual(features);
+  });
+
+  test('projects a memory mode override immediately while awaiting the Host snapshot event', async () => {
+    const runtime = new FakeRuntime();
+    let features: PiSessionFeatureState = { memoryMode: 'off', revision: 1, schemaVersion: 1 };
+    runtime.handler = (method) => {
+      if (method === 'session.features.mutate') return features;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({
+      currentSessionId: 'session-a',
+      records: {
+        'session-a': {
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          snapshot: {
+            ...snapshot('session-a'),
+            harness: {
+              memory: {
+                configuredMode: 'takeover',
+                effectiveMode: 'takeover',
+                lastFailure: { at: 1, message: 'old failure', phase: 'keeper' },
+              },
+            },
+          },
+          toolExecutions: {},
+        },
+      },
+    });
+
+    await store.getState().mutateFeatures('session-a', { mode: 'off', type: 'memory.mode.set' });
+    expect(store.getState().records['session-a']?.snapshot?.harness?.memory).toEqual({
+      configuredMode: 'takeover',
+      effectiveMode: 'off',
+      overrideMode: 'off',
+    });
+
+    features = { revision: 2, schemaVersion: 1 };
+    await store.getState().mutateFeatures('session-a', { mode: 'inherit', type: 'memory.mode.set' });
+    expect(store.getState().records['session-a']?.snapshot?.harness?.memory).toEqual({
+      configuredMode: 'takeover',
+      effectiveMode: 'takeover',
+    });
   });
 
   test('forks at the owning message and activates the Pi-native child session', async () => {

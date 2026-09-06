@@ -1,6 +1,6 @@
 import { sessionEntryToContextMessages, type ExtensionFactory, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { CompactionBeforeResult, CompactionAfterParams } from "@piarium/protocol";
+import type { CompactionBeforeResult, CompactionAfterParams, HarnessMemoryMode } from "@piarium/protocol";
 
 /**
  * Compaction extension — hooks session_before_compact to take over
@@ -22,6 +22,9 @@ import type { CompactionBeforeResult, CompactionAfterParams } from "@piarium/pro
  */
 export interface CompactionExtensionOptions {
   bridge: HostServicesBridge;
+  getMode: () => HarnessMemoryMode;
+  onFailure?: (message: string) => void;
+  onSuccess?: () => void;
 }
 
 export function deriveCompactionCoverage(
@@ -53,26 +56,41 @@ export function createCompactionExtension(options: CompactionExtensionOptions): 
 
   return (pi) => {
     pi.on("session_before_compact", async (event) => {
+      if (options.getMode() !== "takeover") return undefined;
       try {
         const firstKept = event.preparation.firstKeptEntryId;
         const coverage = deriveCompactionCoverage(event.branchEntries, firstKept);
-        if (!coverage || coverage.removedEntryIds.length === 0) return undefined;
+        if (!coverage || coverage.removedEntryIds.length === 0) {
+          options.onFailure?.(
+            coverage
+              ? "Pi reported no removable context entries for compaction coverage"
+              : "Pi's kept entry is not on the active session branch",
+          );
+          return undefined;
+        }
         const result = await bridge.request<"compaction.before">("compaction.before", {
           firstKeptEntryId: firstKept,
           tokensBefore: event.preparation.tokensBefore,
           branchEntryIds: coverage.branchEntryIds,
           removedEntryIds: coverage.removedEntryIds,
+          mode: "takeover",
         }, { timeoutMs: 5_000, signal: event.signal });
+        if (options.getMode() !== "takeover") return undefined;
         const compaction = result as CompactionBeforeResult;
         // Only return { compaction } when firstKeptEntryId is non-empty.
         // If the host returns unavailable (empty firstKeptEntryId), let
         // Pi do its own LLM summarization.
         if (compaction && compaction.summary && compaction.firstKeptEntryId) {
+          options.onSuccess?.();
           return { compaction };
         }
-      } catch {
+        options.onFailure?.("Host returned an incomplete compaction result");
+      } catch (error) {
         // If the host doesn't support compaction.before (unavailable or
         // not wired), let Pi do its own LLM summarization.
+        if (options.getMode() === "takeover") {
+          options.onFailure?.(error instanceof Error ? error.message : String(error));
+        }
       }
       return undefined;
     });

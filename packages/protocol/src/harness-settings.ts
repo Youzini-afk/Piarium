@@ -36,6 +36,58 @@ export interface HarnessWorktreeSettings {
   budget?: HarnessWorktreeBudget;
 }
 
+export type HarnessMemoryMode = "off" | "assist" | "takeover";
+
+export interface HarnessMemorySettings {
+  mode: HarnessMemoryMode;
+}
+
+/**
+ * Raw persisted shape accepted while reading Pi settings. `shadowMode` is the
+ * pre-takeover setting and is intentionally not part of HarnessSettings.
+ */
+export interface HarnessMemorySettingsInput {
+  mode?: unknown;
+  shadowMode?: unknown;
+}
+
+export class HarnessSettingsValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HarnessSettingsValidationError";
+  }
+}
+
+const HARNESS_MEMORY_MODES = ["off", "assist", "takeover"] as const;
+
+/** Resolve the user-owned memory setting, including the legacy boolean. */
+export function resolveHarnessMemoryMode(value: unknown): HarnessMemoryMode {
+  if (value === undefined) return "takeover";
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.memory must be an object");
+  }
+  const input = value as HarnessMemorySettingsInput;
+  if (input.mode !== undefined) {
+    if (!HARNESS_MEMORY_MODES.includes(input.mode as HarnessMemoryMode)) {
+      throw new HarnessSettingsValidationError(
+        `harness.memory.mode must be one of: ${HARNESS_MEMORY_MODES.join(", ")}`,
+      );
+    }
+    return input.mode as HarnessMemoryMode;
+  }
+  if (input.shadowMode !== undefined) {
+    if (typeof input.shadowMode !== "boolean") {
+      throw new HarnessSettingsValidationError("harness.memory.shadowMode must be a boolean");
+    }
+    return input.shadowMode ? "assist" : "off";
+  }
+  return "takeover";
+}
+
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "memory"> & {
+  memory?: HarnessMemorySettingsInput;
+};
+
 export interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;
   shell: "auto" | "git-bash" | "powershell" | "wsl";
@@ -47,7 +99,7 @@ export interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
-  memory: { shadowMode: boolean };
+  memory: HarnessMemorySettings;
   worktree?: HarnessWorktreeSettings;
   web?: {
     maxFetchesPerTurn?: number;
@@ -83,7 +135,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
-  memory: { shadowMode: true },
+  memory: { mode: "takeover" },
   worktree: {
     copyIgnored: [],
     shareDependencies: false,
@@ -93,8 +145,8 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
 };
 
 export function mergeHarnessSettings(
-  user: Partial<HarnessSettings>,
-  workspace: Partial<HarnessSettings>,
+  user: HarnessSettingsInput,
+  workspace: HarnessSettingsInput,
 ): HarnessSettings {
   const askBeforeKeys = new Set([
     ...Object.keys(user.dispatch?.askBefore ?? {}),
@@ -143,12 +195,9 @@ export function mergeHarnessSettings(
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
       },
     },
-    // Background model calls and their cost are user-owned. A repository may
-    // not silently enable the experimental memory keeper.
-    memory: {
-      ...DEFAULT_HARNESS_SETTINGS.memory,
-      ...user.memory,
-    },
+    // Memory execution is user-owned. A repository cannot disable the keeper,
+    // enable background model calls, or change compaction ownership.
+    memory: { mode: resolveHarnessMemoryMode(user.memory) },
     ...(user.web || workspace.web
       ? {
           web: {
