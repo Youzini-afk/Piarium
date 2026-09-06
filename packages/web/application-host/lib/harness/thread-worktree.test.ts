@@ -206,6 +206,9 @@ describe("thread worktree runtime", () => {
       const inspected = await runtime.inspect(snapshotted);
       expect(inspected.changedFiles.toSorted()).toEqual(["binary.bin", "new.txt", "tracked.txt"]);
 
+      const liveInspected = await runtime.inspect(snapshotted, "live");
+      expect(liveInspected.changedFiles.toSorted()).toEqual(["binary.bin", "leak.txt", "new.txt", "tracked.txt"]);
+
       const merged = await runtime.merge(fixture.repo, snapshotted);
       expect(merged.conflicts).toEqual([]);
       expect(merged.conflictState).toBe("none");
@@ -262,6 +265,55 @@ describe("thread worktree runtime", () => {
         try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
       }
       rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains a Git worktree when its clean state cannot be verified", async () => {
+    const root = mkdtempSync(join(tmpdir(), "thread-reclaim-unverified-"));
+    const child = join(root, "child");
+    mkdirSync(child, { recursive: true });
+    writeFileSync(join(child, "result.txt"), "retained\n");
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: child }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+      runGit: async () => { throw new Error("git status unavailable"); },
+    });
+    try {
+      const worktree = { path: child, base: "base", resultCommit: "fixed", materialized: true };
+      const reclaimed = await runtime.reclaim(worktree);
+      expect(reclaimed).toMatchObject({
+        reclaimed: false,
+        reason: expect.stringContaining("git status unavailable"),
+      });
+      expect(existsSync(child)).toBe(true);
+      expect(worktree.materialized).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not rebuild a published copy result from a different fallback when its snapshot is missing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "thread-copy-result-missing-"));
+    const sourceRoot = join(root, "source");
+    const child = join(root, "child");
+    mkdirSync(sourceRoot, { recursive: true });
+    mkdirSync(`${child}.baseline`, { recursive: true });
+    writeFileSync(join(sourceRoot, "file.txt"), "live parent\n");
+    writeFileSync(join(`${child}.baseline`, "file.txt"), "old baseline\n");
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: child }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+    try {
+      await expect(runtime.materialize(sourceRoot, {
+        path: child,
+        base: "zero-commit",
+        resultCommit: "missing-fixed-result",
+        materialized: false,
+      })).rejects.toMatchObject({ code: "ENOENT" });
+      expect(existsSync(child)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -419,15 +471,30 @@ describe("thread worktree runtime", () => {
 
       // Child makes a later live modification (not snapshotted)
       writeFileSync(join(prepared.cwd, "file.txt"), "later-live\n");
+      writeFileSync(join(prepared.cwd, "later-file.txt"), "later live file\n");
 
       // Inspect should see "published", not "later-live"
       const inspected = await runtime.inspect(snapshotted);
       expect(inspected.changedFiles).toEqual(["file.txt"]);
 
+      const liveInspected = await runtime.inspect(snapshotted, "live");
+      expect(liveInspected.changedFiles.toSorted()).toEqual(["file.txt", "later-file.txt"]);
+
+      const legacySnapshot = { ...snapshotted };
+      fs.cpSync(snapshotted.resultPath!, `${prepared.cwd}.snapshot`, { recursive: true });
+      delete legacySnapshot.resultPath;
+      expect((await runtime.inspect(legacySnapshot)).changedFiles).toEqual(["file.txt"]);
+
       // Merge should apply "published", NOT "later-live"
-      const merged = await runtime.merge(sourceRoot, snapshotted);
+      const merged = await runtime.merge(sourceRoot, legacySnapshot);
       expect(merged.conflicts).toEqual([]);
       expect(readFileSync(join(sourceRoot, "file.txt"), "utf8")).toBe("published\n");
+
+      rmSync(prepared.cwd, { recursive: true, force: true });
+      legacySnapshot.materialized = false;
+      await runtime.materialize(sourceRoot, legacySnapshot);
+      expect(readFileSync(join(prepared.cwd, "file.txt"), "utf8")).toBe("published\n");
+      expect(existsSync(join(prepared.cwd, "later-file.txt"))).toBe(false);
     } finally {
       try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows cleanup */ }
     }

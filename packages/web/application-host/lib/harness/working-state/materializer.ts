@@ -35,8 +35,10 @@ async function scanDirectory(
   let entries: fs.Dirent[];
   try {
     entries = await fsPromises.readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw error;
   }
   for (const entry of entries) {
     if (entry.name === ".git" || entry.name === ".piarium") continue;
@@ -76,7 +78,18 @@ export async function materializeWorkingState(
   const removedPaths: string[] = [];
   const expectedRelPaths = new Set<string>();
 
-  for (const [relPathRaw, state] of Object.entries(states)) {
+  const entries = Object.entries(states);
+  const pathDepth = (relPath: string): number => relPath.split("/").length;
+  const orderedEntries = [
+    ...entries
+      .filter(([, state]) => state.kind === "missing")
+      .sort(([left], [right]) => pathDepth(right) - pathDepth(left) || right.localeCompare(left)),
+    ...entries
+      .filter(([, state]) => state.kind !== "missing")
+      .sort(([left], [right]) => pathDepth(left) - pathDepth(right) || left.localeCompare(right)),
+  ];
+
+  for (const [relPathRaw, state] of orderedEntries) {
     const relPath = normalizeRelPath(relPathRaw);
     const absPath = pathModule.resolve(targetDir, relPath);
 
@@ -91,8 +104,9 @@ export async function materializeWorkingState(
       try {
         await fsPromises.rm(absPath, { recursive: true, force: true });
         removedPaths.push(relPath);
-      } catch {
-        // Ignored if file didn't exist
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
       }
       continue;
     }
@@ -116,7 +130,7 @@ export async function materializeWorkingState(
       }
       await fsPromises.mkdir(absPath, { recursive: true });
       if (preservePermissions && state.mode !== undefined) {
-        await fsPromises.chmod(absPath, state.mode).catch(() => {});
+        await fsPromises.chmod(absPath, state.mode);
       }
       materializedPaths.push(relPath);
     } else if (state.kind === "regular-file") {
@@ -138,7 +152,7 @@ export async function materializeWorkingState(
 
       await fsPromises.writeFile(absPath, content);
       if (preservePermissions && state.mode !== undefined) {
-        await fsPromises.chmod(absPath, state.mode).catch(() => {});
+        await fsPromises.chmod(absPath, state.mode);
       }
       materializedPaths.push(relPath);
     } else if (state.kind === "symlink") {
@@ -165,8 +179,9 @@ export async function materializeWorkingState(
         try {
           await fsPromises.rm(abs, { recursive: true, force: true });
           cleanedPaths.push(rel);
-        } catch {
-          // Best-effort cleanup
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
         }
       }
     }

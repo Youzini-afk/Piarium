@@ -1720,6 +1720,8 @@ export interface PiariumDirtyBufferResource {
 
 export interface PiariumAgentInputSnapshotResource extends PiariumDirtyBufferResource {
   content: string;
+  encoding: string;
+  bom: boolean;
 }
 
 export interface PiariumAgentInputSnapshotCaptureRequest {

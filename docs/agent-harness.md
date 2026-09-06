@@ -534,11 +534,12 @@ Host 按来源读取带版本的不可变快照，UI 保持可变缓冲的所有
 这是本次已读文件的版本集合，不是全仓库强一致快照。窗口断开后已捕获快照可按其版本使用，拿不到最新内容则显式 unavailable/stale；
 磁盘替代只能标为磁盘，不能冒充当前草稿。没有 surface 的 headless 任务使用磁盘。
 
-**当前实现与缺口（D-082）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API 固化为
-Host 内存 snapshot；runtime 与 Harness 只传不透明引用或 unavailable dirty paths。pending/active 生命周期与输入接受绑定，捕获失败
-不阻断消息，也不回退这些路径的磁盘正文。当前消费者是 `explore`：它以 snapshot 替换 dirty path 的 rg 命中与切片。Pi 原生 `read`、
-现有 `grep`、LSP 共享 live buffer 与 isolated thread baseline 尚未使用该固定视图；Host 重启后 snapshot 明确过期。后续扩展消费者时
-复用这一引用，不再传第二份正文或另建 buffer authority。
+**当前实现与缺口（D-082/D-083）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API
+固化为 Host 内存 snapshot；runtime 与 Harness 只传不透明引用或 unavailable dirty paths。pending/active 生命周期与输入接受绑定，
+捕获失败不阻断消息，也不回退这些路径的磁盘正文。`explore` 直接读取该 snapshot。`thread.dispatch` 则在请求内把完整固定草稿复制到
+持久 WorkingState draft baseline，之后排队、Host 重启或 surface snapshot 释放都不改变线程输入；已知 dirty 正文不可用时不创建一个
+伪称继承窗口状态的线程。Pi 原生 `read`、现有 `grep` 与父工作区 LSP 仍未消费该固定视图；隔离线程依靠已物化目录读取。Host 重启
+会使尚未被消费者复制的内存 snapshot 过期，不影响已经写入线程工作状态的草稿。
 
 **管线与真实依赖。** 各阶段不是全并行，join 点如下（→ 表示依赖）：
 
@@ -1202,6 +1203,11 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 不增加用户绑定操作。已知有草稿却拿不到正文时列出缺失路径，不把磁盘称为该窗口版本。基线发布后 read、grep、枚举、explore
 读取同一 baseState 加分支 delta；父后来新增、删除或修改的文件不自动进入子分支，更新基线是一次显式记录的新修订。
 
+当前 `thread.dispatch` 纵切在创建 Thread 前同步把固定草稿正文、编码/BOM、原换行和 surface/disk 修订来源复制进 WorkingState；
+`ThreadLaunchManifest.draftBaselineId` 只持久化 Host 对象身份，不进入模型参数。带草稿的角色统一使用 isolated worktree。Run 启动时先按
+现有后端准备磁盘目录，再以持久草稿覆盖对应路径；这个有效状态直接成为工作分支的 revision 0，delta 为空，因此未被子线程修改的
+草稿不会出现在结果里。非草稿路径目前仍取 Run 启动时的物化内容，并非整个工作区在 dispatch 时的瞬时快照。
+
 Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非 Git、尚无首次 commit 的目录按需捕获输入并使用 copy/CoW。
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
@@ -1236,10 +1242,12 @@ base → resultCommit，patch、新文件正文、类型与 mode 全从该 commi
 结果明确区分 applied、conflict、compensated、needs-attention，并附已应用/冲突路径；预期的文本冲突可包含已应用路径和冲突标记，
 不把这种正常冲突处理自动撤回。记录的完成状态使用户解决冲突后无需再次重放整个 patch。
 
-默认把草稿来源的结果集成到对应 Document Registry 缓冲，不隐式保存用户未保存内容；磁盘目标经 Host 文件路径写入。同一次集成
-可能包含两类目标，分别记录撤销材料。当前原生集成直接应用路径状态，不执行 git apply --3way，不修改用户 index；旧 Git 结果先导入
-再走同一原生集成。未来后端若涉及 index，必须记录实际影响并只条件恢复相关条目。UI 与工具共用 Integration，重开仍能继续处理；
-合并后按实际变化执行相关验证。
+草稿来源的最终目标是对应 Document Registry 缓冲，不隐式保存用户未保存内容；磁盘目标经 Host 文件路径写入。同一次集成可能包含
+两类目标，分别记录撤销材料。当前 D-083 尚未接 surface 写回：子修改了草稿路径而父磁盘既不是固定草稿基线、也不是同一子结果时，
+Integration 通过 `surfaceTargetPaths` 返回需要编辑器协调的路径，既不写磁盘也不放冲突标记；用户在父编辑器保存或协调该草稿后可重试。父磁盘已经等于
+子结果时按 no-op 完成。其他当前原生集成直接应用路径状态，不执行 git apply --3way，不修改用户 index；旧 Git 结果先导入再走同一
+原生集成。未来后端若涉及 index，必须记录实际影响并只条件恢复相关条目。UI 与工具共用 Integration，重开仍能继续处理；合并后按
+实际变化执行相关验证。
 
 **重叠提示与合并预览。** 已记录的分支变更路径可投影非阻塞重叠提示；恢复日志覆盖不到的 shell 路径标未知，未发现重叠不等于无冲突。
 提示不长期占有编辑锁，不阻塞独立分支写者。后台三方预览绑定子 resultRevision 与父受影响路径/草稿版本；输入变更即失效重算，
@@ -1312,7 +1320,7 @@ Devin 的 MultiDevin 让用户能打开任何 worker 对话纠偏，但没有合
 ```ts
 Thread {
   id; parent: { kind: "session" | "thread"; id }; workspaceId; brief; kind: "discussion" | "implementation";
-  role; model; manifest: { tools; worktree; scope; systemPromptFragment; concurrency }; // Run 配置世代内冻结
+  role; model; manifest: { tools; worktree; scope; systemPromptFragment; concurrency; draftBaselineId }; // Run 配置世代内冻结
   lifecycle:   "queued" | "active" | "settled" | "archived";
   attention:   "none" | "user" | "permission" | "stalled" | "looping";     // 归 Thread：Run 崩了问题还在等
   integration: "none" | "dirty" | "merge-ready" | "conflict" | "merged";   // 归 Thread：worktree 比 Run 活得久
@@ -1326,7 +1334,8 @@ ThreadRun {
 }
 ```
 
-上面的工作分支/修订/物化字段是 D-078 的目标形状，尚未进入当前协议；旧 worktree 在迁移期间作为后端记录保留。
+工作分支、结果修订与草稿基线身份已经进入当前协议；单独的输入/验证记录与更完整的物化记录仍是后续形状。旧 worktree 在迁移期间
+作为后端记录保留。
 状态是**正交维度**，不是一个枚举：`done + merge conflict`、`active + worker lost`、`archived + worktree retained`、
 `waiting-for-input + permission pending` 都是合法组合，一条状态机表达不了。worker 崩溃 = 当前 Run 以 `lost` 结束，
 恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；**不在同一条记录上把 worker-lost 清掉、改回 running**——那是把

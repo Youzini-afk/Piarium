@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
+import { objectPath, openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { WorkingStateStore } from "./working-state-store.js";
 import { createHash } from "node:crypto";
@@ -67,6 +67,32 @@ describe("WorkingStateStore", () => {
     }
   });
 
+  it("checks draft baseline paths when a narrowed result capture omits them", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, ".gitignore"), "*.draft\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ignored.draft"), "draft baseline\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ordinary.txt"), "ordinary baseline\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "thread-draft", base, "git-base", ["ignored.draft"]);
+
+      const unchanged = await h.store.publishDirectoryResult("thread-draft", h.workspace, ["tracked.txt"]);
+      expect(unchanged.changedPaths).toEqual([]);
+
+      await fs.promises.writeFile(path.join(h.workspace, "ignored.draft"), "draft changed\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ordinary.txt"), "ordinary changed\n");
+      const changed = await h.store.publishDirectoryResult("thread-draft", h.workspace, ["tracked.txt"]);
+      expect(changed.changedPaths).toEqual(["ignored.draft"]);
+
+      await fs.promises.rm(path.join(h.workspace, "ignored.draft"));
+      await fs.promises.rm(path.join(h.workspace, "ordinary.txt"));
+      const deleted = await h.store.publishDirectoryResult("thread-draft", h.workspace, ["tracked.txt"]);
+      expect(deleted.changedPaths).toEqual(["ignored.draft"]);
+    } finally {
+      h.database.close();
+    }
+  });
+
   it("does not switch the branch head when a later capture fails", async () => {
     const h = await harness();
     try {
@@ -96,6 +122,68 @@ describe("WorkingStateStore", () => {
       await fs.promises.writeFile(catalog, "{bad json", "utf8");
       await expect(WorkingStateStore.open(h.context)).rejects.toThrow();
       expect(h.database.prepare(`SELECT COUNT(*) AS count FROM object_references WHERE owner_kind = 'thread-result'`).get()).toEqual({ count: 2 });
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("persists draft baselines with independent object ownership and fails when content is missing", async () => {
+    const h = await harness();
+    try {
+      const baseline = await h.store.createDraftBaseline("ws", [{
+        path: "src/draft.ts",
+        content: "export const draft = true;\n",
+        provenance: {
+          baseRevision: "disk-rev",
+          encoding: "utf-8",
+          bom: false,
+          localEditRevision: 4,
+          revision: "surface-draft:ref:4",
+        },
+      }]);
+      const reopened = await WorkingStateStore.open(h.context);
+      expect(await reopened.getDraftBaseline(baseline.id)).toEqual(baseline);
+      expect(h.database.prepare(`SELECT COUNT(*) AS count FROM object_references WHERE owner_kind = 'draft-baseline'`).get())
+        .toEqual({ count: 1 });
+
+      const state = baseline.pathStates["src/draft.ts"]!;
+      if (state.kind !== "regular-file") throw new Error("expected regular draft state");
+      await fs.promises.rm(objectPath(h.root, state.objectHash));
+      await expect(reopened.getDraftBaseline(baseline.id)).rejects.toThrow("content is missing");
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("rejects a branch whose draft closure is absent from its effective base", async () => {
+    const h = await harness();
+    try {
+      await expect(h.store.createBranch("ws", "broken-draft", {}, "base", ["missing.ts"]))
+        .rejects.toThrow("does not contain every draft baseline path");
+      expect(h.store.getBranch("broken-draft")).toBeNull();
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("migrates a schema v1 catalog to v2 with no draft baselines", async () => {
+    const h = await harness();
+    try {
+      await h.store.createBranch("ws", "legacy", {});
+      const catalog = path.join(h.root, "working-state", `${createHash("sha256").update("ws").digest("hex")}.json`);
+      const v1 = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
+      v1.schemaVersion = 1;
+      delete v1.draftBaselines;
+      for (const branch of Object.values(v1.branches as Record<string, Record<string, unknown>>)) delete branch.draftBasePaths;
+      await fs.promises.writeFile(catalog, JSON.stringify(v1), "utf8");
+
+      const migrated = await WorkingStateStore.open(h.context);
+      expect(migrated.getBranch("legacy")?.draftBasePaths).toEqual([]);
+      expect(await migrated.getDraftBaseline("missing")).toBeNull();
+      await migrated.createBranch("ws", "next", {});
+      const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
+      expect(persisted.schemaVersion).toBe(2);
+      expect(persisted.draftBaselines).toEqual({});
     } finally {
       h.database.close();
     }

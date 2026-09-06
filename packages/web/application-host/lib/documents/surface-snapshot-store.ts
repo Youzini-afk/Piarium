@@ -3,6 +3,8 @@ import type { AgentInputContext } from '@piarium/protocol';
 
 export interface SurfaceSnapshotResource {
   baseRevision: string | null;
+  encoding: string;
+  bom: boolean;
   content: string;
   localEditRevision: number;
   resource: { workspaceId: string; resourceId: string };
@@ -30,6 +32,11 @@ interface StoredSnapshot {
 export type SurfaceSnapshotReadResult =
   | { status: 'disk' }
   | { status: 'ready'; content: string; revision: string; source: 'surface-draft' }
+  | { status: 'unavailable'; message: string };
+
+export type SurfaceSnapshotCloneResult =
+  | { status: 'disk' }
+  | { status: 'ready'; resources: Array<SurfaceSnapshotResource & { revision: string }>; workspaceId: string }
   | { status: 'unavailable'; message: string };
 
 const contentHash = (content: string): string => createHash('sha256').update(content, 'utf8').digest('hex');
@@ -73,6 +80,8 @@ export const createSurfaceSnapshotStore = () => {
       else contents.set(hash, { content: resource.content, references: 1 });
       resources.set(resource.resource.resourceId, Object.freeze({
         baseRevision: resource.baseRevision,
+        encoding: resource.encoding,
+        bom: resource.bom,
         contentHash: hash,
         localEditRevision: resource.localEditRevision,
         resource: Object.freeze({ ...resource.resource }),
@@ -164,6 +173,33 @@ export const createSurfaceSnapshotStore = () => {
     };
   };
 
+  const clone = (sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult => {
+    if (context.source === 'disk') return { status: 'disk' };
+    if (context.snapshot.status === 'unavailable') {
+      return { status: 'unavailable', message: 'The editor source snapshot is unavailable.' };
+    }
+    const snapshot = resolveReady(sessionId, context);
+    if (!snapshot) return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
+    const resources: Array<SurfaceSnapshotResource & { revision: string }> = [];
+    for (const resourceId of snapshot.dirtyPaths) {
+      const resource = snapshot.resources.get(resourceId);
+      const content = resource ? contents.get(resource.contentHash)?.content : undefined;
+      if (!resource || content === undefined) {
+        return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
+      }
+      resources.push({
+        baseRevision: resource.baseRevision,
+        encoding: resource.encoding,
+        bom: resource.bom,
+        content,
+        localEditRevision: resource.localEditRevision,
+        resource: { ...resource.resource },
+        revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
+      });
+    }
+    return { status: 'ready', resources, workspaceId: snapshot.workspaceId };
+  };
+
   const dropSession = (sessionId: string): void => {
     const refs = new Set<string>(pendingBySession.get(sessionId) ?? []);
     const active = activeBySession.get(sessionId);
@@ -191,7 +227,7 @@ export const createSurfaceSnapshotStore = () => {
     activeBySession.clear();
   };
 
-  return { capture, commit, dispose, dropPendingOwner, dropSession, read, release };
+  return { capture, clone, commit, dispose, dropPendingOwner, dropSession, read, release };
 };
 
 export type SurfaceSnapshotStore = ReturnType<typeof createSurfaceSnapshotStore>;

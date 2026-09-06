@@ -9,6 +9,7 @@ import {
   type DurableFileTarget,
 } from "../../recovery/durable-file-operation.js";
 import { assertIntegrationTurnBinding } from "../../recovery/integration-turn-binding.js";
+import { sameState } from "../../recovery/journal-files.js";
 
 export interface IntegrationCoordinatorOptions {
   workingStates: WorkspaceWorkingStateAccess;
@@ -76,10 +77,17 @@ export class IntegrationCoordinator {
       if (blocking) throw new Error(`Integration ${blocking.id} requires recovery before planning (${blocking.state})`);
       const result = store.getResult(input.branchId, input.resultRevision);
       if (!result) throw new Error(`Working result not found: ${input.branchId}@${input.resultRevision}`);
+      const branch = store.getBranch(input.branchId);
+      if (!branch) throw new Error(`Working branch not found: ${input.branchId}`);
       const parentState: Record<string, RecoveryState> = {};
       for (const file of result.changedPaths) {
         parentState[file] = (await context.fileStore.captureState(context.identity, context.root, file, { store: true })).state;
       }
+      const surfaceTargetRequired = result.changedPaths.filter((file) => (
+        branch.draftBasePaths.includes(file)
+        && !sameState(parentState[file]!, result.baseStates[file]!)
+        && !sameState(parentState[file]!, result.pathStates[file]!)
+      ));
       const reusable = findReusableIntegrationConflict(context, {
         workspaceId: input.workspaceId,
         threadId: input.threadId,
@@ -88,7 +96,11 @@ export class IntegrationCoordinator {
         childStates: result.pathStates,
         currentParentStates: parentState,
       });
-      if (reusable) return { ...reusable, changedFiles: result.changedPaths };
+      if (reusable) return {
+        ...reusable,
+        changedFiles: result.changedPaths,
+        ...(surfaceTargetRequired.length > 0 ? { surfaceTargetPaths: surfaceTargetRequired } : {}),
+      };
       const plan = await buildThreeWayMergePlan({
         operationId: `integration-${randomUUID()}`,
         workspaceId: input.workspaceId,
@@ -100,18 +112,21 @@ export class IntegrationCoordinator {
         childState: result.pathStates,
         readContent: async (state) => state.kind === "regular-file" ? store.getObject(state.objectHash) : null,
       });
+      const protectedPaths = new Set(surfaceTargetRequired);
       const targets: Record<string, DurableFileTarget> = {};
       for (const pathPlan of plan.paths) {
+        if (protectedPaths.has(pathPlan.path)) continue;
         const target = await mergeTarget(store, pathPlan);
         if (target) targets[pathPlan.path] = { expected: pathPlan.parentState, target };
       }
+      const conflictPaths = [...new Set([...plan.conflictPaths, ...surfaceTargetRequired])].sort();
       const applied = await applyDurableFileOperation(context, {
         id: plan.operationId,
         workspaceId: input.workspaceId,
         threadId: input.threadId,
         resultRevision: input.resultRevision,
         targets,
-        conflictPaths: plan.conflictPaths,
+        conflictPaths,
         diffStats: plan.diffStats,
         ...(input.executionId ? { executionId: input.executionId } : {}),
         ...(input.requireTurnBinding ? { requireTurnBinding: true } : {}),
@@ -125,7 +140,11 @@ export class IntegrationCoordinator {
           ])),
         },
       });
-      return { ...applied, changedFiles: result.changedPaths };
+      return {
+        ...applied,
+        changedFiles: result.changedPaths,
+        ...(surfaceTargetRequired.length > 0 ? { surfaceTargetPaths: surfaceTargetRequired } : {}),
+      };
     });
   }
 }

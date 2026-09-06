@@ -137,7 +137,34 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
         throw new HarnessServiceError("invalid-params", "Thread concurrency must be a positive integer");
       }
-      const isQueued = await registry.countActive(workspaceId, parent) >= concurrency;
+      const inputContext = ctx.inputContext ?? { source: "disk" as const };
+      let captured: Awaited<ReturnType<NonNullable<HarnessServiceHost["threadCaptureDraftBaseline"]>>> = {
+        draftBaselineId: null,
+        cleanup: async () => undefined,
+      };
+      if (inputContext.source === "surface") {
+        if (!host.threadCaptureDraftBaseline) {
+          if (inputContext.snapshot.status === "unavailable" && inputContext.dirtyPaths.length === 0) {
+            captured = { draftBaselineId: null, cleanup: async () => undefined };
+          } else {
+            throw new HarnessServiceError("unavailable", "Thread draft capture is not configured");
+          }
+        } else {
+          try {
+            captured = await host.threadCaptureDraftBaseline(ctx.sessionId, workspaceId, inputContext);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new HarnessServiceError("unavailable", message);
+          }
+        }
+      }
+      let isQueued: boolean;
+      try {
+        isQueued = await registry.countActive(workspaceId, parent) >= concurrency;
+      } catch (error) {
+        await captured.cleanup().catch(() => undefined);
+        throw error;
+      }
       const input = {
         workspaceId,
         parent,
@@ -147,16 +174,24 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         createdBy: "agent" as const,
         concurrency,
         autoRun: true,
-        worktree: role.worktree === "none" ? "none" as const
-          : role.worktree === "shared" ? "shared" as const
-          : "isolated" as const,
+        worktree: captured.draftBaselineId ? "isolated" as const
+          : role.worktree === "none" ? "none" as const
+            : role.worktree === "shared" ? "shared" as const
+              : "isolated" as const,
+        ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
         tools: role.tools,
         permissions: {},
         ...(params.model ? { model: params.model } : {}),
         systemPromptFragment: role.systemPromptFragment,
         ...(params.scope ? { scope: params.scope } : {}),
       };
-      const thread = await registry.createThread(input);
+      let thread: Thread;
+      try {
+        thread = await registry.createThread(input);
+      } catch (error) {
+        await captured.cleanup().catch(() => undefined);
+        throw error;
+      }
       if (isQueued) {
         return {
           text: `queued as ${thread.id} (${params.role}) — concurrency is full`,
@@ -441,15 +476,22 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       const appliedRevision = result.resultRevision ?? selectedRevision;
       if (result.conflicts.length > 0 || result.status === "conflict" || result.status === "compensated" || result.status === "needs-attention") {
         await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
-        const resolution = result.status === "needs-attention"
-          ? "Some paths could not be restored automatically. Inspect the integration operation and resolve them before retrying."
-          : result.status === "compensated"
-            ? "Merge failed unexpectedly; changes were safely compensated."
-            : result.conflictState === "markers"
-              ? "Conflict markers placed in the parent. Resolve those paths; no further merge step is needed."
-              : result.appliedPaths?.length
-                ? "The listed paths were written; conflicting paths require a version choice. The published child result is retained."
-                : "The parent was left unchanged. The published child result is retained; resolve conflicting paths, then retry merge.";
+        const surfaceTargetPaths = result.surfaceTargetPaths ?? [];
+        const resolution: string[] = [];
+        if (surfaceTargetPaths.length > 0) {
+          resolution.push(`Editor draft paths were left untouched on disk: ${surfaceTargetPaths.join(", ")}. Save or reconcile those drafts in the parent editor, then retry.`);
+        }
+        if (result.status === "needs-attention") {
+          resolution.push("Some paths could not be restored automatically. Inspect the integration operation and resolve them before retrying.");
+        } else if (result.status === "compensated") {
+          resolution.push("Merge failed unexpectedly; changes were safely compensated.");
+        } else if (result.conflictState === "markers") {
+          resolution.push("Conflict markers placed in the parent. Resolve those paths; no further merge step is needed.");
+        } else if (surfaceTargetPaths.length === 0) {
+          resolution.push(result.appliedPaths?.length
+            ? "The listed paths were written; conflicting paths require a version choice. The published child result is retained."
+            : "The parent was left unchanged. The published child result is retained; resolve conflicting paths, then retry merge.");
+        }
         const lines = [
           result.conflicts.length > 0
             ? `merge could not apply ${result.conflicts.length} files cleanly:`
@@ -459,13 +501,14 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         if (result.appliedPaths && result.appliedPaths.length > 0) {
           lines.push(`written paths (${result.appliedPaths.length}): ${result.appliedPaths.join(", ")}`);
         }
-        lines.push(resolution);
+        lines.push(...resolution);
         return {
           text: lines.join("\n"),
           merged: result.appliedPaths?.length ?? 0,
           conflicts: result.conflicts,
           status: result.status ?? "conflict",
           ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
+          ...(surfaceTargetPaths.length > 0 ? { surfaceTargetPaths } : {}),
           ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
           ...(result.operationId ? { operationId: result.operationId } : {}),
         };

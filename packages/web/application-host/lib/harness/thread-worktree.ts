@@ -40,6 +40,9 @@ export interface PreparedThreadWorktree {
   worktree: ThreadWorktree | null;
 }
 
+/** Selects the retained published snapshot or the current materialized worktree for inspection. */
+export type ThreadWorktreeInspectMode = "fixed" | "live";
+
 export interface MergeThreadWorktreeResult {
   merged: number;
   conflicts: string[];
@@ -163,6 +166,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const fsPromises = options.fsPromises ?? fs.promises;
   const pathModule = options.pathModule ?? path;
   const runGit = options.runGit ?? defaultRunGit(options.gitBinary ?? "git", options.env ?? process.env);
+  const fixedCopyResultPath = (worktree: ThreadWorktree): string | undefined => (
+    worktree.resultPath ?? (worktree.resultCommit ? `${worktree.path}.snapshot` : undefined)
+  );
 
   const waitUntilReady = async (directory: string, signal?: AbortSignal): Promise<void> => {
     for (;;) {
@@ -389,11 +395,15 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     };
   };
 
-  const inspect = async (worktree: ThreadWorktree): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
+  const inspect = async (
+    worktree: ThreadWorktree,
+    mode: ThreadWorktreeInspectMode = "fixed",
+  ): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
+    const fixed = mode === "fixed";
     if (worktree.base === "zero-commit") {
       const baselineDir = `${worktree.path}.baseline`;
-      const currentDir = worktree.resultPath
-        ? worktree.resultPath
+      const currentDir = fixed && worktree.resultCommit
+        ? fixedCopyResultPath(worktree)!
         : worktree.path;
       const diff = await diffDirectories(baselineDir, currentDir);
       return {
@@ -404,7 +414,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       };
     }
 
-    const targetRef = worktree.resultCommit;
+    const targetRef = fixed ? worktree.resultCommit : undefined;
     let newPaths: string[];
     let trackedPatchArgs: string[];
     let changedResult: string;
@@ -458,30 +468,35 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (worktree.base === "zero-commit") {
       const resultsRoot = `${worktree.path}.results`;
       const staging = pathModule.join(resultsRoot, `.staging-${randomUUID()}`);
-      await fsPromises.mkdir(resultsRoot, { recursive: true });
-      await copyDirRecursive(worktree.path, staging);
-      const files = await listAllFilesRelative(staging);
-      const hash = createHash("sha256");
-      for (const f of files.sort()) {
-        hash.update(f);
-        try {
+      try {
+        await fsPromises.mkdir(resultsRoot, { recursive: true });
+        await copyDirRecursive(worktree.path, staging);
+        const files = await listAllFilesRelative(staging);
+        const hash = createHash("sha256");
+        for (const f of files.sort()) {
+          hash.update(f);
           const target = pathModule.join(staging, f);
           const stat = await fsPromises.lstat(target);
           hash.update(String(stat.mode & 0o7777));
           if (stat.isSymbolicLink()) hash.update(await fsPromises.readlink(target));
           else hash.update(await fsPromises.readFile(target));
-        } catch { /* ignore */ }
+        }
+        const resultCommit = hash.digest("hex").slice(0, 40);
+        const resultPath = pathModule.join(resultsRoot, resultCommit);
+        try {
+          await fsPromises.stat(resultPath);
+          const existing = await diffDirectories(staging, resultPath);
+          if (existing.diffStats.files > 0) {
+            throw new Error(`Thread worktree snapshot is corrupt: ${resultCommit}`);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await fsPromises.rename(staging, resultPath);
+        }
+        return { ...worktree, resultCommit, resultPath };
+      } finally {
+        await fsPromises.rm(staging, { recursive: true, force: true }).catch(() => undefined);
       }
-      const resultCommit = hash.digest("hex").slice(0, 40);
-      const resultPath = pathModule.join(resultsRoot, resultCommit);
-      try {
-        await fsPromises.stat(resultPath);
-        await fsPromises.rm(staging, { recursive: true, force: true });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        await fsPromises.rename(staging, resultPath);
-      }
-      return { ...worktree, resultCommit, resultPath };
     }
 
     const status = (await runGit(worktree.path, ["status", "--porcelain", "-z"])).stdout;
@@ -525,7 +540,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
 
     const baselineDir = `${worktree.path}.baseline`;
-    const resultDir = worktree.resultPath ?? `${worktree.path}.snapshot`;
+    const resultDir = fixedCopyResultPath(worktree)!;
     await fsPromises.stat(resultDir);
     if (!worktree.resultPath) {
       const files = await listAllFilesRelative(resultDir);
@@ -608,8 +623,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           untrackedConflicts.push(relativeValue);
         }
       } else {
-        const sourceDir = worktree.resultPath
-          ? worktree.resultPath
+        const sourceDir = worktree.base === "zero-commit" && resultCommit
+          ? fixedCopyResultPath(worktree)!
           : worktree.path;
         const source = pathModule.resolve(sourceDir, relative);
         try {
@@ -791,16 +806,22 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       return { reclaimed: false, reason: "Thread worktree result has not been snapshotted" };
     }
     if (worktree.base === "zero-commit") {
-      const snapshotDir = worktree.resultPath;
+      const snapshotDir = fixedCopyResultPath(worktree);
+      if (!snapshotDir) return { reclaimed: false, reason: "Thread worktree result path missing" };
       try {
-        if (!snapshotDir) throw new Error("Thread worktree result path missing");
         await fsPromises.stat(snapshotDir);
         const diff = await diffDirectories(snapshotDir, worktree.path);
         if (diff.diffStats.files > 0) {
           return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
         }
-      } catch {
-        return { reclaimed: false, reason: "Thread worktree snapshot missing" };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          reclaimed: false,
+          reason: (error as NodeJS.ErrnoException).code === "ENOENT"
+            ? "Thread worktree snapshot missing"
+            : `Unable to verify thread worktree snapshot: ${message}`,
+        };
       }
     } else {
       try {
@@ -808,8 +829,15 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         if (status.stdout.length > 0) {
           return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
         }
-      } catch {
-        // Ignored if path already missing or not a git worktree
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          worktree.materialized = false;
+          return { reclaimed: true };
+        }
+        return {
+          reclaimed: false,
+          reason: `Unable to verify thread worktree before reclamation: ${error instanceof Error ? error.message : String(error)}`,
+        };
       }
     }
     try {
@@ -850,18 +878,18 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       }
       await waitUntilReady(worktree.path, signal);
     } else {
-      const snapshotDir = worktree.resultPath;
+      const snapshotDir = fixedCopyResultPath(worktree);
       const baselineDir = `${worktree.path}.baseline`;
-      let src = "";
-      try {
-        if (!snapshotDir) throw new Error("Thread worktree result path missing");
+      let src: string;
+      if (snapshotDir) {
         await fsPromises.stat(snapshotDir);
         src = snapshotDir;
-      } catch {
+      } else {
         try {
           await fsPromises.stat(baselineDir);
           src = baselineDir;
-        } catch {
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           src = sourceRoot;
         }
       }

@@ -265,7 +265,18 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
           ...(params.resultRevision !== undefined ? { resultRevision: params.resultRevision } : {}),
         });
         const typed = result as ThreadMergeResult;
-        return { content: [{ type: "text", text: typed.text }], details: { merged: typed.merged, conflicts: typed.conflicts, status: typed.status, appliedPaths: typed.appliedPaths, operationId: typed.operationId, resultRevision: typed.resultRevision } };
+        return {
+          content: [{ type: "text", text: typed.text }],
+          details: {
+            merged: typed.merged,
+            conflicts: typed.conflicts,
+            status: typed.status,
+            appliedPaths: typed.appliedPaths,
+            surfaceTargetPaths: typed.surfaceTargetPaths,
+            operationId: typed.operationId,
+            resultRevision: typed.resultRevision,
+          },
+        };
       } catch (error) {
         return threadErrorResult("merge", error);
       }

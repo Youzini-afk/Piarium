@@ -47,7 +47,7 @@ Piarium protocol types, schemas, and event/method definitions.
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
 | `thread.send` | `{ threadId, message, from }` | `ThreadSendResult` | Send message to a thread |
 | `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
-| `thread.merge` | `{ threadId }` | `ThreadMergeResult` | Merge completed thread's diff |
+| `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
 
 `agent.prompt`, `agent.steer`, and `agent.followUp` accept an optional
@@ -82,9 +82,12 @@ ThreadRun.outcome: success | failure | cancelled | lost
 These axes are intentionally independent: a successful Run may leave its
 Thread `merge-ready` or `conflict`, while a lost Run leaves durable work and
 attention intact. `ThreadLaunchManifest` freezes the role's tool allowlist,
-worktree mode, scope, prompt fragment, parent-block snapshot choice, and parent concurrency so a restart cannot silently gain
-different capabilities. Reaching a terminal Run frees a concurrency slot and
-may promote the oldest queued Thread.
+worktree mode, scope, prompt fragment, parent-block snapshot choice, parent
+concurrency, and the Host-owned persistent editor-draft baseline identity.
+The baseline body remains in WorkingState rather than the catalog or model
+arguments, so queued and restarted Runs do not depend on the ephemeral surface
+snapshot. Reaching a terminal Run frees a concurrency slot and may promote the
+oldest queued Thread.
 
 ### ShellExecResult Variants
 

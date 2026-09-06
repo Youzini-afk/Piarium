@@ -391,7 +391,9 @@ export class DocumentRegistry {
     const generation = this.getGeneration();
     const resources = dirtyRecords.map((record) => ({
       baseRevision: record.baseRevision,
-      content: record.buffer,
+      content: serializeEditorContent(record.buffer, record.lineEnding),
+      encoding: record.encoding,
+      bom: record.bom,
       localEditRevision: record.localEditRevision,
       resource: { ...record.identity },
     }));

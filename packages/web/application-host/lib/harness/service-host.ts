@@ -15,6 +15,7 @@ import type { RecallToolDeps } from "./recall-tool.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { ThreadTranscriptReader } from "./thread-transcript.js";
+import type { CapturedThreadDraftBaseline } from "./thread-runtime.js";
 import { createObservationCursorStore, type ObservationCursorStore } from "./observation-cursors.js";
 import type {
   HarnessActorContext,
@@ -87,6 +88,7 @@ export interface HarnessServiceHost {
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
+  threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@piarium/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
@@ -97,6 +99,7 @@ export interface HarnessServiceHost {
     changedFiles?: string[];
     diffStats?: import("@piarium/protocol").ThreadDiffStats;
     appliedPaths?: string[];
+    surfaceTargetPaths?: string[];
     status?: "applied" | "conflict" | "compensated" | "needs-attention";
     operationId?: string;
     resultRevision?: number;
@@ -153,6 +156,7 @@ export interface HarnessServiceHostOptions {
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
+  threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
   threadKillSession?: (threadId: string, keepWorktree?: boolean) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
@@ -187,6 +191,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const todoDepsProvider = options.todoDepsProvider ?? null;
   // Phase 3
   const threadRegistry = options.threadRegistry ?? null;
+  const threadCaptureDraftBaseline = options.threadCaptureDraftBaseline ?? null;
   const threadSpawnSession = options.threadSpawnSession ?? null;
   const threadKillSession = options.threadKillSession ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
@@ -329,6 +334,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     recallDepsProvider,
     todoDepsProvider,
     threadRegistry,
+    threadCaptureDraftBaseline,
     threadSpawnSession,
     threadKillSession,
     threadApplyWorktreeDiff,

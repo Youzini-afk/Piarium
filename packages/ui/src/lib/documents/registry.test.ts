@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type {
   DocumentsAPI,
+  PiariumAgentInputSnapshotCaptureRequest,
   PiariumDocumentReadResult,
   PiariumDocumentRecoveryJournalSummary,
   PiariumDocumentWatchEvent,
@@ -205,6 +206,50 @@ const createMemoryDocuments = () => {
 };
 
 describe('DocumentRegistry', () => {
+  test('captures serialized CRLF editor content with UTF-8 BOM metadata', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource('crlf-bom.txt');
+    const captures: PiariumAgentInputSnapshotCaptureRequest[] = [];
+    const surface: DocumentsAPI = {
+      ...api,
+      read: async (ref) => ({
+        status: 'ready' as const,
+        epoch: 1,
+        resource: ref,
+        revision: 'disk-crlf-bom',
+        content: 'base\r\nline\r\n',
+        encoding: 'utf-8',
+        bom: true,
+        byteLength: Buffer.byteLength('\uFEFFbase\r\nline\r\n', 'utf8'),
+      }),
+      captureAgentInputSnapshot: async (request) => {
+        captures.push(request);
+        return {
+          source: 'surface' as const,
+          workspaceId: request.workspaceId,
+          dirtyPaths: request.resources.map((entry) => entry.resource.resourceId),
+          snapshot: { status: 'ready' as const, ref: 'surface-capture' },
+        };
+      },
+    };
+    const registry = new DocumentRegistry({ documents: surface, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(identity);
+    registry.applyTransaction(identity, 'edited\nnext\n', { origin: 'test' });
+
+    const captured = await registry.captureAgentInputContext('session-1', identity.workspaceId);
+    expect(captured).toEqual({
+      source: 'surface',
+      workspaceId: identity.workspaceId,
+      dirtyPaths: [identity.resourceId],
+      snapshot: { status: 'ready', ref: 'surface-capture' },
+    });
+    expect(captures).toHaveLength(1);
+    expect(captures[0]?.resources[0]?.content).toBe('edited\r\nnext\r\n');
+    expect(captures[0]?.resources[0]?.encoding).toBe('utf-8');
+    expect(captures[0]?.resources[0]?.bom).toBe(true);
+    registry.dispose();
+  });
+
   test('keeps independent dirty buffers when switching documents', async () => {
     const { api } = createMemoryDocuments();
     await api.write({ token: mutationToken(), resource: resource('a.txt'), content: 'A', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });

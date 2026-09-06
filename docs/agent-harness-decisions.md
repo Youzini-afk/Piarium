@@ -1517,6 +1517,44 @@ router/service/explore；设计 6.1、plan 0.7/3.2、status、architecture 与�
 
 状态：已实施；本地证据和仍未接的固定视图消费者见 agent-harness-status.md。
 
+### D-083 · 2026-09-06 · thread.dispatch 持久草稿基线与 surface 集成边界
+
+类型：实现决策（D-078 工作状态、D-082 窗口来源的线程纵切）
+
+决定：`thread.dispatch` 在创建 Thread 之前，同步从 D-082 的不透明 surface snapshot 克隆完整 dirty 集合，并把将来保存会产生的
+UTF-8 字节（含 BOM 与原换行）、磁盘 baseRevision、surface localEditRevision 和固定 snapshot revision 写入 WorkingState 的
+内容对象与 draft-baseline manifest。它不把临时 snapshot ref 当作 queued Thread 的恢复权威，也不把正文放进 Thread catalog、broker
+事件或模型参数。WorkingState catalog 升至 schema 2；Thread catalog 升至 schema 7，`ThreadLaunchManifest.draftBaselineId` 是不可变
+launch input，旧 schema 明确迁移为 `null`。Thread 创建失败释放刚建立的 draft baseline；Thread 已创建后该对象随工作保留。
+
+带 dirty baseline 的角色统一使用 isolated worktree，包括通常为 shared/none 的角色。snapshot unavailable、过期、session/workspace 或
+完整 dirty path 集不匹配时 dispatch 失败，不创建一个读取磁盘却声称继承窗口状态的 Thread；已验证为空的 surface 保留角色原来的
+worktree 策略。正文已复制后，surface snapshot 可正常被下一次输入替换或随 Host 生命周期释放，queued、首次启动与无 session id 的
+lost 恢复只依赖持久 baseline id。
+
+Run 首次启动先由现有 Git/copy 后端准备磁盘目录和显式 ignored 输入，再把 draft baseline 叠到相同目录。叠加后的有效路径状态直接
+成为 WorkingBranch `baseState`，`headRevision = 0`、`deltas = {}`，`draftBasePaths` 记录来源范围；草稿是父输入，不是子结果。
+因此子未修改草稿时结果不含该路径；发布 live 结果时即使 Git 忽略该文件也必须比较所有 draftBasePaths。运行中结果采集明确读取
+materialized live 目录，merge 的旧 Git/copy 兼容入口默认读取已选 fixed result，已有 resultCommit/resultPath 不得遮蔽恢复后继续产生的修改。
+
+集成只处理子相对有效基线真正改变的路径。对 draftBasePaths：父磁盘等于子结果时 no-op；父磁盘等于固定草稿基线时可按普通计划应用；
+父磁盘同时不同于二者时返回可识别的 `surfaceTargetPaths` 冲突，该路径不生成 target、不写磁盘、不放冲突标记。当前尚无把结果写回
+原编辑器缓冲的 Host→surface 操作，因此用户先在父编辑器保存或协调草稿后重试；这项明确的零写入冲突替代把未保存输入偷偷落盘。
+
+边界：非草稿文件仍以 Run 物化时的目录为基线，本决定不声称整个工作区在 dispatch 时固定。Pi 原生 `read`、现有 `grep` 与父工作区
+LSP 尚未直接读取 WorkingState 虚拟视图；隔离线程通过真实物化目录获得一致内容。surface buffer 写回/grouped undo、无目录工具、
+完整物化预算和归档释放继续按 3.2/3.4/3.5 实施。
+
+原因：持久复制发生在 snapshot 仍可读的 dispatch 请求内，既消除排队/重启对 Host 内存引用的依赖，也保持 surface 是可变编辑缓冲的
+唯一所有者。把草稿放进 branch base 让结果、三方合并和 ignored 路径都使用同一个父输入身份；若把它发布成 revision 1 delta，未修改
+草稿会被误报为子工作并可能在 merge 时写回磁盘。live/fixed 读取模式分开则同时满足半成品恢复和固定结果消费。
+
+影响：protocol `ThreadLaunchManifest` / `ThreadMergeResult`；UI Documents capture 与 application-client 类型；Application Host
+SurfaceSnapshotStore、ThreadRegistry、Thread services/runtime/worktree、WorkingState store/materializer/IntegrationCoordinator；
+设计 6.1/9.2.5b/9.3、plan 0.7/3.2/3.4/3.5、status、architecture 与模块文档。
+
+状态：已实施；本地证据和当前未接边界见 agent-harness-status.md。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1605,3 +1643,4 @@ router/service/explore；设计 6.1、plan 0.7/3.2、status、architecture 与�
 | D-080 | implementation（取消辅助分项统计，保留会话统计） | — | protocol / pi-host / UI；设计 8.4–8.6、plan、status |
 | D-081 | implementation（默认记忆、动态模式与逐次压缩接管） | — | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture |
 | D-082 | implementation（自动 surface snapshot 与 draft-aware explore） | — | protocol / UI / broker / pi-host / Documents / Host explore；设计 6.1、plan 3.2、status、architecture |
+| D-083 | implementation（dispatch 持久草稿基线与 surface 集成边界） | — | protocol / UI Documents / Host Thread+WorkingState+Integration；设计 6.1/9.2.5b、plan 3.2/3.4/3.5、status、architecture |

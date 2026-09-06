@@ -627,9 +627,11 @@ tools use the same fixed branch view; live shared mode remains explicit. Command
 directory and their changes are captured into a new result before that directory may be reclaimed.
 
 The baseline includes captured disk inputs and revisioned drafts from the window that submitted the
-user message. The surface retains mutable-buffer ownership. Integration into a draft edits that buffer
-without implicitly saving it. Missing draft content is reported, never replaced with an unlabelled disk
-version. A captured baseline remains immutable even when its source directory subsequently changes.
+user message. The surface retains mutable-buffer ownership. `thread.dispatch` now clones fixed draft
+bytes and their revision provenance into persistent WorkingState before creating the Thread; queued and
+restarted Runs no longer depend on the ephemeral surface reference. Missing draft content rejects the
+dispatch rather than substituting an unlabelled disk version. Non-draft inputs are still captured when
+the Run materializes, so this slice does not claim a whole-workspace dispatch-time snapshot.
 
 Integration records the selected child result, expected parent states for affected paths and drafts,
 actual per-path application, conflicts, index effects, and recovery operations. Existing recovery object,
@@ -637,6 +639,9 @@ path-state, and conditional-compensation implementations are reused, with indepe
 result retention references. Deleting recovery history cannot delete a still-referenced thread result.
 Revision checks coordinate controlled writers; they do not claim atomic isolation from arbitrary native
 processes. Conflict resolution and undo preserve later user edits and unrelated staged changes.
+Until surface-buffer application is wired, a changed draft-derived path whose parent disk has diverged
+from both the draft base and child result is returned as a surface-target conflict with no disk write or
+conflict marker. Saving or reconciling the parent draft makes a later retry eligible for normal integration.
 
 Git trees and resultCommit are valid migration inputs and backend references. Publication switches to
 the new authority only after its records and content are readable; failure preserves the previous source.
@@ -659,7 +664,7 @@ Its final compare/apply/verify and compensation share the same canonical path qu
 read/write/move/delete in that authority instance; directory operations cover descendants while unrelated
 paths remain concurrent. This queue does not cover raw filesystem or shell writes in other execution paths.
 Reclamation holds the Documents writer barrier through deletion and preserves materializations used by
-controlled processes or editor surfaces. Virtual file tools, surface draft transport, and the full space
+controlled processes or editor surfaces. Virtual file tools, surface-buffer integration, and the full space
 budget UI remain separately tracked in [agent-harness-status.md](agent-harness-status.md); their helper
 types do not count as delivered product paths.
 

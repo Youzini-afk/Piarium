@@ -138,7 +138,7 @@ describe('Pi timeline chat render mode', () => {
     const markerThread: Thread = {
       id: 'thread-1', parent: { kind: 'session', id: 'session' }, workspaceId: 'workspace',
       forkPoint: { entryId: 'assistant-entry' }, brief: 'Discuss the answer', role: null, model: null,
-      manifest: { carryBlocks: true, concurrency: 12, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
+      manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
       createdBy: 'user', kind: 'discussion', worktree: null, lifecycle: 'active', attention: 'user',
       waitingFor: { kind: 'user', text: 'Ready' }, integration: 'none', diffStats: null, report: null,
       activeRunId: 'run-1', createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z', eventSeq: 1, hidden: false,

@@ -5,17 +5,31 @@ import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from ".
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
-import type { RecoveryState, WorkingBranch, WorkingResult } from "./types.js";
+import type {
+  DraftBaseline,
+  DraftBaselinePathProvenance,
+  RecoveryState,
+  WorkingBranch,
+  WorkingResult,
+} from "./types.js";
 import { materializeWorkingState } from "./materializer.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
 
 interface WorkingStateDocument {
   schemaVersion: typeof SCHEMA_VERSION;
   workspaceId: string;
   branches: Record<string, WorkingBranch>;
+  draftBaselines: Record<string, DraftBaseline>;
   results: Record<string, WorkingResult>;
+}
+
+export interface CreateDraftBaselinePath {
+  path: string;
+  content: string | Buffer;
+  mode?: number;
+  provenance: DraftBaselinePathProvenance;
 }
 
 export interface WorkingStateStoreOptions extends WorkspaceRecoveryStorageContext {
@@ -41,29 +55,91 @@ const normalizeRelative = (value: string): string => {
   return normalized;
 };
 
+const assertNoDraftPathConflicts = (paths: readonly string[]): void => {
+  const seen = new Set<string>();
+  for (const file of paths) {
+    if (seen.has(file)) throw new Error(`Draft baseline contains a duplicate path: ${file}`);
+    seen.add(file);
+  }
+  for (const descendant of [...seen].sort()) {
+    const parts = descendant.split("/");
+    for (let index = 1; index < parts.length; index += 1) {
+      const ancestor = parts.slice(0, index).join("/");
+      if (!seen.has(ancestor)) continue;
+      throw new Error(`Draft baseline paths contain an ancestor/descendant conflict: ${ancestor} and ${descendant}`);
+    }
+  }
+};
+
 const parseStates = (value: unknown, label: string): Record<string, RecoveryState> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return Object.fromEntries(Object.entries(value).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
 };
 
-const parseBranch = (value: unknown, key: string, workspaceId: string): WorkingBranch => {
+const parseBranch = (value: unknown, key: string, workspaceId: string, legacy = false): WorkingBranch => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working branch ${key} is malformed`);
   const row = value as Record<string, unknown>;
   if (row.branchId !== key || row.workspaceId !== workspaceId || !Number.isSafeInteger(row.headRevision)
     || Number(row.headRevision) < 0 || typeof row.createdAt !== "string" || typeof row.updatedAt !== "string"
-    || (row.baseRef !== undefined && typeof row.baseRef !== "string")) {
+    || (row.baseRef !== undefined && typeof row.baseRef !== "string")
+    || (!legacy && (!Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")))) {
     throw new Error(`Working branch ${key} is malformed`);
+  }
+  const draftBasePaths = legacy ? [] : (row.draftBasePaths as string[]).map(normalizeRelative);
+  if (new Set(draftBasePaths).size !== draftBasePaths.length) throw new Error(`Working branch ${key} draft baseline paths are malformed`);
+  const baseState = parseStates(row.baseState, `Working branch ${key} baseline`);
+  if (draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
+    throw new Error(`Working branch ${key} does not contain every draft baseline path`);
   }
   return {
     branchId: key,
     workspaceId,
     ...(row.baseRef === undefined ? {} : { baseRef: row.baseRef as string }),
-    baseState: parseStates(row.baseState, `Working branch ${key} baseline`),
+    baseState,
+    draftBasePaths,
     deltas: parseStates(row.deltas, `Working branch ${key} deltas`),
     headRevision: row.headRevision as number,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+};
+
+const parseDraftProvenance = (value: unknown, label: string): DraftBaselinePathProvenance => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
+  const row = value as Record<string, unknown>;
+  if ((row.baseRevision !== null && typeof row.baseRevision !== "string")
+    || row.encoding !== "utf-8" || typeof row.bom !== "boolean"
+    || !Number.isSafeInteger(row.localEditRevision) || Number(row.localEditRevision) < 0
+    || typeof row.revision !== "string" || !row.revision) throw new Error(`${label} is malformed`);
+  return {
+    baseRevision: row.baseRevision as string | null,
+    encoding: "utf-8",
+    bom: row.bom as boolean,
+    localEditRevision: row.localEditRevision as number,
+    revision: row.revision,
+  };
+};
+
+const parseDraftBaseline = (value: unknown, key: string, workspaceId: string): DraftBaseline => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Draft baseline ${key} is malformed`);
+  const row = value as Record<string, unknown>;
+  if (row.id !== key || row.workspaceId !== workspaceId || typeof row.createdAt !== "string"
+    || !row.provenance || typeof row.provenance !== "object" || Array.isArray(row.provenance)) {
+    throw new Error(`Draft baseline ${key} is malformed`);
+  }
+  const pathStates = parseStates(row.pathStates, `Draft baseline ${key} paths`);
+  if (Object.values(pathStates).some((state) => state.kind !== "regular-file")) {
+    throw new Error(`Draft baseline ${key} contains a non-file state`);
+  }
+  const provenance = Object.fromEntries(Object.entries(row.provenance as Record<string, unknown>)
+    .map(([file, item]) => [normalizeRelative(file), parseDraftProvenance(item, `Draft baseline ${key} provenance for ${file}`)]));
+  const statePaths = Object.keys(pathStates).sort();
+  const provenancePaths = Object.keys(provenance).sort();
+  if (statePaths.length !== provenancePaths.length || statePaths.some((file, index) => file !== provenancePaths[index])) {
+    throw new Error(`Draft baseline ${key} provenance does not match its paths`);
+  }
+  assertNoDraftPathConflicts(statePaths);
+  return { id: key, workspaceId, createdAt: row.createdAt, pathStates, provenance };
 };
 
 const parseResult = (value: unknown, key: string): WorkingResult => {
@@ -126,21 +202,33 @@ export class WorkingStateStore {
         schemaVersion: SCHEMA_VERSION,
         workspaceId: options.identity.workspaceId,
         branches: {},
+        draftBaselines: {},
         results: {},
       });
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
     const record = raw as Record<string, unknown>;
-    if (record.schemaVersion !== SCHEMA_VERSION || record.workspaceId !== options.identity.workspaceId
+    if ((record.schemaVersion !== 1 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
       || !record.branches || typeof record.branches !== "object" || Array.isArray(record.branches)
-      || !record.results || typeof record.results !== "object" || Array.isArray(record.results)) {
+      || !record.results || typeof record.results !== "object" || Array.isArray(record.results)
+      || (record.schemaVersion === SCHEMA_VERSION
+        && (!record.draftBaselines || typeof record.draftBaselines !== "object" || Array.isArray(record.draftBaselines)))) {
       throw new Error("Working-state catalog schema or workspace identity is malformed");
     }
+    const legacy = record.schemaVersion === 1;
     const branches = Object.fromEntries(Object.entries(record.branches as Record<string, unknown>)
-      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId)]));
+      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, legacy)]));
+    const draftBaselines = legacy ? {} : Object.fromEntries(Object.entries(record.draftBaselines as Record<string, unknown>)
+      .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId)]));
     const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
       .map(([key, value]) => [key, parseResult(value, key)]));
-    return new WorkingStateStore(options, { schemaVersion: SCHEMA_VERSION, workspaceId: options.identity.workspaceId, branches, results });
+    return new WorkingStateStore(options, {
+      schemaVersion: SCHEMA_VERSION,
+      workspaceId: options.identity.workspaceId,
+      branches,
+      draftBaselines,
+      results,
+    });
   }
 
   private references(states: Record<string, RecoveryState>, prefix: string) {
@@ -153,6 +241,12 @@ export class WorkingStateStore {
     replaceObjectReferences(this.context.database, branch.workspaceId, "work-branch", branch.branchId, [
       ...this.references(branch.baseState, "base"),
       ...this.references(branch.deltas, "delta"),
+    ]);
+  }
+
+  private protectDraftBaseline(baseline: DraftBaseline): void {
+    replaceObjectReferences(this.context.database, baseline.workspaceId, "draft-baseline", baseline.id, [
+      ...this.references(baseline.pathStates, "draft"),
     ]);
   }
 
@@ -220,6 +314,17 @@ export class WorkingStateStore {
     return branch ? clone(branch) : null;
   }
 
+  async getDraftBaseline(id: string): Promise<DraftBaseline | null> {
+    const baseline = this.document.draftBaselines[id];
+    if (!baseline) return null;
+    for (const [file, state] of Object.entries(baseline.pathStates)) {
+      if (state.kind !== "regular-file" || await this.getObject(state.objectHash) === null) {
+        throw new Error(`Draft baseline ${id} content is missing for ${file}`);
+      }
+    }
+    return clone(baseline);
+  }
+
   getResult(branchId: string, revision: number): WorkingResult | null {
     const result = this.document.results[`${branchId}@${revision}`];
     return result ? clone(result) : null;
@@ -232,16 +337,27 @@ export class WorkingStateStore {
     return { ...clone(branch.baseState), ...clone(result.pathStates) };
   }
 
-  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string): Promise<WorkingBranch> {
+  async createBranch(
+    workspaceId: string,
+    branchId: string,
+    baseState: Record<string, RecoveryState>,
+    baseRef?: string,
+    draftBasePaths: string[] = [],
+  ): Promise<WorkingBranch> {
     if (workspaceId !== this.document.workspaceId) throw new Error(`Working-state workspace mismatch: ${workspaceId}`);
     const existing = this.document.branches[branchId];
     if (existing) return clone(existing);
+    const normalizedDraftBasePaths = [...new Set(draftBasePaths.map(normalizeRelative))].sort();
+    if (normalizedDraftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
+      throw new Error(`Working branch ${branchId} does not contain every draft baseline path`);
+    }
     const now = new Date().toISOString();
     const branch: WorkingBranch = {
       branchId,
       workspaceId,
       ...(baseRef ? { baseRef } : {}),
       baseState: clone(baseState),
+      draftBasePaths: normalizedDraftBasePaths,
       deltas: {},
       headRevision: 0,
       createdAt: now,
@@ -251,6 +367,38 @@ export class WorkingStateStore {
     next.branches[branchId] = branch;
     await this.persist(next, () => this.protectBranch(branch));
     return clone(branch);
+  }
+
+  async createDraftBaseline(workspaceId: string, paths: readonly CreateDraftBaselinePath[]): Promise<DraftBaseline> {
+    if (workspaceId !== this.document.workspaceId) throw new Error(`Working-state workspace mismatch: ${workspaceId}`);
+    const id = `draft-${randomUUID()}`;
+    const pathStates: Record<string, RecoveryState> = {};
+    const provenance: Record<string, DraftBaselinePathProvenance> = {};
+    const normalizedPaths = paths.map((pathInput) => ({ ...pathInput, path: normalizeRelative(pathInput.path) }));
+    assertNoDraftPathConflicts(normalizedPaths.map((pathInput) => pathInput.path));
+    for (const pathInput of normalizedPaths) {
+      const file = pathInput.path;
+      const bytes = typeof pathInput.content === "string" ? Buffer.from(pathInput.content, "utf8") : pathInput.content;
+      const object = await this.putObject(bytes);
+      pathStates[file] = {
+        kind: "regular-file",
+        objectHash: object.hash,
+        byteLength: object.byteLength,
+        ...(pathInput.mode === undefined ? {} : { mode: pathInput.mode }),
+      };
+      provenance[file] = clone(pathInput.provenance);
+    }
+    const baseline: DraftBaseline = {
+      id,
+      workspaceId,
+      createdAt: new Date().toISOString(),
+      pathStates,
+      provenance,
+    };
+    const next = clone(this.document);
+    next.draftBaselines[id] = baseline;
+    await this.persist(next, () => this.protectDraftBaseline(baseline));
+    return clone(baseline);
   }
 
   async importFixedResult(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, resultState: Record<string, RecoveryState>, changedPaths: string[], parentRef?: string): Promise<WorkingResult> {
@@ -319,7 +467,11 @@ export class WorkingStateStore {
       }
       return result;
     });
-    const candidates = [...new Set([...Object.keys(branch.baseState), ...changed, ...ancestors])];
+    const candidates = [...new Set([
+      ...branch.draftBasePaths,
+      ...changed,
+      ...ancestors,
+    ])];
     return this.publishStates(branchId, await this.captureDirectory(directory, candidates), candidates);
   }
 
@@ -331,6 +483,16 @@ export class WorkingStateStore {
       states,
       readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
       cleanUnreferenced: true,
+      fsPromises: this.fsPromises,
+      pathModule: this.pathModule,
+    });
+  }
+
+  async materializeStates(states: Record<string, RecoveryState>, directory: string): Promise<void> {
+    await materializeWorkingState({
+      targetDir: directory,
+      states,
+      readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
       fsPromises: this.fsPromises,
       pathModule: this.pathModule,
     });
@@ -354,6 +516,13 @@ export class WorkingStateStore {
     const next = clone(this.document);
     delete next.branches[branchId];
     await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "work-branch", branchId));
+  }
+
+  async deleteDraftBaseline(id: string): Promise<void> {
+    if (!this.document.draftBaselines[id]) return;
+    const next = clone(this.document);
+    delete next.draftBaselines[id];
+    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "draft-baseline", id));
   }
 
   async deleteResult(branchId: string, revision: number): Promise<void> {

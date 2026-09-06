@@ -86,12 +86,12 @@ Last updated: 2026-09-06
 
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
-1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化与安全回收已进入生产链；
-   窗口草稿、虚拟分支工具、空间总预算和归档产品面随对应消费者继续。
+1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
+   草稿基线已进入生产链；虚拟分支工具、surface 写回、空间总预算和归档产品面随对应消费者继续。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
-3. **当前：窗口读取与 explore（3.2，首个 surface 纵切已交付）**：自动消息来源、固定 dirty snapshot 和 draft-aware rg/正文已接；
-   下一步把同一引用接进线程基线，并为 LSP/符号来源补 document revision 后做结构展开。缺可选来源仍返回已有正文，不等全图/
+3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware rg/正文及线程草稿基线已接；下一步为
+   LSP/符号来源补 document revision 后做结构展开，并让其余受控读工具复用固定来源。缺可选来源仍返回已有正文，不等全图/
    向量/索引/BM25 基线；模型增强按槽位接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
@@ -225,7 +225,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 
 | 环节 | 实施 |
 | --- | --- |
-| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘。待接：隔离线程基线 |
+| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；dispatch 已把固定草稿复制进持久隔离线程基线 |
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；继续补路径、错误/栈帧的类型化提取 |
 | 召回/展开 | rg、按种子文件选择 LSP、符号图、配置的向量；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
 | 版本与融合 | 按来源重读完整符号或行窗口，位置匹配版本；RRF 融合保留来源，不用分差当置信度 |
@@ -235,13 +235,13 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 注册 | 可用来源、正文、授权、句柄和工具链通过相关验证即默认注册，不等所有增强或独立评测 |
 
 现有来源是 search.content、Documents disk、固定 surface draft、需代表文件选语言的 LSP 导航、file/defines 图。surface snapshot 已能
-替换 dirty path 的磁盘命中和正文；`read`/`grep`/线程基线仍待消费。LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺
+替换 dirty path 的磁盘命中和正文；线程基线已消费同一固定来源，`read`/`grep` 仍待接。LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺
 document revision，先补绑定再接结构范围。related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。
 
 已验证中文/Unicode 词项、磁盘与草稿正文/revision、dirty-only 新词、草稿删除旧磁盘词、后续编辑不污染、session/workspace/scope、
-捕获失败、分页句柄和 Pi 真调用链。继续补多窗口来源切换、线程父子基线、结构 range/version、取消及可选模型失败。缺可选来源不禁
+捕获失败、分页句柄和 Pi 真调用链。继续补多窗口来源切换、结构 range/version、取消及可选模型失败。缺可选来源不禁
 整个工具，不建议不存在的 retrieval 角色。
 
 实际遇到召回/时延问题再用固定 query/版本/目标 span/支撑比较 grep、BM25 和 explore，保存相同预算下实际返回包。
@@ -270,6 +270,10 @@ Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算�
 **C. 工具与草稿。** 同名 read/grep/find/ls/edit/write/apply_patch 读写固定 base+delta，父改动不串读，包括子未改路径。
 用户消息自动取得草稿快照，来源/版本随分支保留；草稿集成走 Document Registry 的版本化编辑和 grouped undo，不隐式存盘。
 原生 Pi 工具、LSP、扩展、shell 需要真实路径时 materialize 并切同一执行视图，不为无目录而禁用正常能力；shared 明示实时共享。
+
+已交付的第一段是 dispatch 草稿基线：请求内复制固定正文与字节格式，Thread catalog 持有不可变 baseline id，queued/lost 恢复从持久
+对象重建；有效草稿是 branch revision 0，不是 child delta。dirty 角色强制 isolated，来源不可用则 dispatch 失败。当前非草稿路径仍
+在 Run 启动时捕获；surface 写回、无目录工具和整仓 dispatch 快照尚未交付。
 
 **D. 环境与执行写回。** Git/copy/CoW 按平台选择，缺 CoW 用正常复制，默认不硬链接可写目录；包管理器缓存可复用。
 setup 采用用户工作区配置，配置一次授权正常重复执行，不猜仓库命令；按工具、依赖输入和实际环境需要运行幂等准备。

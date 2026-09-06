@@ -21,7 +21,41 @@ export interface DraftBaselineResult {
   changedPaths: string[];
 }
 
-const normalizeRelPath = (p: string): string => p.replace(/\\/g, "/");
+const normalizeRelPath = (p: string): string => {
+  const normalized = p
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/+$/, "");
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`Invalid draft path: ${p}`);
+  }
+  return normalized;
+};
+const DEFAULT_CREATED_FILE_MODE = 0o666 & ~process.umask();
+const DEFAULT_CREATED_DIRECTORY_MODE = (process.platform === "win32" ? 0o666 : 0o777) & ~process.umask();
+
+const ancestorPaths = (rel: string): string[] => {
+  const parts = rel.split("/");
+  return parts.slice(0, -1).map((_part, index) => parts.slice(0, index + 1).join("/"));
+};
+
+const normalizeDraftList = (drafts: EditorDraft[]): EditorDraft[] => {
+  const normalized = drafts.map((draft) => ({ ...draft, path: normalizeRelPath(draft.path) }));
+  const paths = normalized.filter((draft) => draft.content !== undefined).map((draft) => draft.path);
+  const seen = new Set<string>();
+  for (const rel of paths) {
+    if (seen.has(rel)) throw new Error(`Draft paths contain a duplicate path: ${rel}`);
+    seen.add(rel);
+  }
+  for (const descendant of [...seen].sort()) {
+    const ancestor = ancestorPaths(descendant).find((candidate) => seen.has(candidate));
+    if (ancestor) {
+      throw new Error(`Draft paths contain an ancestor/descendant conflict: ${ancestor} and ${descendant}`);
+    }
+  }
+  return normalized;
+};
 
 /**
  * Overlays in-memory editor dirty drafts onto a disk or git baseline.
@@ -53,13 +87,19 @@ export async function overlayDraftsOnBaseline(
         return { path: p, content: val as string | Buffer | null };
       });
 
-  for (const draft of draftList) {
-    const rel = normalizeRelPath(draft.path);
+  const normalizedDrafts = normalizeDraftList(draftList);
+  const directStates = new Map<string, RecoveryState>();
+  const activeDrafts = normalizedDrafts.filter((draft) => draft.content !== undefined);
+
+  for (const draft of normalizedDrafts) {
+    const rel = draft.path;
     const existing = baseState[rel];
 
     if (draft.content === null) {
       // Draft represents file deletion
-      effectiveState[rel] = { kind: "missing" };
+      const state = { kind: "missing" as const };
+      effectiveState[rel] = state;
+      directStates.set(rel, state);
       if (existing && existing.kind !== "missing") {
         deletedPaths.push(rel);
       }
@@ -73,7 +113,7 @@ export async function overlayDraftsOnBaseline(
 
       const { hash, byteLength } = await putObject(bytes);
       const existingMode = existing && existing.kind === "regular-file" ? existing.mode : undefined;
-      const fileMode = draft.mode ?? existingMode;
+      const fileMode = draft.mode ?? existingMode ?? DEFAULT_CREATED_FILE_MODE;
 
       const newState: RegularFileState = {
         kind: "regular-file",
@@ -83,6 +123,7 @@ export async function overlayDraftsOnBaseline(
       };
 
       effectiveState[rel] = newState;
+      directStates.set(rel, newState);
 
       if (existing && existing.kind !== "missing") {
         modifiedPaths.push(rel);
@@ -92,7 +133,29 @@ export async function overlayDraftsOnBaseline(
     }
   }
 
-  const changedPaths = [...addedPaths, ...modifiedPaths, ...deletedPaths];
+  const changedPathClosure = new Set<string>();
+  const basePaths = Object.keys(baseState);
+  for (const draft of activeDrafts) {
+    const rel = draft.path;
+    changedPathClosure.add(rel);
+    for (const candidate of basePaths) {
+      if (candidate.startsWith(`${rel}/`)) {
+        effectiveState[candidate] = { kind: "missing" };
+        changedPathClosure.add(candidate);
+      }
+    }
+  }
+  for (const [rel, state] of directStates) effectiveState[rel] = state;
+  for (const draft of activeDrafts) {
+    for (const ancestor of ancestorPaths(draft.path)) {
+      if (effectiveState[ancestor]?.kind !== "directory") {
+        effectiveState[ancestor] = { kind: "directory", mode: DEFAULT_CREATED_DIRECTORY_MODE };
+        changedPathClosure.add(ancestor);
+      }
+    }
+  }
+
+  const changedPaths = [...changedPathClosure].sort();
 
   return {
     effectiveState,
@@ -120,13 +183,5 @@ export async function createBranchWithDraftBaseline(
     putObject: (bytes) => store.putObject(bytes),
   });
 
-  const branch = await store.createBranch(workspaceId, branchId, baseState, baseRef);
-
-  if (changedPaths.length > 0) {
-    // Publish the draft overlay as the first immutable revision; callers that
-    // only need the branch can still read the returned branch baseline.
-    await store.publishStates(branchId, effectiveState, changedPaths);
-  }
-
-  return store.getBranch(branchId) ?? branch;
+  return store.createBranch(workspaceId, branchId, effectiveState, baseRef, changedPaths);
 }

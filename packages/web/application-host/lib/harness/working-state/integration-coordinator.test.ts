@@ -164,6 +164,65 @@ describe("IntegrationCoordinator", () => {
     }
   });
 
+  it("keeps an unsaved draft target off disk, then allows integration after the exact draft is saved", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "draft.txt"), "disk bytes\n");
+      const child = path.join(h.root, "child-draft-target");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "draft.txt"), "child bytes\n");
+      const result = await h.workingStates.withStore("ws", "draft-target-result", async (store) => {
+        const diskState = await store.captureDirectory(h.workspace);
+        const object = await store.putObject(Buffer.from("unsaved draft\n"));
+        const current = diskState["draft.txt"]!;
+        const draftState: RecoveryState = {
+          kind: "regular-file",
+          objectHash: object.hash,
+          byteLength: object.byteLength,
+          ...(current.kind === "regular-file" && current.mode !== undefined ? { mode: current.mode } : {}),
+        };
+        await store.createBranch("ws", "thread-draft-target", { ...diskState, "draft.txt": draftState }, "base", ["draft.txt"]);
+        return store.publishDirectoryResult("thread-draft-target", child);
+      });
+      expect(result.changedPaths).toEqual(["draft.txt"]);
+
+      const blocked = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-draft-target",
+        branchId: "thread-draft-target",
+        resultRevision: result.resultRevision,
+      });
+      expect(blocked).toMatchObject({
+        status: "conflict",
+        appliedPaths: [],
+        conflictPaths: ["draft.txt"],
+        surfaceTargetPaths: ["draft.txt"],
+      });
+      expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("disk bytes\n");
+
+      await fs.promises.writeFile(path.join(h.workspace, "draft.txt"), "unsaved draft\n");
+      const saved = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-draft-target",
+        branchId: "thread-draft-target",
+        resultRevision: result.resultRevision,
+      });
+      expect(saved).toMatchObject({ status: "applied", appliedPaths: ["draft.txt"], conflictPaths: [] });
+      expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("child bytes\n");
+
+      const alreadyPresent = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-draft-target",
+        branchId: "thread-draft-target",
+        resultRevision: result.resultRevision,
+      });
+      expect(alreadyPresent).toMatchObject({ status: "applied", appliedPaths: [], conflictPaths: [] });
+      expect(alreadyPresent.surfaceTargetPaths).toBeUndefined();
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
   it("reuses a completed conflict operation when the same result and resulting parent state are retried", async () => {
     const h = await createHarness();
     try {

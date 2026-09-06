@@ -201,6 +201,7 @@ describe("thread registry", () => {
     expect((await restarted.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
       carryBlocks: true,
       concurrency: 12,
+      draftBaselineId: null,
       tools: [],
       worktree: "isolated",
     });
@@ -359,6 +360,24 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.carryBlocks).toBe(true);
   });
 
+  it("upgrades schema v6 manifests with no draft baseline", async () => {
+    const thread = await registry.createThread(createInput());
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v6 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<{ manifest: Record<string, unknown> }>;
+    };
+    v6.schemaVersion = 6;
+    delete v6.threads[0]!.manifest.draftBaselineId;
+    await writeFile(path, JSON.stringify(v6), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.draftBaselineId).toBeNull();
+    await registry.setAttention(WORKSPACE, thread.id, "stalled");
+    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+  });
+
   it("converts a live discussion by ending its old Run and starting a same-session implementation Run atomically", async () => {
     const thread = await registry.createThread(createInput({
       autoRun: true,
@@ -451,19 +470,24 @@ describe("thread registry", () => {
 
   it("dequeues only after an active run frees a concurrency slot", async () => {
     const dequeued: string[] = [];
+    const draftBaselines: Array<string | null> = [];
     await registry.dispose();
     registry = createThreadRegistry({
       dataDir,
       hostId: "test-host",
       maxConcurrency: 1,
-      onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
+      onThreadDequeued: async (_workspaceId, _parent, thread) => {
+        dequeued.push(thread.id);
+        draftBaselines.push(thread.manifest.draftBaselineId);
+      },
     });
     const first = await registry.createThread(createInput({ brief: "first" }));
     const firstRun = await registry.startRun(WORKSPACE, first.id);
     await registry.markRunRunning(WORKSPACE, first.id, firstRun.id, "child-1");
-    const second = await registry.createThread(createInput({ brief: "second" }));
+    const second = await registry.createThread(createInput({ brief: "second", draftBaselineId: "draft-queued" }));
     await registry.endRun(WORKSPACE, first.id, firstRun.id, "success", null, report());
     expect(dequeued).toEqual([second.id]);
+    expect(draftBaselines).toEqual(["draft-queued"]);
   });
 
   it("uses the queued Thread's persisted concurrency after a restart or settings change", async () => {

@@ -98,6 +98,57 @@ describe("materializer", () => {
     expect(fs.existsSync(existingFile)).toBe(false);
   });
 
+  it("does not claim an exact missing state when removal fails", async () => {
+    const blocked = path.join(tempDir, "blocked.txt");
+    await fs.promises.writeFile(blocked, "keep me");
+    const denied = new Proxy(fs.promises, {
+      get(target, property, receiver) {
+        if (property === "rm") return async (candidate: fs.PathLike, options?: fs.RmOptions) => {
+          if (path.resolve(String(candidate)) === path.resolve(blocked)) {
+            throw Object.assign(new Error("denied"), { code: "EACCES" });
+          }
+          return target.rm(candidate, options);
+        };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await expect(materializeWorkingState({
+      targetDir: tempDir,
+      states: { "blocked.txt": { kind: "missing" } },
+      readContent: async () => null,
+      fsPromises: denied,
+    })).rejects.toMatchObject({ code: "EACCES" });
+    expect(await fs.promises.readFile(blocked, "utf8")).toBe("keep me");
+  });
+
+  it("fails exact cleanup when an unreferenced path cannot be removed", async () => {
+    const blocked = path.join(tempDir, "stale.txt");
+    await fs.promises.writeFile(blocked, "stale");
+    const denied = new Proxy(fs.promises, {
+      get(target, property, receiver) {
+        if (property === "rm") return async (candidate: fs.PathLike, options?: fs.RmOptions) => {
+          if (path.resolve(String(candidate)) === path.resolve(blocked)) {
+            throw Object.assign(new Error("denied"), { code: "EPERM" });
+          }
+          return target.rm(candidate, options);
+        };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await expect(materializeWorkingState({
+      targetDir: tempDir,
+      states: {},
+      cleanUnreferenced: true,
+      readContent: async () => null,
+      fsPromises: denied,
+    })).rejects.toMatchObject({ code: "EPERM" });
+    expect(await fs.promises.readFile(blocked, "utf8")).toBe("stale");
+  });
+
   it("materializes symlinks if supported by platform", async () => {
     const states: Record<string, RecoveryState> = {
       "target.txt": {

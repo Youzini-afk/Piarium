@@ -28,10 +28,28 @@ export interface WorkingBranch {
   workspaceId: string;
   baseRef?: string | undefined;
   baseState: Record<string, RecoveryState>;
+  /** Paths whose effective base state was determined by unsaved surface drafts, including structural closure. */
+  draftBasePaths: string[];
   deltas: Record<string, RecoveryState>;
   headRevision: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DraftBaselinePathProvenance {
+  baseRevision: string | null;
+  encoding: string;
+  bom: boolean;
+  localEditRevision: number;
+  revision: string;
+}
+
+export interface DraftBaseline {
+  id: string;
+  workspaceId: string;
+  createdAt: string;
+  pathStates: Record<string, RecoveryState>;
+  provenance: Record<string, DraftBaselinePathProvenance>;
 }
 
 export interface WorkingResult {
@@ -84,6 +102,8 @@ export interface IntegrationApplyResult {
   status: "applied" | "conflict" | "compensated" | "needs-attention";
   appliedPaths: string[];
   conflictPaths: string[];
+  /** Draft-derived paths that require reconciliation with the originating editor surface. */
+  surfaceTargetPaths?: string[];
   compensatedPaths?: string[];
   needsAttentionPaths?: string[];
   diffStats: ThreadDiffStats;

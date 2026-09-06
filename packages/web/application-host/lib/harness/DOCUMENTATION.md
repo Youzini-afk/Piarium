@@ -103,8 +103,9 @@ reported as stale; missing, forbidden, binary, or failed reads never fabricate e
 Partial results retain usable snippets and explicit issues. The formatted body is stored in the
 session OutputStore before its handle is returned. The file count describes files with hits,
 not an unavailable estimate of all scanned files. Source cancellation propagates to search/read.
-Surface drafts, symbol expansion, and optional model enrichment are separate planned consumers;
-the disk path does not claim those services are already present.
+Surface drafts are consumed by `explore.search` and Thread dispatch. Symbol expansion and optional
+model enrichment remain separate planned sources; the disk path does not claim those services are
+already present.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
@@ -139,7 +140,7 @@ Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
 durable Run record before listing children.
-Thread launch includes a tagged snapshot of the parent's current blocks. At
+Run launch includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
@@ -150,6 +151,16 @@ copy snapshots remain migration/reconstruction sources. Merge reads the selected
 native revision, never the live child directory, and applies only baseline-to-result
 paths through the recovery store's selected location, SQLite journal, object store,
 and workspace lease. Reopen materializes the recorded result at the same path.
+When dispatch carries dirty editor input, the runtime first clones the complete
+fixed surface snapshot into a persistent WorkingState draft baseline. Its id is
+frozen in the Thread launch manifest; queued or restarted Runs overlay the exact
+draft bytes into the execution directory and use that effective state as branch
+revision zero. Result publication reads the live materialization even when an
+older fixed result exists, while merge and migration continue to read the selected
+fixed result. Draft-derived paths are checked even when Git ignores them.
+Until surface-buffer mutation is connected, integration reports those paths as
+`surfaceTargetPaths` and performs no disk write or marker insertion when the
+parent disk has diverged from both the draft base and child result.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
 The session-state sidebar reads/updates blocks through authenticated context
@@ -171,7 +182,9 @@ request; Router still derives session/workspace/scope from the broker actor.
 `explore.search` removes disk hits for dirty paths, performs the same literal
 matching over the fixed surface snapshot, and reads excerpts from that same
 revision. Expired or unavailable dirty sources produce issues and never fall
-back to disk. Other files retain the existing Documents disk path.
+back to disk. Other files retain the existing Documents disk path. Thread dispatch
+is the second snapshot consumer; it copies the fixed content into persistent
+WorkingState before the temporary surface reference can be released.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

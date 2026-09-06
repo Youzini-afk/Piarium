@@ -46,7 +46,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 6;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 7;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -98,7 +98,7 @@ interface ThreadCatalogV4 {
   schemaVersion: 4;
   workspaceId: string;
   threads: Array<Omit<Thread, "manifest"> & {
-    manifest: Omit<ThreadLaunchManifest, "carryBlocks">;
+    manifest: Omit<ThreadLaunchManifest, "carryBlocks" | "draftBaselineId">;
   }>;
   runs: ThreadRun[];
 }
@@ -106,9 +106,20 @@ interface ThreadCatalogV4 {
 interface ThreadCatalogV5 {
   schemaVersion: 5;
   workspaceId: string;
-  threads: Thread[];
+  threads: LegacyDraftlessThread[];
   runs: ThreadRun[];
 }
+
+interface ThreadCatalogV6 {
+  schemaVersion: 6;
+  workspaceId: string;
+  threads: LegacyDraftlessThread[];
+  runs: ThreadRun[];
+}
+
+type LegacyDraftlessThread = Omit<Thread, "manifest"> & {
+  manifest: Omit<ThreadLaunchManifest, "draftBaselineId">;
+};
 
 export interface CreateThreadInput {
   workspaceId: string;
@@ -120,6 +131,7 @@ export interface CreateThreadInput {
   forkPoint?: { entryId: string };
   carryBlocks?: boolean;
   concurrency: number;
+  draftBaselineId?: string;
   scope?: string[];
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
@@ -255,14 +267,25 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
   && typeof value.carryBlocks === "boolean"
   && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
+  && (value.draftBaselineId === null || (isString(value.draftBaselineId) && value.draftBaselineId.length > 0))
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
 );
 
-const isLaunchManifestV4 = (value: unknown): value is Omit<ThreadLaunchManifest, "carryBlocks"> => (
+const isLaunchManifestV4 = (value: unknown): value is Omit<ThreadLaunchManifest, "carryBlocks" | "draftBaselineId"> => (
   isRecord(value)
+  && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
+  && Array.isArray(value.scope) && value.scope.every(isString)
+  && isNullableString(value.systemPromptFragment)
+  && Array.isArray(value.tools) && value.tools.every(isString)
+  && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
+);
+
+const isLaunchManifestV6 = (value: unknown): value is Omit<ThreadLaunchManifest, "draftBaselineId"> => (
+  isRecord(value)
+  && typeof value.carryBlocks === "boolean"
   && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
@@ -306,6 +329,7 @@ const isThread = (value: unknown): value is Thread => {
     && isNullableString(value.role)
     && (value.model === null || (isRecord(value.model) && isString(value.model.providerId) && isString(value.model.modelId)))
     && isLaunchManifest(value.manifest)
+    && (value.manifest.draftBaselineId === null || value.manifest.worktree === "isolated")
     && (value.createdBy === "user" || value.createdBy === "agent")
     && (value.kind === "discussion" || value.kind === "implementation")
     && (value.worktree === null || (isRecord(value.worktree)
@@ -345,6 +369,7 @@ const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManif
   return {
     carryBlocks: true,
     concurrency: 12,
+    draftBaselineId: null,
     scope: [],
     systemPromptFragment: role?.systemPromptFragment ?? null,
     tools: [...(role?.tools ?? [])],
@@ -369,7 +394,13 @@ const isThreadV3 = (value: unknown): value is ThreadCatalogV3["threads"][number]
 const isThreadV4 = (value: unknown): value is ThreadCatalogV4["threads"][number] => (
   isRecord(value)
   && isLaunchManifestV4(value.manifest)
-  && isThread({ ...value, manifest: { ...value.manifest, carryBlocks: true } })
+  && isThread({ ...value, manifest: { ...value.manifest, carryBlocks: true, draftBaselineId: null } })
+);
+
+const isThreadV6 = (value: unknown): value is LegacyDraftlessThread => (
+  isRecord(value)
+  && isLaunchManifestV6(value.manifest)
+  && isThread({ ...value, manifest: { ...value.manifest, draftBaselineId: null } })
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -499,7 +530,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -573,19 +604,22 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       runs: structuredClone(v4.runs),
       threads: v4.threads.map((thread) => ({
         ...structuredClone(thread),
-        manifest: { ...structuredClone(thread.manifest), carryBlocks: true },
+        manifest: { ...structuredClone(thread.manifest), carryBlocks: true, draftBaselineId: null },
       })),
     };
-  } else if (schemaVersion === 5) {
-    if (!value.threads.every(isThread)) {
-      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v5 thread records: ${path}`, path);
+  } else if (schemaVersion === 5 || schemaVersion === 6) {
+    if (!value.threads.every(isThreadV6)) {
+      throw new ThreadRegistryError("corrupt", `Thread registry contains malformed v${schemaVersion} thread records: ${path}`, path);
     }
-    const v5 = value as unknown as ThreadCatalogV5;
+    const legacy = value as unknown as ThreadCatalogV5 | ThreadCatalogV6;
     catalog = {
       schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
-      workspaceId: v5.workspaceId,
-      runs: structuredClone(v5.runs),
-      threads: structuredClone(v5.threads),
+      workspaceId: legacy.workspaceId,
+      runs: structuredClone(legacy.runs),
+      threads: legacy.threads.map((thread) => ({
+        ...structuredClone(thread),
+        manifest: { ...structuredClone(thread.manifest), draftBaselineId: null },
+      })),
     };
   } else {
     if (!value.threads.every(isThread)) {
@@ -909,6 +943,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const createThread = async (input: CreateThreadInput): Promise<Thread> => {
+    if (input.draftBaselineId !== undefined && (!input.draftBaselineId || input.worktree !== "isolated")) {
+      throw new Error("A Thread draft baseline requires a non-empty id and an isolated worktree");
+    }
     const key = scopeKey(input.workspaceId, input.parent);
     if (draining.has(key) || retiredParents.has(key)) {
       throw new Error("Cannot create a thread while its parent is being deleted");
@@ -930,6 +967,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         manifest: {
           carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
+          draftBaselineId: input.draftBaselineId ?? null,
           scope: [...(input.scope ?? [])],
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],

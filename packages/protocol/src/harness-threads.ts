@@ -69,6 +69,8 @@ export interface ThreadWorktree {
 export interface ThreadLaunchManifest {
   carryBlocks: boolean;
   concurrency: number;
+  /** Host-owned immutable editor draft baseline captured at dispatch. */
+  draftBaselineId: string | null;
   scope: string[];
   systemPromptFragment: string | null;
   tools: string[];
@@ -242,6 +244,8 @@ export interface ThreadMergeResult {
   text: string;
   merged: number;
   conflicts: string[];
+  /** Paths kept off disk because their baseline came from an unsaved editor draft. */
+  surfaceTargetPaths?: string[];
   status?: "applied" | "conflict" | "compensated" | "needs-attention";
   appliedPaths?: string[];
   resultRevision?: number;

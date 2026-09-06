@@ -1228,11 +1228,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || typeof resource.resourceId !== 'string' || !resource.resourceId
         || (candidate.baseRevision !== null && typeof candidate.baseRevision !== 'string')
         || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
-        || typeof candidate.content !== 'string') {
+        || typeof candidate.content !== 'string'
+        || (candidate.encoding !== undefined && candidate.encoding !== 'utf-8')
+        || (candidate.bom !== undefined && typeof candidate.bom !== 'boolean')) {
         throw new DocumentAuthorityError('Agent input snapshot resource is malformed', { code: 'failed', statusCode: 400 });
       }
       return {
         baseRevision: candidate.baseRevision as string | null,
+        encoding: candidate.encoding === undefined ? 'utf-8' : candidate.encoding,
+        bom: candidate.bom === undefined ? false : candidate.bom,
         content: candidate.content,
         localEditRevision: Number(candidate.localEditRevision),
         resource: { workspaceId: request.workspaceId, resourceId: resource.resourceId },
@@ -1357,6 +1361,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     releaseAgentInputSnapshot,
     commitAgentInputSnapshot,
     readAgentInputSnapshot: surfaceSnapshots.read,
+    cloneAgentInputSnapshot: surfaceSnapshots.clone,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,
     registerDirtySurface,
     beginDirtyStateBarrier,

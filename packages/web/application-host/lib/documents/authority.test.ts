@@ -503,6 +503,25 @@ it('captures immutable agent input snapshots only from the complete current dirt
       content: 'fixed draft\n',
       source: 'surface-draft',
     });
+    expect(harness.authority.cloneAgentInputSnapshot('session-1', first)).toMatchObject({
+      status: 'ready',
+      workspaceId: harness.identity.workspaceId,
+      resources: [{
+        baseRevision: disk.revision,
+        content: 'fixed draft\n',
+        encoding: 'utf-8',
+        bom: false,
+        localEditRevision: 2,
+        resource: harness.resource('draft.ts'),
+        revision: expect.stringMatching(/^surface-draft:/),
+      }],
+    });
+    expect(harness.authority.cloneAgentInputSnapshot('wrong-session', first)).toMatchObject({ status: 'unavailable' });
+    if (first.source !== 'surface') throw new Error('Expected a surface snapshot');
+    expect(harness.authority.cloneAgentInputSnapshot('session-1', {
+      ...first,
+      dirtyPaths: ['different.ts'],
+    })).toMatchObject({ status: 'unavailable' });
     expect(harness.authority.commitAgentInputSnapshot('wrong-session', first)).toEqual({ committed: false });
 
     await harness.authority.publishDirtyBuffers({
@@ -561,6 +580,83 @@ it('captures immutable agent input snapshots only from the complete current dirt
     });
     harness.authority.dropAgentInputSnapshots('session-1');
     expect(harness.authority.readAgentInputSnapshot('session-1', second, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+  } finally {
+    surface.close();
+    await harness.cleanup();
+  }
+});
+
+it('preserves explicit surface snapshot encoding and BOM metadata while rejecting invalid types', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const surface = harness.authority.registerDirtySurface({
+    generation: 7,
+    ownerId: 'surface-owner',
+    workspaceId: harness.identity.workspaceId,
+  }, () => undefined);
+  try {
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'metadata.txt'), 'disk\r\n');
+    const disk = await harness.authority.read(harness.resource('metadata.txt'));
+    if (disk.status !== 'ready') throw new Error('Expected metadata fixture');
+    const publication = {
+      generation: 7,
+      ownerId: 'surface-owner',
+      resources: [{
+        baseRevision: disk.revision,
+        localEditRevision: 1,
+        resource: harness.resource('metadata.txt'),
+      }],
+      workspaceId: harness.identity.workspaceId,
+    };
+    await harness.authority.publishDirtyBuffers(publication);
+    const context = await harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-metadata',
+      resources: [{
+        ...publication.resources[0]!,
+        content: 'draft\r\n',
+        encoding: 'utf-8',
+        bom: true,
+      }],
+    });
+    expect(harness.authority.cloneAgentInputSnapshot('session-metadata', context)).toMatchObject({
+      status: 'ready',
+      resources: [{
+        content: 'draft\r\n',
+        encoding: 'utf-8',
+        bom: true,
+      }],
+    });
+
+    await expect(harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-invalid-encoding',
+      resources: [{
+        ...publication.resources[0]!,
+        content: 'draft',
+        encoding: 7,
+        bom: false,
+      }],
+    })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
+    await expect(harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-unsupported-encoding',
+      resources: [{
+        ...publication.resources[0]!,
+        content: 'draft',
+        encoding: 'utf-16le',
+        bom: false,
+      }],
+    })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
+    await expect(harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-invalid-bom',
+      resources: [{
+        ...publication.resources[0]!,
+        content: 'draft',
+        encoding: 'utf-8',
+        bom: 'true',
+      }],
+    })).rejects.toMatchObject({ code: 'failed', statusCode: 400 });
   } finally {
     surface.close();
     await harness.cleanup();
