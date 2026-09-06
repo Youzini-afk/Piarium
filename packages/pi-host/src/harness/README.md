@@ -22,7 +22,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `kill_shell` | Terminate a background shell | `shell.kill` |
 | `diagnostics` | Get LSP diagnostics for a file, bound to its disk revision | `lsp.diagnosticsSnapshot` |
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
-| `explore` | Search versioned disk and latest accepted surface-draft excerpts | `explore.search` |
+| `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.search` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
 ## Registration

@@ -90,9 +90,11 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    草稿基线已进入生产链；虚拟分支工具、surface 写回、空间总预算和归档产品面随对应消费者继续。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
-3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls 及线程草稿基线已接；
-   下一步是 3.8 的语言服务视图隔离与正文修订绑定（D-087），它同时解锁 3.1 的符号修订与 6.1 的结构展开。缺可选来源仍返回已有正文，
-   不等全图/向量/索引/BM25 基线；模型增强按槽位接入。
+3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls、线程草稿基线、
+   写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组已实施，缺陷 1 的候选广度按 D-092 待补。
+   下一步按 3.11：先定结构来源接口并以 6.4 agent 视图 `documentSymbol` 实现、让结构切片消费带修订的范围，再引入 tree-sitter 作第二
+   provider（D-091，TS/TSX 首刀），再按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
+   全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
 
@@ -227,17 +229,21 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 环节 | 实施 |
 | --- | --- |
 | 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线。观察到写入后该路径的草稿失效、全部消费者回到磁盘（D-088）；shell 与外部写入仍未观察 |
-| seed | ✓ Unicode 标识符、引号字面量与连续中文分词；继续补路径、错误/栈帧的类型化提取 |
-| 召回/展开 | rg、按种子文件选择 LSP、符号图、配置的向量；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
-| 版本与融合 | 按来源重读完整符号或行窗口，位置匹配版本；RRF 融合保留来源，不用分差当置信度 |
-| 打包 | 目标与所需支撑组成 bundle，支撑可空，省略说明；真实 OutputStore 与 UTF-8 分页 |
-| 模型 | pi-host 使用 models.explore；intent 可并行，judge 等正文，修复仅类型化搜索/导航；无槽位零模型调用 |
+| seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
+| 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`（词项分组；不继承 grep `fileScore`；search-service 传 actor/inputContext；按需物化与 `not-requested`；互补打包；自身字节预算与句柄；工具描述改口）。缺陷 1 只做了一半：候选获取已脱离 `params.limit`，但预算耗尽时仍按路径序深度优先截断、后面的文件整体不进候选（D-092）。覆盖：`explore.test.ts` T1/T3–T8、`explore-service.test.ts` T2/T8、`search-service.test.ts` 候选模式、`explore-tool.test.ts` / `session-e2e.test.ts` T9。**待做**：候选广度按 D-092 改广度优先；结构切片消费 6.4 带修订范围（仍先于仓库级索引） |
+| 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 3.11 的 tree-sitter provider 承担）；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
+| 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），首个是 6.4 agent 视图 `documentSymbol`，冷/热为显式条件、缺时退行窗口；tree-sitter 作第二 provider 已决定（D-091），并承担命中分类；RRF 融合保留来源，不用分差当置信度 |
+| 打包 | 内部找全、外部只给支撑判断的材料；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |
+| 模型 | pi-host 使用 models.explore；按"当前缺的那一步"选一种：无仓库词汇 → intent，目标缺席 → 受限修复（须能提新词项/入口），候选多 → 比较；intent 可并行，judge 等正文，修复仅类型化搜索/导航；无槽位零模型调用 |
 | 上下文 | 同 revision/span 仍在实际请求才省正文；无覆盖表或压缩后未知时返回正文 |
 | 注册 | 可用来源、正文、授权、句柄和工具链通过相关验证即默认注册，不等所有增强或独立评测 |
 
 现有来源是 search.content、Documents disk、固定 surface draft、需代表文件选语言的 LSP 导航、file/defines 图。surface snapshot 已能
 替换 explore/grep 的 dirty path 磁盘命中，由同名 read 返回固定正文，并为同名 find/ls 提供固定文件与虚拟目录；线程基线也消费同一来源。
-LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺 document revision：按 3.8（D-087）先做视图隔离与修订绑定，再接结构范围。related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
+视图隔离与修订绑定已按 3.8（D-087）完成；D-090 候选获取/物化与 `anchors` 已实施，结构范围的消费按 3.11 排在其后，贯穿验收例子是
+`explore.search` 的 worker—protocol—Host 链——主 agent 能否从一次结果看见这条链，而不是"多了一个 symbols 调用"。related、co-change、
+测试配对、embedding 各自推进；tree-sitter 按 3.11 引入（D-091），冷仓库符号目录随其第 4 步，仓库级词法索引仍等观察到"找不到入口"再定。
+每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。
 
@@ -364,6 +370,33 @@ LRU 上限与空闲释放、导航的固定草稿与"草稿不可用不回退磁
 
 rail/overlay/时间线共用 session feed/SSE。接归档/独立恢复、结果修订、占用/保留原因和集成状态；重开按需物化，在原 Pi
 session 继续，讨论转实现新分支/Run 保留 transcript。子消息不进父正文；未知占用不补零；新文案 i18n。
+
+### 3.11 结构来源 provider 与 tree-sitter 语法包（D-091）
+
+语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"；两者在 Application Host 长期共存，不进 renderer。
+消费者：explore 结构切片、命中分类（6.1 fuse 段"名称/路径/注释/字符串/正文不同计分"的落地）、连接边形状识别、冷仓库符号目录与
+`imports` 边、线程/压缩用的仓库地图。它给不了类型、跨文件解析与诊断。交付顺序，每步独立可验证：
+
+1. **结构来源接口 + LSP 实现。** 定义带修订绑定的 provider：输入语言 ID（复用 `languageIdForPath`）、正文、修订；输出符号轮廓
+   （名字/种类/范围）、命中节点分类、带字面量调用、import，能力标志声明能给哪些。首个实现包装 6.4 agent 视图的 `documentSymbol`；
+   explore 切片只认接口，冷/热为显式条件，缺时退行窗口并说明来源状态。无新依赖。验收：切片单位按 D-090（小函数全文、大函数签名 +
+   命中语法块 + 省略标记 + 完整读取入口），`explore.search` 的 worker—protocol—Host 链能在一次结果里看见。
+2. **冷启动对照基线。** 在本仓库量一次 agent 视图从冷启动到 `documentSymbol` 可用的时间，记入 status；这是第 3 步"好了多少"的对照，
+   不再是"要不要做"的门。
+3. **web-tree-sitter + TS/TSX 包作第二 provider，同时接命中分类。** 引入依赖与 `.wasm` 打包路径（Electron/Web 宿主都能读到）；
+   语法包 = 语法 wasm + Piarium 查询（定义、带字面量调用、import；从 Aider / nvim-treesitter 的 Apache 2.0 查询改起并注明来源）；
+   解析结果按内容哈希缓存，授权与来源仍每次核验；ABI 随应用版本锁定，加载失败按 provider `unavailable` 报告。验收：同一查询在
+   语言服务器冷态下由 tree-sitter 给出切片；命中按节点种类分类进入排序；解析受工作预算与取消约束。
+4. **连接边查询、冷仓库符号目录、`imports` 边。** `bridge.request("…")` / `router.register("…")` / `on("…")` 等形状产出连接候选，
+   无法确认的同名字符串标关联候选；全仓扫描把 defines/imports 写进 6.2 现有图，同一形状与 `documentRevision` 绑定，不做基于 LSP
+   的全仓扫描。
+5. **语言 ≥ 3 时：按需下载与设置页。** 常用语言随应用捆绑（首批 TS/TSX/JS/JSON），其余按需下载到数据目录，与本地 embedding
+   模型同一套同意提示与下载管理；设置"语言支持"页按工作区检测到的语言列出，每种两行状态（语言服务器 / 结构包：已装 / 可装 / 暂无）。
+   之后按用户工作区语言分布逐个补包，目标覆盖大部分常用语言（Python、Go、Rust、Java、C/C++、C#、Kotlin/Swift、Ruby/PHP、Shell、
+   HTML/CSS、YAML/TOML、Markdown 等），覆盖进度记 status。用户自带包留作后续高级选项，带 ABI 校验与明确提示。
+
+不做：先建"通用 AST 服务"再找消费者；替代语言服务器的导航与诊断；renderer 引入；第一版接受任意第三方语法包；一种语言时做包管理器；
+声称解析速度或省时数字（实测记 status）。
 
 ## 阶段 3b：权限与插件
 

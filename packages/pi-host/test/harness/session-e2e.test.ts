@@ -944,10 +944,10 @@ describe("session e2e — explore", () => {
           /export const before = 1;\\nexport const contextLine = 2;\\nexport function needle\(\) \{ return 3; \}\\nexport const after = 4;/,
           "the model must receive the contiguous current excerpt",
         );
-        assert.match(exploreResult, /revision d1_[A-Za-z0-9_-]+/);
-        assert.match(exploreResult, /Source: disk document snapshots/);
-        const handle = exploreResult.match(/Output: (out_[A-Za-z0-9_-]+)/)?.[1];
-        assert.ok(handle, "the model-visible result must contain the real output handle");
+        assert.match(exploreResult, /"revision":"d1_[A-Za-z0-9_-]+"/);
+        assert.match(exploreResult, /Source: disk or fixed editor-draft snapshots/);
+        const handle = exploreResult.match(/"handle":"(out_[A-Za-z0-9_-]+)"/)?.[1];
+        assert.ok(handle, "the structured result must still issue a session-local output handle");
         const stored = session.harnessServiceHost.outputStore.read(snapshot.sessionId, handle);
         assert.equal(stored.status, "ready");
         assert.match(stored.slice.text, /target\.ts:1-4/);
@@ -1004,7 +1004,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /changed\.ts: stale/);
         assert.doesNotMatch(exploreResult, /before search/);
         assert.doesNotMatch(exploreResult, /replacement/);
-        assert.match(exploreResult, /Output: out_[A-Za-z0-9_-]+/);
+        assert.match(exploreResult, /"handle":"out_[A-Za-z0-9_-]+"/);
       } finally {
         await session.dispose();
         await fixture.documents.dispose();
@@ -1057,7 +1057,49 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /current\.ts/);
         assert.match(exploreResult, /missing\.ts: unavailable/);
         assert.doesNotMatch(exploreResult, /to be removed/);
-        assert.match(exploreResult, /Output: out_[A-Za-z0-9_-]+/);
+        assert.match(exploreResult, /"handle":"out_[A-Za-z0-9_-]+"/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("T9: forwards anchors through the real explore tool and prefers the literal hit", async () => {
+    await withTempRoot("piarium-s-explore-anchors-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "generic.ts"), "export const token = 1;\n", "utf8");
+      await writeFile(join(fixture.workspaceRoot, "exact.ts"), "export const uniqueAnchor = 2;\n", "utf8");
+      const faux = registerFauxProvider();
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "token", anchors: ["uniqueAnchor"] })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("The anchor hit was first.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: (request, options) => fixture.search.searchContent(request, options),
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "locate uniqueAnchor");
+        await session.host.session.waitForIdle();
+
+        assert.match(exploreResult, /exact\.ts/);
+        assert.match(exploreResult, /uniqueAnchor/);
+        assert.match(exploreResult, /"anchors":\["uniqueAnchor"\]|"supplied":\["uniqueAnchor"\]/);
       } finally {
         await session.dispose();
         await fixture.documents.dispose();

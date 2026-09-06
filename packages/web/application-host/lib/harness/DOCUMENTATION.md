@@ -137,17 +137,20 @@ rename tombstones.
 
 ### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
 
-The Pi tool sends the question and optional roots through the normal actor-scoped router.
-The deterministic engine extracts literal terms, merges ranked search hits, then reads each
-candidate through Documents and the same canonical path authority. Snippets contain the actual
-contiguous text, disk revision, and range. Search hits that no longer match the document are
-reported as stale; missing, forbidden, binary, or failed reads never fabricate expanded excerpts.
-Partial results retain usable snippets and explicit issues. The formatted body is stored in the
-session OutputStore before its handle is returned. The file count describes files with hits,
-not an unavailable estimate of all scanned files. Source cancellation propagates to search/read.
-Surface drafts are consumed by `explore.search` and Thread dispatch. Symbol expansion and optional
-model enrichment remain separate planned sources; the disk path does not claim those services are
-already present.
+The Pi tool sends the question, optional literal `anchors`, and optional roots through the
+normal actor-scoped router. `limit` is the excerpt count only. Candidate fetch uses a separate
+working budget (and an independent budget for anchors), reports when that budget is reached, and
+does not inherit grep `fileScore` order. Term groups keep identifier variants, quoted literals,
+and anchors together: variants expand matching, co-occurrence across groups raises rank, and
+anchors/literals stay the most distinctive seeds without becoming a hard filter.
+Search goes through `search-service` with `actor` and `inputContext` so dirty paths are excluded
+before the backend counts hits; explore does not match drafts itself. Candidates are ranked from
+hit metadata, then materialized on demand with bounded parallelism. Unread files are
+`not-requested`, never `empty`. Packing prefers complementary windows across files, then applies
+an explore byte budget below the generic 32 KiB truncation. Provenance stays in `details`; the
+model-visible body is `path:start-end`, code, and actionable gaps. OutputStore keeps the full
+pack plus unread-candidate refs, and the tool text mentions the handle only when more content
+remains. Symbol expansion and optional model enrichment remain separate planned sources.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
