@@ -287,4 +287,20 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.result.text).toContain(`get_output("${response.result.handle}")`);
     expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
   });
+
+  it("does not sum filesDropped across overlapping search roots", async () => {
+    const f = await fixture();
+    const inner = path.join(f.workspace, "sub", "inner");
+    await fs.mkdir(inner, { recursive: true });
+    await Promise.all(Array.from({ length: 250 }, async (_, index) => {
+      await fs.writeFile(path.join(inner, `f${index}.ts`), "needle\n", "utf8");
+    }));
+    // Both roots match all 250 files, so each drops 50 against the 200-file candidate budget.
+    // Summing would claim 100 distinct files were dropped; only 50 ever were.
+    const response = await f.request({ question: "needle", paths: ["sub", "sub/inner"], limit: 2 });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.searched.filesDropped).toBe(50);
+    expect(response.result.text).toMatch(/at least 50 matching file\(s\) were not brought into the candidate pool/);
+  });
 });

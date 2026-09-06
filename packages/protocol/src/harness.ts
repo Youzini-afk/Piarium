@@ -119,7 +119,8 @@ export interface SearchContentResult {
   handle?: string;
   /**
    * Explore candidate-mode only: matching files that had hits but were omitted
-   * because the file count itself exceeded the working budget. Absent on grep.
+   * because the file count itself exceeded the working budget. Exact for this
+   * single query. Absent on grep.
    */
   filesDropped?: number;
 }
@@ -369,6 +370,11 @@ export interface ExploreSearchResult {
   notRequested: { count: number; paths: string[] };
   omitted: Array<{ path: string; startLine: number; endLine: number; reason: string }>;
   partial: boolean;
+  /**
+   * `filesDropped` is a floor, not a total: query terms and search roots match overlapping
+   * file sets, so the distinct union cannot be recovered from per-query counts. It carries
+   * the largest single-query drop, and the model-visible body says "at least".
+   */
   searched: { patterns: number; files: number; ms: number; incomplete: boolean; filesDropped?: number };
   handle: string;
   details: {

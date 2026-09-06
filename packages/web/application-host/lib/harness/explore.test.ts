@@ -312,7 +312,24 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.searched.incomplete).toBe(true);
     expect(result.searched.filesDropped).toBe(13);
     const packed = formatExploreOutput(result);
-    expect(packed.visibleText).toMatch(/13 matching file\(s\) were not brought into the candidate pool/);
+    expect(packed.visibleText).toMatch(/at least 13 matching file\(s\) were not brought into the candidate pool/);
     expect(packed.visibleText).not.toMatch(/candidate working budget reached/);
+  });
+
+  it("reports filesDropped as a floor instead of summing overlapping query terms", async () => {
+    const dropsByPattern = new Map<string, number>();
+    const result = await explore({ question: "Alpha Beta", anchors: ["myAnchor"] }, {
+      rgSearch: async (pattern) => {
+        const filesDropped = pattern === "myAnchor" ? 40 : 12;
+        dropsByPattern.set(pattern, filesDropped);
+        return { hits: [{ path: "kept.ts", line: 1, text: "myAnchor Alpha Beta" }], filesDropped };
+      },
+      readFile: async () => ready("myAnchor Alpha Beta"),
+    });
+    const summed = [...dropsByPattern.values()].reduce((sum, count) => sum + count, 0);
+    expect(dropsByPattern.size).toBeGreaterThan(1);
+    expect(result.searched.filesDropped).toBe(40);
+    expect(result.searched.filesDropped).toBeLessThan(summed);
+    expect(result.searched.incomplete).toBe(true);
   });
 });

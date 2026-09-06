@@ -98,7 +98,8 @@ export function createExploreSearchService(
             };
           }));
           const callPartial = batches.some((batch) => batch.partial);
-          const callFilesDropped = batches.reduce((sum, batch) => sum + batch.filesDropped, 0);
+          // Search roots may overlap (`src` and `src/lib`), so summing would double-count files.
+          const callFilesDropped = batches.reduce((most, batch) => Math.max(most, batch.filesDropped), 0);
           searchPartial ||= callPartial;
           return {
             hits: batches.flatMap((batch) => batch.hits),

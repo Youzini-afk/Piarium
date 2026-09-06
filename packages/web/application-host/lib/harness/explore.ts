@@ -402,7 +402,9 @@ export async function explore(
     }));
     signal.throwIfAborted();
     if (result.partial || result.filesDropped > 0) searchIncomplete = true;
-    filesDropped += result.filesDropped;
+    // Query terms match overlapping file sets, so the union is unknowable from counts alone.
+    // Take the largest single-term drop: a floor that never claims more files than were dropped.
+    filesDropped = Math.max(filesDropped, result.filesDropped);
     for (const hit of result.hits) {
       for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
     }
@@ -523,7 +525,7 @@ function packExploreVisible(
   ];
   const dropped = result.searched.filesDropped ?? 0;
   if (dropped > 0) {
-    header.push(`Search incomplete: ${dropped} matching file(s) were not brought into the candidate pool.`);
+    header.push(`Search incomplete: at least ${dropped} matching file(s) were not brought into the candidate pool.`);
   }
   if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
     header.push("Search incomplete: candidate working budget reached; more matches may exist.");
