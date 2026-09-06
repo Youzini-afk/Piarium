@@ -375,7 +375,8 @@ perform no background work. Agent file changes reconcile with open editors expli
 prompt, steer, or follow-up, the Document Registry copies that surface's dirty buffers into an
 immutable Application Host snapshot. Document text travels only over the authenticated Documents
 channel; the runtime request carries an opaque reference or an unavailable dirty-path set. Harness
-`explore` uses that fixed snapshot for dirty paths and Documents disk snapshots for the rest. Explicit
+`explore`, `grep`, and the same-name `read` / `find` / `ls` adapters use that fixed snapshot for dirty paths;
+other paths keep each tool's established disk source. Explicit
 selection/diff attachments may still quote text in the prompt, and patch accept/reject uses
 expected-revision writes so an agent edit cannot silently overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
 confers process, debug, or test-runner capability.
@@ -460,7 +461,7 @@ The `HarnessServiceMap` defines the following method groups:
 
 - **Shell**: `shell.exec`, `shell.read`, `shell.write`, `shell.kill`
 - **Output**: `output.store`, `output.read`
-- **Search / fixed document source**: `search.content`, `document.readSource`
+- **Search / fixed document source**: `search.content`, `document.readSource`, `document.pathOverlay`
 - **Filesystem**: `fs.lock`
 - **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`, `lsp.symbols`, `lsp.definition`, `lsp.references`, `lsp.hover`
 - **Web**: `web.fetch`, `web.search` (registered when available). A configured
@@ -615,7 +616,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Workspace identity and document recovery journals | Per-host records below `PIARIUM_DATA_DIR` | Scoped to the owning application host; another host never inherits a same-path selection |
 | Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |
 | IDE editor layout | `piarium.workbench.layout` v1 service, profile- and workspace-scoped | Missing/empty use the distribution default without writing it; malformed keeps the last valid document and raises a diagnostic |
-| Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel; Host owns immutable per-input snapshots | Dirty buffers and view state stay client-owned; authenticated fixed snapshots feed explore/grep/read and dispatch without becoming a second live editor |
+| Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel; Host owns immutable per-input snapshots | Dirty buffers and view state stay client-owned; authenticated fixed snapshots feed explore/grep/read/find/ls and dispatch without becoming a second live editor |
 
 ### 6.1 Working-state architecture (D-078 / D-079)
 
@@ -638,11 +639,16 @@ Narrow result publication enumerates only those roots, their baseline descendant
 so ignored modifications, additions, and deletions survive result publication and reclamation without a
 workspace-wide rescan. Schema 1/2 catalogs migrate with an empty capture scope.
 
-Parent-session `explore`, `grep`, and the same-name Pi `read` override consume the immutable surface input.
+Parent-session `explore`, `grep`, and the same-name Pi `read`, `find`, and `ls` overrides consume the immutable surface input.
 Search removes dirty disk hits before its bounded backend counter and merges fixed-draft hits before ranking.
 Read asks the Host only to choose disk versus fixed draft bytes, then delegates pagination, truncation, and
-disk images to Pi's native read definition. An unavailable dirty source never falls back to disk. `find`/`ls`
-and fixed-revision LSP sessions remain the next read-view consumers.
+disk images to Pi's native read definition. Path overlays ask the Host only for
+relative fixed file and virtual directory identities plus revisions, then merge
+them with native fd/filesystem results through Pi's definitions before limit and
+byte truncation. An unavailable dirty source never falls back to disk. LSP and
+fixed-revision sessions remain the next read-view consumers. Surface snapshots
+currently describe dirty text file existence only; deletion and rename
+tombstones are not represented.
 
 Integration records the selected child result, expected parent states for affected paths and drafts,
 actual per-path application, conflicts, index effects, and recovery operations. Existing recovery object,
@@ -675,7 +681,7 @@ Its final compare/apply/verify and compensation share the same canonical path qu
 read/write/move/delete in that authority instance; directory operations cover descendants while unrelated
 paths remain concurrent. This queue does not cover raw filesystem or shell writes in other execution paths.
 Reclamation holds the Documents writer barrier through deletion and preserves materializations used by
-controlled processes or editor surfaces. Find/ls virtual views, fixed-revision LSP, surface-buffer integration, and the full space
+controlled processes or editor surfaces. Fixed-revision LSP, surface-buffer integration, and the full space
 budget UI remain separately tracked in [agent-harness-status.md](agent-harness-status.md); their helper
 types do not count as delivered product paths.
 

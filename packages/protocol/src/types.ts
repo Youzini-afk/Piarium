@@ -535,6 +535,8 @@ export interface HostHandshakeParams {
     harnessLspNavigation?: boolean;
     /** The application Host can resolve native Pi reads against editor drafts. */
     harnessDocumentRead?: boolean;
+    /** The application Host can resolve native Pi find/ls paths against editor drafts. */
+    harnessDocumentPathOverlay?: boolean;
     /** The application Host permits session-local reader models over its guarded web.fetch service. */
     harnessWebRead?: boolean;
     /** The application Host has a real web-search provider. */

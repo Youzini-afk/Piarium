@@ -13,10 +13,11 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── shell.write  → ShellSupervisor
                            ├── shell.kill   → ShellSupervisor
                            ├── output.store → OutputStore (global)
-	                           ├── output.read  → OutputStore
-	                           ├── search.content → HarnessSearchService
-	                           ├── document.readSource → fixed surface bytes or disk sentinel
-	                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
+                           ├── output.read  → OutputStore
+                           ├── search.content → HarnessSearchService
+                           ├── document.readSource → fixed surface bytes or disk sentinel
+                           ├── document.pathOverlay → fixed relative paths or disk sentinel
+                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
@@ -106,6 +107,22 @@ text with encoding, BOM, and revision. The Host serializes only fixed draft byte
 pi-host delegates both branches to Pi's `createReadToolDefinition`, preserving
 native offset/limit truncation and disk image attachments. The wrapper is
 registered only when the Host handshake advertises `harnessDocumentRead`.
+
+### Native find/ls path overlay (`document.pathOverlay`)
+
+The Router authorizes the requested root with `allowMissing`, so a dirty-only
+directory can be traversed. Documents validates the same session, workspace,
+and ready surface snapshot before returning content-free entries relative to
+that root. Each fixed file carries its surface revision; nested files also
+produce virtual directory ancestors. `find` filters those entries with the
+same picomatch basename/path semantics as `grep`, merges them with native fd
+results before applying the user limit, and reuses Pi's own formatting and
+50KB truncation. `ls` merges immediate disk and virtual children through Pi's
+native definition. A covered disk path keeps the fixed snapshot's file or
+directory type. Unrelated roots return the disk sentinel; an expired related
+snapshot returns unavailable and never substitutes disk output. The snapshot
+currently represents dirty text file existence only, so it has no deletion or
+rename tombstones.
 
 ### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
 

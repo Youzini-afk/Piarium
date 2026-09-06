@@ -1296,6 +1296,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     return surfaceSnapshots.commit(sessionId, context);
   };
 
+  const overlayAgentInputSnapshot = (
+    sessionId: string,
+    context: AgentInputContext,
+    resourceId: string,
+  ) => surfaceSnapshots.overlay(sessionId, context, resourceId);
+
   const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
@@ -1360,6 +1366,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     captureAgentInputSnapshot,
     releaseAgentInputSnapshot,
     commitAgentInputSnapshot,
+    overlayAgentInputSnapshot,
     readAgentInputSnapshot: surfaceSnapshots.read,
     cloneAgentInputSnapshot: surfaceSnapshots.clone,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,

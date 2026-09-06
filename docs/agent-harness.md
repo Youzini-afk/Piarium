@@ -94,7 +94,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 度量 | 记录错误、重试、输出、缓存、普通会话用量、耗时与人工介入；不建立辅助模型分项费用/Token 看板。直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078/D-080） |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | grep → 默认提供的 explore（确定性召回、结构展开、版本化正文与关系打包）→ retrieval 角色。explore 接通即注册，可用来源逐步扩展；intent/judge/查询修复按已配置 explore 槽位和查询需要运行，无槽位走纯算法；不等完整图、向量或独立评测（D-078） |
-| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read` 与 thread 基线已消费同一引用，find/ls 与 LSP 继续接入（第 6.1 节，D-071/D-082/D-085） |
+| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read`/`find`/`ls` 与 thread 基线已消费同一引用，LSP 继续接入（第 6.1 节，D-071/D-082/D-085/D-086） |
 | 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`read` / `edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
@@ -187,7 +187,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 | `grep` | 覆盖 Pi | 并行 | rg 搜索、固定 surface 叠加、分组排序与有界结果 |
 | `edit` / `write` | 覆盖 Pi | 不同路径并行，同路径串行 | 参数不变，附加新引入的诊断 |
 | `apply_patch` | 新增 | 同上 | Codex 语法多文件编辑，按模型家族启用 |
-| `read` / `find` / `ls` | `read` 已用同名适配；find/ls 当前复用实体目录 Pi 工具 | 并行 | `read` 保留 Pi 原生分页、截断与图片，同时读取本轮固定草稿；find/ls 的固定 surface 枚举仍待接（9.2.5b） |
+| `read` / `find` / `ls` | 同名适配 | 并行 | `read` 保留 Pi 原生分页、截断与图片；find/ls 取得 Host 的固定 dirty path/虚拟祖先并经 Pi 原生定义合并磁盘结果，过期相关来源不可回退 |
 | `get_output` / `write_to_process` / `kill_shell` | 新增 | 读并行，写与杀独占 | 后台 shell 与输出句柄；对运行中 shell 默认返回上次读取之后的增量（第 5.5 节） |
 | `diagnostics` | 新增 | 并行 | `pending` 后按需查 |
 | `todo` | 新增 | 串行 | 主 agent 自己的计划（第 5.6 节） |
@@ -497,8 +497,8 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 目标是尽快返回主 agent 能直接使用的代码单元及其关系。确定性召回、结构展开、版本化正文和关系打包作为默认实现，接通后投入使用。
 工程测试保证来源、版本、路径与输出正确；实际任务用于优化召回和延迟，不作为批准这个方向的前提。依赖与实施形状见 plan 3.2。
 当前纵切已接通实际 rg、多路径与 actor scope、Documents 版本化连续正文、发起窗口的固定 dirty snapshot 和会话 OutputStore。
-`explore`、`grep` 与同名 `read` 已读取该固定正文；后续编辑不改变本轮结果，来源过期不回退磁盘。结构展开、find/ls、LSP revision
-与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082/D-085）。
+`explore`、`grep` 与同名 `read`/`find`/`ls` 已读取该固定来源；后续编辑不改变本轮结果，来源过期不回退磁盘。结构展开、LSP revision
+与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082/D-085/D-086）。
 
 **设计依据与性能边界。** 以下研究记录说明取舍，不是必须复现的上线门槛；真实使用发现反例时修正算法及相应结论：
 
@@ -533,12 +533,12 @@ Host 按来源读取带版本的不可变快照，UI 保持可变缓冲的所有
 这是本次已读文件的版本集合，不是全仓库强一致快照。窗口断开后已捕获快照可按其版本使用，拿不到最新内容则显式 unavailable/stale；
 磁盘替代只能标为磁盘，不能冒充当前草稿。没有 surface 的 headless 任务使用磁盘。
 
-**当前实现与缺口（D-082–D-085）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API
+**当前实现与缺口（D-082–D-086）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API
 固化为 Host 内存 snapshot；runtime 与 Harness 只传不透明引用或 unavailable dirty paths。pending/active 生命周期与输入接受绑定，
-捕获失败不阻断消息，也不回退这些路径的磁盘正文。`explore`、`grep` 与 Host-capability 门控的同名 `read` 直接读取该 snapshot；
+捕获失败不阻断消息，也不回退这些路径的磁盘正文。`explore`、`grep` 与 Host-capability 门控的同名 `read`/`find`/`ls` 直接读取该 snapshot；
 `read` 的正文来源由 Host 选择，分页、截断、图片和磁盘分支仍委托 Pi 原生实现。`thread.dispatch` 在请求内把完整固定草稿复制到持久
-WorkingState draft baseline，之后排队、Host 重启或 surface snapshot 释放都不改变线程输入。find/ls 与父工作区 LSP 尚未消费该固定
-视图；隔离线程依靠已物化目录读取。Host 重启会使尚未被消费者复制的内存 snapshot 过期，不影响已经写入线程工作状态的草稿。
+WorkingState draft baseline，之后排队、Host 重启或 surface snapshot 释放都不改变线程输入。find/ls 返回相对请求根的固定文件和虚拟目录，
+并在合并前保留磁盘结果的原生格式/截断；隔离线程依靠已物化目录读取。Host 重启会使尚未被消费者复制的内存 snapshot 过期，不影响已经写入线程工作状态的草稿。
 
 **管线与真实依赖。** 各阶段不是全并行，join 点如下（→ 表示依赖）：
 

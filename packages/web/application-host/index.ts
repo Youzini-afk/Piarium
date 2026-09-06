@@ -870,6 +870,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // execution stays inside pi-host so it uses the session's credential and
     // model authority rather than creating a second model stack in the Host.
     harnessDocumentRead: true,
+    harnessDocumentPathOverlay: true,
     harnessWebRead: true,
     harnessWebSearch: configuredWebSearchProvider !== null,
     ...brokerOptions,
@@ -1511,6 +1512,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
+    documentPathOverlay: (sessionId, context, resourceId) => documentsAuthority.overlayAgentInputSnapshot(
+      sessionId,
+      context,
+      resourceId,
+    ),
     commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
     releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
     dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),
@@ -1760,6 +1766,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             actor: event.actor,
             grantedCapabilities: deriveHarnessCapabilities(activeTools, {
               documentRead: true,
+              documentPathOverlay: true,
               threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
             }),
             workspaceId: harnessWorkspaceId,

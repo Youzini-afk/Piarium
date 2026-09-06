@@ -16,6 +16,8 @@ import { createRecallTool } from "./recall-tool.js";
 import { createExploreTool } from "./explore-tool.js";
 import { createLspNavigationTools } from "./lsp-tools.js";
 import { createSurfaceAwareReadTool } from "./read-tool.js";
+import { createSurfaceAwareFindTool } from "./find-tool.js";
+import { createSurfaceAwareLsTool } from "./ls-tool.js";
 import {
   createDispatchTool,
   createThreadsTool,
@@ -40,6 +42,8 @@ export interface SelectHarnessToolsDeps {
   documentReadAvailable?: boolean;
   /** Native Pi image resize setting, kept in sync with the built-in read tool. */
   autoResizeImages?: boolean;
+  /** Whether the Host exposes the Documents-backed native Pi find/ls overlay. */
+  documentPathOverlayAvailable?: boolean;
   /** Tools to yield (not register) because a Pi package provides them. */
   yieldedTools?: ReadonlySet<string>;
   /** Session-local reader model path; absent keeps webfetch extraction-only. */
@@ -80,6 +84,7 @@ export function selectHarnessTools(
     isOpenAIFamily,
     lspNavigationAvailable,
     documentReadAvailable,
+    documentPathOverlayAvailable,
     autoResizeImages,
     yieldedTools,
     readPage,
@@ -98,6 +103,10 @@ export function selectHarnessTools(
       cwd,
       autoResizeImages === undefined ? {} : { autoResizeImages },
     ));
+  }
+  if (documentPathOverlayAvailable) {
+    if (tools.find !== false) result.push(createSurfaceAwareFindTool(bridge, cwd));
+    if (tools.ls !== false) result.push(createSurfaceAwareLsTool(bridge, cwd));
   }
   if (tools.grep !== false) {
     result.push(createGrepTool(bridge, sessionId));

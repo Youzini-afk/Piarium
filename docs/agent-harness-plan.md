@@ -90,8 +90,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    草稿基线已进入生产链；虚拟分支工具、surface 写回、空间总预算和归档产品面随对应消费者继续。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
-3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read 及线程草稿基线已接；下一步为
-   find/ls 的固定枚举和 LSP/符号来源 document revision 隔离。缺可选来源仍返回已有正文，不等全图/
+3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls 及线程草稿基线已接；下一步为
+   LSP/符号来源 document revision 隔离。缺可选来源仍返回已有正文，不等全图/
    向量/索引/BM25 基线；模型增强按槽位接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
@@ -225,7 +225,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 
 | 环节 | 实施 |
 | --- | --- |
-| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线 |
+| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线 |
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；继续补路径、错误/栈帧的类型化提取 |
 | 召回/展开 | rg、按种子文件选择 LSP、符号图、配置的向量；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
 | 版本与融合 | 按来源重读完整符号或行窗口，位置匹配版本；RRF 融合保留来源，不用分差当置信度 |
@@ -235,7 +235,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 注册 | 可用来源、正文、授权、句柄和工具链通过相关验证即默认注册，不等所有增强或独立评测 |
 
 现有来源是 search.content、Documents disk、固定 surface draft、需代表文件选语言的 LSP 导航、file/defines 图。surface snapshot 已能
-替换 explore/grep 的 dirty path 磁盘命中，并由同名 read 返回固定正文；线程基线也消费同一来源。find/ls 仍待接。LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺
+替换 explore/grep 的 dirty path 磁盘命中，由同名 read 返回固定正文，并为同名 find/ls 提供固定文件与虚拟目录；线程基线也消费同一来源。LSP 共享 live buffer 不能冒充本轮 snapshot，符号节点也缺
 document revision，先补绑定再接结构范围。related、co-change、测试配对、tree-sitter、embedding 各自推进。每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。

@@ -1,9 +1,9 @@
 import path from "node:path";
-import picomatch from "picomatch";
 import type { SearchContentParams, SearchContentResult, SearchContentFile, SearchContentHit } from "@piarium/protocol";
 import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
 import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
+import { compileGlobFilter } from "./glob-matcher.js";
 
 export interface HarnessSearchDeps {
   search: (request: {
@@ -146,40 +146,6 @@ const splitLines = (content: string): string[] => {
   // searchable empty line (matching ripgrep's line-oriented output).
   if (/\r\n$|[\n\r]$/u.test(content)) lines.pop();
   return lines;
-};
-
-interface CompiledGlobFilter {
-  /** Positive rules first and negative rules last, matching the filter below. */
-  rgPatterns: string[];
-  matches(resourceId: string): boolean;
-}
-
-const compileGlobFilter = (globs: readonly string[] | undefined): CompiledGlobFilter | null => {
-  const patterns = (globs ?? [])
-    .map((glob) => glob.trim().replace(/\\/g, "/").replace(/^\.\//, ""))
-    .filter(Boolean);
-  const positive = patterns.filter((glob) => !glob.startsWith("!"));
-  const negative = patterns.filter((glob) => glob.startsWith("!") && glob.length > 1);
-  try {
-    const options = { dot: true, nocase: process.platform === "win32" };
-    const positiveMatchers = positive.map((glob) => picomatch(glob, {
-      ...options,
-      basename: !glob.includes("/"),
-    }));
-    const negativeMatchers = negative.map((glob) => {
-      const pattern = glob.slice(1);
-      return picomatch(pattern, { ...options, basename: !pattern.includes("/") });
-    });
-    return {
-      rgPatterns: [...positive, ...negative],
-      matches: (resourceId) => (
-        (positiveMatchers.length === 0 || positiveMatchers.some((matcher) => matcher(resourceId)))
-        && !negativeMatchers.some((matcher) => matcher(resourceId))
-      ),
-    };
-  } catch {
-    return null;
-  }
 };
 
 interface SearchContextWindow {

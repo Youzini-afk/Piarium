@@ -37,6 +37,7 @@ export function createWebPiRuntimeBroker({
   foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
   harnessDocumentRead = false,
+  harnessDocumentPathOverlay = false,
   harnessWebRead = false,
   harnessWebSearch = false,
   nodePath,
@@ -52,6 +53,7 @@ export function createWebPiRuntimeBroker({
   foundationalPackages?: PiRuntimeBrokerOptions['foundationalPackages'] | undefined;
   hostEntry?: string | undefined;
   harnessDocumentRead?: boolean | undefined;
+  harnessDocumentPathOverlay?: boolean | undefined;
   harnessWebRead?: boolean | undefined;
   harnessWebSearch?: boolean | undefined;
   nodePath?: string | undefined;
@@ -65,6 +67,7 @@ export function createWebPiRuntimeBroker({
     client: {
       capabilities: {
         harnessDocumentRead,
+        harnessDocumentPathOverlay,
         harnessLspNavigation: true,
         harnessThreads: true,
         harnessWebRead,

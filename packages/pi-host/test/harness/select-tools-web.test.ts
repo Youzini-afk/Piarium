@@ -127,3 +127,30 @@ describe("selectHarnessTools document read gating", () => {
     assert.equal(tools.some((tool) => tool.name === "read"), false);
   });
 });
+
+describe("selectHarnessTools document path overlay gating", () => {
+  it("registers same-name find and ls overrides only when the Host advertises the overlay", () => {
+    const unavailable = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, baseDeps);
+    const available = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      documentPathOverlayAvailable: true,
+    });
+    assert.equal(unavailable.some((tool) => tool.name === "find"), false);
+    assert.equal(unavailable.some((tool) => tool.name === "ls"), false);
+    assert.equal(available.filter((tool) => tool.name === "find").length, 1);
+    assert.equal(available.filter((tool) => tool.name === "ls").length, 1);
+  });
+
+  it("keeps each built-in when the corresponding setting disables its override", () => {
+    const settings: HarnessSettings = {
+      ...DEFAULT_HARNESS_SETTINGS,
+      tools: { find: false, ls: false },
+    };
+    const tools = selectHarnessTools(settings, {
+      ...baseDeps,
+      documentPathOverlayAvailable: true,
+    });
+    assert.equal(tools.some((tool) => tool.name === "find"), false);
+    assert.equal(tools.some((tool) => tool.name === "ls"), false);
+  });
+});

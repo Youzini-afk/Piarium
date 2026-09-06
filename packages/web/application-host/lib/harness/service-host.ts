@@ -22,7 +22,10 @@ import type {
   HarnessCapability,
   AgentInputContext,
 } from "@piarium/protocol";
-import type { SurfaceSnapshotReadResult } from "../documents/surface-snapshot-store.js";
+import type {
+  SurfaceSnapshotOverlayResult,
+  SurfaceSnapshotReadResult,
+} from "../documents/surface-snapshot-store.js";
 
 export interface HarnessSessionContext {
   actor: HarnessActorIdentity;
@@ -43,7 +46,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; threadRuntime: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -55,6 +58,7 @@ export function deriveHarnessCapabilities(
   ]);
   if (tools.has("grep") || tools.has("explore")) capabilities.add("read.search");
   if (availability.documentRead && tools.has("read")) capabilities.add("read.document");
+  if (availability.documentPathOverlay && (tools.has("find") || tools.has("ls"))) capabilities.add("read.document");
   if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
   if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
@@ -74,6 +78,13 @@ export type HarnessDocumentReadSource = (
   resourceId: string,
 ) => SurfaceSnapshotReadResult;
 
+/** Content-free fixed path lookup used by native Pi find/ls wrappers. */
+export type HarnessDocumentPathOverlay = (
+  sessionId: string,
+  context: AgentInputContext,
+  resourceId: string,
+) => SurfaceSnapshotOverlayResult;
+
 export interface HarnessServiceHost {
   outputStore: OutputStore;
   observationCursors: ObservationCursorStore;
@@ -84,6 +95,7 @@ export interface HarnessServiceHost {
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
+  documentPathOverlay: HarnessDocumentPathOverlay | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
@@ -153,6 +165,8 @@ export interface HarnessServiceHostOptions {
   webSearchService?: HarnessServiceHost["webSearchService"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
   documentReadSource?: HarnessDocumentReadSource;
+  /** Surface-aware native Pi find/ls path overlay (null when unavailable). */
+  documentPathOverlay?: HarnessDocumentPathOverlay;
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
@@ -191,6 +205,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
+  const documentPathOverlay = options.documentPathOverlay ?? null;
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
@@ -337,6 +352,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     webFetchService,
     webSearchService,
     documentReadSource,
+    documentPathOverlay,
     knowledgeStore,
     userKnowledgeStore,
     memoryDepsProvider,

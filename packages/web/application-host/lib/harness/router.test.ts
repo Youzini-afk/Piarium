@@ -126,6 +126,30 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("authorizes native document path overlays with an allowMissing root", async () => {
+    const authorize = vi.fn(async (_actor: HarnessActorContext, candidate: string, options: { allowMissing: boolean }) => ({
+      authorityId: "host-1",
+      canonicalResourceId: candidate,
+      inputPath: candidate,
+      resourceId: candidate,
+      workspaceId: "workspace-1",
+      ...options,
+    }));
+    const responses: Array<{ ok: boolean; result?: unknown }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(outcome.ok ? { result: outcome.result } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.document"]),
+      authorizeWorkspacePath: authorize,
+    });
+    router.register("document.pathOverlay", { handle: async () => ({ status: "disk" as const }) });
+    await router.processEvent(harnessEvent("document.pathOverlay", { path: "src" }));
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src", { allowMissing: true });
+    expect(responses).toEqual([{ ok: true, result: { status: "disk" } }]);
+    router.dispose();
+  });
+
   it("validates every child scope path before creating a thread", async () => {
     const handle = vi.fn(async () => ({ text: "created", threadId: "thread-1", queued: false }));
     const responses: Array<{ ok: boolean; code?: string }> = [];

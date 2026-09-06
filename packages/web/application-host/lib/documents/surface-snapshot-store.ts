@@ -34,6 +34,17 @@ export type SurfaceSnapshotReadResult =
   | { status: 'ready'; bom: boolean; content: string; encoding: string; revision: string; source: 'surface-draft' }
   | { status: 'unavailable'; message: string };
 
+export interface SurfaceSnapshotOverlayEntry {
+  path: string;
+  kind: 'file' | 'directory';
+  revision?: string;
+}
+
+export type SurfaceSnapshotOverlayResult =
+  | { status: 'disk' }
+  | { status: 'ready'; entries: SurfaceSnapshotOverlayEntry[] }
+  | { status: 'unavailable'; message: string };
+
 export type SurfaceSnapshotCloneResult =
   | { status: 'disk' }
   | { status: 'ready'; resources: Array<SurfaceSnapshotResource & { revision: string }>; workspaceId: string }
@@ -48,6 +59,15 @@ export interface SurfaceSnapshotStoreOptions {
 export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions = {}) => {
   const caseSensitive = options.caseSensitive ?? process.platform !== 'win32';
   const pathKey = (value: string): string => caseSensitive ? value : value.toLowerCase();
+  const normalizeResourceId = (value: string): string => {
+    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    return normalized === '.' ? '' : normalized;
+  };
+  const isWithin = (resourceId: string, root: string): boolean => {
+    const resourceKey = pathKey(normalizeResourceId(resourceId));
+    const rootKey = pathKey(normalizeResourceId(root));
+    return !rootKey || resourceKey === rootKey || resourceKey.startsWith(`${rootKey}/`);
+  };
   const samePaths = (left: readonly string[], right: readonly string[]): boolean => {
     const leftKeys = left.map(pathKey).sort();
     const rightKeys = right.map(pathKey).sort();
@@ -210,6 +230,75 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     return { status: 'ready', resources, workspaceId: snapshot.workspaceId };
   };
 
+  /**
+   * Return a content-free fixed path view for native find/ls wrappers. A
+   * request outside the dirty set remains a disk operation; a related request
+   * never falls back to disk when its immutable snapshot is unavailable.
+   */
+  const overlay = (
+    sessionId: string,
+    context: AgentInputContext,
+    root: string,
+  ): SurfaceSnapshotOverlayResult => {
+    if (context.source === 'disk') return { status: 'disk' };
+    const normalizedRoot = normalizeResourceId(root);
+    const contextHasRelatedDirtyPath = context.dirtyPaths.some((path) => isWithin(path, normalizedRoot));
+    if (context.snapshot.status === 'unavailable') {
+      return contextHasRelatedDirtyPath
+        ? { status: 'unavailable', message: 'The editor source snapshot is unavailable.' }
+        : { status: 'disk' };
+    }
+    const snapshot = resolveReady(sessionId, context);
+    if (!snapshot) {
+      return contextHasRelatedDirtyPath
+        ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
+        : { status: 'disk' };
+    }
+    const dirtyPaths = snapshot.dirtyPaths
+      .map(normalizeResourceId)
+      .filter((resourceId) => isWithin(resourceId, normalizedRoot));
+    if (dirtyPaths.length === 0) return { status: 'disk' };
+    const files = dirtyPaths
+      .map((resourceId) => {
+        const resource = snapshot.resources.get(pathKey(resourceId));
+        const content = resource ? contents.get(resource.contentHash)?.content : undefined;
+        if (!resource || content === undefined) return null;
+        return {
+          // Overlay paths are relative to the authorized request root. This
+          // keeps a canonical or symlinked root independent from pi-host cwd.
+          path: normalizedRoot
+            ? resourceId.slice(normalizedRoot.length + 1) || '.'
+            : resourceId || '.',
+          kind: 'file' as const,
+          revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
+        };
+      });
+    if (files.some((entry) => entry === null)) {
+      return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
+    }
+    const entries = files.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    const directories = new Map<string, SurfaceSnapshotOverlayEntry>();
+    for (const file of entries) {
+      const relative = file.path === '.' ? '' : file.path;
+      const parts = relative.split('/').filter(Boolean);
+      for (let index = 1; index < parts.length; index += 1) {
+        const directory = parts.slice(0, index).join('/');
+        directories.set(pathKey(directory), { path: directory, kind: 'directory' });
+      }
+      // A dirty path below the request root makes that root itself virtual.
+      if (parts.length > 0) {
+        directories.set(pathKey('.'), { path: '.', kind: 'directory' });
+      }
+    }
+    return {
+      status: 'ready',
+      entries: [...entries, ...directories.values()].sort((left, right) => (
+        pathKey(left.path).localeCompare(pathKey(right.path))
+        || left.kind.localeCompare(right.kind)
+      )),
+    };
+  };
+
   const dropSession = (sessionId: string): void => {
     const refs = new Set<string>(pendingBySession.get(sessionId) ?? []);
     const active = activeBySession.get(sessionId);
@@ -237,7 +326,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     activeBySession.clear();
   };
 
-  return { capture, clone, commit, dispose, dropPendingOwner, dropSession, read, release };
+  return { capture, clone, commit, dispose, dropPendingOwner, dropSession, overlay, read, release };
 };
 
 export type SurfaceSnapshotStore = ReturnType<typeof createSurfaceSnapshotStore>;

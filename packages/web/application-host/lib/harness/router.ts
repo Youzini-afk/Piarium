@@ -88,6 +88,12 @@ const requestPaths = (
       ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
+  if (method === "document.pathOverlay") {
+    return typeof record.path === "string" && record.path.trim()
+      && (record.pattern === undefined || typeof record.pattern === "string")
+      ? [{ allowMissing: true, path: record.path }]
+      : "invalid";
+  }
   if (method === "shell.exec") {
     if (record.cwd === undefined) return [];
     return typeof record.cwd === "string" && record.cwd.trim()

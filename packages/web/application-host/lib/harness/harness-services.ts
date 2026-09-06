@@ -25,6 +25,7 @@ import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
+import { compileFindGlob, normalizeGlobPath } from "./glob-matcher.js";
 export { createExploreSearchService } from "./explore-service.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
@@ -187,6 +188,58 @@ export function createDocumentReadSourceService(
         revision: snapshot.revision,
         source: "surface-draft",
       };
+    },
+  };
+}
+
+const isOverlayRelativePath = (value: string): boolean => {
+  const normalized = normalizeGlobPath(value);
+  return normalized === "."
+    || (normalized.length > 0 && normalized !== ".." && !normalized.startsWith("../"));
+};
+
+/**
+ * Return only path identities from a fixed editor snapshot. The router has
+ * already authorized the requested root with allowMissing, so a virtual root
+ * can be listed without materializing its content in the request channel.
+ */
+export function createDocumentPathOverlayService(
+  host: Pick<HarnessServiceHost, "documentPathOverlay">,
+): HarnessService<"document.pathOverlay"> {
+  return {
+    handle: async (params, ctx) => {
+      const authorized = ctx.authorizedPaths[0];
+      if (!host.documentPathOverlay || !authorized || ctx.authorizedPaths.length !== 1) {
+        throw new HarnessServiceError("unavailable", "Document path overlay is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      const snapshot = host.documentPathOverlay(
+        ctx.sessionId,
+        ctx.inputContext ?? { source: "disk" },
+        authorized.resourceId,
+      );
+      ctx.signal.throwIfAborted();
+      if (snapshot.status === "disk") return { status: "disk" };
+      if (snapshot.status === "unavailable") {
+        throw new HarnessServiceError("unavailable", snapshot.message);
+      }
+      const pattern = params.pattern === undefined ? null : compileFindGlob(params.pattern);
+      if (params.pattern !== undefined && !pattern) {
+        throw new HarnessServiceError("unavailable", "The find glob pattern is invalid.");
+      }
+      const entries = snapshot.entries
+        .filter((entry) => isOverlayRelativePath(entry.path))
+        .filter((entry) => entry.path === "."
+          || pattern === null
+          || pattern((normalizeGlobPath(authorized.resourceId)
+            ? `${normalizeGlobPath(authorized.resourceId)}/`
+            : "") + normalizeGlobPath(entry.path).replace(/\/$/u, "")))
+        .map((entry) => ({
+          path: normalizeGlobPath(entry.path),
+          kind: entry.kind,
+          ...(entry.revision === undefined ? {} : { revision: entry.revision }),
+        }));
+      return { status: "ready", entries };
     },
   };
 }
@@ -431,6 +484,9 @@ export function registerHarnessServices(
   router.register("search.content", createSearchContentService(host.searchService));
   if (host.documentReadSource) {
     router.register("document.readSource", createDocumentReadSourceService(host));
+  }
+  if (host.documentPathOverlay) {
+    router.register("document.pathOverlay", createDocumentPathOverlayService(host));
   }
   router.register("fs.lock", createFsLockService(host.pathLockService));
   if (host.diagnosticsProvider) {

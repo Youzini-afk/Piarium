@@ -14,6 +14,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 > will be empty; all output appears in `stdout`. PowerShell is the only
 > interpreter that separates the streams (but it is not yet wired).
 | `read` | Pi-native paging/truncation/images with fixed editor-draft source selection | `document.readSource` |
+| `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only paths and virtual ancestors | `document.pathOverlay` |
 | `grep` | Bounded rg plus fixed editor-draft overlay and context lines | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only) | `fs.lock` + `lsp.diagnostics` |
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
@@ -28,7 +29,9 @@ The pi-host harness tools are custom tools registered in the Pi session's
 
 Tools are selected by `selectHarnessTools()` during `SessionHost.#createRuntimeFactory()`.
 The read override is included only after the Host handshake advertises
-`harnessDocumentRead`; otherwise Pi's built-in read remains registered.
+`harnessDocumentRead`; otherwise Pi's built-in read remains registered. The
+same-name `find` and `ls` overrides require `harnessDocumentPathOverlay` and
+are independently disabled by `settings.tools.find` / `settings.tools.ls`.
 
 ```typescript
 const customTools = selectHarnessTools(settings, {
@@ -36,6 +39,7 @@ const customTools = selectHarnessTools(settings, {
   sessionId,
   cwd,
   documentReadAvailable: harnessDocumentReadEnabled,
+  documentPathOverlayAvailable: harnessDocumentPathOverlayEnabled,
   // other negotiated capabilities and runtime dependencies
 });
 ```
@@ -78,9 +82,8 @@ steer, and follow-up temporarily select a new context, commit it after Pi
 accepts the input, and restore/release it when delivery fails. Snapshot
 bookkeeping failure after `agent_start` degrades the source to unavailable and
 cannot turn an already-running prompt into a failed submission.
-`grep`, `explore`, and the Host-advertised read override consume this same fixed
-source. An expired dirty source is an unavailable read/search, never a disk
-fallback.
+`grep`, `explore`, and the Host-advertised same-name read/find/ls overrides consume this same fixed
+source. An expired related dirty source is unavailable, never a disk fallback.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })

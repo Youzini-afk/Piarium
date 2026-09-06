@@ -1594,6 +1594,23 @@ Application Host 在 rg 流式结果计数前按规范化 resourceId 排除它�
 
 状态：已实施；生产接线与验证见 status 3.2。
 
+### D-086 · 2026-09-06 · 普通 find/ls 消费固定窗口路径快照
+
+类型：实现决策（D-082 固定来源的目录枚举纵切）
+
+决定：新增内容为空的 `document.pathOverlay` Host method。Router 以 `allowMissing` 授权请求根；Documents 先核对同 session、workspace
+和 ready surface snapshot，再返回相对请求根的 fixed dirty file、每路径 revision 和虚拟目录祖先。请求根不在 dirty 集合时返回 disk
+sentinel；相关快照过期或不可用返回 Harness `unavailable`，不以磁盘空结果替代。Host 复用 picomatch 的 basename、brace/extglob 和
+Windows nocase 语义筛选 find pattern，不在协议或事件中传正文。
+
+`find`/`ls` 仅在 Host handshake 明示 path-overlay capability 且对应 Settings 工具开启时同名覆盖。find 对固定 entries 与原生 fd 结果去重、
+确定排序后交回 Pi `createFindToolDefinition`，保留目录后缀、limit、通知和 50KB 截断；ls 通过 Pi `createLsToolDefinition` 合并 immediate
+磁盘项和虚拟子项。固定 snapshot 对已覆盖路径的 file/directory 类型优先，避免磁盘漂移被 Pi 原生 stat 循环静默丢弃。
+
+边界：snapshot 当前只表达 dirty text file exists，不表达删除或 rename tombstone；LSP、固定正文 revision 和隔离线程物化仍分别由既有纵切负责。
+
+状态：已实施；生产接线与验证见 status 3.2。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1685,3 +1702,4 @@ Application Host 在 rg 流式结果计数前按规范化 resourceId 排除它�
 | D-083 | implementation（dispatch 持久草稿基线与 surface 集成边界） | — | protocol / UI Documents / Host Thread+WorkingState+Integration；设计 6.1/9.2.5b、plan 3.2/3.4/3.5、status、architecture |
 | D-084 | implementation（copyIgnored 持久 captureScopes 与结果发布） | — | Host WorkingState/Thread runtime；设计 9.2.5b、plan 3.4、status、architecture |
 | D-085 | implementation（普通 read/grep 固定 surface 来源） | — | protocol / pi-host / Host Documents+search；设计 5.3/6.1、plan 3.2、status、architecture |
+| D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |

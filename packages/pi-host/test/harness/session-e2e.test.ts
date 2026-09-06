@@ -62,6 +62,7 @@ async function setupSession(options: {
   faux: ReturnType<typeof registerFauxProvider>;
   workspaceId?: string;
   harnessDocumentRead?: boolean;
+  harnessDocumentPathOverlay?: boolean;
   harnessWebRead?: boolean;
   harnessWebSearch?: boolean;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
@@ -109,7 +110,7 @@ async function setupSession(options: {
           actor,
           grantedCapabilities: [
             "context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document",
-            ...(options.harnessDocumentRead ? ["read.document" as const] : []),
+            ...(options.harnessDocumentRead || options.harnessDocumentPathOverlay ? ["read.document" as const] : []),
           ],
           workspaceId,
           workspaceRoot: root,
@@ -173,6 +174,7 @@ async function setupSession(options: {
     projectTrustOverride: true,
   });
   if (options.harnessDocumentRead) host.setHarnessDocumentReadEnabled(true);
+  if (options.harnessDocumentPathOverlay) host.setHarnessDocumentPathOverlayEnabled(true);
   if (options.harnessWebRead || options.harnessWebSearch) {
     host.setHarnessWebCapabilities({
       read: options.harnessWebRead === true,
@@ -683,6 +685,77 @@ describe("session e2e — fixed surface read", () => {
 
         assert.match(toolResult, /fixed editor value/);
         assert.doesNotMatch(toolResult, /stale disk value/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — fixed surface find and ls", () => {
+  it("enters the Host-advertised same-name overrides for virtual paths and keeps disk paths native", async () => {
+    await withTempRoot("piarium-s-surface-find-ls-", async (root) => {
+      await mkdir(join(root, "disk"), { recursive: true });
+      await writeFile(join(root, "disk", "old.ts"), "disk old\n", "utf8");
+      const faux = registerFauxProvider();
+      let findResult = "";
+      let lsResult = "";
+      const overlayCalls: string[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("find", { path: "nested", pattern: "*.ts" })]),
+        (context) => {
+          findResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage([fauxToolCall("ls", { path: "disk" })]);
+        },
+        (context) => {
+          lsResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        harnessDocumentPathOverlay: true,
+        serviceHostOptions: {
+          commitAgentInputContext: () => ({ committed: true }),
+          documentPathOverlay: (_sessionId, _context, resourceId) => {
+            overlayCalls.push(resourceId);
+            if (resourceId.endsWith(`${path.sep}nested`)) {
+              return {
+                status: "ready",
+                entries: [
+                  { path: ".", kind: "directory" },
+                  { path: "new.ts", kind: "file", revision: "surface-draft:fixed" },
+                ],
+              };
+            }
+            return { status: "disk" };
+          },
+        },
+        authorizeWorkspacePath: async (_actor, inputPath) => ({
+          authorityId: "session-e2e-authority",
+          workspaceId: WORKSPACE_ID,
+          canonicalResourceId: path.resolve(root, inputPath),
+          inputPath,
+          resourceId: path.resolve(root, inputPath),
+        }),
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        const inputContext = {
+          source: "surface" as const,
+          workspaceId: WORKSPACE_ID,
+          dirtyPaths: ["nested/new.ts"],
+          snapshot: { status: "ready" as const, ref: "fixed" },
+        };
+        await session.host.prompt(snapshot.sessionId, "find the unsaved nested file", undefined, undefined, inputContext);
+        await session.host.session.waitForIdle();
+
+        assert.match(findResult, /new\.ts/);
+        assert.doesNotMatch(findResult, /No files found/);
+        assert.match(lsResult, /old\.ts/);
+        assert.equal(overlayCalls.length, 2);
       } finally {
         await session.dispose();
         faux.unregister();

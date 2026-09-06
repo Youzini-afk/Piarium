@@ -181,6 +181,28 @@ export type DocumentReadSourceResult =
   | { source: "disk" }
   | { base64: string; revision: string; source: "surface-draft" };
 
+/**
+ * Content-free view of fixed editor paths used by the native Pi find/ls
+ * wrappers. File entries carry the immutable surface revision; directories
+ * are virtual ancestors and therefore have no content revision.
+ */
+export interface DocumentPathOverlayEntry {
+  /** Path relative to the authorized request root; "." denotes that root. */
+  path: string;
+  kind: "file" | "directory";
+  revision?: string;
+}
+
+export interface DocumentPathOverlayParams {
+  path: string;
+  /** Native find's glob. Omitted for ls, which lists all immediate entries. */
+  pattern?: string;
+}
+
+export type DocumentPathOverlayResult =
+  | { status: "disk" }
+  | { status: "ready"; entries: DocumentPathOverlayEntry[] };
+
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
@@ -318,6 +340,7 @@ export interface HarnessServiceMap {
     };
   };
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
+  "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
 }
@@ -373,6 +396,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.kill": "control.thread",
   "explore.search": "read.search",
   "document.readSource": "read.document",
+  "document.pathOverlay": "read.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
@@ -428,6 +452,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.kill",
   "explore.search",
   "document.readSource",
+  "document.pathOverlay",
   "surface.snapshot.commit",
   "surface.snapshot.release",
 ]);
