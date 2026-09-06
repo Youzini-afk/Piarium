@@ -2034,4 +2034,4 @@ anchor 优先（打包阶段 `windowScore` 给 anchor +100），故只影响候�
 | D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片仍待做） | D-091（tree-sitter 待决项）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
 | D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | — | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；实施全部待接 |
-| D-092 | active-design（D-090 缺陷 1 复验未达成：候选广度改按文件广度优先分配，不按命中数深度优先截断；同批六个小项一并修） | — | plan 0.7/3.2、status 3.2/下一步；实施待接：Host `search-service` `groupAndSort` 候选模式 + `explore` / `explore-service` 小项 |
+| D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修） | — | plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore / pi-host explore-tool schema |

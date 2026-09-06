@@ -91,7 +91,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls、线程草稿基线、
-   写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组已实施，缺陷 1 的候选广度按 D-092 待补。
+   写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组与 D-092（候选广度按文件铺开及同批小项）已实施。
    下一步按 3.11：先定结构来源接口并以 6.4 agent 视图 `documentSymbol` 实现、让结构切片消费带修订的范围，再引入 tree-sitter 作第二
    provider（D-091，TS/TSX 首刀），再按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
    全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
@@ -230,7 +230,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | --- | --- |
 | 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线。观察到写入后该路径的草稿失效、全部消费者回到磁盘（D-088）；shell 与外部写入仍未观察 |
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
-| 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`（词项分组；不继承 grep `fileScore`；search-service 传 actor/inputContext；按需物化与 `not-requested`；互补打包；自身字节预算与句柄；工具描述改口）。缺陷 1 只做了一半：候选获取已脱离 `params.limit`，但预算耗尽时仍按路径序深度优先截断、后面的文件整体不进候选（D-092）。覆盖：`explore.test.ts` T1/T3–T8、`explore-service.test.ts` T2/T8、`search-service.test.ts` 候选模式、`explore-tool.test.ts` / `session-e2e.test.ts` T9。**待做**：候选广度按 D-092 改广度优先；结构切片消费 6.4 带修订范围（仍先于仓库级索引） |
+| 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`；✓ D-092 候选广度按文件轮转分配（30 文件×12 命中、预算 200 时 30 个文件都进候选，总命中 ≤ 预算；文件数超过预算才丢文件并报 `filesDropped`；grep 深度优先截断不变）。同批小项：句柄提示计入字节预算、返回对象只含协议字段、空白 anchor 过滤、`rgSearch` 局部 partial、`fileScore` 每文件一次、候选排序加权组数。覆盖：`explore.test.ts` T1/T3–T8 与 filesDropped/空白 anchor/加权排序、`explore-service.test.ts` T2/T8（含 `showHandle` 为真时的字节预算）与空白 anchor、`search-service.test.ts` 广度优先与 `filesDropped`、`explore-tool.test.ts` / `session-e2e.test.ts` T9。**待做**：结构切片消费 6.4 带修订范围（仍先于仓库级索引） |
 | 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 3.11 的 tree-sitter provider 承担）；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
 | 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），首个是 6.4 agent 视图 `documentSymbol`，冷/热为显式条件、缺时退行窗口；tree-sitter 作第二 provider 已决定（D-091），并承担命中分类；RRF 融合保留来源，不用分差当置信度 |
 | 打包 | 内部找全、外部只给支撑判断的材料；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |

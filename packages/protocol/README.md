@@ -23,7 +23,7 @@ Piarium protocol types, schemas, and event/method definitions.
 | `shell.kill` | `{ id }` | `{ killed }` | Kill a background shell |
 | `output.store` | `{ text, label? }` | `{ ref: OutputRef, total }` | Store large output for the current Host generation |
 | `output.read` | `{ handle, offset?, length? }` | `OutputSlice` | Read stored output |
-| `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` | Content search |
+| `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` (`filesDropped?` only in explore candidate mode) | Content search |
 | `document.readSource` | `{ path }` | disk sentinel or fixed draft bytes | Select the authenticated source for native `read` without changing its schema |
 | `document.pathOverlay` | `{ path, pattern? }` | disk sentinel or fixed relative path entries | Content-free fixed dirty paths and virtual directory ancestors for native `find` / `ls` |
 | `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |

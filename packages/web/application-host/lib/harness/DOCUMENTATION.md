@@ -139,18 +139,22 @@ rename tombstones.
 
 The Pi tool sends the question, optional literal `anchors`, and optional roots through the
 normal actor-scoped router. `limit` is the excerpt count only. Candidate fetch uses a separate
-working budget (and an independent budget for anchors), reports when that budget is reached, and
-does not inherit grep `fileScore` order. Term groups keep identifier variants, quoted literals,
+working budget (and an independent budget for anchors). Candidate mode assigns that budget
+breadth-first: one hit per matching file, then another round, until `hitsPerFile` or the budget
+is exhausted. A file with hits keeps at least one hit unless the file count itself exceeds the
+budget; those omitted files are `filesDropped`, distinct from a hit-level `partial`. Grep still
+depth-first-truncates with `fileScore`. Term groups keep identifier variants, quoted literals,
 and anchors together: variants expand matching, co-occurrence across groups raises rank, and
 anchors/literals stay the most distinctive seeds without becoming a hard filter.
 Search goes through `search-service` with `actor` and `inputContext` so dirty paths are excluded
 before the backend counts hits; explore does not match drafts itself. Candidates are ranked from
 hit metadata, then materialized on demand with bounded parallelism. Unread files are
 `not-requested`, never `empty`. Packing prefers complementary windows across files, then applies
-an explore byte budget below the generic 32 KiB truncation. Provenance stays in `details`; the
-model-visible body is `path:start-end`, code, and actionable gaps. OutputStore keeps the full
-pack plus unread-candidate refs, and the tool text mentions the handle only when more content
-remains. Symbol expansion and optional model enrichment remain separate planned sources.
+an explore byte budget below the generic 32 KiB truncation, including any `get_output` hint.
+Provenance stays in `details`; the model-visible body is `path:start-end`, code, and actionable
+gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool text mentions the
+handle only when more content remains. Symbol expansion and optional model enrichment remain
+separate planned sources.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
