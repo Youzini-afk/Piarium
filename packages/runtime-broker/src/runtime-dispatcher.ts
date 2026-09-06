@@ -20,6 +20,8 @@ import {
   type RuntimeMethod,
   type RuntimeMethodResult,
   type SessionWorkspaceBinding,
+  parseAgentInputContext,
+  type AgentInputContext,
 } from "@piarium/protocol";
 import { PiRuntimeBroker, type PiCatalogMethod } from "./runtime-broker.js";
 
@@ -513,8 +515,15 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionId = requireString(input, "sessionId");
       const images = optionalImages(input);
       const instructions = optionalString(input, "instructions");
+      let inputContext: AgentInputContext | undefined;
+      if (input.inputContext !== undefined) {
+        const parsed = parseAgentInputContext(input.inputContext);
+        if (!parsed) throw new RuntimeDispatchError("invalid_params", "inputContext is malformed");
+        inputContext = parsed;
+      }
       return broker.requestForSession(sessionId, method, {
         ...(images === undefined ? {} : { images }),
+        ...(inputContext === undefined ? {} : { inputContext }),
         ...(instructions === undefined ? {} : { instructions }),
         sessionId,
         text: requireString(input, "text", { allowEmpty: true }),

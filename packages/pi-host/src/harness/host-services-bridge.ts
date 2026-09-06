@@ -4,6 +4,7 @@ import type {
   HarnessMethod,
   HarnessRequestData,
   HarnessServiceMap,
+  AgentInputContext,
 } from "@piarium/protocol";
 
 interface PendingRequest {
@@ -17,6 +18,7 @@ export interface HostServicesBridgeOptions {
   emit: (event: "harness.request", data: HarnessRequestData) => void;
   sessionId: string;
   defaultTimeoutMs?: number;
+  getInputContext?: () => AgentInputContext;
 }
 
 export class HarnessRequestError extends Error {
@@ -35,12 +37,14 @@ export class HostServicesBridge {
   readonly #pending = new Map<string, PendingRequest>();
   readonly #sessionId: string;
   readonly #defaultTimeoutMs: number;
+  readonly #getInputContext: (() => AgentInputContext) | undefined;
   #disposed = false;
 
   constructor(options: HostServicesBridgeOptions) {
     this.#emit = options.emit;
     this.#sessionId = options.sessionId;
     this.#defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
+    this.#getInputContext = options.getInputContext;
   }
 
   request<M extends HarnessMethod>(
@@ -85,6 +89,7 @@ export class HostServicesBridge {
         method,
         params,
         requestId,
+        ...(this.#getInputContext ? { inputContext: structuredClone(this.#getInputContext()) } : {}),
         // Carry the bridge timeout to the router so the service handler
         // can run for the same duration (e.g. thread.wait blocks up to
         // 240s — the router must not abort at its default 30s).

@@ -38,6 +38,8 @@ import {
   THINKING_LEVELS,
   type ThinkingLevel,
   type WireEnvelope,
+  parseAgentInputContext,
+  type AgentInputContext,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
@@ -47,6 +49,13 @@ import { SessionHost } from "./session-host.js";
 import type { HostTransport } from "./transport.js";
 
 export const PIARIUM_HOST_VERSION = "0.1.0";
+
+const readAgentInputContext = (params: Record<string, unknown>): AgentInputContext => {
+  if (params.inputContext === undefined) return { source: "disk" };
+  const context = parseAgentInputContext(params.inputContext);
+  if (!context) throw new HostError("invalid_params", "inputContext is malformed");
+  return context;
+};
 
 const HOST_CAPABILITIES: HostCapabilities = {
   agentProviders: true,
@@ -696,6 +705,7 @@ export class HostController {
           readString(params, "text", { allowEmpty: true }),
           readImages(params),
           optionalString(params, "instructions"),
+          readAgentInputContext(params),
         );
       case "agent.steer":
         return {
@@ -704,6 +714,7 @@ export class HostController {
             readString(params, "text", { allowEmpty: true }),
             readImages(params),
             optionalString(params, "instructions"),
+            readAgentInputContext(params),
           ),
         };
       case "agent.followUp":
@@ -713,6 +724,7 @@ export class HostController {
             readString(params, "text", { allowEmpty: true }),
             readImages(params),
             optionalString(params, "instructions"),
+            readAgentInputContext(params),
           ),
         };
       case "agent.abort":

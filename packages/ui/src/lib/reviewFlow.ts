@@ -10,6 +10,10 @@ import type {
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
+import {
+  captureSurfaceAgentInputContext,
+  releaseSurfaceAgentInputContext,
+} from '@/lib/pi-runtime/agent-input-context';
 import { getRuntimeKey } from '@piarium/application-client';
 import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -246,11 +250,23 @@ const sendPiMessage = async (
   const promptText = modelContext?.agent
     ? renderPiAgentInvocation(modelContext.agent, task)
     : task;
-  const result = await client.request('agent.prompt', {
-    ...(modelContext?.agent || !instructions ? {} : { instructions }),
-    sessionId,
-    text: promptText,
-  });
+  const workspace = usePiSessionStore.getState().records[sessionId]?.snapshot?.workspace;
+  const inputContext = workspace?.kind === 'workspace'
+    ? await captureSurfaceAgentInputContext(sessionId, workspace.authorityId ?? workspace.id)
+    : { source: 'disk' as const };
+  let result;
+  try {
+    result = await client.request('agent.prompt', {
+      ...(modelContext?.agent || !instructions ? {} : { instructions }),
+      inputContext,
+      sessionId,
+      text: promptText,
+    });
+  } catch (error) {
+    await releaseSurfaceAgentInputContext(sessionId, inputContext);
+    throw error;
+  }
+  if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
   if (!result.accepted) throw new Error('The Pi runtime did not accept the review prompt');
   requestChatForceScrollBottom(sessionId);
   return waitForSentUserEntry(sessionId, previousEntryIds, startedAt);

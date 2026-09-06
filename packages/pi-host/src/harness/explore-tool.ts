@@ -12,8 +12,8 @@ export function createExploreTool(bridge: HostServicesBridge, _sessionId: string
   return defineTool({
     name: "explore",
     label: "Explore",
-    description: "Search code using question terms and return current, versioned document excerpts with source gaps when a file cannot be read.",
-    promptSnippet: "explore: locate code and read current matching regions with source revisions",
+    description: "Search code using question terms and return versioned excerpts from disk plus fixed unsaved-editor snapshots from the latest accepted input.",
+    promptSnippet: "explore: locate code and read current disk or fixed editor-draft regions with source revisions",
     promptGuidelines: [
       "Use explore to locate relevant symbols, concepts, and code regions when asking broad questions about the codebase.",
     ],

@@ -40,6 +40,22 @@ describe('document routes', () => {
         .expect(200);
       expect(await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))
         .toEqual([expect.objectContaining({ ownerId: 'web-surface' })]);
+      const captured = await request(app)
+        .post('/api/documents/agent-input/capture')
+        .send({
+          generation: 1,
+          ownerId: 'web-surface',
+          resources: [{ baseRevision: null, content: 'unsaved hello', localEditRevision: 1, resource: harness.resource('note.txt') }],
+          sessionId: 'session-1',
+          workspaceId: harness.identity.workspaceId,
+        })
+        .expect(200);
+      expect(captured.body).toMatchObject({ source: 'surface', snapshot: { status: 'ready' } });
+      expect(JSON.stringify(captured.body)).not.toContain('unsaved hello');
+      await request(app)
+        .post('/api/documents/agent-input/release')
+        .send({ context: captured.body, sessionId: 'session-1' })
+        .expect(200, { released: true });
       await request(app)
         .post('/api/documents/dirty/clear')
         .send({ generation: 1, ownerId: 'web-surface', workspaceId: harness.identity.workspaceId })

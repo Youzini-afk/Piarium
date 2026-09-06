@@ -9,6 +9,8 @@ import {
   type HarnessServiceMap,
   buildHarnessRespondParams,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
+  parseAgentInputContext,
+  type AgentInputContext,
 } from "@piarium/protocol";
 import { HarnessServiceError } from "./service-error.js";
 
@@ -28,6 +30,7 @@ export interface HarnessServiceContext {
   sessionId: HarnessActorContext["sessionId"];
   workspaceId: HarnessActorContext["workspaceId"];
   workspaceScope?: readonly string[];
+  inputContext?: AgentInputContext;
   signal: AbortSignal;
   /** Register state that advances only after the Host response reaches pi-host. */
   deferResponseDelivery?(commit: () => void, abort: () => void): void;
@@ -184,6 +187,16 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         });
         return;
       }
+      const inputContext = data.inputContext === undefined
+        ? { source: "disk" as const }
+        : parseAgentInputContext(data.inputContext);
+      if (!inputContext || (inputContext.source === "surface" && inputContext.workspaceId !== actor.workspaceId)) {
+        await respond({
+          ok: false,
+          error: harnessError("forbidden", "Harness input source does not match the actor workspace"),
+        });
+        return;
+      }
       const requiredCapability = HARNESS_METHOD_CAPABILITY[method];
       if (!actor.grantedCapabilities.includes(requiredCapability)) {
         await respond({
@@ -229,6 +242,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         authorizedPaths,
         sessionId: actor.sessionId,
         workspaceId: actor.workspaceId,
+        inputContext,
         ...(actor.workspaceScope ? { workspaceScope: actor.workspaceScope } : {}),
         signal: controller.signal,
         deferResponseDelivery: (commit, abort) => {

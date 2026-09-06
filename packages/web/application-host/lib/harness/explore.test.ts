@@ -11,6 +11,13 @@ describe("explore query terms", () => {
     expect(terms).not.toContain("where");
   });
 
+  it("adds useful words for an unspaced Chinese question instead of searching only the full sentence", () => {
+    const terms = extractIdentifiers("这个配置在哪里解析");
+    expect(terms).toEqual(expect.arrayContaining(["配置", "解析"]));
+    expect(terms).not.toContain("这个");
+    expect(terms).not.toContain("哪里");
+  });
+
   it("extracts quoted literals without treating regex characters as syntax", () => {
     expect(extractQuotedLiterals('find "a.*b" and ‘中文错误’')).toEqual(["a.*b", "中文错误"]);
     expect(buildRgPatterns(["x", "a.*b"], ["a.*b"])).toEqual([

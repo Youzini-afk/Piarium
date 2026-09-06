@@ -111,6 +111,8 @@ export interface HarnessServiceHost {
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
+  releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
   dispose(): Promise<void>;
 }
 
@@ -118,6 +120,9 @@ export interface HarnessServiceHostOptions {
   search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
+  releaseAgentInputContext?: HarnessServiceHost["releaseAgentInputContext"];
+  dropAgentInputContexts?: (sessionId: string) => void;
   diagnosticsProvider?: DiagnosticsProvider;
   lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
@@ -187,6 +192,12 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
   const threadTranscriptReader = options.threadTranscriptReader ?? null;
+  const commitAgentInputContext = options.commitAgentInputContext ?? ((_sessionId, context) => ({
+    // A Host without a snapshot authority may acknowledge disk/unavailable
+    // sources, but it must not claim an opaque ready snapshot was committed.
+    committed: context.source === "disk" || context.snapshot.status === "unavailable",
+  }));
+  const releaseAgentInputContext = options.releaseAgentInputContext ?? (() => ({ released: false }));
 
   const sessions = new Map<string, SessionEntry>();
 
@@ -196,6 +207,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     if (previous) {
       void previous.shellSupervisor?.dispose();
       observationCursors.clearKind(sessionId, "shell");
+      options.dropAgentInputContexts?.(sessionId);
     }
     const interpreterResult = selectInterpreter({
       platform: process.platform,
@@ -249,6 +261,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadRegistry?.clearCursorsForSession(sessionId);
     pathLockService.dropSession(sessionId);
     keeperCoverageStore.clear(sessionId);
+    options.dropAgentInputContexts?.(sessionId);
   };
 
   const getShellSupervisor = (sessionId: string): ShellSupervisor | null => {
@@ -322,6 +335,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,
     threadSendToSession,
     threadTranscriptReader,
+    commitAgentInputContext,
+    releaseAgentInputContext,
     registerSession,
     dropSession,
     hasActor,

@@ -86,6 +86,7 @@ import type {
   SessionTreeNode,
   SessionTreeResult,
   ThinkingLevel,
+  AgentInputContext,
 } from "@piarium/protocol";
 import {
   packageSourceEnabled,
@@ -628,6 +629,7 @@ export class SessionHost {
   #memoryModeReader: (() => Omit<HarnessMemoryRuntimeState, "lastFailure">) | undefined;
   #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
   #disposed = false;
+  #inputContext: AgentInputContext = { source: "disk" };
 
   constructor(options: SessionHostOptions) {
     this.#agentDir = resolve(options.agentDir);
@@ -1190,29 +1192,32 @@ export class SessionHost {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    inputContext: AgentInputContext = { source: "disk" },
   ): Promise<{ accepted: boolean }> {
     this.assertSession(sessionId);
     const session = this.session;
-    await this.#queueInstructions(instructions, "nextTurn");
-    let accept: (accepted: boolean) => void = () => {};
-    const preflight = new Promise<boolean>((resolvePreflight) => {
-      accept = resolvePreflight;
-    });
-    let markAgentStarted: () => void = () => {};
-    const agentStarted = new Promise<void>((resolveStarted) => {
-      markAgentStarted = resolveStarted;
-    });
-    const unsubscribeStarted = session.subscribe((event) => {
-      if (event.type === "agent_start") markAgentStarted();
-    });
-    const run = session.prompt(text, {
-      ...(images === undefined ? {} : { images: toImages(images) }),
-      preflightResult: accept,
-      source: "interactive",
-    });
-    let accepted: boolean;
+    const previousContext = this.#inputContext;
+    this.#inputContext = inputContext;
+    let unsubscribeStarted = () => {};
     try {
-      accepted = await Promise.race([preflight, run.then(() => false)]);
+      await this.#queueInstructions(instructions, "nextTurn");
+      let accept: (accepted: boolean) => void = () => {};
+      const preflight = new Promise<boolean>((resolvePreflight) => {
+        accept = resolvePreflight;
+      });
+      let markAgentStarted: () => void = () => {};
+      const agentStarted = new Promise<void>((resolveStarted) => {
+        markAgentStarted = resolveStarted;
+      });
+      unsubscribeStarted = session.subscribe((event) => {
+        if (event.type === "agent_start") markAgentStarted();
+      });
+      const run = session.prompt(text, {
+        ...(images === undefined ? {} : { images: toImages(images) }),
+        preflightResult: accept,
+        source: "interactive",
+      });
+      const accepted = await Promise.race([preflight, run.then(() => false)]);
       if (accepted) {
         // `accepted` is a preflight result. Do not acknowledge the Host request
         // before an actual agent run has emitted agent_start, otherwise the
@@ -1223,7 +1228,22 @@ export class SessionHost {
       } else {
         await run;
       }
+      if (!accepted) {
+        this.#inputContext = previousContext;
+        await this.#releaseInputContext(inputContext);
+        return { accepted: false };
+      }
+      void run.catch((error) => {
+        this.#emit("host.error", {
+          code: "agent_run_failed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+      await this.#commitInputContext(inputContext, previousContext);
+      return { accepted: true };
     } catch (error) {
+      this.#inputContext = previousContext;
+      await this.#releaseInputContext(inputContext).catch(() => undefined);
       throw new HostError(
         "agent_run_failed",
         error instanceof Error ? error.message : String(error),
@@ -1232,13 +1252,6 @@ export class SessionHost {
     } finally {
       unsubscribeStarted();
     }
-    void run.catch((error) => {
-      this.#emit("host.error", {
-        code: "agent_run_failed",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    });
-    return { accepted };
   }
 
   async steer(
@@ -1246,11 +1259,21 @@ export class SessionHost {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    inputContext: AgentInputContext = { source: "disk" },
   ): Promise<boolean> {
     this.assertSession(sessionId);
-    await this.#queueInstructions(instructions, "steer");
-    await this.session.steer(text, images === undefined ? undefined : toImages(images));
-    return true;
+    const previousContext = this.#inputContext;
+    this.#inputContext = inputContext;
+    try {
+      await this.#queueInstructions(instructions, "steer");
+      await this.session.steer(text, images === undefined ? undefined : toImages(images));
+      await this.#commitInputContext(inputContext, previousContext);
+      return true;
+    } catch (error) {
+      this.#inputContext = previousContext;
+      await this.#releaseInputContext(inputContext).catch(() => undefined);
+      throw error;
+    }
   }
 
   async followUp(
@@ -1258,11 +1281,51 @@ export class SessionHost {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    inputContext: AgentInputContext = { source: "disk" },
   ): Promise<boolean> {
     this.assertSession(sessionId);
-    await this.#queueInstructions(instructions, "followUp");
-    await this.session.followUp(text, images === undefined ? undefined : toImages(images));
-    return true;
+    const previousContext = this.#inputContext;
+    this.#inputContext = inputContext;
+    try {
+      await this.#queueInstructions(instructions, "followUp");
+      await this.session.followUp(text, images === undefined ? undefined : toImages(images));
+      await this.#commitInputContext(inputContext, previousContext);
+      return true;
+    } catch (error) {
+      this.#inputContext = previousContext;
+      await this.#releaseInputContext(inputContext).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async #commitInputContext(context: AgentInputContext, previous: AgentInputContext): Promise<void> {
+    if (context.source === "disk" && previous.source === "disk") return;
+    try {
+      const result = await this.#hostServicesBridge?.request("surface.snapshot.commit", { context });
+      if (!result?.committed) throw new Error("Application Host rejected the agent input source context");
+    } catch (error) {
+      // The user input has already been accepted by Pi. Failing this bookkeeping
+      // must not report the prompt as failed and invite a duplicate submission.
+      // Retire the new source locally so later reads cannot use an uncommitted ref.
+      this.#inputContext = context.source === "surface"
+        ? {
+            source: "surface",
+            workspaceId: context.workspaceId,
+            dirtyPaths: [...context.dirtyPaths],
+            snapshot: { status: "unavailable", reason: "surface-unavailable" },
+          }
+        : { source: "disk" };
+      await this.#releaseInputContext(context).catch(() => undefined);
+      this.#emit("host.log", {
+        level: "warn",
+        message: `Agent input source commit failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
+  async #releaseInputContext(context: AgentInputContext): Promise<void> {
+    if (context.source !== "surface" || context.snapshot.status !== "ready") return;
+    await this.#hostServicesBridge?.request("surface.snapshot.release", { context });
   }
 
   async #queueInstructions(
@@ -2775,6 +2838,7 @@ export class SessionHost {
       this.#workspaceMutationJournal = workspaceMutationJournal;
       const hostServicesBridge = new HostServicesBridge({
         emit: (event, data) => this.#emit(event, data),
+        getInputContext: () => this.#inputContext,
         sessionId: sessionManager.getSessionId(),
       });
       this.#hostServicesBridge = hostServicesBridge;
@@ -3296,6 +3360,7 @@ export class SessionHost {
     this.#harnessCounters?.reset();
     this.#harnessCounters = undefined;
     this.#memoryModeReader = undefined;
+    this.#inputContext = { source: "disk" };
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();

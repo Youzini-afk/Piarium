@@ -444,6 +444,12 @@ export function registerHarnessServices(
     router.register("thread.merge", createThreadMergeService(host));
   }
   router.register("explore.search", createExploreSearchService(host));
+  router.register("surface.snapshot.commit", {
+    handle: async (params, ctx) => host.commitAgentInputContext(ctx.sessionId, params.context),
+  });
+  router.register("surface.snapshot.release", {
+    handle: async (params, ctx) => host.releaseAgentInputContext(ctx.sessionId, params.context),
+  });
 }
 
 

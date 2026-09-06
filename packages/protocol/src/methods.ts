@@ -37,6 +37,7 @@ import type {
   SessionSummary,
   SessionWorkspaceBinding,
   ThinkingLevel,
+  AgentInputContext,
 } from "./types.js";
 import type { PackageBootstrapResult } from "./foundational-pi-packages.js";
 import type { PiMcpConfigSnapshot } from "./mcp.js";
@@ -119,11 +120,11 @@ export interface HostMethodMap {
     result: { aborted: boolean };
   };
   "agent.followUp": {
-    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; inputContext?: AgentInputContext; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.prompt": {
-    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; inputContext?: AgentInputContext; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.queue.clear": {
@@ -131,7 +132,7 @@ export interface HostMethodMap {
     result: { cleared: boolean; followUp: string[]; steering: string[] };
   };
   "agent.steer": {
-    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; inputContext?: AgentInputContext; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "command.execute": {

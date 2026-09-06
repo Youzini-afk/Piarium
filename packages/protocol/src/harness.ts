@@ -26,7 +26,7 @@ import type {
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
 import type { HarnessMemoryMode } from "./harness-settings.js";
-import type { JsonValue } from "./types.js";
+import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
   text: string;
@@ -302,7 +302,7 @@ export interface HarnessServiceMap {
         text: string;
         why: string;
         revision: string;
-        source: "disk";
+        source: "disk" | "surface-draft";
       }>;
       issues: Array<{ path: string; status: "unavailable" | "failed" | "stale" | "forbidden"; message: string }>;
       partial: boolean;
@@ -310,6 +310,8 @@ export interface HarnessServiceMap {
       handle: string;
     };
   };
+  "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
+  "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -361,6 +363,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.merge": "control.thread",
   "thread.kill": "control.thread",
   "explore.search": "read.search",
+  "surface.snapshot.commit": "context.session",
+  "surface.snapshot.release": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -413,6 +417,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.merge",
   "thread.kill",
   "explore.search",
+  "surface.snapshot.commit",
+  "surface.snapshot.release",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {
@@ -429,6 +435,8 @@ export interface HarnessRequestData {
   requestId: string;
   method: HarnessMethod;
   params: unknown;
+  /** Current immutable input source selected by SessionHost. */
+  inputContext?: AgentInputContext;
   /**
    * How long the worker is prepared to wait, in milliseconds. The router
    * uses it instead of its own default so a deliberately long call such as

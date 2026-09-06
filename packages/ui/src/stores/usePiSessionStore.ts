@@ -21,6 +21,7 @@ import type {
   ThinkingLevel,
   JsonValue,
   PiUserMessage,
+  AgentInputContext,
 } from '@piarium/protocol';
 import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
@@ -28,6 +29,10 @@ import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import {
+  captureSurfaceAgentInputContext,
+  releaseSurfaceAgentInputContext,
+} from '@/lib/pi-runtime/agent-input-context';
 import {
   armPiTimelineTurn,
   cancelPiTimelineAutomation,
@@ -687,6 +692,14 @@ export const createPiSessionStore = (
       runtime.currentKey() === runtimeKey && get().runtimeKey === runtimeKey
     );
 
+    const captureInputContext = async (sessionId: string): Promise<AgentInputContext> => {
+      const state = get();
+      const workspace = state.records[sessionId]?.snapshot?.workspace
+        ?? state.summaries.find((summary) => summary.id === sessionId)?.workspace;
+      if (workspace?.kind !== 'workspace') return { source: 'disk' };
+      return captureSurfaceAgentInputContext(sessionId, workspace.authorityId ?? workspace.id);
+    };
+
     const commitError = (runtimeKey: string, error: unknown): void => {
       if (contextIsCurrent(runtimeKey)) set({ lastError: errorMessage(error) });
     };
@@ -1175,13 +1188,21 @@ export const createPiSessionStore = (
       },
 
       followUp: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
-        const { result } = await request('agent.followUp', {
-          ...(images === undefined ? {} : { images }),
-          ...(instructions === undefined ? {} : { instructions }),
-          sessionId,
-          text,
-        }, expectedRuntimeKey);
-        return result.accepted;
+        const inputContext = await captureInputContext(sessionId);
+        try {
+          const { result } = await request('agent.followUp', {
+            ...(images === undefined ? {} : { images }),
+            inputContext,
+            ...(instructions === undefined ? {} : { instructions }),
+            sessionId,
+            text,
+          }, expectedRuntimeKey);
+          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          return result.accepted;
+        } catch (error) {
+          await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          throw error;
+        }
       },
 
       forkSession: async (sessionId, entryId, position) => {
@@ -1399,13 +1420,21 @@ export const createPiSessionStore = (
       },
 
       prompt: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
-        const { result } = await request('agent.prompt', {
-          ...(images === undefined ? {} : { images }),
-          ...(instructions === undefined ? {} : { instructions }),
-          sessionId,
-          text,
-        }, expectedRuntimeKey);
-        return result.accepted;
+        const inputContext = await captureInputContext(sessionId);
+        try {
+          const { result } = await request('agent.prompt', {
+            ...(images === undefined ? {} : { images }),
+            inputContext,
+            ...(instructions === undefined ? {} : { instructions }),
+            sessionId,
+            text,
+          }, expectedRuntimeKey);
+          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          return result.accepted;
+        } catch (error) {
+          await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          throw error;
+        }
       },
 
       prefetchSession: async (sessionId, cwd) => {
@@ -1674,13 +1703,21 @@ export const createPiSessionStore = (
       },
 
       steer: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
-        const { result } = await request('agent.steer', {
-          ...(images === undefined ? {} : { images }),
-          ...(instructions === undefined ? {} : { instructions }),
-          sessionId,
-          text,
-        }, expectedRuntimeKey);
-        return result.accepted;
+        const inputContext = await captureInputContext(sessionId);
+        try {
+          const { result } = await request('agent.steer', {
+            ...(images === undefined ? {} : { images }),
+            inputContext,
+            ...(instructions === undefined ? {} : { instructions }),
+            sessionId,
+            text,
+          }, expectedRuntimeKey);
+          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          return result.accepted;
+        } catch (error) {
+          await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          throw error;
+        }
       },
 
       unarchiveSession: async (sessionId) => {

@@ -1,4 +1,4 @@
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import type { AgentInputContext, PiRuntimeSnapshot } from '@piarium/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
   PiariumExtensionActualState,
@@ -1718,6 +1718,18 @@ export interface PiariumDirtyBufferResource {
   resource: PiariumResourceReference;
 }
 
+export interface PiariumAgentInputSnapshotResource extends PiariumDirtyBufferResource {
+  content: string;
+}
+
+export interface PiariumAgentInputSnapshotCaptureRequest {
+  generation: number;
+  ownerId: string;
+  resources: PiariumAgentInputSnapshotResource[];
+  sessionId: string;
+  workspaceId: string;
+}
+
 export interface PiariumDirtyBufferPublication {
   generation: number;
   ownerId: string;
@@ -1767,6 +1779,8 @@ export interface DocumentsAPI {
     ownerId: string;
     workspaceId: string;
   }): Promise<{ cleared: boolean }>;
+  captureAgentInputSnapshot?(request: PiariumAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
+  releaseAgentInputSnapshot?(request: { context: AgentInputContext; sessionId: string }): Promise<{ released: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<PiariumWorkspaceIdentity>;
   read(resource: PiariumResourceReference): Promise<PiariumDocumentReadResult>;
   write(request: PiariumDocumentWriteRequest): Promise<PiariumDocumentWriteResult>;

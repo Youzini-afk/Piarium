@@ -1503,6 +1503,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const harnessServiceHost = createHarnessServiceHost({
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
+    commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
+    releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
+    dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),
     search: async (request, options) => workspaceContentSearch.searchContent({
       query: request.query,
       workspaceId: request.workspaceId,
@@ -1713,6 +1716,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const envelopeData = recordOf(envelope.data);
     const sessionId = event.sessionId ?? '';
     if (envelope.event === 'session.closed' && sessionId) {
+      harnessServiceHost.dropSession(sessionId, event.actor);
       sessionStores.delete(sessionId);
       knowledgeContextRuntime.dropSession(sessionId);
       return;

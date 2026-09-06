@@ -33,13 +33,15 @@ Piarium protocol types, schemas, and event/method definitions.
 | `lsp.hover` | `{ path, line, character? }` | `LspNavigationResult` | Read type/signature documentation at a one-based position |
 | `web.fetch` | `{ url, render? }` | `WebFetchResult` | Fetch a URL (SSRF-guarded) |
 | `web.search` | `{ query }` | `WebSearchResult` | Web search |
-| `zone2.assemble` | `{ sinceTurn, branchEntryIds, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
-| `compaction.before` | `{ firstKeptEntryId, tokensBefore, branchEntryIds, removedEntryIds }` | `CompactionBeforeResult` | Verify keeper coverage before optional takeover |
+| `zone2.assemble` | `{ sinceTurn, branchEntryIds, memoryMode, afterEventId?, query?, contextUsage? }` | `{ content, eventCursor }` | Assemble branch-aware, cursor-based Zone 2 context |
+| `compaction.before` | `{ firstKeptEntryId, tokensBefore, branchEntryIds, removedEntryIds, mode }` | `CompactionBeforeResult` | Verify keeper coverage before optional takeover |
 | `compaction.after` | `{ summary, firstKeptEntryId, tokensBefore }` | `{ acknowledged }` | Post-compaction hook |
 | `todo.upsert` | `{ items, branchEntryIds, confidence?, confirmed? }` | `{ text, confirmed?, askedConfirmation }` | Upsert the active branch plan after pi-host confirmation when needed |
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
 | `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
 | `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |
+| `explore.search` | `{ question, paths?, limit? }` | versioned snippets + source issues + OutputRef | Search disk and the current fixed surface draft |
+| `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
 | `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
@@ -47,6 +49,11 @@ Piarium protocol types, schemas, and event/method definitions.
 | `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
 | `thread.merge` | `{ threadId }` | `ThreadMergeResult` | Merge completed thread's diff |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
+
+`agent.prompt`, `agent.steer`, and `agent.followUp` accept an optional
+content-free `inputContext`. UI surfaces capture dirty document bodies through
+the authenticated Documents API first; the runtime method carries only the
+opaque Host reference or an unavailable dirty-path set. Omission means disk.
 
 ### Thread Events
 
@@ -140,5 +147,5 @@ does not make those paths available.
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
-- `memory-agent.ts` — shared shadow-memory settings, scheduler state/gate, operation DTOs, and strict model-output parser
-- `types.ts` — `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)
+- `memory-agent.ts` — shared memory-keeper settings, scheduler state/gate, operation DTOs, and strict model-output parser
+- `types.ts` — `AgentInputContext` (disk or content-free surface snapshot reference), `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)

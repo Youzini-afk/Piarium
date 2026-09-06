@@ -7,6 +7,7 @@ import type {
   Subscription,
 } from '@piarium/application-client';
 import { DocumentsError } from '@piarium/application-client';
+import { parseAgentInputContext, type AgentInputContext } from '@piarium/protocol';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
 import { getRuntimeEndpointGeneration } from '@piarium/application-client';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
@@ -371,6 +372,52 @@ export class DocumentRegistry {
 
   dirtyResourceIds(workspaceId: string): ReadonlySet<string> {
     return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
+  }
+
+  async captureAgentInputContext(sessionId: string, workspaceId: string): Promise<AgentInputContext> {
+    this.assertActive();
+    const dirtyRecords = [...this.records.values()]
+      .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
+      .sort((left, right) => left.identity.resourceId.localeCompare(right.identity.resourceId));
+    if (dirtyRecords.length === 0) return { source: 'disk' };
+    const dirtyPaths = dirtyRecords.map((record) => record.identity.resourceId);
+    const unavailable = (): AgentInputContext => ({
+      source: 'surface',
+      workspaceId,
+      dirtyPaths,
+      snapshot: { status: 'unavailable', reason: 'surface-unavailable' },
+    });
+    if (!this.documents.captureAgentInputSnapshot) return unavailable();
+    const generation = this.getGeneration();
+    const resources = dirtyRecords.map((record) => ({
+      baseRevision: record.baseRevision,
+      content: record.buffer,
+      localEditRevision: record.localEditRevision,
+      resource: { ...record.identity },
+    }));
+    try {
+      this.ensureWatch(workspaceId);
+      await this.enqueueDirtyPublication(workspaceId, generation, resources.map(({ content: _content, ...resource }) => resource));
+      if (this.disposed || generation !== this.getGeneration()) return unavailable();
+      const captured = parseAgentInputContext(await this.documents.captureAgentInputSnapshot({
+        generation,
+        ownerId: this.dirtyOwnerId,
+        resources,
+        sessionId,
+        workspaceId,
+      }));
+      if (!captured || captured.source !== 'surface' || captured.workspaceId !== workspaceId
+        || captured.snapshot.status !== 'ready'
+        || !sameResourceSet(new Set(captured.dirtyPaths), new Set(dirtyPaths))) return unavailable();
+      return captured;
+    } catch {
+      return unavailable();
+    }
+  }
+
+  async releaseAgentInputContext(sessionId: string, context: AgentInputContext): Promise<void> {
+    if (context.source !== 'surface' || context.snapshot.status !== 'ready') return;
+    await this.documents.releaseAgentInputSnapshot?.({ context, sessionId });
   }
 
   private barrierPath(value: string, caseSensitive: boolean): string {
@@ -1280,14 +1327,17 @@ export class DocumentRegistry {
         resource: record.identity,
       }));
     const generation = this.getGeneration();
+    return this.enqueueDirtyPublication(workspaceId, generation, resources);
+  }
+
+  private enqueueDirtyPublication(
+    workspaceId: string,
+    generation: number,
+    resources: Array<{ baseRevision: string | null; localEditRevision: number; resource: DocumentIdentity }>,
+  ): Promise<void> {
     const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
-      await this.documents.publishDirtyBuffers({
-        generation,
-        ownerId: this.dirtyOwnerId,
-        resources,
-        workspaceId,
-      });
+      await this.documents.publishDirtyBuffers({ generation, ownerId: this.dirtyOwnerId, resources, workspaceId });
     });
     this.dirtyPublicationTails.set(workspaceId, current);
     void current.catch((error) => this.reportJournalFailure(error)).finally(() => {

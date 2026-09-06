@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { parseAgentInputContext, type AgentInputContext } from '@piarium/protocol';
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
@@ -35,6 +36,10 @@ import {
   looksLikeFilesystemWorkspaceScopeId,
   type WorkspaceMapping,
 } from './workspace-registry.js';
+import {
+  createSurfaceSnapshotStore,
+  type SurfaceSnapshotResource,
+} from './surface-snapshot-store.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -228,6 +233,14 @@ interface ClearDirtyBuffersRequest {
   generation: number;
 }
 
+interface CaptureAgentInputSnapshotRequest {
+  generation: number;
+  ownerId: string;
+  resources: unknown[];
+  sessionId: string;
+  workspaceId: string;
+}
+
 interface BeginDirtyStateBarrierOptions {
   caseSensitive?: boolean;
 }
@@ -346,6 +359,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dirtyBuffersByOwner = new Map<string, DirtyBufferRecord>();
   const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
   const dirtyBarriers = new Map<string, DirtyBarrier>();
+  const surfaceSnapshots = createSurfaceSnapshotStore();
   let dirtyPublicationRevision = 0;
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
@@ -1021,6 +1035,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (dirtySurfaces.get(key)?.registrationId !== record.registrationId) return;
         dirtySurfaces.delete(key);
         dirtyBuffersByOwner.delete(key);
+        surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
         for (const barrier of dirtyBarriers.values()) {
           if (!barrier.surfaceKeys.has(key) || barrier.released) continue;
           releaseDirtyBarrier(barrier, dirtyBarrierFailure('A document surface disconnected while the dirty-state barrier was held'));
@@ -1172,7 +1187,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         statusCode: 409,
       });
     }
-    return { cleared: dirtyBuffersByOwner.delete(key) };
+    const cleared = dirtyBuffersByOwner.delete(key);
+    surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
+    return { cleared };
   };
 
   const inspectDirtyBuffers = async (workspaceId: string): Promise<DirtyBufferPublication[]> => {
@@ -1181,6 +1198,98 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       .filter((record) => record.workspaceId === workspaceId)
       .map(publicDirtyBufferRecord)
       .sort((left, right) => left.ownerId.localeCompare(right.ownerId));
+  };
+
+  const captureAgentInputSnapshot = async (request: CaptureAgentInputSnapshotRequest): Promise<AgentInputContext> => {
+    if (!request || typeof request.sessionId !== 'string' || !request.sessionId
+      || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0
+      || !Array.isArray(request.resources)) {
+      throw new DocumentAuthorityError('Agent input snapshot capture is malformed', { code: 'failed', statusCode: 400 });
+    }
+    await loadWorkspace(request.workspaceId);
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const publication = dirtyBuffersByOwner.get(key);
+    if (!publication || publication.generation !== request.generation) {
+      throw new DocumentAuthorityError('Dirty buffer publication is unavailable for capture', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    const resources: SurfaceSnapshotResource[] = request.resources.map((entry) => {
+      const candidate = entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? entry as Record<string, unknown>
+        : {};
+      const resource = candidate.resource && typeof candidate.resource === 'object' && !Array.isArray(candidate.resource)
+        ? candidate.resource as Record<string, unknown>
+        : {};
+      if (resource.workspaceId !== request.workspaceId
+        || typeof resource.resourceId !== 'string' || !resource.resourceId
+        || (candidate.baseRevision !== null && typeof candidate.baseRevision !== 'string')
+        || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
+        || typeof candidate.content !== 'string') {
+        throw new DocumentAuthorityError('Agent input snapshot resource is malformed', { code: 'failed', statusCode: 400 });
+      }
+      return {
+        baseRevision: candidate.baseRevision as string | null,
+        content: candidate.content,
+        localEditRevision: Number(candidate.localEditRevision),
+        resource: { workspaceId: request.workspaceId, resourceId: resource.resourceId },
+      };
+    });
+    const requestedByPath = new Map(resources.map((resource) => [resource.resource.resourceId, resource]));
+    const publishedByPath = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
+    if (requestedByPath.size !== resources.length
+      || publishedByPath.size !== publication.resources.length
+      || requestedByPath.size !== publishedByPath.size
+      || [...requestedByPath].some(([resourceId, resource]) => {
+        const published = publishedByPath.get(resourceId);
+        return !published
+          || published.resource.workspaceId !== request.workspaceId
+          || published.baseRevision !== resource.baseRevision
+          || published.localEditRevision !== resource.localEditRevision;
+      })) {
+      throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    await Promise.all(resources.map((resource) => resolveResourcePath(resource.resource, true)));
+    if (dirtyBuffersByOwner.get(key) !== publication) {
+      throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    return surfaceSnapshots.capture({
+      ownerId: request.ownerId,
+      resources,
+      sessionId: request.sessionId,
+      workspaceId: request.workspaceId,
+    });
+  };
+
+  const releaseAgentInputSnapshot = (sessionId: unknown, value: unknown): { released: boolean } => {
+    if (typeof sessionId !== 'string' || !sessionId) {
+      throw new DocumentAuthorityError('Agent input snapshot session is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const context = parseAgentInputContext(value);
+    if (!context) {
+      throw new DocumentAuthorityError('Agent input context is malformed', { code: 'failed', statusCode: 400 });
+    }
+    return surfaceSnapshots.release(sessionId, context);
+  };
+
+  const commitAgentInputSnapshot = (sessionId: string, value: unknown): { committed: boolean } => {
+    if (typeof sessionId !== 'string' || !sessionId) {
+      throw new DocumentAuthorityError('Agent input snapshot session is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const context = parseAgentInputContext(value);
+    if (!context) {
+      throw new DocumentAuthorityError('Agent input context is malformed', { code: 'failed', statusCode: 400 });
+    }
+    return surfaceSnapshots.commit(sessionId, context);
   };
 
   const dispose = (): Promise<void> => {
@@ -1202,6 +1311,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     dirtySurfaces.clear();
     dirtyBuffersByOwner.clear();
+    surfaceSnapshots.dispose();
     const mutationDisposal = mutations.dispose();
     disposePromise = (async () => {
       await Promise.allSettled(records.map((record) => record.ready));
@@ -1243,6 +1353,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     publishDirtyBuffers,
     clearDirtyBuffers,
     inspectDirtyBuffers,
+    captureAgentInputSnapshot,
+    releaseAgentInputSnapshot,
+    commitAgentInputSnapshot,
+    readAgentInputSnapshot: surfaceSnapshots.read,
+    dropAgentInputSnapshots: surfaceSnapshots.dropSession,
     registerDirtySurface,
     beginDirtyStateBarrier,
     acknowledgeDirtyStateBarrier,

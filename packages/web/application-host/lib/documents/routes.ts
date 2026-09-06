@@ -10,6 +10,8 @@ interface DocumentAuthority {
   publishDirtyBuffers(request: unknown): Promise<unknown>;
   clearDirtyBuffers(request: unknown): Promise<unknown>;
   acknowledgeDirtyStateBarrier(request: unknown): Promise<unknown>;
+  captureAgentInputSnapshot(request: unknown): Promise<unknown>;
+  releaseAgentInputSnapshot(sessionId: unknown, context: unknown): unknown;
   inspectWorkspace(workspaceId: string): Promise<unknown>;
   watch(workspaceId: string, listener: (event: unknown) => void): { close(): void };
   registerDirtySurface(request: unknown, listener: (event: unknown) => void): { close(): void };
@@ -116,6 +118,23 @@ export const registerDocumentRoutes = (app: Express, {
   app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.acknowledgeDirtyStateBarrier(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/agent-input/capture', requireAuth, async (req: Request, res: Response) => {
+    try {
+      return res.json(await documents.captureAgentInputSnapshot(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/agent-input/release', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const body = readBody(req);
+      return res.json(await documents.releaseAgentInputSnapshot(body.sessionId, body.context));
     } catch (error) {
       return sendError(res, error);
     }

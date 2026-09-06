@@ -164,6 +164,15 @@ suggestion runtime: only new structured list entries are proposed, and any
 content previously suggested, accepted, or dismissed for that session is not
 proposed again. This path never invokes a model or auto-accepts.
 
+Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
+authority has already validated and frozen any dirty buffers behind its opaque
+reference. `HostServicesBridge` attaches the current context to every Harness
+request; Router still derives session/workspace/scope from the broker actor.
+`explore.search` removes disk hits for dirty paths, performs the same literal
+matching over the fixed surface snapshot, and reads excerpts from that same
+revision. Expired or unavailable dirty sources produce issues and never fall
+back to disk. Other files retain the existing Documents disk path.
+
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 
 Provides `lsp.diagnostics` (sync document + wait) and

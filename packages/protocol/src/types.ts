@@ -135,6 +135,53 @@ export type SessionWorkspaceBinding =
   | { kind: "unbound" }
   | { authorityId?: string; id: string; kind: "workspace" };
 
+/**
+ * Immutable source selected for one user input. Surface contexts contain only
+ * an opaque Host reference; document text remains on the authenticated
+ * Documents channel and never enters runtime request payloads.
+ */
+export type AgentInputContext =
+  | { source: "disk" }
+  | {
+      source: "surface";
+      workspaceId: string;
+      dirtyPaths: string[];
+      snapshot:
+        | { status: "ready"; ref: string }
+        | { status: "unavailable"; reason: "surface-unavailable" };
+    };
+
+/** Parse untrusted wire input into a content-free AgentInputContext clone. */
+export function parseAgentInputContext(value: unknown): AgentInputContext | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (input.source === "disk") return { source: "disk" };
+  if (input.source !== "surface"
+    || typeof input.workspaceId !== "string" || !input.workspaceId
+    || !Array.isArray(input.dirtyPaths)
+    || input.dirtyPaths.some((path) => typeof path !== "string" || !path)
+    || new Set(input.dirtyPaths).size !== input.dirtyPaths.length
+    || !input.snapshot || typeof input.snapshot !== "object" || Array.isArray(input.snapshot)) return null;
+  const snapshot = input.snapshot as Record<string, unknown>;
+  if (snapshot.status === "ready" && typeof snapshot.ref === "string" && snapshot.ref) {
+    return {
+      source: "surface",
+      workspaceId: input.workspaceId,
+      dirtyPaths: [...input.dirtyPaths] as string[],
+      snapshot: { status: "ready", ref: snapshot.ref },
+    };
+  }
+  if (snapshot.status === "unavailable" && snapshot.reason === "surface-unavailable") {
+    return {
+      source: "surface",
+      workspaceId: input.workspaceId,
+      dirtyPaths: [...input.dirtyPaths] as string[],
+      snapshot: { status: "unavailable", reason: "surface-unavailable" },
+    };
+  }
+  return null;
+}
+
 export interface SessionSummary {
   allMessagesText: string;
   archivedAt?: string;

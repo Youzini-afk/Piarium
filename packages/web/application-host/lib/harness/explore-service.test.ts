@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createWorkspaceContentSearch } from "../search/content.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
@@ -48,12 +48,33 @@ async function fixture(scope?: string[]) {
   });
   return {
     root, workspace, actor, host, documents, paths,
-    async request(params: HarnessServiceMap["explore.search"]["params"]) {
+    async request(params: HarnessServiceMap["explore.search"]["params"], inputContext?: AgentInputContext) {
       await router.processEvent({
         kind: "host", actor,
-        envelope: { kind: "event", event: "harness.request", data: { requestId: "request", method: "explore.search", params } },
+        envelope: { kind: "event", event: "harness.request", data: {
+          requestId: "request", method: "explore.search", params,
+          ...(inputContext ? { inputContext } : {}),
+        } },
       });
       return response as { ok: true; result: HarnessServiceMap["explore.search"]["result"] } | { ok: false; error: { code: string; message: string } };
+    },
+    async capture(resourceId: string, content: string, localEditRevision = 1, sessionId = actor.sessionId) {
+      const disk = await documents.read({ workspaceId, resourceId });
+      const baseRevision = disk.status === "missing" ? null : disk.revision;
+      const resource = { workspaceId, resourceId };
+      await documents.publishDirtyBuffers({
+        generation: 1,
+        ownerId: "surface",
+        resources: [{ baseRevision, localEditRevision, resource }],
+        workspaceId,
+      });
+      return documents.captureAgentInputSnapshot({
+        generation: 1,
+        ownerId: "surface",
+        resources: [{ baseRevision, content, localEditRevision, resource }],
+        sessionId,
+        workspaceId,
+      });
     },
   };
 }
@@ -110,5 +131,89 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(await read(f.actor, "missing.ts", new AbortController().signal)).toMatchObject({ status: "unavailable" });
     await fs.writeFile(path.join(f.workspace, "binary.bin"), Buffer.from([0, 255, 0, 1]));
     expect(await read(f.actor, "binary.bin", new AbortController().signal)).toMatchObject({ status: "unavailable" });
+  });
+
+  it("searches dirty-only text, removes stale disk matches, and reads one fixed draft revision", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "stalediskneedle\nbase\n", "utf8");
+    const context = await f.capture("draft.ts", "newdraftneedle\nfirst frozen body\n", 3);
+
+    const draft = await f.request({ question: "newdraftneedle" }, context);
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) throw new Error(draft.error.message);
+    expect(draft.result.snippets).toMatchObject([{
+      path: "draft.ts",
+      source: "surface-draft",
+      text: "newdraftneedle\nfirst frozen body\n",
+    }]);
+    expect(draft.result.snippets[0]?.revision).toMatch(/^surface-draft:/);
+
+    const deletedFromDraft = await f.request({ question: "stalediskneedle" }, context);
+    expect(deletedFromDraft).toMatchObject({ ok: true, result: { snippets: [] } });
+
+    await f.documents.publishDirtyBuffers({
+      generation: 1,
+      ownerId: "surface",
+      resources: [{
+        baseRevision: (await f.documents.read({ workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" }) as { revision: string }).revision,
+        localEditRevision: 4,
+        resource: { workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" },
+      }],
+      workspaceId: f.actor.workspaceId!,
+    });
+    const frozen = await f.request({ question: "first frozen body" }, context);
+    expect(frozen).toMatchObject({ ok: true, result: { snippets: [{ source: "surface-draft" }] } });
+  });
+
+  it("blocks known dirty disk text when the surface source is unavailable", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "dirty.ts"), "mustNotLeakFromDisk\n", "utf8");
+    const context: AgentInputContext = {
+      source: "surface",
+      workspaceId: f.actor.workspaceId!,
+      dirtyPaths: ["dirty.ts"],
+      snapshot: { status: "unavailable", reason: "surface-unavailable" },
+    };
+    const response = await f.request({ question: "mustNotLeakFromDisk" }, context);
+    expect(response.ok).toBe(false);
+    if (response.ok) throw new Error("Expected unavailable source response");
+    expect(response.error).toMatchObject({ code: "unavailable" });
+    expect(response.error.message).toContain("dirty.ts (unavailable)");
+  });
+
+  it("rejects a surface context for another actor workspace", async () => {
+    const f = await fixture();
+    const response = await f.request({ question: "needle" }, {
+      source: "surface",
+      workspaceId: "another-workspace",
+      dirtyPaths: ["secret.ts"],
+      snapshot: { status: "unavailable", reason: "surface-unavailable" },
+    });
+    expect(response).toMatchObject({ ok: false, error: { code: "forbidden" } });
+  });
+
+  it("does not read a ready snapshot owned by another session or outside actor scope", async () => {
+    const scoped = await fixture(["allowed"]);
+    await fs.mkdir(path.join(scoped.workspace, "allowed"));
+    await fs.writeFile(path.join(scoped.workspace, "outside.ts"), "privateDiskNeedle\n", "utf8");
+    const otherSession = await scoped.capture(
+      "outside.ts",
+      "privateDraftNeedle\n",
+      1,
+      "other-session",
+    );
+    const response = await scoped.request({ question: "privateDraftNeedle" }, otherSession);
+    expect(response).toMatchObject({ ok: true, result: { snippets: [] } });
+    expect(JSON.stringify(response)).not.toContain("privateDraftNeedle");
+
+    const inScopeOtherSession = await scoped.capture(
+      "allowed/draft.ts",
+      "otherSessionNeedle\n",
+      1,
+      "other-session",
+    );
+    const unavailable = await scoped.request({ question: "otherSessionNeedle" }, inScopeOtherSession);
+    expect(unavailable).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(JSON.stringify(unavailable)).not.toContain("otherSessionNeedle");
   });
 });

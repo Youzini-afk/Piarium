@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { RuntimeAPIs } from '@piarium/application-client';
+import type { DocumentsAPI, PiariumAgentInputSnapshotCaptureRequest } from '@piarium/application-client';
+import { bindDocumentRegistry, getDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import {
   PIARIUM_PROTOCOL_VERSION,
@@ -394,7 +396,10 @@ describe('Pi session event state', () => {
 });
 
 describe('Pi session store', () => {
-  afterEach(() => registerRuntimeAPIs(null));
+  afterEach(() => {
+    registerRuntimeAPIs(null);
+    resetDocumentRegistry();
+  });
   test('owns recoverable submission state per Pi session', () => {
     const store = createPiSessionStore(new FakeRuntime());
     store.setState({
@@ -1547,5 +1552,103 @@ describe('Pi session store', () => {
       store.getState().prompt('session-a', 'stay on runtime A', undefined, undefined, 'runtime-a'),
     ).rejects.toThrow('runtime changed');
     expect(runtime.calls).toEqual([]);
+  });
+
+  test('automatically captures the current dirty surface without putting document text in runtime params', async () => {
+    const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const captures: PiariumAgentInputSnapshotCaptureRequest[] = [];
+    const releases: Array<{ sessionId: string; context: unknown }> = [];
+    const documents = {
+      captureAgentInputSnapshot: async (request: PiariumAgentInputSnapshotCaptureRequest) => {
+        captures.push(request);
+        return {
+          source: 'surface' as const,
+          workspaceId,
+          dirtyPaths: request.resources.map((resource) => resource.resource.resourceId),
+          snapshot: { status: 'ready' as const, ref: `opaque-snapshot-ref-${captures.length}` },
+        };
+      },
+      clearDirtyBuffers: async () => ({ cleared: true }),
+      delete: async (request: { resource: { workspaceId: string; resourceId: string } }) => ({ status: 'deleted' as const, resource: request.resource }),
+      deleteRecoveryJournal: async () => ({ status: 'missing' as const, journalId: 'none' }),
+      listRecoveryJournals: async () => [],
+      move: async (request: { from: { workspaceId: string; resourceId: string } }) => ({ status: 'missing' as const, resource: request.from }),
+      publishDirtyBuffers: async (request: Parameters<DocumentsAPI['publishDirtyBuffers']>[0]) => ({ ...request, updatedAt: '2026-09-06T00:00:00.000Z' }),
+      read: async (resource: { workspaceId: string; resourceId: string }) => ({
+        status: 'ready' as const,
+        epoch: 1,
+        resource,
+        revision: 'disk-revision',
+        content: 'disk body',
+        encoding: 'utf-8',
+        bom: false,
+        byteLength: 9,
+      }),
+      readRecoveryJournal: async (journalId: string) => ({ status: 'missing' as const, journalId }),
+      releaseAgentInputSnapshot: async (request: { sessionId: string; context: unknown }) => {
+        releases.push(request);
+        return { released: true };
+      },
+      resolveWorkspace: async () => ({ workspaceId, hostId: 'host', epoch: 1 }),
+      watch: () => ({ close() {} }),
+      write: async () => ({ status: 'written' as const, revision: 'next', byteLength: 0 }),
+      writeRecoveryJournal: async () => ({ status: 'missing' as const, journalId: 'none' }),
+    } as DocumentsAPI;
+    bindDocumentRegistry(documents);
+    const identity = { workspaceId, resourceId: 'draft.ts' };
+    await getDocumentRegistry().open(identity);
+    getDocumentRegistry().applyTransaction(identity, 'private dirty-only phrase', { origin: 'test' });
+
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.prompt') return { accepted: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({
+      records: {
+        'session-a': {
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          snapshot: { ...snapshot('session-a'), workspace: { kind: 'workspace', id: workspaceId, authorityId: workspaceId } },
+          toolExecutions: {},
+        },
+      },
+    });
+
+    expect(await store.getState().prompt('session-a', 'inspect my draft')).toBe(true);
+    expect(captures).toHaveLength(1);
+    expect(captures[0]?.resources.map(({ content, localEditRevision }) => ({ content, localEditRevision }))).toEqual([
+      { content: 'private dirty-only phrase', localEditRevision: 1 },
+    ]);
+    const runtimeParams = runtime.calls.find((call) => call.method === 'agent.prompt')?.params as Record<string, unknown>;
+    expect(runtimeParams.inputContext).toEqual({
+      source: 'surface',
+      workspaceId,
+      dirtyPaths: ['draft.ts'],
+      snapshot: { status: 'ready', ref: 'opaque-snapshot-ref-1' },
+    });
+    expect(JSON.stringify(runtimeParams)).not.toContain('private dirty-only phrase');
+
+    getDocumentRegistry().applyTransaction(identity, 'second private draft body', { origin: 'test' });
+    runtime.handler = () => { throw new Error('prompt dispatch failed'); };
+    let failed = false;
+    try {
+      await store.getState().prompt('session-a', 'this send fails');
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    expect(releases).toHaveLength(1);
+    expect(releases[0]).toEqual({
+      sessionId: 'session-a',
+      context: {
+        source: 'surface',
+        workspaceId,
+        dirtyPaths: ['draft.ts'],
+        snapshot: { status: 'ready', ref: 'opaque-snapshot-ref-2' },
+      },
+    });
   });
 });

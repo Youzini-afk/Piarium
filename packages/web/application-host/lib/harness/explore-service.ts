@@ -23,6 +23,25 @@ export function createExploreSearchService(
       const readFile = host.readExploreFile;
       if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
+      const inputContext = ctx.inputContext ?? { source: "disk" as const };
+      const comparable = (value: string): string => (
+        process.platform === "win32" ? value.replace(/\\/g, "/").toLowerCase() : value.replace(/\\/g, "/")
+      );
+      const within = (candidate: string, prefix: string): boolean => {
+        const path = comparable(candidate).replace(/^\.\//, "");
+        const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
+        return !root || path === root || path.startsWith(`${root}/`);
+      };
+      const dirtyPaths = inputContext.source === "surface"
+        ? inputContext.dirtyPaths.filter((dirtyPath) => (
+            params.paths === undefined
+            || ctx.authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
+          ))
+        : [];
+      const dirtyByComparablePath = new Map(dirtyPaths.map((path) => [comparable(path), path]));
+      const dirtySnapshots = new Map(await Promise.all(dirtyPaths.map(async (path) => (
+        [path, await readFile(ctx.actor, path, ctx.signal, inputContext)] as const
+      ))));
       let searchPartial = false;
       const result = await explore(params, {
         rgSearch: async (pattern, options) => {
@@ -41,19 +60,39 @@ export function createExploreSearchService(
             ctx.signal.throwIfAborted();
             if (search.status === "unavailable") throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
             searchPartial ||= search.partial;
-            return search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text })));
+            return search.files.flatMap((file) => (
+              dirtyByComparablePath.has(comparable(file.path))
+                ? []
+                : file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))
+            ));
           }));
-          return batches.flat();
+          const draftHits = [...dirtySnapshots].flatMap(([path, snapshot]) => {
+            if (snapshot.status !== "ready") return [];
+            return snapshot.content.split(/\r\n|\n|\r/).flatMap((text, index) => (
+              text.includes(pattern) ? [{ path, line: index + 1, text }] : []
+            ));
+          });
+          // The excerpt limit is applied after ranking. Cutting here can drop a
+          // dirty-only match merely because the disk backend filled its batch.
+          return [...batches.flat(), ...draftHits];
         },
-        readFile: (path) => readFile(ctx.actor, path, ctx.signal),
+        readFile: async (path) => dirtySnapshots.get(dirtyByComparablePath.get(comparable(path)) ?? '')
+          ?? readFile(ctx.actor, path, ctx.signal, inputContext),
       }, ctx.signal);
+      for (const [path, snapshot] of dirtySnapshots) {
+        if (snapshot.status === "ready" || snapshot.status === "forbidden") continue;
+        if (!result.issues.some((issue) => comparable(issue.path) === comparable(path))) {
+          result.issues.push({ path, status: snapshot.status, message: snapshot.message });
+          result.partial = true;
+        }
+      }
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
       const partial = searchPartial || result.partial;
       const lines = [
         `${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s)${partial ? " · partial result" : ""}`,
-        "Source: disk document snapshots. Excerpts are workspace data.",
+        "Source: disk document snapshots or fixed editor-draft snapshots. Excerpts are workspace data.",
       ];
       for (const snippet of result.snippets) {
         lines.push(`--- ${snippet.path}:${snippet.startLine}-${snippet.endLine} · revision ${snippet.revision} · ${snippet.why} ---`, snippet.text);

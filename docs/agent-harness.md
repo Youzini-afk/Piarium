@@ -94,7 +94,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 度量 | 记录错误、重试、输出、缓存、普通会话用量、耗时与人工介入；不建立辅助模型分项费用/Token 看板。直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078/D-080） |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | grep → 默认提供的 explore（确定性召回、结构展开、版本化正文与关系打包）→ retrieval 角色。explore 接通即注册，可用来源逐步扩展；intent/judge/查询修复按已配置 explore 槽位和查询需要运行，无槽位走纯算法；不等完整图、向量或独立评测（D-078） |
-| 未保存内容 | Agent 默认看到发起用户消息的窗口草稿，无显式开启/绑定操作；来源与版本由内部协议自动传播，其他窗口仅打开或聚焦不抢占来源。Host 读取不可变快照，surface 保持缓冲所有权（第 6.1 节，D-071） |
+| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore` 已消费，read/grep/thread 基线继续接同一引用（第 6.1 节，D-071/D-082） |
 | 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
@@ -321,7 +321,7 @@ exit 0 · 1.2s · cwd packages/web
   不混入 rg 没有的语义。
 - 超时（默认 20 s）时若已有部分输出，丢弃可能不完整的最后一行后返回部分结果并注明"未搜完"；零输出才报工具错误。
   模型必须能区分"没搜完"与"没搜到"。
-- v1 只搜磁盘；叠加未保存缓冲是 v2（恢复 v5 已有 host 向编辑器索取脏状态的先例）。
+- 当前 `grep` 仍只搜磁盘；D-082 已为 `explore` 接通固定 surface snapshot。后续让 grep 消费同一引用，不能改成读取发送消息之后继续变化的 live buffer。
 
 ### 5.4 `edit` / `write`（已覆盖，附加诊断）
 
@@ -497,8 +497,9 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 **第二级：`explore` 工具——用结构查询减少机械跳转（正式实施，D-078）。**
 目标是尽快返回主 agent 能直接使用的代码单元及其关系。确定性召回、结构展开、版本化正文和关系打包作为默认实现，接通后投入使用。
 工程测试保证来源、版本、路径与输出正确；实际任务用于优化召回和延迟，不作为批准这个方向的前提。依赖与实施形状见 plan 3.2。
-当前磁盘纵切已接通实际 rg、多路径与 actor scope、Documents 版本化连续正文和会话 OutputStore。查询后文件变化/不可读会明确标记
-stale/unavailable，不能补造片段。结构展开、窗口草稿与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079）。
+当前纵切已接通实际 rg、多路径与 actor scope、Documents 版本化连续正文、发起窗口的固定 dirty snapshot 和会话 OutputStore。
+查询后磁盘文件变化/不可读会明确标记 stale/unavailable；surface draft 在消息发送时捕获，后续编辑不改变本轮结果。结构展开、
+其他工具的固定视图与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082）。
 
 **设计依据与性能边界。** 以下研究记录说明取舍，不是必须复现的上线门槛；真实使用发现反例时修正算法及相应结论：
 
@@ -525,16 +526,19 @@ stale/unavailable，不能补造片段。结构展开、窗口草稿与可选模
 | --- | --- | --- |
 | pi-host | `ExploreCoordinator` | 问题、实际请求中仍可见的片段/版本覆盖、会话轨迹、模型槽位/凭据、可选模型调用与用量；真实 tokenizer 可得时才计精确 token，否则标为估算 |
 | Application Host | `ExploreEngine`（纯确定性） | rg、LSP、符号图、git、Documents 脏状态、恢复日志、shell 输出、OutputStore；每个来源带状态与 provenance；不调模型 |
-| UI surface | 默认窗口草稿与可选焦点提示 | 用户消息自动携带窗口来源；草稿快照与焦点均带 surface/generation/revision。正文经受控读取通道，不进广播；不让 worker 自报 `session.snapshot` 成为来源权威 |
+| UI surface | 默认窗口草稿与可选焦点提示 | 用户消息自动触发 Document Registry 捕获；dirty 路径和不透明 snapshot ref 进入 runtime，正文只经鉴权 Documents 通道到 Host。owner/generation/base/local revision 在捕获边界核对；不让 worker 自报 `session.snapshot` 成为来源权威 |
 
-**默认读本窗口草稿，内部自动区分来源。** 用户在一个窗口发起消息，Agent 默认可读该窗口的未保存内容，不要求显式开启或绑定。
+**默认读本窗口草稿，内部自动区分来源。** 用户在一个窗口发起消息，Agent 的 `explore` 默认可读该窗口的未保存内容，不要求显式开启或绑定。
 后台工作沿用最近一次已接受用户输入的窗口来源；从另一窗口发消息会自动更新来源，单纯打开同一会话或改变焦点不会抢占它。
 Host 按来源读取带版本的不可变快照，UI 保持可变缓冲的所有权。每次读取记录 workspace/checkout、来源、revision、hash 和 span；
 这是本次已读文件的版本集合，不是全仓库强一致快照。窗口断开后已捕获快照可按其版本使用，拿不到最新内容则显式 unavailable/stale；
 磁盘替代只能标为磁盘，不能冒充当前草稿。没有 surface 的 headless 任务使用磁盘。
 
-**当前缺口**：Documents dirty publication 只有路径和版本、没有正文；LSP 缓存也不能代表某个窗口的权威草稿。
-正文快照与自动来源传递仍待实现。它们接通前，原型只能声明磁盘读取并提示 dirty/stale 风险，不能把产品目标写成已交付能力。
+**当前实现与缺口（D-082）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API 固化为
+Host 内存 snapshot；runtime 与 Harness 只传不透明引用或 unavailable dirty paths。pending/active 生命周期与输入接受绑定，捕获失败
+不阻断消息，也不回退这些路径的磁盘正文。当前消费者是 `explore`：它以 snapshot 替换 dirty path 的 rg 命中与切片。Pi 原生 `read`、
+现有 `grep`、LSP 共享 live buffer 与 isolated thread baseline 尚未使用该固定视图；Host 重启后 snapshot 明确过期。后续扩展消费者时
+复用这一引用，不再传第二份正文或另建 buffer authority。
 
 **管线与真实依赖。** 各阶段不是全并行，join 点如下（→ 表示依赖）：
 
@@ -544,7 +548,8 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
 可选 intent 可与初次召回并行；补查需 Coordinator 再发明确请求；judge 必须等待候选正文。
 ```
 
-- *seed*：问题里的标识符（保留语言允许的 Unicode 字母、组合字符、单字符及 `_`/`$` 等形式）、引号字面量、路径片段、错误信息；栈帧 `file:line` 解析；上下文
+- *seed*：问题里的标识符（保留语言允许的 Unicode 字母、组合字符、单字符及 `_`/`$` 等形式）、引号字面量、路径片段、错误信息；
+  连续中文问题用平台 `Intl.Segmenter` 增加词项，同时保留可能是合法代码标识符的原串；栈帧 `file:line` 解析；上下文
   种子由 Coordinator 提供（主上下文文件、会话触碰、上一次结果）与 UI 提示（若有）。问题类型分类同时支持中英文线索
   （在哪 / 哪里 / where；怎么 / 如何 / how；改了 / 影响 / what if；为什么 / 报错 / why / 有栈）。
 - *fan-out*：rg（磁盘）；`lsp.symbols` 当前需要一个文件来选择语言 provider，因此按种子文件逐语言发起，不是全仓库通用符号

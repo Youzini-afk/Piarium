@@ -49,6 +49,10 @@ session-wide 持久模式覆盖已经接入。`off` 不再把旧 blocks 注入 Z
 可见 block 修订；缺口、漂移或 Host 重启只让该次回到 Pi，自身摘要不会被阻断。运行模式与最近 keeper/compaction 失败投影到
 SessionSnapshot、Harness Settings 和 Context。证据与仍未提供的 facts 见 2.4/2.6。
 
+**D-082 已交付发起窗口草稿读取。** UI 输入自动把本窗口 dirty buffers 固化到 Application Host，不要求附件或绑定操作；runtime
+只传不透明引用。`explore` 在这些路径上搜索并读取同一固定草稿，后续编辑不污染结果，捕获失败也不会静默读取旧磁盘内容。
+当前该固定视图尚未接入 Pi 原生 read、现有 grep 与 isolated thread baseline。
+
 ## 矩阵
 
 Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
@@ -86,7 +90,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.9** 模型槽位 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-model-slots.test.ts`、`roles.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（reader / permissionJudge 实际功能调用）；Harness Settings 生产入口 | ✓（依赖能力各自按配置启用） | 未配置辅助槽位不注册或走无 LLM 路径；仅 hardImplement / review 明示回退主模型 | 三套预设只填空槽位；已按 D-080 删除辅助分项统计及 Context 明细，普通会话统计与 ThreadRun 记录保留 |
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；显式审阅/写入已接，Settings 全量知识管理仍待 2.7 |
 | **3.1** 符号图采集器 | host knowledge | ✓ | ✓（file/symbol/defines） | `knowledge/store.test.ts`（真实节点、defines edges、代际替换、坏 range 不破坏旧图）；`symbol-runtime.test.ts`（Documents post-commit → LSP → graph、buffer 不覆盖、unavailable 保留、delete、嵌套 symbols） | ✓（随 Documents mutation） | 未知语言只 touch file；LSP unavailable 保留最后图，ready 空结果才清空 | 不做启动全仓扫描；references/calls/imports 边未接，需基于 LSP 请求成本设计批处理/背压（D-059） |
-| **3.2** `explore` 磁盘检索纵切 | pi-host tool / host Engine | ✓ | ✓ | `explore.test.ts`；`explore-service.test.ts`（真实 rg、Documents、多路径/scope、会话 OutputStore）；`pi-host/test/harness/session-e2e.test.ts`（真实 Pi：连续正文/revision/handle、查询后文件修改与删除） | ✓ | 来源失败返回具体缺口；全部正文不可用则报错 | LSP 结构展开、上下文覆盖、窗口草稿与模型增强尚未接通；已删除未使用的 Host 模型/向量/PageRank 桩 |
+| **3.2** `explore` 磁盘 + 发起窗口草稿纵切 | pi-host tool / host Engine / Documents / ui | ✓ | ✓ | `explore.test.ts`；`explore-service.test.ts`（真实 rg、Documents、dirty-only、磁盘旧命中替换、固定 revision、session/workspace/scope、来源失败）；`documents/authority.test.ts`（完整 publication 与 pending/active 生命周期）；`usePiSessionStore.test.ts`（自动捕获且 runtime 无正文）；`pi-host/test/harness/session-e2e.test.ts`（真实 Pi 正文/revision/handle） | ✓ | 已知 dirty capture 不可用时该路径不读磁盘；其余路径继续 Documents disk | Pi 原生 read/现有 grep/线程基线尚未消费 snapshot；LSP/符号图缺与固定正文一致的 revision，结构展开、上下文覆盖和模型增强待接 |
 | **3.3** `related` | host | ✓ | ✗ | 单测 | — | — | pi-host 无工具定义 |
 | **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`；`thread-worktree.test.ts`（Git/non-Git、不可变 copy 修订、回收重建）；`thread-runtime.test.ts`；`thread-registry.test.ts`；`phase3-e2e.test.ts`；`worktree-reclaim-guard.test.ts`（真实 Documents 写者屏障与编辑器）；`thread-worktree-settings.test.ts`（Pi projectTrusted、显式配置与失败） | ✓（Web/Application Host） | Host 未声明 harnessThreads 时不注册 | 内部目录仍在 Run 启动时物化；空间总预算、完整结果验证记录、窗口草稿/虚拟工具与归档 UI 待接；scope 非 OS 沙箱 |
 | **3.6** 角色目录 / 团队提示 | protocol / pi-host | ✓ | ✓（随 dispatch） | `host/roles.test.ts`（14） | ✓（随 dispatch） | 未配置槽位的角色不出现 | — |
@@ -99,19 +103,20 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.2** Smart fallback | pi-host | ✓ | ✓ | `session-e2e.test.ts`（配置槽位后真实模型调用）；`permission-gate-extension.test.ts`（普通 ask 可放行、高风险不调用 judge） | 用户选择后 | 无槽位时不可选、判断失败时 ask | 插件活跃时应使用其显式 `authorizerChain`，原生 Smart 不参与裁决 |
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 可选配对回放记录器 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor、记录、配对与失败分类） | — | 不运行不产生模型请求/设置变化 | 自动执行尚缺单会话配置；只有实际安排配对时才需要，不再阻塞其他功能或默认启用（D-078） |
-| **3.4a** 内容寻址工作分支与结果物化 | host / protocol | ✓ | ✓（磁盘分支） | `working-state/working-state-store.test.ts`（持久重载、固定多修订、独立引用、物化匹配）；`working-state/materializer.test.ts`；`thread-runtime.test.ts`（真实存储发布）；`thread-worktree.test.ts` | ✓（隔离线程） | 旧 Git base/resultCommit 是导入来源；不作为正常合并写入旁路 | 草稿 helper 有单测但无 surface 正文调用链；Merkle 结构/无目录工具、跨平台 CoW、完整预算与引用释放 UI 尚未交付 |
+| **3.4a** 内容寻址工作分支与结果物化 | host / protocol | ✓ | ✓（磁盘分支） | `working-state/working-state-store.test.ts`（持久重载、固定多修订、独立引用、物化匹配）；`working-state/materializer.test.ts`；`thread-runtime.test.ts`（真实存储发布）；`thread-worktree.test.ts` | ✓（隔离线程） | 旧 Git base/resultCommit 是导入来源；不作为正常合并写入旁路 | D-082 已提供真实 surface snapshot，但 thread.dispatch/manifest/spawn 尚未把它叠入基线；Merkle/无目录工具、跨平台 CoW、完整预算与引用释放 UI 待交付 |
 | **3.5a** 固定修订 Integration 与条件恢复 | host / protocol | ✓ | ✓ | `working-state/three-way-merge.test.ts`；`working-state/integration-coordinator.test.ts`（固定结果、类型/mode、故障补偿、真实 Documents 保存排队、共享存储隔离、冲突重试）；`pi-host/test/harness/thread-runtime-session.e2e.test.ts`（父 Pi 选择旧结果 → checkpoint → 撤销）；`recovery/journal-catalog.test.ts` | ✓（原生磁盘合并） | 恢复失败保留具体路径与 needs-attention；不回到旧 git apply | 双修订投机预览、独立冲突解决 UI 与验证绑定尚未交付；文本检查不保证行为兼容 |
 
 ## 当前缺口与后续顺序
 
-顺序见 plan 0.7；D-076 已收口第一组本地正确性问题，以下区分已接线行为与仍缺证据。
+顺序见 plan 0.7；D-082 已完成窗口 snapshot 到 explore 的首个固定视图纵切，下一步是线程基线与带正文 revision 的结构来源。
+以下区分已接线行为与仍缺证据。
 
 | 范围 | 已确认现状 / 待做 | 验证与外部边界 |
 | --- | --- | --- |
 | 2.4 记忆写入与模式 | block 以 source leaf 修订，活动祖先路径按 label 解析最近值；后代 copy-on-write，删除写 tombstone；create/update/delete 原子 CAS；keeper 仅 mark plan。默认 takeover，旧 bool、实时全局设置与独立 session override 已接；off 撤销后台写入和 Zone 2 block 注入 | `memory-agent.test.ts` 覆盖分支/CAS；`memory-agent-extension.test.ts` 与真 Pi `session-e2e.test.ts` 覆盖动态模式、主历史隔离和失败；`phase2-e2e.test.ts` 覆盖 off 的 Host 注入边界。真实语义质量在使用中优化，不另设启用门槛 |
 | 2.6 覆盖与证据 | coverage 绑定 keeper 实际 context entry ID、完整活动分支和可见 block 修订；removed range 按上次 boundary 与本次 first-kept 计算。partial/no-op 不推进，压缩后清除；Host 重启不冒充持久 checkpoint，下一次 material 更新可重建。facts 只给可靠 touched files，诊断/checkpoint 暂为空 | `compaction-extension.test.ts`、`compaction.test.ts`、`phase2-e2e.test.ts` 与真 Pi `session-e2e.test.ts` 覆盖缺口、错分支、修订漂移、重启、Pi fallback 和连续压缩；本地 faux provider 证明调用链与零接管模型调用，不宣称外部模型语义质量 |
 | 3.9 / 线程观察 | 已实现并接线到 worker 送达边界：observation 使用单调 revision CAS；pending 跨 clear 失效；Router success commit / failure abort；shell、diagnostics、Zone 2 threads、thread list/wait 延迟推进，线程游标按 eventSeq 防倒退 | cursor/router/phase3 focused tests 已覆盖并发、固定时钟、clear、响应失败与增量行为。确认只到 pi-host 响应，不宣称 tool result 已耐久落盘；更强 acknowledgement 仍待独立纵切 |
-| 窗口读取 / 3.2 | 已接通的是磁盘正文：Host 经 actor 路径授权与 Documents 读取 revision，核对搜索命中是否仍存在，返回真实连续片段、partial/issues 与当前会话 handle；草稿正文传输没有生产调用链 | `explore-service.test.ts` 与真实 Pi `session-e2e.test.ts` 覆盖修改/删除、范围、正文和句柄；`draft-baseline.test.ts` 仅证明输入快照已有时的转换，不证明能从窗口取得正文 |
+| 窗口读取 / 3.2 | UI 输入自动捕获该 surface 全部 dirty records；正文只经 Documents 鉴权通道进入 Host 内容寻址内存 snapshot，runtime/Harness 传 ref。输入接受后 active、失败 release、下一成功来源替换、session drop 清理。explore 用固定草稿替换 dirty path 的 rg/正文；无 dirty 直接 disk，capture unavailable 禁止相应磁盘回退 | `authority.test.ts`、`routes.test.ts`、`explore-service.test.ts`、`usePiSessionStore.test.ts`、`session-host-prompt.test.ts` 与真 Pi `session-e2e.test.ts`。Host 重启后 ref 过期；多窗口产品 smoke、read/grep、thread baseline、LSP/符号 revision 仍待接，不把共享 live buffer 当固定草稿 |
 | T4 / 执行配置 | memory 的单会话覆盖与实际模式已接；完整跨 runtime RunManifest 未收敛，record-only 未实现；Workbench/Agent Profile 职责分开 | record-only/T4 非前置；其余单会话配置随实际消费者完成，不要求统一 RunManifest 先行 |
 | 结果与集成 | 基线与结果从原生对象读取，merge 选择固定 resultRevision，只处理 changedPaths；实际 recovery storage/catalog/lease 负责日志与对象。最终操作与父回合 checkpoint 同事务，已有冲突重试不叠加标记。最终比较/写入/补偿与同一 Documents 实例的保存共用资源队列；默认不改 index | 真实文件/故障注入与 Pi 会话测试；Pi e2e 使用 faux provider、手工提供 broker actor/turn 生命周期适配，未启动完整桌面。资源队列不覆盖独立 Harness 路径租约、直接 fs/命令、其他实例与外部进程 |
 | 物化生命周期 | Git/非 Git 结果已独立发布；copy snapshot 按修订保留，不清空旧版本。先保存结果、关闭 session，再持有 Documents 写者屏障回收；活跃写者、编辑器或未收集内容保留目录并记录原因。设置来自父 Pi settings.get 与 projectTrusted，坏配置不吞成默认 | `thread-worktree.test.ts`、`thread-runtime.test.ts`、`worktree-reclaim-guard.test.ts`、`thread-worktree-settings.test.ts`、`working-state/git-migration.test.ts`；未分类的 setup/ignored 产物会保留目录，Git filters/LFS 的 blob/checkout 适配、完整预算、CoW 与归档 UI 仍待实施 |
@@ -121,6 +126,12 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 Application Host memory/compaction/service/Zone 2 定向组 84 项；UI 模式投影/session store/i18n 54 项，均通过。真 Pi 测试使用本地
 faux provider，证明实际 hook、Host bridge、零接管模型调用与 Pi fallback，不宣称外部模型的长期语义质量。protocol、pi-host、
 Application Host test 与 UI 类型检查及四包 lint 通过；文档检查见本次提交。未运行付费模型或完整桌面 smoke。
+
+**D-082 本地实施证据**：protocol 全组 75 项；Documents Authority/routes、真实 rg/explore 与 query 定向组 53 项；UI session store
+45 项；SessionHost prompt 与真 Pi session 定向组 25 项通过。protocol、application-client、runtime-broker、pi-host、UI 与 Application Host
+测试类型检查和六包 lint 通过；工程文档 19 项及链接校验通过。测试覆盖 snapshot 后继续编辑、旧磁盘命中删除、dirty-only 新词、
+错误 session/workspace/scope、来源不可用、发送/commit 失败，以及 runtime payload 不含正文；使用本地 faux provider，未运行完整桌面
+或多窗口手工 smoke。
 
 **D-079 本地实施证据**：最终 Host 定向组覆盖 working-state、线程、explore、Documents 与 recovery，共 21 个文件，228 项通过，
 1 项 Windows 符号链接权限跳过。Protocol 71 项；Pi 线程 service/bridge 8 项、能力门 3 项；真实 Pi 原生线程测试文件 2 项、explore

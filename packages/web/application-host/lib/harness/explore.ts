@@ -32,7 +32,12 @@ export interface ExploreResult {
 
 const QUESTION_WORDS = new Set([
   "how", "does", "where", "what", "why", "which", "is", "are", "the", "a", "an", "of", "to", "in", "and", "find",
+  "这个", "那个", "这里", "那里", "哪里", "怎么", "如何", "为什么", "什么", "是否", "的", "了", "在", "是", "和", "与", "或", "请", "帮", "找", "查", "看看", "一下",
 ]);
+
+const CHINESE_WORD_SEGMENTER = typeof Intl.Segmenter === "function"
+  ? new Intl.Segmenter("zh", { granularity: "word" })
+  : null;
 
 export function extractIdentifiers(question: string): string[] {
   const identifiers = question.match(/[$_\p{L}][$_\p{L}\p{M}\p{N}]*/gu) ?? [];
@@ -41,6 +46,11 @@ export function extractIdentifiers(question: string): string[] {
     if (!QUESTION_WORDS.has(identifier.toLowerCase())) terms.add(identifier);
     for (const part of identifier.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2").split(/[\s_]+/u)) {
       if (part && !QUESTION_WORDS.has(part.toLowerCase())) terms.add(part);
+    }
+    if (CHINESE_WORD_SEGMENTER && /\p{Script=Han}/u.test(identifier)) {
+      for (const segment of CHINESE_WORD_SEGMENTER.segment(identifier)) {
+        if (segment.isWordLike && !QUESTION_WORDS.has(segment.segment)) terms.add(segment.segment);
+      }
     }
   }
   return [...terms];

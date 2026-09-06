@@ -6,11 +6,33 @@ import {
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
   isRuntimeMethod,
+  parseAgentInputContext,
   PIARIUM_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
 describe("surface runtime protocol", () => {
+  it("parses only content-free input source fields", () => {
+    assert.deepEqual(parseAgentInputContext({
+      source: "surface",
+      workspaceId: "workspace-1",
+      dirtyPaths: ["draft.ts"],
+      snapshot: { status: "ready", ref: "opaque-ref" },
+      content: "must not cross the runtime boundary",
+    }), {
+      source: "surface",
+      workspaceId: "workspace-1",
+      dirtyPaths: ["draft.ts"],
+      snapshot: { status: "ready", ref: "opaque-ref" },
+    });
+    assert.equal(parseAgentInputContext({
+      source: "surface",
+      workspaceId: "workspace-1",
+      dirtyPaths: ["draft.ts", "draft.ts"],
+      snapshot: { status: "ready", ref: "opaque-ref" },
+    }), null);
+  });
+
   it("round-trips session-scoped requests", () => {
     const request = createRuntimeRequest("req-1", "provider.list", {
       sessionId: "session-1",
@@ -24,6 +46,12 @@ describe("surface runtime protocol", () => {
       set: { words: ["oops"] },
     });
     const promptRequest = createRuntimeRequest("req-3", "agent.prompt", {
+      inputContext: {
+        source: "surface",
+        workspaceId: "workspace-1",
+        dirtyPaths: ["draft.ts"],
+        snapshot: { status: "ready", ref: "opaque-ref" },
+      },
       instructions: "hidden context",
       sessionId: "session-1",
       text: "visible prompt",
@@ -57,6 +85,7 @@ describe("surface runtime protocol", () => {
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(promptRequest)),
       promptRequest,
     );
+    assert.equal(JSON.stringify(promptRequest).includes("draft document body"), false);
     assert.deepEqual(
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(featureRequest)),
       featureRequest,

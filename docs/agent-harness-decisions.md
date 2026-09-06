@@ -1475,6 +1475,48 @@ architecture 与两侧模块文档。
 
 状态：已实施；本地验证与外部边界见 agent-harness-status.md。
 
+### D-082 · 2026-09-06 · 3.2（发起窗口快照与 draft-aware explore）
+
+类型：实现决策（D-071/D-078 的窗口正文纵切）
+
+决定：用户从 Piarium UI 发送 prompt、steer 或 follow-up 时，Document Registry 自动取得该 surface 在会话 workspace 内的全部
+dirty records。没有 dirty buffer 时直接声明 disk，不增加捕获请求；存在 dirty 时，先以现有 owner/generation 发布准确路径、
+baseRevision 与 localEditRevision，再经 UI-authenticated Documents HTTP 路径把正文交给 Application Host。Agent runtime 请求只携
+`AgentInputContext` 的不透明 snapshot ref，或 capture unavailable 加已知 dirty paths；正文不进入 prompt 参数、broker 事件、日志或广播。
+
+DocumentAuthority 在捕获时核对 workspace、owner/generation、完整 dirty path 集合、每个 base/local revision，并重新做资源 containment
+解析；任一变化使本次来源 unavailable，不取磁盘冒充。通过校验的正文复制进 Host 内存的内容寻址 SurfaceSnapshotStore：pending
+快照只服务正在送达的输入，Pi 接受输入后 commit 为 active 并释放上一 active，发送失败 release，session drop 清理。后续编辑不改变
+已捕获正文；surface 断开不删除 active snapshot。Host 重启会使内存快照过期，后续读取按 dirty paths 明确 unavailable，不声明持久。
+
+SessionHost 在输入执行期间切到新 context，拒绝或发送失败恢复上一 context；CLI/headless 未携来源时切到 disk。快照 commit 属于输入
+已接受后的生命周期记账：它失败时将新来源降为 unavailable、尝试释放并写 Host warning，绝不能把已经开始的 Pi run 报成发送失败，
+从而诱发重复消息。HostServicesBridge 为 Harness 请求自动附当前 context，模型不能给 `explore` 伪造或选择 surface 参数；Router 仍以
+broker actor 校验 session/workspace/capability。
+
+`explore` 对 snapshot 中的 dirty paths 删除 rg 的磁盘命中，在固定草稿正文中执行同一 literal 匹配，再从同一 revision 切片；其他
+路径继续读 Documents disk。snapshot 缺失/过期时，已知 dirty path 只返回来源问题。所有草稿路径和派生命中再次经过 actor scope 与
+realpath-aware authority；snippet 标明 `disk | surface-draft` 和固定 revision。融合前不以 excerpt limit 删除 draft 候选。连续中文问题
+通过 `Intl.Segmenter` 增加可搜索词，同时保留合法 Unicode 标识符和引号字面量。
+
+边界：本次只让 `explore` 消费自动 surface snapshot；Pi 原生 `read`、现有 `grep`、LSP 共享 live buffer 和 isolated thread baseline
+尚未切到该固定视图。结构图节点也尚未记录可与正文核对的 document revision，因此不把现有 symbol helper 直接混进结果。下一切片先
+复用本引用接线程草稿基线，再为结构来源建立明确版本绑定。
+
+原因：已有 recovery journal 服务于崩溃恢复，会被后续编辑更新，不能充当一轮输入的不可变正文；把正文塞进 runtime prompt 又会绕过
+Documents authority。单独捕获、内容寻址、引用传递同时满足窗口所有权、固定读取和低延迟；已知 dirty 失败时禁用该路径的磁盘回退，
+避免“功能仍能跑”掩盖读取了错误版本。
+
+考虑过的替代：只把显式 editor attachment 注入 prompt 不能覆盖默认窗口语义，也不能被 thread/工具复用；让 Host 直接读 LSP buffer
+会混用另一时刻或另一 surface；把每个 snapshot 永久持久化会在没有恢复消费者前制造新保留权威；捕获失败阻断用户消息则把辅助上下文
+故障升级成会话不可用。
+
+影响：protocol runtime/Harness 输入来源；application-client Documents API；UI DocumentRegistry、Pi session store 与 review flow；
+runtime-broker dispatcher；pi-host SessionHost/HostServicesBridge；Application Host Documents authority/routes/snapshot store、Harness
+router/service/explore；设计 6.1、plan 0.7/3.2、status、architecture 与模块文档。
+
+状态：已实施；本地证据和仍未接的固定视图消费者见 agent-harness-status.md。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1562,3 +1604,4 @@ architecture 与两侧模块文档。
 | D-079 | implementation（修复实际调用与数据正确性） | — | Host working-state/thread/recovery/explore；status |
 | D-080 | implementation（取消辅助分项统计，保留会话统计） | — | protocol / pi-host / UI；设计 8.4–8.6、plan、status |
 | D-081 | implementation（默认记忆、动态模式与逐次压缩接管） | — | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture |
+| D-082 | implementation（自动 surface snapshot 与 draft-aware explore） | — | protocol / UI / broker / pi-host / Documents / Host explore；设计 6.1、plan 3.2、status、architecture |

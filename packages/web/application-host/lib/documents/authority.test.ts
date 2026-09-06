@@ -470,6 +470,103 @@ it('coordinates a dirty-state barrier with every connected document surface', as
   }
 });
 
+it('captures immutable agent input snapshots only from the complete current dirty publication', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const surface = harness.authority.registerDirtySurface({
+    generation: 7,
+    ownerId: 'surface-owner',
+    workspaceId: harness.identity.workspaceId,
+  }, () => undefined);
+  try {
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'draft.ts'), 'disk text\n');
+    const disk = await harness.authority.read(harness.resource('draft.ts'));
+    if (disk.status !== 'ready') throw new Error('Expected draft fixture');
+    const publication = {
+      generation: 7,
+      ownerId: 'surface-owner',
+      resources: [{
+        baseRevision: disk.revision,
+        localEditRevision: 2,
+        resource: harness.resource('draft.ts'),
+      }],
+      workspaceId: harness.identity.workspaceId,
+    };
+    await harness.authority.publishDirtyBuffers(publication);
+    const first = await harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-1',
+      resources: publication.resources.map((resource) => ({ ...resource, content: 'fixed draft\n' })),
+    });
+    expect(first).toMatchObject({ source: 'surface', snapshot: { status: 'ready' } });
+    expect(harness.authority.readAgentInputSnapshot('session-1', first, 'draft.ts')).toMatchObject({
+      status: 'ready',
+      content: 'fixed draft\n',
+      source: 'surface-draft',
+    });
+    expect(harness.authority.commitAgentInputSnapshot('wrong-session', first)).toEqual({ committed: false });
+
+    await harness.authority.publishDirtyBuffers({
+      ...publication,
+      resources: publication.resources.map((resource) => ({ ...resource, localEditRevision: 3 })),
+    });
+    await expect(harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-1',
+      resources: publication.resources.map((resource) => ({ ...resource, content: 'stale capture\n' })),
+    })).rejects.toMatchObject({ code: 'stale-completion', statusCode: 409 });
+    expect(harness.authority.readAgentInputSnapshot('session-1', first, 'draft.ts')).toMatchObject({
+      status: 'ready',
+      content: 'fixed draft\n',
+    });
+
+    const secondPublication = {
+      ...publication,
+      resources: publication.resources.map((resource) => ({ ...resource, localEditRevision: 3 })),
+    };
+    const second = await harness.authority.captureAgentInputSnapshot({
+      ...secondPublication,
+      sessionId: 'session-1',
+      resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'new fixed draft\n' })),
+    });
+    expect(harness.authority.commitAgentInputSnapshot('session-1', first)).toEqual({ committed: true });
+    expect(harness.authority.commitAgentInputSnapshot('session-1', second)).toEqual({ committed: true });
+    expect(harness.authority.readAgentInputSnapshot('session-1', first, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+    expect(harness.authority.readAgentInputSnapshot('session-1', second, 'draft.ts')).toMatchObject({
+      status: 'ready',
+      content: 'new fixed draft\n',
+    });
+    const pendingCleared = await harness.authority.captureAgentInputSnapshot({
+      ...secondPublication,
+      sessionId: 'session-1',
+      resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'clear pending draft\n' })),
+    });
+    await harness.authority.clearDirtyBuffers({
+      generation: 7,
+      ownerId: 'surface-owner',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(harness.authority.readAgentInputSnapshot('session-1', pendingCleared, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+    expect(harness.authority.readAgentInputSnapshot('session-1', second, 'draft.ts')).toMatchObject({ status: 'ready' });
+    await harness.authority.publishDirtyBuffers(secondPublication);
+    const pending = await harness.authority.captureAgentInputSnapshot({
+      ...secondPublication,
+      sessionId: 'session-1',
+      resources: secondPublication.resources.map((resource) => ({ ...resource, content: 'pending draft\n' })),
+    });
+    surface.close();
+    expect(harness.authority.readAgentInputSnapshot('session-1', pending, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+    expect(harness.authority.readAgentInputSnapshot('session-1', second, 'draft.ts')).toMatchObject({
+      status: 'ready',
+      content: 'new fixed draft\n',
+    });
+    harness.authority.dropAgentInputSnapshots('session-1');
+    expect(harness.authority.readAgentInputSnapshot('session-1', second, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+  } finally {
+    surface.close();
+    await harness.cleanup();
+  }
+});
+
 it('closes an asynchronously started obsolete watcher after close and reopen', async () => {
   let gate = false;
   const releases: Array<() => void> = [];

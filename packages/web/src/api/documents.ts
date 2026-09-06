@@ -18,6 +18,7 @@ import type {
   PiariumWorkspaceIdentity,
   Subscription,
 } from '@piarium/application-client';
+import type { AgentInputContext } from '@piarium/protocol';
 import { DocumentsError, parseDocumentsFailureReason } from '@piarium/application-client';
 import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
 import { runtimeFetch } from '@piarium/application-client';
@@ -160,6 +161,8 @@ const readSseEvents = async (
 export const createWebDocumentsAPI = (): DocumentsAPI => ({
   ackDirtyStateBarrier: (request) => postJson('/api/documents/dirty/barrier/ack', request) as Promise<{ acknowledged: boolean }>,
   clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
+  captureAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/capture', request) as Promise<AgentInputContext>,
+  releaseAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/release', request) as Promise<{ released: boolean }>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<PiariumWorkspaceIdentity>,
   read: (resource: PiariumResourceReference) => postJson('/api/documents/read', { resource }) as Promise<PiariumDocumentReadResult>,
   write: (request: PiariumDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<PiariumDocumentWriteResult>,

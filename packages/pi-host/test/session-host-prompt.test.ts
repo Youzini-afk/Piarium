@@ -55,11 +55,26 @@ describe("SessionHost prompt streaming", () => {
       await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
       return { model };
     };
-    const host = new SessionHost({
+    let host!: SessionHost;
+    const surfaceRequests: Array<Record<string, unknown>> = [];
+    host = new SessionHost({
       agentDir,
       configureServices,
       emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
         events.push({ data, event });
+        if (event === "harness.request" && data && typeof data === "object") {
+          const request = data as unknown as Record<string, unknown>;
+          if (request.method === "surface.snapshot.commit" || request.method === "surface.snapshot.release") {
+            surfaceRequests.push(request);
+            queueMicrotask(() => host.respondHarness(
+              host.sessionId ?? "",
+              String(request.requestId),
+              request.method === "surface.snapshot.commit"
+                ? { ok: true, result: { committed: true } }
+                : { ok: true, result: { released: true } },
+            ));
+          }
+        }
       },
       projectTrustOverride: true,
     });
@@ -78,6 +93,12 @@ describe("SessionHost prompt streaming", () => {
           "say hello",
           undefined,
           "Answer with the hidden Piarium instruction.",
+          {
+            source: "surface",
+            workspaceId: "workspace-1",
+            dirtyPaths: ["draft.ts"],
+            snapshot: { status: "ready", ref: "opaque-ref" },
+          },
         ),
         { accepted: true },
       );
@@ -86,6 +107,14 @@ describe("SessionHost prompt streaming", () => {
         "started",
         "accepted prompt responses must not precede the projected agent_start lifecycle",
       );
+      assert.deepEqual(surfaceRequests.map((request) => request.method), ["surface.snapshot.commit"]);
+      assert.equal(JSON.stringify(surfaceRequests).includes("document body"), false);
+      assert.deepEqual(surfaceRequests[0]?.inputContext, {
+        source: "surface",
+        workspaceId: "workspace-1",
+        dirtyPaths: ["draft.ts"],
+        snapshot: { status: "ready", ref: "opaque-ref" },
+      });
       await host.session.waitForIdle();
 
       const serialized = JSON.stringify(events);
@@ -165,6 +194,84 @@ describe("SessionHost prompt streaming", () => {
       const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
       assert.equal(forked.cancelled, false);
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);
+    } finally {
+      await host.dispose();
+      faux.unregister();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps an accepted prompt accepted when surface snapshot commit fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-prompt-source-failure-"));
+    const agentDir = join(root, "agent");
+    const events: Array<{ data: unknown; event: string }> = [];
+    const faux = registerFauxProvider();
+    faux.setResponses([() => fauxAssistantMessage("accepted once")]);
+    const model = faux.getModel();
+    const configureServices = async (services: AgentSessionServices) => {
+      services.modelRuntime.registerProvider(model.provider, {
+        api: model.api,
+        baseUrl: model.baseUrl,
+        models: [{
+          api: model.api,
+          baseUrl: model.baseUrl,
+          contextWindow: model.contextWindow,
+          cost: model.cost,
+          id: model.id,
+          input: model.input,
+          maxTokens: model.maxTokens,
+          name: model.name,
+          reasoning: model.reasoning,
+        }],
+      });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+      return { model };
+    };
+    let host!: SessionHost;
+    host = new SessionHost({
+      agentDir,
+      configureServices,
+      emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
+        events.push({ data, event });
+        if (event !== "harness.request" || !data || typeof data !== "object") return;
+        const request = data as unknown as Record<string, unknown>;
+        if (request.method !== "surface.snapshot.commit" && request.method !== "surface.snapshot.release") return;
+        queueMicrotask(() => host.respondHarness(
+          host.sessionId ?? "",
+          String(request.requestId),
+          request.method === "surface.snapshot.commit"
+            ? { ok: true, result: { committed: false } }
+            : { ok: true, result: { released: true } },
+        ));
+      },
+      projectTrustOverride: true,
+    });
+    try {
+      const snapshot = await host.create(root);
+      const result = await host.prompt(snapshot.sessionId, "run exactly once", undefined, undefined, {
+        source: "surface",
+        workspaceId: "workspace-1",
+        dirtyPaths: ["draft.ts"],
+        snapshot: { status: "ready", ref: "pending-ref" },
+      });
+      assert.deepEqual(result, { accepted: true });
+      await host.session.waitForIdle();
+      assert.equal(faux.state.callCount, 1);
+      const sourceRequests = events
+        .filter((entry) => entry.event === "harness.request")
+        .map((entry) => entry.data as { inputContext?: unknown; method: string })
+        .filter((request) => request.method === "surface.snapshot.commit" || request.method === "surface.snapshot.release");
+      assert.deepEqual(sourceRequests.map((request) => request.method), ["surface.snapshot.commit", "surface.snapshot.release"]);
+      assert.deepEqual(sourceRequests[1]?.inputContext, {
+        source: "surface",
+        workspaceId: "workspace-1",
+        dirtyPaths: ["draft.ts"],
+        snapshot: { status: "unavailable", reason: "surface-unavailable" },
+      });
+      assert.ok(events.some((entry) => (
+        entry.event === "host.log"
+        && JSON.stringify(entry.data).includes("Agent input source commit failed")
+      )));
     } finally {
       await host.dispose();
       faux.unregister();

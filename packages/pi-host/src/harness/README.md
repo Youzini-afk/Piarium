@@ -20,6 +20,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `kill_shell` | Terminate a background shell | `shell.kill` |
 | `diagnostics` | Get LSP diagnostics for a file | `lsp.diagnosticsSnapshot` |
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions | `lsp.*` |
+| `explore` | Search versioned disk and latest accepted surface-draft excerpts | `explore.search` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
 ## Registration
@@ -79,6 +80,14 @@ the broker. The host's `HarnessRouter` dispatches to the appropriate
 service and responds via `harness.respond`. Worker payloads do not carry a
 session identity; the broker pins identity after `session.create/open` and
 adds the trusted Actor envelope consumed by the Host.
+
+SessionHost also gives the bridge the latest accepted `AgentInputContext`.
+That object contains only disk/source state, dirty paths, and an opaque Host
+snapshot reference; editor text never enters the worker request. Prompt,
+steer, and follow-up temporarily select a new context, commit it after Pi
+accepts the input, and restore/release it when delivery fails. Snapshot
+bookkeeping failure after `agent_start` degrades the source to unavailable and
+cannot turn an already-running prompt into a failed submission.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })

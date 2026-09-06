@@ -371,15 +371,19 @@ supervisor and a standard Debug Adapter Protocol implementation with its adapter
 and task processes under workspace trust and owner generations; renderers send typed requests and
 never start a process. Language failures are typed and distinguishable — including
 `stale-completion`, `untrusted`, and `unsupported` — stale results are rejected, and hidden views
-perform no background work. Agent file changes reconcile with open editors explicitly: attachments
-are runtime- and session-scoped, unsaved buffers become explicit prompt text rather than implicit
-context, and patch accept/reject uses expected-revision writes so an agent edit cannot silently
-overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
+perform no background work. Agent file changes reconcile with open editors explicitly. On each UI
+prompt, steer, or follow-up, the Document Registry copies that surface's dirty buffers into an
+immutable Application Host snapshot. Document text travels only over the authenticated Documents
+channel; the runtime request carries an opaque reference or an unavailable dirty-path set. Harness
+`explore` uses that fixed snapshot for dirty paths and Documents disk snapshots for the rest. Explicit
+selection/diff attachments may still quote text in the prompt, and patch accept/reject uses
+expected-revision writes so an agent edit cannot silently overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
 confers process, debug, or test-runner capability.
 Breakpoint mutations are conditional on the observed debug owner, stack/test decorations are scoped to
 workspace plus session/run generation, and delayed results from a retired owner are discarded. The
-visible editor view is also the sole active Agent context owner; file, selection, diff, inline-comment,
-and patch-review paths therefore follow one document identity instead of competing projections.
+surface that sends the user input is the Agent context owner; its active view and dirty Document Registry
+records determine the captured source. File, selection, diff, inline-comment, and patch-review paths therefore
+follow one document identity instead of competing projections.
 
 Surface parity is explicit rather than assumed. Agent Workspace declares web, desktop, and mobile;
 the official IDE Workbench declares web and desktop only. VS Code is a companion that opens Piarium,
@@ -419,6 +423,12 @@ documents rooted in the agent directory, trusted project, or standard user confi
 Runtime snapshots carry Pi's actual streaming,
 compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
 atomic Piarium metadata; renames remain native append-only Pi session-info entries.
+
+Interactive agent inputs may carry a content-free `AgentInputContext`. A surface context names the
+workspace, dirty paths, and an opaque Application Host snapshot reference; document bodies never
+cross the runtime worker protocol. Missing context means a headless/disk source. SessionHost attaches
+the accepted context to Harness requests, while the broker actor remains the authority for session,
+workspace, scope, and capability.
 
 An initial handshake requires the single Piarium v1 contract and reports capabilities. During
 pre-release development every product surface changes in lockstep; no historical Piarium ABI is
