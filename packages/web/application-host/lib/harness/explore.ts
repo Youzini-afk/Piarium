@@ -86,6 +86,10 @@ const GROUP_WEIGHT: Record<TermGroupKind, number> = {
   question: 1,
 };
 
+export function exploreHandleHint(handle: string): string {
+  return `\nMore: get_output("${handle}") for the full pack and unread candidate list (session-local, ephemeral).`;
+}
+
 const comparePath = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 
 const normalizeRgResult = (value: RgSearchReturn): { hits: RgHit[]; partial: boolean; filesDropped: number } => (
@@ -134,9 +138,10 @@ export function buildTermGroups(question: string, anchors: readonly string[] = [
   usedAnchors: string[];
   anchorsTruncated: number;
 } {
-  const suppliedAnchors = anchors.map((anchor) => anchor.trim()).filter(Boolean);
-  const usedAnchors = suppliedAnchors.slice(0, DEFAULT_ANCHOR_CAP);
-  const anchorsTruncated = Math.max(0, suppliedAnchors.length - usedAnchors.length);
+  const suppliedAnchors = [...anchors];
+  const usable = anchors.map((anchor) => anchor.trim()).filter(Boolean);
+  const usedAnchors = usable.slice(0, DEFAULT_ANCHOR_CAP);
+  const anchorsTruncated = Math.max(0, usable.length - usedAnchors.length);
   const groups: TermGroup[] = [];
   const seen = new Set<string>();
   const add = (kind: TermGroupKind, distinctive: string, variants: string[]): void => {
@@ -239,9 +244,21 @@ function rankCandidates(byFile: Map<string, FileEvidence>, groups: TermGroup[]):
     .map(([path, evidence]) => ({
       path,
       evidence,
-      score: (scores.get(path) ?? 0) + evidence.groups.size + evidence.anchors.size * 2,
+      score: (scores.get(path) ?? 0) + evidenceWeight(evidence, groups),
     }))
     .sort((left, right) => right.score - left.score || comparePath(left.path, right.path));
+}
+
+/** Weighted group mass at GROUP_WEIGHT scale so one anchor outranks three identifier groups. */
+function evidenceWeight(evidence: FileEvidence, groups: TermGroup[]): number {
+  let weight = 0;
+  for (const group of groups) {
+    if (!evidence.groups.has(group.id)) continue;
+    const specificity = evidence.distinctive.has(group.id) ? 1 : 0.25;
+    weight += GROUP_WEIGHT[group.kind] * specificity;
+  }
+  weight += GROUP_WEIGHT.anchor * evidence.anchors.size;
+  return weight;
 }
 
 function windowsFor(
@@ -497,11 +514,10 @@ export async function explore(
   };
 }
 
-export function formatExploreOutput(
+function packExploreVisible(
   result: Pick<ExploreResult, "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched">,
-  options?: { byteBudget?: number },
+  byteBudget: number,
 ): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
-  const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;
   const header: string[] = [
     `${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s)${result.partial ? " · partial result" : ""}`,
   ];
@@ -570,4 +586,21 @@ export function formatExploreOutput(
   }
   const showHandle = storedBody !== visibleText || extraOmitted.length > 0 || result.notRequested.count > 0 && !visibleText.includes(result.notRequested.paths[0] ?? "\0");
   return { visibleText, storedBody, showHandle, omitted };
+}
+
+export function formatExploreOutput(
+  result: Pick<ExploreResult, "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched">,
+  options?: { byteBudget?: number; handle?: string },
+): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
+  const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;
+  const packed = packExploreVisible(result, byteBudget);
+  const hint = options?.handle && packed.showHandle ? exploreHandleHint(options.handle) : "";
+  if (!hint) return packed;
+  const reserved = packExploreVisible(result, Math.max(0, byteBudget - utf8Bytes(hint)));
+  let visibleText = `${reserved.visibleText}${hint}`;
+  if (utf8Bytes(visibleText) > byteBudget) {
+    const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);
+    visibleText = raw.toString("utf8").replace(/\uFFFD$/u, "");
+  }
+  return { ...reserved, visibleText, showHandle: true };
 }

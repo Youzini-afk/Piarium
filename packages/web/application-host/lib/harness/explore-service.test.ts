@@ -263,4 +263,28 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.result.text).toMatch(/Unread candidates \(not-requested/);
     expect(response.result.text).not.toContain(response.result.handle);
   });
+
+  it("filters a blank anchor instead of rejecting the call", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "a.ts"), "needle\n", "utf8");
+    const response = await f.request({ question: "needle", anchors: ["foo", ""] });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.details.anchors.supplied).toEqual(["foo", ""]);
+    expect(response.result.details.anchors.used).toEqual(["foo"]);
+    expect(JSON.stringify(response.result)).not.toContain("searchIncomplete");
+  });
+
+  it("T8: keeps result.text within the byte budget when the handle hint is shown", async () => {
+    const f = await fixture();
+    const pad = "x".repeat(5000);
+    await Promise.all(Array.from({ length: 8 }, async (_, index) => {
+      await fs.writeFile(path.join(f.workspace, `big${index}.ts`), `needle ${index}\n${pad}\n`, "utf8");
+    }));
+    const response = await f.request({ question: "needle", limit: 6 });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.text).toContain(`get_output("${response.result.handle}")`);
+    expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
+  });
 });

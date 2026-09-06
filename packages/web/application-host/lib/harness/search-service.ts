@@ -131,28 +131,24 @@ function groupAndSort(
   });
 
   const useFileScore = options?.useFileScore !== false;
-  prepared.sort((a, b) => {
-    if (useFileScore) {
-      const scoreA = fileScore({
-        hits: a.hits.length,
-        path: a.path,
+  const scored = prepared.map((file) => ({
+    ...file,
+    score: useFileScore
+      ? fileScore({
+        hits: file.hits.length,
+        path: file.path,
         root,
         gitModified: false, // TODO: integrate with git status
         ageDays: 0, // TODO: integrate with file mtime
-      });
-      const scoreB = fileScore({
-        hits: b.hits.length,
-        path: b.path,
-        root,
-        gitModified: false,
-        ageDays: 0,
-      });
-      if (scoreB !== scoreA) return scoreB - scoreA;
-    }
+      })
+      : 0,
+  }));
+  scored.sort((a, b) => {
+    if (useFileScore && b.score !== a.score) return b.score - a.score;
     return a.path.localeCompare(b.path);
   });
 
-  const files: SearchContentFile[] = prepared.map(({ path, hits: fileHits }) => toSearchFile(path, fileHits));
+  const files: SearchContentFile[] = scored.map(({ path, hits: fileHits }) => toSearchFile(path, fileHits));
   const totalHits = hits.length;
   const totalFiles = byFile.size;
   const displayedHits = files.reduce((sum, file) => sum + file.hits.length, 0);

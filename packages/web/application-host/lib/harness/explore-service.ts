@@ -52,8 +52,8 @@ export function createExploreSearchService(
       if (params.paths !== undefined && (!Array.isArray(params.paths) || params.paths.some((path) => typeof path !== "string" || !path.trim()))) {
         throw new HarnessServiceError("invalid-params", "Search paths must be non-empty strings.");
       }
-      if (params.anchors !== undefined && (!Array.isArray(params.anchors) || params.anchors.some((anchor) => typeof anchor !== "string" || !anchor.trim()))) {
-        throw new HarnessServiceError("invalid-params", "Anchors must be non-empty strings.");
+      if (params.anchors !== undefined && (!Array.isArray(params.anchors) || params.anchors.some((anchor) => typeof anchor !== "string"))) {
+        throw new HarnessServiceError("invalid-params", "Anchors must be an array of strings.");
       }
       const workspaceId = ctx.actor.workspaceId;
       const readFile = host.readExploreFile;
@@ -90,16 +90,20 @@ export function createExploreSearchService(
               }
               throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
             }
-            searchPartial ||= search.partial || (search.filesDropped ?? 0) > 0;
+            const callPartial = search.partial || (search.filesDropped ?? 0) > 0;
             return {
               hits: search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))),
+              partial: callPartial,
               filesDropped: search.filesDropped ?? 0,
             };
           }));
+          const callPartial = batches.some((batch) => batch.partial);
+          const callFilesDropped = batches.reduce((sum, batch) => sum + batch.filesDropped, 0);
+          searchPartial ||= callPartial;
           return {
             hits: batches.flatMap((batch) => batch.hits),
-            partial: searchPartial,
-            filesDropped: batches.reduce((sum, batch) => sum + batch.filesDropped, 0),
+            partial: callPartial,
+            filesDropped: callFilesDropped,
           };
         },
         readFile: (path) => readFile(ctx.actor, path, ctx.signal, inputContext),
@@ -107,24 +111,39 @@ export function createExploreSearchService(
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
-      const packed = formatExploreOutput({
-        ...result,
+      const incomplete = searchPartial || result.searched.incomplete;
+      const formatted = {
+        snippets: result.snippets,
+        issues: result.issues,
+        notRequested: result.notRequested,
+        omitted: result.omitted,
         partial: searchPartial || result.partial,
         searchIncomplete: searchPartial || result.searchIncomplete,
-        searched: { ...result.searched, incomplete: searchPartial || result.searched.incomplete },
-      }, { byteBudget: DEFAULT_BYTE_BUDGET });
-      const stored = host.outputStore.store(ctx.sessionId, packed.storedBody, "explore");
-      const handleHint = packed.showHandle
-        ? `\nMore: get_output("${stored.ref.handle}") for the full pack and unread candidate list (session-local, ephemeral).`
-        : "";
+        searched: {
+          patterns: result.searched.patterns,
+          files: result.searched.files,
+          ms: result.searched.ms,
+          incomplete,
+          ...(result.searched.filesDropped !== undefined ? { filesDropped: result.searched.filesDropped } : {}),
+        },
+      };
+      const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
+      const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
+      const packed = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET, handle: stored.ref.handle });
       return {
-        ...result,
+        text: packed.visibleText,
+        snippets: result.snippets,
+        issues: result.issues,
+        notRequested: result.notRequested,
         omitted: packed.omitted,
         partial: searchPartial || result.partial,
-        searched: { ...result.searched, incomplete: searchPartial || result.searched.incomplete },
-        details: { ...result.details, byteBudget: DEFAULT_BYTE_BUDGET },
-        text: `${packed.visibleText}${handleHint}`,
+        searched: formatted.searched,
         handle: stored.ref.handle,
+        details: {
+          provenance: result.details.provenance,
+          anchors: result.details.anchors,
+          byteBudget: DEFAULT_BYTE_BUDGET,
+        },
       };
     },
   };

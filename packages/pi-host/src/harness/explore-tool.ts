@@ -4,7 +4,7 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const ExploreParams = Type.Object({
   question: Type.String({ description: "What you want to find or understand in the codebase" }),
-  anchors: Type.Optional(Type.Array(Type.String(), {
+  anchors: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
     description: "Known symbols, method names, error text, or path fragments. Matched literally and prioritized; not a hard filter.",
   })),
   paths: Type.Optional(Type.Array(Type.String(), { description: "Optional subpaths or directories to restrict search to" })),

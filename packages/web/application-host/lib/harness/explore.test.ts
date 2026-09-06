@@ -43,6 +43,13 @@ describe("explore query terms", () => {
     expect(buildRgPatterns(ids, []).map((entry) => entry.pattern)).toEqual(ids);
   });
 
+  it("keeps blank anchors in supplied and omits them from used", () => {
+    const { suppliedAnchors, usedAnchors, groups } = buildTermGroups("needle", ["foo", "", "  "]);
+    expect(suppliedAnchors).toEqual(["foo", "", "  "]);
+    expect(usedAnchors).toEqual(["foo"]);
+    expect(groups.filter((group) => group.kind === "anchor").map((group) => group.distinctive)).toEqual(["foo"]);
+  });
+
   it("groups an identifier with its splits instead of treating each variant as its own concept", () => {
     const { groups } = buildTermGroups("where is createMemoryAgentExtension");
     const identifier = groups.find((group) => group.distinctive === "createMemoryAgentExtension");
@@ -269,6 +276,28 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
     expect(result.details.byteBudget).toBe(DEFAULT_BYTE_BUDGET);
     expect(result.snippets[0]?.revision).toBe("rev-1");
+    const withHandle = formatExploreOutput(result, { byteBudget: 280, handle: "out_test" });
+    expect(withHandle.showHandle).toBe(true);
+    expect(withHandle.visibleText).toContain("get_output(\"out_test\")");
+    expect(Buffer.byteLength(withHandle.visibleText, "utf8")).toBeLessThanOrEqual(280);
+  });
+
+  it("ranks a single anchor file ahead of files that only match three split-word groups", async () => {
+    const splitFiles = Array.from({ length: 10 }, (_, index) => `split${index}.ts`);
+    const readFile = vi.fn(async (path: string) => ready(path === "anchor.ts" ? "uniqueAnchor" : "Alpha Beta Gamma"));
+    const result = await explore({ question: "Alpha Beta Gamma", anchors: ["uniqueAnchor"], limit: 2 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "uniqueAnchor") return [{ path: "anchor.ts", line: 1, text: "uniqueAnchor" }];
+        if (pattern === "Alpha" || pattern === "Beta" || pattern === "Gamma") {
+          return splitFiles.map((path) => ({ path, line: 1, text: "Alpha Beta Gamma" }));
+        }
+        return [];
+      },
+      readFile,
+    });
+    expect(result.snippets.some((snippet) => snippet.path === "anchor.ts")).toBe(true);
+    expect(result.notRequested.paths).not.toContain("anchor.ts");
+    expect(readFile.mock.calls.some((call) => call[0] === "anchor.ts")).toBe(true);
   });
 
   it("reports filesDropped separately from a hit-budget partial", async () => {
