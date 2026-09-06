@@ -73,6 +73,16 @@ try {
   // cmd.exe and bun path resolution issues on Windows.
   const tscJs = path.join(repoRoot, 'node_modules', 'typescript', 'lib', 'tsc.js');
   const configPath = path.join(webRoot, 'tsconfig.application-host.json');
+  log('Refreshing structure runtime wasm...');
+  const copyRuntime = spawnSync(process.execPath, [path.join(webRoot, 'scripts', 'copy-structure-runtime.mjs')], {
+    cwd: webRoot,
+    stdio: 'inherit',
+    shell: false,
+  });
+  if (copyRuntime.status !== 0) {
+    throw new Error(`copy-structure-runtime exited with status ${copyRuntime.status}`);
+  }
+
   log('Compiling application-host to staging directory...');
   const tscResult = spawnSync(process.execPath, [
     tscJs,
