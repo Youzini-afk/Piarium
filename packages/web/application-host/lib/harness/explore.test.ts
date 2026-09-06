@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_BYTE_BUDGET,
@@ -13,7 +17,9 @@ import {
   type ExploreDeps,
 } from "./explore.js";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
-import type { StructureOutlineResult, StructureSource } from "../structure/types.js";
+import { createStructureSource } from "../structure/source.js";
+import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
+import type { StructureOutlineResult, StructureProvider, StructureSource } from "../structure/types.js";
 
 const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({ status: "ready", content, revision, source: "disk" });
 
@@ -457,6 +463,64 @@ describe("explore structure slices", () => {
     expect(result.details.structure?.files[0]).toEqual({ path: "a.ts", provider: "lsp", status: "stale" });
   });
 
+  it("ranks a declaration-name hit ahead of the same token in a comment", async () => {
+    const result = await explore({ question: "needle", limit: 2 }, {
+      rgSearch: async () => [
+        { path: "name.ts", line: 1, text: "export function needle() {" },
+        { path: "comment.ts", line: 1, text: "// needle" },
+      ],
+      readFile: async (path) => ready(path === "name.ts" ? "export function needle() {\n  return 1;\n}" : "// needle\nexport function other() {\n  return 2;\n}"),
+      structure: {
+        outline: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          symbols: request.path === "name.ts"
+            ? [{ name: "needle", kind: "function", range: { startLine: 1, endLine: 3 }, signature: { startLine: 1, endLine: 1 } }]
+            : [{ name: "other", kind: "function", range: { startLine: 2, endLine: 4 }, signature: { startLine: 2, endLine: 2 } }],
+        }),
+        classifyHits: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          hits: request.lines.map((line) => ({
+            line,
+            class: request.path === "name.ts" ? "name" as const : "comment" as const,
+          })),
+        }),
+      },
+    });
+    expect(result.snippets.map((snippet) => snippet.path)).toEqual(["name.ts", "comment.ts"]);
+  });
+
+  it("does not classify unread candidates", async () => {
+    const classified: string[] = [];
+    const hits = Array.from({ length: 8 }, (_, index) => ({
+      path: `file-${index}.ts`,
+      line: 1,
+      text: "export function needle() {",
+    }));
+    const result = await explore({ question: "needle", limit: 1 }, {
+      rgSearch: async () => hits,
+      readFile: async () => ready("export function needle() {\n  return 1;\n}"),
+      structure: {
+        outline: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          symbols: [{ name: "needle", kind: "function", range: { startLine: 1, endLine: 3 }, signature: { startLine: 1, endLine: 1 } }],
+        }),
+        classifyHits: async (request) => {
+          classified.push(request.path);
+          return { status: "ready", provider: "tree-sitter", revision: request.revision, hits: request.lines.map((line) => ({ line, class: "name" as const })) };
+        },
+      },
+    });
+    expect(classified.length).toBeGreaterThan(0);
+    expect(classified).not.toContain("file-7.ts");
+    expect(result.notRequested.paths).toContain("file-7.ts");
+  });
+
   it("keeps anchor-first complementary packing when structure slices are present", async () => {
     const result = await explore({ question: "token", anchors: ["keyHit"], limit: 2 }, {
       rgSearch: async (pattern) => pattern === "keyHit"
@@ -476,5 +540,62 @@ describe("explore structure slices", () => {
     });
     expect(result.snippets.map((snippet) => snippet.path).sort()).toEqual(["first.ts", "second.ts"]);
     expect(result.snippets[0]?.path).toBe("second.ts");
+  });
+
+  it("slices from tree-sitter when the language-server provider is cold", async () => {
+    const unavailableLsp: StructureProvider = {
+      id: "lsp",
+      capabilities: () => ({ outline: true, classifyHits: false, literalCalls: false, imports: false }),
+      outline: async (request) => ({
+        status: "unavailable",
+        provider: "lsp",
+        revision: request.revision,
+        symbols: [],
+        message: "Language server is still starting.",
+      }),
+      classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+      literalCalls: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, calls: [] }),
+      imports: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, imports: [] }),
+    };
+    const content = [
+      "export function decoy() {",
+      "  return 0;",
+      "}",
+      "export function needle() {",
+      "  return 1;",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "cold.ts", line: 4, text: "export function needle() {" }],
+      readFile: async () => ready(content),
+      structure: createStructureSource([createTreeSitterStructureProvider(), unavailableLsp]),
+    });
+    expect(result.snippets[0]).toMatchObject({
+      path: "cold.ts",
+      startLine: 4,
+      endLine: 6,
+      text: "export function needle() {\n  return 1;\n}",
+      unit: { name: "needle", kind: "function", startLine: 4, endLine: 6 },
+      structure: { provider: "tree-sitter", status: "ready" },
+    });
+    expect(result.details.structure?.files).toEqual([{ path: "cold.ts", provider: "tree-sitter", status: "ready" }]);
+  });
+
+  it("falls back when tree-sitter wasm is missing and does not fail the tool", async () => {
+    const missing = createTreeSitterStructureProvider({
+      runtimeFromUrl: pathToFileURL(join(mkdtempSync(join(tmpdir(), "piarium-missing-structure-")), "index.js")).href,
+    });
+    const content = Array.from({ length: 10 }, (_, index) => index === 6 ? "needle" : `line ${index + 1}`).join("\n");
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "a.ts", line: 7, text: "needle" }],
+      readFile: async () => ready(content),
+      structure: createStructureSource([missing]),
+    });
+    expect(result.snippets[0]).toMatchObject({
+      startLine: 4,
+      endLine: 10,
+      structure: { provider: "tree-sitter", status: "unavailable" },
+    });
+    expect(result.snippets[0]?.unit).toBeUndefined();
   });
 });

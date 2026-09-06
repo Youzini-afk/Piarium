@@ -6,3 +6,22 @@
  * threshold, not a hard reject and not a measured product limit (D-093).
  */
 export const SMALL_STRUCTURE_SPAN_LINES = 24;
+
+/**
+ * After a file is materialized, window scoring may add these terms so a hit on
+ * a declaration name outranks the same token in a comment or string (D-095).
+ * Candidate ranking before readFile is unchanged.
+ */
+export const STRUCTURE_HIT_CLASS_SCORE = {
+  name: 30,
+  body: 8,
+  string: -4,
+  comment: -10,
+} as const;
+
+/**
+ * Working parse+query budget for one tree-sitter outline or classify call
+ * after the runtime wasm is already loaded. Init and grammar load are
+ * outside this window; their failure is `unavailable`, not a budget miss.
+ */
+export const STRUCTURE_PARSE_BUDGET_MS = 40;

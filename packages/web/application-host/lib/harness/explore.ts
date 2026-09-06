@@ -1,7 +1,8 @@
 import { languageIdForPath, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import { STRUCTURE_HIT_CLASS_SCORE } from "../structure/constants.js";
 import { outlineUsableForText, sliceStructureWindows } from "../structure/slice.js";
-import type { StructureOutlineResult, StructureSource } from "../structure/types.js";
+import type { StructureHitClass, StructureOutlineResult, StructureSource } from "../structure/types.js";
 
 type WireResult = HarnessServiceMap["explore.search"]["result"];
 export type ExploreSnippet = WireResult["snippets"][number];
@@ -201,7 +202,8 @@ interface PreparedWindow {
   why: string;
   unit?: ExploreSnippet["unit"];
   structure?: ExploreSnippet["structure"];
-  hitClass?: "name" | "body" | "string" | "comment";
+  hitLines: number[];
+  hitClass?: StructureHitClass;
 }
 
 const emptyEvidence = (): FileEvidence => ({
@@ -333,9 +335,62 @@ function windowsFor(
       why: names.length === 1 ? `matched ${names[0]}` : `matched ${names.length} term groups (${names.join(", ")})`,
       ...(slice.unit ? { unit: slice.unit } : {}),
       ...(structure ? { structure } : {}),
+      hitLines: slice.hitLines,
     };
   });
   return { windows, stale };
+}
+
+const HIT_CLASS_RANK: Record<StructureHitClass, number> = {
+  name: 3,
+  body: 2,
+  string: 1,
+  comment: 0,
+};
+
+const bestHitClass = (classes: StructureHitClass[]): StructureHitClass | undefined => {
+  let best: StructureHitClass | undefined;
+  for (const item of classes) {
+    if (!best || HIT_CLASS_RANK[item] > HIT_CLASS_RANK[best]) best = item;
+  }
+  return best;
+};
+
+async function classifyPreparedWindows(
+  path: string,
+  snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
+  windows: PreparedWindow[],
+  deps: ExploreDeps,
+  signal: AbortSignal,
+): Promise<PreparedWindow[]> {
+  if (!deps.structure || windows.length === 0) return windows;
+  const lines = [...new Set(windows.flatMap((window) => window.hitLines))];
+  if (lines.length === 0) return windows;
+  try {
+    signal.throwIfAborted();
+    const classified = await deps.structure.classifyHits({
+      path,
+      languageId: languageIdForPath(path),
+      text: snapshot.content,
+      revision: snapshot.revision,
+      lines,
+      signal,
+    });
+    if (classified.status !== "ready") return windows;
+    const byLine = new Map(classified.hits.map((hit) => [hit.line, hit.class]));
+    return windows.map((window) => {
+      const hitClass = bestHitClass(
+        window.hitLines.flatMap((line) => {
+          const item = byLine.get(line);
+          return item ? [item] : [];
+        }),
+      );
+      return hitClass ? { ...window, hitClass } : window;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    return windows;
+  }
 }
 
 function windowScore(window: PreparedWindow, selected: PreparedWindow[]): number {
@@ -345,7 +400,8 @@ function windowScore(window: PreparedWindow, selected: PreparedWindow[]): number
     if (!covered.has(groupId)) newGroups += 1;
   }
   const newFile = selected.some((item) => item.path === window.path) ? 0 : 1;
-  return (window.hasAnchor ? 100 : 0) + (window.hasDistinctive ? 20 : 0) + newGroups * 10 + newFile * 8 + window.groups.size;
+  const hitClassScore = window.hitClass ? STRUCTURE_HIT_CLASS_SCORE[window.hitClass] : 0;
+  return (window.hasAnchor ? 100 : 0) + (window.hasDistinctive ? 20 : 0) + newGroups * 10 + newFile * 8 + window.groups.size + hitClassScore;
 }
 
 function packComplementary(windows: PreparedWindow[], limit: number): PreparedWindow[] {
@@ -521,7 +577,9 @@ export async function explore(
           status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
         });
       }
-      const { windows, stale } = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
+      const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
+      const windows = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
+      const stale = sliced.stale;
       if (stale) {
         issues.push({
           path: candidate.path,

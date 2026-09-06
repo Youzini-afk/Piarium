@@ -1,5 +1,6 @@
-export { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
+export { SMALL_STRUCTURE_SPAN_LINES, STRUCTURE_HIT_CLASS_SCORE } from "./constants.js";
 export { createLspStructureProvider } from "./lsp-provider.js";
+export { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
 export { createStructureSource } from "./source.js";
 export { outlineUsableForText, sliceStructureWindows } from "./slice.js";
 export type {

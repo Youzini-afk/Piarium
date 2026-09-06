@@ -71,6 +71,7 @@ import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagn
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
+import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
@@ -1565,6 +1566,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       supervisor: languageSupervisor,
     }),
     structureSource: createStructureSource([
+      createTreeSitterStructureProvider(),
       createLspStructureProvider({
         documents: documentsAuthority,
         supervisor: languageSupervisor,
