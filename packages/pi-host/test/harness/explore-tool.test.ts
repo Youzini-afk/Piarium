@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { Value } from "typebox/value";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createExploreTool } from "../../src/harness/explore-tool.js";
 
@@ -44,5 +45,14 @@ describe("Host-backed explore tool", () => {
       anchors: ["createMemoryAgentExtension"],
       limit: 3,
     });
+  });
+
+  it("accepts a blank anchor at the schema layer so the Host can filter it", () => {
+    const tool = createExploreTool({ request: async () => ({}) } as unknown as HostServicesBridge, "session");
+    // The Host drops blank anchors and reports them in details.anchors. A stricter schema here
+    // would reject the whole call instead, so the two layers must accept the same input.
+    assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", ""] }), true);
+    assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", "  "] }), true);
+    assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: [7] }), false);
   });
 });
