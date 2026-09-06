@@ -316,6 +316,63 @@ export interface RecallSearchResult {
   results: RecallSearchResultItem[];
 }
 
+export interface ExploreSearchParams {
+  question: string;
+  paths?: string[];
+  limit?: number;
+  /** Known symbols, method names, error text, or path fragments. Literal matches; not a hard filter. */
+  anchors?: string[];
+}
+
+export type ExploreSourceStatus =
+  | "ready"
+  | "empty"
+  | "unavailable"
+  | "failed"
+  | "stale"
+  | "not-requested"
+  | "forbidden";
+
+export interface ExploreSearchSnippet {
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  why: string;
+  revision: string;
+  source: "disk" | "surface-draft";
+}
+
+export interface ExploreSearchIssue {
+  path: string;
+  status: "unavailable" | "failed" | "stale" | "forbidden";
+  message: string;
+}
+
+export interface ExploreSearchProvenance {
+  path: string;
+  revision: string;
+  source: "disk" | "surface-draft" | null;
+  status: ExploreSourceStatus;
+  matchedGroups: string[];
+}
+
+export interface ExploreSearchResult {
+  text: string;
+  snippets: ExploreSearchSnippet[];
+  issues: ExploreSearchIssue[];
+  notRequested: { count: number; paths: string[] };
+  omitted: Array<{ path: string; startLine: number; endLine: number; reason: string }>;
+  partial: boolean;
+  searched: { patterns: number; files: number; ms: number; incomplete: boolean };
+  handle: string;
+  details: {
+    provenance: ExploreSearchProvenance[];
+    anchors: { supplied: string[]; used: string[]; truncated: number };
+    byteBudget: number;
+  };
+}
+
 export interface HarnessServiceMap {
   "shell.exec": { params: { command: string; cwd?: string; waitMs?: number }; result: ShellExecResult };
   "shell.read": { params: { id: string; offset?: number; length?: number }; result: ShellReadResult };
@@ -349,23 +406,8 @@ export interface HarnessServiceMap {
   "thread.merge": { params: ThreadMergeParams; result: ThreadMergeResult };
   "thread.kill": { params: ThreadKillParams; result: ThreadKillResult };
   "explore.search": {
-    params: { question: string; paths?: string[]; limit?: number };
-    result: {
-      text: string;
-      snippets: Array<{
-        path: string;
-        startLine: number;
-        endLine: number;
-        text: string;
-        why: string;
-        revision: string;
-        source: "disk" | "surface-draft";
-      }>;
-      issues: Array<{ path: string; status: "unavailable" | "failed" | "stale" | "forbidden"; message: string }>;
-      partial: boolean;
-      searched: { patterns: number; files: number; ms: number };
-      handle: string;
-    };
+    params: ExploreSearchParams;
+    result: ExploreSearchResult;
   };
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };

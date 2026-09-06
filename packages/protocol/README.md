@@ -46,7 +46,7 @@ language server read itself, which LSP cannot attribute to a version.
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
 | `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
 | `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |
-| `explore.search` | `{ question, paths?, limit? }` | versioned snippets + source issues + OutputRef | Search disk and the current fixed surface draft |
+| `explore.search` | `{ question, anchors?, paths?, limit? }` | versioned snippets + source issues + not-requested candidates + OutputRef | Search disk and the current fixed surface draft; anchors are literal priority seeds |
 | `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
 | `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |

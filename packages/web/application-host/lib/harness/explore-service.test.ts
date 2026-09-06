@@ -94,7 +94,8 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(result.snippets.map((snippet) => snippet.path)).toEqual(["first/a.ts", "second/b.ts"]);
     expect(result.snippets[0]).toMatchObject({ source: "disk", startLine: 1, text: "header\na.*b\nfirst body\n" });
     expect(result.snippets[0]?.revision).toBeTruthy();
-    expect(result.text).toContain(result.handle);
+    expect(result.handle).toMatch(/^out_/);
+    expect(result.details.provenance.length).toBeGreaterThan(0);
     expect(f.host.outputStore.read(f.actor.sessionId, result.handle).status).toBe("ready");
     expect(f.host.outputStore.read("other-session", result.handle).status).not.toBe("ready");
   });
@@ -215,5 +216,51 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     const unavailable = await scoped.request({ question: "otherSessionNeedle" }, inScopeOtherSession);
     expect(unavailable).toMatchObject({ ok: false, error: { code: "unavailable" } });
     expect(JSON.stringify(unavailable)).not.toContain("otherSessionNeedle");
+  });
+
+  it("T2: search-service receives actor and inputContext; explore-service has no draft matcher", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "a.ts"), "needle\n", "utf8");
+    const calls: Array<{
+      params: { pattern?: string; fixedStrings?: boolean; limit?: number };
+      ctx: { actor?: unknown; inputContext?: unknown; candidateBudget?: number };
+    }> = [];
+    const original = f.host.searchService.search.bind(f.host.searchService);
+    f.host.searchService.search = async (params, ctx) => {
+      calls.push({ params, ctx });
+      return original(params, ctx);
+    };
+    const context = await f.capture("a.ts", "needle\n", 1);
+    const response = await f.request({ question: "needle" }, context);
+    expect(response.ok).toBe(true);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call.ctx).toMatchObject({ actor: f.actor, inputContext: context });
+      expect(call.params).toMatchObject({ fixedStrings: true, pattern: "needle" });
+      expect(call.params.limit).toBeUndefined();
+      expect(call.ctx.candidateBudget).toEqual(expect.any(Number));
+    }
+    const source = await fs.readFile(path.join(import.meta.dirname, "explore-service.ts"), "utf8");
+    expect(source).not.toMatch(/dirtySnapshots/);
+    expect(source).not.toMatch(/draftHits/);
+  });
+
+  it("T8: stores unread candidates in OutputStore and mentions the handle only when more remains", async () => {
+    const f = await fixture();
+    const pad = "x".repeat(120);
+    await Promise.all(Array.from({ length: 8 }, async (_, index) => {
+      await fs.writeFile(path.join(f.workspace, `f${index}.ts`), `${pad}\nneedle ${index}\n${pad}\n`, "utf8");
+    }));
+    const response = await f.request({ question: "needle", limit: 2 });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    const stored = f.host.outputStore.read(f.actor.sessionId, response.result.handle);
+    expect(stored.status).toBe("ready");
+    if (stored.status !== "ready") throw new Error("expected stored explore output");
+    expect(stored.slice.text).toMatch(/Unread candidates \(not-requested/);
+    expect(response.result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
+    expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
+    expect(response.result.text).toMatch(/Unread candidates \(not-requested/);
+    expect(response.result.text).not.toContain(response.result.handle);
   });
 });

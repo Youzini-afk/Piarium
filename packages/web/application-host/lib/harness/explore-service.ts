@@ -1,9 +1,42 @@
+import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
-import { explore } from "./explore.js";
+import {
+  DEFAULT_BYTE_BUDGET,
+  DEFAULT_CANDIDATE_BUDGET,
+  DEFAULT_HITS_PER_FILE,
+  explore,
+  formatExploreOutput,
+  type ExploreIssue,
+} from "./explore.js";
 
-const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+type ExploreParams = HarnessServiceMap["explore.search"]["params"];
+
+const comparable = (value: string): string => (
+  process.platform === "win32" ? value.replace(/\\/g, "/").toLowerCase() : value.replace(/\\/g, "/")
+);
+
+const within = (candidate: string, prefix: string): boolean => {
+  const path = comparable(candidate).replace(/^\.\//, "");
+  const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
+  return !root || path === root || path.startsWith(`${root}/`);
+};
+
+const ownedDirtyPathsFor = (
+  inputContext: AgentInputContext,
+  actor: HarnessActorContext,
+  params: ExploreParams,
+  authorizedPaths: ReadonlyArray<{ resourceId: string }>,
+  draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[],
+): string[] => {
+  if (inputContext.source !== "surface") return [];
+  const owned = draftPaths ? draftPaths(actor.sessionId, inputContext) : inputContext.dirtyPaths;
+  return owned.filter((dirtyPath) => (
+    params.paths === undefined
+    || authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
+  ));
+};
 
 export function createExploreSearchService(
   host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths">,
@@ -19,34 +52,14 @@ export function createExploreSearchService(
       if (params.paths !== undefined && (!Array.isArray(params.paths) || params.paths.some((path) => typeof path !== "string" || !path.trim()))) {
         throw new HarnessServiceError("invalid-params", "Search paths must be non-empty strings.");
       }
+      if (params.anchors !== undefined && (!Array.isArray(params.anchors) || params.anchors.some((anchor) => typeof anchor !== "string" || !anchor.trim()))) {
+        throw new HarnessServiceError("invalid-params", "Anchors must be non-empty strings.");
+      }
       const workspaceId = ctx.actor.workspaceId;
       const readFile = host.readExploreFile;
       if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
-      const comparable = (value: string): string => (
-        process.platform === "win32" ? value.replace(/\\/g, "/").toLowerCase() : value.replace(/\\/g, "/")
-      );
-      const within = (candidate: string, prefix: string): boolean => {
-        const path = comparable(candidate).replace(/^\.\//, "");
-        const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
-        return !root || path === root || path.startsWith(`${root}/`);
-      };
-      // A path written during this turn is answered from disk again, so it goes
-      // through the ordinary rg path instead of the older draft (D-088).
-      const ownedDirtyPaths = inputContext.source === "surface"
-        ? (host.agentInputDraftPaths
-          ? host.agentInputDraftPaths(ctx.sessionId, inputContext)
-          : inputContext.dirtyPaths)
-        : [];
-      const dirtyPaths = ownedDirtyPaths.filter((dirtyPath) => (
-        params.paths === undefined
-        || ctx.authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
-      ));
-      const dirtyByComparablePath = new Map(dirtyPaths.map((path) => [comparable(path), path]));
-      const dirtySnapshots = new Map(await Promise.all(dirtyPaths.map(async (path) => (
-        [path, await readFile(ctx.actor, path, ctx.signal, inputContext)] as const
-      ))));
       let searchPartial = false;
       const result = await explore(params, {
         rgSearch: async (pattern, options) => {
@@ -54,63 +67,77 @@ export function createExploreSearchService(
           const batches = await Promise.all(roots.map(async (path) => {
             ctx.signal.throwIfAborted();
             const search = await host.searchService.search({
-              pattern: options.fixedStrings ? escapeRegex(pattern) : pattern,
-              ...(options.limit !== undefined ? { limit: options.limit } : {}),
+              pattern,
+              fixedStrings: options.fixedStrings,
               ...(path !== undefined ? { path } : {}),
             }, {
               workspaceId,
+              actor: ctx.actor,
+              inputContext,
+              candidateBudget: options.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET,
+              hitsPerFile: options.hitsPerFile ?? DEFAULT_HITS_PER_FILE,
               ...(ctx.actor.workspaceScope !== undefined ? { workspaceScope: ctx.actor.workspaceScope } : {}),
               signal: ctx.signal,
             });
             ctx.signal.throwIfAborted();
-            if (search.status === "unavailable") throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
+            if (search.status === "unavailable") {
+              const dirtyIssues = await collectDirtySourceIssues(params, ctx, inputContext, host, readFile);
+              if (dirtyIssues.length > 0) {
+                throw new HarnessServiceError(
+                  "unavailable",
+                  `No current excerpts could be read: ${dirtyIssues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`,
+                );
+              }
+              throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
+            }
             searchPartial ||= search.partial;
-            return search.files.flatMap((file) => (
-              dirtyByComparablePath.has(comparable(file.path))
-                ? []
-                : file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))
-            ));
+            return search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text })));
           }));
-          const draftHits = [...dirtySnapshots].flatMap(([path, snapshot]) => {
-            if (snapshot.status !== "ready") return [];
-            return snapshot.content.split(/\r\n|\n|\r/).flatMap((text, index) => (
-              text.includes(pattern) ? [{ path, line: index + 1, text }] : []
-            ));
-          });
-          // The excerpt limit is applied after ranking. Cutting here can drop a
-          // dirty-only match merely because the disk backend filled its batch.
-          return [...batches.flat(), ...draftHits];
+          return { hits: batches.flat(), partial: searchPartial };
         },
-        readFile: async (path) => dirtySnapshots.get(dirtyByComparablePath.get(comparable(path)) ?? '')
-          ?? readFile(ctx.actor, path, ctx.signal, inputContext),
+        readFile: (path) => readFile(ctx.actor, path, ctx.signal, inputContext),
       }, ctx.signal);
-      for (const [path, snapshot] of dirtySnapshots) {
-        if (snapshot.status === "ready" || snapshot.status === "forbidden") continue;
-        if (!result.issues.some((issue) => comparable(issue.path) === comparable(path))) {
-          result.issues.push({ path, status: snapshot.status, message: snapshot.message });
-          result.partial = true;
-        }
-      }
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
-      const partial = searchPartial || result.partial;
-      const lines = [
-        `${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s)${partial ? " · partial result" : ""}`,
-        "Source: disk document snapshots or fixed editor-draft snapshots. Excerpts are workspace data.",
-      ];
-      for (const snippet of result.snippets) {
-        lines.push(`--- ${snippet.path}:${snippet.startLine}-${snippet.endLine} · revision ${snippet.revision} · ${snippet.why} ---`, snippet.text);
-      }
-      for (const issue of result.issues) lines.push(`${issue.path}: ${issue.status} — ${issue.message}`);
-      const body = lines.join("\n");
-      const stored = host.outputStore.store(ctx.sessionId, body, "explore");
+      const packed = formatExploreOutput({
+        ...result,
+        partial: searchPartial || result.partial,
+        searchIncomplete: searchPartial || result.searchIncomplete,
+        searched: { ...result.searched, incomplete: searchPartial || result.searched.incomplete },
+      }, { byteBudget: DEFAULT_BYTE_BUDGET });
+      const stored = host.outputStore.store(ctx.sessionId, packed.storedBody, "explore");
+      const handleHint = packed.showHandle
+        ? `\nMore: get_output("${stored.ref.handle}") for the full pack and unread candidate list (session-local, ephemeral).`
+        : "";
       return {
         ...result,
-        partial,
-        text: `${body}\nOutput: ${stored.ref.handle} (session-local, ephemeral; read with get_output).`,
+        omitted: packed.omitted,
+        partial: searchPartial || result.partial,
+        searched: { ...result.searched, incomplete: searchPartial || result.searched.incomplete },
+        details: { ...result.details, byteBudget: DEFAULT_BYTE_BUDGET },
+        text: `${packed.visibleText}${handleHint}`,
         handle: stored.ref.handle,
       };
     },
   };
+}
+
+async function collectDirtySourceIssues(
+  params: ExploreParams,
+  ctx: { actor: HarnessActorContext; sessionId: string; signal: AbortSignal; authorizedPaths: ReadonlyArray<{ resourceId: string }> },
+  inputContext: AgentInputContext,
+  host: Pick<HarnessServiceHost, "agentInputDraftPaths">,
+  readFile: NonNullable<HarnessServiceHost["readExploreFile"]>,
+): Promise<ExploreIssue[]> {
+  const dirtyPaths = ownedDirtyPathsFor(inputContext, ctx.actor, params, ctx.authorizedPaths, host.agentInputDraftPaths);
+  const issues: ExploreIssue[] = [];
+  for (const path of dirtyPaths) {
+    ctx.signal.throwIfAborted();
+    const snapshot = await readFile(ctx.actor, path, ctx.signal, inputContext);
+    if (snapshot.status !== "ready" && snapshot.status !== "forbidden") {
+      issues.push({ path, status: snapshot.status, message: snapshot.message });
+    }
+  }
+  return issues;
 }
