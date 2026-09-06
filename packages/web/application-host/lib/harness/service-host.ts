@@ -136,6 +136,8 @@ export interface HarnessServiceHost {
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  /** Dirty paths this turn's fixed source still owns (D-088). */
+  agentInputDraftPaths?: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => readonly string[];
   commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
   releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
   dispose(): Promise<void>;
@@ -145,6 +147,7 @@ export interface HarnessServiceHostOptions {
   search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  agentInputDraftPaths?: HarnessServiceHost["agentInputDraftPaths"];
   commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
   releaseAgentInputContext?: HarnessServiceHost["releaseAgentInputContext"];
   dropAgentInputContexts?: (sessionId: string) => void;
@@ -199,6 +202,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     ...(options.readExploreFile ? { readFile: options.readExploreFile } : {}),
+    ...(options.agentInputDraftPaths ? { draftPaths: options.agentInputDraftPaths } : {}),
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
   const lspNavigationServices = options.lspNavigationServices ?? null;
@@ -383,5 +387,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
     ...(options.readExploreFile ? { readExploreFile: options.readExploreFile } : {}),
+    ...(options.agentInputDraftPaths ? { agentInputDraftPaths: options.agentInputDraftPaths } : {}),
   };
 }

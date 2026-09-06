@@ -65,6 +65,7 @@ export interface ThreadRuntimeOptions {
     | {
         status: "ready";
         workspaceId: string;
+        supersededPaths: string[];
         resources: Array<{
           baseRevision: string | null;
           encoding: string;
@@ -520,7 +521,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         : "The editor source snapshot is unavailable");
     }
     const requestedPaths = [...context.dirtyPaths].sort();
-    const clonedPaths = cloned.resources.map((resource) => resource.resource.resourceId).sort();
+    // A path written during this turn is answered from disk, which the Run
+    // materializes anyway; overlaying its older draft would undo that write.
+    // Completeness is still verified: every requested path must be accounted
+    // for as either a cloned draft or a superseded one (D-088).
+    const clonedPaths = [
+      ...cloned.resources.map((resource) => resource.resource.resourceId),
+      ...cloned.supersededPaths,
+    ].sort();
     if (cloned.workspaceId !== workspaceId
       || clonedPaths.length !== requestedPaths.length
       || clonedPaths.some((file, index) => file !== requestedPaths[index])

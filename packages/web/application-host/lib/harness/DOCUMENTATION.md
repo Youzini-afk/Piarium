@@ -108,6 +108,17 @@ pi-host delegates both branches to Pi's `createReadToolDefinition`, preserving
 native offset/limit truncation and disk image attachments. The wrapper is
 registered only when the Host handshake advertises `harnessDocumentRead`.
 
+The fixed draft is one turn's input, not a standing authority. Once Piarium
+observes a write to a path — a Documents write or the Pi mutation journal's
+successful `after` phase, which is awaited before the tool is acknowledged —
+every snapshot captured before that write stops answering for it, so read,
+search, enumeration, navigation, and the dispatch baseline all return to disk and
+an agent reads back its own write (D-088). A snapshot captured after the write
+keeps its draft. `agentInputDraftPaths` reports the dirty paths the fixed source
+still owns; an expired capture keeps every dirty path there and never degrades
+into a silent disk read. Shell and external writes stay unobserved, the same
+boundary the recovery journal reports.
+
 ### Native find/ls path overlay (`document.pathOverlay`)
 
 The Router authorizes the requested root with `allowMissing`, so a dirty-only

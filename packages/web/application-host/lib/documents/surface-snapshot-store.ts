@@ -26,11 +26,17 @@ interface StoredSnapshot {
   resources: ReadonlyMap<string, StoredResource>;
   sessionId: string;
   state: 'active' | 'pending';
+  /**
+   * Paths whose captured draft has been replaced by an observed write. The
+   * fixed draft is this turn's input; once something writes that path, disk
+   * holds the newer text and the draft must stop answering for it (D-088).
+   */
+  superseded: Set<string>;
   workspaceId: string;
 }
 
 export type SurfaceSnapshotReadResult =
-  | { status: 'disk' }
+  | { status: 'disk'; superseded?: true }
   | { status: 'ready'; bom: boolean; content: string; encoding: string; revision: string; source: 'surface-draft' }
   | { status: 'unavailable'; message: string };
 
@@ -47,7 +53,13 @@ export type SurfaceSnapshotOverlayResult =
 
 export type SurfaceSnapshotCloneResult =
   | { status: 'disk' }
-  | { status: 'ready'; resources: Array<SurfaceSnapshotResource & { revision: string }>; workspaceId: string }
+  | {
+      status: 'ready';
+      resources: Array<SurfaceSnapshotResource & { revision: string }>;
+      /** Dirty paths a write already superseded; disk is their newer baseline. */
+      supersededPaths: string[];
+      workspaceId: string;
+    }
   | { status: 'unavailable'; message: string };
 
 const contentHash = (content: string): string => createHash('sha256').update(content, 'utf8').digest('hex');
@@ -124,6 +136,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       resources,
       sessionId: input.sessionId,
       state: 'pending',
+      superseded: new Set<string>(),
       workspaceId: input.workspaceId,
     });
     snapshots.set(ref, snapshot);
@@ -136,6 +149,31 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       dirtyPaths: [...dirtyPaths],
       snapshot: { status: 'ready', ref },
     };
+  };
+
+  /**
+   * Record that something wrote this path. Every snapshot captured before the
+   * write stops serving its draft for it, so a later read, search, enumeration
+   * or language answer sees the text that is now on disk — including the
+   * agent's own write. Snapshots captured after the write keep their draft,
+   * because that draft is what the user had on screen at that point.
+   *
+   * Only Host-observed writes reach this hook: Documents-mediated writes and
+   * the Pi mutation journal. A shell or external write stays uncovered, the
+   * same boundary the recovery journal reports.
+   */
+  const observeWrite = (workspaceId: string, resourceId: string): void => {
+    const written = pathKey(normalizeResourceId(resourceId));
+    if (!written) return;
+    for (const snapshot of snapshots.values()) {
+      if (snapshot.workspaceId !== workspaceId) continue;
+      for (const [key, resource] of snapshot.resources) {
+        if (snapshot.superseded.has(key)) continue;
+        if (pathKey(normalizeResourceId(resource.resource.resourceId)) === written) {
+          snapshot.superseded.add(key);
+        }
+      }
+    }
   };
 
   const resolveReady = (sessionId: string, context: AgentInputContext): StoredSnapshot | null => {
@@ -189,6 +227,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     }
     const resource = snapshot.resources.get(pathKey(resourceId));
     if (!resource) return { status: 'disk' };
+    if (snapshot.superseded.has(pathKey(resourceId))) return { status: 'disk', superseded: true };
     const content = contents.get(resource.contentHash)?.content;
     if (content === undefined) {
       return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
@@ -211,7 +250,14 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const snapshot = resolveReady(sessionId, context);
     if (!snapshot) return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
     const resources: Array<SurfaceSnapshotResource & { revision: string }> = [];
+    const supersededPaths: string[] = [];
     for (const resourceId of snapshot.dirtyPaths) {
+      // A superseded path already has its newer text on disk, which the child
+      // materializes anyway; overlaying the stale draft would undo the write.
+      if (snapshot.superseded.has(pathKey(resourceId))) {
+        supersededPaths.push(resourceId);
+        continue;
+      }
       const resource = snapshot.resources.get(pathKey(resourceId));
       const content = resource ? contents.get(resource.contentHash)?.content : undefined;
       if (!resource || content === undefined) {
@@ -227,7 +273,21 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
       });
     }
-    return { status: 'ready', resources, workspaceId: snapshot.workspaceId };
+    return { status: 'ready', resources, supersededPaths, workspaceId: snapshot.workspaceId };
+  };
+
+  /**
+   * Dirty paths this turn's fixed source still owns: the ones it can serve plus
+   * the ones it must refuse. A superseded path is not in the set, so callers
+   * search and enumerate it on disk like any other file, while an expired
+   * capture keeps every dirty path here and never becomes a silent disk read.
+   */
+  const draftPaths = (sessionId: string, context: AgentInputContext): string[] => {
+    if (context.source === 'disk') return [];
+    if (context.snapshot.status === 'unavailable') return [...context.dirtyPaths];
+    const snapshot = resolveReady(sessionId, context);
+    if (!snapshot) return [...context.dirtyPaths];
+    return snapshot.dirtyPaths.filter((resourceId) => !snapshot.superseded.has(pathKey(resourceId)));
   };
 
   /**
@@ -255,6 +315,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         : { status: 'disk' };
     }
     const dirtyPaths = snapshot.dirtyPaths
+      .filter((resourceId) => !snapshot.superseded.has(pathKey(resourceId)))
       .map(normalizeResourceId)
       .filter((resourceId) => isWithin(resourceId, normalizedRoot));
     if (dirtyPaths.length === 0) return { status: 'disk' };
@@ -326,7 +387,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     activeBySession.clear();
   };
 
-  return { capture, clone, commit, dispose, dropPendingOwner, dropSession, overlay, read, release };
+  return { capture, clone, commit, dispose, draftPaths, dropPendingOwner, dropSession, observeWrite, overlay, read, release };
 };
 
 export type SurfaceSnapshotStore = ReturnType<typeof createSurfaceSnapshotStore>;

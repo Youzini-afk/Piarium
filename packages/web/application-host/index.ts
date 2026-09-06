@@ -1511,6 +1511,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const harnessServiceHost = createHarnessServiceHost({
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
+    agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: (sessionId, context, resourceId) => documentsAuthority.readAgentInputSnapshot(
       sessionId,
       context,
@@ -1651,6 +1652,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { accepted, requestId: request.requestId, sessionId: request.sessionId },
       );
     },
+    observeToolWrite: (workspaceId, absolutePath) => (
+      documentsAuthority.observeAgentWrite(workspaceId, absolutePath)
+    ),
     writerTracker: piWriterTracker,
   });
   // ── Harness router ─────────────────────────────────────────────────

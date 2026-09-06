@@ -226,7 +226,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 
 | 环节 | 实施 |
 | --- | --- |
-| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线 |
+| 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线。观察到写入后该路径的草稿失效、全部消费者回到磁盘（D-088）；shell 与外部写入仍未观察 |
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；继续补路径、错误/栈帧的类型化提取 |
 | 召回/展开 | rg、按种子文件选择 LSP、符号图、配置的向量；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
 | 版本与融合 | 按来源重读完整符号或行窗口，位置匹配版本；RRF 融合保留来源，不用分差当置信度 |

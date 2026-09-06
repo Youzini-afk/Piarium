@@ -81,15 +81,20 @@ const createHarness = () => {
       changedResourceIds: ['note.txt'], coverageComplete: true, mutationObserved: true,
     })),
   };
+  const observed: Array<{ workspaceId: string; absolutePath: string; respondedBefore: number }> = [];
   const respondMutation = vi.fn(async (): Promise<void> => undefined);
+  const observeToolWrite = vi.fn(async (workspaceId: string, absolutePath: string): Promise<void> => {
+    observed.push({ workspaceId, absolutePath, respondedBefore: respondMutation.mock.calls.length });
+  });
   const coordinator = createRecoveryTurnCoordinator({
     documents,
     getSessionSnapshot: () => ({ workspace: { authorityId: 'workspace-1', id: 'project-1', kind: 'workspace' } }),
     invokeService,
     respondMutation,
+    observeToolWrite,
     writerTracker,
   });
-  return { calls, coordinator, respondMutation, writerTracker };
+  return { calls, coordinator, observed, observeToolWrite, respondMutation, writerTracker };
 };
 
 const admission: AdmitRequest = {
@@ -169,6 +174,42 @@ describe('recovery turn coordinator', () => {
     ]);
     expect(respondMutation).toHaveBeenNthCalledWith(1, request, true);
     expect(respondMutation).toHaveBeenNthCalledWith(2, { ...request, phase: 'after', succeeded: true }, true);
+  });
+
+  it('reports a completed tool write before acknowledging it and ignores before/failed phases', async () => {
+    const { coordinator, observed, observeToolWrite } = createHarness();
+    await coordinator.admit(admission);
+    await coordinator.processEvent(agentEvent('execution-1', {
+      entry: { id: 'user-1', message: { role: 'user' }, type: 'message' },
+      type: 'entry_appended',
+    }));
+    const request = {
+      path: 'D:/workspace/note.txt',
+      phase: 'before',
+      requestId: 'mutation-1',
+      sessionId: 'session-1',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+    };
+    const send = (data: Record<string, unknown>): Promise<unknown> => coordinator.processEvent({
+      executionId: 'execution-1',
+      kind: 'host',
+      envelope: { data, event: 'workspace.mutation.request', kind: 'event' },
+      sessionId: 'session-1',
+      workerId: 'worker-1',
+    });
+    await send(request);
+    expect(observeToolWrite).not.toHaveBeenCalled();
+    await send({ ...request, requestId: 'mutation-2', phase: 'after', succeeded: false });
+    expect(observeToolWrite).not.toHaveBeenCalled();
+    await send({ ...request, requestId: 'mutation-3', phase: 'after', succeeded: true });
+    // The next read in this turn must not still see the pre-write draft, so the
+    // report is awaited before the tool is acknowledged (D-088).
+    expect(observed).toEqual([{
+      workspaceId: 'workspace-1',
+      absolutePath: 'D:/workspace/note.txt',
+      respondedBefore: 2,
+    }]);
   });
 
   it('always releases a mutation request that no longer has an owning turn', async () => {

@@ -6,7 +6,7 @@ import { explore } from "./explore.js";
 const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths">,
 ): HarnessService<"explore.search"> {
   return {
     handle: async (params, ctx) => {
@@ -32,12 +32,17 @@ export function createExploreSearchService(
         const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
         return !root || path === root || path.startsWith(`${root}/`);
       };
-      const dirtyPaths = inputContext.source === "surface"
-        ? inputContext.dirtyPaths.filter((dirtyPath) => (
-            params.paths === undefined
-            || ctx.authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
-          ))
+      // A path written during this turn is answered from disk again, so it goes
+      // through the ordinary rg path instead of the older draft (D-088).
+      const ownedDirtyPaths = inputContext.source === "surface"
+        ? (host.agentInputDraftPaths
+          ? host.agentInputDraftPaths(ctx.sessionId, inputContext)
+          : inputContext.dirtyPaths)
         : [];
+      const dirtyPaths = ownedDirtyPaths.filter((dirtyPath) => (
+        params.paths === undefined
+        || ctx.authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
+      ));
       const dirtyByComparablePath = new Map(dirtyPaths.map((path) => [comparable(path), path]));
       const dirtySnapshots = new Map(await Promise.all(dirtyPaths.map(async (path) => (
         [path, await readFile(ctx.actor, path, ctx.signal, inputContext)] as const

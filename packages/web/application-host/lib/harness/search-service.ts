@@ -18,6 +18,8 @@ export interface HarnessSearchDeps {
   }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readFile?: ExploreFileReader;
+  /** Dirty paths this turn's fixed source still owns (D-088). */
+  draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[];
 }
 
 interface HarnessSearchContext {
@@ -268,8 +270,16 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           searchPrefixes = minimal;
         }
 
+        // A path written during this turn is no longer draft-owned: its disk
+        // hits must be searched normally instead of replaced by the older
+        // draft, which would hide the agent's own write (D-088).
+        const ownedDirtyPaths = inputContext.source === "surface"
+          ? (ctx.actor && deps.draftPaths
+            ? deps.draftPaths(ctx.actor.sessionId, inputContext)
+            : inputContext.dirtyPaths)
+          : [];
         const dirtyPaths = inputContext.source === "surface"
-          ? [...new Set(inputContext.dirtyPaths
+          ? [...new Set(ownedDirtyPaths
             .map((dirtyPath) => toPrefix(dirtyPath))
             .filter((dirtyPath): dirtyPath is string => dirtyPath !== null))]
             .filter((dirtyPath) => (

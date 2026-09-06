@@ -84,9 +84,12 @@ bookkeeping failure after `agent_start` degrades the source to unavailable and
 cannot turn an already-running prompt into a failed submission.
 `grep`, `explore`, the Host-advertised same-name read/find/ls overrides, and the `lsp.*` navigation
 tools consume this same fixed source. An expired related dirty source is unavailable, never a disk
-fallback. Navigation answers report the revision and source they were computed from; positions in
-files the language server read itself are marked unpinned. `diagnostics` is deliberately different:
-it describes the file as written to disk, because it is feedback about what an agent just wrote.
+fallback. Writing a path ends the draft's authority for it: after the journal acknowledges a
+successful `write` / `edit` / `apply_patch`, every one of those tools reads that path from disk again,
+so an agent reads back its own write. Navigation answers report the revision and source they were
+computed from; positions in files the language server read itself are marked unpinned. `diagnostics`
+is deliberately different: it describes the file as written to disk, because it is feedback about
+what an agent just wrote.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })

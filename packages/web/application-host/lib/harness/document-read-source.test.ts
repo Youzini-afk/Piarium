@@ -154,6 +154,23 @@ describe("native read source through Host router and Documents", () => {
     expect(JSON.stringify(expired)).not.toContain("must not leak");
   });
 
+  it("reads back the agent's own write instead of the draft captured before it", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "disk value\n", "utf8");
+    const context = await f.capture("draft.ts", "unsaved editor value\n", 2);
+    expect(await f.request("draft.ts", context)).toMatchObject({ ok: true, result: { source: "surface-draft" } });
+
+    // The native write tool writes disk; the Host observes it through the Pi
+    // mutation journal, exactly as index.ts wires observeToolWrite (D-088).
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "agent write\n", "utf8");
+    await f.documents.observeAgentWrite(f.actor.workspaceId!, path.join(f.workspace, "draft.ts"));
+
+    // The disk sentinel hands the read back to Pi's native tool, which now
+    // reads the bytes the agent just wrote.
+    expect(await f.request("draft.ts", context)).toEqual({ ok: true, result: { source: "disk" } });
+    expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context)).toEqual([]);
+  });
+
   it("returns a disk sentinel when the current input has no draft for the path", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "disk.txt"), "disk\n", "utf8");

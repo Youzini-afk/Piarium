@@ -470,6 +470,95 @@ it('coordinates a dirty-state barrier with every connected document surface', as
   }
 });
 
+it('stops answering a path from its captured draft once a write is observed', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const surface = harness.authority.registerDirtySurface({
+    generation: 1,
+    ownerId: 'surface-owner',
+    workspaceId: harness.identity.workspaceId,
+  }, () => undefined);
+  try {
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'draft.ts'), 'disk text\n');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'other.ts'), 'other disk\n');
+    const disk = await harness.authority.read(harness.resource('draft.ts'));
+    const otherDisk = await harness.authority.read(harness.resource('other.ts'));
+    if (disk.status !== 'ready' || otherDisk.status !== 'ready') throw new Error('Expected draft fixtures');
+    const publication = {
+      generation: 1,
+      ownerId: 'surface-owner',
+      resources: [
+        { baseRevision: disk.revision, localEditRevision: 2, resource: harness.resource('draft.ts') },
+        { baseRevision: otherDisk.revision, localEditRevision: 1, resource: harness.resource('other.ts') },
+      ],
+      workspaceId: harness.identity.workspaceId,
+    };
+    await harness.authority.publishDirtyBuffers(publication);
+    const context = await harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-1',
+      resources: publication.resources.map((resource) => ({ ...resource, content: 'unsaved draft\n' })),
+    });
+    expect(harness.authority.readAgentInputSnapshot('session-1', context, 'draft.ts')).toMatchObject({
+      status: 'ready',
+      content: 'unsaved draft\n',
+    });
+    expect(harness.authority.agentInputDraftPaths('session-1', context)).toEqual(['draft.ts', 'other.ts']);
+
+    // A native tool write lands on disk; the agent must read back its own work.
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'draft.ts'), 'agent write\n');
+    await harness.authority.observeAgentWrite(
+      harness.identity.workspaceId,
+      path.join(harness.workspaceRoot, 'draft.ts'),
+    );
+    expect(harness.authority.readAgentInputSnapshot('session-1', context, 'draft.ts'))
+      .toEqual({ status: 'disk', superseded: true });
+    expect(harness.authority.agentInputDraftPaths('session-1', context)).toEqual(['other.ts']);
+    expect(harness.authority.readAgentInputSnapshot('session-1', context, 'other.ts')).toMatchObject({
+      status: 'ready',
+      content: 'unsaved draft\n',
+    });
+    // Enumeration and the dispatch baseline follow the same rule.
+    const overlay = harness.authority.overlayAgentInputSnapshot('session-1', context, '');
+    if (overlay.status !== 'ready') throw new Error('Expected a ready overlay');
+    expect(overlay.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.path)).toEqual(['other.ts']);
+    expect(harness.authority.cloneAgentInputSnapshot('session-1', context)).toMatchObject({
+      status: 'ready',
+      supersededPaths: ['draft.ts'],
+      resources: [{ resource: { resourceId: 'other.ts' } }],
+    });
+
+    // A path written outside the workspace root supersedes nothing here.
+    await harness.authority.observeAgentWrite(
+      harness.identity.workspaceId,
+      path.join(harness.workspaceRoot, '..', 'outside.ts'),
+    );
+    expect(harness.authority.agentInputDraftPaths('session-1', context)).toEqual(['other.ts']);
+
+    // A Documents-mediated write supersedes the same way.
+    await harness.authority.write({
+      resource: harness.resource('other.ts'),
+      token: harness.token(undefined, { kind: 'web-route', id: 'editor' }),
+      content: 'saved by the editor\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: otherDisk.revision,
+      operationId: randomUUID(),
+    });
+    expect(harness.authority.readAgentInputSnapshot('session-1', context, 'other.ts'))
+      .toEqual({ status: 'disk', superseded: true });
+    expect(harness.authority.agentInputDraftPaths('session-1', context)).toEqual([]);
+    expect(harness.authority.overlayAgentInputSnapshot('session-1', context, '')).toEqual({ status: 'disk' });
+
+    // An expired capture still refuses disk for its known dirty paths.
+    harness.authority.dropAgentInputSnapshots('session-1');
+    expect(harness.authority.readAgentInputSnapshot('session-1', context, 'draft.ts')).toMatchObject({ status: 'unavailable' });
+    expect(harness.authority.agentInputDraftPaths('session-1', context)).toEqual(['draft.ts', 'other.ts']);
+  } finally {
+    surface.close();
+    await harness.cleanup();
+  }
+});
+
 it('captures immutable agent input snapshots only from the complete current dirty publication', async () => {
   const harness = await createDocumentAuthorityHarness();
   const surface = harness.authority.registerDirtySurface({

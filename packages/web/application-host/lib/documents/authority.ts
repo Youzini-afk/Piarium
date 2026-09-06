@@ -374,12 +374,33 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   });
 
   const publishMutation = (event: DocumentMutationObservation): void => {
+    // A written path can no longer be answered from a draft captured before the
+    // write; this runs before the observer so a reader cannot race it (D-088).
+    surfaceSnapshots.observeWrite(event.workspaceId, event.resourceId);
     try {
       void Promise.resolve(onMutation({ ...event, owner: { ...event.owner } })).catch((error: unknown) => {
         console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
       });
     } catch (error) {
       console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
+    }
+  };
+
+  /**
+   * Record a write Piarium observed outside the Documents write path — today
+   * the Pi mutation journal for the native `write` / `edit` / `apply_patch`
+   * tools. The absolute path is resolved against the workspace root; a path
+   * outside it (an isolated thread's worktree) supersedes nothing here.
+   */
+  const observeAgentWrite = async (workspaceId: string, absolutePath: string): Promise<void> => {
+    try {
+      const workspace = await loadWorkspace(workspaceId);
+      const relative = pathModule.relative(workspace.root, absolutePath);
+      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return;
+      surfaceSnapshots.observeWrite(workspaceId, relative.split(pathModule.sep).join('/'));
+    } catch {
+      // An unresolvable workspace cannot invalidate a draft; the turn journal
+      // already reports the write itself.
     }
   };
 
@@ -1369,6 +1390,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     overlayAgentInputSnapshot,
     readAgentInputSnapshot: surfaceSnapshots.read,
     cloneAgentInputSnapshot: surfaceSnapshots.clone,
+    agentInputDraftPaths: surfaceSnapshots.draftPaths,
+    observeAgentWrite,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,
     registerDirtySurface,
     beginDirtyStateBarrier,

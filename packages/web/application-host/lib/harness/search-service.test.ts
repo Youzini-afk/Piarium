@@ -193,6 +193,32 @@ describe("harness search service", () => {
     });
   });
 
+  it("searches a written path on disk again instead of hiding it behind the older draft", async () => {
+    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
+      status: "ready",
+      generation: 1,
+      hits: [makeHit("draft.ts", 3, "value the agent just wrote")],
+    }));
+    const readFile = vi.fn();
+    // The turn's fixed source no longer owns draft.ts: it was written since the
+    // capture, so disk holds the newer text (D-088).
+    const draftPaths = vi.fn(() => [] as readonly string[]);
+    const service = createHarnessSearchService({
+      search,
+      readFile,
+      draftPaths,
+      resolveWorkspaceRoot: async () => "/workspace",
+    });
+
+    const result = await service.search({ pattern: "value" }, searchContext(surface(["draft.ts"])));
+
+    expect(result).toMatchObject({ status: "ready", totalHits: 1 });
+    expect(result.files[0]?.hits[0]?.text).toBe("value the agent just wrote");
+    expect(readFile).not.toHaveBeenCalled();
+    expect(draftPaths).toHaveBeenCalledWith(actor.sessionId, surface(["draft.ts"]));
+    expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0].excludeResourceIds).toBeUndefined();
+  });
+
   it("matches draft lines with regex semantics and reports CRLF, LF, and CR line numbers", async () => {
     const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "empty", generation: 1 }));
     const readFile = vi.fn(async () => ({

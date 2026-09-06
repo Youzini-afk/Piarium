@@ -94,6 +94,12 @@ export interface TurnCoordinatorOptions {
   getSessionSnapshot: (sessionId: string) => SessionSnapshot | null;
   invokeService: (request: RecoveryServiceRequest) => Promise<unknown>;
   respondMutation: (request: MutationRequest, accepted: boolean) => Promise<void>;
+  /**
+   * Report a completed native tool write. It is awaited before the tool is
+   * acknowledged, so the next read in the same turn cannot still be answered
+   * from a draft captured before the write (D-088).
+   */
+  observeToolWrite?: (workspaceId: string, absolutePath: string) => Promise<void> | void;
   writerTracker: WriterTracker;
 }
 
@@ -140,6 +146,7 @@ export const createRecoveryTurnCoordinator = ({
   getSessionSnapshot,
   invokeService,
   respondMutation,
+  observeToolWrite,
   writerTracker,
 }: TurnCoordinatorOptions): TurnCoordinator => {
   const pending = new Map<string, TurnRecord>();
@@ -267,6 +274,15 @@ export const createRecoveryTurnCoordinator = ({
     } catch (error) {
       if (turn) reportFailure(turn, `mutation ${request.phase}`, error);
     } finally {
+      // Journal coverage can fail without changing the fact that the file was
+      // written, so this follows the tool outcome rather than `accepted`.
+      if (turn && request.phase === 'after' && request.succeeded === true && observeToolWrite) {
+        try {
+          await observeToolWrite(turn.workspaceId, request.path);
+        } catch (error) {
+          reportFailure(turn, 'mutation source invalidation', error);
+        }
+      }
       await respondMutation(request, accepted).catch((error) => {
         if (turn) reportFailure(turn, 'mutation response', error);
       });

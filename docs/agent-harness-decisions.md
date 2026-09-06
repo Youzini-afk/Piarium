@@ -1669,6 +1669,43 @@ renderer 在运行时由编辑器注册表贡献的语言仍然只在 renderer �
 
 状态：已实施；生产接线与验证见 status 3.1/3.2/3.8。
 
+### D-088 · 2026-09-06 · 3.2（写入使固定窗口草稿在该路径上失效）
+
+类型：实现修正（D-082/D-085/D-086 的读取语义缺陷）
+
+决定：固定窗口草稿是一轮输入，不是永久权威。Piarium 观察到某路径被写入后，**该次写入之前捕获的每个 snapshot 都停止用草稿回答这个
+路径**：`document.readSource` 返回 disk sentinel（Pi 原生 read 因此读到刚写的字节），`search.content` 与 `explore` 不再排除它的磁盘命中、
+改按普通 rg 路径搜索，`document.pathOverlay` 不再枚举它，`lsp.*` 导航按磁盘绑定，`thread.dispatch` 的草稿基线不再叠加它。写入之后
+捕获的 snapshot 保留自己的草稿——那份草稿正是用户当时屏幕上的正文。
+
+观察来源两条，都是 Host 侧可靠信号：Documents 权威的 write/move/delete（含用户保存），以及 Pi mutation journal 的 `after` 阶段且
+`succeeded === true`（覆盖原生 `write`/`edit`/`apply_patch`）。journal 那条在**确认工具之前**被 await，因此同一回合里紧接着的读取不可能
+还看到写前的草稿。journal 记账失败不影响失效判定——文件确实被写了。绝对路径按工作区根解析，落在根外（隔离线程的 worktree）不失效
+本工作区的草稿。
+
+完整性检查保留：`thread.dispatch` 仍要求请求的每个 dirty path 都被交代清楚，只是判据从"全部克隆到"变为"克隆到的草稿 ∪ 已失效的路径 ==
+请求集合"。已失效路径以 `supersededPaths` 显式返回，不静默消失。`agentInputDraftPaths` 返回"本轮固定来源仍拥有的 dirty 路径"，
+过期捕获仍返回全部已知 dirty 路径，因此 D-085 的"已知 dirty 不可用时不回退磁盘"不变；失效与不可用是两件事，前者是磁盘成为更新的
+权威，后者是我们丢了本该展示的正文。
+
+边界：shell 与外部进程的写入仍未被观察，与恢复日志同一边界；这类写入之后草稿继续服务该路径。**另一件事本决定不做**：Pi 原生 `edit`
+的 `old_string` 匹配的是磁盘正文，而 `read` 给的是草稿，两者不同时首次编辑会报"字符串未找到"。让 `edit` 改按草稿匹配等于把用户未保存
+的改动顺带落盘，违反 D-083 明确的"草稿集成不自动保存磁盘"，因此保留为独立产品问题，不在本修正内改。
+
+原因：D-085 让 `read` 消费固定草稿，但没有定义"写入之后草稿还算不算权威"。实际后果不止读不回自己的写：`grep` 会把该文件的磁盘命中
+整体排除并只在旧草稿里匹配，agent 刚写的代码对 `grep` 完全不可见；`find`/`ls` 继续枚举旧快照；dispatch 会把旧草稿叠回子线程基线，
+覆盖已经写进磁盘的结果。读回自己的写是工具循环的基本前提，缺了它 agent 无法验证自己的编辑。
+
+考虑过的替代：把该路径从 snapshot 的 `resources` 里直接删除——会破坏 `samePaths` 的完整集合校验，把失效误报成过期；让 `read` 在写入后
+返回 unavailable——把可用的磁盘正文说成不可读；只修 `read` 不修 grep/find/dispatch——留下更严重的不可见性。
+
+影响：`lib/documents/surface-snapshot-store.ts`（`superseded`、`observeWrite`、`draftPaths`、clone 的 `supersededPaths`）、
+`lib/documents/authority.ts`（`publishMutation` 失效、`observeAgentWrite`、`agentInputDraftPaths`）、`lib/recovery/turn-coordinator.ts`
+（`observeToolWrite`，确认前 await）、`index.ts` 接线、`lib/harness/search-service.ts` / `explore-service.ts` / `service-host.ts`、
+`lib/harness/thread-runtime.ts` 的 dispatch 完整性判据；plan 3.2、status 窗口读取行与 3.2。
+
+状态：已实施；验证见 status 3.2。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1762,3 +1799,4 @@ renderer 在运行时由编辑器注册表贡献的语言仍然只在 renderer �
 | D-085 | implementation（普通 read/grep 固定 surface 来源） | — | protocol / pi-host / Host Documents+search；设计 5.3/6.1、plan 3.2、status、architecture |
 | D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |
 | D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |
+| D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
