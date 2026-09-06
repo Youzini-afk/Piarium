@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { parseAgentInputContext, type AgentInputContext } from '@piarium/protocol';
+import {
+  parseAgentInputContext,
+  type AgentInputContext,
+  type DocumentWriteGuardResult,
+} from '@piarium/protocol';
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
@@ -1323,6 +1327,69 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     resourceId: string,
   ) => surfaceSnapshots.overlay(sessionId, context, resourceId);
 
+  /**
+   * Decide whether a native write may proceed on one path (D-089).
+   *
+   * An agent reads this turn's fixed draft but `write` / `edit` apply to disk.
+   * When the two differ, writing text derived from the draft persists the user's
+   * unsaved changes without their decision — the same outcome D-083 refuses on
+   * the child integration path. The write is therefore refused with a reason
+   * the agent can act on, and the matching semantics of the native tools stay
+   * untouched.
+   *
+   * Saving is the only remedy inside the turn: the save is a Documents write, so
+   * it supersedes the draft (D-088) and the next attempt is an ordinary write.
+   * Discarding cannot clear the refusal, because this turn keeps reading the
+   * captured draft and writing it back would restore changes the user rejected.
+   * The messages therefore name saving alone, so a refused agent escalates
+   * instead of retrying the same call.
+   */
+  const inspectAgentWriteTarget = async (
+    sessionId: string,
+    context: AgentInputContext,
+    resourceId: string,
+  ): Promise<DocumentWriteGuardResult> => {
+    const draft = surfaceSnapshots.read(sessionId, context, resourceId);
+    // No draft owns this path: either the turn reads disk anyway, or a write
+    // already superseded the draft, so reads and writes share one source.
+    if (draft.status === 'disk') return { status: 'allow' };
+    if (draft.status === 'unavailable') {
+      return {
+        status: 'unavailable',
+        message: `${resourceId} has unsaved editor changes but its fixed draft is unavailable (${draft.message}) `
+          + 'so Piarium cannot tell whether writing would discard them. Nothing was written. This turn cannot '
+          + 'recover the draft, so retrying it returns the same answer: report the path to the user and read it '
+          + 'again in a later turn.',
+      };
+    }
+    if (context.source !== 'surface') return { status: 'allow' };
+    let disk;
+    try {
+      disk = await read({ workspaceId: context.workspaceId, resourceId });
+    } catch {
+      return {
+        status: 'unavailable',
+        message: `${resourceId} has unsaved editor changes and its current disk text could not be read, `
+          + 'so Piarium cannot tell whether writing would discard them. Nothing was written. Retry or inspect '
+          + 'workspace availability.',
+      };
+    }
+    if (disk.status === 'ready' && disk.content === draft.content) return { status: 'allow' };
+    const reason = disk.status === 'missing'
+      ? `${resourceId} exists only as an unsaved editor draft.`
+      : disk.status === 'ready'
+        ? `${resourceId} has unsaved editor changes that differ from the file on disk.`
+        : `${resourceId} has unsaved editor changes and its disk content is ${disk.status}.`;
+    return {
+      status: 'conflict',
+      revision: draft.revision,
+      message: `${reason} You read the editor draft, but write and edit apply to disk, so writing now would `
+        + 'persist the user\'s unsaved changes without their decision. Nothing was written. Ask the user to save '
+        + 'the file, then retry. If they discard the changes instead, this turn still reads the captured draft, so '
+        + 'the write stays refused and the path has to be read again in a later turn.',
+    };
+  };
+
   const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
@@ -1391,6 +1458,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     readAgentInputSnapshot: surfaceSnapshots.read,
     cloneAgentInputSnapshot: surfaceSnapshots.clone,
     agentInputDraftPaths: surfaceSnapshots.draftPaths,
+    inspectAgentWriteTarget,
     observeAgentWrite,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,
     registerDirtySurface,

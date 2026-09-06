@@ -8,8 +8,10 @@ import {
   createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type AgentInputContext,
   createRequest,
   type EventEnvelope,
+  type HarnessRequestData,
   type HostEvent,
   type HostEventData,
   PIARIUM_PROTOCOL_VERSION,
@@ -19,6 +21,7 @@ import {
 import { HostController } from "../src/host-controller.js";
 import { SessionHost } from "../src/session-host.js";
 import { MemoryHostTransport } from "../src/transport.js";
+import { HostServicesBridge } from "../src/harness/host-services-bridge.js";
 import {
   createWorkspaceMutationJournalTools,
   WorkspaceMutationJournalBridge,
@@ -224,6 +227,91 @@ describe("workspace mutation journal", () => {
     } finally {
       await host.dispose();
     }
+  });
+
+  it("refuses a write whose path is answered from an unsaved editor draft", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-write-guard-"));
+    const events = new MutationEventCollector();
+    const journal = new WorkspaceMutationJournalBridge({
+      emit: (event, data) => events.emit(event, data),
+      sessionId: "session-guard",
+    });
+    const guardCalls: string[] = [];
+    let inputContext: AgentInputContext = {
+      source: "surface",
+      workspaceId: "workspace-1",
+      dirtyPaths: ["draft.txt"],
+      snapshot: { status: "ready", ref: "ref-1" },
+    };
+    const harnessRequests: HarnessRequestData[] = [];
+    const hostServices = new HostServicesBridge({
+      emit: (_event, data) => {
+        harnessRequests.push(data);
+        if (data.method === "fs.lock") {
+          const action = (data.params as { action?: string }).action;
+          hostServices.respond("session-guard", data.requestId, {
+            ok: true,
+            result: action === "acquire" ? { held: true, leaseIds: ["lease-1"] } : { held: false, released: true },
+          });
+          return;
+        }
+        if (data.method === "document.writeGuard") {
+          const path = (data.params as { path: string }).path;
+          guardCalls.push(path);
+          hostServices.respond("session-guard", data.requestId, {
+            ok: true,
+            result: path.endsWith("draft.txt")
+              ? {
+                  status: "conflict",
+                  revision: "surface-draft:ref-1:2",
+                  message: "draft.txt has unsaved editor changes that differ from the file on disk.",
+                }
+              : { status: "allow" },
+          });
+          return;
+        }
+        if (data.method === "lsp.diagnostics") {
+          hostServices.respond("session-guard", data.requestId, { ok: true, result: { status: "ready", diagnostics: [] } });
+        }
+      },
+      sessionId: "session-guard",
+      getInputContext: () => inputContext,
+    });
+    const write = createWorkspaceMutationJournalTools(root, journal, hostServices, "session-guard", {
+      writeGuard: true,
+    }).find((tool) => tool.name === "write") as ReturnType<typeof createWriteToolDefinition>;
+
+    await assert.rejects(
+      write.execute("guarded", { content: "agent text", path: "draft.txt" }, undefined, undefined, undefined as never),
+      /unsaved editor changes/,
+    );
+    // A refused write leaves neither a file nor a journal record.
+    await assert.rejects(readFile(join(root, "draft.txt")), { code: "ENOENT" });
+    assert.equal(events.seen.length, 0);
+    assert.deepEqual(guardCalls, [resolve(root, "draft.txt")]);
+
+    // Another path in the same turn is an ordinary write.
+    const otherRun = write.execute("allowed", { content: "plain", path: "other.txt" }, undefined, undefined, undefined as never);
+    const before = await events.next();
+    assert.equal(journal.respond("session-guard", before.requestId, true), true);
+    const after = await events.next();
+    assert.equal(journal.respond("session-guard", after.requestId, true), true);
+    await otherRun;
+    assert.equal(await readFile(join(root, "other.txt"), "utf8"), "plain");
+
+    // A disk-sourced turn never pays for the guard at all.
+    guardCalls.length = 0;
+    inputContext = { source: "disk" };
+    const diskRun = write.execute("disk", { content: "disk turn", path: "disk.txt" }, undefined, undefined, undefined as never);
+    const diskBefore = await events.next();
+    assert.equal(journal.respond("session-guard", diskBefore.requestId, true), true);
+    const diskAfter = await events.next();
+    assert.equal(journal.respond("session-guard", diskAfter.requestId, true), true);
+    await diskRun;
+    assert.deepEqual(guardCalls, []);
+
+    journal.dispose();
+    hostServices.dispose();
   });
 
   it("isolates concurrent request ids and preserves the original tool result", async () => {

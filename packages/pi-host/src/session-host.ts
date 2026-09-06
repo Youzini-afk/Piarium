@@ -3156,6 +3156,9 @@ export class SessionHost {
           workspaceMutationJournal,
           hostServicesBridge,
           sessionManager.getSessionId(),
+          // The fixed-draft read override and the write guard are the two sides
+          // of one source contract, so they are gated together (D-089).
+          { writeGuard: this.#harnessDocumentReadEnabled },
         ));
       }
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.

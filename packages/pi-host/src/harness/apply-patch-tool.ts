@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
+import { assertWritablePath, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withPathLock } from "./path-lock.js";
 
 const ApplyPatchParams = Type.Object({
@@ -196,6 +196,7 @@ export function createApplyPatchTool(
   _sessionId: string,
   cwd: string,
   mutationJournal?: WorkspaceMutationJournalBridge,
+  options: { writeGuard?: boolean } = {},
 ): ToolDefinition {
   return defineTool({
     name: "apply_patch",
@@ -224,6 +225,14 @@ export function createApplyPatchTool(
       const diagnosticPaths: string[] = [];
 
       const patchResult = await withPathLock(bridge, filePaths, async () => {
+        // A multi-file patch is admitted as a whole: one path answered from an
+        // unsaved editor draft refuses the patch before any file is touched, so
+        // the refusal never leaves a half-applied tree (D-089).
+        if (options.writeGuard === true) {
+          for (const filePath of filePaths) {
+            await assertWritablePath(bridge, filePath);
+          }
+        }
         for (const [index, op] of parsed.operations.entries()) {
           const filePath = filePaths[index]!;
           const opResult = await (async () => {

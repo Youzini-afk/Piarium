@@ -244,6 +244,32 @@ export function createDocumentPathOverlayService(
   };
 }
 
+/**
+ * Decide whether a native write may proceed on one path. Reads follow this
+ * turn's fixed draft while writes apply to disk, so a divergent draft is
+ * reported as an actionable conflict instead of being silently persisted
+ * (D-089). The Router authorized the path with `allowMissing`, since a dirty
+ * document may not exist on disk yet.
+ */
+export function createDocumentWriteGuardService(
+  host: Pick<HarnessServiceHost, "documentWriteGuard">,
+): HarnessService<"document.writeGuard"> {
+  return {
+    handle: async (_params, ctx) => {
+      const authorized = ctx.authorizedPaths[0];
+      if (!host.documentWriteGuard || !authorized || ctx.authorizedPaths.length !== 1) {
+        throw new HarnessServiceError("unavailable", "Document write guard is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      return host.documentWriteGuard(
+        ctx.sessionId,
+        ctx.inputContext ?? { source: "disk" },
+        authorized.resourceId,
+      );
+    },
+  };
+}
+
 export function createFsLockService(locks: PathLockService): HarnessService<"fs.lock"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
@@ -487,6 +513,9 @@ export function registerHarnessServices(
   }
   if (host.documentPathOverlay) {
     router.register("document.pathOverlay", createDocumentPathOverlayService(host));
+  }
+  if (host.documentWriteGuard) {
+    router.register("document.writeGuard", createDocumentWriteGuardService(host));
   }
   router.register("fs.lock", createFsLockService(host.pathLockService));
   if (host.diagnosticsProvider) {

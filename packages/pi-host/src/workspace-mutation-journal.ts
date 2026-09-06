@@ -88,6 +88,29 @@ interface JournaledExecutionOptions<TResult> {
   toolCallId: string;
   toolName: WorkspaceMutationToolName;
   hostServicesBridge?: HostServicesBridge;
+  writeGuard?: boolean;
+}
+
+/**
+ * Refuse a write whose path is answered from this turn's fixed editor draft
+ * while the write itself would apply to disk (D-089). The check runs under the
+ * same path lease as the write, and only when the turn actually carries unsaved
+ * editor documents, so an ordinary write pays nothing.
+ */
+export async function assertWritablePath(
+  bridge: HostServicesBridge,
+  path: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const context = bridge.inputContext();
+  if (!context || context.source !== "surface" || context.dirtyPaths.length === 0) return;
+  const guard = await bridge.request(
+    "document.writeGuard",
+    { path },
+    signal === undefined ? {} : { signal },
+  );
+  if (guard.status === "allow") return;
+  throw new Error(guard.message);
 }
 
 async function fetchDiagnostics(
@@ -118,6 +141,11 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
 ): Promise<TResult> {
   const path = resolve(options.cwd, options.inputPath);
   const executeMutation = async (): Promise<TResult> => {
+    // Admission first: a refused write leaves no journal records because
+    // nothing was attempted.
+    if (options.writeGuard && options.hostServicesBridge) {
+      await assertWritablePath(options.hostServicesBridge, path);
+    }
     await options.bridge.request({
       path,
       phase: "before",
@@ -166,9 +194,11 @@ export function createWorkspaceMutationJournalTools(
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
   _sessionId?: string,
+  options: { writeGuard?: boolean } = {},
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
+  const guard = options.writeGuard === true;
   const journaledWrite = defineTool({
     ...write,
     execute: (toolCallId, params, signal, onUpdate, ctx) => executeWithMutationJournal({
@@ -178,6 +208,7 @@ export function createWorkspaceMutationJournalTools(
       inputPath: params.path,
       toolCallId,
       toolName: "write",
+      writeGuard: guard,
       ...(hostServicesBridge ? { hostServicesBridge } : {}),
     }),
   });
@@ -190,6 +221,7 @@ export function createWorkspaceMutationJournalTools(
       inputPath: params.path,
       toolCallId,
       toolName: "edit",
+      writeGuard: guard,
       ...(hostServicesBridge ? { hostServicesBridge } : {}),
     }),
   });

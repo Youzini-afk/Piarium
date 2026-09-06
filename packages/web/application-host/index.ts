@@ -1522,6 +1522,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
+    documentWriteGuard: (sessionId, context, resourceId) => documentsAuthority.inspectAgentWriteTarget(
+      sessionId,
+      context,
+      resourceId,
+    ),
     commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
     releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
     dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),

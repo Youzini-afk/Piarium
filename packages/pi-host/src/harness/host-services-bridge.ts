@@ -47,6 +47,15 @@ export class HostServicesBridge {
     this.#getInputContext = options.getInputContext;
   }
 
+  /**
+   * The input source accepted for the current turn. Tools read it to skip Host
+   * round-trips that cannot apply, such as the write guard when this turn has
+   * no unsaved editor documents at all.
+   */
+  inputContext(): AgentInputContext | undefined {
+    return this.#getInputContext?.();
+  }
+
   request<M extends HarnessMethod>(
     method: M,
     params: HarnessServiceMap[M]["params"],

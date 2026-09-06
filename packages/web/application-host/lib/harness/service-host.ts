@@ -78,6 +78,13 @@ export type HarnessDocumentReadSource = (
   resourceId: string,
 ) => SurfaceSnapshotReadResult;
 
+/** Write admission for native Pi write/edit/apply_patch wrappers (D-089). */
+export type HarnessDocumentWriteGuard = (
+  sessionId: string,
+  context: AgentInputContext,
+  resourceId: string,
+) => Promise<import("@piarium/protocol").DocumentWriteGuardResult>;
+
 /** Content-free fixed path lookup used by native Pi find/ls wrappers. */
 export type HarnessDocumentPathOverlay = (
   sessionId: string,
@@ -96,6 +103,7 @@ export interface HarnessServiceHost {
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
+  documentWriteGuard: HarnessDocumentWriteGuard | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
@@ -170,6 +178,8 @@ export interface HarnessServiceHostOptions {
   documentReadSource?: HarnessDocumentReadSource;
   /** Surface-aware native Pi find/ls path overlay (null when unavailable). */
   documentPathOverlay?: HarnessDocumentPathOverlay;
+  /** Write admission against this turn's fixed draft (null when unavailable). */
+  documentWriteGuard?: HarnessDocumentWriteGuard;
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
@@ -210,6 +220,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
   const documentPathOverlay = options.documentPathOverlay ?? null;
+  const documentWriteGuard = options.documentWriteGuard ?? null;
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
@@ -357,6 +368,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     webSearchService,
     documentReadSource,
     documentPathOverlay,
+    documentWriteGuard,
     knowledgeStore,
     userKnowledgeStore,
     memoryDepsProvider,

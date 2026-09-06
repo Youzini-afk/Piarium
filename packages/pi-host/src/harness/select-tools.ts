@@ -131,7 +131,11 @@ export function selectHarnessTools(
   }
   if (isOpenAIFamily && tools.apply_patch !== false) {
     result.push(
-      createApplyPatchTool(bridge, sessionId, cwd, workspaceMutationJournal),
+      createApplyPatchTool(bridge, sessionId, cwd, workspaceMutationJournal, {
+        // Reads follow the fixed draft only when the Host advertises that
+        // source, so the write guard applies under the same condition (D-089).
+        writeGuard: documentReadAvailable === true,
+      }),
     );
   }
   // Web tools — yield to pi-web-access if it is loaded and enabled

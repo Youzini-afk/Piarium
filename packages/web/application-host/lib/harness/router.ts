@@ -94,6 +94,11 @@ const requestPaths = (
       ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
+  if (method === "document.writeGuard") {
+    return typeof record.path === "string" && record.path.trim()
+      ? [{ allowMissing: true, path: record.path }]
+      : "invalid";
+  }
   if (method === "shell.exec") {
     if (record.cwd === undefined) return [];
     return typeof record.cwd === "string" && record.cwd.trim()

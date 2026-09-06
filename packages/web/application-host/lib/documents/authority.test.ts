@@ -559,6 +559,92 @@ it('stops answering a path from its captured draft once a write is observed', as
   }
 });
 
+it('refuses a native write that would persist unsaved editor changes', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const surface = harness.authority.registerDirtySurface({
+    generation: 1,
+    ownerId: 'surface-owner',
+    workspaceId: harness.identity.workspaceId,
+  }, () => undefined);
+  try {
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'diverged.ts'), 'disk text\n');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'same.ts'), 'identical\n');
+    const diverged = await harness.authority.read(harness.resource('diverged.ts'));
+    const same = await harness.authority.read(harness.resource('same.ts'));
+    if (diverged.status !== 'ready' || same.status !== 'ready') throw new Error('Expected write-guard fixtures');
+    const publication = {
+      generation: 1,
+      ownerId: 'surface-owner',
+      resources: [
+        { baseRevision: diverged.revision, localEditRevision: 2, resource: harness.resource('diverged.ts') },
+        { baseRevision: same.revision, localEditRevision: 1, resource: harness.resource('same.ts') },
+        { baseRevision: null, localEditRevision: 1, resource: harness.resource('untitled.ts') },
+      ],
+      workspaceId: harness.identity.workspaceId,
+    };
+    await harness.authority.publishDirtyBuffers(publication);
+    const context = await harness.authority.captureAgentInputSnapshot({
+      ...publication,
+      sessionId: 'session-1',
+      resources: [
+        { ...publication.resources[0]!, content: 'unsaved edits\n' },
+        // A dirty buffer whose text equals disk hides nothing, so writing it is safe.
+        { ...publication.resources[1]!, content: 'identical\n' },
+        { ...publication.resources[2]!, content: 'never saved\n' },
+      ],
+    });
+
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'diverged.ts')).toMatchObject({
+      status: 'conflict',
+      revision: expect.stringMatching(/^surface-draft:/),
+    });
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'same.ts')).toEqual({ status: 'allow' });
+    // A file that exists only as an unsaved draft would also reach disk. The
+    // refusal names saving alone: discarding leaves this turn reading the same
+    // captured draft, so it cannot clear the conflict.
+    const untitled = await harness.authority.inspectAgentWriteTarget('session-1', context, 'untitled.ts');
+    expect(untitled).toMatchObject({ status: 'conflict' });
+    if (untitled.status !== 'conflict') throw new Error('Expected an unsaved-draft conflict');
+    expect(untitled.message).toContain('save the file');
+    expect(untitled.message).not.toContain('save or discard');
+    // A path with no draft at all is an ordinary write.
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'other.ts')).toEqual({ status: 'allow' });
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', { source: 'disk' }, 'diverged.ts')).toEqual({ status: 'allow' });
+
+    // Once the agent has written the path, disk is the newer authority (D-088)
+    // and further writes are ordinary again.
+    await harness.authority.observeAgentWrite(
+      harness.identity.workspaceId,
+      path.join(harness.workspaceRoot, 'diverged.ts'),
+    );
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'diverged.ts')).toEqual({ status: 'allow' });
+
+    // Saving is the remedy the refusal names, and it works for the same reason:
+    // the user's save is a Documents write, so it supersedes the draft (D-088)
+    // and the retry is an ordinary write.
+    await harness.authority.write({
+      resource: harness.resource('untitled.ts'),
+      token: harness.token(undefined, { kind: 'web-route', id: 'editor' }),
+      content: 'never saved\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    });
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'untitled.ts'))
+      .toEqual({ status: 'allow' });
+
+    // An expired capture cannot prove the write is safe either way.
+    harness.authority.dropAgentInputSnapshots('session-1');
+    expect(await harness.authority.inspectAgentWriteTarget('session-1', context, 'same.ts')).toMatchObject({
+      status: 'unavailable',
+    });
+  } finally {
+    surface.close();
+    await harness.cleanup();
+  }
+});
+
 it('captures immutable agent input snapshots only from the complete current dirty publication', async () => {
   const harness = await createDocumentAuthorityHarness();
   const surface = harness.authority.registerDirtySurface({

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
-import { createDocumentReadSourceService } from "./harness-services.js";
+import { createDocumentReadSourceService, createDocumentWriteGuardService } from "./harness-services.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
 import { createHarnessRouter } from "./router.js";
 import { createHarnessServiceHost } from "./service-host.js";
@@ -30,7 +30,7 @@ async function fixture() {
     workerId: "worker",
     workerGeneration: 1,
     workspaceId,
-    grantedCapabilities: ["read.document"],
+    grantedCapabilities: ["read.document", "write.document"],
   };
   const paths = createHarnessPathAuthority({ authorityId: "test-host", documents });
   const host = createHarnessServiceHost({
@@ -38,6 +38,9 @@ async function fixture() {
     resolveWorkspaceRoot: async () => workspace,
     documentReadSource: (sessionId, context, resourceId) => (
       documents.readAgentInputSnapshot(sessionId, context, resourceId)
+    ),
+    documentWriteGuard: (sessionId, context, resourceId) => (
+      documents.inspectAgentWriteTarget(sessionId, context, resourceId)
     ),
   });
   let response: unknown;
@@ -47,6 +50,7 @@ async function fixture() {
     respond: async (_sessionId, _requestId, result) => { response = result; },
   });
   router.register("document.readSource", createDocumentReadSourceService(host));
+  router.register("document.writeGuard", createDocumentWriteGuardService(host));
   disposes.push(async () => {
     router.dispose();
     await host.dispose();
@@ -73,6 +77,25 @@ async function fixture() {
       | { ok: true; result: HarnessServiceMap["document.readSource"]["result"] }
       | { ok: false; error: { code: string; message: string } };
   };
+  const guard = async (resourcePath: string, inputContext?: AgentInputContext) => {
+    await router.processEvent({
+      kind: "host",
+      actor,
+      envelope: {
+        kind: "event",
+        event: "harness.request",
+        data: {
+          requestId: crypto.randomUUID(),
+          method: "document.writeGuard",
+          params: { path: resourcePath },
+          ...(inputContext ? { inputContext } : {}),
+        },
+      },
+    });
+    return response as
+      | { ok: true; result: HarnessServiceMap["document.writeGuard"]["result"] }
+      | { ok: false; error: { code: string; message: string } };
+  };
   const capture = async (resourceId: string, content: string, localEditRevision: number, bom = false) => {
     const disk = await documents.read({ workspaceId, resourceId });
     const baseRevision = disk.status === "missing" ? null : disk.revision;
@@ -91,7 +114,7 @@ async function fixture() {
       workspaceId,
     });
   };
-  return { actor, capture, documents, request, workspace };
+  return { actor, capture, documents, guard, request, workspace };
 }
 
 describe("native read source through Host router and Documents", () => {
@@ -169,6 +192,23 @@ describe("native read source through Host router and Documents", () => {
     // reads the bytes the agent just wrote.
     expect(await f.request("draft.ts", context)).toEqual({ ok: true, result: { source: "disk" } });
     expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context)).toEqual([]);
+  });
+
+  it("refuses a write through the router while the draft diverges, and allows it after the user saves", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "disk value\n", "utf8");
+    const context = await f.capture("draft.ts", "unsaved editor value\n", 2);
+
+    const refused = await f.guard("draft.ts", context);
+    expect(refused).toMatchObject({ ok: true, result: { status: "conflict" } });
+    if (!refused.ok || refused.result.status !== "conflict") throw new Error("Expected a conflict");
+    expect(refused.result.message).toContain("unsaved editor changes");
+    expect(refused.result.message).not.toContain("unsaved editor value");
+
+    // The user saves: disk now equals the draft, so nothing is hidden.
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "unsaved editor value\n", "utf8");
+    expect(await f.guard("draft.ts", context)).toEqual({ ok: true, result: { status: "allow" } });
+    expect(await f.guard("untouched.ts", context)).toEqual({ ok: true, result: { status: "allow" } });
   });
 
   it("returns a disk sentinel when the current input has no draft for the path", async () => {

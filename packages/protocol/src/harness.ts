@@ -217,6 +217,20 @@ export type DocumentPathOverlayResult =
   | { status: "disk" }
   | { status: "ready"; entries: DocumentPathOverlayEntry[] };
 
+/**
+ * Whether a native `write` / `edit` / `apply_patch` may proceed on one path.
+ *
+ * Reads follow this turn's fixed editor draft while writes apply to disk. When
+ * those differ, writing text derived from the draft would persist the user's
+ * unsaved changes without their decision, so the write is refused with an
+ * actionable reason instead (D-089). `revision` is the draft identity the
+ * refusal was computed against.
+ */
+export type DocumentWriteGuardResult =
+  | { status: "allow" }
+  | { status: "conflict"; message: string; revision: string }
+  | { status: "unavailable"; message: string };
+
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
@@ -355,6 +369,7 @@ export interface HarnessServiceMap {
   };
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
+  "document.writeGuard": { params: { path: string }; result: DocumentWriteGuardResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
 }
@@ -411,6 +426,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "explore.search": "read.search",
   "document.readSource": "read.document",
   "document.pathOverlay": "read.document",
+  "document.writeGuard": "write.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
@@ -467,6 +483,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "explore.search",
   "document.readSource",
   "document.pathOverlay",
+  "document.writeGuard",
   "surface.snapshot.commit",
   "surface.snapshot.release",
 ]);

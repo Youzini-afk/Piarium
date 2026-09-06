@@ -1706,6 +1706,50 @@ renderer 在运行时由编辑器注册表贡献的语言仍然只在 renderer �
 
 状态：已实施；验证见 status 3.2。
 
+### D-089 · 2026-09-06 · 3.2（读写来源不对称：写入前拦住并说清楚）
+
+类型：实现修正（D-085 读取语义的写入侧对偶；用户已决定语义）
+
+决定：新增 Host method `document.writeGuard`（capability `write.document`，路径以 `allowMissing` 授权）。原生 `write` / `edit` /
+`apply_patch` 在**同一条路径租约内、写入与 journal before 之前**先请求它；返回 `conflict` 或 `unavailable` 时工具以该原因失败，
+磁盘、journal 与工具结果都不产生任何写入痕迹。判据只有一条：**本轮该路径的固定草稿仍有效，且草稿正文与当前磁盘正文不同。**
+草稿与磁盘相同（脏缓冲但内容一致）、路径没有草稿、草稿已按 D-088 失效、本轮来源是 disk，全部照旧放行。
+
+拦住时给的是可执行的原因：文件有未保存的编辑器改动、你读到的是草稿而写入落在磁盘、现在写会把用户未保存的改动落盘，本次什么都没写。
+消息不含正文，草稿修订以 `revision` 放在结构化结果里。磁盘缺失（只存在于未保存的新建草稿）与磁盘为 binary/unsupported 同样按 conflict
+处理——无法证明写入安全就不写。已知脏路径但草稿不可读（快照过期、Host 重启）返回 `unavailable`：既不假称安全，也不谎称冲突。
+
+**本轮唯一的解法是保存，消息只说保存。** 用户保存走 Documents write，因此按 D-088 使该路径草稿失效，重试即是普通写入。放弃不行，
+而且不该行：本轮仍按捕获的草稿回答该路径，把它写回磁盘等于把用户刚否决的改动重新落盘，与拦住的初衷同一个错误。消息因此明说放弃不
+解除拒绝、需要在后续回合重新读取，避免 agent 在同一条建议上反复重试。`unavailable` 同理不建议原地重试：固定来源已经丢了，本轮内
+保存也换不回它（`read` 在快照过期时先于 superseded 判定返回 unavailable），消息让 agent 报告路径并在后续回合重读。
+
+`apply_patch` 在拿到全部文件租约后先逐个预检，任一路径冲突即整体拒绝，不留半应用的树。worker 侧先看本轮 `AgentInputContext`：
+来源是 disk 或没有 dirty path 时根本不发这次请求，因此普通写入零额外成本；只有"用户此刻有未保存文件"这个窄窗口才多一次往返。
+该检查与固定草稿 read 覆盖共用 `harnessDocumentRead` 握手能力——两者是同一套来源契约的两面，Host 不提供草稿时读写本来同源，
+无需守卫。
+
+明确不做：让 `edit` 按草稿匹配 `old_string`、或让 `write` 把草稿正文写回磁盘。那等于把用户尚未决定保存的改动落盘，正是 D-083 在
+子线程集成路径上拒绝的事（宁可返回 `surfaceTargetPaths` 零写入）。原生工具的匹配语义完全不动。
+
+边界：守卫协调的是受控写入。shell 命令、外部进程与第三方工具照旧不经过它，与 D-088、恢复日志同一边界。守卫请求本身失败（传输、
+超时）按失败处理，写入不发生——在这个窄窗口里无法证明安全就不写；理由随错误消息可诊断。
+
+原因：D-085 让 `read` 消费固定草稿，`write`/`edit` 仍落在磁盘，于是同一路径读写不同源。后果不只是 `edit` 的 `old_string` 匹配失败：
+agent 拿不到匹配就会退化成 `write` 全量覆盖，而它手里的正文是草稿加自己的改动，用户未保存的编辑因此被静默写进磁盘。这条路径把
+D-083 保护的原则在父会话自己的写入上破掉了，且发生时没有任何提示。
+
+考虑过的替代：把拒绝挂在 journal 的 `accepted` 布尔上——那个布尔的既有语义是"记账是否成功、失败不阻断工具"，复用会让记账故障开始
+阻断写入；该路径 read 直接给磁盘——agent 就看不到用户屏幕上的正文，与 D-082 的窗口语义冲突；做成用户设置——先交付明确语义，
+需要时再加开关。
+
+影响：protocol `DocumentWriteGuardResult` / 方法表 / capability 映射；`lib/documents/authority.ts` `inspectAgentWriteTarget`；
+`lib/harness/harness-services.ts`、`router.ts`、`service-host.ts`、`index.ts` 接线；pi-host `host-services-bridge.ts`（暴露
+`inputContext()`）、`workspace-mutation-journal.ts`（`assertWritablePath` 与锁内预检）、`harness/apply-patch-tool.ts`、
+`harness/select-tools.ts`、`session-host.ts`；设计 6.1、plan 3.2、status 窗口读取行与 3.2。
+
+状态：已实施；验证见 status 3.2。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1800,3 +1844,4 @@ renderer 在运行时由编辑器注册表贡献的语言仍然只在 renderer �
 | D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |
 | D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
+| D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
