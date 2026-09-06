@@ -142,7 +142,12 @@ normal actor-scoped router. `limit` is the excerpt count only. Candidate fetch u
 working budget (and an independent budget for anchors). Candidate mode assigns that budget
 breadth-first: one hit per matching file, then another round, until `hitsPerFile` or the budget
 is exhausted. A file with hits keeps at least one hit unless the file count itself exceeds the
-budget; those omitted files are `filesDropped`, distinct from a hit-level `partial`. Grep still
+budget; those omitted files are `filesDropped`, distinct from a hit-level `partial`. That count is
+a floor: query terms and search roots match overlapping file sets, so the distinct union cannot be
+recovered from per-query counts. Explore carries the largest single-query drop and the body says
+"at least", rather than summing and claiming more files than were dropped. The tool schema accepts
+blank anchors because the Host filters them and reports them in `details.anchors`; a stricter
+schema would reject the whole call. Grep still
 depth-first-truncates with `fileScore`. Term groups keep identifier variants, quoted literals,
 and anchors together: variants expand matching, co-occurrence across groups raises rank, and
 anchors/literals stay the most distinctive seeds without becoming a hard filter.
