@@ -13,6 +13,7 @@ import {
   type ExploreDeps,
 } from "./explore.js";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import type { StructureOutlineResult, StructureSource } from "../structure/types.js";
 
 const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({ status: "ready", content, revision, source: "disk" });
 
@@ -331,5 +332,149 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.searched.filesDropped).toBe(40);
     expect(result.searched.filesDropped).toBeLessThan(summed);
     expect(result.searched.incomplete).toBe(true);
+  });
+});
+
+const structureSource = (outline: StructureOutlineResult): Pick<StructureSource, "outline" | "classifyHits"> => ({
+  outline: async (request) => ({ ...outline, revision: outline.status === "stale" ? outline.revision : request.revision }),
+  classifyHits: async (request) => ({ status: "unsupported", provider: outline.provider, revision: request.revision, hits: [] }),
+});
+
+describe("explore structure slices", () => {
+  it("uses a small function in full when the outline is ready", async () => {
+    const content = "export function needle() {\n  return 1;\n}\n";
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "small.ts", line: 1, text: "export function needle() {" }],
+      readFile: async () => ready(content),
+      structure: structureSource({
+        status: "ready",
+        provider: "lsp",
+        revision: "rev-1",
+        symbols: [{
+          name: "needle",
+          kind: "function",
+          range: { startLine: 1, endLine: 3 },
+          signature: { startLine: 1, endLine: 1 },
+        }],
+      }),
+    });
+    expect(result.snippets[0]).toMatchObject({
+      path: "small.ts",
+      startLine: 1,
+      endLine: 3,
+      text: "export function needle() {\n  return 1;\n}",
+      unit: { name: "needle", kind: "function", startLine: 1, endLine: 3 },
+      structure: { provider: "lsp", status: "ready" },
+    });
+    expect(result.details.structure?.files).toEqual([{ path: "small.ts", provider: "lsp", status: "ready" }]);
+  });
+
+  it("keeps signature, hit block, omission markers, and a full-unit read entry for a large function", async () => {
+    const body = Array.from({ length: 48 }, (_, index) => index === 23 ? "  const needle = 1;" : `  const pad${index} = ${index};`);
+    const content = ["export function largeTarget() {", ...body, "}"].join("\n");
+    const hitLine = 25;
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "large.ts", line: hitLine, text: "  const needle = 1;" }],
+      readFile: async () => ready(content),
+      structure: structureSource({
+        status: "ready",
+        provider: "lsp",
+        revision: "rev-1",
+        symbols: [{
+          name: "largeTarget",
+          kind: "function",
+          range: { startLine: 1, endLine: 50 },
+          signature: { startLine: 1, endLine: 1 },
+        }],
+      }),
+    });
+    const snippet = result.snippets[0];
+    expect(snippet?.structure).toEqual({ provider: "lsp", status: "ready" });
+    expect(snippet?.unit).toMatchObject({ name: "largeTarget", kind: "function", startLine: 1, endLine: 50 });
+    expect(snippet?.unit?.omitted?.length).toBeGreaterThan(0);
+    expect(snippet?.text.startsWith("export function largeTarget() {")).toBe(true);
+    expect(snippet?.text).toContain("const needle = 1;");
+    expect(snippet?.text).toContain("read large.ts:1-50");
+    expect(snippet?.text).toMatch(/… omitted large\.ts:\d+-\d+/);
+    expect(snippet?.endLine).toBeLessThan(50);
+    const packed = formatExploreOutput(result);
+    expect(packed.visibleText).toMatch(/unit largeTarget \(function\) large\.ts:1-50/);
+    expect(packed.visibleText).toMatch(/structure lsp\/ready/);
+  });
+
+  it("falls back to a ±3 window and reports the source status when structure is unavailable", async () => {
+    const content = Array.from({ length: 10 }, (_, index) => index === 6 ? "needle" : `line ${index + 1}`).join("\n");
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "a.ts", line: 7, text: "needle" }],
+      readFile: async () => ready(content),
+      structure: structureSource({
+        status: "unavailable",
+        provider: "lsp",
+        revision: "rev-1",
+        symbols: [],
+        message: "Language server is not ready for document symbols.",
+      }),
+    });
+    expect(result.snippets[0]).toMatchObject({
+      path: "a.ts",
+      startLine: 4,
+      endLine: 10,
+      text: "line 4\nline 5\nline 6\nneedle\nline 8\nline 9\nline 10",
+      structure: { provider: "lsp", status: "unavailable" },
+    });
+    expect(result.snippets[0]?.unit).toBeUndefined();
+    expect(result.details.structure?.files[0]?.status).toBe("unavailable");
+  });
+
+  it("does not slice with a stale outline", async () => {
+    const content = Array.from({ length: 10 }, (_, index) => index === 6 ? "needle" : `line ${index + 1}`).join("\n");
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "a.ts", line: 7, text: "needle" }],
+      readFile: async () => ready(content, "rev-new"),
+      structure: {
+        outline: async () => ({
+          status: "stale",
+          provider: "lsp",
+          revision: "rev-old",
+          symbols: [{
+            name: "oldNeedle",
+            kind: "function",
+            range: { startLine: 1, endLine: 10 },
+            signature: { startLine: 1, endLine: 1 },
+          }],
+        }),
+        classifyHits: async () => ({ status: "unsupported", provider: "lsp", revision: "rev-old", hits: [] }),
+      },
+    });
+    expect(result.snippets[0]).toMatchObject({
+      startLine: 4,
+      endLine: 10,
+      structure: { provider: "lsp", status: "stale" },
+    });
+    expect(result.snippets[0]?.unit).toBeUndefined();
+    expect(result.snippets[0]?.text).toContain("needle");
+    expect(result.snippets[0]?.text).not.toContain("omitted");
+    expect(result.details.structure?.files[0]).toEqual({ path: "a.ts", provider: "lsp", status: "stale" });
+  });
+
+  it("keeps anchor-first complementary packing when structure slices are present", async () => {
+    const result = await explore({ question: "token", anchors: ["keyHit"], limit: 2 }, {
+      rgSearch: async (pattern) => pattern === "keyHit"
+        ? [{ path: "second.ts", line: 1, text: "keyHit" }]
+        : [1, 8, 15, 22, 29].map((line) => ({ path: "first.ts", line, text: `token ${line}` })),
+      readFile: async (path) => ready(
+        path === "second.ts"
+          ? "keyHit"
+          : Array.from({ length: 32 }, (_, index) => [1, 8, 15, 22, 29].includes(index + 1) ? `token ${index + 1}` : `pad ${index + 1}`).join("\n"),
+      ),
+      structure: structureSource({
+        status: "unavailable",
+        provider: "lsp",
+        revision: "rev-1",
+        symbols: [],
+      }),
+    });
+    expect(result.snippets.map((snippet) => snippet.path).sort()).toEqual(["first.ts", "second.ts"]);
+    expect(result.snippets[0]?.path).toBe("second.ts");
   });
 });

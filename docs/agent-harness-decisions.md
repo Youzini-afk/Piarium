@@ -1937,6 +1937,38 @@ anchor 优先（打包阶段 `windowScore` 给 anchor +100），故只影响候�
 
 状态：已复验并记录；候选广度与小项待实施，排在 3.11 第 1 步之前。
 
+### D-093 · 2026-09-07 · 3.11（小函数 / 大函数切片阈值）
+
+类型：实施拍板
+
+背景：plan 3.11 / D-090 要求小函数全文、大函数签名 + 命中块 + 省略标记 + 完整读取入口，但没有给出「小 / 大」的行数。需要一个具名常量，不能把魔数散在切片里。
+
+决定：`SMALL_STRUCTURE_SPAN_LINES = 24`（含首尾的行数）。依据是一个常见编辑器视口大约能看完的短函数加几行局部变量；超过则按大函数切片。这是工作阈值，不是硬拒绝，也不是测过的产品上限。
+
+不改：不按字符数、AST 深度或「300 字符并入邻居」切；不把阈值做成用户设置；不声称这个数字优化了召回或省时。
+
+影响：`lib/structure/constants.ts`；explore 结构切片；D-091 实施。
+
+状态：已实施。
+
+### D-094 · 2026-09-07 · 3.11（结构切片的协议字段）
+
+类型：实施拍板
+
+背景：`ExploreSearchSnippet` 只有 path/行号/text/why/revision/source。语法单元和结构来源状态若塞进 `why` 或未声明字段，会重复 D-092 修过的漏字段问题；worker—protocol—Host 链也无法在一次 `explore.search` 结果里看见切片契约。
+
+决定：在协议层显式加字段，不另开方法：
+- `ExploreSearchSnippet.unit?`：`{ name, kind, startLine, endLine, omitted? }`，行号与 explore 一样是 1-based 闭区间；`omitted` 只出现在大函数。
+- `ExploreSearchSnippet.structure?`：`{ provider: "lsp" | "tree-sitter" | null, status }`，status 含 `ready|empty|unavailable|unsupported|stale|failed|cancelled|not-requested`。
+- `details.structure.files[]`：按文件记录本次咨询过的 provider/status，让一次工具结果能看见来源，而不只是摘录正文。
+LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-based。未咨询结构来源时这些字段缺席，避免把「没接线」伪装成「已请求」。
+
+不改：不把结构信息只写在 `why` 或可见文本里；不新增 `explore.symbols` 工具；不在协议里放 AST 节点或 wasm 细节。
+
+影响：`protocol/src/harness.ts`；explore 引擎与 `explore-service`；pi-host 工具 details 原样转发 snippets。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2033,5 +2065,7 @@ anchor 优先（打包阶段 `windowScore` 给 anchor +100），故只影响候�
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
 | D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片仍待做） | D-091（tree-sitter 待决项）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
-| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | — | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；实施全部待接 |
+| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093、D-094（第 1 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1 步已接，第 2–5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
+| D-093 | implementation（小/大函数阈值 24 行，一个典型编辑器视口） | — | structure/constants.ts；3.11 切片 |
+| D-094 | implementation（结构切片字段放在 ExploreSearchSnippet 与 details.structure，不进 why） | — | protocol harness explore.search；Host explore + structure；pi-host explore-tool details |

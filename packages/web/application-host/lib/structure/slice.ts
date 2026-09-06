@@ -1,0 +1,206 @@
+import { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
+import { structureSpanLines } from "./kinds.js";
+import { clipRange, mergeAdjacentRanges, rangeContainsLine } from "./ranges.js";
+import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "./types.js";
+
+export interface StructureSliceHit {
+  line: number;
+}
+
+export interface StructureSliceUnit {
+  name: string;
+  kind: string;
+  startLine: number;
+  endLine: number;
+  omitted?: StructureLineRange[];
+}
+
+export interface StructureSliceWindow {
+  start: number;
+  end: number;
+  text: string;
+  hitLines: number[];
+  unit?: StructureSliceUnit;
+  fallback: boolean;
+}
+
+export interface StructureSliceInput {
+  path: string;
+  lines: string[];
+  hits: StructureSliceHit[];
+  revision: string;
+  outline: StructureOutlineResult | { status: "not-requested"; provider: null; revision?: string; symbols?: StructureSymbol[] };
+}
+
+const flattenSymbols = (symbols: readonly StructureSymbol[]): StructureSymbol[] => {
+  const result: StructureSymbol[] = [];
+  const visit = (symbol: StructureSymbol): void => {
+    result.push(symbol);
+    for (const child of symbol.children ?? []) visit(child);
+  };
+  for (const symbol of symbols) visit(symbol);
+  return result;
+};
+
+const enclosingSymbol = (symbols: readonly StructureSymbol[], line: number): StructureSymbol | undefined => {
+  let best: StructureSymbol | undefined;
+  for (const symbol of flattenSymbols(symbols)) {
+    if (!rangeContainsLine(symbol.range, line)) continue;
+    if (!best) {
+      best = symbol;
+      continue;
+    }
+    const bestSpan = structureSpanLines(best.range.startLine, best.range.endLine);
+    const nextSpan = structureSpanLines(symbol.range.startLine, symbol.range.endLine);
+    if (nextSpan < bestSpan || (nextSpan === bestSpan && symbol.range.startLine >= best.range.startLine)) {
+      best = symbol;
+    }
+  }
+  return best;
+};
+
+const lineWindow = (line: number, lineCount: number): StructureLineRange => ({
+  startLine: Math.max(1, line - 3),
+  endLine: Math.min(lineCount, line + 3),
+});
+
+const textOf = (lines: string[], range: StructureLineRange): string => (
+  lines.slice(range.startLine - 1, range.endLine).join("\n")
+);
+
+const omittedBetween = (bounds: StructureLineRange, kept: StructureLineRange[]): StructureLineRange[] => {
+  const omitted: StructureLineRange[] = [];
+  let cursor = bounds.startLine;
+  for (const range of kept) {
+    if (range.startLine > cursor) {
+      omitted.push({ startLine: cursor, endLine: range.startLine - 1 });
+    }
+    cursor = Math.max(cursor, range.endLine + 1);
+  }
+  if (cursor <= bounds.endLine) omitted.push({ startLine: cursor, endLine: bounds.endLine });
+  return omitted;
+};
+
+const omissionMarker = (path: string, omitted: StructureLineRange, unit: StructureLineRange): string => (
+  `… omitted ${path}:${omitted.startLine}-${omitted.endLine}; read ${path}:${unit.startLine}-${unit.endLine}`
+);
+
+const largeUnitText = (
+  path: string,
+  lines: string[],
+  unit: StructureLineRange,
+  kept: StructureLineRange[],
+): { text: string; omitted: StructureLineRange[] } => {
+  const omitted = omittedBetween(unit, kept);
+  const parts: string[] = [];
+  let omitIndex = 0;
+  for (const range of kept) {
+    while (omitIndex < omitted.length && omitted[omitIndex]!.endLine < range.startLine) {
+      parts.push(omissionMarker(path, omitted[omitIndex]!, unit));
+      omitIndex += 1;
+    }
+    parts.push(textOf(lines, range));
+  }
+  while (omitIndex < omitted.length) {
+    parts.push(omissionMarker(path, omitted[omitIndex]!, unit));
+    omitIndex += 1;
+  }
+  return { text: parts.join("\n"), omitted };
+};
+
+const fallbackWindows = (lines: string[], hits: StructureSliceHit[]): StructureSliceWindow[] => {
+  const valid = [...hits].map((hit) => hit.line).filter((line) => Number.isSafeInteger(line) && line >= 1 && line <= lines.length).sort((a, b) => a - b);
+  const ranges: Array<{ range: StructureLineRange; hitLines: number[] }> = [];
+  for (const line of valid) {
+    const next = lineWindow(line, lines.length);
+    const previous = ranges.at(-1);
+    if (previous && next.startLine <= previous.range.endLine + 1) {
+      previous.range.endLine = Math.max(previous.range.endLine, next.endLine);
+      previous.hitLines.push(line);
+    } else {
+      ranges.push({ range: next, hitLines: [line] });
+    }
+  }
+  return ranges.map((item) => ({
+    start: item.range.startLine,
+    end: item.range.endLine,
+    text: textOf(lines, item.range),
+    hitLines: item.hitLines,
+    fallback: true,
+  }));
+};
+
+const sliceSymbol = (
+  path: string,
+  lines: string[],
+  symbol: StructureSymbol,
+  hitLines: number[],
+): StructureSliceWindow => {
+  const span = structureSpanLines(symbol.range.startLine, symbol.range.endLine);
+  const unit = {
+    name: symbol.name,
+    kind: symbol.kind,
+    startLine: symbol.range.startLine,
+    endLine: symbol.range.endLine,
+  };
+  if (span <= SMALL_STRUCTURE_SPAN_LINES) {
+    return {
+      start: symbol.range.startLine,
+      end: symbol.range.endLine,
+      text: textOf(lines, symbol.range),
+      hitLines,
+      unit,
+      fallback: false,
+    };
+  }
+  const signature = clipRange(symbol.signature, symbol.range);
+  const hitBlocks = mergeAdjacentRanges(hitLines.map((line) => clipRange(lineWindow(line, lines.length), symbol.range)));
+  const kept = mergeAdjacentRanges([signature, ...hitBlocks]);
+  const { text, omitted } = largeUnitText(path, lines, symbol.range, kept);
+  return {
+    start: kept[0]?.startLine ?? symbol.range.startLine,
+    end: kept.at(-1)?.endLine ?? symbol.range.endLine,
+    text,
+    hitLines,
+    unit: omitted.length > 0 ? { ...unit, omitted } : unit,
+    fallback: false,
+  };
+};
+
+/**
+ * Build explore windows from an outline, or the ±3 line fallback when the
+ * outline is not a usable current revision.
+ */
+export function sliceStructureWindows(input: StructureSliceInput): StructureSliceWindow[] {
+  const hits = input.hits.filter((hit) => Number.isSafeInteger(hit.line));
+  if (hits.length === 0) return [];
+  const outline = input.outline;
+  if (!outlineUsableForText(outline, input.revision) || !outline.symbols.length) {
+    return fallbackWindows(input.lines, hits);
+  }
+  const grouped = new Map<StructureSymbol, number[]>();
+  const unstructured: StructureSliceHit[] = [];
+  for (const hit of hits) {
+    const symbol = enclosingSymbol(outline.symbols, hit.line);
+    if (!symbol) {
+      unstructured.push(hit);
+      continue;
+    }
+    const group = grouped.get(symbol) ?? [];
+    group.push(hit.line);
+    grouped.set(symbol, group);
+  }
+  const windows: StructureSliceWindow[] = [];
+  for (const [symbol, hitLines] of grouped) {
+    windows.push(sliceSymbol(input.path, input.lines, symbol, hitLines.sort((a, b) => a - b)));
+  }
+  windows.push(...fallbackWindows(input.lines, unstructured));
+  return windows.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+export function outlineUsableForText(
+  outline: StructureOutlineResult | { status: string; revision?: string },
+  revision: string,
+): outline is StructureOutlineResult & { status: "ready" } {
+  return outline.status === "ready" && outline.revision === revision;
+}

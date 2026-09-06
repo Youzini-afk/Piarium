@@ -69,6 +69,8 @@ import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
+import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
+import { createStructureSource } from './lib/structure/source.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
@@ -1562,6 +1564,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       documents: documentsAuthority,
       supervisor: languageSupervisor,
     }),
+    structureSource: createStructureSource([
+      createLspStructureProvider({
+        documents: documentsAuthority,
+        supervisor: languageSupervisor,
+      }),
+    ]),
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,

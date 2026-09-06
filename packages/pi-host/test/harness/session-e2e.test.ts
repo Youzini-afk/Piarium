@@ -39,6 +39,7 @@ import { createWebSearchService } from "../../../web/application-host/lib/harnes
 import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 import { createExploreFileReader } from "../../../web/application-host/lib/harness/explore-file-reader.js";
+import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
 import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";
 
@@ -951,6 +952,74 @@ describe("session e2e — explore", () => {
         const stored = session.harnessServiceHost.outputStore.read(snapshot.sessionId, handle);
         assert.equal(stored.status, "ready");
         assert.match(stored.slice.text, /target\.ts:1-4/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("returns a structure slice in one explore.search result, not an extra symbols call", async () => {
+    await withTempRoot("piarium-s-explore-structure-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      const body = Array.from({ length: 48 }, (_, index) => (
+        index === 23 ? "  const needle = 1;" : `  const pad${index} = ${index};`
+      ));
+      await writeFile(join(fixture.workspaceRoot, "large.ts"), ["export function largeTarget() {", ...body, "}"].join("\n"), "utf8");
+      const structureSource: StructureSource = {
+        outline: async (request) => ({
+          status: "ready",
+          provider: "lsp",
+          revision: request.revision,
+          symbols: [{
+            name: "largeTarget",
+            kind: "function",
+            range: { startLine: 1, endLine: 50 },
+            signature: { startLine: 1, endLine: 1 },
+          }],
+        }),
+        classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+      };
+      const faux = registerFauxProvider();
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("I found the structured unit.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: (request, options) => fixture.search.searchContent(request, options),
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+          structureSource,
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "locate needle");
+        await session.host.session.waitForIdle();
+        assert.match(exploreResult, /"name":"largeTarget"/);
+        assert.match(exploreResult, /"kind":"function"/);
+        assert.match(exploreResult, /"provider":"lsp"/);
+        assert.match(exploreResult, /"status":"ready"/);
+        assert.match(exploreResult, /read large\.ts:1-50/);
+        assert.match(exploreResult, /… omitted large\.ts:/);
+        assert.match(exploreResult, /unit largeTarget \(function\) large\.ts:1-50/);
+        assert.doesNotMatch(exploreResult, /"name":"symbols"/);
+        assert.doesNotMatch(exploreResult, /lsp\.symbols/);
+        assert.match(exploreResult, /large\.ts:1-/);
+        assert.ok(
+          /"startLine":1/.test(exploreResult) && /"endLine":50/.test(exploreResult),
+          "the tool result must carry the full-unit range, not only a ±3 window",
+        );
       } finally {
         await session.dispose();
         await fixture.documents.dispose();

@@ -39,7 +39,7 @@ const ownedDirtyPathsFor = (
 };
 
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource">,
 ): HarnessService<"explore.search"> {
   return {
     handle: async (params, ctx) => {
@@ -108,6 +108,22 @@ export function createExploreSearchService(
           };
         },
         readFile: (path) => readFile(ctx.actor, path, ctx.signal, inputContext),
+        ...(host.structureSource ? {
+          structure: {
+            outline: (request) => host.structureSource!.outline({
+              ...request,
+              workspaceId,
+              sessionId: ctx.sessionId,
+              inputContext,
+            }),
+            classifyHits: (request) => host.structureSource!.classifyHits({
+              ...request,
+              workspaceId,
+              sessionId: ctx.sessionId,
+              inputContext,
+            }),
+          },
+        } : {}),
       }, ctx.signal);
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
@@ -144,6 +160,7 @@ export function createExploreSearchService(
           provenance: result.details.provenance,
           anchors: result.details.anchors,
           byteBudget: DEFAULT_BYTE_BUDGET,
+          ...(result.details.structure ? { structure: result.details.structure } : {}),
         },
       };
     },

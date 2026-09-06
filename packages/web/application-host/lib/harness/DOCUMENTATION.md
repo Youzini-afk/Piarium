@@ -246,6 +246,14 @@ to disk. Other files retain the existing disk path. Thread dispatch copies the
 fixed content into persistent WorkingState before the temporary surface reference
 can be released.
 
+`explore.search` asks an optional `structureSource` (see
+`lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
+materialized. Small units are emitted in full; large units keep the signature,
+the hit block, omission markers, and a full-unit read entry. When the source is
+missing, cold, unsupported, stale, or failed, explore falls back to the ±3 line
+window and records that status on the snippet and in `details.structure`. It
+does not call `documentSymbols` itself.
+
 ### LspNavigationServices (`lsp-nav.ts`)
 
 `symbols` / `definition` / `references` / `hover` bind the queried document in

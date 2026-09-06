@@ -12,6 +12,7 @@ import { createKeeperCoverageStore } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
+import type { StructureSource } from "../structure/types.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { ThreadTranscriptReader } from "./thread-transcript.js";
 import type { CapturedThreadDraftBaseline } from "./thread-runtime.js";
@@ -99,6 +100,7 @@ export interface HarnessServiceHost {
   searchService: HarnessSearchService;
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
+  structureSource: StructureSource | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -161,6 +163,7 @@ export interface HarnessServiceHostOptions {
   dropAgentInputContexts?: (sessionId: string) => void;
   diagnosticsProvider?: DiagnosticsProvider;
   lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
+  structureSource?: StructureSource;
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -216,6 +219,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
   const lspNavigationServices = options.lspNavigationServices ?? null;
+  const structureSource = options.structureSource ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -364,6 +368,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     searchService,
     diagnosticsProvider,
     lspNavigationServices,
+    structureSource,
     webFetchService,
     webSearchService,
     documentReadSource,

@@ -10,12 +10,13 @@ import { createHarnessPathAuthority } from "./path-authority.js";
 import { createExploreFileReader } from "./explore-file-reader.js";
 import { createExploreSearchService } from "./explore-service.js";
 import { createHarnessServiceHost } from "./service-host.js";
+import type { StructureSource } from "../structure/types.js";
 import { createHarnessRouter } from "./router.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
-async function fixture(scope?: string[]) {
+async function fixture(scope?: string[], structureSource?: StructureSource) {
   const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-explore-service-"));
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace);
@@ -31,6 +32,7 @@ async function fixture(scope?: string[]) {
     search: (request, options) => search.searchContent(request, options),
     resolveWorkspaceRoot: async () => workspace,
     readExploreFile: createExploreFileReader(documents, paths),
+    ...(structureSource ? { structureSource } : {}),
   });
   let response: unknown;
   const router = createHarnessRouter({
@@ -302,5 +304,40 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     if (!response.ok) throw new Error(response.error.message);
     expect(response.result.searched.filesDropped).toBe(50);
     expect(response.result.text).toMatch(/at least 50 matching file\(s\) were not brought into the candidate pool/);
+  });
+
+  it("returns a structure unit and source status on the explore.search result", async () => {
+    const body = Array.from({ length: 48 }, (_, index) => index === 23 ? "  const needle = 1;" : `  const pad${index} = ${index};`);
+    const structureSource: StructureSource = {
+      outline: async (request) => ({
+        status: "ready",
+        provider: "lsp",
+        revision: request.revision,
+        symbols: [{
+          name: "largeTarget",
+          kind: "function",
+          range: { startLine: 1, endLine: 50 },
+          signature: { startLine: 1, endLine: 1 },
+        }],
+      }),
+      classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+    };
+    const f = await fixture(undefined, structureSource);
+    await fs.writeFile(
+      path.join(f.workspace, "large.ts"),
+      ["export function largeTarget() {", ...body, "}"].join("\n"),
+      "utf8",
+    );
+    const response = await f.request({ question: "needle" });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.snippets[0]).toMatchObject({
+      path: "large.ts",
+      structure: { provider: "lsp", status: "ready" },
+      unit: { name: "largeTarget", kind: "function", startLine: 1, endLine: 50 },
+    });
+    expect(response.result.snippets[0]?.text).toContain("read large.ts:1-50");
+    expect(response.result.details.structure?.files).toEqual([{ path: "large.ts", provider: "lsp", status: "ready" }]);
+    expect(response.result.text).toMatch(/structure lsp\/ready/);
   });
 });

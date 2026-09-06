@@ -339,6 +339,31 @@ export type ExploreSourceStatus =
   | "not-requested"
   | "forbidden";
 
+export type ExploreStructureProvider = "lsp" | "tree-sitter";
+
+export type ExploreStructureStatus =
+  | "ready"
+  | "empty"
+  | "unavailable"
+  | "unsupported"
+  | "stale"
+  | "failed"
+  | "cancelled"
+  | "not-requested";
+
+export interface ExploreStructureUnit {
+  name: string;
+  kind: string;
+  startLine: number;
+  endLine: number;
+  omitted?: Array<{ startLine: number; endLine: number }>;
+}
+
+export interface ExploreStructureSource {
+  provider: ExploreStructureProvider | null;
+  status: ExploreStructureStatus;
+}
+
 export interface ExploreSearchSnippet {
   path: string;
   startLine: number;
@@ -347,6 +372,8 @@ export interface ExploreSearchSnippet {
   why: string;
   revision: string;
   source: "disk" | "surface-draft";
+  unit?: ExploreStructureUnit;
+  structure?: ExploreStructureSource;
 }
 
 export interface ExploreSearchIssue {
@@ -381,6 +408,13 @@ export interface ExploreSearchResult {
     provenance: ExploreSearchProvenance[];
     anchors: { supplied: string[]; used: string[]; truncated: number };
     byteBudget: number;
+    structure?: {
+      files: Array<{
+        path: string;
+        provider: ExploreStructureProvider | null;
+        status: ExploreStructureStatus;
+      }>;
+    };
   };
 }
 

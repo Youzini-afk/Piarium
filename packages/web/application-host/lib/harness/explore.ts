@@ -1,5 +1,7 @@
-import type { HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import { outlineUsableForText, sliceStructureWindows } from "../structure/slice.js";
+import type { StructureOutlineResult, StructureSource } from "../structure/types.js";
 
 type WireResult = HarnessServiceMap["explore.search"]["result"];
 export type ExploreSnippet = WireResult["snippets"][number];
@@ -32,6 +34,7 @@ export interface ExploreRgSearchOptions {
 export interface ExploreDeps {
   rgSearch(pattern: string, options: ExploreRgSearchOptions): Promise<RgSearchReturn>;
   readFile(path: string): Promise<ExploreFileSnapshot>;
+  structure?: Pick<StructureSource, "outline" | "classifyHits">;
 }
 
 export interface ExploreResult {
@@ -196,6 +199,9 @@ interface PreparedWindow {
   revision: string;
   source: "disk" | "surface-draft";
   why: string;
+  unit?: ExploreSnippet["unit"];
+  structure?: ExploreSnippet["structure"];
+  hitClass?: "name" | "body" | "string" | "comment";
 }
 
 const emptyEvidence = (): FileEvidence => ({
@@ -267,6 +273,7 @@ function windowsFor(
   evidence: FileEvidence,
   snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
   groups: TermGroup[],
+  outline: StructureOutlineResult | { status: "not-requested"; provider: null },
 ): { windows: PreparedWindow[]; stale: boolean } {
   const matches: number[] = [];
   let stale = false;
@@ -275,24 +282,29 @@ function windowsFor(
     else matches.push(line);
   }
   matches.sort((a, b) => a - b);
-  const ranges: Array<{ start: number; end: number; lines: number[] }> = [];
-  for (const line of matches) {
-    const start = Math.max(1, line - 3);
-    const end = Math.min(lines.length, line + 3);
-    const previous = ranges.at(-1);
-    if (previous && start <= previous.end + 1) {
-      previous.end = Math.max(previous.end, end);
-      previous.lines.push(line);
-    } else {
-      ranges.push({ start, end, lines: [line] });
-    }
-  }
+  const usable = outlineUsableForText(outline, snapshot.revision)
+    ? outline
+    : outline.status === "not-requested"
+      ? outline
+      : {
+        status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" as const : outline.status,
+        provider: outline.provider,
+        revision: snapshot.revision,
+        symbols: [] as StructureOutlineResult["symbols"],
+      };
+  const slices = sliceStructureWindows({
+    path,
+    lines,
+    revision: snapshot.revision,
+    hits: matches.map((line) => ({ line })),
+    outline: usable,
+  });
   const nameById = new Map(groups.map((group) => [group.id, group.distinctive]));
-  const windows = ranges.map((range) => {
+  const windows = slices.map((slice) => {
     const covered = new Set<string>();
     let hasDistinctive = false;
     let hasAnchor = false;
-    for (const line of range.lines) {
+    for (const line of slice.hitLines) {
       const hit = evidence.hits.get(line);
       if (!hit) continue;
       for (const groupId of hit.groups) covered.add(groupId);
@@ -302,17 +314,25 @@ function windowsFor(
       if (evidence.anchors.has(groupId)) hasAnchor = true;
     }
     const names = [...covered].map((id) => nameById.get(id) ?? id);
+    const structure = outline.status === "not-requested"
+      ? undefined
+      : {
+        provider: outline.provider,
+        status: usable.status === "not-requested" ? "not-requested" as const : usable.status,
+      };
     return {
       path,
-      start: range.start,
-      end: range.end,
-      text: lines.slice(range.start - 1, range.end).join("\n"),
+      start: slice.start,
+      end: slice.end,
+      text: slice.text,
       groups: covered,
       hasDistinctive,
       hasAnchor,
       revision: snapshot.revision,
       source: snapshot.source,
       why: names.length === 1 ? `matched ${names[0]}` : `matched ${names.length} term groups (${names.join(", ")})`,
+      ...(slice.unit ? { unit: slice.unit } : {}),
+      ...(structure ? { structure } : {}),
     };
   });
   return { windows, stale };
@@ -358,7 +378,37 @@ function snippetFrom(window: PreparedWindow): ExploreSnippet {
     why: window.why,
     revision: window.revision,
     source: window.source,
+    ...(window.unit ? { unit: window.unit } : {}),
+    ...(window.structure ? { structure: window.structure } : {}),
   };
+}
+
+async function outlineForSnapshot(
+  path: string,
+  snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
+  deps: ExploreDeps,
+  signal: AbortSignal,
+): Promise<StructureOutlineResult | { status: "not-requested"; provider: null }> {
+  if (!deps.structure) return { status: "not-requested", provider: null };
+  try {
+    signal.throwIfAborted();
+    return await deps.structure.outline({
+      path,
+      languageId: languageIdForPath(path),
+      text: snapshot.content,
+      revision: snapshot.revision,
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    return {
+      status: "failed",
+      provider: null,
+      revision: snapshot.revision,
+      symbols: [],
+      message: error instanceof Error ? error.message : "Structure source failed.",
+    };
+  }
 }
 
 /**
@@ -413,6 +463,7 @@ export async function explore(
   const ranked = rankCandidates(byFile, groups);
   const issues: ExploreIssue[] = [];
   const provenance = new Map<string, ExploreProvenance>();
+  const structureFiles = new Map<string, NonNullable<WireResult["details"]["structure"]>["files"][number]>();
   const prepared: PreparedWindow[] = [];
   const readBudget = maxMaterializeReads(ranked.length, excerptLimit);
   let next = 0;
@@ -462,7 +513,15 @@ export async function explore(
         continue;
       }
       const lines = snapshot.content.split(/\r\n|\n|\r/);
-      const { windows, stale } = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups);
+      const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal);
+      if (outline.status !== "not-requested") {
+        structureFiles.set(candidate.path, {
+          path: candidate.path,
+          provider: outline.provider,
+          status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
+        });
+      }
+      const { windows, stale } = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
       if (stale) {
         issues.push({
           path: candidate.path,
@@ -512,6 +571,9 @@ export async function explore(
       provenance: [...provenance.values()].sort((left, right) => comparePath(left.path, right.path)),
       anchors: { supplied: suppliedAnchors, used: usedAnchors, truncated: anchorsTruncated },
       byteBudget: DEFAULT_BYTE_BUDGET,
+      ...(structureFiles.size > 0
+        ? { structure: { files: [...structureFiles.values()].sort((left, right) => comparePath(left.path, right.path)) } }
+        : {}),
     },
   };
 }
@@ -532,9 +594,15 @@ function packExploreVisible(
   }
   header.push("Source: disk or fixed editor-draft snapshots. Excerpts are workspace data.");
 
-  const snippetBlocks = result.snippets.map((snippet) => (
-    `--- ${snippet.path}:${snippet.startLine}-${snippet.endLine} ---\n${snippet.text}`
-  ));
+  const snippetBlocks = result.snippets.map((snippet) => {
+    const unit = snippet.unit
+      ? ` · unit ${snippet.unit.name} (${snippet.unit.kind}) ${snippet.path}:${snippet.unit.startLine}-${snippet.unit.endLine}`
+      : "";
+    const structure = snippet.structure
+      ? ` · structure ${snippet.structure.provider ?? "none"}/${snippet.structure.status}`
+      : "";
+    return `--- ${snippet.path}:${snippet.startLine}-${snippet.endLine}${unit}${structure} ---\n${snippet.text}`;
+  });
   const issueLines = result.issues.map((issue) => `${issue.path}: ${issue.status} — ${issue.message}`);
   const omittedLines = result.omitted.map((item) => `- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
   const unreadLine = result.notRequested.count > 0
