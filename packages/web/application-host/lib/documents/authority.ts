@@ -356,14 +356,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const queues = createSerialQueues();
   const watchers = new Map<string, WatcherRecord>();
   const captureWatches = new Map<string, CaptureWatch>();
+  const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
   const dirtyBuffersByOwner = new Map<string, DirtyBufferRecord>();
   const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
   const dirtyBarriers = new Map<string, DirtyBarrier>();
-  const surfaceSnapshots = createSurfaceSnapshotStore();
+  const surfaceSnapshots = createSurfaceSnapshotStore({ caseSensitive: platform !== 'win32' });
   let dirtyPublicationRevision = 0;
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
-  const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
   const mutations = createWorkspaceMutationAuthority({
     dataDir,
     hostId,

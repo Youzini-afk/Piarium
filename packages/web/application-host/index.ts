@@ -869,6 +869,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // The official Host always provides SSRF-guarded web.fetch. Reader-model
     // execution stays inside pi-host so it uses the session's credential and
     // model authority rather than creating a second model stack in the Host.
+    harnessDocumentRead: true,
     harnessWebRead: true,
     harnessWebSearch: configuredWebSearchProvider !== null,
     ...brokerOptions,
@@ -1505,6 +1506,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const harnessServiceHost = createHarnessServiceHost({
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
+    documentReadSource: (sessionId, context, resourceId) => documentsAuthority.readAgentInputSnapshot(
+      sessionId,
+      context,
+      resourceId,
+    ),
     commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
     releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
     dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),
@@ -1513,6 +1519,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       workspaceId: request.workspaceId,
       maxResults: request.maxResults,
       ...(request.paths === undefined ? {} : { paths: request.paths }),
+      ...(request.glob === undefined ? {} : { glob: request.glob }),
+      ...(request.excludeResourceIds === undefined ? {} : { excludeResourceIds: request.excludeResourceIds }),
+      ...(request.ignoreCase === undefined ? {} : { ignoreCase: request.ignoreCase }),
+      ...(request.fixedStrings === undefined ? {} : { fixedStrings: request.fixedStrings }),
     }, options),
     resolveWorkspaceRoot: async (workspaceId) => {
       try {
@@ -1749,6 +1759,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           harnessServiceHost.registerSession({
             actor: event.actor,
             grantedCapabilities: deriveHarnessCapabilities(activeTools, {
+              documentRead: true,
               threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
             }),
             workspaceId: harnessWorkspaceId,

@@ -13,7 +13,8 @@ The pi-host harness tools are custom tools registered in the Pi session's
 > are merged into a single stream. The `stderr` field in `ShellExecResult`
 > will be empty; all output appears in `stdout`. PowerShell is the only
 > interpreter that separates the streams (but it is not yet wired).
-| `grep` | Content search with hit grouping | `search.content` |
+| `read` | Pi-native paging/truncation/images with fixed editor-draft source selection | `document.readSource` |
+| `grep` | Bounded rg plus fixed editor-draft overlay and context lines | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only) | `fs.lock` + `lsp.diagnostics` |
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
@@ -25,29 +26,18 @@ The pi-host harness tools are custom tools registered in the Pi session's
 
 ## Registration
 
-Tools are registered in `session-host.ts` `#createRuntimeFactory()`:
+Tools are selected by `selectHarnessTools()` during `SessionHost.#createRuntimeFactory()`.
+The read override is included only after the Host handshake advertises
+`harnessDocumentRead`; otherwise Pi's built-in read remains registered.
 
 ```typescript
-const customTools: ToolDefinition[] = [];
-if (workspaceMutationJournal !== undefined) {
-  customTools.push(...createWorkspaceMutationJournalTools(
-    cwd, workspaceMutationJournal, hostServicesBridge, sessionId,
-  ));
-}
-customTools.push(
-  createBashTool(hostServicesBridge, sessionId, cwd),
-  createGrepTool(hostServicesBridge, sessionId),
-  createGetOutputTool(hostServicesBridge, sessionId),
-  createWriteToProcessTool(hostServicesBridge, sessionId),
-  createKillShellTool(hostServicesBridge, sessionId),
-  createDiagnosticsTool(hostServicesBridge, sessionId),
-);
-// apply_patch: OpenAI family only
-if (isOpenAIFamily) {
-  customTools.push(createApplyPatchTool(
-    hostServicesBridge, sessionId, cwd, workspaceMutationJournal,
-  ));
-}
+const customTools = selectHarnessTools(settings, {
+  bridge: hostServicesBridge,
+  sessionId,
+  cwd,
+  documentReadAvailable: harnessDocumentReadEnabled,
+  // other negotiated capabilities and runtime dependencies
+});
 ```
 
 ## Extensions
@@ -88,6 +78,9 @@ steer, and follow-up temporarily select a new context, commit it after Pi
 accepts the input, and restore/release it when delivery fails. Snapshot
 bookkeeping failure after `agent_start` degrades the source to unavailable and
 cannot turn an already-running prompt into a failed submission.
+`grep`, `explore`, and the Host-advertised read override consume this same fixed
+source. An expired dirty source is an unavailable read/search, never a disk
+fallback.
 
 ```
 pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
@@ -113,9 +106,10 @@ child launch supplies its resolved role model and tool allowlist to
 `session.create/open` before Pi constructs the AgentSession; read-only roles do
 not merely rely on a prompt asking them not to write. The role fragment and
 scope stay in the first task message, keeping the base system prefix stable;
-scope also travels in the broker-owned Actor envelope. Host path services
-enforce it, but it is not an OS sandbox over shell text or Pi tools that access
-the filesystem directly inside the worker.
+scope also travels in the broker-owned Actor envelope. Host path services,
+including fixed-source read, enforce it. This is not an OS sandbox over shell
+text, third-party tools, or the built-in read used when the Host override is
+unavailable or disabled.
 
 ## Mutation Journal Integration
 

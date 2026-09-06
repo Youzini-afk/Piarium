@@ -1,0 +1,165 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it } from "vitest";
+import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import { createDocumentAuthority } from "../documents/authority.js";
+import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
+import { createDocumentReadSourceService } from "./harness-services.js";
+import { createHarnessPathAuthority } from "./path-authority.js";
+import { createHarnessRouter } from "./router.js";
+import { createHarnessServiceHost } from "./service-host.js";
+
+const disposes: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
+
+async function fixture() {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-document-read-source-"));
+  const workspace = path.join(root, "workspace");
+  await fs.mkdir(workspace);
+  const documents = createDocumentAuthority({
+    hostId: "test-host",
+    dataDir: path.join(root, "data"),
+    isAllowedRoot: async () => true,
+    isTrusted: async () => true,
+  });
+  const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
+  const actor: HarnessActorContext = {
+    authorityInstanceId: "test-host",
+    sessionId: "test-session",
+    workerId: "worker",
+    workerGeneration: 1,
+    workspaceId,
+    grantedCapabilities: ["read.document"],
+  };
+  const paths = createHarnessPathAuthority({ authorityId: "test-host", documents });
+  const host = createHarnessServiceHost({
+    search: async () => ({ status: "empty", generation: undefined }),
+    resolveWorkspaceRoot: async () => workspace,
+    documentReadSource: (sessionId, context, resourceId) => (
+      documents.readAgentInputSnapshot(sessionId, context, resourceId)
+    ),
+  });
+  let response: unknown;
+  const router = createHarnessRouter({
+    resolveActor: async () => actor,
+    authorizeWorkspacePath: (current, input, options) => paths.resolve(current, input, options),
+    respond: async (_sessionId, _requestId, result) => { response = result; },
+  });
+  router.register("document.readSource", createDocumentReadSourceService(host));
+  disposes.push(async () => {
+    router.dispose();
+    await host.dispose();
+    await documents.dispose();
+    expect(path.dirname(path.resolve(root))).toBe(path.resolve(tmpdir()));
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const request = async (resourcePath: string, inputContext?: AgentInputContext) => {
+    await router.processEvent({
+      kind: "host",
+      actor,
+      envelope: {
+        kind: "event",
+        event: "harness.request",
+        data: {
+          requestId: crypto.randomUUID(),
+          method: "document.readSource",
+          params: { path: resourcePath },
+          ...(inputContext ? { inputContext } : {}),
+        },
+      },
+    });
+    return response as
+      | { ok: true; result: HarnessServiceMap["document.readSource"]["result"] }
+      | { ok: false; error: { code: string; message: string } };
+  };
+  const capture = async (resourceId: string, content: string, localEditRevision: number, bom = false) => {
+    const disk = await documents.read({ workspaceId, resourceId });
+    const baseRevision = disk.status === "missing" ? null : disk.revision;
+    const resource = { workspaceId, resourceId };
+    await documents.publishDirtyBuffers({
+      generation: 1,
+      ownerId: "surface",
+      resources: [{ baseRevision, localEditRevision, resource }],
+      workspaceId,
+    });
+    return documents.captureAgentInputSnapshot({
+      generation: 1,
+      ownerId: "surface",
+      resources: [{ baseRevision, bom, content, encoding: "utf-8", localEditRevision, resource }],
+      sessionId: actor.sessionId,
+      workspaceId,
+    });
+  };
+  return { actor, capture, documents, request, workspace };
+}
+
+describe("native read source through Host router and Documents", () => {
+  it("matches equivalent resource casing when the workspace is case-insensitive", () => {
+    const snapshots = createSurfaceSnapshotStore({ caseSensitive: false });
+    const context = snapshots.capture({
+      ownerId: "surface",
+      sessionId: "session",
+      workspaceId: "workspace",
+      resources: [{
+        baseRevision: null,
+        bom: false,
+        content: "fixed\n",
+        encoding: "utf-8",
+        localEditRevision: 1,
+        resource: { workspaceId: "workspace", resourceId: "src/Draft.ts" },
+      }],
+    });
+
+    expect(snapshots.read("session", context, "SRC/draft.ts")).toMatchObject({
+      status: "ready",
+      content: "fixed\n",
+    });
+    snapshots.dispose();
+  });
+
+  it("returns the fixed save-compatible draft bytes after the live surface changes", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "disk value\n", "utf8");
+    const context = await f.capture("draft.ts", "fixed draft\r\n", 3, true);
+    await f.documents.publishDirtyBuffers({
+      generation: 1,
+      ownerId: "surface",
+      resources: [{
+        baseRevision: (await f.documents.read({ workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" }) as { revision: string }).revision,
+        localEditRevision: 4,
+        resource: { workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" },
+      }],
+      workspaceId: f.actor.workspaceId!,
+    });
+
+    const response = await f.request("draft.ts", context);
+
+    expect(response.ok).toBe(true);
+    if (!response.ok || response.result.source !== "surface-draft") throw new Error("Expected fixed surface bytes");
+    expect(Buffer.from(response.result.base64, "base64").toString("utf8")).toBe("\uFEFFfixed draft\r\n");
+    expect(response.result.revision).toMatch(/^surface-draft:/);
+  });
+
+  it("reads a dirty-only path and refuses disk fallback after the snapshot expires", async () => {
+    const f = await fixture();
+    const context = await f.capture("new.ts", "unsaved\n", 1);
+    const ready = await f.request("new.ts", context);
+    expect(ready).toMatchObject({ ok: true, result: { source: "surface-draft" } });
+
+    await fs.writeFile(path.join(f.workspace, "new.ts"), "must not leak\n", "utf8");
+    f.documents.dropAgentInputSnapshots(f.actor.sessionId);
+    const expired = await f.request("new.ts", context);
+    expect(expired).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(JSON.stringify(expired)).not.toContain("must not leak");
+  });
+
+  it("returns a disk sentinel when the current input has no draft for the path", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "disk.txt"), "disk\n", "utf8");
+    expect(await f.request("disk.txt", { source: "disk" })).toEqual({
+      ok: true,
+      result: { source: "disk" },
+    });
+  });
+});

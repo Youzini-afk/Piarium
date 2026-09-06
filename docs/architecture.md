@@ -460,7 +460,7 @@ The `HarnessServiceMap` defines the following method groups:
 
 - **Shell**: `shell.exec`, `shell.read`, `shell.write`, `shell.kill`
 - **Output**: `output.store`, `output.read`
-- **Search**: `search.content`
+- **Search / fixed document source**: `search.content`, `document.readSource`
 - **Filesystem**: `fs.lock`
 - **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`, `lsp.symbols`, `lsp.definition`, `lsp.references`, `lsp.hover`
 - **Web**: `web.fetch`, `web.search` (registered when available). A configured
@@ -594,8 +594,8 @@ to its built-in equivalent.
 
 ## 6. Data ownership
 
-The following table describes current ownership. The accepted evolution for thread working state is
-specified immediately after it; that design has not yet replaced the current Git-backed implementation.
+The following table describes current ownership. Native working state now owns published thread results;
+Git and copy directories remain materialization and migration backends as specified immediately after it.
 
 | Data | Authority | Piarium behavior |
 | --- | --- | --- |
@@ -607,7 +607,7 @@ specified immediately after it; that design has not yet replaced the current Git
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle | Host atomic Thread/ThreadRun catalog + Pi child session JSONL + managed Git worktree | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, and merge only the child delta |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL + content-addressed WorkingState; Git/copy directories are materializations | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
@@ -615,7 +615,7 @@ specified immediately after it; that design has not yet replaced the current Git
 | Workspace identity and document recovery journals | Per-host records below `PIARIUM_DATA_DIR` | Scoped to the owning application host; another host never inherits a same-path selection |
 | Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |
 | IDE editor layout | `piarium.workbench.layout` v1 service, profile- and workspace-scoped | Missing/empty use the distribution default without writing it; malformed keeps the last valid document and raises a diagnostic |
-| Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel | Dirty buffers and view state are client-owned; disk revisions stay host-owned |
+| Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel; Host owns immutable per-input snapshots | Dirty buffers and view state stay client-owned; authenticated fixed snapshots feed explore/grep/read and dispatch without becoming a second live editor |
 
 ### 6.1 Working-state architecture (D-078 / D-079)
 
@@ -632,6 +632,17 @@ bytes and their revision provenance into persistent WorkingState before creating
 restarted Runs no longer depend on the ephemeral surface reference. Missing draft content rejects the
 dispatch rather than substituting an unlabelled disk version. Non-draft inputs are still captured when
 the Run materializes, so this slice does not claim a whole-workspace dispatch-time snapshot.
+
+Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
+Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,
+so ignored modifications, additions, and deletions survive result publication and reclamation without a
+workspace-wide rescan. Schema 1/2 catalogs migrate with an empty capture scope.
+
+Parent-session `explore`, `grep`, and the same-name Pi `read` override consume the immutable surface input.
+Search removes dirty disk hits before its bounded backend counter and merges fixed-draft hits before ranking.
+Read asks the Host only to choose disk versus fixed draft bytes, then delegates pagination, truncation, and
+disk images to Pi's native read definition. An unavailable dirty source never falls back to disk. `find`/`ls`
+and fixed-revision LSP sessions remain the next read-view consumers.
 
 Integration records the selected child result, expected parent states for affected paths and drafts,
 actual per-path application, conflicts, index effects, and recovery operations. Existing recovery object,
@@ -664,7 +675,7 @@ Its final compare/apply/verify and compensation share the same canonical path qu
 read/write/move/delete in that authority instance; directory operations cover descendants while unrelated
 paths remain concurrent. This queue does not cover raw filesystem or shell writes in other execution paths.
 Reclamation holds the Documents writer barrier through deletion and preserves materializations used by
-controlled processes or editor surfaces. Virtual file tools, surface-buffer integration, and the full space
+controlled processes or editor surfaces. Find/ls virtual views, fixed-revision LSP, surface-buffer integration, and the full space
 budget UI remain separately tracked in [agent-harness-status.md](agent-harness-status.md); their helper
 types do not count as delivered product paths.
 

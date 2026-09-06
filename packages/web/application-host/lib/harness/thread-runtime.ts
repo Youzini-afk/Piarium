@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import type {
   AgentInputContext,
   HarnessWorktreeSettings,
@@ -338,6 +339,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return options.worktreeSettings;
   };
 
+  const resolveCaptureScopes = (sourceRoot: string, settings: HarnessWorktreeSettings | undefined): string[] => {
+    const root = path.resolve(sourceRoot);
+    return (settings?.copyIgnored ?? []).map((configuredPath) => {
+      const absolute = path.resolve(root, configuredPath);
+      const relative = path.relative(root, absolute).replace(/\\/g, "/");
+      if (!relative || relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) {
+        throw new ThreadRuntimeError("invalid-request", `harness.worktree.copyIgnored path is outside the workspace: ${configuredPath}`);
+      }
+      return relative;
+    });
+  };
+
   const parentSession = async (workspaceId: string, parent: ThreadParent): Promise<{ id: string; file: string; cwd: string }> => {
     let sessionId: string;
     if (parent.kind === "session") sessionId = parent.id;
@@ -626,15 +639,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
 
     const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
-    if (worktree && needsBranchCapture && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
-      await options.worktrees.prepareInputs(sourceRoot, worktree, effectiveSettings);
+    // A persisted branch owns its capture scope. A missing worktree still
+    // follows the existing branch capture/materialization flow, but must not
+    // recopy live parent inputs or replace that scope from current settings.
+    const launchBranchCapture = Boolean(worktree && needsBranchCapture && !existing?.workBranchId);
+    const captureScopes = launchBranchCapture ? resolveCaptureScopes(sourceRoot, effectiveSettings) : [];
+    if (launchBranchCapture && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
+      await options.worktrees.prepareInputs(sourceRoot, worktree!, effectiveSettings);
     }
     if (worktree && needsBranchCapture && options.workingStates) {
       const branchId = `thread-${input.threadId}`;
       await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
         const baseline = await store.captureDirectory(preparedCwd);
         if (!draftBaselineId) {
-          await store.createBranch(input.workspaceId, branchId, baseline, worktree!.base);
+          await store.createBranch(input.workspaceId, branchId, baseline, worktree!.base, [], captureScopes);
           return;
         }
         const draftBaseline = await store.getDraftBaseline(draftBaselineId);
@@ -652,6 +670,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           baseline,
           drafts,
           worktree!.base,
+          captureScopes,
         );
         await store.materializeStates(
           Object.fromEntries(branch.draftBasePaths.map((file) => [file, branch.baseState[file]!])),

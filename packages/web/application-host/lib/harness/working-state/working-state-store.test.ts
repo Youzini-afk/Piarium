@@ -93,6 +93,46 @@ describe("WorkingStateStore", () => {
     }
   });
 
+  it("captures configured file and directory scopes around a narrowed Git change set", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "ignored.env"), "base env\n");
+      await fs.promises.mkdir(path.join(h.workspace, "ignored-dir"), { recursive: true });
+      await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "old.txt"), "old\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ordinary.txt"), "ordinary base\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      const branch = await h.store.createBranch("ws", "scoped", base, "git-base", [], [
+        "./ignored-dir/",
+        "ignored.env",
+        "ignored.env",
+      ]);
+      expect(branch.captureScopes).toEqual(["ignored-dir", "ignored.env"]);
+
+      await fs.promises.writeFile(path.join(h.workspace, "ignored.env"), "changed env\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "old.txt"), "changed old\n");
+      await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "new.txt"), "new\n");
+      await fs.promises.rm(path.join(h.workspace, "ordinary.txt"));
+      const first = await h.store.publishDirectoryResult("scoped", h.workspace, ["tracked.txt"]);
+      expect(first.changedPaths).toEqual(["ignored-dir/new.txt", "ignored-dir/old.txt", "ignored.env"]);
+
+      const reopened = await WorkingStateStore.open(h.context);
+      await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "newer.txt"), "newer\n");
+      await fs.promises.rm(path.join(h.workspace, "ignored-dir", "old.txt"));
+      const second = await reopened.publishDirectoryResult("scoped", h.workspace, ["tracked.txt"]);
+      expect(second.changedPaths).toEqual(["ignored-dir/new.txt", "ignored-dir/newer.txt", "ignored-dir/old.txt", "ignored.env"]);
+
+      const materialized = path.join(h.parent, "materialized-scoped");
+      await reopened.materializeResult("scoped", second.resultRevision, materialized);
+      expect(await reopened.directoryMatchesResult("scoped", second.resultRevision, materialized)).toBe(true);
+      expect(await fs.promises.readFile(path.join(materialized, "ignored.env"), "utf8")).toBe("changed env\n");
+      expect(await fs.promises.readFile(path.join(materialized, "ignored-dir", "newer.txt"), "utf8")).toBe("newer\n");
+      await expect(fs.promises.lstat(path.join(materialized, "ignored-dir", "old.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await fs.promises.readFile(path.join(materialized, "ordinary.txt"), "utf8")).toBe("ordinary base\n");
+    } finally {
+      h.database.close();
+    }
+  });
+
   it("does not switch the branch head when a later capture fails", async () => {
     const h = await harness();
     try {
@@ -166,7 +206,7 @@ describe("WorkingStateStore", () => {
     }
   });
 
-  it("migrates a schema v1 catalog to v2 with no draft baselines", async () => {
+  it("migrates a schema v1 catalog to v3 with no draft baselines or capture scopes", async () => {
     const h = await harness();
     try {
       await h.store.createBranch("ws", "legacy", {});
@@ -182,8 +222,48 @@ describe("WorkingStateStore", () => {
       expect(await migrated.getDraftBaseline("missing")).toBeNull();
       await migrated.createBranch("ws", "next", {});
       const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      expect(persisted.schemaVersion).toBe(2);
+      expect(persisted.schemaVersion).toBe(3);
       expect(persisted.draftBaselines).toEqual({});
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("reads an older schema v2 branch without capture scopes and preserves draft baselines", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "draft.ts"), "draft\n");
+      const draftBaseline = await h.store.createDraftBaseline("ws", [{
+        path: "draft.ts",
+        content: "draft\n",
+        provenance: {
+          baseRevision: null,
+          encoding: "utf-8",
+          bom: false,
+          localEditRevision: 1,
+          revision: "surface:1",
+        },
+      }]);
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "legacy-v2", base, "base", ["draft.ts"], ["ignored"]);
+      const catalog = path.join(h.root, "working-state", `${createHash("sha256").update("ws").digest("hex")}.json`);
+      const v2 = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
+      v2.schemaVersion = 2;
+      delete (v2.branches as Record<string, Record<string, unknown>>)["legacy-v2"]!.captureScopes;
+      await fs.promises.writeFile(catalog, JSON.stringify(v2), "utf8");
+
+      const migrated = await WorkingStateStore.open(h.context);
+      expect(migrated.getBranch("legacy-v2")).toMatchObject({
+        draftBasePaths: ["draft.ts"],
+        captureScopes: [],
+      });
+      expect(await migrated.getDraftBaseline(draftBaseline.id)).toEqual(draftBaseline);
+      await migrated.createBranch("ws", "next-v3", base);
+      const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
+      expect(persisted.schemaVersion).toBe(3);
+      delete (persisted.branches as Record<string, Record<string, unknown>>)["next-v3"]!.captureScopes;
+      await fs.promises.writeFile(catalog, JSON.stringify(persisted), "utf8");
+      await expect(WorkingStateStore.open(h.context)).rejects.toThrow("Working branch next-v3 is malformed");
     } finally {
       h.database.close();
     }

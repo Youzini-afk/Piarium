@@ -1,10 +1,9 @@
 import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
-import { createHarnessSearchService, type HarnessSearchService } from "./search-service.js";
+import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
-import type { WorkspaceContentSearchResult } from "../search/content.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
 import type { MemoryAgentSettings } from "@piarium/protocol";
 import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
@@ -21,7 +20,9 @@ import type {
   HarnessActorContext,
   HarnessActorIdentity,
   HarnessCapability,
+  AgentInputContext,
 } from "@piarium/protocol";
+import type { SurfaceSnapshotReadResult } from "../documents/surface-snapshot-store.js";
 
 export interface HarnessSessionContext {
   actor: HarnessActorIdentity;
@@ -42,7 +43,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { threadRuntime: boolean },
+  availability: { documentRead?: boolean; threadRuntime: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -53,6 +54,7 @@ export function deriveHarnessCapabilities(
     "read.output",
   ]);
   if (tools.has("grep") || tools.has("explore")) capabilities.add("read.search");
+  if (availability.documentRead && tools.has("read")) capabilities.add("read.document");
   if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
   if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
@@ -65,6 +67,13 @@ export function deriveHarnessCapabilities(
   return [...capabilities];
 }
 
+/** Read-source lookup used by the native Pi read wrapper. */
+export type HarnessDocumentReadSource = (
+  sessionId: string,
+  context: AgentInputContext,
+  resourceId: string,
+) => SurfaceSnapshotReadResult;
+
 export interface HarnessServiceHost {
   outputStore: OutputStore;
   observationCursors: ObservationCursorStore;
@@ -74,6 +83,7 @@ export interface HarnessServiceHost {
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
+  documentReadSource: HarnessDocumentReadSource | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
@@ -120,7 +130,7 @@ export interface HarnessServiceHost {
 }
 
 export interface HarnessServiceHostOptions {
-  search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
+  search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readExploreFile?: ExploreFileReader;
   commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
@@ -141,6 +151,8 @@ export interface HarnessServiceHostOptions {
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
   webSearchService?: HarnessServiceHost["webSearchService"];
+  /** Surface-aware native Pi read source (null when Documents is unavailable). */
+  documentReadSource?: HarnessDocumentReadSource;
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
@@ -172,11 +184,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const searchService = createHarnessSearchService({
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
+    ...(options.readExploreFile ? { readFile: options.readExploreFile } : {}),
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
   const lspNavigationServices = options.lspNavigationServices ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
+  const documentReadSource = options.documentReadSource ?? null;
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
@@ -322,6 +336,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     lspNavigationServices,
     webFetchService,
     webSearchService,
+    documentReadSource,
     knowledgeStore,
     userKnowledgeStore,
     memoryDepsProvider,

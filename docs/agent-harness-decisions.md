@@ -1555,6 +1555,45 @@ SurfaceSnapshotStore、ThreadRegistry、Thread services/runtime/worktree、Worki
 
 状态：已实施；本地证据和当前未接边界见 agent-harness-status.md。
 
+### D-084 · 2026-09-06 · copyIgnored 成为持久结果捕获范围
+
+类型：实现决策（D-078 工作状态/物化边界的收口）
+
+决定：`harness.worktree.copyIgnored` 在首次 Run 准备并捕获基线时规范化为工作区相对根，写入 WorkingBranch `captureScopes`；
+WorkingState catalog 升为 schema 3。schema 1 迁移为空 draft/capture 范围，schema 2 保留 draft baselines 与 draftBasePaths、
+captureScopes 为空，schema 3 严格要求该字段。已有 branch 恢复使用持久范围，不重新解释后来变化的 settings。
+
+窄结果发布把后端 changed paths、草稿结构闭包与 captureScopes 合并。每个 capture scope 只枚举该文件或目录子树，并同时比较
+baseline 后代与当前后代，因此修改、新增和删除都进入 native WorkingResult；符号链接作为链接捕获，不递归跟随。它不为显式 ignored
+输入重新扫描整个工作区。partial publish、lost-run 恢复、directoryMatchesResult、reclaim 与 materialize 继续消费同一个 native
+resultRevision，Git status 是否看见该路径不再决定结果是否保存。
+
+原因：copyIgnored 已是用户明确选入的执行输入。只在 prepare 时复制却不把范围留在 branch，会使 Git ignored 修改既进不了
+resultCommit 也进不了 native result，最终只能永久保留目录或在错误回收时丢结果。把根随 branch 持久化同时解决重启配置漂移和目录
+后代新增/删除，不需要 WorkspaceHead 或每次全仓扫描。
+
+状态：已实施；代码、迁移与验证见 status 3.4a。
+
+### D-085 · 2026-09-06 · 普通 read/grep 消费固定窗口草稿
+
+类型：实现决策（D-082 固定来源的工具纵切）
+
+决定：`search.content` 接收 Router 已校验的 AgentInputContext。surface dirty paths 先按 actor scope、请求 path 与 glob 过滤；
+Application Host 在 rg 流式结果计数前按规范化 resourceId 排除它们的旧磁盘命中，再在消息发送时的固定正文上执行 regex/fixed string、
+大小写与同一 glob 过滤，合并后统一排序、context 和 limit。已知 dirty snapshot 不可用时返回 unavailable，不从磁盘补值。公开但从未
+实现的 `type` 与 files/count mode 从协议和工具 schema 删除；before/after/context、glob、fixedStrings 与 ignoreCase 贯通真实后端。
+
+普通 `read` 继续使用 Pi 0.84.3 的 `createReadToolDefinition`，只新增一个同名 source wrapper。Application Host 声明
+`harnessDocumentRead` 后，worker 在每次执行前以受授权 path 请求 `document.readSource`：非 dirty 返回 disk sentinel 并直接执行 Pi
+原生 read；dirty 返回固定 revision 的 save-compatible UTF-8 bytes（保留 BOM 与换行），再把这一次 bytes 交给相同 Pi definition。
+因此分页、截断、错误和磁盘图片 attachment 不复制实现。Host 未声明能力或用户关闭该覆盖时保留 Pi built-in。来源正文不进入工具参数、
+请求事件或日志，surface revision 写入 tool details；Windows 等不区分大小写的工作区按等价 resource identity 查 snapshot。
+
+边界：find/ls 尚未叠加 dirty-only 路径；LSP/符号图还没有与固定正文绑定的独立 revision/session；surface snapshot 仍是 Host 生命周期内
+的输入来源，Thread dispatch 已按 D-083 复制为持久基线。上述缺口继续直接实施，不回退已接通的 read/grep。
+
+状态：已实施；生产接线与验证见 status 3.2。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -1644,3 +1683,5 @@ SurfaceSnapshotStore、ThreadRegistry、Thread services/runtime/worktree、Worki
 | D-081 | implementation（默认记忆、动态模式与逐次压缩接管） | — | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture |
 | D-082 | implementation（自动 surface snapshot 与 draft-aware explore） | — | protocol / UI / broker / pi-host / Documents / Host explore；设计 6.1、plan 3.2、status、architecture |
 | D-083 | implementation（dispatch 持久草稿基线与 surface 集成边界） | — | protocol / UI Documents / Host Thread+WorkingState+Integration；设计 6.1/9.2.5b、plan 3.2/3.4/3.5、status、architecture |
+| D-084 | implementation（copyIgnored 持久 captureScopes 与结果发布） | — | Host WorkingState/Thread runtime；设计 9.2.5b、plan 3.4、status、architecture |
+| D-085 | implementation（普通 read/grep 固定 surface 来源） | — | protocol / pi-host / Host Documents+search；设计 5.3/6.1、plan 3.2、status、architecture |

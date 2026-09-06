@@ -1,5 +1,6 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceMap, ShellExecResultSpawnFailed } from "@piarium/protocol";
+import { encodeDocumentText } from "../documents/inspect.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
   createThreadDispatchService,
@@ -136,7 +137,56 @@ export function createSearchContentService(search: HarnessSearchService): Harnes
         signal: ctx.signal,
         workspaceId: ctx.workspaceId,
         ...(ctx.actor.workspaceScope ? { workspaceScope: ctx.actor.workspaceScope } : {}),
+        actor: ctx.actor,
+        ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
       });
+    },
+  };
+}
+
+/**
+ * Resolve the source for one native Pi read. Path authorization is performed
+ * by the router before this service runs; only the authorized resource ID is
+ * passed to Documents so aliases cannot select a different snapshot entry.
+ */
+export function createDocumentReadSourceService(
+  host: Pick<HarnessServiceHost, "documentReadSource">,
+): HarnessService<"document.readSource"> {
+  return {
+    handle: async (_params, ctx) => {
+      const authorized = ctx.authorizedPaths[0];
+      if (!host.documentReadSource || !authorized || ctx.authorizedPaths.length !== 1) {
+        throw new HarnessServiceError("unavailable", "Document read source is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      const snapshot = host.documentReadSource(
+        ctx.sessionId,
+        ctx.inputContext ?? { source: "disk" },
+        authorized.resourceId,
+      );
+      ctx.signal.throwIfAborted();
+      if (snapshot.status === "disk") return { source: "disk" };
+      if (snapshot.status === "unavailable") {
+        throw new HarnessServiceError("unavailable", snapshot.message);
+      }
+      let bytes: Buffer;
+      try {
+        bytes = encodeDocumentText({
+          content: snapshot.content,
+          encoding: snapshot.encoding,
+          bom: snapshot.bom,
+        });
+      } catch (error) {
+        throw new HarnessServiceError(
+          "failed",
+          error instanceof Error ? error.message : "Unable to encode the editor source snapshot",
+        );
+      }
+      return {
+        base64: bytes.toString("base64"),
+        revision: snapshot.revision,
+        source: "surface-draft",
+      };
     },
   };
 }
@@ -379,6 +429,9 @@ export function registerHarnessServices(
   router.register("output.store", createOutputStoreService(host.outputStore));
   router.register("output.read", createOutputReadService(host.outputStore));
   router.register("search.content", createSearchContentService(host.searchService));
+  if (host.documentReadSource) {
+    router.register("document.readSource", createDocumentReadSourceService(host));
+  }
   router.register("fs.lock", createFsLockService(host.pathLockService));
   if (host.diagnosticsProvider) {
     router.register("lsp.diagnostics", createLspDiagnosticsService(host.diagnosticsProvider));

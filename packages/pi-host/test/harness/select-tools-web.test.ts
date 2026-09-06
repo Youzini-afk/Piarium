@@ -101,3 +101,29 @@ describe("selectHarnessTools web tool gating", () => {
     assert.equal(tools.some((tool) => tool.name === "websearch"), false);
   });
 });
+
+describe("selectHarnessTools document read gating", () => {
+  it("registers the native read override only when the Host advertises its source service", () => {
+    const unavailable = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, baseDeps);
+    const available = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      documentReadAvailable: true,
+    });
+
+    assert.equal(unavailable.some((tool) => tool.name === "read"), false);
+    assert.equal(available.filter((tool) => tool.name === "read").length, 1);
+  });
+
+  it("leaves Pi's built-in read in place when the override is disabled", () => {
+    const settings: HarnessSettings = {
+      ...DEFAULT_HARNESS_SETTINGS,
+      tools: { read: false },
+    };
+    const tools = selectHarnessTools(settings, {
+      ...baseDeps,
+      documentReadAvailable: true,
+    });
+
+    assert.equal(tools.some((tool) => tool.name === "read"), false);
+  });
+});

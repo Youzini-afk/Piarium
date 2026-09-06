@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
 import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
@@ -14,7 +15,7 @@ import type {
 } from "./types.js";
 import { materializeWorkingState } from "./materializer.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
 
 interface WorkingStateDocument {
@@ -48,8 +49,10 @@ export interface WorkspaceWorkingStateAccess {
 
 const clone = <T>(value: T): T => structuredClone(value);
 const normalizeRelative = (value: string): string => {
-  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+  const raw = value.replace(/\\/g, "/");
+  const segments = raw.split("/").filter((segment) => segment && segment !== ".");
+  const normalized = segments.join("/");
+  if (!normalized || raw.includes("\0") || raw.startsWith("/") || /^[A-Za-z]:/.test(raw) || segments.includes("..")) {
     throw new Error(`Invalid working-state path: ${value}`);
   }
   return normalized;
@@ -76,17 +79,28 @@ const parseStates = (value: unknown, label: string): Record<string, RecoveryStat
   return Object.fromEntries(Object.entries(value).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
 };
 
-const parseBranch = (value: unknown, key: string, workspaceId: string, legacy = false): WorkingBranch => {
+type WorkingStateSchemaVersion = 1 | 2 | 3;
+
+const parseBranch = (
+  value: unknown,
+  key: string,
+  workspaceId: string,
+  schemaVersion: WorkingStateSchemaVersion,
+): WorkingBranch => {
+  const legacy = schemaVersion === 1;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working branch ${key} is malformed`);
   const row = value as Record<string, unknown>;
   if (row.branchId !== key || row.workspaceId !== workspaceId || !Number.isSafeInteger(row.headRevision)
     || Number(row.headRevision) < 0 || typeof row.createdAt !== "string" || typeof row.updatedAt !== "string"
     || (row.baseRef !== undefined && typeof row.baseRef !== "string")
-    || (!legacy && (!Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")))) {
+    || (!legacy && (!Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")))
+    || (schemaVersion === 3 && (!Array.isArray(row.captureScopes) || !row.captureScopes.every((entry) => typeof entry === "string")))) {
     throw new Error(`Working branch ${key} is malformed`);
   }
   const draftBasePaths = legacy ? [] : (row.draftBasePaths as string[]).map(normalizeRelative);
   if (new Set(draftBasePaths).size !== draftBasePaths.length) throw new Error(`Working branch ${key} draft baseline paths are malformed`);
+  const rawCaptureScopes = schemaVersion === 3 ? row.captureScopes as string[] : [];
+  const captureScopes = legacy ? [] : [...new Set(rawCaptureScopes.map(normalizeRelative))].sort();
   const baseState = parseStates(row.baseState, `Working branch ${key} baseline`);
   if (draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
     throw new Error(`Working branch ${key} does not contain every draft baseline path`);
@@ -97,6 +111,7 @@ const parseBranch = (value: unknown, key: string, workspaceId: string, legacy = 
     ...(row.baseRef === undefined ? {} : { baseRef: row.baseRef as string }),
     baseState,
     draftBasePaths,
+    captureScopes,
     deltas: parseStates(row.deltas, `Working branch ${key} deltas`),
     headRevision: row.headRevision as number,
     createdAt: row.createdAt,
@@ -208,16 +223,16 @@ export class WorkingStateStore {
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
     const record = raw as Record<string, unknown>;
-    if ((record.schemaVersion !== 1 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
+    if ((record.schemaVersion !== 1 && record.schemaVersion !== 2 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
       || !record.branches || typeof record.branches !== "object" || Array.isArray(record.branches)
       || !record.results || typeof record.results !== "object" || Array.isArray(record.results)
-      || (record.schemaVersion === SCHEMA_VERSION
+      || (record.schemaVersion !== 1
         && (!record.draftBaselines || typeof record.draftBaselines !== "object" || Array.isArray(record.draftBaselines)))) {
       throw new Error("Working-state catalog schema or workspace identity is malformed");
     }
     const legacy = record.schemaVersion === 1;
     const branches = Object.fromEntries(Object.entries(record.branches as Record<string, unknown>)
-      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, legacy)]));
+      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, record.schemaVersion as WorkingStateSchemaVersion)]));
     const draftBaselines = legacy ? {} : Object.fromEntries(Object.entries(record.draftBaselines as Record<string, unknown>)
       .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId)]));
     const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
@@ -343,6 +358,7 @@ export class WorkingStateStore {
     baseState: Record<string, RecoveryState>,
     baseRef?: string,
     draftBasePaths: string[] = [],
+    captureScopes: string[] = [],
   ): Promise<WorkingBranch> {
     if (workspaceId !== this.document.workspaceId) throw new Error(`Working-state workspace mismatch: ${workspaceId}`);
     const existing = this.document.branches[branchId];
@@ -358,6 +374,7 @@ export class WorkingStateStore {
       ...(baseRef ? { baseRef } : {}),
       baseState: clone(baseState),
       draftBasePaths: normalizedDraftBasePaths,
+      captureScopes: [...new Set(captureScopes.map(normalizeRelative))].sort(),
       deltas: {},
       headRevision: 0,
       createdAt: now,
@@ -467,8 +484,15 @@ export class WorkingStateStore {
       }
       return result;
     });
+    const currentPaths = await this.scanCaptureScopes(directory, branch.captureScopes);
+    const scopePaths = branch.captureScopes.flatMap((scope) => [
+      scope,
+      ...Object.keys(branch.baseState).filter((file) => file === scope || file.startsWith(`${scope}/`)),
+      ...currentPaths.filter((file) => file === scope || file.startsWith(`${scope}/`)),
+    ]);
     const candidates = [...new Set([
       ...branch.draftBasePaths,
+      ...scopePaths,
       ...changed,
       ...ancestors,
     ])];
@@ -559,6 +583,39 @@ export class WorkingStateStore {
       }
     }
     return result.sort();
+  }
+
+  private async scanCaptureScopes(directory: string, scopes: readonly string[]): Promise<string[]> {
+    const normalizedScopes = [...new Set(scopes.map(normalizeRelative))].sort();
+    const minimalScopes = normalizedScopes.filter((scope, index) => (
+      !normalizedScopes.slice(0, index).some((parent) => scope.startsWith(`${parent}/`))
+    ));
+    const result = new Set<string>();
+    const visit = async (relative: string): Promise<void> => {
+      const absolute = this.pathModule.resolve(directory, ...relative.split("/"));
+      await assertAbsolutePathInWorkspace(absolute, {
+        root: directory,
+        fsPromises: this.fsPromises,
+        pathModule: this.pathModule,
+        allowMissing: true,
+      });
+      let stat: fs.Stats;
+      try {
+        stat = await this.fsPromises.lstat(absolute);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      result.add(relative);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+      const entries = await this.fsPromises.readdir(absolute, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name === ".git" || entry.name === ".piarium") continue;
+        await visit(normalizeRelative(`${relative}/${entry.name}`));
+      }
+    };
+    for (const scope of minimalScopes) await visit(scope);
+    return [...result].sort();
   }
 }
 

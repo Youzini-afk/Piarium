@@ -15,6 +15,7 @@ import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
 import { createExploreTool } from "./explore-tool.js";
 import { createLspNavigationTools } from "./lsp-tools.js";
+import { createSurfaceAwareReadTool } from "./read-tool.js";
 import {
   createDispatchTool,
   createThreadsTool,
@@ -35,6 +36,10 @@ export interface SelectHarnessToolsDeps {
   isOpenAIFamily: boolean;
   /** Whether the Host exposes real LanguageSupervisor navigation services. */
   lspNavigationAvailable?: boolean;
+  /** Whether the Host exposes the Documents-backed native Pi read source. */
+  documentReadAvailable?: boolean;
+  /** Native Pi image resize setting, kept in sync with the built-in read tool. */
+  autoResizeImages?: boolean;
   /** Tools to yield (not register) because a Pi package provides them. */
   yieldedTools?: ReadonlySet<string>;
   /** Session-local reader model path; absent keeps webfetch extraction-only. */
@@ -53,7 +58,8 @@ export interface SelectHarnessToolsDeps {
  * ToolDefinitions to register. session-host calls this; tests verify gating
  * without needing a real session.
  *
- * Override tools (bash, grep) fall back to Pi built-in when disabled — they
+ * Override tools (read, bash, grep) fall back to Pi built-in when disabled or
+ * when the Host does not advertise the required source service — they
  * are simply omitted from the returned list.
  * New tools (get_output, write_to_process, kill_shell, diagnostics,
  * apply_patch) are omitted when disabled.
@@ -73,6 +79,8 @@ export function selectHarnessTools(
     workspaceMutationJournal,
     isOpenAIFamily,
     lspNavigationAvailable,
+    documentReadAvailable,
+    autoResizeImages,
     yieldedTools,
     readPage,
     webSearchAvailable,
@@ -83,6 +91,13 @@ export function selectHarnessTools(
 
   if (tools.bash !== false) {
     result.push(createBashTool(bridge, sessionId, cwd));
+  }
+  if (documentReadAvailable && tools.read !== false) {
+    result.push(createSurfaceAwareReadTool(
+      bridge,
+      cwd,
+      autoResizeImages === undefined ? {} : { autoResizeImages },
+    ));
   }
   if (tools.grep !== false) {
     result.push(createGrepTool(bridge, sessionId));

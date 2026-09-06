@@ -61,6 +61,7 @@ async function setupSession(options: {
   root: string;
   faux: ReturnType<typeof registerFauxProvider>;
   workspaceId?: string;
+  harnessDocumentRead?: boolean;
   harnessWebRead?: boolean;
   harnessWebSearch?: boolean;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
@@ -106,7 +107,10 @@ async function setupSession(options: {
       if (!harnessServiceHost.hasActor(actor)) {
         harnessServiceHost.registerSession({
           actor,
-          grantedCapabilities: ["context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document"],
+          grantedCapabilities: [
+            "context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document",
+            ...(options.harnessDocumentRead ? ["read.document" as const] : []),
+          ],
           workspaceId,
           workspaceRoot: root,
         });
@@ -168,6 +172,7 @@ async function setupSession(options: {
     emit,
     projectTrustOverride: true,
   });
+  if (options.harnessDocumentRead) host.setHarnessDocumentReadEnabled(true);
   if (options.harnessWebRead || options.harnessWebSearch) {
     host.setHarnessWebCapabilities({
       read: options.harnessWebRead === true,
@@ -617,6 +622,67 @@ describe("session e2e — durable output handles", () => {
         assert.match(handle, /^out_/);
         assert.match(pagedContext, /line 1/);
         assert.match(pagedContext, /\[\d+\/\d+ bytes/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
+describe("session e2e — fixed surface read", () => {
+  it("uses the Host-advertised read override inside a real Pi turn", async () => {
+    await withTempRoot("piarium-s-surface-read-", async (root) => {
+      await writeFile(join(root, "draft.ts"), "stale disk value\n", "utf8");
+      const faux = registerFauxProvider();
+      let toolResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "draft.ts" })]),
+        (context) => {
+          toolResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        harnessDocumentRead: true,
+        serviceHostOptions: {
+          commitAgentInputContext: () => ({ committed: true }),
+          documentReadSource: (_sessionId, context, resourceId) => {
+            assert.equal(context.source, "surface");
+            assert.equal(resourceId, "draft.ts");
+            return {
+              status: "ready",
+              bom: false,
+              content: "fixed editor value\n",
+              encoding: "utf-8",
+              revision: "surface-draft:fixed:1",
+              source: "surface-draft",
+            };
+          },
+        },
+        authorizeWorkspacePath: async (_actor, inputPath) => ({
+          authorityId: "session-e2e-authority",
+          workspaceId: WORKSPACE_ID,
+          canonicalResourceId: path.resolve(root, inputPath),
+          inputPath,
+          resourceId: inputPath,
+        }),
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        const inputContext = {
+          source: "surface" as const,
+          workspaceId: WORKSPACE_ID,
+          dirtyPaths: ["draft.ts"],
+          snapshot: { status: "ready" as const, ref: "fixed" },
+        };
+        await session.host.prompt(snapshot.sessionId, "read the current editor", undefined, undefined, inputContext);
+        await session.host.session.waitForIdle();
+
+        assert.match(toolResult, /fixed editor value/);
+        assert.doesNotMatch(toolResult, /stale disk value/);
       } finally {
         await session.dispose();
         faux.unregister();

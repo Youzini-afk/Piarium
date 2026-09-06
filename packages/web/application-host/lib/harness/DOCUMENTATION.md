@@ -13,9 +13,10 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── shell.write  → ShellSupervisor
                            ├── shell.kill   → ShellSupervisor
                            ├── output.store → OutputStore (global)
-                           ├── output.read  → OutputStore
-                           ├── search.content → HarnessSearchService
-                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
+	                           ├── output.read  → OutputStore
+	                           ├── search.content → HarnessSearchService
+	                           ├── document.readSource → fixed surface bytes or disk sentinel
+	                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
@@ -91,7 +92,20 @@ Wraps `createWorkspaceContentSearch` with hit grouping, scoring, and
 formatting. It intersects an explicit request path with the child scope before
 launching ripgrep, passes those canonical workspace-contained roots to the
 search process, and validates returned resource IDs again. Returns
-`SearchContentResult` with files, hits, and totals.
+`SearchContentResult` with files, hits, and totals. For a surface input it reads
+all in-scope dirty snapshots first, removes their disk hits before the backend
+result cap, applies the same regex/fixed/case/glob semantics to the frozen text,
+and ranks the combined set. Context lines come from the same source revision;
+source drift makes that context partial instead of attaching unrelated lines.
+
+### Native read source (`document.readSource`, pi-host `read-tool.ts`)
+
+The Router authorizes the requested path with `allowMissing` so an unsaved new
+document can be read. Documents returns either a disk sentinel or fixed surface
+text with encoding, BOM, and revision. The Host serializes only fixed draft bytes;
+pi-host delegates both branches to Pi's `createReadToolDefinition`, preserving
+native offset/limit truncation and disk image attachments. The wrapper is
+registered only when the Host handshake advertises `harnessDocumentRead`.
 
 ### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
 
@@ -158,6 +172,9 @@ draft bytes into the execution directory and use that effective state as branch
 revision zero. Result publication reads the live materialization even when an
 older fixed result exists, while merge and migration continue to read the selected
 fixed result. Draft-derived paths are checked even when Git ignores them.
+Configured `copyIgnored` roots are stored as branch `captureScopes`; narrowed
+publication scans only those roots plus known changed paths, so ignored additions,
+updates, and deletions enter the native result and survive reclaim/materialize.
 Until surface-buffer mutation is connected, integration reports those paths as
 `surfaceTargetPaths` and performs no disk write or marker insertion when the
 parent disk has diverged from both the draft base and child result.
@@ -179,12 +196,12 @@ Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
 authority has already validated and frozen any dirty buffers behind its opaque
 reference. `HostServicesBridge` attaches the current context to every Harness
 request; Router still derives session/workspace/scope from the broker actor.
-`explore.search` removes disk hits for dirty paths, performs the same literal
-matching over the fixed surface snapshot, and reads excerpts from that same
-revision. Expired or unavailable dirty sources produce issues and never fall
-back to disk. Other files retain the existing Documents disk path. Thread dispatch
-is the second snapshot consumer; it copies the fixed content into persistent
-WorkingState before the temporary surface reference can be released.
+`explore.search` and `search.content` remove disk hits for dirty paths and match
+the fixed snapshot; the same-name `read` override obtains save-compatible bytes
+from `document.readSource`. Expired or unavailable dirty sources never fall back
+to disk. Other files retain the existing disk path. Thread dispatch copies the
+fixed content into persistent WorkingState before the temporary surface reference
+can be released. Find/ls and LSP still require their fixed-view adapters.
 
 ### LspDiagnosticsService (`diagnostics-service.ts`)
 

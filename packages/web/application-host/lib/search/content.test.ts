@@ -81,6 +81,40 @@ describe('workspace content search', () => {
     }
   });
 
+  it('passes fixed, case-insensitive, and ordered glob filters to ripgrep', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      let spawnArgs: string[] = [];
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: (_command, args) => {
+          spawnArgs = args;
+          const child = createFakeChild();
+          queueMicrotask(() => child.emit('close', 1));
+          return child;
+        },
+      });
+
+      await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'literal [value]',
+        fixedStrings: true,
+        ignoreCase: true,
+        glob: ['**/*.ts', '!**/*.test.ts'],
+      });
+
+      expect(spawnArgs).toContain('--fixed-strings');
+      expect(spawnArgs).toContain('--ignore-case');
+      const include = spawnArgs.lastIndexOf('**/*.ts');
+      const exclude = spawnArgs.lastIndexOf('!**/*.test.ts');
+      expect(include).toBeGreaterThan(-1);
+      expect(exclude).toBeGreaterThan(include);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   it('returns ready hits, empty success, and failure without mapping errors to empty', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
@@ -245,6 +279,45 @@ describe('workspace content search', () => {
       expect(result.hits).toHaveLength(1);
       expect(child?.killed).toBe(true);
       expect(args).not.toContain('--max-count');
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it('excludes normalized dirty resource IDs before applying the result cap', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const dirtyPath = path.join(workspace.root, 'dirty.ts');
+      const firstPath = path.join(workspace.root, 'first.ts');
+      const secondPath = path.join(workspace.root, 'second.ts');
+      let child: FakeSearchChild | undefined;
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: (_command, _args) => {
+          child = createFakeChild();
+          queueMicrotask(() => {
+            const output = [
+              matchLine(dirtyPath, 'dirty'),
+              matchLine(firstPath, 'first'),
+              matchLine(secondPath, 'second'),
+            ].join('\n') + '\n';
+            finishWithOutput(child!, output);
+          });
+          return child!;
+        },
+      });
+
+      const result = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'match',
+        maxResults: 2,
+        excludeResourceIds: ['dirty.ts'],
+      });
+
+      expect(result).toMatchObject({ status: 'ready', hits: [{ preview: 'first' }, { preview: 'second' }] });
+      expect(child?.killed).toBe(true);
     } finally {
       await harness.cleanup();
     }

@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import fs from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
@@ -814,10 +814,11 @@ describe("thread runtime", () => {
 
   it("copies configured inputs before baseline capture and runs setup afterward", async () => {
     const order: string[] = [];
+    const createBranch = vi.fn(async () => ({ branchId: "branch" }));
     const orderedRuntime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
-      worktreeSettings: { copyIgnored: [".env.local"], setup: "install" },
+      worktreeSettings: { copyIgnored: [resolve(WORKSPACE, ".env.local")], setup: "install" },
       worktrees: {
         prepare: prepareWorktree,
         prepareInputs: async () => { order.push("inputs"); },
@@ -829,7 +830,7 @@ describe("thread runtime", () => {
       workingStates: {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => { order.push("baseline"); return {}; },
-          createBranch: async () => ({ branchId: "branch" }),
+          createBranch,
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
       },
       resolveWorkspaceRoot: async () => WORKSPACE,
@@ -840,6 +841,14 @@ describe("thread runtime", () => {
     const run = await registry.startRun(WORKSPACE, thread.id);
     await orderedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
     expect(order).toEqual(["inputs", "baseline", "setup"]);
+    expect(createBranch).toHaveBeenCalledWith(
+      WORKSPACE,
+      expect.stringMatching(/^thread-/),
+      {},
+      "base",
+      [],
+      [".env.local"],
+    );
     await orderedRuntime.dispose();
   });
 

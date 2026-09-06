@@ -1,10 +1,31 @@
 import path from "node:path";
+import picomatch from "picomatch";
 import type { SearchContentParams, SearchContentResult, SearchContentFile, SearchContentHit } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
 import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
+import type { ExploreFileReader } from "./explore-file-reader.js";
 
 export interface HarnessSearchDeps {
-  search: (request: { query: string; workspaceId: string; maxResults?: number; paths?: string[] }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
+  search: (request: {
+    query: string;
+    workspaceId: string;
+    maxResults?: number;
+    paths?: string[];
+    glob?: string[];
+    excludeResourceIds?: string[];
+    ignoreCase?: boolean;
+    fixedStrings?: boolean;
+  }, options: { signal?: AbortSignal }) => Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  readFile?: ExploreFileReader;
+}
+
+interface HarnessSearchContext {
+  workspaceId: string | null;
+  workspaceScope?: readonly string[];
+  signal: AbortSignal;
+  actor?: HarnessActorContext;
+  inputContext?: AgentInputContext;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -65,8 +86,8 @@ function groupAndSort(
       .map((hit): SearchContentHit => ({
         line: hit.line,
         text: hit.preview,
-        before: [],
-        after: [],
+        before: hit.before ?? [],
+        after: hit.after ?? [],
       })),
   }));
 
@@ -89,16 +110,125 @@ function groupAndSort(
   return { files, totalHits, totalFiles };
 }
 
+const unavailableResult = (): SearchContentResult => ({
+  status: "unavailable",
+  files: [],
+  totalHits: 0,
+  totalFiles: 0,
+  searchedFiles: 0,
+  partial: false,
+});
+
+const emptyResult = (): SearchContentResult => ({
+  status: "empty",
+  files: [],
+  totalHits: 0,
+  totalFiles: 0,
+  searchedFiles: 0,
+  partial: false,
+});
+
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** SearchContent uses ripgrep's default line-oriented regular-expression mode. */
+const compileDraftPattern = (pattern: string, fixedStrings: boolean | undefined, ignoreCase: boolean | undefined): RegExp | null => {
+  try {
+    return new RegExp(fixedStrings ? escapeRegex(pattern) : pattern, ignoreCase ? "i" : "");
+  } catch {
+    return null;
+  }
+};
+
+const splitLines = (content: string): string[] => {
+  if (content.length === 0) return [];
+  const lines = content.split(/\r\n|\n|\r/);
+  // A line terminator closes the final line; it does not create another
+  // searchable empty line (matching ripgrep's line-oriented output).
+  if (/\r\n$|[\n\r]$/u.test(content)) lines.pop();
+  return lines;
+};
+
+interface CompiledGlobFilter {
+  /** Positive rules first and negative rules last, matching the filter below. */
+  rgPatterns: string[];
+  matches(resourceId: string): boolean;
+}
+
+const compileGlobFilter = (globs: readonly string[] | undefined): CompiledGlobFilter | null => {
+  const patterns = (globs ?? [])
+    .map((glob) => glob.trim().replace(/\\/g, "/").replace(/^\.\//, ""))
+    .filter(Boolean);
+  const positive = patterns.filter((glob) => !glob.startsWith("!"));
+  const negative = patterns.filter((glob) => glob.startsWith("!") && glob.length > 1);
+  try {
+    const options = { dot: true, nocase: process.platform === "win32" };
+    const positiveMatchers = positive.map((glob) => picomatch(glob, {
+      ...options,
+      basename: !glob.includes("/"),
+    }));
+    const negativeMatchers = negative.map((glob) => {
+      const pattern = glob.slice(1);
+      return picomatch(pattern, { ...options, basename: !pattern.includes("/") });
+    });
+    return {
+      rgPatterns: [...positive, ...negative],
+      matches: (resourceId) => (
+        (positiveMatchers.length === 0 || positiveMatchers.some((matcher) => matcher(resourceId)))
+        && !negativeMatchers.some((matcher) => matcher(resourceId))
+      ),
+    };
+  } catch {
+    return null;
+  }
+};
+
+interface SearchContextWindow {
+  before: number;
+  after: number;
+}
+
+const contextWindowFor = (params: SearchContentParams): SearchContextWindow => ({
+  before: Math.max(0, params.before ?? params.context ?? 0),
+  after: Math.max(0, params.after ?? params.context ?? 0),
+});
+
+const hasContext = (window: SearchContextWindow): boolean => window.before > 0 || window.after > 0;
+
+const withContext = (lines: string[], line: number, window: SearchContextWindow): { before: string[]; after: string[] } => ({
+  before: window.before > 0 ? lines.slice(Math.max(0, line - 1 - window.before), line - 1) : [],
+  after: window.after > 0 ? lines.slice(line, line + window.after) : [],
+});
+
+const draftHitsFor = (
+  pathName: string,
+  workspaceId: string,
+  content: string,
+  matcher: RegExp,
+  window: SearchContextWindow,
+): WorkspaceSearchHit[] => {
+  const lines = splitLines(content);
+  return lines.flatMap((text, index) => {
+    const column = text.search(matcher);
+    return column < 0 ? [] : [{
+      resource: { workspaceId, resourceId: pathName },
+      line: index + 1,
+      column: column + 1,
+      preview: text,
+      ...withContext(lines, index + 1, window),
+    }];
+  });
+};
+
 export type HarnessSearchService = ReturnType<typeof createHarnessSearchService>;
 
 export function createHarnessSearchService(deps: HarnessSearchDeps) {
   return {
     async search(
       params: SearchContentParams,
-      ctx: { workspaceId: string | null; workspaceScope?: readonly string[]; signal: AbortSignal },
+      ctx: HarnessSearchContext,
     ): Promise<SearchContentResult> {
       if (!ctx.workspaceId) {
-        return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+        return unavailableResult();
       }
 
       const limit = params.limit ?? DEFAULT_LIMIT;
@@ -113,8 +243,16 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       try {
         const root = await deps.resolveWorkspaceRoot(ctx.workspaceId);
         if (!root) {
-          return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          return unavailableResult();
         }
+        const inputContext = ctx.inputContext ?? { source: "disk" as const };
+        if (inputContext.source === "surface" && inputContext.workspaceId !== ctx.workspaceId) {
+          return unavailableResult();
+        }
+        if (typeof params.pattern !== "string" || !params.pattern.trim()) return emptyResult();
+        const contextWindow = contextWindowFor(params);
+        const globFilter = compileGlobFilter(params.glob);
+        if (!globFilter) return unavailableResult();
         const toPrefix = (input: string): string | null => {
           const absolute = path.isAbsolute(input) ? path.resolve(input) : path.resolve(root, input);
           const relative = path.relative(root, absolute);
@@ -137,7 +275,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           (ctx.workspaceScope !== undefined && actorPrefixes.length !== ctx.workspaceScope.length)
           || (params.path !== undefined && requestedPrefixes.length !== 1)
         ) {
-          return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          return emptyResult();
         }
         let searchPrefixes: string[] | undefined;
         if (ctx.workspaceScope !== undefined && params.path !== undefined) {
@@ -149,7 +287,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             }
           }
           if (searchPrefixes.length === 0) {
-            return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+            return emptyResult();
           }
         } else if (ctx.workspaceScope !== undefined) {
           searchPrefixes = [...actorPrefixes];
@@ -163,36 +301,122 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           }
           searchPrefixes = minimal;
         }
+
+        const dirtyPaths = inputContext.source === "surface"
+          ? [...new Set(inputContext.dirtyPaths
+            .map((dirtyPath) => toPrefix(dirtyPath))
+            .filter((dirtyPath): dirtyPath is string => dirtyPath !== null))]
+            .filter((dirtyPath) => (
+              (ctx.workspaceScope === undefined || within(dirtyPath, actorPrefixes))
+              && (params.path === undefined || within(dirtyPath, requestedPrefixes))
+              && globFilter.matches(dirtyPath)
+            ))
+          : [];
+        const dirtyPathKeys = new Set(dirtyPaths.map((dirtyPath) => comparable(dirtyPath)));
+        const draftHits: WorkspaceSearchHit[] = [];
+        if (dirtyPaths.length > 0) {
+          if (!deps.readFile || !ctx.actor || inputContext.source !== "surface" || inputContext.workspaceId !== ctx.workspaceId) {
+            return unavailableResult();
+          }
+          const matcher = compileDraftPattern(params.pattern.trim(), params.fixedStrings, params.ignoreCase);
+          if (!matcher) return unavailableResult();
+          let snapshots: Array<readonly [string, Awaited<ReturnType<ExploreFileReader>>]>;
+          try {
+            snapshots = await Promise.all(dirtyPaths.map(async (dirtyPath) => {
+              controller.signal.throwIfAborted();
+              return [dirtyPath, await deps.readFile!(ctx.actor!, dirtyPath, controller.signal, inputContext)] as const;
+            }));
+          } catch {
+            controller.signal.throwIfAborted();
+            return unavailableResult();
+          }
+          for (const [dirtyPath, snapshot] of snapshots) {
+            if (snapshot.status !== "ready" || snapshot.source !== "surface-draft") return unavailableResult();
+            draftHits.push(...draftHitsFor(dirtyPath, ctx.workspaceId, snapshot.content, matcher, contextWindow));
+          }
+        }
+        let contextIncomplete = false;
         const result = await deps.search(
           {
             query: params.pattern,
             workspaceId: ctx.workspaceId,
-            maxResults: limit * 3, // Over-fetch for grouping
+            // A surface overlay must be merged with every disk hit before the
+            // service applies its own ranking and limit. The backend excludes
+            // dirty paths before counting this bounded over-fetch.
+            maxResults: limit * 3,
             ...(searchPrefixes ? { paths: searchPrefixes.map((prefix) => prefix || ".") } : {}),
+            ...(globFilter.rgPatterns.length > 0 ? { glob: globFilter.rgPatterns } : {}),
+            ...(dirtyPaths.length > 0 ? { excludeResourceIds: dirtyPaths } : {}),
+            ...(params.ignoreCase !== undefined ? { ignoreCase: params.ignoreCase } : {}),
+            ...(params.fixedStrings !== undefined ? { fixedStrings: params.fixedStrings } : {}),
           },
           { signal: controller.signal },
         );
+        controller.signal.throwIfAborted();
 
         if (result.status === "empty") {
-          return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          if (draftHits.length === 0) return emptyResult();
+          const grouped = groupAndSort(draftHits, root, limit);
+          return {
+            status: "ready",
+            files: grouped.files,
+            totalHits: grouped.totalHits,
+            totalFiles: grouped.totalFiles,
+            searchedFiles: grouped.totalFiles,
+            partial: grouped.totalHits > limit,
+          };
         }
         if (result.status === "failure" || result.status === "cancelled") {
-          return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          return unavailableResult();
         }
         if (result.status === "ready") {
-          const hits = result.hits.filter((hit) => {
+          let hits = result.hits.filter((hit) => {
             const resourceId = toPrefix(hit.resource.resourceId);
             if (resourceId === null) return false;
+            if (dirtyPathKeys.has(comparable(resourceId))) return false;
             return (
               (ctx.workspaceScope === undefined || within(resourceId, actorPrefixes))
               && (params.path === undefined || within(resourceId, requestedPrefixes))
+              && globFilter.matches(resourceId)
             );
           });
-          if (hits.length === 0) {
-            return { status: "empty", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+          hits = hits.map((hit) => {
+            const resourceId = toPrefix(hit.resource.resourceId)!;
+            return {
+              ...hit,
+              resource: { ...hit.resource, resourceId },
+            };
+          });
+          if (hasContext(contextWindow) && hits.some((hit) => hit.before === undefined || hit.after === undefined)) {
+            if (!deps.readFile || !ctx.actor) return unavailableResult();
+            const paths = [...new Set(hits
+              .filter((hit) => hit.before === undefined || hit.after === undefined)
+              .map((hit) => hit.resource.resourceId))];
+            const snapshots = await Promise.all(paths.map(async (resourceId) => {
+              controller.signal.throwIfAborted();
+              return [resourceId, await deps.readFile!(ctx.actor!, resourceId, controller.signal, inputContext)] as const;
+            }));
+            const linesByPath = new Map<string, string[]>();
+            for (const [resourceId, snapshot] of snapshots) {
+              if (snapshot.status !== "ready") return unavailableResult();
+              linesByPath.set(resourceId, splitLines(snapshot.content));
+            }
+            hits = hits.map((hit) => {
+              if (hit.before !== undefined && hit.after !== undefined) return hit;
+              const lines = linesByPath.get(hit.resource.resourceId) ?? [];
+              if (lines[hit.line - 1] !== hit.preview) {
+                contextIncomplete = true;
+                return { ...hit, before: [], after: [] };
+              }
+              return { ...hit, ...withContext(lines, hit.line, contextWindow) };
+            });
           }
-          const { files, totalHits, totalFiles } = groupAndSort(hits, root, limit);
-          const partial = totalHits > limit;
+          const mergedHits = [...hits, ...draftHits];
+          if (mergedHits.length === 0) {
+            return emptyResult();
+          }
+          const { files, totalHits, totalFiles } = groupAndSort(mergedHits, root, limit);
+          const partial = totalHits > limit || contextIncomplete;
           return {
             status: "ready",
             files,
@@ -202,10 +426,10 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             partial,
           };
         }
-        return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+        return unavailableResult();
       } catch {
         // Timeout or abort
-        return { status: "unavailable", files: [], totalHits: 0, totalFiles: 0, searchedFiles: 0, partial: false };
+        return unavailableResult();
       } finally {
         clearTimeout(timer);
       }

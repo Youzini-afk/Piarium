@@ -102,6 +102,30 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("authorizes native document reads with allowMissing for dirty-only files", async () => {
+    const responses: Array<{ ok: boolean; result?: unknown }> = [];
+    const authorize = vi.fn(async (_actor: HarnessActorContext, path: string, options: { allowMissing: boolean }) => ({
+      authorityId: "host-1",
+      canonicalResourceId: path,
+      inputPath: path,
+      resourceId: path,
+      workspaceId: "workspace-1",
+      ...options,
+    }));
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(outcome.ok ? { result: outcome.result } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.document"]),
+      authorizeWorkspacePath: authorize,
+    });
+    router.register("document.readSource", { handle: async () => ({ source: "disk" }) });
+    await router.processEvent(harnessEvent("document.readSource", { path: "new.ts" }));
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "new.ts", { allowMissing: true });
+    expect(responses).toEqual([{ ok: true, result: { source: "disk" } }]);
+    router.dispose();
+  });
+
   it("validates every child scope path before creating a thread", async () => {
     const handle = vi.fn(async () => ({ text: "created", threadId: "thread-1", queued: false }));
     const responses: Array<{ ok: boolean; code?: string }> = [];

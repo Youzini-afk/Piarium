@@ -520,6 +520,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessLspNavigation", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessDocumentReadEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessDocumentRead", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessWebCapabilities({
           read: clientCapabilities !== undefined
             && readBoolean(clientCapabilities, "harnessWebRead", { optional: true }) === true,

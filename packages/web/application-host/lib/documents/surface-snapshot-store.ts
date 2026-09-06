@@ -31,7 +31,7 @@ interface StoredSnapshot {
 
 export type SurfaceSnapshotReadResult =
   | { status: 'disk' }
-  | { status: 'ready'; content: string; revision: string; source: 'surface-draft' }
+  | { status: 'ready'; bom: boolean; content: string; encoding: string; revision: string; source: 'surface-draft' }
   | { status: 'unavailable'; message: string };
 
 export type SurfaceSnapshotCloneResult =
@@ -41,11 +41,18 @@ export type SurfaceSnapshotCloneResult =
 
 const contentHash = (content: string): string => createHash('sha256').update(content, 'utf8').digest('hex');
 
-const samePaths = (left: readonly string[], right: readonly string[]): boolean => (
-  left.length === right.length && left.every((path, index) => path === right[index])
-);
+export interface SurfaceSnapshotStoreOptions {
+  caseSensitive?: boolean;
+}
 
-export const createSurfaceSnapshotStore = () => {
+export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions = {}) => {
+  const caseSensitive = options.caseSensitive ?? process.platform !== 'win32';
+  const pathKey = (value: string): string => caseSensitive ? value : value.toLowerCase();
+  const samePaths = (left: readonly string[], right: readonly string[]): boolean => {
+    const leftKeys = left.map(pathKey).sort();
+    const rightKeys = right.map(pathKey).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every((entry, index) => entry === rightKeys[index]);
+  };
   const contents = new Map<string, StoredContent>();
   const snapshots = new Map<string, StoredSnapshot>();
   const pendingBySession = new Map<string, Set<string>>();
@@ -78,7 +85,7 @@ export const createSurfaceSnapshotStore = () => {
       const stored = contents.get(hash);
       if (stored) stored.references += 1;
       else contents.set(hash, { content: resource.content, references: 1 });
-      resources.set(resource.resource.resourceId, Object.freeze({
+      resources.set(pathKey(resource.resource.resourceId), Object.freeze({
         baseRevision: resource.baseRevision,
         encoding: resource.encoding,
         bom: resource.bom,
@@ -87,7 +94,9 @@ export const createSurfaceSnapshotStore = () => {
         resource: Object.freeze({ ...resource.resource }),
       }));
     }
-    const dirtyPaths = Object.freeze([...resources.keys()].sort());
+    const dirtyPaths = Object.freeze([...resources.values()]
+      .map((resource) => resource.resource.resourceId)
+      .sort());
     const snapshot: StoredSnapshot = Object.freeze({
       dirtyPaths,
       ownerId: input.ownerId,
@@ -113,8 +122,7 @@ export const createSurfaceSnapshotStore = () => {
     if (context.source !== 'surface' || context.snapshot.status !== 'ready') return null;
     const snapshot = snapshots.get(context.snapshot.ref);
     if (!snapshot || snapshot.sessionId !== sessionId || snapshot.workspaceId !== context.workspaceId) return null;
-    const paths = [...context.dirtyPaths].sort();
-    return samePaths(snapshot.dirtyPaths, paths) ? snapshot : null;
+    return samePaths(snapshot.dirtyPaths, context.dirtyPaths) ? snapshot : null;
   };
 
   const commit = (sessionId: string, context: AgentInputContext): { committed: boolean } => {
@@ -147,7 +155,7 @@ export const createSurfaceSnapshotStore = () => {
 
   const read = (sessionId: string, context: AgentInputContext, resourceId: string): SurfaceSnapshotReadResult => {
     if (context.source === 'disk') return { status: 'disk' };
-    const dirty = context.dirtyPaths.includes(resourceId);
+    const dirty = context.dirtyPaths.some((path) => pathKey(path) === pathKey(resourceId));
     if (context.snapshot.status === 'unavailable') {
       return dirty
         ? { status: 'unavailable', message: 'The editor source snapshot is unavailable for this dirty document.' }
@@ -159,7 +167,7 @@ export const createSurfaceSnapshotStore = () => {
         ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
         : { status: 'disk' };
     }
-    const resource = snapshot.resources.get(resourceId);
+    const resource = snapshot.resources.get(pathKey(resourceId));
     if (!resource) return { status: 'disk' };
     const content = contents.get(resource.contentHash)?.content;
     if (content === undefined) {
@@ -167,7 +175,9 @@ export const createSurfaceSnapshotStore = () => {
     }
     return {
       status: 'ready',
+      bom: resource.bom,
       content,
+      encoding: resource.encoding,
       revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
       source: 'surface-draft',
     };
@@ -182,7 +192,7 @@ export const createSurfaceSnapshotStore = () => {
     if (!snapshot) return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
     const resources: Array<SurfaceSnapshotResource & { revision: string }> = [];
     for (const resourceId of snapshot.dirtyPaths) {
-      const resource = snapshot.resources.get(resourceId);
+      const resource = snapshot.resources.get(pathKey(resourceId));
       const content = resource ? contents.get(resource.contentHash)?.content : undefined;
       if (!resource || content === undefined) {
         return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };

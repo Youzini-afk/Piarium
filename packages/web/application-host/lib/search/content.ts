@@ -16,6 +16,8 @@ const CONTENT_SEARCH_EXCLUDED_GLOBS = [
 type PathModule = typeof path;
 
 export interface WorkspaceSearchHit {
+  after?: string[];
+  before?: string[];
   column: number;
   line: number;
   preview: string;
@@ -28,8 +30,14 @@ export type WorkspaceContentSearchResult =
   | { generation: number | undefined; message: string; status: 'failure' };
 
 export interface WorkspaceContentSearchRequest {
+  /** Additional ripgrep include/exclude globs supplied by the caller. */
+  glob?: string[] | undefined;
   includeHidden?: boolean | undefined;
   maxResults?: number | undefined;
+  ignoreCase?: boolean | undefined;
+  fixedStrings?: boolean | undefined;
+  /** Workspace-relative resource IDs to remove before maxResults is counted. */
+  excludeResourceIds?: string[] | undefined;
   /** Optional workspace-contained files/directories to search instead of the whole root. */
   paths?: string[] | undefined;
   query?: string | undefined;
@@ -203,6 +211,11 @@ export const createWorkspaceContentSearch = ({
       ...CONTENT_SEARCH_EXCLUDED_GLOBS.flatMap((glob) => ['--glob', glob]),
     ];
     if (request?.includeHidden) args.push('--hidden');
+    if (request?.ignoreCase) args.push('--ignore-case');
+    if (request?.fixedStrings) args.push('--fixed-strings');
+    for (const glob of request?.glob ?? []) {
+      if (typeof glob === 'string' && glob.trim()) args.push('--glob', glob);
+    }
     args.push('--', query.trim(), ...searchPaths);
 
     return await new Promise<WorkspaceContentSearchResult>((resolve) => {
@@ -227,10 +240,18 @@ export const createWorkspaceContentSearch = ({
       let stdoutBuffer = '';
       const hits: WorkspaceSearchHit[] | null = options.collect === false ? null : [];
       let hitCount = 0;
+      const excludedResourceIds = new Set((request.excludeResourceIds ?? []).map((resourceId) => (
+        process.platform === 'win32' ? resourceId.toLowerCase() : resourceId
+      )));
       const publish = (batch: WorkspaceSearchHit[]): boolean => {
-        if (batch.length === 0) return false;
-        const remaining = maxResults === null ? batch.length : Math.max(0, maxResults - hitCount);
-        const accepted = remaining >= batch.length ? batch : batch.slice(0, remaining);
+        const eligible = batch.filter((hit) => (
+          !excludedResourceIds.has(process.platform === 'win32'
+            ? hit.resource.resourceId.toLowerCase()
+            : hit.resource.resourceId)
+        ));
+        if (eligible.length === 0) return false;
+        const remaining = maxResults === null ? eligible.length : Math.max(0, maxResults - hitCount);
+        const accepted = remaining >= eligible.length ? eligible : eligible.slice(0, remaining);
         if (accepted.length === 0) return maxResults !== null && hitCount >= maxResults;
         hitCount += accepted.length;
         hits?.push(...accepted);

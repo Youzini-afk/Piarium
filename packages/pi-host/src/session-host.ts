@@ -620,6 +620,7 @@ export class SessionHost {
   #workspaceMutationJournalEnabled = false;
   #harnessThreadRuntimeEnabled = false;
   #harnessLspNavigationEnabled = false;
+  #harnessDocumentReadEnabled = false;
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
@@ -674,6 +675,10 @@ export class SessionHost {
 
   setHarnessLspNavigationEnabled(enabled: boolean): void {
     this.#harnessLspNavigationEnabled = enabled;
+  }
+
+  setHarnessDocumentReadEnabled(enabled: boolean): void {
+    this.#harnessDocumentReadEnabled = enabled;
   }
 
   setHarnessWebCapabilities(input: { read: boolean; search: boolean }): void {
@@ -3175,6 +3180,8 @@ export class SessionHost {
         workspaceMutationJournal: workspaceMutationJournal ?? undefined,
         isOpenAIFamily,
         lspNavigationAvailable: this.#harnessLspNavigationEnabled,
+        documentReadAvailable: this.#harnessDocumentReadEnabled,
+        autoResizeImages: settingsManager.getImageAutoResize(),
         yieldedTools,
         ...(readPage ? { readPage } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,

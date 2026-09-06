@@ -89,13 +89,11 @@ export interface SearchContentParams {
   pattern: string;
   path?: string;
   glob?: string[];
-  type?: string;
   ignoreCase?: boolean;
   fixedStrings?: boolean;
   before?: number;
   after?: number;
   context?: number;
-  mode?: "content" | "files" | "count";
   limit?: number;
 }
 
@@ -173,6 +171,15 @@ export interface SearchResultItem {
   snippet: string;
   publishedAt?: string;
 }
+
+/**
+ * The source selected for a native Pi `read` call. Disk reads stay inside the
+ * Pi runtime; surface drafts are returned as save-compatible bytes by the
+ * authenticated Application Host.
+ */
+export type DocumentReadSourceResult =
+  | { source: "disk" }
+  | { base64: string; revision: string; source: "surface-draft" };
 
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
@@ -310,6 +317,7 @@ export interface HarnessServiceMap {
       handle: string;
     };
   };
+  "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
 }
@@ -327,6 +335,7 @@ export type HarnessCapability =
   | "process.shell"
   | "read.lsp"
   | "read.output"
+  | "read.document"
   | "read.search"
   | "read.web"
   | "write.document";
@@ -363,6 +372,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.merge": "control.thread",
   "thread.kill": "control.thread",
   "explore.search": "read.search",
+  "document.readSource": "read.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
@@ -417,6 +427,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.merge",
   "thread.kill",
   "explore.search",
+  "document.readSource",
   "surface.snapshot.commit",
   "surface.snapshot.release",
 ]);

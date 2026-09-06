@@ -30,6 +30,8 @@ export interface WorkingBranch {
   baseState: Record<string, RecoveryState>;
   /** Paths whose effective base state was determined by unsaved surface drafts, including structural closure. */
   draftBasePaths: string[];
+  /** Relative file or directory roots copied from harness.worktree.copyIgnored at launch. */
+  captureScopes: string[];
   deltas: Record<string, RecoveryState>;
   headRevision: number;
   createdAt: string;

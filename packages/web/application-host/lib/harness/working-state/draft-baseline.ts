@@ -176,6 +176,7 @@ export async function createBranchWithDraftBaseline(
   baseState: Record<string, RecoveryState>,
   drafts: EditorDraft[] | Record<string, EditorDraft | string | Buffer | null>,
   baseRef?: string,
+  captureScopes: string[] = [],
 ): Promise<WorkingBranch> {
   const { effectiveState, changedPaths } = await overlayDraftsOnBaseline({
     baseState,
@@ -183,5 +184,5 @@ export async function createBranchWithDraftBaseline(
     putObject: (bytes) => store.putObject(bytes),
   });
 
-  return store.createBranch(workspaceId, branchId, effectiveState, baseRef, changedPaths);
+  return store.createBranch(workspaceId, branchId, effectiveState, baseRef, changedPaths, captureScopes);
 }

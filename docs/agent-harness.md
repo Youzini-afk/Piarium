@@ -94,10 +94,10 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 度量 | 记录错误、重试、输出、缓存、普通会话用量、耗时与人工介入；不建立辅助模型分项费用/Token 看板。直接测试验证正确性，真实使用驱动优化。T4 和检索对照按问题需要使用，不是开发或默认启用门禁；Zone 0 稳定性由契约测试保证（D-078/D-080） |
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | grep → 默认提供的 explore（确定性召回、结构展开、版本化正文与关系打包）→ retrieval 角色。explore 接通即注册，可用来源逐步扩展；intent/judge/查询修复按已配置 explore 槽位和查询需要运行，无槽位走纯算法；不等完整图、向量或独立评测（D-078） |
-| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore` 已消费，read/grep/thread 基线继续接同一引用（第 6.1 节，D-071/D-082） |
+| 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read` 与 thread 基线已消费同一引用，find/ls 与 LSP 继续接入（第 6.1 节，D-071/D-082/D-085） |
 | 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
-| Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
+| Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`read` / `edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
 | 权限 | 插件已加载时由 pi-permission-system 独占 tool_call 与 UI，原生门在缺席时覆盖 Harness 工具；Host 只验身份/能力/路径，不弹窗。原生权限按具体能力演进，替换时覆盖实际消费者并保留用户策略，不因“原生”名义缩小已有保护，也不重复形式审批（9.1.2，D-078） |
 | 知识库保留 | 可配置；默认按时间自动清理原始 `event` 与已结束会话的 `block`，`knowledge` 不按时间过期；删除会话级联删除其 event 与 block |
 | 用户级记忆 | 存在但轻：独立 `user.tdb`，只放 `knowledge`，不放 event / block；写入需经审阅；在 Settings 中可见、可编辑、可审计 |
@@ -158,7 +158,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 
 | harness 机制 | Pi 事件 / API | 用法 |
 | --- | --- | --- |
-| 工具覆盖 | `customTools` on session create | 同名 `ToolDefinition` 覆盖 `bash` / `edit` / `write` / `grep`；新增 `apply_patch`、`get_output`、`write_to_process`、`kill_shell`、`diagnostics`、`todo`、`dispatch`、`wait`、`webfetch`、`websearch`；`executionMode` 按第 5.9 节声明 |
+| 工具覆盖 | `customTools` on session create | 同名 `ToolDefinition` 覆盖 `read` / `bash` / `edit` / `write` / `grep`；`read` 只在 Host 声明固定来源服务时覆盖，否则保留 Pi 原生实现；新增 `apply_patch`、`get_output`、`write_to_process`、`kill_shell`、`diagnostics`、`todo`、`dispatch`、`wait`、`webfetch`、`websearch`；`executionMode` 按第 5.9 节声明 |
 | Zone 2 尾部追加 | `before_agent_start` → 返回 `message` | 本轮轨迹增量、记忆指针、计划复述作为一条自定义消息追加；**不**通过返回 `systemPrompt` 注入 |
 | post-tool 反馈注入 | `tool_result` → 替换 `content` / `details` | 把诊断附加到 edit/write 结果；验证器的统一通道 |
 | 工具门控 | `tool_call` → `block` | profile 的权限默认值；等价于"mask 不删" |
@@ -184,10 +184,10 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 | 工具 | 来源 | 并发 | 一句话 |
 | --- | --- | --- | --- |
 | `bash` | 覆盖 Pi | 独占（`executionMode: sequential`） | PTY、持久会话 shell、超时转后台不杀 |
-| `grep` | 覆盖 Pi | 并行 | rg 镜像 schema，分组排序，句柄 |
+| `grep` | 覆盖 Pi | 并行 | rg 搜索、固定 surface 叠加、分组排序与有界结果 |
 | `edit` / `write` | 覆盖 Pi | 不同路径并行，同路径串行 | 参数不变，附加新引入的诊断 |
 | `apply_patch` | 新增 | 同上 | Codex 语法多文件编辑，按模型家族启用 |
-| `read` / `find` / `ls` | 实体目录复用 Pi；虚拟分支走同名适配 | 并行 | 同一分支读视图，结果经句柄截断（9.2.5b） |
+| `read` / `find` / `ls` | `read` 已用同名适配；find/ls 当前复用实体目录 Pi 工具 | 并行 | `read` 保留 Pi 原生分页、截断与图片，同时读取本轮固定草稿；find/ls 的固定 surface 枚举仍待接（9.2.5b） |
 | `get_output` / `write_to_process` / `kill_shell` | 新增 | 读并行，写与杀独占 | 后台 shell 与输出句柄；对运行中 shell 默认返回上次读取之后的增量（第 5.5 节） |
 | `diagnostics` | 新增 | 并行 | `pending` 后按需查 |
 | `todo` | 新增 | 串行 | 主 agent 自己的计划（第 5.6 节） |
@@ -306,22 +306,21 @@ exit 0 · 1.2s · cwd packages/web
 
 ### 5.3 `grep`（覆盖）
 
-覆盖 Pi 内置 `grep` 而非新增 `search`，以保持同名覆盖原则。参数 schema **忠实镜像 rg 的命令行 flag**（`pattern`、
-`path`、`-i`、`-A/-B/-C`、`--glob`、`--type`、`--fixed-strings`、输出模式 files / content / count），让模型训练时学到
-的用法直接迁移；`limit` 默认 100 条命中，完整结果仍存入句柄。这是 Claude Code Grep 的做法；Devin CLI 同样提供 `grep` /
-`glob` 工具且 Fast Context 只用它们；Codex 没有专用 grep 工具而走 shell 里的 rg；Cursor 是 rg 工具加一个语义
-`codebase_search`。
+覆盖 Pi 内置 `grep` 而非新增 `search`，以保持同名覆盖原则。现行参数是 `pattern`、`path`、大小写、fixed string、
+`-A/-B/-C` 等价邻行、多个 include/exclude glob 与 `limit`；曾暴露但从未实现的 `--type` 和 files/count mode 已删除，
+不让假参数继续占工具 schema。`limit` 默认 100 条命中，达到限制时返回 partial，模型可缩小 path/glob 或提高 limit。
 
-- 走 host 的 `createWorkspaceContentSearch`（ripgrep，尊重 `.gitignore`，有界）；permission 的 ignore 模式编译为
-  `--glob !pattern` 传入。
-- 排序按文件分组；文件按命中密度、最近修改（mtime 与 Git status 中 modified 加权）、路径偏好（源码优先于测试、
-  浅路径优先）三信号排序。目标是第一屏就是模型要的文件。
+- 走 host 的 `createWorkspaceContentSearch`（ripgrep，尊重 `.gitignore`，有界）；调用方的 include/exclude glob 直接传给 rg，
+  surface 路径用同一组规则过滤。
+- 排序按文件分组；当前按命中数、源码/测试路径偏好和路径深度确定顺序。mtime 与 Git modified 尚未接入，不把占位字段
+  写成已生效的排序信号。
 - **不含符号模式。** 符号导航（定义、引用、工作区符号、悬停签名 `hover`）是独立的 LSP 工具，第 3 阶段与 `related` 一起
   交付——Claude Code 也把 LSP 与 Grep 分开，Devin 的 `hover_symbol` 与定义、引用并列。grep 的 schema 保持与 rg 一致，
   不混入 rg 没有的语义。
-- 超时（默认 20 s）时若已有部分输出，丢弃可能不完整的最后一行后返回部分结果并注明"未搜完"；零输出才报工具错误。
-  模型必须能区分"没搜完"与"没搜到"。
-- 当前 `grep` 仍只搜磁盘；D-082 已为 `explore` 接通固定 surface snapshot。后续让 grep 消费同一引用，不能改成读取发送消息之后继续变化的 live buffer。
+- Host 搜索当前有 20 s 工作默认；取消、rg 失败或超时返回 unavailable，命中数超过显示 limit 才返回 partial，不能把 unavailable
+  写成零命中。
+- D-085 已让 `grep` 消费与 `explore` 相同的固定 surface snapshot：先在 rg 流式计数前排除 dirty path 的旧磁盘命中，再在固定
+  草稿上执行相同 regex/fixed/case/glob 过滤，最后统一排序和截断。草稿缺失或过期时整个相关查询 unavailable，不回退磁盘。
 
 ### 5.4 `edit` / `write`（已覆盖，附加诊断）
 
@@ -374,7 +373,7 @@ confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模�
 **`explore(question, paths?)` 是正式默认检索能力**，规格与依赖统一见第 6.1 节。它用确定性搜索与结构展开减少找定义、
 找引用等机械跳转，返回按当前来源重读、带版本和关系的代码单元；不承诺固定时延，也不声称结构查询能替代所有跨文件推理。
 纯算法路径先行，意图扩展、候选裁决和查询修复按查询需要接入；没有 models.explore 就没有模型调用，永不回退主模型。
-当前 v1 仍未接线；补齐当前正文读取、真实句柄与生产调用后默认注册，不等独立回放、所有可选来源或上下文去重优化完成。
+当前磁盘与固定草稿正文、真实 OutputStore 句柄和生产调用已接线并默认注册；LSP/符号 revision、关系扩展与可选模型增强继续沿本节推进。
 
 `dispatch(role, task, { scope?: paths })` 把一个任务交给第 9.2.2 节角色目录中的一个成员：**开一条线程**（第 9.3 节），
 **异步**，立即返回线程 id；父继续工作。系统提示把角色呈现为团队成员而非工具（第 9.2.4 节）。每个角色有自己的结果
@@ -491,15 +490,15 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 
 三级升级，每级更贵，主 agent 自己判断用哪级：
 
-**第一级：`grep` 工具。** rg 镜像、分组排序、句柄（第 5.3 节）。知道确切符号或字面量时一次调用就该给出第一屏正确的
+**第一级：`grep` 工具。** rg、固定草稿叠加与分组排序（第 5.3 节）。知道确切符号或字面量时一次调用就该给出第一屏正确的
 文件。
 
 **第二级：`explore` 工具——用结构查询减少机械跳转（正式实施，D-078）。**
 目标是尽快返回主 agent 能直接使用的代码单元及其关系。确定性召回、结构展开、版本化正文和关系打包作为默认实现，接通后投入使用。
 工程测试保证来源、版本、路径与输出正确；实际任务用于优化召回和延迟，不作为批准这个方向的前提。依赖与实施形状见 plan 3.2。
 当前纵切已接通实际 rg、多路径与 actor scope、Documents 版本化连续正文、发起窗口的固定 dirty snapshot 和会话 OutputStore。
-查询后磁盘文件变化/不可读会明确标记 stale/unavailable；surface draft 在消息发送时捕获，后续编辑不改变本轮结果。结构展开、
-其他工具的固定视图与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082）。
+`explore`、`grep` 与同名 `read` 已读取该固定正文；后续编辑不改变本轮结果，来源过期不回退磁盘。结构展开、find/ls、LSP revision
+与可选模型处理继续沿本节实施；现有词项搜索不冒充这些来源已接通（D-079/D-082/D-085）。
 
 **设计依据与性能边界。** 以下研究记录说明取舍，不是必须复现的上线门槛；真实使用发现反例时修正算法及相应结论：
 
@@ -534,12 +533,12 @@ Host 按来源读取带版本的不可变快照，UI 保持可变缓冲的所有
 这是本次已读文件的版本集合，不是全仓库强一致快照。窗口断开后已捕获快照可按其版本使用，拿不到最新内容则显式 unavailable/stale；
 磁盘替代只能标为磁盘，不能冒充当前草稿。没有 surface 的 headless 任务使用磁盘。
 
-**当前实现与缺口（D-082/D-083）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API
+**当前实现与缺口（D-082–D-085）**：Document Registry 在 prompt/steer/follow-up 前把全部 dirty buffers 经鉴权 Documents API
 固化为 Host 内存 snapshot；runtime 与 Harness 只传不透明引用或 unavailable dirty paths。pending/active 生命周期与输入接受绑定，
-捕获失败不阻断消息，也不回退这些路径的磁盘正文。`explore` 直接读取该 snapshot。`thread.dispatch` 则在请求内把完整固定草稿复制到
-持久 WorkingState draft baseline，之后排队、Host 重启或 surface snapshot 释放都不改变线程输入；已知 dirty 正文不可用时不创建一个
-伪称继承窗口状态的线程。Pi 原生 `read`、现有 `grep` 与父工作区 LSP 仍未消费该固定视图；隔离线程依靠已物化目录读取。Host 重启
-会使尚未被消费者复制的内存 snapshot 过期，不影响已经写入线程工作状态的草稿。
+捕获失败不阻断消息，也不回退这些路径的磁盘正文。`explore`、`grep` 与 Host-capability 门控的同名 `read` 直接读取该 snapshot；
+`read` 的正文来源由 Host 选择，分页、截断、图片和磁盘分支仍委托 Pi 原生实现。`thread.dispatch` 在请求内把完整固定草稿复制到持久
+WorkingState draft baseline，之后排队、Host 重启或 surface snapshot 释放都不改变线程输入。find/ls 与父工作区 LSP 尚未消费该固定
+视图；隔离线程依靠已物化目录读取。Host 重启会使尚未被消费者复制的内存 snapshot 过期，不影响已经写入线程工作状态的草稿。
 
 **管线与真实依赖。** 各阶段不是全并行，join 点如下（→ 表示依赖）：
 
@@ -1066,16 +1065,16 @@ accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（
    `edit` / `write` / `apply_patch` 这类**在 worker 进程内直接写文件**的工具目前唯一可阻断的门——Host 对这些写入只能通过
    Harness wrapper 的 mutation lease 约束，无法约束任意第三方工具或 worker 自己的文件访问。
 2. **Host 服务授权**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态能力集、workspace / path 包含，
-   覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `thread.*` / `fs.lock` / `lsp.*`）。能力按会话实际冻结的
+   覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `document.readSource` / `thread.*` / `fs.lock` / `lsp.*`）。能力按会话实际冻结的
    `activeTools` 推导：只有没有任何 `bash` 工具时才不含 `process.shell`；关闭 Piarium 的同名覆盖若会回退到 Pi 内置 bash，
    仍然具有 process 能力。缺少该能力时绕过工具直接到达的 `shell.exec` 必须被拒——这不是第二套用户策略，是防止
-   绕过工具入口。按风险类别授权：`read`（search / output / lsp）、`process`（shell）、`control`（thread send / kill /
+   绕过工具入口。按风险类别授权：`read`（document / search / output / lsp）、`process`（shell）、`control`（thread send / kill /
    merge）、`write`（未来经 host 中介的文档写入）。
 3. **OS 沙箱**（第 9.1.1 节）：限制 worker 绕过工具直接访问文件与网络。当前不具备。
 
-`ThreadLaunchManifest.scope` 是任务范围，同时对 Host 能解析出具体路径的服务形成强约束：`search.content` 的返回项、LSP 路径、
-`fs.lock` 路径与显式 `shell.exec.cwd` 都必须落在 scope 内。它**不是文件系统沙箱**：shell 命令文本内部可以改变目录或访问其他
-路径，Pi 内置 `read` 也在 worker 内直接执行。隔离 worktree 把写入副本与父工作区分开，但只有未来的 OS containment 才能约束
+`ThreadLaunchManifest.scope` 是任务范围，同时对 Host 能解析出具体路径的服务形成强约束：`search.content` 的返回项、固定来源
+`read`、LSP 路径、`fs.lock` 路径与显式 `shell.exec.cwd` 都必须落在 scope 内。它**不是文件系统沙箱**：shell 命令文本内部可以
+改变目录或访问其他路径；Host 未提供固定来源或用户关闭覆盖时，Pi 内置 `read` 也仍在 worker 内直接执行。隔离 worktree 把写入副本与父工作区分开，但只有未来的 OS containment 才能约束
 同用户进程能读写的全部路径。
 
 **威胁模型**：worker 是 host 自己 spawn 的、同一 OS 用户的子进程，本来就拥有整个文件系统；第二层防的是**跨会话串线、
@@ -1191,7 +1190,7 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 | 对象 | 所有权与用途 |
 | --- | --- |
 | 内容对象 / 路径状态 | Host 存字节与哈希；路径状态复用 missing、file+mode、directory、symlink 原始目标、unsupported 的恢复模型，保留编码与换行；文本/二进制用于合并策略 |
-| 工作树 / 工作分支 | 固定 baseState、按路径的 delta/tombstone、单调 revision、来源与覆盖；目录节点采用 Merkle 结构共享，旧修订不变 |
+| 工作树 / 工作分支 | 固定 baseState、按路径的 delta/tombstone、单调 revision、草稿路径与显式 captureScopes；目录节点采用 Merkle 结构共享，旧修订不变 |
 | 物化记录 | branchId、输入 revision、实际路径、已收集 revision、运行者与未收集改动、环境准备状态、占用；同一分支写入按世代协调 |
 | 结果 / 验证记录 | resultRevision、可读取正文的引用、变更路径与来源；验证记录输入修订、环境、命令、退出与生成物，运行中输入变了须说明 |
 | Integration | 选定子结果、父相关路径/草稿的期望状态、逐路径计划和实际 before/after、冲突、暂存区影响与恢复操作引用 |
@@ -1207,6 +1206,10 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 `ThreadLaunchManifest.draftBaselineId` 只持久化 Host 对象身份，不进入模型参数。带草稿的角色统一使用 isolated worktree。Run 启动时先按
 现有后端准备磁盘目录，再以持久草稿覆盖对应路径；这个有效状态直接成为工作分支的 revision 0，delta 为空，因此未被子线程修改的
 草稿不会出现在结果里。非草稿路径目前仍取 Run 启动时的物化内容，并非整个工作区在 dispatch 时的瞬时快照。
+
+`harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
+显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和
+materialize 使用同一冻结范围，Git 是否忽略该路径不再决定结果是否保存。
 
 Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非 Git、尚无首次 commit 的目录按需捕获输入并使用 copy/CoW。
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
@@ -1260,7 +1263,7 @@ Host 通过父 Pi 会话的 settings.get 取得实际设置和 projectTrusted，
 快速读取句柄，不作为持久报告唯一引用。用户配置一次即授权正常重复执行，不每次再问，不自动执行从仓库猜出的命令。
 
 文件分为需版本化的工作输入/结果、可重建缓存、用户提供的环境文件；ignored 仅作初始选择信号，不能判定重要性。copyIgnored 可显式
-选入文件并记录用途。优先文件系统 CoW 克隆（写时分离）和包管理器自身缓存，缺该能力正常复制；可写构建产物不默认硬链接或 junction
+选入文件或目录，其规范化根随工作分支持久化并参与每次结果发布。优先文件系统 CoW 克隆（写时分离）和包管理器自身缓存，缺该能力正常复制；可写构建产物不默认硬链接或 junction
 到父目录。用户显式共享时显示共享范围。Git 后端不切用户当前分支、不改写提交历史，内部引用可识别；允许必要的 worktree 元数据，
 不承诺“用户 .git 一个字节不动”。
 
