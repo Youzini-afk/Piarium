@@ -270,4 +270,20 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.details.byteBudget).toBe(DEFAULT_BYTE_BUDGET);
     expect(result.snippets[0]?.revision).toBe("rev-1");
   });
+
+  it("reports filesDropped separately from a hit-budget partial", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => ({
+        hits: [{ path: "kept.ts", line: 1, text: "needle" }],
+        partial: true,
+        filesDropped: 13,
+      }),
+      readFile: async () => ready("needle"),
+    });
+    expect(result.searched.incomplete).toBe(true);
+    expect(result.searched.filesDropped).toBe(13);
+    const packed = formatExploreOutput(result);
+    expect(packed.visibleText).toMatch(/13 matching file\(s\) were not brought into the candidate pool/);
+    expect(packed.visibleText).not.toMatch(/candidate working budget reached/);
+  });
 });

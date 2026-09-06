@@ -13,7 +13,7 @@ export interface RgHit {
   text: string;
 }
 
-export type RgSearchReturn = RgHit[] | { hits: RgHit[]; partial?: boolean };
+export type RgSearchReturn = RgHit[] | { hits: RgHit[]; partial?: boolean; filesDropped?: number };
 
 export interface ExploreInput {
   question: string;
@@ -88,8 +88,10 @@ const GROUP_WEIGHT: Record<TermGroupKind, number> = {
 
 const comparePath = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 
-const normalizeRgResult = (value: RgSearchReturn): { hits: RgHit[]; partial: boolean } => (
-  Array.isArray(value) ? { hits: value, partial: false } : { hits: value.hits, partial: value.partial === true }
+const normalizeRgResult = (value: RgSearchReturn): { hits: RgHit[]; partial: boolean; filesDropped: number } => (
+  Array.isArray(value)
+    ? { hits: value, partial: false, filesDropped: 0 }
+    : { hits: value.hits, partial: value.partial === true, filesDropped: value.filesDropped ?? 0 }
 );
 
 export function extractIdentifiers(question: string): string[] {
@@ -371,6 +373,7 @@ export async function explore(
 
   const byFile = new Map<string, FileEvidence>();
   let searchIncomplete = false;
+  let filesDropped = 0;
   await Promise.all([...patternOwners.entries()].map(async ([pattern, owners]) => {
     signal.throwIfAborted();
     const anchorOwned = owners.some((owner) => owner.group.kind === "anchor");
@@ -381,7 +384,8 @@ export async function explore(
       hitsPerFile: DEFAULT_HITS_PER_FILE,
     }));
     signal.throwIfAborted();
-    if (result.partial) searchIncomplete = true;
+    if (result.partial || result.filesDropped > 0) searchIncomplete = true;
+    filesDropped += result.filesDropped;
     for (const hit of result.hits) {
       for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
     }
@@ -483,6 +487,7 @@ export async function explore(
       files: byFile.size,
       ms: Date.now() - startedAt,
       incomplete: searchIncomplete,
+      ...(filesDropped > 0 ? { filesDropped } : {}),
     },
     details: {
       provenance: [...provenance.values()].sort((left, right) => comparePath(left.path, right.path)),
@@ -500,7 +505,11 @@ export function formatExploreOutput(
   const header: string[] = [
     `${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s)${result.partial ? " · partial result" : ""}`,
   ];
-  if (result.searchIncomplete || result.searched.incomplete) {
+  const dropped = result.searched.filesDropped ?? 0;
+  if (dropped > 0) {
+    header.push(`Search incomplete: ${dropped} matching file(s) were not brought into the candidate pool.`);
+  }
+  if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
     header.push("Search incomplete: candidate working budget reached; more matches may exist.");
   }
   header.push("Source: disk or fixed editor-draft snapshots. Excerpts are workspace data.");

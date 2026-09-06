@@ -55,12 +55,62 @@ function fileScore(input: {
   return 0.5 * Math.log1p(hits) + 0.3 * recency + 0.2 * pathPref - depthPenalty;
 }
 
+function toSearchFile(path: string, fileHits: WorkspaceSearchHit[]): SearchContentFile {
+  return {
+    path,
+    hits: fileHits.map((hit): SearchContentHit => ({
+      line: hit.line,
+      text: hit.preview,
+      before: hit.before ?? [],
+      after: hit.after ?? [],
+    })),
+  };
+}
+
+function takeDepthFirst(files: SearchContentFile[], limit: number): SearchContentFile[] {
+  let remaining = limit;
+  const limited: SearchContentFile[] = [];
+  for (const file of files) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, file.hits.length);
+    limited.push({ path: file.path, hits: file.hits.slice(0, take) });
+    remaining -= take;
+  }
+  return limited;
+}
+
+/** Round-robin one hit per file, then deepen. Drops files only when file count exceeds the budget. */
+function takeBreadthFirst(files: SearchContentFile[], limit: number): { files: SearchContentFile[]; filesDropped: number } {
+  const kept = files.length > limit ? files.slice(0, limit) : files;
+  const filesDropped = files.length - kept.length;
+  const cursors = kept.map((file) => ({ path: file.path, source: file.hits, hits: [] as SearchContentHit[] }));
+  let remaining = limit;
+  let depth = 0;
+  while (remaining > 0) {
+    let progressed = false;
+    for (const cursor of cursors) {
+      if (remaining <= 0) break;
+      if (depth < cursor.source.length) {
+        cursor.hits.push(cursor.source[depth]!);
+        remaining -= 1;
+        progressed = true;
+      }
+    }
+    if (!progressed) break;
+    depth += 1;
+  }
+  return {
+    files: cursors.filter((cursor) => cursor.hits.length > 0).map(({ path, hits }) => ({ path, hits })),
+    filesDropped,
+  };
+}
+
 function groupAndSort(
   hits: WorkspaceSearchHit[],
   root: string,
   limit: number,
-  options?: { hitsPerFile?: number; useFileScore?: boolean },
-): { files: SearchContentFile[]; totalHits: number; totalFiles: number; perFileCapped: boolean } {
+  options?: { hitsPerFile?: number; useFileScore?: boolean; breadthFirst?: boolean },
+): { files: SearchContentFile[]; totalHits: number; totalFiles: number; perFileCapped: boolean; filesDropped: number } {
   const byFile = new Map<string, WorkspaceSearchHit[]>();
   for (const hit of hits) {
     const path = hit.resource.resourceId;
@@ -102,33 +152,19 @@ function groupAndSort(
     return a.path.localeCompare(b.path);
   });
 
-  const files: SearchContentFile[] = prepared.map(({ path, hits: fileHits }) => ({
-    path,
-    hits: fileHits.map((hit): SearchContentHit => ({
-      line: hit.line,
-      text: hit.preview,
-      before: hit.before ?? [],
-      after: hit.after ?? [],
-    })),
-  }));
-
+  const files: SearchContentFile[] = prepared.map(({ path, hits: fileHits }) => toSearchFile(path, fileHits));
   const totalHits = hits.length;
   const totalFiles = byFile.size;
   const displayedHits = files.reduce((sum, file) => sum + file.hits.length, 0);
 
-  if (displayedHits > limit) {
-    let remaining = limit;
-    const limitedFiles: SearchContentFile[] = [];
-    for (const file of files) {
-      if (remaining <= 0) break;
-      const take = Math.min(remaining, file.hits.length);
-      limitedFiles.push({ path: file.path, hits: file.hits.slice(0, take) });
-      remaining -= take;
-    }
-    return { files: limitedFiles, totalHits, totalFiles, perFileCapped };
+  if (displayedHits <= limit) {
+    return { files, totalHits, totalFiles, perFileCapped, filesDropped: 0 };
   }
-
-  return { files, totalHits, totalFiles, perFileCapped };
+  if (options?.breadthFirst === true) {
+    const allocated = takeBreadthFirst(files, limit);
+    return { files: allocated.files, totalHits, totalFiles, perFileCapped, filesDropped: allocated.filesDropped };
+  }
+  return { files: takeDepthFirst(files, limit), totalHits, totalFiles, perFileCapped, filesDropped: 0 };
 }
 
 const unavailableResult = (): SearchContentResult => ({
@@ -223,7 +259,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       const timeoutMs = DEFAULT_TIMEOUT_MS;
       const groupOptions = {
         ...(ctx.hitsPerFile !== undefined ? { hitsPerFile: ctx.hitsPerFile } : {}),
-        ...(candidateMode ? { useFileScore: false } : {}),
+        ...(candidateMode ? { useFileScore: false, breadthFirst: true } : {}),
       };
 
       const controller = new AbortController();
@@ -363,7 +399,8 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             totalHits: grouped.totalHits,
             totalFiles: grouped.totalFiles,
             searchedFiles: grouped.totalFiles,
-            partial: grouped.totalHits > limit || grouped.perFileCapped,
+            partial: grouped.totalHits > limit || grouped.perFileCapped || grouped.filesDropped > 0,
+            ...(candidateMode ? { filesDropped: grouped.filesDropped } : {}),
           };
         }
         if (result.status === "failure" || result.status === "cancelled") {
@@ -415,9 +452,9 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           if (mergedHits.length === 0) {
             return emptyResult();
           }
-          const { files, totalHits, totalFiles, perFileCapped } = groupAndSort(mergedHits, root, limit, groupOptions);
+          const { files, totalHits, totalFiles, perFileCapped, filesDropped } = groupAndSort(mergedHits, root, limit, groupOptions);
           const backendCapped = hits.length >= limit * 3;
-          const partial = totalHits > limit || contextIncomplete || perFileCapped || backendCapped;
+          const partial = totalHits > limit || contextIncomplete || perFileCapped || backendCapped || filesDropped > 0;
           return {
             status: "ready",
             files,
@@ -425,6 +462,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             totalFiles,
             searchedFiles: totalFiles,
             partial,
+            ...(candidateMode ? { filesDropped } : {}),
           };
         }
         return unavailableResult();

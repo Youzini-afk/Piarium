@@ -117,6 +117,11 @@ export interface SearchContentResult {
   searchedFiles: number;
   partial: boolean;
   handle?: string;
+  /**
+   * Explore candidate-mode only: matching files that had hits but were omitted
+   * because the file count itself exceeded the working budget. Absent on grep.
+   */
+  filesDropped?: number;
 }
 
 export interface DiagnosticItem {
@@ -364,7 +369,7 @@ export interface ExploreSearchResult {
   notRequested: { count: number; paths: string[] };
   omitted: Array<{ path: string; startLine: number; endLine: number; reason: string }>;
   partial: boolean;
-  searched: { patterns: number; files: number; ms: number; incomplete: boolean };
+  searched: { patterns: number; files: number; ms: number; incomplete: boolean; filesDropped?: number };
   handle: string;
   details: {
     provenance: ExploreSearchProvenance[];

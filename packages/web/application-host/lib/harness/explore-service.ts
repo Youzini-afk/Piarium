@@ -90,10 +90,17 @@ export function createExploreSearchService(
               }
               throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
             }
-            searchPartial ||= search.partial;
-            return search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text })));
+            searchPartial ||= search.partial || (search.filesDropped ?? 0) > 0;
+            return {
+              hits: search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))),
+              filesDropped: search.filesDropped ?? 0,
+            };
           }));
-          return { hits: batches.flat(), partial: searchPartial };
+          return {
+            hits: batches.flatMap((batch) => batch.hits),
+            partial: searchPartial,
+            filesDropped: batches.reduce((sum, batch) => sum + batch.filesDropped, 0),
+          };
         },
         readFile: (path) => readFile(ctx.actor, path, ctx.signal, inputContext),
       }, ctx.signal);

@@ -531,6 +531,61 @@ describe("harness search service", () => {
     expect(searchPaths).toEqual(["packages/web/src"]);
   });
 
+  it("explore candidate mode keeps every matching file by breadth-first budget, including the last path", async () => {
+    const files = Array.from({ length: 30 }, (_, index) => `dir${String(index).padStart(2, "0")}/file.ts`);
+    const hits: WorkspaceSearchHit[] = files.flatMap((path) => (
+      Array.from({ length: 12 }, (_, index) => makeHit(path, index + 1, `token ${index}`))
+    ));
+    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "ready", generation: 1, hits }));
+    const service = createHarnessSearchService({ search, resolveWorkspaceRoot: async () => "/workspace" });
+
+    const exploreMode = await service.search({ pattern: "token" }, {
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      candidateBudget: 200,
+      hitsPerFile: 12,
+    });
+    expect(exploreMode.status).toBe("ready");
+    expect(exploreMode.files).toHaveLength(30);
+    expect(exploreMode.files.reduce((sum, file) => sum + file.hits.length, 0)).toBeLessThanOrEqual(200);
+    expect(exploreMode.files.at(-1)?.path).toBe("dir29/file.ts");
+    expect(exploreMode.filesDropped).toBe(0);
+    expect(exploreMode.partial).toBe(true);
+
+    const grepMode = await service.search({ pattern: "token" }, {
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+    });
+    expect(grepMode.files).toHaveLength(9);
+    expect(grepMode.files[0]?.path).toBe("dir00/file.ts");
+    expect(grepMode.files.at(-1)?.path).toBe("dir08/file.ts");
+    expect(grepMode.files.at(-1)?.hits).toHaveLength(4);
+    expect(grepMode.files.flatMap((file) => file.hits)).toHaveLength(100);
+    expect(grepMode.partial).toBe(true);
+    expect(grepMode.filesDropped).toBeUndefined();
+    expect(grepMode.files.map((file) => file.path)).not.toContain("dir29/file.ts");
+  });
+
+  it("explore candidate mode reports filesDropped when matching files exceed the budget", async () => {
+    const files = Array.from({ length: 5 }, (_, index) => `z${index}.ts`);
+    const hits = files.map((path) => makeHit(path, 1, "token"));
+    const service = createHarnessSearchService({
+      search: async () => ({ status: "ready", generation: 1, hits }),
+      resolveWorkspaceRoot: async () => "/workspace",
+    });
+    const result = await service.search({ pattern: "token" }, {
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      candidateBudget: 3,
+      hitsPerFile: 12,
+    });
+    expect(result.files.map((file) => file.path)).toEqual(["z0.ts", "z1.ts", "z2.ts"]);
+    expect(result.files.every((file) => file.hits.length === 1)).toBe(true);
+    expect(result.filesDropped).toBe(2);
+    expect(result.partial).toBe(true);
+    expect(result.totalFiles).toBe(5);
+  });
+
   it("explore candidate mode keeps a second file after a flood of hits and does not use grep fileScore order", async () => {
     const hits: WorkspaceSearchHit[] = [
       ...Array.from({ length: 50 }, (_, index) => makeHit("flood.ts", index + 1, `token ${index}`)),
