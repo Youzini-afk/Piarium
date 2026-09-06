@@ -55,3 +55,8 @@ callers.
 `createHarnessServiceHost({ structureSource })` is optional, same shape as
 `lspNavigationServices`. Production `index.ts` installs the LSP provider.
 Explore consumes the interface only; it does not call `documentSymbols` itself.
+
+A repeatable agent-view cold-start measurement lives in
+`packages/web/scripts/structure-cold-start.ts` (`bun run --cwd packages/web structure:cold-start`).
+It is not in the default test suite. Numbers go in `docs/agent-harness-status.md`;
+do not turn them into speedup claims.
