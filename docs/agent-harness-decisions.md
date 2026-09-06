@@ -1969,6 +1969,48 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-095 · 2026-09-07 · 3.11（命中分类只作用在已物化文件）
+
+类型：实施拍板
+
+背景：6.1 fuse 段要求名称 / 路径 / 注释 / 字符串 / 正文不同计分，但候选排序发生在 `readFile` 之前，分类需要正文。把分类前推到读文件之前，就要解析本来不会读的文件；候选预算是 200 个文件，不允许为此解析整个候选池，也不许悄悄放大预算。
+
+决定：分类只作用在已经物化的窗口上——`windowScore` / `packComplementary` / 最终摘录顺序。候选文件排序仍只用词组与锚点权重。已物化窗口上，声明名字 +30、正文 +8、字符串 −4、注释 −10（`STRUCTURE_HIT_CLASS_SCORE`）。未读候选保持 `not-requested`，不解析。
+
+不改：不把分类前推到 `readFile` 之前；不提高 200 文件候选预算或物化读预算来换分类覆盖；不把 hit class 塞进协议 `why`。
+
+影响：`lib/structure/constants.ts`；explore `windowScore`；tree-sitter `classifyHits`。
+
+状态：已实施。
+
+### D-096 · 2026-09-07 · 3.11（语法 wasm 打包与 ASAR 路径）
+
+类型：实施拍板
+
+背景：web-tree-sitter 与 TS/TSX 语法 wasm 必须在 Electron 与 Web 宿主都能读到。另写一套路径解析会和 `extension-builtins` 的 asar / asar.unpacked 重映射分叉。`tree-sitter-wasms@0.1.13` 的预编译文件没有 `dylink.0`，`Language.load` 在 web-tree-sitter 0.27 上失败。
+
+决定：运行时资产放在 `lib/structure/runtime/`，由 `copy-structure-runtime.mjs` 在 Host 编译前刷新，并随 Host 非 TS 资源拷进 `server/`。路径解析复用与 `extension-builtins` 相同的 `ASAR_DIRECTORY_SEGMENT` → `.asar.unpacked` 重映射，不另发明。`web-tree-sitter.wasm` 来自钉住的 `web-tree-sitter@0.27.0`；TS/TSX 语法 wasm 来自钉住的 `tree-sitter-typescript@0.23.2` 发布包（ABI 14，兼容 0.27 的 13–15）。加载失败报 provider `unavailable`。许可与出处按 `LICENSE.typescript` 先例放在同一 runtime 目录。
+
+不改：不把整个 `tree-sitter-wasms` 语言包当运行时依赖；不在 renderer 加载 wasm；不在缓存命中时跳过路径核验；不声称解析速度。
+
+影响：`packages/web` 依赖与 copy/build 脚本；`lib/structure/runtime-path.ts`；D-091 第 3 步。
+
+状态：已实施。
+
+### D-097 · 2026-09-07 · 3.11（结构 provider 顺序：tree-sitter 先于 LSP）
+
+类型：实施拍板
+
+背景：语言服务器冷态时仍要能切出语法单元（与第 2 步 833ms 对照），但 wasm 加载失败时 explore 不能整体挂掉。需要一条固定的 fan-out 顺序，而不是按文件临时挑选。
+
+决定：生产 `structureSource` 先 tree-sitter、后 LSP。`createStructureSource` 对每个文件按这个顺序问 outline；第一个 `ready`/`empty` 获胜，`unavailable`/`failed`/`unsupported` 试下一个。tree-sitter 给出切片时不再等 LSP；两者都不可用时退行 ±3 窗口并标明来源状态。
+
+不改：不删 ±3 降级；不在 wasm 失败时让工具失败；不把连接边 / `imports` 图写进本步（第 4 步）。
+
+影响：`application-host/index.ts`；`lib/structure/source.ts`；explore 切片。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2065,7 +2107,10 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
 | D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片仍待做） | D-091（tree-sitter 待决项）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
-| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093、D-094（第 1 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1 步已接，第 2–5 步待做 |
+| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-097（第 1–3 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–3 步已接，第 4–5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
 | D-093 | implementation（小/大函数阈值 24 行，一个典型编辑器视口） | — | structure/constants.ts；3.11 切片 |
 | D-094 | implementation（结构切片字段放在 ExploreSearchSnippet 与 details.structure，不进 why） | — | protocol harness explore.search；Host explore + structure；pi-host explore-tool details |
+| D-095 | implementation（命中分类只打已物化窗口分，不解析 200 文件候选池） | — | structure/constants.ts；explore windowScore；tree-sitter classifyHits |
+| D-096 | implementation（wasm 放 lib/structure/runtime，ASAR 重映射复用 extension-builtins；语法取 tree-sitter-typescript 0.23.2 而非 tree-sitter-wasms） | — | packages/web 依赖与 copy/build；structure/runtime-path.ts |
+| D-097 | implementation（生产顺序 tree-sitter → LSP → ±3 窗口） | — | application-host/index.ts；structure/source.ts；explore |

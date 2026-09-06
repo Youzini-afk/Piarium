@@ -20,12 +20,12 @@ in a renderer and is not a language-server replacement.
 `StructureProvider` exposes four operations. Capability flags say which ones a
 provider can actually answer for a language:
 
-| Operation | Meaning | First providers |
+| Operation | Meaning | Providers |
 | --- | --- | --- |
-| `outline` | Named units with signature and full span | LSP `documentSymbol`; later tree-sitter |
+| `outline` | Named units with signature and full span | tree-sitter (TS/TSX), then LSP `documentSymbol` |
 | `classifyHits` | Hit line → name / body / string / comment | tree-sitter (not LSP) |
-| `literalCalls` | Call + string-literal shapes | later (step 4) |
-| `imports` | Import sources | later (step 4) |
+| `literalCalls` | Call + string-literal shapes | tree-sitter can extract; graph write is step 4 |
+| `imports` | Import sources | tree-sitter can extract; graph write is step 4 |
 
 Statuses stay distinct: `ready`, `empty`, `unavailable` (cold or missing
 runtime), `unsupported` (no language, or no `documentSymbolProvider`), `stale`,
@@ -53,8 +53,19 @@ callers.
 ## Wiring
 
 `createHarnessServiceHost({ structureSource })` is optional, same shape as
-`lspNavigationServices`. Production `index.ts` installs the LSP provider.
-Explore consumes the interface only; it does not call `documentSymbols` itself.
+`lspNavigationServices`. Production `index.ts` installs tree-sitter first, then
+the LSP provider (D-097). Explore consumes the interface only; it does not call
+`documentSymbols` itself.
+
+Runtime wasm lives in `lib/structure/runtime/` (`web-tree-sitter.wasm` plus the
+TS/TSX grammars from `tree-sitter-typescript@0.23.2`). Paths go through the same
+asar / asar.unpacked remap as `extension-builtins` (D-096). A missing or
+unloadable wasm is `unavailable`; explore then tries LSP or the ±3 window.
+
+Hit classification (D-095) runs only after a file is materialized. Candidate
+ranking before `readFile` is unchanged. `windowScore` then adds
+`STRUCTURE_HIT_CLASS_SCORE` so a declaration name outranks the same token in a
+comment or string.
 
 A repeatable agent-view cold-start measurement lives in
 `packages/web/scripts/structure-cold-start.ts` (`bun run --cwd packages/web structure:cold-start`).
