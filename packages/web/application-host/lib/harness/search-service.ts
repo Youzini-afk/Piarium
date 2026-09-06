@@ -22,12 +22,19 @@ export interface HarnessSearchDeps {
   draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[];
 }
 
-interface HarnessSearchContext {
+export interface HarnessSearchContext {
   workspaceId: string | null;
   workspaceScope?: readonly string[];
   signal: AbortSignal;
   actor?: HarnessActorContext;
   inputContext?: AgentInputContext;
+  /**
+   * Explore-only working hit budget. Absent for `search.content` / grep, which
+   * keep `params.limit` as the displayed-hit cap and `maxResults = 3 * limit`.
+   */
+  candidateBudget?: number;
+  /** Explore-only per-file hit cap applied before the working budget. */
+  hitsPerFile?: number;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -52,8 +59,8 @@ function groupAndSort(
   hits: WorkspaceSearchHit[],
   root: string,
   limit: number,
-): { files: SearchContentFile[]; totalHits: number; totalFiles: number } {
-  // Group by file path
+  options?: { hitsPerFile?: number; useFileScore?: boolean },
+): { files: SearchContentFile[]; totalHits: number; totalFiles: number; perFileCapped: boolean } {
   const byFile = new Map<string, WorkspaceSearchHit[]>();
   for (const hit of hits) {
     const path = hit.resource.resourceId;
@@ -62,42 +69,54 @@ function groupAndSort(
     byFile.set(path, fileHits);
   }
 
-  // Score and sort files
-  const scored = Array.from(byFile.entries()).map(([path, fileHits]) => ({
-    path,
-    hits: fileHits,
-    score: fileScore({
-      hits: fileHits.length,
-      path,
-      root,
-      gitModified: false, // TODO: integrate with git status
-      ageDays: 0, // TODO: integrate with file mtime
-    }),
-  }));
+  const hitsPerFile = options?.hitsPerFile;
+  let perFileCapped = false;
+  const prepared = Array.from(byFile.entries()).map(([path, fileHits]) => {
+    const ordered = [...fileHits].sort((a, b) => a.line - b.line);
+    if (hitsPerFile !== undefined && ordered.length > hitsPerFile) {
+      perFileCapped = true;
+      return { path, hits: ordered.slice(0, hitsPerFile) };
+    }
+    return { path, hits: ordered };
+  });
 
-  scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
+  const useFileScore = options?.useFileScore !== false;
+  prepared.sort((a, b) => {
+    if (useFileScore) {
+      const scoreA = fileScore({
+        hits: a.hits.length,
+        path: a.path,
+        root,
+        gitModified: false, // TODO: integrate with git status
+        ageDays: 0, // TODO: integrate with file mtime
+      });
+      const scoreB = fileScore({
+        hits: b.hits.length,
+        path: b.path,
+        root,
+        gitModified: false,
+        ageDays: 0,
+      });
+      if (scoreB !== scoreA) return scoreB - scoreA;
+    }
     return a.path.localeCompare(b.path);
   });
 
-  // Sort hits within each file by line number
-  const files: SearchContentFile[] = scored.map(({ path, hits: fileHits }) => ({
+  const files: SearchContentFile[] = prepared.map(({ path, hits: fileHits }) => ({
     path,
-    hits: fileHits
-      .sort((a, b) => a.line - b.line)
-      .map((hit): SearchContentHit => ({
-        line: hit.line,
-        text: hit.preview,
-        before: hit.before ?? [],
-        after: hit.after ?? [],
-      })),
+    hits: fileHits.map((hit): SearchContentHit => ({
+      line: hit.line,
+      text: hit.preview,
+      before: hit.before ?? [],
+      after: hit.after ?? [],
+    })),
   }));
 
   const totalHits = hits.length;
   const totalFiles = byFile.size;
+  const displayedHits = files.reduce((sum, file) => sum + file.hits.length, 0);
 
-  // Apply limit: keep all files but truncate hits if over limit
-  if (totalHits > limit) {
+  if (displayedHits > limit) {
     let remaining = limit;
     const limitedFiles: SearchContentFile[] = [];
     for (const file of files) {
@@ -106,10 +125,10 @@ function groupAndSort(
       limitedFiles.push({ path: file.path, hits: file.hits.slice(0, take) });
       remaining -= take;
     }
-    return { files: limitedFiles, totalHits, totalFiles };
+    return { files: limitedFiles, totalHits, totalFiles, perFileCapped };
   }
 
-  return { files, totalHits, totalFiles };
+  return { files, totalHits, totalFiles, perFileCapped };
 }
 
 const unavailableResult = (): SearchContentResult => ({
@@ -199,8 +218,13 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         return unavailableResult();
       }
 
-      const limit = params.limit ?? DEFAULT_LIMIT;
+      const candidateMode = ctx.candidateBudget !== undefined;
+      const limit = candidateMode ? ctx.candidateBudget! : (params.limit ?? DEFAULT_LIMIT);
       const timeoutMs = DEFAULT_TIMEOUT_MS;
+      const groupOptions = {
+        ...(ctx.hitsPerFile !== undefined ? { hitsPerFile: ctx.hitsPerFile } : {}),
+        ...(candidateMode ? { useFileScore: false } : {}),
+      };
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -332,14 +356,14 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
 
         if (result.status === "empty") {
           if (draftHits.length === 0) return emptyResult();
-          const grouped = groupAndSort(draftHits, root, limit);
+          const grouped = groupAndSort(draftHits, root, limit, groupOptions);
           return {
             status: "ready",
             files: grouped.files,
             totalHits: grouped.totalHits,
             totalFiles: grouped.totalFiles,
             searchedFiles: grouped.totalFiles,
-            partial: grouped.totalHits > limit,
+            partial: grouped.totalHits > limit || grouped.perFileCapped,
           };
         }
         if (result.status === "failure" || result.status === "cancelled") {
@@ -391,8 +415,9 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           if (mergedHits.length === 0) {
             return emptyResult();
           }
-          const { files, totalHits, totalFiles } = groupAndSort(mergedHits, root, limit);
-          const partial = totalHits > limit || contextIncomplete;
+          const { files, totalHits, totalFiles, perFileCapped } = groupAndSort(mergedHits, root, limit, groupOptions);
+          const backendCapped = hits.length >= limit * 3;
+          const partial = totalHits > limit || contextIncomplete || perFileCapped || backendCapped;
           return {
             status: "ready",
             files,

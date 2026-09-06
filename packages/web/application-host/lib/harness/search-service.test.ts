@@ -531,6 +531,34 @@ describe("harness search service", () => {
     expect(searchPaths).toEqual(["packages/web/src"]);
   });
 
+  it("explore candidate mode keeps a second file after a flood of hits and does not use grep fileScore order", async () => {
+    const hits: WorkspaceSearchHit[] = [
+      ...Array.from({ length: 50 }, (_, index) => makeHit("flood.ts", index + 1, `token ${index}`)),
+      makeHit("key.ts", 1, "uniqueAnchor"),
+    ];
+    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "ready", generation: 1, hits }));
+    const service = createHarnessSearchService({ search, resolveWorkspaceRoot: async () => "/workspace" });
+
+    const exploreMode = await service.search({ pattern: "token" }, {
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      candidateBudget: 80,
+      hitsPerFile: 12,
+    });
+    expect(exploreMode.status).toBe("ready");
+    expect(exploreMode.files.map((file) => file.path).sort()).toEqual(["flood.ts", "key.ts"]);
+    expect(exploreMode.files.find((file) => file.path === "flood.ts")?.hits).toHaveLength(12);
+    expect(exploreMode.partial).toBe(true);
+
+    const grepMode = await service.search({ pattern: "token", limit: 1 }, {
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+    });
+    expect(grepMode.files).toHaveLength(1);
+    expect(grepMode.files[0]?.path).toBe("flood.ts");
+    expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[1]?.[0]).toMatchObject({ maxResults: 3 });
+  });
+
   it("returns empty without launching search when the requested path and child scope are disjoint", async () => {
     let called = false;
     const service = createHarnessSearchService({
