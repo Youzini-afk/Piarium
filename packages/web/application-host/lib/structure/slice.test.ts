@@ -108,6 +108,72 @@ describe("sliceStructureWindows", () => {
     expect(windows[0]?.text).toContain("read large.ts:1-");
   });
 
+  it("pads a signature-only container to at least the window it replaced", () => {
+    // tsserver types an interface call signature as SymbolKind.Method, so the
+    // smallest container can be a one-line fragment (D-102).
+    const lines = [
+      "export interface Wide {",
+      ...Array.from({ length: 8 }, (_, index) => `  head${index}(): number;`),
+      "  needle(): string;",
+      ...Array.from({ length: 8 }, (_, index) => `  tail${index}(): number;`),
+      "}",
+    ];
+    const windows = sliceStructureWindows({
+      path: "wide.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: 10 }],
+      outline: readyOutline([
+        {
+          name: "Wide",
+          kind: "interface",
+          range: { startLine: 1, endLine: lines.length },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "needle",
+          kind: "method",
+          range: { startLine: 10, endLine: 10 },
+          signature: { startLine: 10, endLine: 10 },
+        },
+      ]),
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({
+      start: 7,
+      end: 13,
+      fallback: false,
+      unit: { name: "needle", kind: "method", startLine: 10, endLine: 10 },
+    });
+    expect(windows[0]?.text).toContain("needle(): string;");
+    expect(windows[0]?.text).toContain("head6(): number;");
+    expect(windows[0]?.text).toContain("tail2(): number;");
+  });
+
+  it("keeps a container that has a body exact instead of padding it", () => {
+    const lines = [
+      "const before = 0;",
+      "export function needle() {",
+      "  return 1;",
+      "}",
+      "const after = 1;",
+    ];
+    const windows = sliceStructureWindows({
+      path: "body.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: 3 }],
+      outline: readyOutline([{
+        name: "needle",
+        kind: "function",
+        range: { startLine: 2, endLine: 4 },
+        signature: { startLine: 2, endLine: 2 },
+      }]),
+    });
+    expect(windows[0]).toMatchObject({ start: 2, end: 4, fallback: false });
+    expect(windows[0]?.text).toBe("export function needle() {\n  return 1;\n}");
+  });
+
   it("selects the interface instead of a one-line member signature", () => {
     const lines = [
       "export interface Box {",

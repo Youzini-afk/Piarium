@@ -138,6 +138,34 @@ const fallbackWindows = (lines: string[], hits: StructureSliceHit[]): StructureS
   }));
 };
 
+/**
+ * A unit that is nothing but its own signature: an interface member, an
+ * ambient or abstract declaration, a one-line definition. LSP reports these
+ * under container kinds — tsserver types an interface call signature as
+ * `method` — so a hit on one would emit a bare fragment carrying less than the
+ * ±3 window it replaced. Units with a body identify themselves and stay exact
+ * (D-102).
+ */
+const signatureOnly = (symbol: StructureSymbol): boolean => {
+  const signature = clipRange(symbol.signature, symbol.range);
+  return signature.startLine <= symbol.range.startLine && signature.endLine >= symbol.range.endLine;
+};
+
+const paddedToWindows = (
+  range: StructureLineRange,
+  lines: string[],
+  hitLines: number[],
+): StructureLineRange => {
+  const windows = hitLines
+    .filter((line) => Number.isSafeInteger(line) && line >= 1 && line <= lines.length)
+    .map((line) => lineWindow(line, lines.length));
+  if (windows.length === 0) return range;
+  return {
+    startLine: Math.min(range.startLine, ...windows.map((window) => window.startLine)),
+    endLine: Math.max(range.endLine, ...windows.map((window) => window.endLine)),
+  };
+};
+
 const sliceSymbol = (
   path: string,
   lines: string[],
@@ -152,10 +180,13 @@ const sliceSymbol = (
     endLine: symbol.range.endLine,
   };
   if (span <= SMALL_STRUCTURE_SPAN_LINES) {
+    const range = signatureOnly(symbol)
+      ? paddedToWindows(symbol.range, lines, hitLines)
+      : symbol.range;
     return {
-      start: symbol.range.startLine,
-      end: symbol.range.endLine,
-      text: textOf(lines, symbol.range),
+      start: range.startLine,
+      end: range.endLine,
+      text: textOf(lines, range),
       hitLines,
       unit,
       fallback: false,
