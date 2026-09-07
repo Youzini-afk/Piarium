@@ -2209,6 +2209,104 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-109 · 2026-09-07 · 关联候选必须真是「同名」，不是「任何带字符串首参的调用」
+
+类型：问题与解法
+
+背景：plan 3.11 第 4 步写的是「无法确认的**同名**字符串标关联候选」——条件是这个字面量和某个已知连接标识同名。首版 `classifyLiteralCall` 只看 callee 名字，凡不在允许名单里就归 `associates`，完全没有同名条件。
+
+在 `application-host/lib` 全部 499 个 TS 文件上实测（真实 wasm 解析）：`connects` 360 条，`associates` **10,711** 条，噪声比约 30:1。前十二位 callee 是 `it` 1518、`join` 1272、`toBe` 827、`toContain` 323、`get` 307、`describe` 296、`writeFile` 292、`post` 274、`startsWith` 210、`includes` 207、`error` 194、`setHeader` 159——测试脚手架、路径拼接、字符串判定、日志，按任何定义都不是连接候选。单这一个目录就是 13,220 个 link 节点，仓库 2,245 个 TS/TSX 文件等比约 5.9 万。每个 link 节点都进 `db.indexText` + `db.indexKeyword`，而 `searchSymbols` 与 `recall` 都是全节点 `scanNodes`，所以这批节点会被永久扫过一遍再丢掉。explore 还会把它们打进可见正文。
+
+决定：`associates` 只在该字面量**已经是某处的确认连接值**时写入。store 增 `connectionLiterals(values)`，用一份按路径引用计数的 connects 值索引回答（open 时从 payload 建，写入/删除时同步维护），不做全表扫描。闸门同时看本批：同一文件里 `register("x")` 与 `log("x")` 是最清楚的同名情形，而 store 还没看到这一代。闸门只看已采集到的连接，所以冷扫描里排在注册文件之前的文件会先丢掉候选——记下这些路径，扫描主循环结束后再补一遍（解析按内容哈希缓存，这一遍便宜，且不递归）。
+
+同一测量在闸门后：`associates` 10,711 → **153**，link 节点 13,220 → 2,662。留下的 153 条都是真正的同名情形。
+
+原因：候选的价值在于「这个标识别处也出现了，但这次的调用形状不能确认」。没有同名条件时它退化成"任何字符串首参调用"，既不是候选也不是信息，只是把预算和索引填满。
+
+考虑过的替代：(1) 扩大 callee 拒绝名单（`it`/`describe`/`toBe`/`join`…）——黑名单永远追不上真实代码，且仍然存不该存的东西。(2) 全部字面量都存、读时再过滤——存储与索引成本照付。(3) 读时用 `findLinks` 反查——需要先存下全部字面量，回到 (2)。(4) 整类去掉只留 `connects`/`imports`——比现状好，但放弃了 plan 明确要的那一类。
+
+不改：`connects` 允许名单（D-106）；`findLinks` 语义；import 边。
+
+影响：`lib/knowledge/store.ts`（`connectionLiterals` 与 connects 值索引）；`lib/knowledge/symbol-runtime.ts`（闸门与补扫一遍）；`symbol-runtime.test.ts`；`store.ts` 顶部节点/边说明。
+
+状态：已实施。
+
+### D-110 · 2026-09-07 · 结构轮廓写进图时的范围转换
+
+类型：问题与解法
+
+背景：`StructureSymbol.range` 是**只有行**的 1-based 闭区间，图里的 `SymbolGraphRange` 是 0-based 字符范围。首版把字符位一律填 0 并把 `endLine` 减一，于是多行符号的范围止于末行第 0 列（排除整个末行），单行符号退化成零宽：`{startLine:0,startCharacter:0,endLine:0,endCharacter:0}`。此前 LSP 路径给的是 `selectionRange`，即名字的真实跨度。
+
+决定：末列取该行**真实长度**（`loadGraphFacts` 手里就有正文，按 `\n` 切分并去掉 `\r` 后取长度），`endLine` 用 `max(startLine, endLine-1)`。范围含义随之从「名字跨度」变为「符号整体跨度」，这是 tree-sitter 轮廓能诚实给出的粒度。
+
+原因：零宽范围通不过任何「这个范围还成立吗」的判断，而 §7.2 要求消费者据修订与范围判断事实是否仍然成立。
+
+考虑过的替代：(1) `endCharacter` 填一个大哨兵值——范围不再对应真实文本。(2) 把 `SymbolGraphRange` 改成只有行——LSP 路径（仍在用，见 D-111）会丢掉已有的列精度。
+
+不改：`SymbolGraphRange` 类型；`validRange`；LSP 路径的 `selectionRange` 语义。
+
+影响：`lib/knowledge/symbol-runtime.ts` `flattenOutlineSymbols`。
+
+状态：已实施。
+
+### D-111 · 2026-09-07 · 边查询被阻塞不得冻结可用的轮廓
+
+类型：问题与解法
+
+背景：首版 `loadGraphFacts` 里 `if (blocked(importsResult.status) || blocked(callsResult.status)) return null;` 与 outline 状态无关。tree-sitter 的能力按语言静态声明，wasm 加载失败后 `imports` 报 `unavailable`，而 LSP 没有 `imports` 能力会被门面跳过，于是门面结果就是 `unavailable`，整个文件走 `touchFile` 保留分支。
+
+实测：outline 仍 `ready`、文件已改名，store 只收到 `touchFile`。也就是说 **wasm 一坏，全部 TS/TSX 文件的符号更新永久冻结**，而 D-104 明说「LSP outline 可作 defines 后备」，D-097 明说 wasm 失败应降级。配合 D-105 让 `touchFile` 保留 `documentRevision`，图会一直上报一个早已不成立的修订。既有测试 `preserves the graph when extraction is unavailable` 只断言图还活着，没断言新鲜度，把这个行为锁成了预期。
+
+决定：由 **outline 单独决定这一代能不能写**——`ready`/`empty` 可写（空集只有在真有 provider 应答时才是权威的），`unsupported` 回落到 LSP `documentSymbol`，其余保留旧图。边查询被阻塞时不再抑制 outline，而是照写 defines、带上已就绪的那部分边，并在文件节点上记 `linksIncomplete`，经 `getFileRelations().linksIncomplete` 透出，explore 显示「edge extraction was incomplete for this revision」。
+
+原因：「没有边」和「边没采集到」必须分开（plan 0.4）。冻结符号是把一个可修复的降级变成静默错误，而且没有任何通道报告。
+
+考虑过的替代：(1) 边被阻塞时保留旧边、只更新符号——`replaceFileSymbols` 是按文件整体事务，做不到部分保留，硬做要引入第二种写路径。(2) 继续全否定但把冻结报出来——图仍然停在旧修订，只是多一行日志。
+
+不改：`replaceFileSymbols` 的事务形状；`touchFile` 保留语义（D-105）。
+
+影响：`lib/knowledge/symbol-runtime.ts`；`lib/knowledge/symbols.ts` `CollectedSymbols.linksIncomplete`；`lib/knowledge/store.ts`（`linksIncomplete` payload 与 `SymbolGraphFileRelations`）；`symbol-runtime.test.ts`。
+
+状态：已实施。
+
+### D-112 · 2026-09-07 · 关系是注解：不许拖垮检索，不许冒充当前
+
+类型：问题与解法
+
+背景：首版把 `fileRelations` 接在 `explore.search` 的成功路径上且无保护。实测一个必然抛错的知识库：检索本身完全成功、摘录已物化，结果整体返回 `{"ok":false,"error":{"code":"failed","message":"knowledge store is corrupt"}}`，内部错误原文还漏给了 agent。这次提交之前 explore 对知识库零依赖。而且 `getKnowledgeStoreForWorkspace` 会按需开库并触发全仓扫描，等于把开库和扫描搬到了读路径上。
+
+另一半：图装的是磁盘已提交事实，摘录可能来自固定草稿或更新的磁盘修订。首版既不比较修订也不打标记。实测摘录在 `disk-r9`、关系在 `disk-r2` 时，可见正文照样印 `- src/router.ts connects register("gone.handler") (L3)`——L3 指向 agent 没在看的那个修订。§7.2 就在这次改动的下一段写着「消费者据修订判断范围是否仍然成立……而不是拿一份无身份的范围继续用」。
+
+决定：三件事。(1) 查询失败或库未打开时降级注解、不失败检索：`details.relations` 增 `status`（`ready` / `partial` / `unavailable`），`unavailable` 与"没有任何出边"（`relations` 缺席）是不同结果，可见正文写一行说明，不透内部错误原文。读路径只用**已打开**的 store，不开库也不触发扫描——会话自身的知识工作负责打开。(2) 关系与摘录修订比较，不同则 `stale: true`，可见正文标 `[stale @<修订>]` 并**去掉行号**——移位的行号比没有行号更坏，边本身仍是证据。(3) 关系排在可见预算的**最后**，在 `Omitted supports`、未读候选与 issue 行之后，每文件上限 12 条并报省略数——注解不得挤掉「这个结果不包含什么」的通道。
+
+原因：装饰性注解的失败必须只降级注解（plan 0.4）。检索成功却整体失败，是把一个增强变成了新的失败源。
+
+考虑过的替代：(1) 只 try/catch 静默吞掉——把「查不到」和「没有边」压成同一个空成功。(2) 过期就整条丢掉——丢掉了"这两个文件之间有连接"这个仍然成立的事实。(3) 保持关系在预算靠前——D-090/D-092 刚把预算收口，注解不该优先于 issue。
+
+不改：候选池（D-108 不扩候选仍然成立）；24 KiB 预算；`ExploreSearchSnippet`。
+
+影响：protocol `ExploreRelationStatus` / `ExploreFileRelation.stale` / `.incomplete` / `details.relations.status`；`lib/harness/explore-service.ts`；`lib/harness/explore.ts` 打包顺序与 `relationLines`；`lib/harness/service-host.ts` `fileRelations` 返回类型（不含 `stale`）；`application-host/index.ts`；`explore.test.ts` / `explore-service.test.ts`。
+
+状态：已实施。
+
+### D-113 · 2026-09-07 · 切片查询与目录查询是两件事
+
+类型：问题与解法
+
+背景：第 4 步把图的符号来源从 LSP `documentSymbols` 换成了 `structureSource.outline`。TS/TSX 下 tree-sitter 必胜，LSP 永远不会被问，而那份定义查询是按 D-098「切片单位是容器」调的：provider 用 `isSliceUnit` 过滤，普通值绑定根本不进 outline。实测 `export const DEFAULT_BYTE_BUDGET = 24576;` 与 `export const TABLE = { a: 1 };` 从轮廓里整体消失，只剩 `type:Alias` / `function:realFn` / `function:arrow`。于是 `searchSymbols("DEFAULT_BYTE_BUDGET")` 再也找不到——目录的覆盖面被一份为切片调的查询悄悄收窄了。
+
+决定：outline 的收录条件与切片的单位条件分开。outline 收 `isSliceUnit(node) || isModuleLevelBinding(node)`，即容器、定义绑定，再加**模块级与类级**的值绑定（`kind` 为 `variable`）；函数体内的局部绑定仍不收——那不是 `searchSymbols` 要回答的东西，LSP 的 `documentSymbol` 也不给。切片侧无需改动：`enclosingSliceSymbol` 早已按 `isStructureContainerKind` 过滤，`variable` 不是容器种类，所以 D-098 与 `outlineCoversHitLines` 的行为不变。
+
+原因：「哪些跨度值得当作一段代码切出来」和「哪些名字值得被检索到」是不同的判据，复用同一个过滤器会让后者被前者的取舍绑架。
+
+考虑过的替代：(1) 目录改回 LSP `documentSymbols`——事件驱动路径可以，但会让同一张图的符号语义按发现途径分叉，而 plan 3.11 又禁止基于 LSP 的全仓扫描。(2) 在 store 侧补一层——图不该猜 provider 漏了什么。(3) 连局部绑定一起收——`explore.ts` 这类文件会多出大量局部名，`searchSymbols` 的信噪比反而更差。
+
+不改：`TYPESCRIPT_DEFINITION_QUERY`（`lexical_declaration` / `variable_declaration` 早已捕获，被 provider 过滤掉的）；`isSliceUnit`；`isStructureContainerKind`；D-098 的切片行为。
+
+影响：`lib/structure/tree-sitter-provider.ts`（`isModuleLevelBinding` / `isOutlineUnit`）；`tree-sitter-provider.test.ts`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2323,3 +2421,8 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |
 | D-108 | implementation（explore 读摘录路径出边；不扩候选池） | — | protocol explore.search details.relations；explore + explore-service |
+| D-109 | implementation（关联候选须真同名：`connectionLiterals` 闸门 + 本批 connects + 冷扫描补一遍；实测 10,711 → 153） | — | knowledge/store.ts connects 值索引；symbol-runtime 闸门；symbol-runtime.test.ts |
+| D-110 | implementation（轮廓行区间转字符范围时末列取真实行长，不再零宽） | — | knowledge/symbol-runtime.ts flattenOutlineSymbols |
+| D-111 | implementation（outline 单独决定能否写这一代；边被阻塞记 `linksIncomplete` 而非冻结符号） | — | knowledge/symbol-runtime.ts + symbols.ts + store.ts；symbol-runtime.test.ts |
+| D-112 | implementation（关系是注解：`status` 降级不失败检索、读路径不开库、过期去行号标 `stale`、可见预算排最后并每文件 12 条上限） | — | protocol ExploreRelationStatus/ExploreFileRelation；explore.ts 打包；explore-service.ts；service-host.ts；index.ts |
+| D-113 | implementation（outline 收模块级/类级值绑定作目录名，切片仍按容器过滤） | — | structure/tree-sitter-provider.ts；tree-sitter-provider.test.ts |
