@@ -1,0 +1,192 @@
+{
+  "generatedAt": "2026-09-07",
+  "minCompatibleAbi": 13,
+  "maxCompatibleAbi": 15,
+  "packs": {
+    "python": {
+      "languageId": "python",
+      "packageName": "tree-sitter-python",
+      "version": "0.25.0",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-python/-/tree-sitter-python-0.25.0.tgz",
+      "wasmPath": "package/tree-sitter-python.wasm",
+      "grammarFile": "tree-sitter-python.wasm",
+      "integrity": "sha256-16108b50df4ee9a30168794252ab55e7c93bfc5765d7fa0aa3e335752c515f47",
+      "bytes": 457883,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "go": {
+      "languageId": "go",
+      "packageName": "tree-sitter-go",
+      "version": "0.25.0",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-go/-/tree-sitter-go-0.25.0.tgz",
+      "wasmPath": "package/tree-sitter-go.wasm",
+      "grammarFile": "tree-sitter-go.wasm",
+      "integrity": "sha256-9504573f352b20be7f2f1911754d710622aedc15afff16d5ed8fb5645681aee7",
+      "bytes": 217182,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "rust": {
+      "languageId": "rust",
+      "packageName": "tree-sitter-rust",
+      "version": "0.24.0",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-rust/-/tree-sitter-rust-0.24.0.tgz",
+      "wasmPath": "package/tree-sitter-rust.wasm",
+      "grammarFile": "tree-sitter-rust.wasm",
+      "integrity": "sha256-f65f354215611fd94ad34134b3427eb3d58cbb745df7b6509ba722184db73d57",
+      "bytes": 1102547,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "java": {
+      "languageId": "java",
+      "packageName": "tree-sitter-java",
+      "version": "0.23.5",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-java/-/tree-sitter-java-0.23.5.tgz",
+      "wasmPath": "package/tree-sitter-java.wasm",
+      "grammarFile": "tree-sitter-java.wasm",
+      "integrity": "sha256-4fdeac4ca6ca089f06c6f7e562abcac1733cd465728cc7031ebb73c2019122c4",
+      "bytes": 414641,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "c": {
+      "languageId": "c",
+      "packageName": "tree-sitter-c",
+      "version": "0.24.1",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-c/-/tree-sitter-c-0.24.1.tgz",
+      "wasmPath": "package/tree-sitter-c.wasm",
+      "grammarFile": "tree-sitter-c.wasm",
+      "integrity": "sha256-c852c2a85ebf2beb636aa3b0ef7f7e70458684d74f6741b20dcb296885bed9f9",
+      "bytes": 625918,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "cpp": {
+      "languageId": "cpp",
+      "packageName": "tree-sitter-cpp",
+      "version": "0.23.4",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-cpp/-/tree-sitter-cpp-0.23.4.tgz",
+      "wasmPath": "package/tree-sitter-cpp.wasm",
+      "grammarFile": "tree-sitter-cpp.wasm",
+      "integrity": "sha256-174eb0deb75b2ec7881bcacda9f995648d8e683956e5c2267e69ab6dc503fcbf",
+      "bytes": 3434931,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "csharp": {
+      "languageId": "csharp",
+      "packageName": "tree-sitter-c-sharp",
+      "version": "0.23.5",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-c-sharp/-/tree-sitter-c-sharp-0.23.5.tgz",
+      "wasmPath": "package/tree-sitter-c_sharp.wasm",
+      "grammarFile": "tree-sitter-c_sharp.wasm",
+      "integrity": "sha256-6f69e1cae44e1c32c1eccc170dc5a9778fb94ff716f71113fe1f8c4299aa2f40",
+      "bytes": 5350581,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "kotlin": {
+      "languageId": "kotlin",
+      "packageName": "@tree-sitter-grammars/tree-sitter-kotlin",
+      "version": "1.1.0",
+      "tarballUrl": "https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-kotlin/-/tree-sitter-kotlin-1.1.0.tgz",
+      "wasmPath": "package/tree-sitter-kotlin.wasm",
+      "grammarFile": "tree-sitter-kotlin.wasm",
+      "integrity": "sha256-7009d69453bc8735e438b2818a633efb21c88f99782769abba60dffedfab73f7",
+      "bytes": 3441042,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "ruby": {
+      "languageId": "ruby",
+      "packageName": "tree-sitter-ruby",
+      "version": "0.23.1",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-ruby/-/tree-sitter-ruby-0.23.1.tgz",
+      "wasmPath": "package/tree-sitter-ruby.wasm",
+      "grammarFile": "tree-sitter-ruby.wasm",
+      "integrity": "sha256-09a96427d7c72f0613ed470cd9812223fc4a91d6a9c025c0235cc6bd59ff96f4",
+      "bytes": 2106352,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "php": {
+      "languageId": "php",
+      "packageName": "tree-sitter-php",
+      "version": "0.24.2",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-php/-/tree-sitter-php-0.24.2.tgz",
+      "wasmPath": "package/tree-sitter-php.wasm",
+      "grammarFile": "tree-sitter-php.wasm",
+      "integrity": "sha256-d4df6a6ff08c87c3ec4f9cbb785fe09998a0cb570e03f57d7b19b3acfb146aa7",
+      "bytes": 1058041,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "shellscript": {
+      "languageId": "shellscript",
+      "packageName": "tree-sitter-bash",
+      "version": "0.25.1",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-bash/-/tree-sitter-bash-0.25.1.tgz",
+      "wasmPath": "package/tree-sitter-bash.wasm",
+      "grammarFile": "tree-sitter-bash.wasm",
+      "integrity": "sha256-8292919c88a0f7d3fb31d0cd0253ca5a9531bc1ede82b0537f2c63dd8abe6a7a",
+      "bytes": 1358224,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "css": {
+      "languageId": "css",
+      "packageName": "tree-sitter-css",
+      "version": "0.25.0",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-css/-/tree-sitter-css-0.25.0.tgz",
+      "wasmPath": "package/tree-sitter-css.wasm",
+      "grammarFile": "tree-sitter-css.wasm",
+      "integrity": "sha256-8a23977fe271357cce6f254ef88c9bebf3854602d8046605aef6a45c02135c59",
+      "bytes": 128668,
+      "abi": 15,
+      "licensePath": "package/LICENSE"
+    },
+    "html": {
+      "languageId": "html",
+      "packageName": "tree-sitter-html",
+      "version": "0.23.2",
+      "tarballUrl": "https://registry.npmjs.org/tree-sitter-html/-/tree-sitter-html-0.23.2.tgz",
+      "wasmPath": "package/tree-sitter-html.wasm",
+      "grammarFile": "tree-sitter-html.wasm",
+      "integrity": "sha256-c48fcd82c7ea8bf943180088ba7f28c48b2bb5287874179168bf9d31e394cf85",
+      "bytes": 18385,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "yaml": {
+      "languageId": "yaml",
+      "packageName": "@tree-sitter-grammars/tree-sitter-yaml",
+      "version": "0.7.1",
+      "tarballUrl": "https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-yaml/-/tree-sitter-yaml-0.7.1.tgz",
+      "wasmPath": "package/tree-sitter-yaml.wasm",
+      "grammarFile": "tree-sitter-yaml.wasm",
+      "integrity": "sha256-e752dc21c3591df9b45692fe417d101f45d1828c28c44d79005f4066dc7e4e91",
+      "bytes": 189255,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    },
+    "toml": {
+      "languageId": "toml",
+      "packageName": "@tree-sitter-grammars/tree-sitter-toml",
+      "version": "0.7.0",
+      "tarballUrl": "https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-toml/-/tree-sitter-toml-0.7.0.tgz",
+      "wasmPath": "package/tree-sitter-toml.wasm",
+      "grammarFile": "tree-sitter-toml.wasm",
+      "integrity": "sha256-1ac6a83826c35a68857f8325e00c78f6bcbef4eb6db3931a6cf3041f76e5e09f",
+      "bytes": 24040,
+      "abi": 14,
+      "licensePath": "package/LICENSE"
+    }
+  },
+  "skipped": {
+    "swift": "tree-sitter-swift@0.7.1: tarball has no .wasm",
+    "markdown": "tree-sitter-markdown@0.7.1: tarball has no .wasm; @tree-sitter-grammars/tree-sitter-markdown@0.3.2: tarball has no .wasm",
+    "xml": "tree-sitter-xml@1.0.0: tarball has no .wasm; @tree-sitter-grammars/tree-sitter-xml@0.7.0: tarball has no .wasm"
+  }
+}

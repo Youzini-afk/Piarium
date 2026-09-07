@@ -96,8 +96,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls、线程草稿基线、
    写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组与 D-092（候选广度按文件铺开及同批小项）已实施。
-   3.11 第 1–4 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX 与命中分类、连接边/TS·TSX 冷目录/`imports`，
-   D-091/D-093–D-108）。下一步是第 5 步（按需下载与设置页）以及按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
+   3.11 第 1–5 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX/JS/JSON、连接边/冷目录/`imports`、
+   语言支持设置页与可验证按需下载，D-091/D-093–D-127）。下一步按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
    全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
@@ -380,7 +380,7 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 
 语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"；两者在 Application Host 长期共存，不进 renderer。
 消费者：explore 结构切片、命中分类（6.1 fuse 段"名称/路径/注释/字符串/正文不同计分"的落地）、连接边形状识别、冷仓库符号目录与
-`imports` 边、线程/压缩用的仓库地图。它给不了类型、跨文件解析与诊断。第 1–4 步已实施（D-093–D-108）；第 5 步未做。
+`imports` 边、线程/压缩用的仓库地图。它给不了类型、跨文件解析与诊断。第 1–5 步已实施（D-093–D-127）。
 交付顺序，每步独立可验证：
 
 1. **结构来源接口 + LSP 实现。** 定义带修订绑定的 provider：输入语言 ID（复用 `languageIdForPath`）、正文、修订；输出符号轮廓
@@ -396,10 +396,13 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 4. **连接边查询、冷仓库符号目录、`imports` 边。** ✓ `bridge.request("…")` / `router.register("…")` / `on("…")` 等形状产出确认连接，
    无法确认的同名字符串标关联候选；`searchFilesystemFiles` + Documents 磁盘读把 TS/TSX defines/imports/连接边写进 6.2 现有图，同一
    `documentRevision` 与 generation 绑定，不做基于 LSP 的全仓扫描。生产消费者是 explore 读摘录路径出边（D-104–D-108）。
-5. **语言 ≥ 3 时：按需下载与设置页。** 常用语言随应用捆绑（首批 TS/TSX/JS/JSON），其余按需下载到数据目录，与本地 embedding
-   模型同一套同意提示与下载管理；设置"语言支持"页按工作区检测到的语言列出，每种两行状态（语言服务器 / 结构包：已装 / 可装 / 暂无）。
-   之后按用户工作区语言分布逐个补包，目标覆盖大部分常用语言（Python、Go、Rust、Java、C/C++、C#、Kotlin/Swift、Ruby/PHP、Shell、
-   HTML/CSS、YAML/TOML、Markdown 等），覆盖进度记 status。用户自带包留作后续高级选项，带 ABI 校验与明确提示。
+5. **语言 ≥ 3 时：按需下载与设置页。** ✓ 常用语言随应用捆绑（TS/TSX/JS/JSON）。其余语言的「按需」是需求信号 + 用户在设置页点安装，
+   **不是** Host 自动下载。仓库里没有 embedding 模型下载/同意管道（`openWorkspaceKnowledge` 一律 `embedding: null`）；听写本地模型下载
+   没有摘要、取消或同意门，不能当先例。同意模型：明确动作即同意，不做弹窗，不做 `ask`/`always`/`never`（D-124）。
+   发布期脚本从 npm 解出 wasm、自算 sha256、记录 ABI，清单提交进 git（D-125）。运行期下载到临时文件 → 算摘要 → 与清单比 →
+   对上才写入 `{PIARIUM_DATA_DIR}/structure-grammars/sha256/<hex>.wasm`；对不上删除。带 `AbortController`，不做断点续传。
+   解析顺序：先捆绑 `runtime/`，再下载目录（D-126）。ABI 闸门仍在 `loadLanguage`。设置「语言支持」页按工作区现算分布列出，
+   每种两行状态（语言服务器 / 结构包）。用户自带 `.wasm` 走同一存储、标未验证、仍过 ABI 闸（D-123）。覆盖进度见 status（D-127）。
 
 不做：先建"通用 AST 服务"再找消费者；替代语言服务器的导航与诊断；renderer 引入；第一版接受任意第三方语法包；一种语言时做包管理器；
 声称解析速度或省时数字（实测记 status）。

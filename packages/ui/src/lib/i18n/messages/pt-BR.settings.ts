@@ -81,6 +81,8 @@
   "settings.languageSupport.actions.installing": "Instalando",
   "settings.languageSupport.actions.cancel": "Cancelar",
   "settings.languageSupport.actions.refresh": "Atualizar",
+  "settings.languageSupport.actions.import": "Importar .wasm",
+  "settings.languageSupport.field.abi": "ABI {abi}",
   "settings.languageSupport.capability.outline": "Estrutura",
   "settings.languageSupport.capability.classifyHits": "Classificação de ocorrências",
   "settings.languageSupport.capability.literalCalls": "Chamadas literais",

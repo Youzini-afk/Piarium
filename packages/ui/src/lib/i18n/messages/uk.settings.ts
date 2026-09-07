@@ -81,6 +81,8 @@
   "settings.languageSupport.actions.installing": "Встановлення",
   "settings.languageSupport.actions.cancel": "Скасувати",
   "settings.languageSupport.actions.refresh": "Оновити",
+  "settings.languageSupport.actions.import": "Імпортувати .wasm",
+  "settings.languageSupport.field.abi": "ABI {abi}",
   "settings.languageSupport.capability.outline": "Структура",
   "settings.languageSupport.capability.classifyHits": "Класифікація збігів",
   "settings.languageSupport.capability.literalCalls": "Виклики літералів",

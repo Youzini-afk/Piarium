@@ -79,6 +79,8 @@
   'settings.languageSupport.actions.installing': '正在安裝',
   'settings.languageSupport.actions.cancel': '取消',
   'settings.languageSupport.actions.refresh': '重新整理',
+  'settings.languageSupport.actions.import': '匯入 .wasm',
+  'settings.languageSupport.field.abi': 'ABI {abi}',
   'settings.languageSupport.capability.outline': '大綱',
   'settings.languageSupport.capability.classifyHits': '命中分類',
   'settings.languageSupport.capability.literalCalls': '字面量呼叫',

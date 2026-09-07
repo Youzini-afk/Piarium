@@ -84,6 +84,8 @@ export const settingsDict = {
   'settings.languageSupport.actions.installing': 'インストール中',
   'settings.languageSupport.actions.cancel': 'キャンセル',
   'settings.languageSupport.actions.refresh': '更新',
+  'settings.languageSupport.actions.import': '.wasm をインポート',
+  'settings.languageSupport.field.abi': 'ABI {abi}',
   'settings.languageSupport.capability.outline': 'アウトライン',
   'settings.languageSupport.capability.classifyHits': 'ヒット分類',
   'settings.languageSupport.capability.literalCalls': 'リテラル呼び出し',

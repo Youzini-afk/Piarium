@@ -27,6 +27,8 @@ export interface TreeSitterStructureProviderOptions {
   pathExists?: (candidate: string) => boolean;
   /** Demand signal for installable-but-missing grammars. Host never downloads from here. */
   onLanguageRequest?: (languageId: string, workspaceId?: string) => void;
+  /** Second-level lookup after the bundled runtime directory (D-118). */
+  resolveInstalled?: (fileName: string) => string | null;
 }
 
 const FUNCTION_LIKE_TYPES = new Set([
@@ -169,7 +171,7 @@ export function createTreeSitterStructureProvider(
   };
 
   const runtimeFile = (name: string): string => (
-    resolveStructureRuntimeFile(name, fromUrl ?? import.meta.url, pathExists)
+    resolveStructureRuntimeFile(name, fromUrl ?? import.meta.url, pathExists, options.resolveInstalled)
   );
 
   const ensureRuntime = (): { status: "ok" } | { status: "unavailable"; message: string } => {

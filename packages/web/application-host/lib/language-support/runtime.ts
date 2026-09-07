@@ -8,6 +8,9 @@ import type {
 } from "@piarium/application-client";
 import { NO_STRUCTURE_CAPABILITIES } from "../structure/types.js";
 import { capabilitiesFromSpec, treeSitterLanguageSpec } from "../structure/languages.js";
+import type { GrammarInstaller } from "../structure/grammar-installer.js";
+import type { GrammarPackManifest } from "../structure/grammar-manifest.js";
+import type { GrammarStore } from "../structure/grammar-store.js";
 import type { FileSearchItem } from "../fs/types.js";
 
 /** Enumerate this many files, then stop and set `partial` (D-120). */
@@ -26,11 +29,14 @@ export interface LanguageSupportRuntimeOptions {
   now?: () => number;
   /**
    * Language ids that have a downloadable pack but are not on this machine.
-   * Empty until the grammar manifest is wired (commit 5).
+   * Defaults from the committed manifest + store when those are provided.
    */
   installableLanguageIds?: () => readonly string[];
   installedLanguageIds?: () => readonly string[];
   userUnverifiedLanguageIds?: () => readonly string[];
+  manifest?: GrammarPackManifest;
+  store?: GrammarStore;
+  installer?: GrammarInstaller;
 }
 
 export interface LanguageSupportRuntime extends LanguageSupportAPI {
@@ -67,10 +73,19 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
   const wantedByWorkspace = new Map<string, Set<string>>();
   const cache = new Map<string, { expiresAt: number; status: LanguageSupportStatus }>();
 
+  const installableLanguageIds = options.installableLanguageIds ?? (() => {
+    const packs = Object.keys(options.manifest?.packs ?? {});
+    return packs.filter((languageId) => (
+      !treeSitterLanguageSpec(languageId) && !options.store?.has(languageId)
+    ));
+  });
+  const installedLanguageIds = options.installedLanguageIds ?? (() => options.store?.idsBySource("manifest") ?? []);
+  const userUnverifiedLanguageIds = options.userUnverifiedLanguageIds ?? (() => options.store?.idsBySource("user") ?? []);
+
   const sets = () => ({
-    installable: new Set(options.installableLanguageIds?.() ?? []),
-    installed: new Set(options.installedLanguageIds?.() ?? []),
-    userUnverified: new Set(options.userUnverifiedLanguageIds?.() ?? []),
+    installable: new Set(installableLanguageIds()),
+    installed: new Set(installedLanguageIds()),
+    userUnverified: new Set(userUnverifiedLanguageIds()),
   });
 
   const noteRequest = (languageId: string, workspaceId?: string): void => {
@@ -110,13 +125,24 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
 
     const wanted = wantedByWorkspace.get(workspaceId) ?? new Set<string>();
     const languageIds = new Set([...counts.keys(), ...wanted]);
-    const languages: LanguageSupportLanguageRow[] = [...languageIds].map((languageId) => ({
-      languageId,
-      grammarStatus: resolveGrammarStatus(languageId, catalog),
-      capabilities: capabilitiesFromSpec(treeSitterLanguageSpec(languageId)),
-      fileCount: counts.get(languageId) ?? 0,
-      wanted: wanted.has(languageId),
-    }));
+    const languages: LanguageSupportLanguageRow[] = [...languageIds].map((languageId) => {
+      const pack = options.manifest?.packs[languageId];
+      return {
+        languageId,
+        grammarStatus: resolveGrammarStatus(languageId, catalog),
+        capabilities: capabilitiesFromSpec(treeSitterLanguageSpec(languageId)),
+        fileCount: counts.get(languageId) ?? 0,
+        wanted: wanted.has(languageId),
+        ...(pack ? {
+          pack: {
+            abi: pack.abi,
+            bytes: pack.bytes,
+            packageName: pack.packageName,
+            version: pack.version,
+          },
+        } : {}),
+      };
+    });
     languages.sort((left, right) => {
       if (left.wanted !== right.wanted) return left.wanted ? -1 : 1;
       if (right.fileCount !== left.fileCount) return right.fileCount - left.fileCount;
@@ -138,9 +164,22 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     noteRequest,
     peekWanted: (workspaceId) => [...(wantedByWorkspace.get(workspaceId) ?? [])],
     getStatus,
-    install: async ({ languageId }) => unsupportedInstall(languageId),
-    cancelInstall: async ({ languageId }) => unsupportedInstall(languageId),
-    importUserGrammar: async ({ languageId }) => unsupportedInstall(languageId),
+    install: async (request) => {
+      if (!options.installer) return unsupportedInstall(request.languageId);
+      const result = await options.installer.install(request);
+      cache.clear();
+      return result;
+    },
+    cancelInstall: async (request) => {
+      if (!options.installer) return unsupportedInstall(request.languageId);
+      return options.installer.cancelInstall(request);
+    },
+    importUserGrammar: async (request) => {
+      if (!options.installer) return unsupportedInstall(request.languageId);
+      const result = await options.installer.importUserGrammar(request);
+      cache.clear();
+      return result;
+    },
   };
 }
 

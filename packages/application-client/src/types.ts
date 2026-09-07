@@ -2198,12 +2198,20 @@ export interface LanguageSupportCapabilities {
   imports: boolean;
 }
 
+export interface LanguageSupportPackInfo {
+  abi: number;
+  bytes: number;
+  packageName: string;
+  version: string;
+}
+
 export interface LanguageSupportLanguageRow {
   languageId: string;
   grammarStatus: StructureGrammarStatus;
   capabilities: LanguageSupportCapabilities;
   fileCount: number;
   wanted: boolean;
+  pack?: LanguageSupportPackInfo;
 }
 
 export interface LanguageSupportStatus {

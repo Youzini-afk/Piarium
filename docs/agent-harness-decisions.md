@@ -2397,6 +2397,88 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-123 · 2026-09-07 · 3.11 第 5 步（用户自带 wasm：未验证，不覆盖捆绑）
+
+类型：问题与解法
+
+背景：D-122 把导入按钮留到下载管道。用户自带包是高级选项，不是默认信任。
+
+决定：设置页「导入 .wasm」走桌面选文件 + `importUserGrammar`。同一内容寻址目录，`source: 'user'`，不算清单摘要，ABI 仍在 `Language.load` 窗口里闸。UI 标 `user-unverified`。捆绑语言拒绝导入，避免下载目录永远到不了 TS/JS/JSON。
+
+原因：明确动作即同意；未验证必须看得见。
+
+不改：捆绑优先（D-126）；清单摘要只约束 npm 包。
+
+影响：`grammar-installer.ts`；`LanguageSupportPage`。
+
+状态：已实施。
+
+### D-124 · 2026-09-07 · 3.11 第 5 步（明确动作即同意；Host 不自发网络）
+
+类型：问题与解法
+
+背景：plan 3.11 第 5 步原文写「与本地 embedding 模型同一套同意提示与下载管理」。那套东西不存在：`openWorkspaceKnowledge` 一律 `embedding: null`，听写 `ensureLocalSttModel` 无摘要、无取消、无同意门，缺模型就后台自动下。
+
+决定：不做同意弹窗，不做 `ask`/`always`/`never`。用户点「安装」或「导入」就是同意。Host **从不自己发起**语法包网络请求。wanted 只是需求信号。
+
+原因：抄听写等于给 ABI+摘要双重校验套上两样都没有的管道。
+
+考虑过的替代：(1) 抄听写自动下载。(2) 新做同意设置项——无既有消费者。
+
+不改：听写下载；embedding 仍为 null。
+
+影响：plan 3.11 第 5 步原文；`grammar-installer.ts`。
+
+状态：已实施。
+
+### D-125 · 2026-09-07 · 3.11 第 5 步（清单摘要在发布期生成）
+
+类型：implementation
+
+背景：运行期不能从网络取信。npm tarball 的 integrity 是整包的，不是 wasm 字节的。
+
+决定：`scripts/refresh-grammar-manifest.mjs` 从 npm 拉 tarball、解出 wasm、用 web-tree-sitter 读 ABI、**我们自己算 sha256**，写入提交进 git 的 `grammar-packs.json`。运行期只把下载字节与这份清单比。
+
+原因：与 D-101「checked-in wasm 是权威」同一精神。
+
+不改：`scripts/cloud-runtime.bun.lock`。
+
+影响：`grammar-packs.json`；`createGrammarInstaller`。
+
+状态：已实施。
+
+### D-126 · 2026-09-07 · 3.11 第 5 步（捆绑目录优先于下载目录）
+
+类型：implementation
+
+背景：下载目录若优先，被污染的 `tree-sitter-typescript.wasm` 能遮蔽内置语法。
+
+决定：`resolveStructureRuntimeFile` 先查捆绑 `runtime/`（含 asar 重映射），只有捆绑文件不存在才问 `resolveInstalled`。默认不注入第二级，现有测试无需数据目录。
+
+原因：内置 TS/JS/JSON 必须不可被数据目录覆盖。
+
+不改：asar 重映射；`pathExists` 注入。
+
+影响：`runtime-path.ts`；`createTreeSitterStructureProvider({ resolveInstalled })`。
+
+状态：已实施。
+
+### D-127 · 2026-09-07 · 3.11 第 5 步（按需语言名单与落选原因）
+
+类型：实验结果
+
+背景：plan 覆盖目标是 python、go、rust、java、c、cpp、c-sharp、kotlin、swift、ruby、php、bash、css、html、yaml、toml、markdown、xml。协议 id 是 `csharp` / `shellscript`，不是 `c-sharp` / `bash`。
+
+决定：清单收入 15 种：python、go、rust、java、c、cpp、csharp、kotlin、ruby、php、shellscript、css、html、yaml、toml。落选：swift（`tree-sitter-swift@0.7.1` 无 wasm）、markdown（两个候选包都无 wasm）、xml（两个候选包都无 wasm）。`languageIdForPath` 补 `.cs/.kt/.kts/.swift/.rb/.php/.toml/.cc/.cxx/.hh`，否则分布永远看不到这些语言。下载不做断点续传；C#/C++/Kotlin wasm 超过 1 MB，整包下完再校验。
+
+原因：脚本对每个候选如实判定，没有的记下原因略过。
+
+不改：捆绑的 TS/TSX/JS/JSX/JSON；冷目录仍只含带 `importQuery` 的语言（D-115）。按需语言装上 wasm 但还没有查询规格时，结构仍报 `unsupported`，能力旗标全关。
+
+影响：`grammar-packs.json`；`language-id.ts`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2512,6 +2594,11 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-120 | implementation（语言分布现算；文件上限 8000；工作区缓存 30s） | — | language-support/runtime.ts |
 | D-121 | implementation（wanted 按工作区内存记，结构仍报 unsupported；Host 不自发网络） | — | tree-sitter onLanguageRequest；LanguageSupportRuntime |
 | D-122 | implementation（语言支持设置页：普通渲染器 order 38；LSP 复用 LanguageServicesAPI） | — | LanguageSupportPage；builtin-page-metadata |
+| D-123 | implementation（用户自带 wasm：source=user，ABI 闸门，不覆盖捆绑） | — | grammar-installer importUserGrammar |
+| D-124 | implementation（明确动作即同意；Host 不自发网络；embedding 下载管道不存在） | — | grammar-installer；plan 3.11 第 5 步 |
+| D-125 | implementation（发布期自算 wasm sha256，不从网络取信） | — | refresh-grammar-manifest.mjs；grammar-packs.json |
+| D-126 | implementation（捆绑 runtime/ 优先于下载目录） | — | resolveStructureRuntimeFile |
+| D-127 | 实验结果（15 种可装；swift/markdown/xml 无 wasm；协议 id 用 csharp/shellscript） | — | grammar-packs.json；language-id.ts |
 | D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |

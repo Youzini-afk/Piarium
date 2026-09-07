@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { remapAsarUnpackedPath } from "./runtime-path.js";
+import { remapAsarUnpackedPath, resolveStructureRuntimeFile } from "./runtime-path.js";
 
 describe("remapAsarUnpackedPath", () => {
   it("rewrites app.asar to app.asar.unpacked when that path exists", () => {
@@ -11,5 +11,32 @@ describe("remapAsarUnpackedPath", () => {
   it("keeps the logical path when the unpacked file is absent", () => {
     const logical = "/opt/Piarium/resources/app.asar/server/lib/structure/runtime/web-tree-sitter.wasm";
     expect(remapAsarUnpackedPath(logical, () => false)).toBe(logical);
+  });
+});
+
+describe("resolveStructureRuntimeFile", () => {
+  it("keeps a bundled file even when an installed twin exists", () => {
+    const bundled = new URL("./runtime/tree-sitter-typescript.wasm", import.meta.url).pathname;
+    const installed = "/data/structure-grammars/sha256/deadbeef.wasm";
+    const resolved = resolveStructureRuntimeFile(
+      "tree-sitter-typescript.wasm",
+      import.meta.url,
+      (candidate) => candidate.replace(/\\/g, "/").endsWith("tree-sitter-typescript.wasm") || candidate === installed,
+      () => installed,
+    );
+    expect(resolved.replace(/\\/g, "/")).toContain("runtime/tree-sitter-typescript.wasm");
+    expect(resolved).not.toBe(installed);
+    expect(bundled.length).toBeGreaterThan(0);
+  });
+
+  it("falls through to the download directory only when the bundled file is absent", () => {
+    const installed = "/data/structure-grammars/sha256/abcdef.wasm";
+    const resolved = resolveStructureRuntimeFile(
+      "tree-sitter-python.wasm",
+      import.meta.url,
+      (candidate) => candidate === installed,
+      (fileName) => fileName === "tree-sitter-python.wasm" ? installed : null,
+    );
+    expect(resolved).toBe(installed);
   });
 });

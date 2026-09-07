@@ -26,6 +26,11 @@ export const resolveStructureRuntimeFile = (
   fileName: string,
   fromUrl: string = import.meta.url,
   pathExists: (candidate: string) => boolean = existsSync,
-): string => (
-  remapAsarUnpackedPath(fileURLToPath(new URL(`./runtime/${fileName}`, fromUrl)), pathExists)
-);
+  resolveInstalled?: (candidate: string) => string | null,
+): string => {
+  const bundled = remapAsarUnpackedPath(fileURLToPath(new URL(`./runtime/${fileName}`, fromUrl)), pathExists);
+  if (pathExists(bundled)) return bundled;
+  const installed = resolveInstalled?.(fileName);
+  if (installed && pathExists(installed)) return installed;
+  return bundled;
+};

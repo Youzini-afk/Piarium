@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  canImportGrammar,
   canInstallGrammar,
   grammarStatusKey,
   grammarStatusTone,
@@ -22,5 +23,7 @@ describe('language support presentation', () => {
     expect(canInstallGrammar('available')).toBe(true);
     expect(canInstallGrammar('bundled')).toBe(false);
     expect(canInstallGrammar('absent')).toBe(false);
+    expect(canImportGrammar('absent')).toBe(true);
+    expect(canImportGrammar('bundled')).toBe(false);
   });
 });

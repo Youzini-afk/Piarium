@@ -148,6 +148,15 @@ TS/TSX grammars from `tree-sitter-typescript@0.23.2`, JavaScript from
 asar / asar.unpacked remap as `extension-builtins` (D-096). A missing or
 unloadable wasm is `unavailable`; explore then tries LSP or the ±3 window.
 
+On-demand grammars are listed in committed `grammar-packs.json` (publish-time
+sha256, D-125). Install writes `{PIARIUM_DATA_DIR}/structure-grammars/sha256/<hex>.wasm`
+plus `index.json`. `resolveStructureRuntimeFile` looks at the bundled
+`runtime/` directory first and only then at the download store (D-126). Host
+never starts a grammar download by itself; the settings page Install click is
+the consent (D-124). User-supplied wasm uses the same store with
+`source: 'user'` and stays `user-unverified` (D-123). ABI is still enforced in
+`loadLanguage`. Packs without a query spec stay `unsupported` for outline.
+
 `STRUCTURE_PARSE_BUDGET_MS` bounds parse plus query after the wasm is loaded.
 It is a wall clock and a runaway guard, not a latency target: a value near an
 ordinary file's parse time makes a busy Host report `failed` and silently drop

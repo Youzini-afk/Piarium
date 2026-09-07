@@ -7,6 +7,8 @@ describe('Language Support settings page', () => {
     expect(source).toContain('SettingsPageLayout');
     expect(source).toContain('useRuntimeAPIs');
     expect(source).toContain('languageSupport.getStatus');
+    expect(source).toContain('languageSupport.install');
+    expect(source).toContain('languageSupport.importUserGrammar');
     expect(source).toContain('language.getStatus');
     expect(source).toContain('settings.page.languageSupport.title');
     expect(source).not.toContain('tree-sitter');

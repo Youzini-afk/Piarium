@@ -72,6 +72,11 @@ import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
+import { createGrammarAbiInspector, GRAMMAR_MAX_ABI, GRAMMAR_MIN_ABI } from './lib/structure/grammar-abi.js';
+import { createGrammarInstaller } from './lib/structure/grammar-installer.js';
+import { loadCommittedGrammarPackManifest } from './lib/structure/grammar-manifest.js';
+import { createGrammarStore } from './lib/structure/grammar-store.js';
+import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
@@ -1433,13 +1438,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     spawn,
     resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
   });
+  const grammarManifest = loadCommittedGrammarPackManifest();
+  const grammarStore = createGrammarStore(PIARIUM_DATA_DIR);
+  const grammarInstaller = createGrammarInstaller({
+    store: grammarStore,
+    manifest: grammarManifest,
+    minAbi: GRAMMAR_MIN_ABI,
+    maxAbi: GRAMMAR_MAX_ABI,
+    inspectAbi: createGrammarAbiInspector((fileName) => resolveStructureRuntimeFile(fileName)),
+  });
   const languageSupportRuntime = createLanguageSupportRuntime({
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     inspectWorkspace: async (workspaceId) => documentsAuthority.inspectWorkspace(workspaceId),
+    manifest: grammarManifest,
+    store: grammarStore,
+    installer: grammarInstaller,
   });
   const structureSource = createStructureSource([
     createTreeSitterStructureProvider({
       onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
+      resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
     }),
     createLspStructureProvider({
       documents: documentsAuthority,

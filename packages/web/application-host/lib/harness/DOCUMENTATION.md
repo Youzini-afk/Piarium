@@ -246,6 +246,12 @@ to disk. Other files retain the existing disk path. Thread dispatch copies the
 fixed content into persistent WorkingState before the temporary surface reference
 can be released.
 
+Language support status (`LanguageSupportAPI`) is computed when the settings
+page asks, not at boot: `searchFilesystemFiles` + `languageIdForPath`, cap
+8000 files, `partial` when truncated, 30s per-workspace cache (D-120). A
+structure request for an installable-but-missing language records an in-memory
+wanted id and still returns `unsupported` (D-121).
+
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
 materialized. Production tries tree-sitter, then the agent-view LSP outline.

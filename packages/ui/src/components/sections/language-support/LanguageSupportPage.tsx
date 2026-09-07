@@ -15,9 +15,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { requestFileAccess } from '@/lib/desktop';
 import { useWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
+  canImportGrammar,
   canInstallGrammar,
   grammarStatusKey,
   grammarStatusTone,
@@ -37,9 +39,10 @@ const LanguageRow: React.FC<{
   busy: boolean;
   languageServerStatus?: PiariumLanguageProviderStatus['status'];
   onCancel(): void;
+  onImport(): void;
   onInstall(): void;
   row: LanguageSupportLanguageRow;
-}> = ({ busy, languageServerStatus, onCancel, onInstall, row }) => {
+}> = ({ busy, languageServerStatus, onCancel, onImport, onInstall, row }) => {
   const { t } = useI18n();
   const lspStatus = languageServerStatus ?? 'absent';
   const capabilityKeys: I18nKey[] = [];
@@ -63,6 +66,11 @@ const LanguageRow: React.FC<{
             <span className={SETTINGS_HELPER_CLASS}>
               {t('settings.languageSupport.files.count', { count: row.fileCount })}
             </span>
+            {row.pack ? (
+              <span className={SETTINGS_HELPER_CLASS}>
+                {t('settings.languageSupport.field.abi', { abi: row.pack.abi })}
+              </span>
+            ) : null}
           </div>
           <SettingsFieldRow
             label={t('settings.languageSupport.row.languageServer')}
@@ -85,17 +93,22 @@ const LanguageRow: React.FC<{
             </p>
           ) : null}
         </div>
-        {canInstallGrammar(row.grammarStatus) ? (
+        {canInstallGrammar(row.grammarStatus) || canImportGrammar(row.grammarStatus) ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {busy ? (
               <Button type="button" variant="outline" size="xs" onClick={onCancel} className="!font-normal">
                 {t('settings.languageSupport.actions.cancel')}
               </Button>
-            ) : (
+            ) : canInstallGrammar(row.grammarStatus) ? (
               <Button type="button" variant="outline" size="xs" onClick={onInstall} className="!font-normal">
                 {t('settings.languageSupport.actions.install')}
               </Button>
-            )}
+            ) : null}
+            {canImportGrammar(row.grammarStatus) && !busy ? (
+              <Button type="button" variant="outline" size="xs" onClick={onImport} className="!font-normal">
+                {t('settings.languageSupport.actions.import')}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -152,6 +165,31 @@ export const LanguageSupportPage: React.FC = () => {
       }
       if (result.status === 'cancelled') {
         toast.error(t('settings.languageSupport.actions.cancel'));
+        return;
+      }
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('settings.languageSupport.empty.none'));
+    } finally {
+      setBusyId(null);
+    }
+  }, [languageSupport, refresh, t]);
+
+  const runImport = React.useCallback(async (languageId: string) => {
+    const picked = await requestFileAccess({
+      filters: [{ name: 'WebAssembly', extensions: ['wasm'] }],
+    });
+    if (!picked.success || !picked.path) {
+      if (picked.error && picked.error !== 'File selection cancelled') {
+        toast.error(picked.error);
+      }
+      return;
+    }
+    setBusyId(languageId);
+    try {
+      const result = await languageSupport.importUserGrammar({ languageId, path: picked.path });
+      if (result.status === 'failed') {
+        toast.error(result.message);
         return;
       }
       await refresh();
@@ -228,6 +266,7 @@ export const LanguageSupportPage: React.FC = () => {
               busy={busyId === row.languageId}
               languageServerStatus={lspByLanguage[row.languageId]}
               onInstall={() => void runInstall(row.languageId)}
+              onImport={() => void runImport(row.languageId)}
               onCancel={() => void runCancel(row.languageId)}
             />
           ))}

@@ -1063,6 +1063,8 @@
   'settings.languageSupport.actions.installing': 'Instalowanie',
   'settings.languageSupport.actions.cancel': 'Anuluj',
   'settings.languageSupport.actions.refresh': 'Odśwież',
+  'settings.languageSupport.actions.import': 'Importuj .wasm',
+  'settings.languageSupport.field.abi': 'ABI {abi}',
   'settings.languageSupport.capability.outline': 'Konspekt',
   'settings.languageSupport.capability.classifyHits': 'Klasyfikacja trafień',
   'settings.languageSupport.capability.literalCalls': 'Wywołania literałów',

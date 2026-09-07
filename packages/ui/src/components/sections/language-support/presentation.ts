@@ -66,6 +66,8 @@ export const grammarStatusTone = (status: StructureGrammarStatus): StatusTone =>
 
 export const canInstallGrammar = (status: StructureGrammarStatus): boolean => status === 'available';
 
+export const canImportGrammar = (status: StructureGrammarStatus): boolean => status !== 'bundled';
+
 export const statusToneClass = (tone: StatusTone): string => {
   switch (tone) {
     case 'success':

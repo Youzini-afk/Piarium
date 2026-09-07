@@ -76,6 +76,8 @@ export const settingsDict = {
   'settings.languageSupport.actions.installing': 'Installation',
   'settings.languageSupport.actions.cancel': 'Annuler',
   'settings.languageSupport.actions.refresh': 'Actualiser',
+  'settings.languageSupport.actions.import': 'Importer un .wasm',
+  'settings.languageSupport.field.abi': 'ABI {abi}',
   'settings.languageSupport.capability.outline': 'Plan',
   'settings.languageSupport.capability.classifyHits': 'Classification des occurrences',
   'settings.languageSupport.capability.literalCalls': 'Appels littéraux',

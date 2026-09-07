@@ -100,4 +100,46 @@ describe("createLanguageSupportRuntime", () => {
       reason: "unsupported",
     });
   });
+
+  it("delegates install to the injected installer and attaches pack metadata", async () => {
+    const runtime = createLanguageSupportRuntime({
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [file("app.py")],
+      manifest: {
+        generatedAt: "2026-09-07",
+        minCompatibleAbi: 13,
+        maxCompatibleAbi: 15,
+        packs: {
+          python: {
+            languageId: "python",
+            packageName: "tree-sitter-python",
+            version: "0.25.0",
+            tarballUrl: "https://example.test/python.tgz",
+            wasmPath: "package/tree-sitter-python.wasm",
+            grammarFile: "tree-sitter-python.wasm",
+            integrity: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            bytes: 12,
+            abi: 15,
+            licensePath: null,
+          },
+        },
+        skipped: {},
+      },
+      installer: {
+        install: async ({ languageId }) => ({ status: "ready", languageId, grammarStatus: "installed" }),
+        cancelInstall: async ({ languageId }) => ({ status: "cancelled", languageId }),
+        importUserGrammar: async ({ languageId }) => ({ status: "ready", languageId, grammarStatus: "user-unverified" }),
+      },
+    });
+    const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(status.languages[0]).toMatchObject({
+      languageId: "python",
+      grammarStatus: "available",
+      pack: { abi: 15, packageName: "tree-sitter-python", version: "0.25.0" },
+    });
+    await expect(runtime.install({ languageId: "python" })).resolves.toMatchObject({
+      status: "ready",
+      grammarStatus: "installed",
+    });
+  });
 });
