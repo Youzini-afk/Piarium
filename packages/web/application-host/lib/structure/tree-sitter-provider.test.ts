@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { isStructureContainerKind } from "./kinds.js";
 import { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
 
 const request = (text: string, path = "sample.ts") => ({
@@ -95,10 +96,33 @@ describe("createTreeSitterStructureProvider", () => {
     const outline = await provider.outline(request(text));
     expect(outline.status).toBe("ready");
     const names = outline.symbols.map((symbol) => symbol.name);
-    expect(names).toEqual(expect.arrayContaining(["eta", "Epsilon"]));
-    expect(names).not.toContain("zeta");
-    expect(names).toEqual(expect.arrayContaining(["default"]));
+    expect(names).toEqual(expect.arrayContaining(["eta", "Epsilon", "default"]));
+    // Module-level value bindings are catalog names, not slice units (D-113).
+    expect(outline.symbols.find((symbol) => symbol.name === "zeta")?.kind).toBe("variable");
     expect(outline.symbols.find((symbol) => symbol.name === "Epsilon")?.kind).toBe("module");
+  });
+
+  it("outlines module-level value bindings but not function-local ones", async () => {
+    const provider = parsingProvider();
+    const text = [
+      "export const DEFAULT_BYTE_BUDGET = 24576;",
+      "export const TABLE = { a: 1 };",
+      "class Holder { field = 2; }",
+      "function wrap() {",
+      "  const localOnly = 3;",
+      "  for (const each of []) void each;",
+      "  return localOnly;",
+      "}",
+    ].join("\n");
+    const outline = await provider.outline(request(text));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["DEFAULT_BYTE_BUDGET", "TABLE", "field", "Holder", "wrap"]));
+    expect(names).not.toContain("localOnly");
+    expect(names).not.toContain("each");
+    expect(outline.symbols.find((symbol) => symbol.name === "DEFAULT_BYTE_BUDGET")?.kind).toBe("variable");
+    // Slicing still refuses value bindings as units, so D-098 is unaffected.
+    expect(isStructureContainerKind("variable")).toBe(false);
   });
 
   it("outlines arrows, declare class/namespace, abstract members, and object methods", async () => {
@@ -122,7 +146,7 @@ describe("createTreeSitterStructureProvider", () => {
     const names = outline.symbols.map((symbol) => symbol.name);
     expect(names).toEqual(expect.arrayContaining(["beta", "gamma", "delta", "Alpha", "Omega", "Box", "concrete", "method"]));
     expect(names).not.toContain("needle");
-    expect(names).not.toContain("obj");
+    expect(outline.symbols.find((symbol) => symbol.name === "obj")?.kind).toBe("variable");
     expect(outline.symbols.find((symbol) => symbol.name === "beta")?.kind).toBe("function");
     expect(outline.symbols.find((symbol) => symbol.name === "Alpha")?.kind).toBe("class");
     expect(outline.symbols.find((symbol) => symbol.name === "Omega")?.kind).toBe("module");

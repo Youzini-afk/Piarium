@@ -267,6 +267,18 @@ English block in the visible/stored body). Confirmed `connections` stay
 distinct from unverified `associations`. This does not add files to the
 candidate pool or change byte/candidate budgets (D-108).
 
+Relations are an annotation, so they never make a successful search fail
+(D-112). `fileRelations` throwing — a corrupt store, or no store open for that
+workspace — sets `details.relations.status` to `partial` / `unavailable` and
+prints one line saying the graph could not answer, without leaking the
+underlying error. That is a different result from an absent `relations`, which
+means no excerpt path had an edge. A graph revision that differs from the
+excerpt is reported as `stale` and printed **without** line numbers, since a
+moved line number is worse than none. Relation lines are pushed last in the
+visible budget — after omitted supports, unread candidates and issues — and are
+capped per file, because the annotation must not crowd out the channels that
+tell the agent what the result does not contain.
+
 ### LspNavigationServices (`lsp-nav.ts`)
 
 `symbols` / `definition` / `references` / `hover` bind the queried document in

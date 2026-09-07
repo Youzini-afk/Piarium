@@ -8,6 +8,8 @@
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),
  * imports / connects / associates (file → link). Additive link kinds share the
  * file generation; there is no schema version or migration runner (D-105).
+ * `associates` is gated on the literal already being a confirmed connection
+ * value elsewhere, so `connectionLiterals` must track the connects set (D-109).
  *
  * Placeholder vector mode: dim=8, all-zero vectors, recall uses searchHybrid
  * with hybridAlpha=0 (text + graph only, no vector contribution).
@@ -204,6 +206,11 @@ export interface SymbolGraphFileRelations {
   path: string;
   documentRevision: string | null;
   generation: string | null;
+  /**
+   * Link extraction was blocked when this generation was written, so the edge
+   * set is a floor. Distinct from a file that genuinely has no edges.
+   */
+  linksIncomplete: boolean;
   imports: Array<{ specifier: string; line: number; documentRevision: string | null }>;
   connections: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
   associations: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
@@ -283,12 +290,19 @@ export interface KnowledgeStore {
     symbols: SymbolGraphSymbolInput[],
     documentRevision: string,
     links?: readonly SymbolGraphLinkInput[],
+    options?: { linksIncomplete?: boolean },
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
   findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
+  /**
+   * Values that are a confirmed connection literal somewhere in the graph.
+   * Gates association candidates: plan 3.11 marks a *same-name* string as a
+   * candidate, not every string-literal call (D-109).
+   */
+  connectionLiterals(values: readonly string[]): Promise<Set<string>>;
   deleteSession(sessionId: string): Promise<void>;
   runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }>;
   close(): Promise<void>;
@@ -413,6 +427,27 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   const graphFileIds = new Map<string, Set<number>>();
   const graphSymbolIds = new Map<string, Set<number>>();
   const graphLinkIds = new Map<string, Set<number>>();
+  /**
+   * Confirmed connection literals, refcounted so a path can be re-collected
+   * without losing values another path still declares. This is what gates
+   * association candidates, so it must stay in step with the link nodes.
+   */
+  const connectionLiteralCounts = new Map<string, number>();
+  const connectionLiteralsByPath = new Map<string, string[]>();
+  function rememberConnectionLiteral(path: string, value: string): void {
+    connectionLiteralCounts.set(value, (connectionLiteralCounts.get(value) ?? 0) + 1);
+    const values = connectionLiteralsByPath.get(path);
+    if (values) values.push(value);
+    else connectionLiteralsByPath.set(path, [value]);
+  }
+  function forgetConnectionLiterals(path: string): void {
+    for (const value of connectionLiteralsByPath.get(path) ?? []) {
+      const next = (connectionLiteralCounts.get(value) ?? 0) - 1;
+      if (next > 0) connectionLiteralCounts.set(value, next);
+      else connectionLiteralCounts.delete(value);
+    }
+    connectionLiteralsByPath.delete(path);
+  }
   for (const id of db.allNodeIds()) {
     const payload = db.getPayload(id) as Record<string, unknown> | null;
     if (!payload || typeof payload["path"] !== "string") continue;
@@ -424,6 +459,14 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ? graphLinkIds
           : null;
     if (!target) continue;
+    if (
+      payload["type"] === "link"
+      && payload["kind"] === "connects"
+      && payload["active"] === true
+      && typeof payload["value"] === "string"
+    ) {
+      rememberConnectionLiteral(payload["path"], payload["value"]);
+    }
     const ids = target.get(payload["path"]) ?? new Set<number>();
     ids.add(id);
     target.set(payload["path"], ids);
@@ -911,6 +954,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           active: true,
           ...(typeof previous["generation"] === "string" ? { generation: previous["generation"] } : {}),
           ...(typeof previous["documentRevision"] === "string" ? { documentRevision: previous["documentRevision"] } : {}),
+          ...(previous["linksIncomplete"] === true ? { linksIncomplete: true } : {}),
         };
         const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
         graphFileIds.set(normalizedPath, new Set([fileId, ...existing.slice(1).map(({ id }) => id)]));
@@ -926,7 +970,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async replaceFileSymbols(path, language, symbols, documentRevision, links = []) {
+    async replaceFileSymbols(path, language, symbols, documentRevision, links = [], options = {}) {
       return enqueueWrite(() => {
         const normalizedPath = assertGraphText(path, "File path");
         const normalizedLanguage = assertGraphText(language, "File language");
@@ -997,6 +1041,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           active: true,
           generation,
           documentRevision: normalizedRevision,
+          ...(options.linksIncomplete ? { linksIncomplete: true } : {}),
         };
         const previousTargets = new Set([
           ...previousSymbols.map(({ id }) => id),
@@ -1028,6 +1073,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         else graphSymbolIds.delete(normalizedPath);
         if (linkIds.length > 0) graphLinkIds.set(normalizedPath, new Set(linkIds));
         else graphLinkIds.delete(normalizedPath);
+        forgetConnectionLiterals(normalizedPath);
+        for (const link of links) {
+          if (link.kind === "connects") rememberConnectionLiteral(normalizedPath, link.value);
+        }
         db.indexText(fileId, normalizedPath);
         for (let index = 0; index < symbolIds.length; index += 1) {
           const id = symbolIds[index]!;
@@ -1061,6 +1110,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         graphFileIds.delete(normalizedPath);
         graphSymbolIds.delete(normalizedPath);
         graphLinkIds.delete(normalizedPath);
+        forgetConnectionLiterals(normalizedPath);
         db.flush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
@@ -1165,11 +1215,20 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         path: normalizedPath,
         documentRevision,
         generation,
+        linksIncomplete: file.payload["linksIncomplete"] === true,
         imports: imports.toSorted(byLine),
         connections: connections.toSorted(byLine),
         associations: associations.toSorted(byLine),
         danglingEdges,
       };
+    },
+
+    async connectionLiterals(values) {
+      const found = new Set<string>();
+      for (const value of values) {
+        if (connectionLiteralCounts.has(value)) found.add(value);
+      }
+      return found;
     },
 
     async findLinks(value) {

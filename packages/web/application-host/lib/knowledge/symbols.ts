@@ -9,6 +9,8 @@ import type {
 export interface CollectedSymbols {
   symbols: SymbolGraphSymbolInput[];
   links?: SymbolGraphLinkInput[];
+  /** Link extraction was blocked, so `links` is a floor rather than the set. */
+  linksIncomplete?: boolean;
   /** Disk revision the ranges were computed from. */
   documentRevision: string;
 }
@@ -54,6 +56,7 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
       collected.symbols,
       collected.documentRevision,
       collected.links,
+      { ...(collected.linksIncomplete ? { linksIncomplete: true } : {}) },
     );
   };
 

@@ -19,7 +19,7 @@ afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) awai
 async function fixture(
   scope?: string[],
   structureSource?: StructureSource,
-  fileRelations?: (workspaceId: string, path: string) => Promise<import("@piarium/protocol").ExploreFileRelation | null>,
+  fileRelations?: NonNullable<import("./service-host.js").HarnessServiceHost["fileRelations"]>,
 ) {
   const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-explore-service-"));
   const workspace = path.join(root, "workspace");
@@ -349,11 +349,13 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
   });
 
   it("attaches graph relations for excerpt paths without expanding the candidate pool", async () => {
+    let excerptRevision = "";
     const f = await fixture(undefined, undefined, async (_workspaceId, path) => (
       path === "router.ts"
         ? {
             path: "router.ts",
-            documentRevision: "disk-r1",
+            documentRevision: excerptRevision,
+            incomplete: false,
             imports: [{ specifier: "./protocol", line: 1 }],
             connections: [{ callee: "register", literal: "explore.search", line: 4 }],
             associations: [{ callee: "log", literal: "explore.search", line: 5 }],
@@ -366,20 +368,62 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
       "utf8",
     );
     await fs.writeFile(path.join(f.workspace, "other.ts"), "export const unused = 1;\n", "utf8");
+    const disk = await f.documents.read({ workspaceId: f.actor.workspaceId!, resourceId: "router.ts" });
+    if (disk.status !== "ready") throw new Error("expected disk text");
+    excerptRevision = disk.revision;
     const response = await f.request({ question: "explore.search" });
     expect(response.ok).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
-    expect(response.result.details.relations?.files).toEqual([{
-      path: "router.ts",
-      documentRevision: "disk-r1",
-      imports: [{ specifier: "./protocol", line: 1 }],
-      connections: [{ callee: "register", literal: "explore.search", line: 4 }],
-      associations: [{ callee: "log", literal: "explore.search", line: 5 }],
-    }]);
+    expect(response.result.details.relations).toEqual({
+      status: "ready",
+      files: [{
+        path: "router.ts",
+        documentRevision: excerptRevision,
+        stale: false,
+        incomplete: false,
+        imports: [{ specifier: "./protocol", line: 1 }],
+        connections: [{ callee: "register", literal: "explore.search", line: 4 }],
+        associations: [{ callee: "log", literal: "explore.search", line: 5 }],
+      }],
+    });
     expect(response.result.snippets.every((snippet) => snippet.path === "router.ts")).toBe(true);
     expect(response.result.notRequested.paths).not.toContain("other.ts");
     expect(response.result.text).toContain("router.ts connects register(\"explore.search\") (L4)");
     expect(response.result.text).toContain("[candidate]");
     expect(response.result.searched.files).toBe(1);
+  });
+
+  it("still returns excerpts when the symbol graph cannot be consulted", async () => {
+    const f = await fixture(undefined, undefined, async () => {
+      throw new Error("knowledge store is not open for workspace w");
+    });
+    await fs.writeFile(path.join(f.workspace, "router.ts"), "export function needle() { return 1; }\n", "utf8");
+    const response = await f.request({ question: "needle" });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.snippets.map((snippet) => snippet.path)).toEqual(["router.ts"]);
+    expect(response.result.details.relations).toEqual({ status: "unavailable", files: [] });
+    expect(response.result.text).toContain("Relations unavailable");
+    expect(response.result.text).not.toContain("knowledge store is not open");
+  });
+
+  it("marks relations stale when the excerpt comes from a captured draft the graph never saw", async () => {
+    const f = await fixture(undefined, undefined, async (_workspaceId, path) => ({
+      path,
+      documentRevision: "disk-before-the-edit",
+      incomplete: false,
+      imports: [],
+      connections: [{ callee: "register", literal: "explore.search", line: 2 }],
+      associations: [],
+    }));
+    await fs.writeFile(path.join(f.workspace, "router.ts"), "export function boot() {}\n", "utf8");
+    const context = await f.capture("router.ts", "export function boot() { register(\"explore.search\"); }\n");
+    const response = await f.request({ question: "explore.search" }, context);
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.snippets[0]?.source).toBe("surface-draft");
+    expect(response.result.details.relations?.files[0]).toMatchObject({ stale: true });
+    expect(response.result.text).toContain("stale @disk-before-the-edit");
+    expect(response.result.text).not.toContain("(L2)");
   });
 });

@@ -682,10 +682,15 @@ RETURN scored, graph_score(scored) AS rank ORDER BY rank DESC LIMIT 15
 当前已交付的第一纵切（D-059）在 Documents 权威写后事件上建立真实 `file → defines → symbol` 图；LSP 暂不可用时保留最后图，
 权威空结果才清旧符号。plan 3.11 第 4 步把同一张图补上 `imports` / `connects` / `associates` 边（link 节点，绑 `documentRevision`，
 与 defines 共用 generation；D-105）。确认连接与同名字符串关联候选在数据模型里分开，消费者不得把候选当事实（D-106 分类器）。
-冷仓库符号目录用已有的 `searchFilesystemFiles` 枚举、Documents 读磁盘正文与修订，不读脏缓冲（D-087），不扫 LSP，不阻塞启动或
-第一个 turn（D-107）。tree-sitter 今天只覆盖 TS/TSX，所以目录不是仓库级覆盖：非 TS/TSX 冷扫描跳过，不 `touchFile`（D-104）。
-`related` 工具仍是未接线草稿；生产消费者是 `explore.search` 读摘录路径的出边（D-108）。`references`、解析后的跨文件 `calls` 与
-PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。仓库级词法索引仍等观察到"找不到入口"再定。
+确认连接与关联候选的区别不是给消费者记一个布尔：**候选必须真是"同名"**——该字面量已经是某处的确认连接值时才写入，否则
+"任何带字符串首参的调用"会把 `it("…")` / `join("…")` / `toBe("…")` 全灌进图（D-109）。冷仓库符号目录用已有的
+`searchFilesystemFiles` 枚举、Documents 读磁盘正文与修订，不读脏缓冲（D-087），不扫 LSP，不阻塞启动或第一个 turn（D-107）。
+tree-sitter 今天只覆盖 TS/TSX，所以目录不是仓库级覆盖：非 TS/TSX 冷扫描跳过，不 `touchFile`（D-104）。轮廓的收录条件比切片的
+单位条件宽——模块级与类级值绑定是目录要回答的名字，函数体内的局部绑定不是（D-113）；轮廓能否写这一代由轮廓自己决定，边查询被
+阻塞时照写 defines 并记 `linksIncomplete`，不冻结符号（D-111）。
+`related` 工具仍是未接线草稿；生产消费者是 `explore.search` 读摘录路径的出边（D-108）。关系是**注解**：图不可用或查询失败按
+`status` 降级而不失败检索，修订与摘录不同则去掉行号并标 `stale`，可见预算排在 issue 之后（D-112）。`references`、解析后的跨文件
+`calls` 与 PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。仓库级词法索引仍等观察到"找不到入口"再定。
 
 图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
 也不是任何一轮输入的固定草稿。消费者据修订判断范围是否仍然成立，不成立时按来源状态降级，而不是拿一份无身份的范围继续用。

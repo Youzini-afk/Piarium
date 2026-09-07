@@ -1,4 +1,10 @@
-import type { AgentInputContext, ExploreFileRelation, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type {
+  AgentInputContext,
+  ExploreFileRelation,
+  ExploreRelationStatus,
+  HarnessActorContext,
+  HarnessServiceMap,
+} from "@piarium/protocol";
 import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -38,26 +44,44 @@ const ownedDirtyPathsFor = (
   ));
 };
 
+/**
+ * Graph relations decorate a result that already succeeded, so a broken or
+ * unopened knowledge store degrades the annotation and never fails the search
+ * (plan 0.4). A revision that differs from the excerpt is reported as `stale`
+ * rather than printed as current (agent-harness 7.2, D-112).
+ */
 async function loadSnippetRelations(
   host: Pick<HarnessServiceHost, "fileRelations">,
   workspaceId: string,
-  paths: readonly string[],
+  snippets: ReadonlyArray<{ path: string; revision: string }>,
   signal: AbortSignal,
-): Promise<{ files: ExploreFileRelation[] } | undefined> {
-  if (!host.fileRelations || paths.length === 0) return undefined;
-  const seen = new Set<string>();
+): Promise<{ status: ExploreRelationStatus; files: ExploreFileRelation[] } | undefined> {
+  if (!host.fileRelations || snippets.length === 0) return undefined;
+  const excerptRevisions = new Map<string, string>();
+  for (const snippet of snippets) {
+    if (!excerptRevisions.has(snippet.path)) excerptRevisions.set(snippet.path, snippet.revision);
+  }
   const files: ExploreFileRelation[] = [];
-  for (const path of paths) {
-    if (seen.has(path)) continue;
-    seen.add(path);
+  let asked = 0;
+  let answered = 0;
+  for (const [path, excerptRevision] of excerptRevisions) {
     signal.throwIfAborted();
-    const relation = await host.fileRelations(workspaceId, path);
+    asked += 1;
+    let relation: Awaited<ReturnType<NonNullable<HarnessServiceHost["fileRelations"]>>>;
+    try {
+      relation = await host.fileRelations(workspaceId, path);
+    } catch {
+      continue;
+    }
+    answered += 1;
     if (!relation) continue;
     if (relation.imports.length === 0 && relation.connections.length === 0 && relation.associations.length === 0) continue;
-    files.push(relation);
+    files.push({ ...relation, stale: relation.documentRevision !== excerptRevision });
   }
+  const status: ExploreRelationStatus = answered === asked ? "ready" : answered === 0 ? "unavailable" : "partial";
+  if (files.length === 0 && status === "ready") return undefined;
   files.sort((left, right) => left.path.localeCompare(right.path));
-  return files.length > 0 ? { files } : undefined;
+  return { status, files };
 }
 
 export function createExploreSearchService(
@@ -151,12 +175,7 @@ export function createExploreSearchService(
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
       const incomplete = searchPartial || result.searched.incomplete;
-      const relations = await loadSnippetRelations(
-        host,
-        workspaceId,
-        result.snippets.map((snippet) => snippet.path),
-        ctx.signal,
-      );
+      const relations = await loadSnippetRelations(host, workspaceId, result.snippets, ctx.signal);
       const formatted = {
         snippets: result.snippets,
         issues: result.issues,

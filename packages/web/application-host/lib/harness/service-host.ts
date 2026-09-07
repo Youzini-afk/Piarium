@@ -101,7 +101,12 @@ export interface HarnessServiceHost {
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   structureSource: StructureSource | null;
-  fileRelations: ((workspaceId: string, path: string) => Promise<import("@piarium/protocol").ExploreFileRelation | null>) | null;
+  /**
+   * Graph relations for one path. `stale` is decided by the caller, which knows
+   * the excerpt revision, so the provider does not report it. Throwing means
+   * "not answered" and must degrade the annotation, not the search (D-112).
+   */
+  fileRelations: ((workspaceId: string, path: string) => Promise<Omit<import("@piarium/protocol").ExploreFileRelation, "stale"> | null>) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;

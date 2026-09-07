@@ -96,6 +96,24 @@ const isSliceUnit = (node: Node): boolean => {
   return initializer !== null && FUNCTION_LIKE_TYPES.has(initializer.type);
 };
 
+/**
+ * A value binding at module or class level is a name the symbol catalog has to
+ * know — `export const DEFAULT_BYTE_BUDGET = 24576` is findable in the LSP
+ * outline and must not disappear because the slice query only wants containers
+ * (D-098 / D-113). Function-local bindings stay out: they are not what
+ * `searchSymbols` answers, and LSP's `documentSymbol` omits them too.
+ */
+const isModuleLevelBinding = (node: Node): boolean => {
+  if (!BINDING_UNIT_TYPES.has(node.type)) return false;
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.type === "statement_block" || FUNCTION_LIKE_TYPES.has(parent.type)) return false;
+  }
+  return true;
+};
+
+/** Emitted into the outline. Slicing narrows this again by kind (D-098). */
+const isOutlineUnit = (node: Node): boolean => isSliceUnit(node) || isModuleLevelBinding(node);
+
 const nameOfUnit = (unit: Node, name: Node | undefined): string => {
   if (name?.text) return name.text;
   const identifier = unit.childForFieldName("name");
@@ -292,7 +310,7 @@ export function createTreeSitterStructureProvider(
         const unit = match.captures.find((capture) => capture.name === "unit")?.node;
         const name = match.captures.find((capture) => capture.name === "name")?.node;
         if (name) nameLines.add(name.startPosition.row + 1);
-        if (!unit || !isSliceUnit(unit)) continue;
+        if (!unit || !isOutlineUnit(unit)) continue;
         const unitName = nameOfUnit(unit, name);
         const initializer = initializerOf(unit);
         const range = pointToLines(unit.startPosition, unit.endPosition);

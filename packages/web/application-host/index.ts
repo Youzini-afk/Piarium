@@ -1593,8 +1593,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       supervisor: languageSupervisor,
     }),
     structureSource,
+    // Reading relations must not open a database or start a catalog scan, so
+    // this consults an already-open store and reports "not answered" otherwise.
+    // The session's own knowledge work opens it (D-112).
     fileRelations: async (workspaceId, resourceId) => {
-      const store = await getKnowledgeStoreForWorkspace(workspaceId);
+      const store = knowledgeStores.get(workspaceId);
+      if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
       const relations = await store.getFileRelations(resourceId);
       if (!relations) return null;
       if (relations.imports.length === 0 && relations.connections.length === 0 && relations.associations.length === 0) {
@@ -1603,6 +1607,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return {
         path: relations.path,
         documentRevision: relations.documentRevision,
+        incomplete: relations.linksIncomplete,
         imports: relations.imports.map(({ specifier, line }) => ({ specifier, line })),
         connections: relations.connections.map(({ callee, literal, line }) => ({ callee, literal, line })),
         associations: relations.associations.map(({ callee, literal, line }) => ({ callee, literal, line })),

@@ -646,22 +646,37 @@ export type ExploreFormatInput = Pick<
   relations?: NonNullable<WireResult["details"]["relations"]>;
 };
 
+/**
+ * Relations are an annotation, so they are capped per file and never printed
+ * as current when the graph revision differs from the excerpt: a moved line
+ * number is worse than no line number (agent-harness 7.2, D-112).
+ */
+const RELATION_LINES_PER_FILE = 12;
+
 function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined): string[] {
-  const files = relations?.files.filter((file) => (
+  if (!relations) return [];
+  const files = relations.files.filter((file) => (
     file.imports.length > 0 || file.connections.length > 0 || file.associations.length > 0
-  )) ?? [];
-  if (files.length === 0) return [];
-  const lines = ["Relations (graph; associates are unverified candidates, not confirmed connections):"];
+  ));
+  const lines: string[] = [];
+  if (relations.status !== "ready") {
+    lines.push(`Relations ${relations.status}: the symbol graph could not answer for every excerpt path.`);
+  }
+  if (files.length === 0) return lines;
+  lines.push("Relations (graph; associates are same-string candidates, not confirmed connections):");
   for (const file of files) {
-    for (const item of file.imports) {
-      lines.push(`- ${file.path} imports ${item.specifier} (L${item.line})`);
-    }
-    for (const item of file.connections) {
-      lines.push(`- ${file.path} connects ${item.callee}("${item.literal}") (L${item.line})`);
-    }
-    for (const item of file.associations) {
-      lines.push(`- ${file.path} associates ${item.callee}("${item.literal}") (L${item.line}) [candidate]`);
-    }
+    const where = file.stale
+      ? `${file.path} [stale @${file.documentRevision ?? "unknown"}; line numbers are from that revision]`
+      : file.path;
+    const items = [
+      ...file.connections.map((item) => `connects ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`}`),
+      ...file.imports.map((item) => `imports ${item.specifier}${file.stale ? "" : ` (L${item.line})`}`),
+      ...file.associations.map((item) => `associates ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`} [candidate]`),
+    ];
+    for (const item of items.slice(0, RELATION_LINES_PER_FILE)) lines.push(`- ${where} ${item}`);
+    const dropped = items.length - RELATION_LINES_PER_FILE;
+    if (dropped > 0) lines.push(`- ${file.path} … ${dropped} more edge(s) omitted`);
+    if (file.incomplete) lines.push(`- ${file.path} edge extraction was incomplete for this revision`);
   }
   return lines;
 }
@@ -699,10 +714,10 @@ function packExploreVisible(
 
   const graphLines = relationLines(result.relations);
   const storedParts = [...header, ...snippetBlocks];
-  if (graphLines.length > 0) storedParts.push(...graphLines);
   if (omittedLines.length > 0) storedParts.push("Omitted supports:", ...omittedLines);
   if (unreadLine) storedParts.push(unreadLine);
   storedParts.push(...issueLines);
+  if (graphLines.length > 0) storedParts.push(...graphLines);
   const storedBody = storedParts.join("\n");
 
   const visible: string[] = [...header];
@@ -727,7 +742,6 @@ function packExploreVisible(
       });
     }
   });
-  for (const line of graphLines) pushIfFits(line);
   const extraOmitted = omitted.filter((item) => item.reason === "over byte budget");
   if (omitted.length > 0) {
     pushIfFits("Omitted supports:");
@@ -739,6 +753,10 @@ function packExploreVisible(
     pushIfFits(`Unread candidates (not-requested, ${result.notRequested.count}): listed in output store`);
   }
   for (const line of issueLines) pushIfFits(line);
+  // Relations come last: they annotate excerpts the agent already has, so they
+  // must not crowd out omitted supports, unread candidates or issues, which are
+  // how the agent learns what this result does not contain (D-112).
+  for (const line of graphLines) pushIfFits(line);
 
   let visibleText = visible.join("\n");
   if (utf8Bytes(visibleText) > byteBudget) {

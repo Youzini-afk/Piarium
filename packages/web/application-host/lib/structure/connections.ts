@@ -2,8 +2,11 @@
  * Connection-edge shape recognition for literal-call captures (plan 3.11 step 4).
  *
  * A confirmed connection is a callee on the allowlist plus a string literal.
- * Any other same-string call is an association candidate, not a fact. Consumers
- * must keep those two classes distinct (plan 0.4).
+ * Any other string-literal call is only a *potential* association candidate:
+ * plan 3.11 requires the literal to be a same-name string, which this module
+ * cannot know on its own. The knowledge runtime applies that second gate
+ * against the graph's confirmed connection values (D-109). Consumers must keep
+ * the two classes distinct (plan 0.4).
  */
 
 export const CONFIRMED_CONNECTION_CALLEES = Object.freeze(new Set([

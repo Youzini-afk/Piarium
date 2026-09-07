@@ -42,6 +42,21 @@ unavailable rules without hit-line coverage. When no configured provider
 declares the capability, the facade status is `unsupported`, not `failed`
 (D-106). LSP still reports `unsupported` for those two operations.
 
+What the outline contains is deliberately wider than what slicing will use.
+Containers, definition bindings, and module- or class-level value bindings are
+all outlined; the last group carries kind `variable` so `export const
+DEFAULT_BYTE_BUDGET = 24576` is a findable catalog name. Function-local
+bindings stay out, matching what `documentSymbol` reports. Slicing narrows the
+outline again through `isStructureContainerKind`, so D-098 is unaffected by the
+wider outline (D-113).
+
+`literalCalls` only reports the shape it saw. Deciding which of those are
+association candidates needs the graph, because plan 3.11 marks a *same-name*
+string as a candidate: the classifier in `connections.ts` splits allowlisted
+callees from the rest, and the knowledge runtime then drops any non-connection
+literal that is not already a confirmed connection value somewhere (D-109).
+Without that second gate every `it("…")` and `join("…")` becomes a graph node.
+
 ## Slice
 
 Slice units are **containers**: function, method, constructor, class, interface,

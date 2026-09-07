@@ -390,9 +390,26 @@ export interface ExploreSearchProvenance {
   matchedGroups: string[];
 }
 
+/**
+ * `ready` — every excerpt path was answered by the graph. `partial` — at least
+ * one lookup failed or the graph was not open for that workspace. `unavailable`
+ * — no lookup succeeded. An absent `relations` means no excerpt path had any
+ * edge, which is different from all three of these.
+ */
+export type ExploreRelationStatus = "ready" | "partial" | "unavailable";
+
 export interface ExploreFileRelation {
   path: string;
+  /** Disk revision the edges were collected from; null on legacy rows. */
   documentRevision: string | null;
+  /**
+   * The graph revision differs from the excerpt the agent is reading, so the
+   * edges may name lines that moved. The edge itself is still evidence; its
+   * line numbers are not (agent-harness 7.2).
+   */
+  stale: boolean;
+  /** Link extraction was blocked for this revision, so edges may be missing. */
+  incomplete: boolean;
   imports: Array<{ specifier: string; line: number }>;
   connections: Array<{ callee: string; literal: string; line: number }>;
   associations: Array<{ callee: string; literal: string; line: number }>;
@@ -425,9 +442,10 @@ export interface ExploreSearchResult {
     };
     /**
      * Outbound graph facts for excerpt paths only. `connections` are confirmed
-     * call/register shapes; `associations` are unverified same-string candidates.
+     * call/register shapes; `associations` are same-string literals whose own
+     * call shape is not a connection, so they are candidates, not facts.
      */
-    relations?: { files: ExploreFileRelation[] };
+    relations?: { status: ExploreRelationStatus; files: ExploreFileRelation[] };
   };
 }
 

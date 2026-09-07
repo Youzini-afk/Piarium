@@ -73,18 +73,29 @@ const flattenSymbols = (value: unknown): SymbolGraphSymbolInput[] => {
   return result;
 };
 
-const flattenOutlineSymbols = (symbols: readonly StructureSymbol[]): SymbolGraphSymbolInput[] => {
+/**
+ * Structure outlines carry inclusive 1-based line spans with no columns, while
+ * the graph stores a 0-based character range. Ending at column 0 of the last
+ * line would exclude that line and make a single-line symbol zero-width, so the
+ * end column comes from the real line length (D-110).
+ */
+const flattenOutlineSymbols = (
+  symbols: readonly StructureSymbol[],
+  lineLengths: readonly number[],
+): SymbolGraphSymbolInput[] => {
   const result: SymbolGraphSymbolInput[] = [];
   const visit = (symbol: StructureSymbol): void => {
     if (symbol.name.trim()) {
+      const startLine = Math.max(0, symbol.range.startLine - 1);
+      const endLine = Math.max(startLine, symbol.range.endLine - 1);
       result.push({
         name: symbol.name,
         kind: symbol.kind,
         range: {
-          startLine: Math.max(0, symbol.range.startLine - 1),
+          startLine,
           startCharacter: 0,
-          endLine: Math.max(0, symbol.range.endLine - 1),
-          endCharacter: 0,
+          endLine,
+          endCharacter: lineLengths[endLine] ?? 0,
         },
       });
     }
@@ -103,6 +114,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const pending = new Set<Promise<void>>();
   const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor });
   const catalogControllers = new Map<string, AbortController>();
+  const suppressedCandidates = new Map<string, Set<string>>();
   let disposed = false;
 
   /**
@@ -149,12 +161,18 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     if (outline.status === "cancelled" || importsResult.status === "cancelled" || callsResult.status === "cancelled") {
       return null;
     }
-    const blocked = (status: string): boolean => status === "unavailable" || status === "failed" || status === "stale";
-    if (blocked(importsResult.status) || blocked(callsResult.status)) return null;
-    if (blocked(outline.status) && importsResult.status !== "ready" && callsResult.status !== "ready") return null;
-    if (outline.status === "unsupported" && importsResult.status === "unsupported" && callsResult.status === "unsupported") {
+    /**
+     * The outline decides whether this generation may be written at all: an
+     * empty symbol set is only authoritative when a provider actually answered.
+     * A blocked link query never suppresses a working outline — a wasm failure
+     * must degrade to defines-only, not freeze the file forever (D-111).
+     */
+    if (outline.status !== "ready" && outline.status !== "empty") {
+      if (outline.status === "unsupported") return loadSymbolsFromLsp(workspaceId, path, languageId);
       return null;
     }
+    const answered = (status: string): boolean => status === "ready" || status === "empty" || status === "unsupported";
+    const linksIncomplete = !answered(importsResult.status) || !answered(callsResult.status);
     const links: SymbolGraphLinkInput[] = [];
     if (importsResult.status === "ready") {
       for (const item of importsResult.imports) {
@@ -164,15 +182,50 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       }
     }
     if (callsResult.status === "ready") {
-      for (const call of callsResult.calls) {
-        const classified = classifyLiteralCall(call);
-        if (!classified || !Number.isSafeInteger(call.line) || call.line < 1) continue;
+      const usable = callsResult.calls.filter((call) => (
+        classifyLiteralCall(call) !== null && Number.isSafeInteger(call.line) && call.line >= 1
+      ));
+      const candidates = usable.filter((call) => classifyLiteralCall(call) === "associates");
+      /**
+       * plan 3.11 marks a *same-name* string as an association candidate, so a
+       * literal only qualifies once it is a confirmed connection value
+       * somewhere. Without this gate every `it("…")` and `join("…")` becomes a
+       * graph node (D-109).
+       */
+      // A file that both registers and mentions the same literal is the
+      // clearest same-name case, and the store has not seen this generation
+      // yet, so the gate consults this batch as well as the graph (D-109).
+      const localConnections = new Set(usable
+        .filter((call) => classifyLiteralCall(call) === "connects")
+        .map((call) => call.literal));
+      const unresolved = [...new Set(candidates
+        .map((call) => call.literal)
+        .filter((literal) => !localConnections.has(literal)))];
+      const store = unresolved.length > 0 ? await options.getStore(workspaceId) : null;
+      const knownLiterals = store ? await store.connectionLiterals(unresolved) : new Set<string>();
+      let suppressed = false;
+      for (const call of usable) {
+        const classified = classifyLiteralCall(call)!;
+        if (classified === "associates" && !localConnections.has(call.literal) && !knownLiterals.has(call.literal)) {
+          suppressed = true;
+          continue;
+        }
         links.push({ kind: classified, value: call.literal, line: call.line, callee: call.name });
       }
+      // The gate only sees connections collected so far, so a file visited
+      // before the file that registers its literal loses the candidate. Record
+      // it and let the cold scan make one more pass (D-109).
+      if (suppressed) {
+        const paths = suppressedCandidates.get(workspaceId) ?? new Set<string>();
+        paths.add(path);
+        suppressedCandidates.set(workspaceId, paths);
+      }
     }
+    const lineLengths = snapshot.content.split("\n").map((line) => line.replace(/\r$/u, "").length);
     return {
-      symbols: outline.status === "ready" || outline.status === "empty" ? flattenOutlineSymbols(outline.symbols) : [],
+      symbols: flattenOutlineSymbols(outline.symbols, lineLengths),
       links,
+      ...(linksIncomplete ? { linksIncomplete: true } : {}),
       documentRevision: snapshot.revision,
     };
   };
@@ -255,6 +308,20 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         await collector.drain();
         await yieldToEventLoop();
       }
+      // One more pass over the files whose association candidates were gated
+      // before their connection literal existed. Parses are content-hashed, so
+      // this re-collect is cheap, and it does not recurse (D-109).
+      const revisit = [...(suppressedCandidates.get(workspaceId) ?? [])];
+      suppressedCandidates.delete(workspaceId);
+      for (let offset = 0; offset < revisit.length; offset += CATALOG_SCAN_BATCH) {
+        if (disposed || signal.aborted) return;
+        for (const revisitPath of revisit.slice(offset, offset + CATALOG_SCAN_BATCH)) {
+          collector.observe({ path: revisitPath, kind: "modified" });
+        }
+        await collector.drain();
+        await yieldToEventLoop();
+      }
+      suppressedCandidates.delete(workspaceId);
     } catch (error) {
       if (signal.aborted || disposed) return;
       try { options.onError?.(error); } catch { /* catalog failures stay observational */ }

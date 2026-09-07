@@ -356,9 +356,12 @@ describe("explore D-090 candidate ranking and materialization", () => {
     const withGraph = formatExploreOutput({
       ...result,
       relations: {
+        status: "ready",
         files: [{
           path: "router.ts",
-          documentRevision: "disk-r1",
+          documentRevision: result.snippets[0]!.revision,
+          stale: false,
+          incomplete: false,
           imports: [{ specifier: "./protocol", line: 1 }],
           connections: [{ callee: "register", literal: "explore.search", line: 4 }],
           associations: [{ callee: "log", literal: "explore.search", line: 5 }],
@@ -369,13 +372,16 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(withGraph.visibleText).toContain("router.ts imports ./protocol (L1)");
     expect(withGraph.visibleText).toContain("router.ts connects register(\"explore.search\") (L4)");
     expect(withGraph.visibleText).toContain("router.ts associates log(\"explore.search\") (L5) [candidate]");
-    expect(withGraph.storedBody).toContain("unverified candidates");
+    expect(withGraph.storedBody).toContain("same-string candidates");
     const tight = formatExploreOutput({
       ...result,
       relations: {
+        status: "ready",
         files: [{
           path: "router.ts",
-          documentRevision: "disk-r1",
+          documentRevision: result.snippets[0]!.revision,
+          stale: false,
+          incomplete: false,
           imports: [{ specifier: "./protocol", line: 1 }],
           connections: [],
           associations: [],
@@ -384,6 +390,68 @@ describe("explore D-090 candidate ranking and materialization", () => {
     }, { byteBudget: Buffer.byteLength(withoutGraph.visibleText, "utf8") });
     expect(tight.visibleText).not.toContain("imports ./protocol");
     expect(Buffer.byteLength(tight.visibleText, "utf8")).toBeLessThanOrEqual(Buffer.byteLength(withoutGraph.visibleText, "utf8"));
+  });
+
+  it("drops relation line numbers when the graph revision is not the excerpt revision", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "router.ts", line: 1, text: "needle" }],
+      readFile: async () => ready("needle"),
+    });
+    const formatted = formatExploreOutput({
+      ...result,
+      relations: {
+        status: "ready",
+        files: [{
+          path: "router.ts",
+          documentRevision: "disk-older",
+          stale: true,
+          incomplete: false,
+          imports: [],
+          connections: [{ callee: "register", literal: "gone.handler", line: 3 }],
+          associations: [],
+        }],
+      },
+    });
+    expect(formatted.visibleText).toContain("stale @disk-older");
+    expect(formatted.visibleText).toContain("connects register(\"gone.handler\")");
+    expect(formatted.visibleText).not.toContain("(L3)");
+  });
+
+  it("reports a graph that could not answer, and keeps issues ahead of relations in the budget", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [
+        { path: "router.ts", line: 1, text: "needle" },
+        { path: "broken.ts", line: 1, text: "needle" },
+      ],
+      readFile: async (path) => (path === "broken.ts"
+        ? { status: "failed", message: "disk read failed" }
+        : ready("needle")),
+    });
+    const unavailable = formatExploreOutput({ ...result, relations: { status: "unavailable", files: [] } });
+    expect(unavailable.visibleText).toContain("Relations unavailable");
+
+    const issueLine = result.issues[0]!;
+    const manyEdges = Array.from({ length: 40 }, (_, index) => ({
+      callee: "register", literal: `handler-${index}`, line: index + 1,
+    }));
+    const crowded = formatExploreOutput({
+      ...result,
+      relations: {
+        status: "ready",
+        files: [{
+          path: "router.ts",
+          documentRevision: result.snippets[0]!.revision,
+          stale: false,
+          incomplete: false,
+          imports: [],
+          connections: manyEdges,
+          associations: [],
+        }],
+      },
+    });
+    expect(crowded.visibleText).toContain(issueLine.path);
+    expect(crowded.visibleText).toContain("more edge(s) omitted");
+    expect(crowded.visibleText.split("\n").filter((line) => line.includes("connects register")).length).toBe(12);
   });
 });
 
