@@ -17,7 +17,8 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── search.content → HarnessSearchService
                            ├── document.readSource → fixed surface bytes or disk sentinel
                            ├── document.pathOverlay → fixed relative paths or disk sentinel
-                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore
+                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore + optional graph path recall
+                           ├── related.query → already-open KnowledgeStore (file-level topology; not lsp.references)
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
@@ -270,8 +271,19 @@ parsed. It does not call `documentSymbols` itself.
 After excerpts are chosen, an optional `fileRelations` callback may attach
 outbound graph facts for those paths only (`details.relations` and a compact
 English block in the visible/stored body). Confirmed `connections` stay
-distinct from unverified `associations`. This does not add files to the
-candidate pool or change byte/candidate budgets (D-108).
+distinct from unverified `associations`. That annotation does not change
+byte/candidate budgets (D-108 / D-112).
+
+A second, independent graph path (`graphRecall`, already-open store only) may
+add **path** candidates before and after the first pack: definition hits for
+distinctive terms, other ends of connection literals that appear in selected
+excerpt text, and a capped set of reverse importers (D-136 / D-137). The graph
+never supplies line numbers for excerpts. After `readFile`, explore relocates
+the symbol name or literal in the current text and only then writes `hits`;
+if the name is gone, that window is omitted — it does not become line 1.
+`details.graph` reports `not-requested | ready | empty | unavailable | failed`.
+An unusable graph leaves the rg excerpts in place. Graph `filesDropped` is a
+floor and is combined with rg by taking the maximum, not the sum (D-092).
 
 Relations are an annotation, so they never make a successful search fail
 (D-112). `fileRelations` throwing — a corrupt store, or no store open for that
@@ -284,6 +296,11 @@ moved line number is worse than none. Relation lines are pushed last in the
 visible budget — after omitted supports, unread candidates and issues — and are
 capped per file, because the annotation must not crowd out the channels that
 tell the agent what the result does not contain.
+
+`related.query` answers file-level topology for one path or symbol name:
+definitions, imports (resolved and visibly unresolved), reverse importers, and
+connection endpoints. It is not `lsp.references`. A missing open store is
+`unavailable`; the read path does not open a database.
 
 ### LspNavigationServices (`lsp-nav.ts`)
 

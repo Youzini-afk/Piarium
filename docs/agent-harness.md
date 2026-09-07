@@ -595,12 +595,24 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
   互相重叠，从每次查询的计数无法还原去重后的并集，所以取单次查询的最大丢弃数并在正文说"至少"，宁可少报不虚报（D-092）。
 - *fan-out*：rg（磁盘）经 search-service 一条路径，传入 actor 与本轮 inputContext，脏路径由后端在计数前排除、草稿命中由同一
   服务叠加，`explore` 不自带第二套草稿匹配；`lsp.symbols` 当前需要一个文件来选择语言 provider，因此按种子文件逐语言发起，不是
-  全仓库通用符号索引；知识库符号搜索当前是 JS 扫描 + 字符串计分（不是 AC / BM25），作为退化通道；有 embedding 时语义召回。
+  全仓库通用符号索引。符号图是**第二路路径候选**，不是第二套 rg：目录把「这个名字在哪儿定义」和「这根连线的另一端在哪」
+  收成路径，摘录正文仍走 `readFile` → `outline` → `sliceStructureWindows`，和 rg 候选完全一样。图**不**主要增加召回——
+  问题里出现 `explore.search` 时，rg 一样能命中 `router.register("explore.search")` 那一行。图给三件 rg 给不了的：
+  **定义优先**（目录知道 `foo` 在哪儿定义、是什么 kind）、**连线配对**（`register` 与 `request` 是同一字面量的两头）、
+  **反向 import**（谁 import 了这个文件，不需要查询词）。其中只有连线补全是真正的新召回：注册端或请求端可能被 rg
+  候选预算裁掉。定义候选在 store 已打开且目录非空时始终跑；连线与反向 import 等第一次打包之后，用已选中摘录里确认过的
+  字面量/路径（D-136 / D-137）。图有独立预算，`filesDropped` 跨来源取最大值（D-092）。读路径只用已经打开的 store，
+  未开 / 空目录 / 查询失败分别报 `unavailable` / `empty` / `failed`，rg 结果照出（D-112 同类）。知识库符号搜索是
+  对已打开目录的名字扫描 + 分档计分（精确 / 名字含 / 路径含），不是 AC / BM25；有 embedding 时语义召回仍休眠。
 - *物化*：先用便宜信息排候选，按需读取当前来源正文；输出满足后不再无条件读完全部候选，候选失效或内容不合适时补下一批。未读候选
   记 `not-requested`，不混进 `empty`。正文读取可有受控并行，目标是少做无用读取而不只是同时做完（D-090）。
 - *expand*：`lsp.definition` / `lsp.references`（有界；**`references` 不是调用图**，当前没有 call hierarchy，不写"调用图 BFS"）；
-  符号图已有 `file → defines → symbol` 以及 `file → imports|connects|associates → link`（TS/TSX tree-sitter，绑 `documentRevision`）。`references`、解析后的 `calls` 与 PageRank 仍未接；explore 只读摘录路径的出边，不把关联文件扩进候选池（D-108）；
-  git co-change 与测试 ↔ 源码配对是待建服务。**LSP 返回的路径与所有派生出的支撑路径都要重新经过 workspace scope / realpath
+  符号图已有 `file → defines → symbol` 以及 `file → imports|connects|associates → link`（TS/TSX/JS/JSX tree-sitter，绑 `documentRevision`）。
+  explore 用图选**路径**：定义命中、已确认连接字面量的其他端点、已选中路径的反向 import（D-136，取代 D-108 的「不扩候选池」）。
+  图范围只当定位提示：物化后必须在当前正文里重新找到符号名或字面量，找不到就不输出这个窗口，不许退化成第 1 行，
+  也不许把图里的行号当真。摘录出边注解（`details.relations`）仍只注释已经选中的摘录（D-108/D-112）。
+  `references`、解析后的 `calls` 与 PageRank 仍未接；git co-change 与测试 ↔ 源码配对是待建服务。
+  **LSP 返回的路径与所有派生出的支撑路径都要重新经过 workspace scope / realpath
   授权**，不能只校验用户传入的 `paths`——定义可以跳进 `node_modules` 或工作区之外。
 - *fuse*：用 **RRF** 按各路名次融合，不生硬相加不同量纲的分数；先保留来源身份与确定性的并列顺序，相关来源不冒充独立证据。
   RRF 融合的是有不同信息来源的候选排名（词法、符号、路径、结构关系），不掩盖单路本身只是命中数排序；名称、路径、注释、字符串
@@ -662,35 +674,40 @@ read 后可能已变。因此按工作区记录 telemetry（问题、类型、�
 
 ### 6.2 第二层：这段代码和什么有关
 
-由知识库拥有。节点是符号与文件，边是 `imports` / `calls` / `references` / `defines`（来源为 host LSP 与
-Git），payload 是路径、语言、最近修改时间、dirty 状态。这是 Aider repo map 的图 + PageRank，直接以 TQL
-表达：
+由知识库拥有。节点是文件与符号，边是 `defines` / `imports` / `connects` / `associates`（tree-sitter 写进同一张图；
+`references` 与解析后的跨文件 `calls` 仍未接）。这不是 Aider repo map + PageRank：多跳扩展和 rank 分数都还没做，
+也不在本刀范围。早期 TQL 草稿（`EXPAND [:calls|references*1..2]` + `pagerank`）留作远期形状，不是当前契约。
 
-```sql
-SEARCH VECTOR $q TOP 20 AS seed
-WITH seed
-EXPAND seed [:calls|references*1..2] AS related
-WITH related
-pagerank related AS scored
-WITH scored
-WHERE scored.modified_at > $since
-RETURN scored, graph_score(scored) AS rank ORDER BY rank DESC LIMIT 15
-```
+图**不**主要增加召回。rg 已经能命中提到某个字面量的行。图给三件 rg 给不了的：
 
-暴露为工具 `related(anchor, hops?, labels?)`。
+1. **定义优先。** 目录知道 `foo` 在哪儿定义、是什么 kind；rg 只知道四十处都提到了 `foo`。
+2. **连线配对。** rg 给你散落的 N 行；图知道这个字面量的一端是 `register`、另一端是 `request`。
+3. **反向依赖。** 「谁 import 了这个文件」不需要查询词。
 
-当前已交付的第一纵切（D-059）在 Documents 权威写后事件上建立真实 `file → defines → symbol` 图；LSP 暂不可用时保留最后图，
-权威空结果才清旧符号。plan 3.11 第 4 步把同一张图补上 `imports` / `connects` / `associates` 边（link 节点，绑 `documentRevision`，
-与 defines 共用 generation；D-105）。确认连接与同名字符串关联候选在数据模型里分开，消费者不得把候选当事实（D-106 分类器）。
-确认连接与关联候选的区别不是给消费者记一个布尔：**候选必须真是"同名"**——该字面量已经是某处的确认连接值时才写入，否则
-"任何带字符串首参的调用"会把 `it("…")` / `join("…")` / `toBe("…")` 全灌进图（D-109）。冷仓库符号目录用已有的
-`searchFilesystemFiles` 枚举、Documents 读磁盘正文与修订，不读脏缓冲（D-087），不扫 LSP，不阻塞启动或第一个 turn（D-107）。
-tree-sitter 今天只覆盖 TS/TSX，所以目录不是仓库级覆盖：非 TS/TSX 冷扫描跳过，不 `touchFile`（D-104）。轮廓的收录条件比切片的
-单位条件宽——模块级与类级值绑定是目录要回答的名字，函数体内的局部绑定不是（D-113）；轮廓能否写这一代由轮廓自己决定，边查询被
-阻塞时照写 defines 并记 `linksIncomplete`，不冻结符号（D-111）。
-`related` 工具仍是未接线草稿；生产消费者是 `explore.search` 读摘录路径的出边（D-108）。关系是**注解**：图不可用或查询失败按
-`status` 降级而不失败检索，修订与摘录不同则去掉行号并标 `stale`，可见预算排在 issue 之后（D-112）。`references`、解析后的跨文件
-`calls` 与 PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。仓库级词法索引仍等观察到"找不到入口"再定。
+其中只有连线补全是新召回：agent 问 `explore.search` 时，注册它的文件可能被 rg 候选预算裁掉，请求端也可能没进候选。
+
+当前图：Documents 写后事件 + 冷扫描把磁盘正文写进 `file → defines → symbol` 和 `file → imports|connects|associates → link`
+（绑 `documentRevision`，共用 generation；D-087/D-105）。LSP 暂不可用时保留最后图，权威空结果才清旧符号。
+确认连接与同名字符串关联候选分开，候选必须真是同名（D-106/D-109）。冷目录覆盖带 `importQuery` 的语言
+（TS/TSX/JS/JSX，D-115）；纯 Python 仓库对目录来说是 `empty`，不是坏了。轮廓收录模块级/类级值绑定（D-113）；
+边查询被阻塞时照写 defines 并记 `linksIncomplete`（D-111）。
+
+**读者。** `explore.search` 把图当第二路路径候选（定义 / 连线另一端 / 反向 import，D-136，取代 D-108 的「不扩候选池」），
+并继续用 `details.relations` 注解已经选中的摘录（D-112）。`related` 是真实注册的工具：对一个路径或符号名回答它定义了什么、
+import 了什么、谁 import 了它、它在哪些连线上以及另一端在哪。每一项都能表达「没有」和「不完整」（`linksIncomplete`、
+specifier 未解析、目录不覆盖该语言）。`related` **不是**更差的 `lsp.references`：references 精确回答「谁引用这个符号」，
+需要语言服务器；related 回答文件级 import 拓扑和连线端点，不需要语言服务器在跑。
+
+反向 import 在**查询期**解析：相对 specifier 相对于该文件所在目录加上常见扩展名（含 `.js`→`.ts` 孪生）；
+非相对（包名、别名）保持未解析。解析不了可见地报，不猜（D-135）。store 读路径只用已经打开的库，未开返回
+`unavailable`，不开数据库（D-112/D-138）。
+
+图只选路径。`documentRevision` 可能过期或为 `null`；范围只能当定位提示，物化后必须在当前正文里重新确认名字。
+确认不了就不输出这个窗口。目录只有冷扫描 + Documents mutation 那么新，shell 和外部进程的写入不被观察——
+路径级召回 + 当前正文物化就是为此设计的，不另做第二套过期检测。
+
+`references`、解析后的跨文件 `calls` 与 PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。
+仓库级词法索引仍等观察到「找不到入口」再定。
 
 图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
 也不是任何一轮输入的固定草稿。消费者据修订判断范围是否仍然成立，不成立时按来源状态降级，而不是拿一份无身份的范围继续用。

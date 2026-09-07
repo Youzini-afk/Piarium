@@ -2569,6 +2569,102 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-133 · 2026-09-07 · D-103 第 2 项：崩溃隔离用例忽略已死管道的 EPIPE
+
+类型：问题与解法
+
+背景：D-103 立项三处测试收尾项。第 2 项：`lib/run/supervisor.test.ts`「isolates a crashed test provider」在子进程已死后仍向 stdin 写 `initialized` / RPC，未捕获的 `write EPIPE`（`errno -4047`）让 `packages/web` 完整套件退出码为 1，而断言全过。3.12 要反复跑这个套件，先修这一条。
+
+决定：在 `test-supervisor.ts` 给崩溃隔离用例的子进程 stdin/stdout/stderr 挂 `error` 监听，忽略 `EPIPE` 与 `ERR_STREAM_DESTROYED`。崩溃隔离本身仍被断言。不改产品监督器。D-103 第 1 项（`thread-runtime` 20ms stalled）和第 3 项（pi-host `harness-e2e` #3）本刀不碰。
+
+原因：套件退出码必须能当判据。把 EPIPE 吞进 vitest 全局忽略会一并吞掉真实未捕获错误；只在这条故意崩子进程的路径上忽略已死管道，范围最小。
+
+不改：D-103 正文（历史立项）；两处挂钟阈值；生产 `supervisor.ts`。
+
+影响：`lib/run/test-supervisor.ts`；status 3.2/下一步；D-103 索引行。
+
+状态：已实施。
+
+### D-134 · 2026-09-07 · 3.12 先量再决定：查询走已有 path→id 图，不加名字哈希
+
+类型：问题与解法
+
+背景：`searchSymbols` / `findLinks` 曾 `scanNodes` 全节点。上 explore 热路径前要先量本仓库目录规模和单次查询墙钟，再决定要不要内存索引。`connectionLiteralCounts` / `connectionLiteralsByPath` 是「打开时和每次写入维护、不改持久格式」的先例。
+
+决定：查询不再 `scanNodes` 全库。打开与每次写入维护三份内存结构，无新持久格式、无迁移：`symbolQueryByPath`（searchSymbols 扫行而不是 `getPayload`）、`linksByValue`（findLinks 按字面量取值）、`importSpecifiersByPath`（findImporters 仍在查询期解析）。`searchSymbols` 把计分档暴露为 `match: exact | name-contains | path-contains`（分仍是 4/2/1）。对照测量（加缓存前、本仓库 2349 文件 / 24232 符号 / 13969 边）：`searchSymbols("explore", 20)=186.0ms`，`findLinks("explore.search")=73.2ms`，`findImporters(explore.ts)=42.4ms`。186ms × 每个 distinctive 词已经够上 explore 热路径，所以加了行缓存和按值的 link 映射；**不加**按名字的第二份哈希（名字包含仍要扫行）。findImporters 42ms 留在查询期解析，因为解析依赖当时的路径集合。
+
+原因：全节点扫描会把 event/block/knowledge 和符号混在一起数。对照数字说明贵的是逐 id `getPayload`，不是缺一个名字哈希。`connectionLiteralCounts` 就是这个先例。
+
+不改：持久 schema；embedding；词法/BM25 索引。
+
+影响：`knowledge/store.ts`；`scripts/symbol-graph-query.ts`；status 3.1/3.12。
+
+状态：已实施。
+
+### D-135 · 2026-09-07 · 反向 import 查询期解析，未解析可见，不猜
+
+类型：问题与解法
+
+背景：import 边存的是未解析 specifier 字符串（D-105）。`./explore.js` 和 `../harness/explore.js` 是两个键，却常指向同一个文件。`related` 最有用的答案是「谁用了这个文件」。
+
+决定：在查询期解析。相对 specifier 相对于该文件所在目录，尝试常见扩展名和 `index.*`；本仓库需要的 `.js`→`.ts` / `.tsx` 孪生一并试。命中目录里恰好一个已知路径才算解析成功。命中零个或多个孪生 → `unresolved-relative`。包名、别名、`node:`、`#` → `non-relative`。未解析必须出现在结果里，不许悄悄丢掉，更不许在多个孪生里猜一个。
+
+原因：解析写进边会强迫冷扫描做模块解析，D-105 已拒绝。查询期有完整路径集合，相对路径足够确定性；包名没有工作区解析器，猜会撒谎。
+
+不改：边的持久格式；tsconfig paths / package exports。
+
+影响：`knowledge/import-resolve.ts`；`store.findImporters`；`related` 的 imports.unresolved。
+
+状态：已实施。
+
+### D-136 · 2026-09-07 · 本刀取代 D-108 的「不扩候选池」
+
+类型：问题与解法
+
+背景：D-108 把 explore 定为图的唯一生产消费者，但只注解已经选中的摘录，明确不把关联文件加入候选池。3.11 第 4 步因此建了只写的图：冷扫描持续维护符号，没有任何路径读目录做定义优先或连线补全。plan 0.7 要按观察到的「找不到入口」决定下一步；证据已经在库里——`explore.search` 的注册端和请求端是同一字面量的两头，rg 候选预算可能只留下提到它的文件。
+
+决定：explore 增加图路径候选：定义、连线另一端、反向 import。摘录出边注解（`details.relations`）和 D-112 的降级/去行号/可见预算规则保留。D-108 正文不改；本条取代其中「不扩候选池」一句。
+
+原因：图能加的是定义位置、连线配对和反向 import，不是笼统扩大召回。继续只注解已经选中的摘录，兑现不了第 4 步建的东西。
+
+不改：rg 候选预算；24 KiB 字节预算；结构切片；`lsp.references`。
+
+影响：`explore.ts` / `explore-graph.ts` / `explore-service.ts`；protocol `details.graph`；设计 6.1/6.2；plan 3.2/3.12；D-108 索引行。
+
+状态：已实施。
+
+### D-137 · 2026-09-07 · 图召回始终跑定义；连线与反向 import 等第一次打包之后
+
+类型：问题与解法
+
+背景：两级门控要自己定：始终跑图，还是只在 rg 不足时跑。第 1 步对照查询（path→id 扫描，见 D-134）显示单次 `searchSymbols` / `findLinks` / `findImporters` 的墙钟远小于一次 rg 扇出，定义优先的价值在 rg 命中很多时也成立。
+
+决定：store 已打开且目录非空时**始终**跑定义召回（跳过 `path-contains` 档，避免把路径碰巧含该词的文件当定义）。连线补全和反向 import 需要已选中的摘录正文/路径，所以放在第一次 `packComplementary` 之后：只对摘录**正文里出现过**的确认连接字面量做 `findLinks`，只对已打包路径做 `findImporters`。独立预算：定义 40、连线 16、反向 import 每种子 6 / 总共 12。RRF 权重定义 10 / 连线 7 / import 3，打进现有 `rankCandidates`。打包另加 `graphBoost`（定义 30 / 连线 16 / import 4），因为互补打包原先不看 RRF，只提及时会压过定义文件。`filesDropped` 与 rg 取 max。why 写明来源，不伪装成 rg 命中。
+
+原因：定义优先在「rg 已经很多」时仍然要把定义文件排到前面。连线和反向 import 没有查询词就做会把半个仓库拉进来；有了选中摘录才有种子。反向 import 噪声最大，上限宁可少给；同目录、更少 `../` 的 importer 优先。
+
+不改：rg 200/80/20 预算；embedding；模型增强。
+
+影响：`explore.ts`；`explore-graph.ts`；`explore.test.ts`。
+
+状态：已实施。
+
+### D-138 · 2026-09-07 · `related` 是文件级拓扑，不是 references，也不做 PageRank
+
+类型：问题与解法
+
+背景：`related-tool.ts` 依赖 store 上不存在的 `findNode` / `getNeighbors` 和 PageRank，还打印不存在的 rank。pi-host 没有工具定义。plan 0.1：不留 facade。
+
+决定：按路径（含扩展名或分隔符）或名字重写。路径：定义、import（解析与未解析分列）、反向 import、连线及另一端。名字：先精确符号，再当连接字面量。空目录（含「这种语言目录不收录」）与「这个路径/名字没扫到」都是 `empty`，不是失败。`linksIncomplete`、未解析 specifier 是不完整。store 未打开返回 `unavailable`，读路径不开库。工具描述必须写明与 `lsp.references` 的分工。不保留 hops/labels/rank。
+
+原因：LSP `references` 已经接线，精确回答谁引用这个符号。图回答它回答不了的：文件级连线和 import 拓扑，而且不需要语言服务器。做一个更差的 references 会和 3.8 抢活。
+
+不改：PageRank、多跳、`references`/`calls` 边（D-059）。
+
+影响：protocol `related.query`；Host `related-tool.ts` / `related-service.ts`；pi-host `related-tool.ts` / `select-tools.ts`；`session-e2e.test.ts`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2677,7 +2773,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-100 | implementation（云 lock 与冒烟包含 web-tree-sitter） | — | scripts/cloud-runtime.bun.lock；build-cloud-runtime.mjs |
 | D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |
 | D-102 | implementation（解析预算是跑飞兜底、250ms、测试自带预算；签名即全体的单元按 ±3 取并补齐） | — | structure/constants.ts + slice.ts；structure/explore 测试；structure/DOCUMENTATION.md；status 3.11 |
-| D-103 | open（三处既有挂钟/子进程收尾项已立项未修：thread-runtime 20ms stalled、run/supervisor 未捕获 EPIPE 使套件退出码与断言脱钩、pi-host harness-e2e #3） | — | thread-runtime.test.ts；run/supervisor.test.ts；pi-host harness-e2e.test.ts；status 3.2/3.11 |
+| D-103 | open（第 1、3 项仍待：thread-runtime 20ms stalled、pi-host harness-e2e #3；第 2 项 EPIPE 已由 D-133 修） | D-133（仅第 2 项） | thread-runtime.test.ts；run/supervisor.test.ts；pi-host harness-e2e.test.ts；status 3.2/3.12 |
 | D-104 | implementation（冷目录只采集 TS/TSX；非 TS 跳过不 touchFile） | D-115 | symbol-runtime catalog scan；status 3.11 |
 | D-114 | implementation（JSON 进切片不进目录；深度 8、符号 256；根容器始终保留） | — | json-outline.ts；kinds/slice/source；catalog scan |
 | D-115 | implementation（冷目录扩到带 importQuery 的语言：TS/TSX/JS/JSX；取代 D-104 覆盖范围） | — | languages.ts CATALOG_SCAN_LANGUAGES |
@@ -2692,7 +2788,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |
-| D-108 | implementation（explore 读摘录路径出边；不扩候选池） | — | protocol explore.search details.relations；explore + explore-service |
+| D-108 | superseded in part（摘录出边注解保留；「不扩候选池」由 D-136 取代） | D-136 | protocol explore.search details.relations；explore + explore-service |
 | D-109 | implementation（关联候选须真同名：`connectionLiterals` 闸门 + 本批 connects + 冷扫描补一遍；实测 10,711 → 153） | — | knowledge/store.ts connects 值索引；symbol-runtime 闸门；symbol-runtime.test.ts |
 | D-110 | implementation（轮廓行区间转字符范围时末列取真实行长，不再零宽） | — | knowledge/symbol-runtime.ts flattenOutlineSymbols |
 | D-111 | implementation（outline 单独决定能否写这一代；边被阻塞记 `linksIncomplete` 而非冻结符号） | — | knowledge/symbol-runtime.ts + symbols.ts + store.ts；symbol-runtime.test.ts |
@@ -2707,3 +2803,9 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-130 | implementation（导入校验后缀与体积；不回传文件系统错误原文；ABI 检查异常变 `abi` 失败） | — | grammar-installer.ts importUserGrammar |
 | D-131 | implementation（清单加载失败退空清单；解析期筛 ABI 超窗；刷新脚本按已提交版本可复现；重复安装并流） | — | grammar-manifest.ts；application-host/index.ts；grammar-installer.ts；refresh 脚本 |
 | D-132 | active-design（D-116–D-119 永久空号，引用改指真实条目） | — | 本文件治理规则 |
+| D-133 | implementation（D-103 第 2 项：崩溃隔离用例忽略已死管道的 EPIPE） | — | lib/run/test-supervisor.ts；status 3.2/3.12 |
+| D-134 | implementation（查询走内存行缓存 + linksByValue；searchSymbols 暴露 match 分档；对照数字后不加名字哈希） | — | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
+| D-135 | implementation（反向 import 查询期解析；未解析可见；`.js`→`.ts` 孪生；多命中不猜） | — | knowledge/import-resolve.ts；store.findImporters；related imports.unresolved |
+| D-136 | implementation（取代 D-108「不扩候选池」：explore 增加图路径候选） | — | explore.ts / explore-graph.ts；protocol details.graph；设计 6.1/6.2；plan 3.12 |
+| D-137 | implementation（定义召回始终跑；连线与反向 import 等第一次打包之后；独立预算与 filesDropped max） | — | explore.ts；explore-graph.ts |
+| D-138 | implementation（related 是文件级拓扑，不是 references，无 PageRank；store 未开 → unavailable） | — | protocol related.query；Host related-tool/service；pi-host related-tool；session-e2e |

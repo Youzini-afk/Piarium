@@ -97,8 +97,10 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls、线程草稿基线、
    写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组与 D-092（候选广度按文件铺开及同批小项）已实施。
    3.11 第 1–5 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX/JS/JSON、连接边/冷目录/`imports`、
-   语言支持设置页与可验证按需下载，其中按需语言经上游 `tags.scm` 适配器真出轮廓，D-091/D-093–D-132）。下一步按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
-   全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
+   语言支持设置页与可验证按需下载，其中按需语言经上游 `tags.scm` 适配器真出轮廓，D-091/D-093–D-132）。
+   3.12 已接（符号图读者：explore 定义优先 / 连线补全 / 反向 import，以及接线的 `related`，D-133–D-138）。
+   下一步按仍然观察得到的「找不到入口」决定词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是通用召回提升。
+   缺可选来源仍返回已有正文，不等全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
 
@@ -221,9 +223,11 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 
 ### 3.1 符号图
 
-已有 file/defines/symbol。继续按实际查询建 references/imports/calls，来源/版本明确，LSP references 不冒充调用图。
+已有 file/defines/symbol 以及 `imports` / `connects` / `associates`（3.11 第 4 步）。读者是 explore 的路径级候选
+（定义 / 连线另一端 / 反向 import，3.12）和 `related` 工具；摘录出边注解（D-108/D-112）仍在。
+继续按实际查询建 `references` / 解析后的跨文件 `calls`，来源/版本明确，LSP `references` 不冒充调用图，也不和 `related` 抢活。
 复用背压和按变化路径采集，未知语言/不可用不清最后图；不把全图或所有索引完成作为 explore 前置。
-范围只从磁盘正文采集并逐文件记 document revision（D-087，随 3.8 第 6 步交付）；脏缓冲结果不入图，消费者据修订判断范围是否仍成立。
+范围只从磁盘正文采集并逐文件记 document revision（D-087）；脏缓冲结果不入图。图只选路径，行号在当前正文里重新确认。
 
 ### 3.2 explore：正式默认工具
 
@@ -235,7 +239,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线。观察到写入后该路径的草稿失效、全部消费者回到磁盘（D-088）；shell 与外部写入仍未观察 |
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
 | 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`；✓ D-092 候选广度按文件轮转分配（30 文件×12 命中、预算 200 时 30 个文件都进候选，总命中 ≤ 预算；文件数超过预算才丢文件并报 `filesDropped`；grep 深度优先截断不变）。同批小项：句柄提示计入字节预算、返回对象只含协议字段、空白 anchor 过滤、`rgSearch` 局部 partial、`fileScore` 每文件一次、候选排序加权组数。验收复验又补两项：`filesDropped` 跨词项与重叠搜索根不求和，取单次查询最大值作下界、正文说"至少"（原实现两处相加会虚报去重后的文件数）；pi-host 工具 schema 不再给 anchor 元素加 `minLength`，与 Host 的"接受并过滤空白"同口径（原实现两层口径相反，`""` 撞 schema 而 `"  "` 被优雅过滤）。覆盖：`explore.test.ts` T1/T3–T8 与 filesDropped/空白 anchor/加权排序、`explore-service.test.ts` T2/T8（含 `showHandle` 为真时的字节预算）与空白 anchor、`search-service.test.ts` 广度优先与 `filesDropped`、`explore-tool.test.ts` / `session-e2e.test.ts` T9。✓ 结构切片消费 6.4 / tree-sitter 带修订范围（D-091 第 1、3 步；小/大阈值 D-093，协议字段 D-094） |
-| 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图（✓ TS/TSX defines/`imports`/`connects`/`associates`，explore 读摘录路径出边，D-108）、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 tree-sitter 承担并写入图）；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
+| 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图路径候选（✓ 定义优先 / 连线补全 / 反向 import，3.12，取代 D-108 的「不扩候选池」）+ 摘录出边注解（D-108/D-112 保留）、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 tree-sitter 承担并写入图）；`references`/测试配对/co-change 按可用性接入，派生路径重新授权。图给定义位置、连线配对和反向 import，不是笼统扩大召回 |
 | 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（容器：小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口；普通值绑定切所属函数/类，D-098），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），生产顺序 tree-sitter → LSP（D-097），`empty`/覆盖缺口可问后续但 `warmOnly` 不冷启动 LSP（D-099），缺时退行窗口；命中分类只打已物化窗口分（D-095）；RRF 融合保留来源，不用分差当置信度 |
 | 打包 | 内部找全、外部只给支撑判断的材料；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |
 | 模型 | pi-host 使用 models.explore；按"当前缺的那一步"选一种：无仓库词汇 → intent，目标缺席 → 受限修复（须能提新词项/入口），候选多 → 比较；intent 可并行，judge 等正文，修复仅类型化搜索/导航；无槽位零模型调用 |
@@ -245,9 +249,10 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 现有来源是 search.content、Documents disk、固定 surface draft、需代表文件选语言的 LSP 导航、file/defines 图。surface snapshot 已能
 替换 explore/grep 的 dirty path 磁盘命中，由同名 read 返回固定正文，并为同名 find/ls 提供固定文件与虚拟目录；线程基线也消费同一来源。
 视图隔离与修订绑定已按 3.8（D-087）完成；D-090 候选获取/物化与 `anchors` 已实施，结构切片已按 3.11 第 1、3 步接入，连接边与
-TS/TSX 冷目录已按第 4 步写入同一张图并由 `explore.search` 读出。贯穿验收例子是
-`explore.search` 的 worker—protocol—Host 链——主 agent 能否从一次结果看见这条链，而不是"多了一个 symbols 调用"。related、co-change、
-测试配对、embedding 各自推进；仓库级词法索引仍等观察到"找不到入口"再定。冷目录不是全语言覆盖。
+TS/JS 冷目录已按第 4 步写入同一张图。3.12 让 explore 读定义/连线另一端/反向 import 作路径候选（D-136），摘录出边注解仍在。
+贯穿验收例子是 `explore.search` 的 worker—protocol—Host 链——主 agent 能否从一次结果看见这条链，而不是"多了一个 symbols 调用"。
+`related` 已接线（3.12）；co-change、测试配对、embedding 各自推进。仓库级词法索引仍等观察到「找不到入口」再定。
+冷目录只覆盖带 `importQuery` 的语言（TS/TSX/JS/JSX）。
 每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
 Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算，不加固定候选数/轮数/时间门槛。
@@ -262,8 +267,8 @@ Host 计字节，只有真实 tokenizer 才报精确 token。复用服务预算�
 
 ### 3.3 related
 
-接现有 helper 到真实 KnowledgeStore 节点/边与 worker 工具，返回关系/来源/版本，缺关系明确说明。
-有可用关系就注册，不等 PageRank/完整调用图，继续优化是正常迭代。
+✓ 已接线（3.12）。工具回答文件级定义、import、反向 import 和连线另一端；没有与不完整分开表达。
+不是 `lsp.references`，不做 PageRank / 多跳。store 未打开返回 `unavailable`，不开库。
 
 ### 3.4 工作状态、物化与生命周期
 
@@ -410,6 +415,39 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 
 不做：先建"通用 AST 服务"再找消费者；替代语言服务器的导航与诊断；renderer 引入；第一版接受任意第三方语法包；一种语言时做包管理器；
 声称解析速度或省时数字（实测记 status）。
+
+### 3.12 符号图读者（explore 路径候选 + `related`）
+
+3.11 第 4 步把 TS/JS 符号和边写进图，但读者只有摘录出边注解（D-108）。`searchSymbols` 没有生产调用方；
+`findLinks` 只给 associates 闸门用；`related` 是依赖不存在 API 的 PageRank 空壳。本刀给图真实读者，
+并分清图能加什么、不能加什么：
+
+| 图给的 | rg 给不了的 | 是不是新召回 |
+| --- | --- | --- |
+| 定义优先 | 目录知道 `foo` 在哪儿*定义*、是什么 kind；rg 只知道提到 `foo` 的行 | 否：同一文件 rg 也能命中，图改的是排序与理由 |
+| 连线配对 | 同一字面量的 `register` 端和 `request` 端是一根线的两头 | **是**：另一端可能不在 rg 候选里（plan 0.7 的「找不到入口」） |
+| 反向 import | 「谁 import 了这个文件」不需要查询词 | 否：问的是拓扑，不是词 |
+
+硬约束：图只选路径，不给行号；物化后必须在当前正文里重新定位符号名/字面量，定位不到就丢掉这个窗口，
+不许退化成第 1 行，也不许把图里的行号当真（D-112 已修过的错误类型）。图不可用不得拖垮检索：读路径只用
+已经打开的 store，失败/空/未开按来源状态降级，rg 结果照出。目录只覆盖带 `importQuery` 的语言，纯 Python
+仓库是 `empty` 不是坏了。图有独立预算，`filesDropped` 跨来源取最大值。不和 `lsp.references` 竞争。
+目录只有冷扫描 + Documents mutation 那么新，不另做第二套过期检测。
+
+交付：
+
+1. **退出码（D-103 第 2 项）。** 崩溃隔离用例给已死子进程 stdio 加上 `EPIPE` / `ERR_STREAM_DESTROYED` 处理。
+   第 1、3 项（挂钟阈值）本刀不碰。
+2. **可查的 store。** 先量再决定要不要内存索引。`searchSymbols` 暴露精确 / 名字含 / 路径含分档。
+   反向 import 在查询期解析相对 specifier（含 `.js`→`.ts` 孪生）；解析不了可见地报，不猜。
+3. **explore 第二候选来源。** 定义候选始终跑（只要 store 开着且目录非空）；连线补全和反向 import 在第一次
+   打包之后，用已选中摘录里确认过的字面量/路径。三路进现有 `rankCandidates` RRF，不另起排序。
+   取代 D-108 的「不扩候选池」。摘录出边注解仍在。
+4. **`related`。** 丢掉 PageRank facade，按路径或名字回答定义 / import / 谁 import 了它 / 连线另一端。
+   接进 pi-host（协议 + 工具定义 + 默认注册）。工具描述写明和 `lsp.references` 的分工。
+
+不做：PageRank、多跳、`references`/`calls` 边、embedding、词法索引、BM25、语法包/设置页、记忆/压缩/线程/权限、
+explore 模型增强。不声称检索质量或速度提升；量到的数字进 status，标明是对照数字。
 
 ## 阶段 3b：权限与插件
 
