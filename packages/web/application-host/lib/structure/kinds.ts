@@ -37,3 +37,27 @@ export function structureKindFromLsp(kind: unknown): string {
 export function structureSpanLines(startLine: number, endLine: number): number {
   return Math.max(0, endLine - startLine + 1);
 }
+
+/**
+ * Units a reader can treat as a self-contained slice (D-098).
+ * Value bindings, fields, signatures, and enum members are names inside a
+ * container, not the container. `const foo = () => {}` is emitted as
+ * `function` by the tree-sitter provider, so it stays a unit.
+ */
+const STRUCTURE_CONTAINER_KINDS = new Set([
+  "function",
+  "method",
+  "constructor",
+  "class",
+  "interface",
+  "enum",
+  "module",
+  "namespace",
+  "type",
+  "struct",
+  "package",
+]);
+
+export function isStructureContainerKind(kind: string): boolean {
+  return STRUCTURE_CONTAINER_KINDS.has(kind);
+}

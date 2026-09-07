@@ -38,13 +38,69 @@ const GRAMMAR_FILE: Record<string, string> = {
   typescriptreact: "tree-sitter-tsx.wasm",
 };
 
-const kindForType = (type: string): string => {
-  if (type.includes("function") || type === "method_definition" || type === "method_signature") return "function";
+const FUNCTION_LIKE_TYPES = new Set([
+  "arrow_function",
+  "function",
+  "function_expression",
+  "generator_function",
+  "class",
+]);
+
+const CONTAINER_UNIT_TYPES = new Set([
+  "function_declaration",
+  "generator_function_declaration",
+  "class_declaration",
+  "class",
+  "abstract_class_declaration",
+  "interface_declaration",
+  "type_alias_declaration",
+  "enum_declaration",
+  "method_definition",
+  "function_signature",
+  "internal_module",
+  "module",
+]);
+
+const BINDING_UNIT_TYPES = new Set([
+  "lexical_declaration",
+  "variable_declaration",
+  "public_field_definition",
+]);
+
+const kindForType = (type: string, initializerType?: string): string => {
+  if (initializerType === "class") return "class";
+  if (initializerType && FUNCTION_LIKE_TYPES.has(initializerType)) return "function";
+  if (type === "method_definition" || type === "function_signature") return "function";
+  if (type.includes("function")) return "function";
   if (type.includes("class")) return "class";
   if (type.includes("interface")) return "interface";
   if (type.includes("enum")) return "enum";
   if (type.includes("type_alias")) return "type";
+  if (type === "internal_module" || type === "module") return "module";
   return "variable";
+};
+
+const initializerOf = (node: Node): Node | null => {
+  if (node.type === "lexical_declaration" || node.type === "variable_declaration") {
+    const declarator = node.descendantsOfType("variable_declarator")[0];
+    return declarator?.childForFieldName("value") ?? null;
+  }
+  if (node.type === "public_field_definition") return node.childForFieldName("value");
+  return null;
+};
+
+const isSliceUnit = (node: Node): boolean => {
+  if (CONTAINER_UNIT_TYPES.has(node.type)) return true;
+  if (!BINDING_UNIT_TYPES.has(node.type)) return false;
+  const initializer = initializerOf(node);
+  return initializer !== null && FUNCTION_LIKE_TYPES.has(initializer.type);
+};
+
+const nameOfUnit = (unit: Node, name: Node | undefined): string => {
+  if (name?.text) return name.text;
+  const identifier = unit.childForFieldName("name");
+  if (identifier?.text) return identifier.text;
+  return "default";
 };
 
 const contentHash = (text: string): string => createHash("sha256").update(text).digest("hex");
@@ -80,8 +136,35 @@ export function createTreeSitterStructureProvider(
   const pathExists = options.pathExists ?? existsSync;
   const fromUrl = options.runtimeFromUrl;
   const cache = new Map<string, ParsedCache>();
+  const pins = new Map<string, number>();
   let initPromise: Promise<void> | null = null;
   const languages = new Map<string, Promise<Language>>();
+
+  const pin = (key: string): void => {
+    pins.set(key, (pins.get(key) ?? 0) + 1);
+  };
+
+  const unpin = (key: string): void => {
+    const next = (pins.get(key) ?? 1) - 1;
+    if (next <= 0) pins.delete(key);
+    else pins.set(key, next);
+  };
+
+  /**
+   * Drop idle cache entries only. A caller may still hold `entry.tree` after
+   * `parseDocument` resolves; deleting that tree is use-after-free. Pin the
+   * key for the whole outline/classify/calls/imports call, including any
+   * await after parse.
+   */
+  const evictIdle = (keepKey: string): void => {
+    if (cache.size <= 32) return;
+    for (const key of cache.keys()) {
+      if (key === keepKey || (pins.get(key) ?? 0) > 0) continue;
+      cache.get(key)?.tree.delete();
+      cache.delete(key);
+      if (cache.size <= 32) return;
+    }
+  };
 
   const runtimeFile = (name: string): string => (
     resolveStructureRuntimeFile(name, fromUrl ?? import.meta.url, pathExists)
@@ -135,7 +218,7 @@ export function createTreeSitterStructureProvider(
     request: StructureOutlineRequest,
     languageId: string,
   ): Promise<
-    | { status: "ready"; entry: ParsedCache }
+    | { status: "ready"; entry: ParsedCache; cacheKey: string }
     | { status: "cancelled" | "failed" | "unavailable"; message: string }
   > => {
     if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
@@ -149,7 +232,8 @@ export function createTreeSitterStructureProvider(
       if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(runtimeFile(GRAMMAR_FILE[languageId]!))) {
         return { status: "unavailable", message: "Grammar wasm is not readable." };
       }
-      return { status: "ready", entry: cached };
+      pin(cacheKey);
+      return { status: "ready", entry: cached, cacheKey };
     }
       await initParser();
       if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
@@ -203,16 +287,24 @@ export function createTreeSitterStructureProvider(
       }
       const symbols: StructureSymbol[] = [];
       const nameLines = new Set<number>();
+      const seen = new Set<string>();
       for (const match of matches) {
         const unit = match.captures.find((capture) => capture.name === "unit")?.node;
         const name = match.captures.find((capture) => capture.name === "name")?.node;
-        if (!unit || !name) continue;
+        if (name) nameLines.add(name.startPosition.row + 1);
+        if (!unit || !isSliceUnit(unit)) continue;
+        const unitName = nameOfUnit(unit, name);
+        const initializer = initializerOf(unit);
         const range = pointToLines(unit.startPosition, unit.endPosition);
-        const signature = pointToLines(name.startPosition, name.endPosition);
-        nameLines.add(signature.startLine);
+        const signature = name
+          ? pointToLines(name.startPosition, name.endPosition)
+          : { startLine: range.startLine, endLine: range.startLine };
+        const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         symbols.push({
-          name: name.text,
-          kind: kindForType(unit.type),
+          name: unitName,
+          kind: kindForType(unit.type, initializer?.type),
           range,
           signature: {
             startLine: Math.max(range.startLine, signature.startLine),
@@ -222,14 +314,9 @@ export function createTreeSitterStructureProvider(
       }
       const entry: ParsedCache = { hash, languageId, tree, language, symbols, nameLines };
       cache.set(cacheKey, entry);
-      if (cache.size > 32) {
-        const first = cache.keys().next().value;
-        if (first && first !== cacheKey) {
-          cache.get(first)?.tree.delete();
-          cache.delete(first);
-        }
-      }
-      return { status: "ready", entry };
+      pin(cacheKey);
+      evictIdle(cacheKey);
+      return { status: "ready", entry, cacheKey };
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
@@ -279,12 +366,16 @@ export function createTreeSitterStructureProvider(
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, symbols: [], message: parsed.message };
       }
-      return {
-        status: parsed.entry.symbols.length > 0 ? "ready" : "empty",
-        provider: "tree-sitter",
-        revision: request.revision,
-        symbols: parsed.entry.symbols,
-      };
+      try {
+        return {
+          status: parsed.entry.symbols.length > 0 ? "ready" : "empty",
+          provider: "tree-sitter",
+          revision: request.revision,
+          symbols: parsed.entry.symbols,
+        };
+      } finally {
+        unpin(parsed.cacheKey);
+      }
     },
     async classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult> {
       const languageId = request.languageId ?? languageIdForPath(request.path);
@@ -295,12 +386,16 @@ export function createTreeSitterStructureProvider(
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, hits: [], message: parsed.message };
       }
-      return {
-        status: "ready",
-        provider: "tree-sitter",
-        revision: request.revision,
-        hits: request.lines.map((line) => ({ line, class: classifyLine(parsed.entry, line) })),
-      };
+      try {
+        return {
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          hits: request.lines.map((line) => ({ line, class: classifyLine(parsed.entry, line) })),
+        };
+      } finally {
+        unpin(parsed.cacheKey);
+      }
     },
     async literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult> {
       const languageId = request.languageId ?? languageIdForPath(request.path);
@@ -311,16 +406,20 @@ export function createTreeSitterStructureProvider(
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, calls: [], message: parsed.message };
       }
-      const query = new Query(parsed.entry.language, TYPESCRIPT_LITERAL_CALL_QUERY);
-      const calls: StructureLiteralCall[] = [];
-      for (const match of query.matches(parsed.entry.tree.rootNode)) {
-        const fn = match.captures.find((capture) => capture.name === "fn")?.node;
-        const literal = match.captures.find((capture) => capture.name === "literal")?.node;
-        if (!fn || !literal) continue;
-        calls.push({ name: fn.text, literal: literal.text.slice(1, -1), line: literal.startPosition.row + 1 });
+      try {
+        const query = new Query(parsed.entry.language, TYPESCRIPT_LITERAL_CALL_QUERY);
+        const calls: StructureLiteralCall[] = [];
+        for (const match of query.matches(parsed.entry.tree.rootNode)) {
+          const fn = match.captures.find((capture) => capture.name === "fn")?.node;
+          const literal = match.captures.find((capture) => capture.name === "literal")?.node;
+          if (!fn || !literal) continue;
+          calls.push({ name: fn.text, literal: literal.text.slice(1, -1), line: literal.startPosition.row + 1 });
+        }
+        query.delete();
+        return { status: "ready", provider: "tree-sitter", revision: request.revision, calls };
+      } finally {
+        unpin(parsed.cacheKey);
       }
-      query.delete();
-      return { status: "ready", provider: "tree-sitter", revision: request.revision, calls };
     },
     async imports(request: StructureOutlineRequest): Promise<StructureImportsResult> {
       const languageId = request.languageId ?? languageIdForPath(request.path);
@@ -331,15 +430,19 @@ export function createTreeSitterStructureProvider(
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, imports: [], message: parsed.message };
       }
-      const query = new Query(parsed.entry.language, TYPESCRIPT_IMPORT_QUERY);
-      const imports: StructureImport[] = [];
-      for (const match of query.matches(parsed.entry.tree.rootNode)) {
-        const source = match.captures.find((capture) => capture.name === "source")?.node;
-        if (!source) continue;
-        imports.push({ source: source.text.slice(1, -1), line: source.startPosition.row + 1 });
+      try {
+        const query = new Query(parsed.entry.language, TYPESCRIPT_IMPORT_QUERY);
+        const imports: StructureImport[] = [];
+        for (const match of query.matches(parsed.entry.tree.rootNode)) {
+          const source = match.captures.find((capture) => capture.name === "source")?.node;
+          if (!source) continue;
+          imports.push({ source: source.text.slice(1, -1), line: source.startPosition.row + 1 });
+        }
+        query.delete();
+        return { status: "ready", provider: "tree-sitter", revision: request.revision, imports };
+      } finally {
+        unpin(parsed.cacheKey);
       }
-      query.delete();
-      return { status: "ready", provider: "tree-sitter", revision: request.revision, imports };
     },
   };
 }

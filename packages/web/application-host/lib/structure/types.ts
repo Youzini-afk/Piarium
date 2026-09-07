@@ -44,6 +44,13 @@ export interface StructureOutlineRequest {
   sessionId?: string;
   inputContext?: AgentInputContext;
   signal?: AbortSignal;
+  /** Hit lines used to detect an uncovered gap before consulting a later provider. */
+  hitLines?: number[];
+  /**
+   * When true, a provider that would start a cold language-server session
+   * must return `unavailable` instead (D-099).
+   */
+  warmOnly?: boolean;
 }
 
 export interface StructureOutlineResult {

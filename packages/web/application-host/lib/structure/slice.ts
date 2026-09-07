@@ -1,5 +1,5 @@
 import { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
-import { structureSpanLines } from "./kinds.js";
+import { isStructureContainerKind, structureSpanLines } from "./kinds.js";
 import { clipRange, mergeAdjacentRanges, rangeContainsLine } from "./ranges.js";
 import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "./types.js";
 
@@ -42,10 +42,14 @@ const flattenSymbols = (symbols: readonly StructureSymbol[]): StructureSymbol[] 
   return result;
 };
 
-const enclosingSymbol = (symbols: readonly StructureSymbol[], line: number): StructureSymbol | undefined => {
+/**
+ * Smallest enclosing *container*. Value bindings and members are ignored so a
+ * hit on `const needle = 1` inside `function big` selects `big` (D-098).
+ */
+export function enclosingSliceSymbol(symbols: readonly StructureSymbol[], line: number): StructureSymbol | undefined {
   let best: StructureSymbol | undefined;
   for (const symbol of flattenSymbols(symbols)) {
-    if (!rangeContainsLine(symbol.range, line)) continue;
+    if (!isStructureContainerKind(symbol.kind) || !rangeContainsLine(symbol.range, line)) continue;
     if (!best) {
       best = symbol;
       continue;
@@ -57,7 +61,11 @@ const enclosingSymbol = (symbols: readonly StructureSymbol[], line: number): Str
     }
   }
   return best;
-};
+}
+
+export function outlineCoversHitLines(symbols: readonly StructureSymbol[], lines: readonly number[]): boolean {
+  return lines.length > 0 && lines.every((line) => enclosingSliceSymbol(symbols, line) !== undefined);
+}
 
 const lineWindow = (line: number, lineCount: number): StructureLineRange => ({
   startLine: Math.max(1, line - 3),
@@ -181,7 +189,7 @@ export function sliceStructureWindows(input: StructureSliceInput): StructureSlic
   const grouped = new Map<StructureSymbol, number[]>();
   const unstructured: StructureSliceHit[] = [];
   for (const hit of hits) {
-    const symbol = enclosingSymbol(outline.symbols, hit.line);
+    const symbol = enclosingSliceSymbol(outline.symbols, hit.line);
     if (!symbol) {
       unstructured.push(hit);
       continue;

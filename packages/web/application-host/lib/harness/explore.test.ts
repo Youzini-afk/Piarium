@@ -542,6 +542,64 @@ describe("explore structure slices", () => {
     expect(result.snippets[0]?.path).toBe("second.ts");
   });
 
+  it("keeps a value-binding hit inside its enclosing function, not a one-line unit", async () => {
+    const body = Array.from({ length: 47 }, (_, index) => {
+      if (index === 44) return "  const needle = 1;";
+      if (index === 45) return "  handle(needle);";
+      return `  const pad${index} = ${index};`;
+    });
+    const content = ["export function big() {", ...body, "}"].join("\n");
+    const lines = content.split("\n");
+    const constLine = lines.findIndex((line) => line.includes("const needle")) + 1;
+    const callLine = lines.findIndex((line) => line.includes("handle(needle)")) + 1;
+    const structure = createStructureSource([createTreeSitterStructureProvider()]);
+    const run = (line: number, text: string) => explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "big.ts", line, text }],
+      readFile: async () => ready(content),
+      structure,
+    });
+
+    const onConst = await run(constLine, "  const needle = 1;");
+    expect(onConst.snippets[0]?.unit).toMatchObject({ name: "big", kind: "function", startLine: 1, endLine: lines.length });
+    expect(onConst.snippets[0]?.text.startsWith("export function big() {")).toBe(true);
+    expect(onConst.snippets[0]?.text).toContain("const needle = 1;");
+    expect(onConst.snippets[0]?.text).toMatch(/read big\.ts:1-\d+/);
+    expect(onConst.snippets[0]?.text.split("\n").length).toBeGreaterThan(3);
+
+    const onCall = await run(callLine, "  handle(needle);");
+    expect(onCall.snippets[0]?.unit).toMatchObject({ name: "big", kind: "function" });
+    expect(onCall.snippets[0]?.text.startsWith("export function big() {")).toBe(true);
+    expect(onCall.snippets[0]?.text).toContain("handle(needle);");
+
+    const without = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "big.ts", line: constLine, text: "  const needle = 1;" }],
+      readFile: async () => ready(content),
+    });
+    expect(without.snippets[0]?.unit).toBeUndefined();
+    expect(without.snippets[0]?.startLine).toBe(constLine - 3);
+    expect(without.snippets[0]?.endLine).toBe(constLine + 3);
+    expect(onConst.snippets[0]!.text.length).toBeGreaterThan(without.snippets[0]!.text.length);
+  });
+
+  it("keeps a definition binding as its own explore unit", async () => {
+    const content = [
+      "export function wrap() {",
+      "  const foo = () => {",
+      "    return needle;",
+      "  };",
+      "  return foo;",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "bind.ts", line: 3, text: "    return needle;" }],
+      readFile: async () => ready(content),
+      structure: createStructureSource([createTreeSitterStructureProvider()]),
+    });
+    expect(result.snippets[0]?.unit).toMatchObject({ name: "foo", kind: "function", startLine: 2, endLine: 4 });
+    expect(result.snippets[0]?.text).toContain("const foo = () => {");
+    expect(result.snippets[0]?.text).toContain("return needle;");
+  });
+
   it("slices from tree-sitter when the language-server provider is cold", async () => {
     const unavailableLsp: StructureProvider = {
       id: "lsp",

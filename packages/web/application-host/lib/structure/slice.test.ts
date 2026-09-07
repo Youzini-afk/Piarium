@@ -79,6 +79,104 @@ describe("sliceStructureWindows", () => {
     expect(window.end).toBeGreaterThanOrEqual(hitLine);
   });
 
+  it("selects the enclosing function instead of an inner value binding", () => {
+    const hitLine = 40;
+    const lines = ["export function largeTarget() {", ...linesOf(50, hitLine).slice(1, 50), "}"];
+    const windows = sliceStructureWindows({
+      path: "large.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: hitLine }],
+      outline: readyOutline([
+        {
+          name: "largeTarget",
+          kind: "function",
+          range: { startLine: 1, endLine: lines.length },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "needle",
+          kind: "variable",
+          range: { startLine: hitLine, endLine: hitLine },
+          signature: { startLine: hitLine, endLine: hitLine },
+        },
+      ]),
+    });
+    expect(windows[0]?.unit).toMatchObject({ name: "largeTarget", kind: "function", startLine: 1, endLine: lines.length });
+    expect(windows[0]?.text.startsWith("export function largeTarget() {")).toBe(true);
+    expect(windows[0]?.text).toContain("const needle = 1;");
+    expect(windows[0]?.text).toContain("read large.ts:1-");
+  });
+
+  it("selects the interface instead of a one-line member signature", () => {
+    const lines = [
+      "export interface Box {",
+      "  needle(): void;",
+      "  other(): void;",
+      "}",
+    ];
+    const windows = sliceStructureWindows({
+      path: "box.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: 2 }],
+      outline: readyOutline([
+        {
+          name: "Box",
+          kind: "interface",
+          range: { startLine: 1, endLine: 4 },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "needle",
+          kind: "property",
+          range: { startLine: 2, endLine: 2 },
+          signature: { startLine: 2, endLine: 2 },
+        },
+      ]),
+    });
+    expect(windows[0]).toMatchObject({
+      start: 1,
+      end: 4,
+      fallback: false,
+      unit: { name: "Box", kind: "interface", startLine: 1, endLine: 4 },
+      text: lines.join("\n"),
+    });
+  });
+
+  it("keeps a definition binding as its own unit", () => {
+    const lines = [
+      "export function wrap() {",
+      "  const foo = () => {",
+      "    return 1;",
+      "  };",
+      "  return foo;",
+      "}",
+    ];
+    const windows = sliceStructureWindows({
+      path: "bind.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: 3 }],
+      outline: readyOutline([
+        {
+          name: "wrap",
+          kind: "function",
+          range: { startLine: 1, endLine: 6 },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "foo",
+          kind: "function",
+          range: { startLine: 2, endLine: 4 },
+          signature: { startLine: 2, endLine: 2 },
+        },
+      ]),
+    });
+    expect(windows[0]?.unit).toMatchObject({ name: "foo", kind: "function", startLine: 2, endLine: 4 });
+    expect(windows[0]?.text).toBe("  const foo = () => {\n    return 1;\n  };");
+  });
+
   it("falls back to a ±3 line window when the outline is unavailable", () => {
     const lines = Array.from({ length: 10 }, (_, index) => index === 6 ? "needle" : `line ${index + 1}`);
     const windows = sliceStructureWindows({

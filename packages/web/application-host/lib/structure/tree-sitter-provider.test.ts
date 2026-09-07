@@ -54,6 +54,73 @@ describe("createTreeSitterStructureProvider", () => {
     ]);
   });
 
+  it("keeps definition bindings and skips ordinary value bindings as units", async () => {
+    const provider = createTreeSitterStructureProvider();
+    const text = [
+      "export function wrap() {",
+      "  const foo = () => {",
+      "    return 1;",
+      "  };",
+      "  const needle = 1;",
+      "  return foo;",
+      "}",
+      "export const C = class {",
+      "  x = 1;",
+      "};",
+    ].join("\n");
+    const outline = await provider.outline(request(text));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["wrap", "foo", "C"]));
+    expect(names).not.toContain("needle");
+    expect(outline.symbols.find((symbol) => symbol.name === "foo")?.kind).toBe("function");
+    expect(outline.symbols.find((symbol) => symbol.name === "C")?.kind).toBe("class");
+  });
+
+  it("outlines var, declare function, namespace, and export default class", async () => {
+    const provider = createTreeSitterStructureProvider();
+    const text = [
+      "var zeta = 1;",
+      "declare function eta(): void;",
+      "namespace Epsilon { export const z = 1 }",
+      "export default class {}",
+    ].join("\n");
+    const outline = await provider.outline(request(text));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["eta", "Epsilon"]));
+    expect(names).not.toContain("zeta");
+    expect(names).toEqual(expect.arrayContaining(["default"]));
+    expect(outline.symbols.find((symbol) => symbol.name === "Epsilon")?.kind).toBe("module");
+  });
+
+  it("outlines arrows, declare class/namespace, abstract members, and object methods", async () => {
+    const provider = createTreeSitterStructureProvider();
+    const text = [
+      "const beta = () => { return 1; };",
+      "export const gamma = () => { return 2; };",
+      "export default function delta() { return 3; }",
+      "declare class Alpha { bar(): void }",
+      "declare namespace Omega { export const n = 1 }",
+      "abstract class Box {",
+      "  abstract needle(): void;",
+      "  concrete() { return 1; }",
+      "}",
+      "const obj = {",
+      "  method() { return 1; }",
+      "};",
+    ].join("\n");
+    const outline = await provider.outline(request(text));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["beta", "gamma", "delta", "Alpha", "Omega", "Box", "concrete", "method"]));
+    expect(names).not.toContain("needle");
+    expect(names).not.toContain("obj");
+    expect(outline.symbols.find((symbol) => symbol.name === "beta")?.kind).toBe("function");
+    expect(outline.symbols.find((symbol) => symbol.name === "Alpha")?.kind).toBe("class");
+    expect(outline.symbols.find((symbol) => symbol.name === "Omega")?.kind).toBe("module");
+  });
+
   it("reports cancelled when the signal is already aborted", async () => {
     const provider = createTreeSitterStructureProvider();
     const signal = AbortSignal.abort();
