@@ -840,8 +840,15 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
 
 ### 7.5 已知约束与要求
 
-下面的 TQL、占位向量与分词记录针对当前钉住的 0.8.5 集成；不能推断最新上游仍有同样问题。向作者报告数据库本身的类型处理、检索
-语义和能力边界，不要求数据库适配 Piarium 的领域模型。keeper 漏传版本、分支归属及代码分词策略由 Piarium 自己负责。
+当前钉住 **0.8.6**（D-141）。下面按「已在该版本核实」与「历史记录」区分；向作者报告数据库本身的类型处理、检索语义和能力边界，
+不要求数据库适配 Piarium 的领域模型。keeper 漏传版本、分支归属及代码分词策略由 Piarium 自己负责。
+
+- **0.8.6 已核实**：D-019 的 TQL 字符串字面量错误与 D-020 的全零向量空结果都已修复（原句复现通过）；`indexedLookup` /
+  `substringLookup` 提供不经 TQL 解析器的索引查找，索引持久且事后创建会回填。符号图的查询据此改走原生索引，不再在 JS 里维护
+  一套并行的内存表。三条必须知道的约束：`maxResults` 是失败即错的行预算（默认 10,000、上限 1,000,000），不是 LIMIT；
+  n-gram 子串查询要求 ≥3 个字符；**默认开启的解析 payload LRU 缓存把每次 `getPayload` 变成 O(库大小)**（50K 节点时 60 µs
+  对 0.8.5 的 1.7 µs），Piarium 以 `payloadCacheMb: 0` 关掉它——这是数据库侧的缺陷，已向作者报告。`flush()` 仍随库大小
+  线性增长（两版一致），D-140 的派生数据去抖 flush 保留。
 
 - **embedding 是可插拔 provider，远端一等，本地选装，缺省可无。** TriviumDB 存向量不产向量。2026 年的现状：
   代码专用远端模型（Codestral Embed、voyage-code-3、Gemini Embedding、Cohere v4）领先通用模型约 10 分
@@ -859,13 +866,13 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
     发布新代，旧代由 Reader 租约保护。
   - 每个远端 provider 单独同意，与远程模型 provider 同一信任门。使用云端 LLM 时代码本已出机器，embedding 不是新的
     暴露类别，但可能是新的 vendor。
-  - 需向 TriviumDB 确认无向量节点的支持；不支持则以最小维度占位向量建库并禁用向量检索路径。**已验证**（D-020）：
-    v0.8.5 上全零占位向量的 `searchHybrid` 不报错但返回空结果，因此占位模式下 `recall` 走 JS 层扫描 + 词项匹配，
-    向量路径只在配置了 embedding 时启用。需向作者确认数据库自身的纯稀疏入口、混合检索权重与零/缺失向量语义；全零向量不应被要求
-    产生正常相似度，当前返回空不能未经参数/语义核对就定为数据库错误。占位向量是 Piarium 的绕路，不是数据库必须兼容的领域协议。
-- **TQL 在 v0.8.5 上不可用于 payload 字段过滤**（D-019）：`FIND {type:"block", sessionId:"s1"}` 对字符串字面量报
-  napi 类型转换错误。知识库当前所有查询用 `allNodeIds()` + `getPayload()` 在 JS 层过滤；`createIndex` 仍建，待 TQL 修复
-  后启用。数据规模（单会话数百 event）下可接受，是 TriviumDB 侧需要修的项，不是 Piarium 的长期形状。
+  - 需向 TriviumDB 确认无向量节点的支持；不支持则以最小维度占位向量建库并禁用向量检索路径。历史记录（D-020）：
+    v0.8.5 上全零占位向量的 `searchHybrid` 不报错但返回空结果，因此占位模式下 `recall` 走 JS 层扫描 + 词项匹配。
+    **0.8.6 已修**：全零向量的 `searchHybrid` 返回命中，TQL 另有不带向量的 `TEXT BM25 / AC / HYBRID` 稀疏入口。
+    `recall` 的 JS 扫描目前仍在——换成 BM25 会改变召回排序，属于产品行为变更，未随存储升级一并动（D-141）。
+- **TQL 字符串字面量**（D-019，历史记录）：v0.8.5 上 `FIND {type:"block", sessionId:"s1"}` 报 napi 类型转换错误，知识库改用
+  `allNodeIds()` + `getPayload()` 在 JS 层过滤。**0.8.6 已修**。符号图查询已改走 `indexedLookup` / `substringLookup`；
+  块、知识、事件那几处 JS 过滤仍在（单会话数百节点，成本可忽略），不再是「等修复」而是「可换但没必要急」（D-141）。
 - **分词职责**：现有记录描述 tokenizer 为 ASCII 字母数字段 + CJK 2-gram、camelCase 不拆分，本轮未复核最新上游。
   数据库可说明 Unicode、可配置分词或预分词输入等通用能力；camelCase/snake_case/路径的代码分析策略由 Piarium 拥有并版本化，
   不要求数据库为了 Piarium 内置一套代码语言分析器。当前 searchSymbols 是 JS 字符串计分，不声称已走 AC/BM25 排序。

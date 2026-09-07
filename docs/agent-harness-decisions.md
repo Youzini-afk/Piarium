@@ -2764,6 +2764,67 @@ flush。全库实测 18.4 → 17.6 分钟，等于没动。占用不是判据，
 
 状态：已实施。
 
+### D-141 · 2026-09-07 · TriviumDB 升到 0.8.6：符号图查询改走原生索引，禁用其 payload 缓存
+
+类型：implementation + 实验结果
+
+背景：D-019/D-020 是在 0.8.5 上记的；维护者把问题反馈给了作者，0.8.6 于 9 月 5 日发布。上一轮设计讨论里「派生数据该不该住在
+TriviumDB」的主要论据是查询模型不匹配——store 为此叠了八张 JS 内存表（三张路径→id、`linksByValue`、`connectionLiteralCounts`、
+`symbolQueryByPath`、`fileLanguageByPath`、import specifier 表），每次写都要维护，每次打开都要走一遍全部节点重建。
+
+**先在隔离目录里量，再动依赖。** 逐条复现记录在案的失败并对照新 API：
+
+| 项 | 0.8.6 结果 |
+| --- | --- |
+| D-019 原句 `FIND {type: "symbol", name: "exploreSearch"} RETURN *` | 返回正确行 |
+| D-020 全零向量 `searchHybrid` | 返回命中；另有不带向量的 `TEXT BM25 / AC` |
+| `indexedLookup({type, path})` / `({type:'link', value})` | 精确命中，支持布尔等值，未索引字段自动后过滤 |
+| `substringLookup('nameLower', …)` | 命中；**要求 ≥3 个字符** |
+| 索引持久性 | flush 后重开全在；**事后建索引会回填**已有行 |
+| `maxResults` | 失败即错的行预算（默认 10,000、上限 1,000,000），不是 LIMIT；`maxQueryRows`/`rowOverflow` 只管 TQL |
+| TQL `COUNT(*)` | 返回 `null`，不可用 |
+| `flush()` 随库增长 | **未修**：1,768→25,568 节点 24.7→66.2 ms（0.8.5）对 28.6→73.0 ms（0.8.6） |
+
+**然后差点被小规模骗过去。** 3,000 条的探针里一切都快；换到 25K–50K 节点，`indexedLookup` 取整类结果 2.7 s（O(N²)），
+`getPayload` 单次 60 µs 且随库线性增长（0.8.5 恒定 1.7 µs），冷热两遍一样慢，Rom/Mmap 两种存储模式一样慢，关闭重开后仍慢 10 倍，
+`compact()` 后回到最慢。逐个变量排除后定位到 **0.8.6 新加的解析 payload LRU 缓存**（`payloadCacheMb`，默认 64）：设为 0，
+`getPayload` 回到 2.0 µs，50K 个 id 的 `indexedLookup` 从 2,689 ms 回到 42 ms；设为 1024 无改善——是簿记算法问题，不是容量问题。
+
+决定：
+
+1. **升到 0.8.6，`payloadCacheMb: 0`。** 没有这一条不升级：`getPayload` 是每条读路径的基础原语，10–30 倍且随规模增长的退化
+   压过所有新能力。这一条已作为可复现报告交维护者转给作者。
+2. **符号图的八张内存表换成原生索引。** 新增 `kind` / `value` / `nameLower` 哈希索引与 `nameLower` / `pathLower` n-gram 索引；
+   符号 payload 多存 `nameLower` / `pathLower` 两个字段供子串查询（子串查询大小写敏感，`searchSymbols` 按小写比较）。
+   路径查找、按值找 link、「该字面量是否已是确认连接」、名字子串候选，全部改为索引调用后 `getPayload`。打开时的全节点遍历删除。
+   留在内存里的只剩两样：三个懒初始化、写时增减的**计数器**（通过索引数 24K 个 id 仍要约 20 ms，而 explore 每次查询都要问
+   `symbolCount`），和一个任一写入即丢、读时懒重建的**形状缓存**（文件路径与语言、解析后的反向 import——解析是 Piarium 的规则，
+   数据库不该懂，D-139）。形状缓存分两层，`catalogStats` 只碰便宜的文件层，import 解析只在 `findImporters` 真被问到时付。
+3. **短词只精确匹配。** n-gram 拒绝 <3 字符的针，所以 `db` 只能精确命中 `db`，不再命中 `dbPath`，也不匹配路径；≥3 字符的词
+   语义与原来的全扫描完全一致（候选集 = 名字或路径含该词的全部符号，评分函数不变）。
+4. **整类与子串查询显式传 `maxResults = 1,000,000`**（API 上限），仍是超出即抛而非静默截断——派生数据的诚实失败方式。
+   按路径、按值的小结果集查询同样传，不给 10,000 的默认值留意外。
+5. **D-019/D-020 的绕路不在本刀拆。** 块/知识/事件的 JS 过滤是几百个节点的小事；`recall` 换 BM25 会改变召回排序，是产品行为
+   变更。两处都记为「可换」而非「等修」。
+
+复验数字（本仓库 2,359 文件 / 4,145 次解析 / 24,301 符号 / 14,024 边，同一脚本同一机器）：建目录 290.5 s → **256.7 s**；
+`searchSymbols("explore", 20)` 17.1 → **11.5 ms**；`findLinks` 0.27 → 0.97 ms；`findImporters` 首次 125 → 147 ms（含形状重建）。
+仍是对照数字，不是省时声称。
+
+原因：查询模型不匹配这条论据被 0.8.6 拿掉了大半，「搬出 TriviumDB」的动机只剩 flush 增长一条——它更适合反馈作者而不是我们绕。
+测量纪律再记一次：**只在小规模量过的结论不算量过**，这次三个探针里两个是在 25K+ 才翻的。
+
+不改：知识/块/事件/会话的写入仍在各自写入里即时 flush（D-140 的边界）；`CATALOG_SCAN_BATCH`；import 解析规则（D-135）；
+`resolveImportSpecifier`；`related` / explore 的接口。
+
+未验证：Electron 打包后 0.8.6 的 `.node` 与新增 `.pld.<generation>` sidecar（代码里没有按文件名枚举/删除 `.tdb` 的路径，已查）；
+多进程只读 Reader；v5–v8 → v9 的格式迁移只在测试临时库上发生过（plan 0.1：无存量用户）。
+
+影响：`packages/web/package.json`（0.8.5 → 0.8.6）；`knowledge/store.ts`（打开选项、索引、八张表 → 计数器 + 形状缓存、
+`searchSymbols` / `findLinks` / `connectionLiterals` / `catalogStats` / `findImporters` 改写）；`store.test.ts`（+4）；设计 7.5。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2788,8 +2849,8 @@ flush。全库实测 18.4 → 17.6 分钟，等于没动。占用不是判据，
 | D-016 | implementation | — | — |
 | D-017 | implementation | — | — |
 | D-018 | implementation | — | status（1.11 未接渲染路径） |
-| D-019 | active-design | — | agent-harness.md 7.5 |
-| D-020 | active-design | — | agent-harness.md 7.5 |
+| D-019 | superseded（0.8.6 已修 TQL 字符串字面量；符号图查询改走原生索引，块/知识/事件的 JS 过滤保留但不再是「等修」） | D-141 | agent-harness.md 7.5 |
+| D-020 | superseded（0.8.6 全零向量 `searchHybrid` 返回命中；`recall` 的 JS 扫描保留，换 BM25 是产品行为变更另议） | D-141 | agent-harness.md 7.5 |
 | D-021 | reverted | — | status（3b.3 真实状态） |
 | D-022 | experiment-result | — | agent-harness.md 12.2 |
 | D-023 | active-design | — | architecture.md §5.1（已有）、`lib/harness/DOCUMENTATION.md`— 待回写 |
@@ -2903,10 +2964,11 @@ flush。全库实测 18.4 → 17.6 分钟，等于没动。占用不是判据，
 | D-131 | implementation（清单加载失败退空清单；解析期筛 ABI 超窗；刷新脚本按已提交版本可复现；重复安装并流） | — | grammar-manifest.ts；application-host/index.ts；grammar-installer.ts；refresh 脚本 |
 | D-132 | active-design（D-116–D-119 永久空号，引用改指真实条目） | — | 本文件治理规则 |
 | D-133 | implementation（D-103 第 2 项：崩溃隔离用例忽略已死管道的 EPIPE） | D-139（改为只吞死管道，其他重抛） | lib/run/test-supervisor.ts；status 3.2/3.12 |
-| D-134 | implementation（查询走内存行缓存 + linksByValue；searchSymbols 暴露 match 分档；对照数字后不加名字哈希） | D-139（反向 import 反向索引；catalogStats 不逐文件读） | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
+| D-134 | implementation（searchSymbols 暴露 match 分档保留；内存行缓存与 linksByValue 已换成 0.8.6 原生索引） | D-139（反向 import 反向索引）；D-141（内存表 → 原生索引） | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
 | D-135 | implementation（反向 import 未解析可见；`.js`→`.ts` 孪生；多命中不猜） | D-139（解析时机改为反向索引，不再每次查询重解析） | knowledge/import-resolve.ts；store.findImporters；related imports.unresolved |
 | D-136 | implementation（取代 D-108「不扩候选池」：explore 增加图路径候选） | — | explore.ts / explore-graph.ts；protocol details.graph；设计 6.1/6.2；plan 3.12 |
 | D-137 | implementation（定义召回始终跑；连线与反向 import 等第一次打包之后；独立预算与 filesDropped max） | — | explore.ts；explore-graph.ts |
 | D-138 | implementation（related 是文件级拓扑，不是 references，无 PageRank；store 未开 → unavailable） | — | protocol related.query；Host related-tool/service；pi-host related-tool；session-e2e |
 | D-139 | implementation（按调用次数量：反向 import 反向索引、catalogStats 不逐文件读、EPIPE 只吞死管道、boost 查表、图那趟复用主物化形状、related 正文按段设上限；892 → 52 ms） | — | knowledge/store.ts；explore.ts；related-tool.ts；run/test-supervisor.ts |
 | D-140 | implementation（目录前置条件：枚举一次 `git ls-files` 而非每目录 `check-ignore`；派生图写入尾随去抖 flush；测量脚本改成生产的成批形状。枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟） | — | lib/fs/search.ts + search.test.ts；knowledge/store.ts；symbol-runtime.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
+| D-141 | implementation + 实验结果（TriviumDB 0.8.5 → 0.8.6；`payloadCacheMb: 0` 绕开其 O(N) payload 缓存；符号图八张内存表换原生索引，剩计数器 + 形状缓存；短词只精确匹配；建目录 290 → 257 s，`searchSymbols` 17 → 11.5 ms） | — | packages/web/package.json；knowledge/store.ts + store.test.ts；设计 7.5 |
