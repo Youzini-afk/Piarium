@@ -2119,6 +2119,96 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：待实施（不阻塞 3.11 第 4–5 步；建议在下一次触及这三个模块时一并收）。
 
+### D-104 · 2026-09-07 · 3.11 第 4 步（冷目录只覆盖 TS/TSX）
+
+类型：问题与解法
+
+背景：冷仓库符号目录要把从未改动过的文件写进 6.2 图。tree-sitter 今天只接 `typescript` / `typescriptreact`。若把「扫全仓」写成仓库级覆盖，status 会撒谎。
+
+决定：冷扫描枚举仍走 `searchFilesystemFiles`，但只对 TS/TSX `observe`。非 TS/TSX **跳过**，不 `touchFile`。事件驱动路径保持今天的行为：未知语言 `touchFile`；有 `structureSource` 时 defines/imports/连接边走门面（tree-sitter 先，LSP outline 可作 defines 后备）。
+
+原因：`touchFile` 只声明「见过这个路径」，冷扫描对 Markdown/JS 写这种节点会让消费者以为目录覆盖了那些语言。跳过把「没有符号」和「这种语言还没有采集器」分开。
+
+考虑过的替代：(1) 对非 TS `touchFile`——扩大图却没有符号或边，status 更容易被读成全仓目录。(2) 等第 5 步语言包再做冷扫描——未改动的 TS 文件会继续缺席，第 4 步交不出目录。
+
+不改：JS/JSON 语法包、设置页、按需下载（第 5 步）；仓库级词法索引；LSP 全仓扫描。
+
+影响：`symbol-runtime.ts` `CATALOG_SCAN_LANGUAGES`；`catalog-scan.test.ts`；status 3.11 必须写 TS/TSX only。
+
+状态：已实施。
+
+### D-105 · 2026-09-07 · 3.11 第 4 步（加法边与 generation 同寿）
+
+类型：问题与解法
+
+背景：`replaceFileSymbols` 每次换新 generation UUID，并删掉该路径旧 symbol 节点。store 没有 schema version 或 migration runner。新增边若不属于同一事务，重收集会留下悬挂边。`touchFile` 在 unavailable 时「刷新文件事实」，但会抹掉 `documentRevision`，使已提交范围失去身份。
+
+决定：新增节点类型 `link` 与边标签 `imports` / `connects` / `associates`，加法写入，不跑 migration。link 与 symbol 共用该次 `generation`；`replaceFileSymbols` 在同一事务里 `unlinkLabel` 旧出边并删除旧 symbol **和** link。不把 import specifier 解析成文件（没有 tsconfig）。`touchFile` 保留已有 `generation` / `documentRevision`。查询面是 `getFileRelations` / `findLinks`，`danglingEdges` 数目标 payload 已消失的出边。
+
+原因：确认连接与关联候选必须是不同节点/边，不能靠消费者记一个布尔。specifier 字符串是今天能诚实写下的事实。
+
+考虑过的替代：(1) 边直接连 file→file 或 symbol→symbol——没有解析器会写成猜的。(2) 加 schema version + runner——本刀没有不兼容旧库的必要，旧库只是没有 link。(3) 接线未实现的 `related-tool.ts`——store 原先没有邻居 API，草稿会把候选当事实。
+
+不改：`references`、PageRank、跨文件解析后的 `calls`。
+
+影响：`lib/knowledge/store.ts`；collector / symbol-runtime；store 与 smoke 测试。
+
+状态：已实施。
+
+### D-106 · 2026-09-07 · 3.11 第 4 步（门面长出 literalCalls/imports）
+
+类型：问题与解法
+
+背景：`literalCalls` / `imports` 已在 `StructureProvider` 上，tree-sitter 已实现，LSP 报 `unsupported`，但 `StructureSource` 只暴露 outline/classifyHits。分类器必须把确认连接与关联候选分开。
+
+决定：门面按 outline 同样的 fan-out：`cancelled` 立即返回，首个 `ready` 获胜，`empty` 之后 `warmOnly`，先前 `unavailable` 允许后者冷启。没有任何 provider 声明该能力时门面是 `unsupported`，不是 `failed`。确认 callee 允许名单：`request` / `register` / `on` / `once` / `emit` / `subscribe` / `addEventListener`。`require`/`import` 归 imports 查询，不重复写成调用边。其余带字面量的调用是 `associates`。
+
+原因：LSP `unsupported` 是正当能力声明。空成功与缺能力不能合成同一个结果。
+
+考虑过的替代：只让 collector 直接打 tree-sitter——绕过 fan-out 与 `warmOnly`，和 D-097/D-099 分叉。
+
+不改：LSP 补 literalCalls/imports 实现。
+
+影响：`structure/source.ts` / `connections.ts`；symbol-runtime 写边。
+
+状态：已实施。
+
+### D-107 · 2026-09-07 · 3.11 第 4 步（冷扫描不挡启动与首 turn）
+
+类型：问题与解法
+
+背景：全仓扫描若 await 在 `openWorkspaceKnowledge` / 首个 harness turn 上，会把目录建成启动门。
+
+决定：store 打开之后 `queueMicrotask` 火忘 `scanWorkspace`。扫描可取消、按 8 个文件一批 `drain` 后让出事件循环、按磁盘修订幂等跳过。不设硬文件上限（以免静默少扫）；取消或中途停下的文件等下次打开再补。正文/修订/二进制/体积上限走 `documents.read`（内部已是 `inspectDocumentBytes` + `maxReadBytes`）。
+
+原因：目录是增强，不是打开工作区的前置。修订相同则跳过，重入不会把同一磁盘事实再写一遍。
+
+考虑过的替代：(1) 等首个 explore 再扫——从未被 explore 的仓库会一直空。(2) 启动时 await 扫完——违反「不阻塞启动或第一个 turn」。
+
+不改：启动墙钟对照；把扫描进度做成 UI。
+
+影响：`application-host/index.ts`；`symbol-runtime.scanWorkspace`。
+
+状态：已实施。
+
+### D-108 · 2026-09-07 · 3.11 第 4 步（explore 做唯一生产消费者）
+
+类型：问题与解法
+
+背景：符号图此前没有生产读者。`related-tool.ts` 未 import，store 原先没有邻居 API。只写边没有读者是货架代码（plan 0.1）。
+
+决定：选 explore，不选 related 工具，也不改 compaction。`explore.search` 在物化并选出摘录之后，按摘录路径读 `getFileRelations`，写入 `details.relations` 与可见/stored 正文（计入 24 KiB 字节预算）。`connections` 与 `associations` 分列；不把关联文件加入 rg 候选池，不改变 D-090/D-092/D-098/D-102 的字节/候选预算。无 `fileRelations` 依赖时输出字节与现在一致。
+
+原因：explore 已是「这段代码和什么有关」的模型入口；related 草稿会把未实现的 PageRank/邻居假装接上。扩候选池会回归已经收口的预算。
+
+考虑过的替代：(1) 接线 `related-tool.ts`——要先发明邻居 API 和工具面，本刀范围外。(2) 仓库地图进 compaction——没有现成字节预算与验收例子。(3) 按字面量反查把连接文件扩进候选——改变物化集合。
+
+不改：pi-host explore 参数 schema；`related` 工具。
+
+影响：protocol `ExploreSearchResult.details.relations`；`explore.ts` 打包；`explore-service.ts`；`index.ts` `fileRelations`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2214,8 +2304,8 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
 | D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
-| D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片已由 3.11 第 1、3 步接上） | D-091（tree-sitter 第 4–5 步仍待决）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
-| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-101（第 1–3 步实施拍板与验收缺陷） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–3 步已接，第 4–5 步待做 |
+| D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片已由 3.11 第 1、3 步接上） | D-091（tree-sitter 第 5 步仍待决）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
+| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-108（第 1–4 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–4 步已接，第 5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
 | D-093 | implementation（小/大函数阈值 24 行，一个典型编辑器视口） | — | structure/constants.ts；3.11 切片 |
 | D-094 | implementation（结构切片字段放在 ExploreSearchSnippet 与 details.structure，不进 why） | — | protocol harness explore.search；Host explore + structure；pi-host explore-tool details |
@@ -2228,3 +2318,8 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |
 | D-102 | implementation（解析预算是跑飞兜底、250ms、测试自带预算；签名即全体的单元按 ±3 取并补齐） | — | structure/constants.ts + slice.ts；structure/explore 测试；structure/DOCUMENTATION.md；status 3.11 |
 | D-103 | open（三处既有挂钟/子进程收尾项已立项未修：thread-runtime 20ms stalled、run/supervisor 未捕获 EPIPE 使套件退出码与断言脱钩、pi-host harness-e2e #3） | — | thread-runtime.test.ts；run/supervisor.test.ts；pi-host harness-e2e.test.ts；status 3.2/3.11 |
+| D-104 | implementation（冷目录只采集 TS/TSX；非 TS 跳过不 touchFile） | — | symbol-runtime catalog scan；status 3.11 |
+| D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
+| D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
+| D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |
+| D-108 | implementation（explore 读摘录路径出边；不扩候选池） | — | protocol explore.search details.relations；explore + explore-service |

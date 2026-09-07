@@ -599,7 +599,7 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
 - *物化*：先用便宜信息排候选，按需读取当前来源正文；输出满足后不再无条件读完全部候选，候选失效或内容不合适时补下一批。未读候选
   记 `not-requested`，不混进 `empty`。正文读取可有受控并行，目标是少做无用读取而不只是同时做完（D-090）。
 - *expand*：`lsp.definition` / `lsp.references`（有界；**`references` 不是调用图**，当前没有 call hierarchy，不写"调用图 BFS"）；
-  符号图目前只有 `file → defines → symbol`，`references` / `calls` / `imports` 边与 PageRank 都未接，扩展先只用 defines 与 LSP；
+  符号图已有 `file → defines → symbol` 以及 `file → imports|connects|associates → link`（TS/TSX tree-sitter，绑 `documentRevision`）。`references`、解析后的 `calls` 与 PageRank 仍未接；explore 只读摘录路径的出边，不把关联文件扩进候选池（D-108）；
   git co-change 与测试 ↔ 源码配对是待建服务。**LSP 返回的路径与所有派生出的支撑路径都要重新经过 workspace scope / realpath
   授权**，不能只校验用户传入的 `paths`——定义可以跳进 `node_modules` 或工作区之外。
 - *fuse*：用 **RRF** 按各路名次融合，不生硬相加不同量纲的分数；先保留来源身份与确定性的并列顺序，相关来源不冒充独立证据。
@@ -617,8 +617,8 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
   `selectionRange`，且是语法层请求，不等语义分析完成）。**冷/热语言服务是显式执行条件**："得到可读代码"不依赖"语言服务器已经热了"，
   缺结构来源退回行窗口并说明来源状态。tree-sitter 是已接线的第二个 provider（D-091 / D-097）：web-tree-sitter 在 Host 内、语法包 = 语法
   wasm + Piarium 查询、语言身份复用 `languageIdForPath`、解析结果按内容哈希缓存；生产顺序先 tree-sitter、后 LSP，wasm 失败报
-  `unavailable` 再试 LSP 或退行窗口。高优先 provider 的 `empty` 或未覆盖该命中的 `ready` 不得挡住后续 provider，但后续询问带 `warmOnly`：agent 视图语言会话未就绪时接受 `unavailable` / 窗口，不冷启动 LSP（D-099）。除切片外它还承担命中分类；连接边形状识别、冷仓库符号目录与 `imports` 边仍排在 plan 3.11 第 4 步。
-  第 1–3 步已做（接口、冷启动对照、TS/TSX 包 + 分类）。**不**照搬 OCE 的
+  `unavailable` 再试 LSP 或退行窗口。高优先 provider 的 `empty` 或未覆盖该命中的 `ready` 不得挡住后续 provider，但后续询问带 `warmOnly`：agent 视图语言会话未就绪时接受 `unavailable` / 窗口，不冷启动 LSP（D-099）。除切片与命中分类外，`literalCalls` / `imports` 经同一门面写出连接边与 import 边（D-106）；冷仓库符号目录只覆盖 TS/TSX（D-104），不扫 LSP。plan 3.11 第 5 步（JS/JSON 与按需语言包）未做。
+  第 1–4 步已做（接口、冷启动对照、TS/TSX 包 + 分类、连接边/目录/`imports`）。**不**照搬 OCE 的
   "300 字符以下并入邻居"——那是修它 AST 切块的列切分伪影，套到 `documentSymbol` 上会把合法的小函数、声明、配置项误合并。
 - *pack*：内部尽量找全可能性，外部只给能支撑当前判断的材料。目标与问题所需支撑组成 bundle，支撑允许为空；片段之间要互补——先比较
   文件内哪些片段最有用，再考虑集合互补，一个目标实现加一个真正传参的调用点，通常比五个复述同一接口的片段更有用；不做"每文件最多
@@ -679,11 +679,13 @@ RETURN scored, graph_score(scored) AS rank ORDER BY rank DESC LIMIT 15
 
 暴露为工具 `related(anchor, hops?, labels?)`。
 
-当前已交付的第一纵切（D-059）只在 Documents 权威写后事件上，复用已运行的 LanguageSupervisor 建立真实
-`file → defines → symbol` 图；不做基于 LSP 的启动全仓扫描，LSP 暂不可用时保留最后图，权威空结果才清旧符号。`references` / `calls` /
-`imports` 边与 `related` 工具仍未接生产；它们不能通过对每个 symbol 无界请求 references 来伪装完成。冷仓库的符号目录与 `imports`
-边按 D-091 由 tree-sitter provider 扫描提供，写进同一张图、同一形状、同一 `documentRevision` 绑定——它便宜到可以扫全仓，
-而不需要为每种语言起一个语言服务器；排在 plan 3.11 第 4 步。
+当前已交付的第一纵切（D-059）在 Documents 权威写后事件上建立真实 `file → defines → symbol` 图；LSP 暂不可用时保留最后图，
+权威空结果才清旧符号。plan 3.11 第 4 步把同一张图补上 `imports` / `connects` / `associates` 边（link 节点，绑 `documentRevision`，
+与 defines 共用 generation；D-105）。确认连接与同名字符串关联候选在数据模型里分开，消费者不得把候选当事实（D-106 分类器）。
+冷仓库符号目录用已有的 `searchFilesystemFiles` 枚举、Documents 读磁盘正文与修订，不读脏缓冲（D-087），不扫 LSP，不阻塞启动或
+第一个 turn（D-107）。tree-sitter 今天只覆盖 TS/TSX，所以目录不是仓库级覆盖：非 TS/TSX 冷扫描跳过，不 `touchFile`（D-104）。
+`related` 工具仍是未接线草稿；生产消费者是 `explore.search` 读摘录路径的出边（D-108）。`references`、解析后的跨文件 `calls` 与
+PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。仓库级词法索引仍等观察到"找不到入口"再定。
 
 图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
 也不是任何一轮输入的固定草稿。消费者据修订判断范围是否仍然成立，不成立时按来源状态降级，而不是拿一份无身份的范围继续用。
