@@ -205,18 +205,22 @@ const main = async (): Promise<void> => {
     },
     structureSource,
     graphRecall: () => openStore,
+    // Same shape as index.ts. The first version of this callback omitted
+    // `associations` and crashed `relationLines` — on exactly the two
+    // questions whose excerpts were source files with graph edges.
     fileRelations: async (_workspaceId, resourceId) => {
       const relations = await openStore.getFileRelations(resourceId);
       if (!relations) return null;
       if (relations.imports.length === 0 && relations.connections.length === 0 && relations.associations.length === 0) {
-        return { path: relations.path, documentRevision: relations.documentRevision, incomplete: relations.linksIncomplete, imports: [], connections: [] };
+        return null;
       }
       return {
         path: relations.path,
         documentRevision: relations.documentRevision,
         incomplete: relations.linksIncomplete,
-        imports: relations.imports.map((item) => ({ specifier: item.specifier, line: item.line })),
-        connections: relations.connections.map((item) => ({ callee: item.callee, literal: item.literal, line: item.line })),
+        imports: relations.imports.map(({ specifier, line }) => ({ specifier, line })),
+        connections: relations.connections.map(({ callee, literal, line }) => ({ callee, literal, line })),
+        associations: relations.associations.map(({ callee, literal, line }) => ({ callee, literal, line })),
       };
     },
   });
@@ -255,6 +259,12 @@ const main = async (): Promise<void> => {
       );
     } catch (error) {
       process.stdout.write(`THREW: ${error instanceof Error ? error.message : String(error)}\n`);
+      // A throw here is a product defect, not a retrieval outcome; the frame is
+      // the only thing that locates it.
+      if (error instanceof Error && error.stack) {
+        const frames = error.stack.split("\n").slice(1, 5).map((frame) => frame.trim());
+        process.stdout.write(`  ${frames.join("\n  ")}\n`);
+      }
       continue;
     }
     const elapsed = Math.round(performance.now() - started);
