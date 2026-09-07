@@ -20,8 +20,15 @@ export const STRUCTURE_HIT_CLASS_SCORE = {
 } as const;
 
 /**
- * Working parse+query budget for one tree-sitter outline or classify call
- * after the runtime wasm is already loaded. Init and grammar load are
- * outside this window; their failure is `unavailable`, not a budget miss.
+ * Runaway guard for one tree-sitter outline or classify call after the runtime
+ * wasm is already loaded. Init and grammar load are outside this window; their
+ * failure is `unavailable`, not a budget miss.
+ *
+ * This is a wall clock, so it competes with everything else on the box. A
+ * value near the parse time of an ordinary file turns a busy Host into silent
+ * `failed` and drops slicing back to ±3 windows; it also makes the tests that
+ * assert a real parse depend on machine load. Keep enough headroom that only a
+ * pathological file trips it, and inject an explicit budget in tests that
+ * assert either outcome (D-102).
  */
-export const STRUCTURE_PARSE_BUDGET_MS = 40;
+export const STRUCTURE_PARSE_BUDGET_MS = 250;

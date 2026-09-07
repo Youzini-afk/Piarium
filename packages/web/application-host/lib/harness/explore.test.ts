@@ -23,6 +23,13 @@ import type { StructureOutlineResult, StructureProvider, StructureSource } from 
 
 const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({ status: "ready", content, revision, source: "disk" });
 
+/**
+ * Slice assertions need a real parse, and the production budget is a wall
+ * clock that a loaded runner can exhaust. Pin a budget so these tests do not
+ * depend on machine load (D-102).
+ */
+const parsingProvider = () => createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
+
 describe("explore query terms", () => {
   it("preserves Unicode, combining marks, single-character and dollar identifiers", () => {
     const terms = extractIdentifiers("where is x $value 计算值 e\u0301 myFunction snake_case");
@@ -552,7 +559,7 @@ describe("explore structure slices", () => {
     const lines = content.split("\n");
     const constLine = lines.findIndex((line) => line.includes("const needle")) + 1;
     const callLine = lines.findIndex((line) => line.includes("handle(needle)")) + 1;
-    const structure = createStructureSource([createTreeSitterStructureProvider()]);
+    const structure = createStructureSource([parsingProvider()]);
     const run = (line: number, text: string) => explore({ question: "needle" }, {
       rgSearch: async () => [{ path: "big.ts", line, text }],
       readFile: async () => ready(content),
@@ -593,7 +600,7 @@ describe("explore structure slices", () => {
     const result = await explore({ question: "needle" }, {
       rgSearch: async () => [{ path: "bind.ts", line: 3, text: "    return needle;" }],
       readFile: async () => ready(content),
-      structure: createStructureSource([createTreeSitterStructureProvider()]),
+      structure: createStructureSource([parsingProvider()]),
     });
     expect(result.snippets[0]?.unit).toMatchObject({ name: "foo", kind: "function", startLine: 2, endLine: 4 });
     expect(result.snippets[0]?.text).toContain("const foo = () => {");
@@ -626,7 +633,7 @@ describe("explore structure slices", () => {
     const result = await explore({ question: "needle" }, {
       rgSearch: async () => [{ path: "cold.ts", line: 4, text: "export function needle() {" }],
       readFile: async () => ready(content),
-      structure: createStructureSource([createTreeSitterStructureProvider(), unavailableLsp]),
+      structure: createStructureSource([parsingProvider(), unavailableLsp]),
     });
     expect(result.snippets[0]).toMatchObject({
       path: "cold.ts",

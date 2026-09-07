@@ -12,9 +12,16 @@ const request = (text: string, path = "sample.ts") => ({
   revision: "rev-1",
 });
 
+/**
+ * The production budget is a wall clock, so a shared runner under load can
+ * exhaust it and turn these assertions into `failed`. Tests that assert a real
+ * parse pin their own budget; the ones that assert exhaustion pin `0` (D-102).
+ */
+const parsingProvider = () => createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
+
 describe("createTreeSitterStructureProvider", () => {
   it("outlines TypeScript units from the vendored wasm", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const text = [
       "import { join } from \"node:path\";",
       "export function needle() {",
@@ -38,7 +45,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("classifies declaration names differently from comments and strings", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const text = [
       "// needle",
       "export function needle() {",
@@ -55,7 +62,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("keeps definition bindings and skips ordinary value bindings as units", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const text = [
       "export function wrap() {",
       "  const foo = () => {",
@@ -78,7 +85,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("outlines var, declare function, namespace, and export default class", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const text = [
       "var zeta = 1;",
       "declare function eta(): void;",
@@ -95,7 +102,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("outlines arrows, declare class/namespace, abstract members, and object methods", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const text = [
       "const beta = () => { return 1; };",
       "export const gamma = () => { return 2; };",
@@ -122,7 +129,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("reports cancelled when the signal is already aborted", async () => {
-    const provider = createTreeSitterStructureProvider();
+    const provider = parsingProvider();
     const signal = AbortSignal.abort();
     const result = await provider.outline({ ...request("export function needle() { return 1; }"), signal });
     expect(result.status).toBe("cancelled");
