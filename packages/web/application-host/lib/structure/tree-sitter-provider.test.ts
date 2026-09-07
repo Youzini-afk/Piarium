@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isStructureContainerKind } from "./kinds.js";
+import { capabilitiesFromSpec, treeSitterLanguageSpec } from "./languages.js";
 import { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
+import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
 
 const request = (text: string, path = "sample.ts") => ({
   path,
@@ -19,6 +21,52 @@ const request = (text: string, path = "sample.ts") => ({
  * parse pin their own budget; the ones that assert exhaustion pin `0` (D-102).
  */
 const parsingProvider = () => createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
+
+describe("tree-sitter language specs", () => {
+  it("derives all four capabilities for typescript and tsx", () => {
+    const expected = { outline: true, classifyHits: true, literalCalls: true, imports: true };
+    expect(capabilitiesFromSpec(treeSitterLanguageSpec("typescript"))).toEqual(expected);
+    expect(capabilitiesFromSpec(treeSitterLanguageSpec("typescriptreact"))).toEqual(expected);
+    expect(createTreeSitterStructureProvider().capabilities("typescript")).toEqual(expected);
+    expect(createTreeSitterStructureProvider().capabilities("typescriptreact")).toEqual(expected);
+  });
+
+  it("derives no capabilities when the language has no spec", () => {
+    expect(treeSitterLanguageSpec("javascript")).toBeUndefined();
+    expect(treeSitterLanguageSpec("json")).toBeUndefined();
+    expect(capabilitiesFromSpec(undefined)).toEqual(NO_STRUCTURE_CAPABILITIES);
+    expect(createTreeSitterStructureProvider().capabilities("javascript")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    expect(createTreeSitterStructureProvider().capabilities(null)).toEqual(NO_STRUCTURE_CAPABILITIES);
+  });
+
+  it("derives outline and classifyHits from a spec, and optional queries from presence", () => {
+    const outlineOnly = capabilitiesFromSpec({
+      grammarFile: "x.wasm",
+      definitionQuery: "(program) @unit",
+      commentTypes: new Set(["comment"]),
+      stringTypes: new Set(["string"]),
+      bindingTypes: new Set(),
+    });
+    expect(outlineOnly).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: false,
+      imports: false,
+    });
+  });
+
+  it("turns a missing import or literal-call query into unsupported, not failed", async () => {
+    const provider = createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
+    const python = await provider.literalCalls({
+      path: "a.py",
+      languageId: "python",
+      text: "print('x')",
+      revision: "r1",
+    });
+    expect(python.status).toBe("unsupported");
+    expect(python.calls).toEqual([]);
+  });
+});
 
 describe("createTreeSitterStructureProvider", () => {
   it("outlines TypeScript units from the vendored wasm", async () => {

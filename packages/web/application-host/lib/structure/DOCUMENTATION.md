@@ -22,10 +22,10 @@ provider can actually answer for a language:
 
 | Operation | Meaning | Providers |
 | --- | --- | --- |
-| `outline` | Named units with signature and full span | tree-sitter (TS/TSX), then LSP `documentSymbol` |
+| `outline` | Named units with signature and full span | tree-sitter (languages in the spec table), then LSP `documentSymbol` |
 | `classifyHits` | Hit line → name / body / string / comment | tree-sitter (not LSP) |
-| `literalCalls` | Call + string-literal shapes | tree-sitter extracts; `StructureSource` fans out like outline (D-106); graph write classifies `connects` vs `associates` |
-| `imports` | Import sources | tree-sitter extracts; same fan-out; specifier strings are written as `imports` edges |
+| `literalCalls` | Call + string-literal shapes | tree-sitter when the spec has `literalCallQuery`; `StructureSource` fans out like outline (D-106); graph write classifies `connects` vs `associates` |
+| `imports` | Import sources | tree-sitter when the spec has `importQuery`; same fan-out; specifier strings are written as `imports` edges |
 
 Statuses stay distinct: `ready`, `empty`, `unavailable` (cold or missing
 runtime), `unsupported` (no language, or no `documentSymbolProvider`), `stale`,
@@ -85,6 +85,11 @@ initializer.
 
 That ±3 fallback is a runtime degradation, not a compatibility layer for old
 callers.
+
+Tree-sitter capabilities are derived from `TREE_SITTER_LANGUAGE_SPECS` in
+`languages.ts`. A missing spec, or a spec without `importQuery` /
+`literalCallQuery`, is `unsupported` (D-099 / D-106 already fan that out).
+Do not hard-code the four flags.
 
 ## Tree-sitter coverage (TS/TSX)
 

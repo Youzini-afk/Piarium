@@ -3,14 +3,9 @@ import { existsSync } from "node:fs";
 import { languageIdForPath } from "@piarium/protocol";
 import { LANGUAGE_VERSION, Language, MIN_COMPATIBLE_VERSION, Parser, Query, type Node } from "web-tree-sitter";
 import { STRUCTURE_PARSE_BUDGET_MS } from "./constants.js";
-import {
-  TYPESCRIPT_DEFINITION_QUERY,
-  TYPESCRIPT_IMPORT_QUERY,
-  TYPESCRIPT_LITERAL_CALL_QUERY,
-} from "./queries.js";
+import { capabilitiesFromSpec, treeSitterLanguageSpec, type TreeSitterLanguageSpec } from "./languages.js";
 import { resolveStructureRuntimeFile } from "./runtime-path.js";
 import {
-  NO_STRUCTURE_CAPABILITIES,
   type StructureCapabilities,
   type StructureClassifyRequest,
   type StructureClassifyResult,
@@ -30,13 +25,6 @@ export interface TreeSitterStructureProviderOptions {
   parseBudgetMs?: number;
   pathExists?: (candidate: string) => boolean;
 }
-
-const TREE_SITTER_LANGUAGES = new Set(["typescript", "typescriptreact"]);
-
-const GRAMMAR_FILE: Record<string, string> = {
-  typescript: "tree-sitter-typescript.wasm",
-  typescriptreact: "tree-sitter-tsx.wasm",
-};
 
 const FUNCTION_LIKE_TYPES = new Set([
   "arrow_function",
@@ -61,12 +49,6 @@ const CONTAINER_UNIT_TYPES = new Set([
   "module",
 ]);
 
-const BINDING_UNIT_TYPES = new Set([
-  "lexical_declaration",
-  "variable_declaration",
-  "public_field_definition",
-]);
-
 const kindForType = (type: string, initializerType?: string): string => {
   if (initializerType === "class") return "class";
   if (initializerType && FUNCTION_LIKE_TYPES.has(initializerType)) return "function";
@@ -89,9 +71,9 @@ const initializerOf = (node: Node): Node | null => {
   return null;
 };
 
-const isSliceUnit = (node: Node): boolean => {
+const isSliceUnit = (node: Node, spec: TreeSitterLanguageSpec): boolean => {
   if (CONTAINER_UNIT_TYPES.has(node.type)) return true;
-  if (!BINDING_UNIT_TYPES.has(node.type)) return false;
+  if (!spec.bindingTypes.has(node.type)) return false;
   const initializer = initializerOf(node);
   return initializer !== null && FUNCTION_LIKE_TYPES.has(initializer.type);
 };
@@ -103,8 +85,8 @@ const isSliceUnit = (node: Node): boolean => {
  * (D-098 / D-113). Function-local bindings stay out: they are not what
  * `searchSymbols` answers, and LSP's `documentSymbol` omits them too.
  */
-const isModuleLevelBinding = (node: Node): boolean => {
-  if (!BINDING_UNIT_TYPES.has(node.type)) return false;
+const isModuleLevelBinding = (node: Node, spec: TreeSitterLanguageSpec): boolean => {
+  if (!spec.bindingTypes.has(node.type)) return false;
   for (let parent = node.parent; parent; parent = parent.parent) {
     if (parent.type === "statement_block" || FUNCTION_LIKE_TYPES.has(parent.type)) return false;
   }
@@ -112,7 +94,9 @@ const isModuleLevelBinding = (node: Node): boolean => {
 };
 
 /** Emitted into the outline. Slicing narrows this again by kind (D-098). */
-const isOutlineUnit = (node: Node): boolean => isSliceUnit(node) || isModuleLevelBinding(node);
+const isOutlineUnit = (node: Node, spec: TreeSitterLanguageSpec): boolean => (
+  isSliceUnit(node, spec) || isModuleLevelBinding(node, spec)
+);
 
 const nameOfUnit = (unit: Node, name: Node | undefined): string => {
   if (name?.text) return name.text;
@@ -130,9 +114,7 @@ const pointToLines = (start: { row: number; column: number }, end: { row: number
 };
 
 const capabilitiesFor = (languageId: string | null): StructureCapabilities => (
-  languageId && TREE_SITTER_LANGUAGES.has(languageId)
-    ? { outline: true, classifyHits: true, literalCalls: true, imports: true }
-    : NO_STRUCTURE_CAPABILITIES
+  capabilitiesFromSpec(treeSitterLanguageSpec(languageId))
 );
 
 interface ParsedCache {
@@ -143,9 +125,6 @@ interface ParsedCache {
   symbols: StructureSymbol[];
   nameLines: Set<number>;
 }
-
-const COMMENT_TYPES = new Set(["comment", "html_comment"]);
-const STRING_TYPES = new Set(["string", "template_string", "string_fragment", "escape_sequence"]);
 
 export function createTreeSitterStructureProvider(
   options: TreeSitterStructureProviderOptions = {},
@@ -208,12 +187,12 @@ export function createTreeSitterStructureProvider(
     await initPromise;
   };
 
-  const loadLanguage = (languageId: string): Promise<Language> => {
+  const loadLanguage = (languageId: string, spec: TreeSitterLanguageSpec): Promise<Language> => {
     const existing = languages.get(languageId);
     if (existing) return existing;
-    const fileName = GRAMMAR_FILE[languageId];
+    const fileName = spec.grammarFile;
     const loading = (async () => {
-      const grammarPath = runtimeFile(fileName!);
+      const grammarPath = runtimeFile(fileName);
       if (!pathExists(grammarPath)) {
         throw new Error(`Grammar wasm is not readable: ${fileName}`);
       }
@@ -235,6 +214,7 @@ export function createTreeSitterStructureProvider(
   const parseDocument = async (
     request: StructureOutlineRequest,
     languageId: string,
+    spec: TreeSitterLanguageSpec,
   ): Promise<
     | { status: "ready"; entry: ParsedCache; cacheKey: string }
     | { status: "cancelled" | "failed" | "unavailable"; message: string }
@@ -247,7 +227,7 @@ export function createTreeSitterStructureProvider(
     const cacheKey = `${languageId}:${hash}`;
     const cached = cache.get(cacheKey);
     if (cached && cached.languageId === languageId) {
-      if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(runtimeFile(GRAMMAR_FILE[languageId]!))) {
+      if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(runtimeFile(spec.grammarFile))) {
         return { status: "unavailable", message: "Grammar wasm is not readable." };
       }
       pin(cacheKey);
@@ -255,7 +235,7 @@ export function createTreeSitterStructureProvider(
     }
       await initParser();
       if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
-      const language = await loadLanguage(languageId);
+      const language = await loadLanguage(languageId, spec);
       if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
       const started = performance.now();
       const parser = new Parser();
@@ -292,7 +272,7 @@ export function createTreeSitterStructureProvider(
         tree.delete();
         return { status: "failed", message: "Parse budget exhausted before the file was finished." };
       }
-      const definitionQuery = new Query(language, TYPESCRIPT_DEFINITION_QUERY);
+      const definitionQuery = new Query(language, spec.definitionQuery);
       const matches = definitionQuery.matches(tree.rootNode);
       definitionQuery.delete();
       if (request.signal?.aborted) {
@@ -310,7 +290,7 @@ export function createTreeSitterStructureProvider(
         const unit = match.captures.find((capture) => capture.name === "unit")?.node;
         const name = match.captures.find((capture) => capture.name === "name")?.node;
         if (name) nameLines.add(name.startPosition.row + 1);
-        if (!unit || !isOutlineUnit(unit)) continue;
+        if (!unit || !isOutlineUnit(unit, spec)) continue;
         const unitName = nameOfUnit(unit, name);
         const initializer = initializerOf(unit);
         const range = pointToLines(unit.startPosition, unit.endPosition);
@@ -355,19 +335,26 @@ export function createTreeSitterStructureProvider(
     node.startPosition.row <= zeroLine && node.endPosition.row >= zeroLine
   );
 
-  const lineHasType = (node: Node, zeroLine: number, types: Set<string>): boolean => {
+  const lineHasType = (node: Node, zeroLine: number, types: ReadonlySet<string>): boolean => {
     if (!nodeTouchesLine(node, zeroLine)) return false;
     if (types.has(node.type)) return true;
     return node.children.some((child) => lineHasType(child, zeroLine, types));
   };
 
-  const classifyLine = (entry: ParsedCache, line: number): StructureHitClass => {
+  const classifyLine = (entry: ParsedCache, spec: TreeSitterLanguageSpec, line: number): StructureHitClass => {
     const zeroLine = line - 1;
     const root = entry.tree.rootNode;
-    if (lineHasType(root, zeroLine, COMMENT_TYPES)) return "comment";
+    if (lineHasType(root, zeroLine, spec.commentTypes)) return "comment";
     if (entry.nameLines.has(line)) return "name";
-    if (lineHasType(root, zeroLine, STRING_TYPES)) return "string";
+    if (lineHasType(root, zeroLine, spec.stringTypes)) return "string";
     return "body";
+  };
+
+  const resolveSpec = (request: StructureOutlineRequest): { languageId: string; spec: TreeSitterLanguageSpec } | null => {
+    const languageId = request.languageId ?? languageIdForPath(request.path);
+    if (!languageId) return null;
+    const spec = treeSitterLanguageSpec(languageId);
+    return spec ? { languageId, spec } : null;
   };
 
   return {
@@ -376,11 +363,11 @@ export function createTreeSitterStructureProvider(
       return capabilitiesFor(languageId);
     },
     async outline(request): Promise<StructureOutlineResult> {
-      const languageId = request.languageId ?? languageIdForPath(request.path);
-      if (!languageId || !TREE_SITTER_LANGUAGES.has(languageId)) {
+      const resolved = resolveSpec(request);
+      if (!resolved) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, symbols: [], message: "tree-sitter outline is only wired for typescript/tsx." };
       }
-      const parsed = await parseDocument(request, languageId);
+      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, symbols: [], message: parsed.message };
       }
@@ -396,11 +383,11 @@ export function createTreeSitterStructureProvider(
       }
     },
     async classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult> {
-      const languageId = request.languageId ?? languageIdForPath(request.path);
-      if (!languageId || !TREE_SITTER_LANGUAGES.has(languageId)) {
+      const resolved = resolveSpec(request);
+      if (!resolved) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, hits: [], message: "Hit classification is only wired for typescript/tsx." };
       }
-      const parsed = await parseDocument(request, languageId);
+      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, hits: [], message: parsed.message };
       }
@@ -409,23 +396,26 @@ export function createTreeSitterStructureProvider(
           status: "ready",
           provider: "tree-sitter",
           revision: request.revision,
-          hits: request.lines.map((line) => ({ line, class: classifyLine(parsed.entry, line) })),
+          hits: request.lines.map((line) => ({ line, class: classifyLine(parsed.entry, resolved.spec, line) })),
         };
       } finally {
         unpin(parsed.cacheKey);
       }
     },
     async literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult> {
-      const languageId = request.languageId ?? languageIdForPath(request.path);
-      if (!languageId || !TREE_SITTER_LANGUAGES.has(languageId)) {
+      const resolved = resolveSpec(request);
+      if (!resolved) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction is only wired for typescript/tsx." };
       }
-      const parsed = await parseDocument(request, languageId);
+      if (!resolved.spec.literalCallQuery) {
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction is not available for this language." };
+      }
+      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, calls: [], message: parsed.message };
       }
       try {
-        const query = new Query(parsed.entry.language, TYPESCRIPT_LITERAL_CALL_QUERY);
+        const query = new Query(parsed.entry.language, resolved.spec.literalCallQuery);
         const calls: StructureLiteralCall[] = [];
         for (const match of query.matches(parsed.entry.tree.rootNode)) {
           const fn = match.captures.find((capture) => capture.name === "fn")?.node;
@@ -440,16 +430,19 @@ export function createTreeSitterStructureProvider(
       }
     },
     async imports(request: StructureOutlineRequest): Promise<StructureImportsResult> {
-      const languageId = request.languageId ?? languageIdForPath(request.path);
-      if (!languageId || !TREE_SITTER_LANGUAGES.has(languageId)) {
+      const resolved = resolveSpec(request);
+      if (!resolved) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction is only wired for typescript/tsx." };
       }
-      const parsed = await parseDocument(request, languageId);
+      if (!resolved.spec.importQuery) {
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction is not available for this language." };
+      }
+      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
         return { status: parsed.status, provider: "tree-sitter", revision: request.revision, imports: [], message: parsed.message };
       }
       try {
-        const query = new Query(parsed.entry.language, TYPESCRIPT_IMPORT_QUERY);
+        const query = new Query(parsed.entry.language, resolved.spec.importQuery);
         const imports: StructureImport[] = [];
         for (const match of query.matches(parsed.entry.tree.rootNode)) {
           const source = match.captures.find((capture) => capture.name === "source")?.node;
