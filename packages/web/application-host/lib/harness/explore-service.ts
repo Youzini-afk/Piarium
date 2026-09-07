@@ -16,6 +16,7 @@ import {
   formatExploreOutput,
   type ExploreIssue,
 } from "./explore.js";
+import type { ExploreGraphRecall } from "./explore-graph.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
@@ -85,7 +86,7 @@ async function loadSnippetRelations(
 }
 
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall">,
 ): HarnessService<"explore.search"> {
   return {
     handle: async (params, ctx) => {
@@ -170,6 +171,7 @@ export function createExploreSearchService(
             }),
           },
         } : {}),
+        ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
       }, ctx.signal);
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
@@ -191,6 +193,7 @@ export function createExploreSearchService(
           ...(result.searched.filesDropped !== undefined ? { filesDropped: result.searched.filesDropped } : {}),
         },
         ...(relations ? { relations } : {}),
+        ...(result.details.graph ? { graph: result.details.graph } : {}),
       };
       const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
       const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
@@ -210,9 +213,35 @@ export function createExploreSearchService(
           byteBudget: DEFAULT_BYTE_BUDGET,
           ...(result.details.structure ? { structure: result.details.structure } : {}),
           ...(relations ? { relations } : {}),
+          ...(result.details.graph ? { graph: result.details.graph } : {}),
         },
       };
     },
+  };
+}
+
+function bindExploreGraphRecall(
+  getStore: NonNullable<HarnessServiceHost["graphRecall"]>,
+  workspaceId: string,
+): ExploreGraphRecall {
+  const requireStore = (): NonNullable<ReturnType<typeof getStore>> => {
+    const store = getStore(workspaceId);
+    if (!store) throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
+    return store;
+  };
+  return {
+    catalogStats: async () => requireStore().catalogStats(),
+    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k),
+    findLinks: (value) => requireStore().findLinks(value),
+    fileRelations: async (path) => {
+      const relations = await requireStore().getFileRelations(path);
+      if (!relations) return null;
+      return {
+        connections: relations.connections.map(({ callee, literal }) => ({ callee, literal })),
+        linksIncomplete: relations.linksIncomplete,
+      };
+    },
+    findImporters: (path) => requireStore().findImporters(path),
   };
 }
 

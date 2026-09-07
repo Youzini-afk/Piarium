@@ -322,6 +322,38 @@ export interface RecallSearchResult {
   results: RecallSearchResultItem[];
 }
 
+export interface RelatedQueryParams {
+  /** Workspace path or symbol / connection-literal name. */
+  anchor: string;
+}
+
+export type RelatedQueryStatus = "ready" | "empty" | "unavailable" | "failed";
+
+export interface RelatedQueryResult {
+  text: string;
+  status: RelatedQueryStatus;
+  anchor: { kind: "path" | "name"; value: string };
+  definitions: Array<{ name: string; kind: string; path: string }>;
+  imports: {
+    items: Array<{ specifier: string; path: string; resolvedPath?: string }>;
+    unresolved: Array<{ specifier: string; path: string; reason: "non-relative" | "unresolved-relative" }>;
+    incomplete: boolean;
+  };
+  importers: {
+    items: Array<{ path: string; specifier: string }>;
+    incomplete: boolean;
+  };
+  connections: {
+    items: Array<{
+      literal: string;
+      callee: string;
+      path: string;
+      otherEnds: Array<{ path: string; kind: string; callee?: string }>;
+    }>;
+    incomplete: boolean;
+  };
+}
+
 export interface ExploreSearchParams {
   question: string;
   paths?: string[];
@@ -398,6 +430,27 @@ export interface ExploreSearchProvenance {
  */
 export type ExploreRelationStatus = "ready" | "partial" | "unavailable";
 
+export type ExploreGraphStatus =
+  | "ready"
+  | "empty"
+  | "unavailable"
+  | "failed"
+  | "stale"
+  | "not-requested";
+
+export interface ExploreGraphDetails {
+  status: ExploreGraphStatus;
+  definitions: number;
+  connections: number;
+  imports: number;
+  /**
+   * Floor of graph-source files that exceeded the independent graph budget.
+   * Combined with rg `searched.filesDropped` by taking the maximum, not the sum.
+   */
+  filesDropped?: number;
+  partial?: boolean;
+}
+
 export interface ExploreFileRelation {
   path: string;
   /** Disk revision the edges were collected from; null on legacy rows. */
@@ -446,6 +499,13 @@ export interface ExploreSearchResult {
      * call shape is not a connection, so they are candidates, not facts.
      */
     relations?: { status: ExploreRelationStatus; files: ExploreFileRelation[] };
+    /**
+     * Path-level graph recall (definitions, connection endpoints, reverse
+     * imports). The graph never supplies line numbers for excerpts; those are
+     * re-located in the current text. Distinct from `relations`, which annotate
+     * already-selected excerpts.
+     */
+    graph?: ExploreGraphDetails;
   };
 }
 
@@ -484,6 +544,10 @@ export interface HarnessServiceMap {
   "explore.search": {
     params: ExploreSearchParams;
     result: ExploreSearchResult;
+  };
+  "related.query": {
+    params: RelatedQueryParams;
+    result: RelatedQueryResult;
   };
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
@@ -542,6 +606,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.merge": "control.thread",
   "thread.kill": "control.thread",
   "explore.search": "read.search",
+  "related.query": "read.search",
   "document.readSource": "read.document",
   "document.pathOverlay": "read.document",
   "document.writeGuard": "write.document",
@@ -599,6 +664,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.merge",
   "thread.kill",
   "explore.search",
+  "related.query",
   "document.readSource",
   "document.pathOverlay",
   "document.writeGuard",

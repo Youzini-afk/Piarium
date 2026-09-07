@@ -831,3 +831,194 @@ describe("explore structure slices", () => {
     expect((result.snippets[0]?.endLine ?? 0) - (result.snippets[0]?.startLine ?? 0)).toBeLessThan(8);
   });
 });
+
+describe("explore graph path recall", () => {
+  const files = new Map<string, string>([
+    ["aaa.ts", "export function uniqueDefName() { return 1; }\n"],
+    ["def.ts", "export function uniqueDefName() { return 2; }\n"],
+    ["request.ts", "export function uniqueWireHandler() { return request(\"unique.wire.literal\"); }\n"],
+    ["register.ts", "router.register(\"unique.wire.literal\");\n"],
+    ["core.ts", "export function uniqueCoreName() { return 1; }\n"],
+    ["app.ts", "import { uniqueCoreName } from \"./core.js\";\nexport const boot = uniqueCoreName;\n"],
+    ["missing.ts", "export function other() { return 1; }\n"],
+  ]);
+
+  const readNamed = async (path: string): Promise<ExploreFileSnapshot> => {
+    const content = files.get(path);
+    return content ? ready(content) : { status: "unavailable", message: "missing" };
+  };
+
+  it("prefers a catalog definition over a same-term mention when ranking", async () => {
+    const result = await explore({ question: "uniqueDefName", limit: 1 }, {
+      rgSearch: async () => [
+        { path: "aaa.ts", line: 1, text: "export function uniqueDefName() { return 1; }" },
+        { path: "def.ts", line: 1, text: "export function uniqueDefName() { return 2; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 2 }),
+        searchDefinitions: async (query) => query === "uniqueDefName"
+          ? [{ name: "uniqueDefName", path: "def.ts", kind: "function", match: "exact" as const }]
+          : [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.path).toBe("def.ts");
+    expect(result.snippets[0]?.why).toContain("definition of uniqueDefName (function)");
+    expect(result.details.graph).toMatchObject({ status: "ready", definitions: 1 });
+  });
+
+  it("brings in the other end of a connection that rg never candidate-selected", async () => {
+    const result = await explore({ question: "uniqueWireHandler" }, {
+      rgSearch: async () => [
+        { path: "request.ts", line: 1, text: "export function uniqueWireHandler() { return request(\"unique.wire.literal\"); }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 2 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => value === "unique.wire.literal"
+          ? [
+            { path: "request.ts", kind: "connects", value, callee: "request" },
+            { path: "register.ts", kind: "connects", value, callee: "register" },
+          ]
+          : [],
+        fileRelations: async (path) => path === "request.ts"
+          ? { connections: [{ callee: "request", literal: "unique.wire.literal" }], linksIncomplete: false }
+          : null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets.map((snippet) => snippet.path)).toEqual(expect.arrayContaining(["request.ts", "register.ts"]));
+    const other = result.snippets.find((snippet) => snippet.path === "register.ts");
+    expect(other?.why).toContain("other end of connection \"unique.wire.literal\"");
+    expect(other?.why).not.toMatch(/matched uniqueWireHandler/);
+    expect(result.details.graph).toMatchObject({ status: "ready", connections: 1 });
+  });
+
+  it("adds a reverse-import candidate and does not pretend it was an rg hit", async () => {
+    const result = await explore({ question: "uniqueCoreName" }, {
+      rgSearch: async () => [
+        { path: "core.ts", line: 1, text: "export function uniqueCoreName() { return 1; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async (path) => path === "core.ts"
+          ? { resolved: [{ path: "app.ts", specifier: "./core.js" }] }
+          : { resolved: [] },
+      },
+    });
+    const importer = result.snippets.find((snippet) => snippet.path === "app.ts");
+    expect(importer?.why).toContain("imports core.ts");
+    expect(importer?.text).toContain("./core.js");
+  });
+
+  it("omits a graph path when the current text no longer contains the symbol name", async () => {
+    const result = await explore({ question: "ghostName" }, {
+      rgSearch: async () => [],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [
+          { name: "ghostName", path: "missing.ts", kind: "function", match: "exact" as const },
+        ],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets).toEqual([]);
+    expect(result.details.provenance.find((entry) => entry.path === "missing.ts")?.status).toBe("empty");
+  });
+
+  it("reports unavailable instead of failed when the graph store is not open", async () => {
+    const result = await explore({ question: "uniqueDefName" }, {
+      rgSearch: async () => [
+        { path: "aaa.ts", line: 1, text: "export function uniqueDefName() { return 1; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => {
+          throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
+        },
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.path).toBe("aaa.ts");
+    expect(result.details.graph?.status).toBe("unavailable");
+  });
+
+  it("keeps rg excerpts when the graph store is unusable", async () => {
+    const result = await explore({ question: "uniqueDefName" }, {
+      rgSearch: async () => [
+        { path: "aaa.ts", line: 1, text: "export function uniqueDefName() { return 1; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => {
+          throw new Error("knowledge store is corrupt");
+        },
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.path).toBe("aaa.ts");
+    expect(result.details.graph?.status).toBe("failed");
+  });
+
+  it("reports an empty catalog instead of ready when no symbols were collected", async () => {
+    const result = await explore({ question: "uniqueDefName" }, {
+      rgSearch: async () => [
+        { path: "aaa.ts", line: 1, text: "export function uniqueDefName() { return 1; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 0 }),
+        searchDefinitions: async () => {
+          throw new Error("should not search an empty catalog");
+        },
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.details.graph?.status).toBe("empty");
+    expect(result.snippets[0]?.path).toBe("aaa.ts");
+  });
+
+  it("takes filesDropped as a floor across rg and graph instead of summing", async () => {
+    const result = await explore({ question: "uniqueDefName" }, {
+      rgSearch: async () => ({
+        hits: [{ path: "aaa.ts", line: 1, text: "export function uniqueDefName() { return 1; }" }],
+        filesDropped: 12,
+      }),
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 40 }),
+        searchDefinitions: async () => Array.from({ length: 50 }, (_, index) => ({
+          name: "uniqueDefName",
+          path: `extra-${index}.ts`,
+          kind: "function",
+          match: "exact" as const,
+        })),
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.searched.filesDropped).toBeGreaterThanOrEqual(12);
+    expect(result.details.graph?.filesDropped).toBeGreaterThan(0);
+    expect(result.searched.filesDropped).toBe(Math.max(12, result.details.graph?.filesDropped ?? 0));
+  });
+});

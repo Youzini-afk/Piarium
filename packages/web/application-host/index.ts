@@ -1629,6 +1629,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Reading relations must not open a database or start a catalog scan, so
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
+    graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
     fileRelations: async (workspaceId, resourceId) => {
       const store = knowledgeStores.get(workspaceId);
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);

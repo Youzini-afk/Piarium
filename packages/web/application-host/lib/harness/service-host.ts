@@ -107,6 +107,11 @@ export interface HarnessServiceHost {
    * "not answered" and must degrade the annotation, not the search (D-112).
    */
   fileRelations: ((workspaceId: string, path: string) => Promise<Omit<import("@piarium/protocol").ExploreFileRelation, "stale"> | null>) | null;
+  /**
+   * Already-open symbol graph for path-level recall. Returning null means the
+   * store is not open; the caller must degrade, not open a database (D-112).
+   */
+  graphRecall: ((workspaceId: string) => import("../knowledge/store.js").KnowledgeStore | null) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -171,6 +176,7 @@ export interface HarnessServiceHostOptions {
   lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
   structureSource?: StructureSource;
   fileRelations?: HarnessServiceHost["fileRelations"];
+  graphRecall?: HarnessServiceHost["graphRecall"];
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -228,6 +234,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const lspNavigationServices = options.lspNavigationServices ?? null;
   const structureSource = options.structureSource ?? null;
   const fileRelations = options.fileRelations ?? null;
+  const graphRecall = options.graphRecall ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -378,6 +385,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     lspNavigationServices,
     structureSource,
     fileRelations,
+    graphRecall,
     webFetchService,
     webSearchService,
     documentReadSource,
