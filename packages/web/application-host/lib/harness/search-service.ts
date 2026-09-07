@@ -386,6 +386,10 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         );
         controller.signal.throwIfAborted();
 
+        // The backend produced matches and then hit a non-fatal error, so its
+        // sweep did not cover everything. The hits are usable; the caller has
+        // to be told the coverage is partial (D-142).
+        const backendIncomplete = (result as { incomplete?: boolean }).incomplete === true;
         if (result.status === "empty") {
           if (draftHits.length === 0) return emptyResult();
           const grouped = groupAndSort(draftHits, root, limit, groupOptions);
@@ -395,7 +399,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             totalHits: grouped.totalHits,
             totalFiles: grouped.totalFiles,
             searchedFiles: grouped.totalFiles,
-            partial: grouped.totalHits > limit || grouped.perFileCapped || grouped.filesDropped > 0,
+            partial: backendIncomplete || grouped.totalHits > limit || grouped.perFileCapped || grouped.filesDropped > 0,
             ...(candidateMode ? { filesDropped: grouped.filesDropped } : {}),
           };
         }
@@ -450,7 +454,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           }
           const { files, totalHits, totalFiles, perFileCapped, filesDropped } = groupAndSort(mergedHits, root, limit, groupOptions);
           const backendCapped = hits.length >= limit * 3;
-          const partial = totalHits > limit || contextIncomplete || perFileCapped || backendCapped || filesDropped > 0;
+          const partial = backendIncomplete || totalHits > limit || contextIncomplete || perFileCapped || backendCapped || filesDropped > 0;
           return {
             status: "ready",
             files,

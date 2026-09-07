@@ -24,8 +24,15 @@ export interface WorkspaceSearchHit {
   resource: { resourceId: string; workspaceId: string };
 }
 
+/**
+ * `incomplete` means ripgrep produced these matches and then reported a
+ * non-fatal error, so the hits are valid while coverage is not guaranteed.
+ * Exit code 2 is ripgrep's "an error occurred" and is routine in a live
+ * workspace: one file being written, deleted mid-walk or briefly locked is
+ * enough, and rg still returns everything else it matched (D-142).
+ */
 export type WorkspaceContentSearchResult =
-  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: 'ready' }
+  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: 'ready'; incomplete?: true }
   | { generation: number | undefined; status: 'empty' | 'cancelled' }
   | { generation: number | undefined; message: string; status: 'failure' };
 
@@ -264,7 +271,12 @@ export const createWorkspaceContentSearch = ({
         }
         return maxResults !== null && hitCount >= maxResults;
       };
-      const ready = (): WorkspaceContentSearchResult => ({ status: 'ready', generation, hits: hits ?? [] });
+      const ready = (incomplete = false): WorkspaceContentSearchResult => ({
+        status: 'ready',
+        generation,
+        hits: hits ?? [],
+        ...(incomplete ? { incomplete: true as const } : {}),
+      });
       const finish = (result: WorkspaceContentSearchResult): void => {
         if (settled) return;
         settled = true;
@@ -309,8 +321,14 @@ export const createWorkspaceContentSearch = ({
           }
         }
       });
-      child.stderr.on('data', () => {
-        // Search diagnostics stay on the host. File bodies are not logged.
+      // Search diagnostics stay on the host and file bodies are never logged,
+      // but the first line of ripgrep's own error output is the only way to
+      // learn *which* path made it exit 2, so one bounded line is kept.
+      let firstStderrLine = '';
+      child.stderr.on('data', (chunk) => {
+        if (firstStderrLine) return;
+        const line = String(chunk).split('\n').map((entry) => entry.trim()).find(Boolean);
+        if (line) firstStderrLine = line.slice(0, 200);
       });
       child.on('close', (code) => {
         if (settled) return;
@@ -318,19 +336,33 @@ export const createWorkspaceContentSearch = ({
           finish({ status: 'cancelled', generation });
           return;
         }
-        if (code !== 0 && code !== 1) {
-          finish({ status: 'failure', generation, message: 'Content search failed' });
-          return;
-        }
         if (stdoutBuffer) {
           const hit = parseRipgrepMatch(stdoutBuffer, workspaceId, workspace.root, pathModule);
           if (hit) publish([hit]);
+        }
+        // 0 = matched, 1 = no match, 2 = finished with a non-fatal error. Exit
+        // 2 with matches in hand is a partial sweep: one path could not be read
+        // — a file being written, deleted mid-walk or briefly locked is enough —
+        // and every other match is valid. Discarding those matches failed a
+        // whole `explore.search` over one unrelated file (D-142). Exit 2 with
+        // nothing in hand stays a failure, because "matched nothing" and
+        // "could not search" are then indistinguishable.
+        const partialSweep = code === 2 && hitCount > 0;
+        if (code !== 0 && code !== 1 && !partialSweep) {
+          finish({ status: 'failure', generation, message: 'Content search failed' });
+          return;
+        }
+        if (partialSweep) {
+          console.warn(
+            '[WorkspaceSearch] ripgrep reported a non-fatal error; coverage is incomplete:',
+            firstStderrLine || 'no diagnostic output',
+          );
         }
         if (hitCount === 0) {
           finish({ status: 'empty', generation });
           return;
         }
-        finish(ready());
+        finish(ready(partialSweep));
       });
 
       if (signal) {

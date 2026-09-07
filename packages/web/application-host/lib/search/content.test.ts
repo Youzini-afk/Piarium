@@ -186,6 +186,74 @@ describe('workspace content search', () => {
     }
   });
 
+  /**
+   * ripgrep exits 2 when it finished but could not read something. Discarding
+   * the matches it had already produced turned one unreadable file into a
+   * failed search, and the harness search service then failed a whole
+   * `explore.search` call over it (D-142).
+   */
+  it('keeps matches ripgrep produced before a non-fatal error and marks them incomplete', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const notePath = path.join(workspace.root, 'note.txt');
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: () => {
+          const child = createFakeChild();
+          queueMicrotask(() => {
+            child.stderr.write('rg: /some/locked/file: I/O error (os error 29)\n');
+            finishWithOutput(child, `${matchLine(notePath, 'todo item')}\n`, 2);
+          });
+          return child;
+        },
+      });
+
+      const result = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'todo',
+      }, { generation: 5 });
+
+      expect(result).toMatchObject({
+        status: 'ready',
+        generation: 5,
+        incomplete: true,
+        hits: [{ resource: { resourceId: 'note.txt' }, preview: 'todo item' }],
+      });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it('still fails when ripgrep errors without producing any match', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: () => {
+          const child = createFakeChild();
+          // Nothing matched and something went wrong: "no matches" and "could
+          // not search" are indistinguishable here, so this fails closed.
+          queueMicrotask(() => child.emit('close', 2));
+          return child;
+        },
+      });
+
+      await expect(search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'todo',
+      }, { generation: 6 })).resolves.toEqual({
+        status: 'failure',
+        generation: 6,
+        message: 'Content search failed',
+      });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   it('cancels an in-flight search by killing the child process', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
