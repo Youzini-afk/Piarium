@@ -1180,6 +1180,69 @@ describe("session e2e — explore", () => {
   });
 });
 
+describe("session e2e — related", () => {
+  it("registers related and returns file-level topology from an already-open store", async () => {
+    await withTempRoot("piarium-s-related-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      const store = await openWorkspaceKnowledge({
+        dataDir: join(root, "knowledge"),
+        hostId: "related-session-e2e-host",
+        workspaceId: fixture.identity.workspaceId,
+        embedding: null,
+      });
+      await store.replaceFileSymbols("target.ts", "typescript", [
+        { name: "needle", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 } },
+      ], "disk-r1", [
+        { kind: "import", value: "./dep.js", line: 1 },
+        { kind: "connects", value: "related.query", callee: "register", line: 3 },
+      ]);
+      await store.replaceFileSymbols("dep.ts", "typescript", [
+        { name: "dep", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 3 } },
+      ], "disk-r1", [
+        { kind: "import", value: "./target.js", line: 1 },
+      ]);
+      await writeFile(join(fixture.workspaceRoot, "target.ts"), "export function needle() { return 1; }\n", "utf8");
+      await writeFile(join(fixture.workspaceRoot, "dep.ts"), "import { needle } from \"./target.js\";\n", "utf8");
+      const faux = registerFauxProvider();
+      let relatedResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("related", { anchor: "target.ts" })]),
+        (context) => {
+          relatedResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("I have the file topology.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          graphRecall: (workspaceId) => workspaceId === fixture.identity.workspaceId ? store : null,
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        assert.ok(snapshot.activeTools.includes("related"));
+        await session.host.prompt(snapshot.sessionId, "what is related to target.ts");
+        await session.host.session.waitForIdle();
+        assert.match(relatedResult, /related target\.ts/);
+        assert.match(relatedResult, /needle/);
+        assert.match(relatedResult, /Imported by/);
+        assert.match(relatedResult, /dep\.ts/);
+        assert.match(relatedResult, /lsp\.references/);
+        assert.doesNotMatch(relatedResult, /rank /);
+      } finally {
+        await session.dispose();
+        await store.close();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
 describe("session e2e — real LSP diagnostics", () => {
   it("carries fixture-server diagnostics through the Host bridge into a real Pi turn", async () => {
     const harness = await createDocumentAuthorityHarness();

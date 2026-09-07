@@ -77,6 +77,12 @@ const requestPaths = (
       ? record.paths.map((path) => ({ allowMissing: false, path: path as string }))
       : "invalid";
   }
+  if (method === "related.query") {
+    if (typeof record.anchor !== "string" || !record.anchor.trim()) return "invalid";
+    return /[\\/]/.test(record.anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(record.anchor)
+      ? [{ allowMissing: true, path: record.anchor.trim() }]
+      : [];
+  }
   if (method === "search.content") {
     if (record.path === undefined) return [];
     return typeof record.path === "string" && record.path.trim()

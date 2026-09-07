@@ -23,6 +23,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `diagnostics` | Get LSP diagnostics for a file, bound to its disk revision | `lsp.diagnosticsSnapshot` |
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
 | `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.search` |
+| `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 
 ## Registration

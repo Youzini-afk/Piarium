@@ -25,6 +25,7 @@ import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
+import { createRelatedQueryService } from "./related-service.js";
 import { compileFindGlob, normalizeGlobPath } from "./glob-matcher.js";
 export { createExploreSearchService } from "./explore-service.js";
 
@@ -582,6 +583,7 @@ export function registerHarnessServices(
     router.register("thread.merge", createThreadMergeService(host));
   }
   router.register("explore.search", createExploreSearchService(host));
+  router.register("related.query", createRelatedQueryService(host));
   router.register("surface.snapshot.commit", {
     handle: async (params, ctx) => host.commitAgentInputContext(ctx.sessionId, params.context),
   });
