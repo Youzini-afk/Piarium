@@ -617,8 +617,8 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
   `selectionRange`，且是语法层请求，不等语义分析完成）。**冷/热语言服务是显式执行条件**："得到可读代码"不依赖"语言服务器已经热了"，
   缺结构来源退回行窗口并说明来源状态。tree-sitter 是已接线的第二个 provider（D-091 / D-097）：web-tree-sitter 在 Host 内、语法包 = 语法
   wasm + Piarium 查询、语言身份复用 `languageIdForPath`、解析结果按内容哈希缓存；生产顺序先 tree-sitter、后 LSP，wasm 失败报
-  `unavailable` 再试 LSP 或退行窗口。高优先 provider 的 `empty` 或未覆盖该命中的 `ready` 不得挡住后续 provider，但后续询问带 `warmOnly`：agent 视图语言会话未就绪时接受 `unavailable` / 窗口，不冷启动 LSP（D-099）。除切片与命中分类外，`literalCalls` / `imports` 经同一门面写出连接边与 import 边（D-106）；冷仓库符号目录只覆盖 TS/TSX（D-104），不扫 LSP。plan 3.11 第 5 步（JS/JSON 与按需语言包）未做。
-  第 1–4 步已做（接口、冷启动对照、TS/TSX 包 + 分类、连接边/目录/`imports`）。**不**照搬 OCE 的
+  `unavailable` 再试 LSP 或退行窗口。高优先 provider 的 `empty` 或未覆盖该命中的 `ready` 不得挡住后续 provider，但后续询问带 `warmOnly`：agent 视图语言会话未就绪时接受 `unavailable` / 窗口，不冷启动 LSP（D-099）。除切片与命中分类外，`literalCalls` / `imports` 经同一门面写出连接边与 import 边（D-106）；冷仓库符号目录覆盖带 `importQuery` 的语言（TS/TSX/JS/JSX，D-115 取代 D-104 的覆盖范围），不扫 LSP。
+  第 1–5 步已做（接口、冷启动对照、TS/TSX 包 + 分类、连接边/目录/`imports`、JS/JSON 包与按需语法包）。**语法包的能力必须可验证**：捆绑语言用手写查询（四项能力齐全）；按需语言取上游 `queries/tags.scm`，发布期用该包自己的 wasm 编译一遍，编得过才记进清单并按摘要安装，装上得到 `outline` + `classifyHits`，`literalCalls` / `imports` 仍需手写查询因而关闭；上游没带查询的包装上只有解析器，能力旗标全关、`outline` 仍 `unsupported`，界面按此如实标注而不显示为成功（D-128）。**不**照搬 OCE 的
   "300 字符以下并入邻居"——那是修它 AST 切块的列切分伪影，套到 `documentSymbol` 上会把合法的小函数、声明、配置项误合并。
 - *pack*：内部尽量找全可能性，外部只给能支撑当前判断的材料。目标与问题所需支撑组成 bundle，支撑允许为空；片段之间要互补——先比较
   文件内哪些片段最有用，再考虑集合互补，一个目标实现加一个真正传参的调用点，通常比五个复述同一接口的片段更有用；不做"每文件最多
@@ -1669,7 +1669,7 @@ P0、T1/T2/T3 核心和 D-076 已交付；当前直接实施工作状态/集成�
 | RunManifest | Host 执行意图、runtime 解析模型/工具、Host 确认能力、worker 报实际装配；沿 launch 消费者收敛，不复制凭据权威 |
 | 外部 runtime | 对实际 adapter 做版本和能力协商，不先解决全部未来版本兼容问题 |
 | 本地 embedding | 按可部署模型与 runtime 选型，显式下载；远端和稀疏模式不等它 |
-| 结构来源与语法包 | tree-sitter 作 Host 第二结构来源，wasm 版、接口先行、TS/TSX 首刀；常用语言随应用捆绑、其余按需下载（与本地 embedding 同一套同意与下载管理），目标覆盖大部分常用语言；语言 ≥ 3 时设置页；第一版不接受任意第三方语法包（D-091） |
+| 结构来源与语法包 | tree-sitter 作 Host 第二结构来源，wasm 版、接口先行、TS/TSX 首刀；常用语言随应用捆绑、其余按需下载（点安装即同意，Host 不自发网络，与本地 embedding 各走各的，D-124）；发布期清单自算 wasm 与查询摘要，运行期只按摘要装（D-125/D-128）；用户自带 wasm 过 ABI 闸门并标未验证（D-123）；语言 ≥ 3 时设置页（D-091） |
 | TriviumDB | 优先保留；按实际版本核实无向量/文本查询，具体数据库问题交用户联系作者，不迁移 SQLite |
 | Pi 接口缺口 | 钩子与 provider 能力按本机真实版本适配，缺可选能力仅影响对应路径 |
 | explore 增强 | 确定性路径默认；已配槽位后按查询需要 intent/judge/修复，失败保留已有结果；反馈优化不另设研究门禁 |

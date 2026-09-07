@@ -2479,6 +2479,96 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-128 · 2026-09-07 · 装下来的语法必须真的出轮廓，否则不许说"已安装"
+
+类型：active-design
+
+背景：D-127 交付时，15 种按需语言只有 wasm，没有 `definitionQuery` / `commentTypes` / `stringTypes`。装完之后 `grammarStatus` 是 `installed`、设置页显示绿色成功，但 `capabilities` 四项全关、`outline` 继续 `unsupported`。用户按了按钮、下了 5 MB、看到"已安装"，检索行为一点没变。这是假可用性，比不提供这个功能更坏。
+
+决定：两件事同时做。
+
+一是接上游 `queries/tags.scm`。tree-sitter 生态里几乎每个语法包都带这个文件，捕获名是跨语言约定：`@definition.function` / `@definition.class` / `@definition.method` / `@definition.interface` / `@definition.module` 等，配套 `@name`。`treeSitterTagsSpec(grammarFile, tagsQuery)` 把这份查询变成一份运行期语言规格：`tagsDefinitionKind` 把 `definition.*` 后缀映射到 `StructureSymbol.kind`，认识的映到对应种类，不认识的映到 `unknown`（进目录，不进切片）；`reference.*` 与裸 `@name` 不产生符号。命中分类退化为按节点类型名判断——`stringTypes` 用 `/string|char/`、`commentTypes` 用 `/comment/` 匹配节点类型，这是 tree-sitter 命名惯例，不是逐语言表。`literalCalls` / `imports` 仍然关闭：那两项需要按语言写的查询，tags 里没有。
+
+二是把这件事变成发布期可验证的。`refresh-grammar-manifest.mjs` 从 tarball 里连 `queries/tags.scm` 一起取出来，**用该包自己的 wasm 编译一遍**，编得过才把 `tagsPath` / `tagsIntegrity` 写进清单；编不过只记 `tagsNote`，清单里 `tagsPath` 为 `null`。安装时 `tags.scm` 和 wasm 一样按摘要校验，摘要不符整个安装失败。清单解析阶段还会丢掉摘要格式不对的 tags 字段——宁可没有轮廓，不要一份没验证过的查询。
+
+结果：15 种里 9 种（python、go、rust、java、c、cpp、csharp、php、ruby）拿到编译通过的 tags 查询，装上就有 `outline` + `classifyHits`。6 种（kotlin、shellscript、css、html、yaml、toml）上游包没带 `queries/tags.scm`，装上只有解析器。
+
+原因：能力旗标是协议事实，不是宣传语。要么让它真的为真，要么在按钮旁边说清楚它为假。
+
+不改：`literalCalls` / `imports` 仍只有手写规格的语言有（TS/TSX/JS/JSX）。JSON 仍按 D-114 只进切片。捆绑语言不受影响。
+
+影响：`structure/languages.ts`（`treeSitterTagsSpec` / `tagsDefinitionKind`）；`structure/tree-sitter-provider.ts`；`grammar-store.ts`（存查询）；`grammar-installer.ts`（校验查询）；`grammar-manifest.ts`（`tagsPath` / `tagsIntegrity`）；`scripts/refresh-grammar-manifest.mjs`；`grammar-packs.json`。
+
+状态：已实施。
+
+### D-129 · 2026-09-07 · 语法索引读不出来是"不知道"，不是"没装"
+
+类型：implementation
+
+背景：`readGrammarIndex` 之前把任何异常都吞成空索引。`index.json` 被截断、被别的进程占住、权限不对，都报"没装任何语法"。这违反 plan 0.4 不变量 10（只有 ENOENT 算空），而且下一次 `put` 会把这份"空"索引写回去——真装过的语言就此消失。
+
+决定：只有 ENOENT 算空。其他 IO 错误、JSON 解析失败、形状不对，都抛 `GrammarStoreUnreadableError`。`index.json` 改成写临时文件再 rename，与 blob 的写法一致，崩在中途不会留下半个索引。
+
+这个错误必须在界面上能看见，不能在 Host 里静静吞掉：`LanguageSupportStatus` 长出 `grammarStore: 'ready' | 'unreadable'`，`grammarStatus` 多一个 `unknown` 值。索引读不出来时，按需语言显示 `unknown`（灰色，不是"没装"的可操作态），安装和导入按钮都停用，页面顶部说明状态未知。捆绑语言不受影响——那张表在代码里，不在索引里。
+
+原因：把"读不出来"报成"没装"，会让用户点安装，然后覆盖掉自己原有的安装记录。
+
+不改：blob 文件名仍是内容地址，索引坏了 blob 还在，修好索引即恢复。
+
+影响：`grammar-store.ts`；`language-support/runtime.ts`；`application-client` 的 `LanguageSupportStatus` / `StructureGrammarStatus`；`presentation.ts`；`LanguageSupportPage.tsx`；五个语言的 settings 词条。
+
+状态：已实施。
+
+### D-130 · 2026-09-07 · 导入端点的路径策略与错误面
+
+类型：implementation
+
+背景：`/api/language-support/import` 把 `readLocal` 的 `error.message` 原样回给调用方。已认证客户端能拿这个端点当文件探针：错误原文里带路径、`EACCES` / `EISDIR` / `ENOENT` 的区别，足以枚举 Host 机器上的文件。另外后缀和体积都没校验，任何文件都会先读进内存再交给 ABI 检查。
+
+决定：读之前先判后缀必须是 `.wasm`，读到的字节超过 `MAX_USER_GRAMMAR_BYTES`（32 MiB）就拒。读失败一律回一句固定文案，不带 `errno`、不带路径。ABI 检查本身也包起来——喂给它一个不是 wasm 的文件会抛，那要变成 `reason: "abi"` 的失败，不是未捕获异常。
+
+原因：D-124 说 Host 不自发网络；同理，Host 也不该把本地文件系统的形状当错误消息往外送。
+
+不改：路径仍来自桌面 `requestFileAccess`，仍要求绝对路径；`source: "user"` 与 D-123 的 `user-unverified` 标记不变。
+
+影响：`grammar-installer.ts`（`importUserGrammar`、`MAX_USER_GRAMMAR_BYTES`）。
+
+状态：已实施。
+
+### D-131 · 2026-09-07 · 清单坏了不许掀翻 Host；刷新脚本按已提交版本可复现
+
+类型：implementation
+
+背景：三处不牢。`loadCommittedGrammarPackManifest()` 在 `main()` 里裸调，`grammar-packs.json` 少一个字段就是 Host 起不来。清单解析不看 ABI 窗口——超窗的包照样列成 `available`，点了必然失败。刷新脚本取 npm `dist-tags.latest`，同一份代码今天明天生成的清单不一样。
+
+决定：`main()` 用 try/catch 包住清单加载，失败退到 `EMPTY_GRAMMAR_PACK_MANIFEST`——按需下载没了，捆绑语言和已装语言照旧工作。解析阶段就按 `minCompatibleAbi` / `maxCompatibleAbi` 筛掉超窗的包，移进 `skipped` 并写原因。刷新脚本默认复用已提交清单里的版本号，`--latest` 才去 npm 问最新；`generatedAt` 取当次运行日期。
+
+同时把重复点安装从"取消上一个"改成"并到同一个 Promise"，ABI 不匹配从 `reason: "failed"` 改成 `reason: "abi"`。
+
+原因：清单是发布期产物，它的问题不该变成运行期启动故障；能装的清单不该列出装不上的东西。
+
+不改：摘要校验仍是硬闸门（D-125）；捆绑优先（D-126）。
+
+影响：`grammar-manifest.ts`；`application-host/index.ts`；`grammar-installer.ts`；`scripts/refresh-grammar-manifest.mjs`。
+
+状态：已实施。
+
+### D-132 · 2026-09-07 · D-116 至 D-119 是空号
+
+类型：active-design
+
+背景：3.11 第 5 步的实现里有注释引用 D-117 / D-118 / D-119，但这三个编号从未写过条目。按 D-030，编号一旦被引用就该能查到。
+
+决定：D-116、D-117、D-118、D-119 永久空号，不回填。已有引用改指真实条目：D-117 → D-125（清单摘要在发布期生成），D-118 → D-126（捆绑目录优先），D-119 → D-127（按需语言名单）。以后新条目从 D-128 起编号，不复用空号。
+
+原因：回填会让编号顺序和时间顺序对不上；空号比错号便宜。
+
+不改：D-114 / D-115 / D-120 至 D-127 正文。
+
+影响：`refresh-grammar-manifest.mjs`；`tree-sitter-provider.ts` 注释。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2608,3 +2698,12 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-111 | implementation（outline 单独决定能否写这一代；边被阻塞记 `linksIncomplete` 而非冻结符号） | — | knowledge/symbol-runtime.ts + symbols.ts + store.ts；symbol-runtime.test.ts |
 | D-112 | implementation（关系是注解：`status` 降级不失败检索、读路径不开库、过期去行号标 `stale`、可见预算排最后并每文件 12 条上限） | — | protocol ExploreRelationStatus/ExploreFileRelation；explore.ts 打包；explore-service.ts；service-host.ts；index.ts |
 | D-113 | implementation（outline 收模块级/类级值绑定作目录名，切片仍按容器过滤） | — | structure/tree-sitter-provider.ts；tree-sitter-provider.test.ts |
+| D-116 | 空号（未使用） | D-132 | — |
+| D-117 | 空号（引用改指 D-125） | D-132 | — |
+| D-118 | 空号（引用改指 D-126） | D-132 | — |
+| D-119 | 空号（引用改指 D-127） | D-132 | — |
+| D-128 | active-design（上游 `tags.scm` 变运行期规格；发布期编译验证；15 种里 9 种真出轮廓） | — | agent-harness.md 6.4；plan 3.11 第 5 步；status 3.11；languages.ts / grammar-* / refresh 脚本 |
+| D-129 | implementation（只 ENOENT 算空；索引原子写；读不出来报 `unknown` 并停用安装） | — | grammar-store.ts；language-support/runtime.ts；application-client 类型；LanguageSupportPage |
+| D-130 | implementation（导入校验后缀与体积；不回传文件系统错误原文；ABI 检查异常变 `abi` 失败） | — | grammar-installer.ts importUserGrammar |
+| D-131 | implementation（清单加载失败退空清单；解析期筛 ABI 超窗；刷新脚本按已提交版本可复现；重复安装并流） | — | grammar-manifest.ts；application-host/index.ts；grammar-installer.ts；refresh 脚本 |
+| D-132 | active-design（D-116–D-119 永久空号，引用改指真实条目） | — | 本文件治理规则 |
