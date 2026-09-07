@@ -26,7 +26,17 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
   - Enforces workspace boundary checks with active project + worktree fallback support.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
-  - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
+  - Supports fuzzy matching, hidden-file handling, and optional gitignore filtering.
+  - `respectGitignore` costs **one** `git ls-files -z --cached --others --exclude-standard`
+    for the whole walk, not one `git check-ignore` per directory. The catalog scan
+    walks an entire workspace, and the per-directory shape cost one process per
+    directory — 4363 of them on this repository, where the bare walk is 1.6 s (D-140).
+    A file present on disk but absent from that listing is ignored; a directory is
+    descended only when some listed path lives under it.
+  - Outside a Git work tree the listing fails and nothing is treated as ignored,
+    which is the answer the per-directory probe also gave on failure. Three callers
+    share this path: the workbench file picker, the settings page language
+    distribution (D-120), and the cold catalog scan (D-107).
 
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).

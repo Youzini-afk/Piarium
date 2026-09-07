@@ -6,10 +6,13 @@
  *   bun run --cwd packages/web symbol-graph-query
  *
  * Prints one JSON object to stdout. Progress goes to stderr. Does not claim a
- * speedup. Uses `git ls-files` plus the same tree-sitter queries and
- * `replaceFileSymbols` path as the collector. It does not walk the tree with
- * `searchFilesystemFiles` (that path spawns `git check-ignore` per directory
- * and stalled for 11+ minutes at ~0 CPU on this machine).
+ * speedup. Uses `git ls-files` plus the same tree-sitter queries,
+ * `replaceFileSymbols` path, associate gate and `CATALOG_SCAN_BATCH` write
+ * burst as the collector, so the numbers describe the shape the product runs.
+ *
+ * Enumeration is still `git ls-files` rather than `searchFilesystemFiles`: the
+ * two now agree on which files are catalog candidates, and going straight to
+ * git keeps this script independent of the workspace-root plumbing.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -19,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { languageIdForPath } from "../application-host/lib/harness/language-id.js";
 import { openWorkspaceKnowledge, type SymbolGraphLinkInput } from "../application-host/lib/knowledge/store.js";
+import { CATALOG_SCAN_BATCH } from "../application-host/lib/knowledge/symbol-runtime.js";
 import { classifyLiteralCall } from "../application-host/lib/structure/connections.js";
 import { CATALOG_SCAN_LANGUAGES } from "../application-host/lib/structure/languages.js";
 import { createStructureSource } from "../application-host/lib/structure/source.js";
@@ -153,10 +157,19 @@ const main = async (): Promise<void> => {
       process.stderr.write(`parsed ${parsed}/${files.length} (failed ${parseFailed}, revisit ${revisit.length})\n`);
     }
   };
-  for (const relativePath of files) await collect(relativePath, "first");
+  // The collector serializes per path but lets a batch of distinct paths run
+  // concurrently, so the store sees one burst per batch and flushes once for it.
+  // Collecting one file at a time here measured a shape the product does not
+  // run: it cost one whole-store flush per file (D-140).
+  const collectInBatches = async (paths: readonly string[], pass: "first" | "revisit"): Promise<void> => {
+    for (let offset = 0; offset < paths.length; offset += CATALOG_SCAN_BATCH) {
+      await Promise.all(paths.slice(offset, offset + CATALOG_SCAN_BATCH).map((item) => collect(item, pass)));
+    }
+  };
+  await collectInBatches(files, "first");
   const uniqueRevisit = [...new Set(revisit)];
   process.stderr.write(`first pass done; revisiting ${uniqueRevisit.length} gated files\n`);
-  for (const relativePath of uniqueRevisit) await collect(relativePath, "revisit");
+  await collectInBatches(uniqueRevisit, "revisit");
   const catalogBuildMs = performance.now() - scanStarted;
   const stats = await store.catalogStats();
   const searchStarted = performance.now();
@@ -197,7 +210,7 @@ const main = async (): Promise<void> => {
       totalmemMiB: Math.round(os.totalmem() / (1024 * 1024)),
       node: process.version,
     },
-    method: "git ls-files of this repository ∩ CATALOG_SCAN_LANGUAGES, then tree-sitter outline/imports/literalCalls + replaceFileSymbols (same associate gate and one revisit pass as the collector). Queries: one searchSymbols('explore', 20), one findLinks('explore.search'), one findImporters of harness explore.ts. Clock is process performance.now(). Not a speedup claim. Did not use scanWorkspace/searchFilesystemFiles: that walk spawns git check-ignore per directory and stalled here for 11+ minutes at ~0 CPU.",
+    method: `git ls-files of this repository ∩ CATALOG_SCAN_LANGUAGES, then tree-sitter outline/imports/literalCalls + replaceFileSymbols, with the collector's associate gate, one revisit pass, and writes issued in bursts of CATALOG_SCAN_BATCH=${CATALOG_SCAN_BATCH} as the collector does. Queries: one searchSymbols('explore', 20), one findLinks('explore.search'), one findImporters of harness explore.ts. Clock is process performance.now(). Not a speedup claim. Enumeration is git ls-files, not searchFilesystemFiles.`,
   }, null, 2)}\n`);
   await store.close();
   await fs.rm(dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }).catch(() => undefined);

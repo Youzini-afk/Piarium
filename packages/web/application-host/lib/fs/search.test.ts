@@ -1,0 +1,154 @@
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { createFsSearchRuntime } from "./search.js";
+
+/**
+ * `search.ts` is a shared hot path: the workbench file picker, the language
+ * distribution on the settings page, and the cold catalog scan all call it. The
+ * ignore lookup used to cost one `git check-ignore` process per directory, so
+ * these tests pin the invocation count as much as the filtering (D-140).
+ */
+
+interface FakeGit {
+  calls: Array<{ args: readonly string[]; cwd: string }>;
+}
+
+const fakeSpawn = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number }) => (
+  (_binary: string, args: readonly string[], options: { cwd: string }) => {
+    git.calls.push({ args, cwd: options.cwd });
+    const { stdout, code } = reply(args);
+    const listeners = new Map<string, Array<(value?: unknown) => void>>();
+    const on = (event: string, handler: (value?: unknown) => void) => {
+      const existing = listeners.get(event) ?? [];
+      existing.push(handler);
+      listeners.set(event, existing);
+    };
+    queueMicrotask(() => {
+      if (code === 0 && stdout) {
+        for (const handler of listeners.get("data") ?? []) handler(Buffer.from(stdout, "utf8"));
+      }
+      for (const handler of listeners.get("close") ?? []) handler(code);
+    });
+    return {
+      stdout: { on: (event: string, handler: (value?: unknown) => void) => on(event, handler) },
+      stderr: { on: () => undefined },
+      on: (event: string, handler: (value?: unknown) => void) => on(event, handler),
+      kill: () => undefined,
+    };
+  }
+);
+
+const workspace = (): string => {
+  const root = mkdtempSync(path.join(tmpdir(), "piarium-fs-search-"));
+  mkdirSync(path.join(root, "src", "deep"), { recursive: true });
+  mkdirSync(path.join(root, "build"), { recursive: true });
+  mkdirSync(path.join(root, "generated"), { recursive: true });
+  writeFileSync(path.join(root, "src", "app.ts"), "export const app = 1;\n", "utf8");
+  writeFileSync(path.join(root, "src", "deep", "nested.ts"), "export const nested = 1;\n", "utf8");
+  writeFileSync(path.join(root, "build", "app.js"), "1;\n", "utf8");
+  writeFileSync(path.join(root, "generated", "schema.ts"), "1;\n", "utf8");
+  return root;
+};
+
+const runtimeFor = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number }) => (
+  createFsSearchRuntime({
+    fsPromises,
+    path,
+    spawn: fakeSpawn(git, reply),
+    resolveGitBinaryForSpawn: () => "git",
+  })
+);
+
+const listed = (...paths: readonly string[]) => ({ stdout: `${paths.join("\0")}\0`, code: 0 });
+
+describe("searchFilesystemFiles", () => {
+  it("asks git once for the whole tree instead of once per directory", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => listed("src/app.ts", "src/deep/nested.ts"));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true });
+
+    expect(git.calls).toHaveLength(1);
+    expect(git.calls[0]?.args).toEqual(["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+    expect(git.calls[0]?.cwd).toBe(root);
+    expect(files.map((file) => file.relativePath).toSorted()).toEqual(["src/app.ts", "src/deep/nested.ts"]);
+  });
+
+  it("drops an ignored file and never descends a directory with nothing tracked in it", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => listed("src/app.ts"));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true });
+
+    // `generated/` is not excluded by name, so only the ignore lookup keeps it out.
+    expect(files.map((file) => file.relativePath)).toEqual(["src/app.ts"]);
+  });
+
+  it("keeps a tracked file that a gitignore rule also matches", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    // `--cached` reports force-added files, so being listed is the answer.
+    const runtime = runtimeFor(git, () => listed("src/app.ts", "generated/schema.ts"));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true });
+
+    expect(files.map((file) => file.relativePath).toSorted()).toEqual(["generated/schema.ts", "src/app.ts"]);
+  });
+
+  it("falls back to an unfiltered walk when the directory is not a Git work tree", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => ({ stdout: "", code: 128 }));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true });
+
+    expect(git.calls).toHaveLength(1);
+    // No rule could be read, so nothing is claimed to be ignored. `build/` is
+    // still absent because it is an excluded directory name.
+    expect(files.map((file) => file.relativePath).toSorted()).toEqual([
+      "generated/schema.ts",
+      "src/app.ts",
+      "src/deep/nested.ts",
+    ]);
+  });
+
+  it("does not run git at all when the caller does not want ignore rules", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => listed("src/app.ts"));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: false });
+
+    expect(git.calls).toEqual([]);
+    expect(files.map((file) => file.relativePath)).toContain("generated/schema.ts");
+  });
+
+  it("still fuzzy matches and honours the limit over the filtered set", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => listed("src/app.ts", "src/deep/nested.ts"));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "nested", respectGitignore: true, limit: 1 });
+
+    expect(files.map((file) => file.relativePath)).toEqual(["src/deep/nested.ts"]);
+  });
+
+  it("rejects when the caller aborts", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => listed("src/app.ts"));
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runtime.searchFilesystemFiles(root, {
+      query: "",
+      respectGitignore: true,
+      signal: controller.signal,
+    })).rejects.toThrow();
+  });
+});

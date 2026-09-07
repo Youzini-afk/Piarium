@@ -35,6 +35,67 @@ const listDirectoryEntries = async (dirPath: string, fsPromises: FsPromises): Pr
   }
 };
 
+/**
+ * Non-ignored paths under a search root, from one `git ls-files` instead of a
+ * `git check-ignore` per directory. The catalog scan walks a whole workspace,
+ * so the per-directory shape cost one process per directory — 4363 of them on
+ * this repository, where the bare walk is 1.6 s (D-140).
+ *
+ * `--cached --others --exclude-standard` is "tracked, plus untracked that is
+ * not ignored", so a file on disk that is absent from this set is ignored.
+ * Paths come out relative to the cwd, which is the search root.
+ */
+interface IgnoreLookup {
+  /** The file is tracked or untracked-but-not-ignored. */
+  allowsFile(relativePath: string): boolean;
+  /** Some non-ignored file lives at or below this directory. */
+  allowsDirectory(relativePath: string): boolean;
+}
+
+const buildIgnoreLookup = async (
+  rootPath: string,
+  spawn: typeof nodeSpawn,
+  resolveGitBinaryForSpawn: () => string,
+  signal?: AbortSignal,
+): Promise<IgnoreLookup | null> => {
+  const listed = await new Promise<string | null>((resolve) => {
+    const child = spawn(resolveGitBinaryForSpawn(), ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      cwd: rootPath,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const chunks: Buffer[] = [];
+    let failed = false;
+    child.stdout.on('data', (data: Buffer) => { chunks.push(data); });
+    child.on('error', () => { failed = true; resolve(null); });
+    child.on('close', (code) => {
+      if (failed) return;
+      resolve(code === 0 ? Buffer.concat(chunks).toString('utf8') : null);
+    });
+    signal?.addEventListener('abort', () => child.kill(), { once: true });
+  });
+  // Not a Git working tree, or git is unavailable: nothing declares an ignore
+  // rule, which is the same answer the per-directory probe gave on failure.
+  if (listed === null) return null;
+  const files = new Set<string>();
+  const directories = new Set<string>();
+  for (const entry of listed.split('\0')) {
+    if (!entry) continue;
+    files.add(entry);
+    let cut = entry.lastIndexOf('/');
+    while (cut > 0) {
+      const parent = entry.slice(0, cut);
+      if (directories.has(parent)) break;
+      directories.add(parent);
+      cut = parent.lastIndexOf('/');
+    }
+  }
+  return {
+    allowsFile: (relativePath) => files.has(relativePath),
+    allowsDirectory: (relativePath) => directories.has(relativePath),
+  };
+};
+
 const fuzzyMatchScoreNormalized = (normalizedQuery: string, candidate: string): number | null => {
   if (!normalizedQuery) return 0;
 
@@ -125,66 +186,34 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
       : matchAll ? requestedLimit : Math.max(requestedLimit * 3, 200);
     const candidates: Array<FileSearchItem & { score: number }> = [];
 
+    const ignore = shouldRespectGitignore
+      ? await buildIgnoreLookup(rootPath, spawn, resolveGitBinaryForSpawn, signal)
+      : null;
+
     while (queue.length > 0 && candidates.length < collectLimit) {
       if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
 
       const dirResults = await Promise.all(
-        batch.map(async (dir) => {
-          if (!shouldRespectGitignore) {
-            return { dir, dirents: await listDirectoryEntries(dir, fsPromises), ignoredPaths: new Set() };
-          }
-
-          try {
-            const dirents = await listDirectoryEntries(dir, fsPromises);
-            const pathsToCheck = dirents.map((dirent) => dirent.name).filter(Boolean);
-            if (pathsToCheck.length === 0) {
-              return { dir, dirents, ignoredPaths: new Set() };
-            }
-
-            const result = await new Promise<string>((resolve) => {
-              const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                cwd: dir,
-                windowsHide: true,
-                stdio: ['ignore', 'pipe', 'pipe'],
-              });
-
-              let stdout = '';
-              child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-              child.on('close', () => resolve(stdout));
-              child.on('error', () => resolve(''));
-            });
-
-            const ignoredNames = new Set(
-              String(result)
-                .split('\n')
-                .map((name) => name.trim())
-                .filter(Boolean)
-            );
-
-            return { dir, dirents, ignoredPaths: ignoredNames };
-          } catch {
-            return { dir, dirents: await listDirectoryEntries(dir, fsPromises), ignoredPaths: new Set() };
-          }
-        })
+        batch.map(async (dir) => ({ dir, dirents: await listDirectoryEntries(dir, fsPromises) })),
       );
       if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
 
-      for (const { dir: currentDir, dirents, ignoredPaths } of dirResults) {
+      for (const { dir: currentDir, dirents } of dirResults) {
         for (const dirent of dirents) {
           const entryName = dirent.name;
           if (!entryName || (!includeHiddenEntries && entryName.startsWith('.'))) {
             continue;
           }
 
-          if (shouldRespectGitignore && ignoredPaths.has(entryName)) {
-            continue;
-          }
-
           const entryPath = path.join(currentDir, entryName);
+          const entryRelative = normalizeRelativeSearchPath(rootPath, entryPath, path);
 
           if (dirent.isDirectory()) {
             if (shouldSkipSearchDirectory(entryName, includeHiddenEntries)) {
+              continue;
+            }
+            if (ignore && !ignore.allowsDirectory(entryRelative)) {
               continue;
             }
             if (!visited.has(entryPath)) {
@@ -198,7 +227,11 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
             continue;
           }
 
-          const relativePath = normalizeRelativeSearchPath(rootPath, entryPath, path);
+          if (ignore && !ignore.allowsFile(entryRelative)) {
+            continue;
+          }
+
+          const relativePath = entryRelative;
           const extension = entryName.includes('.') ? entryName.split('.').pop()?.toLowerCase() : undefined;
 
           if (matchAll) {

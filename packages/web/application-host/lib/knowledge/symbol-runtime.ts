@@ -20,7 +20,13 @@ type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   "syncDocument" | "documentSymbols">;
 
 export { CATALOG_SCAN_LANGUAGES };
-const CATALOG_SCAN_BATCH = 8;
+/**
+ * Distinct paths handed to the collector at once. The collector serializes per
+ * path and runs different paths concurrently, so this is also the store's write
+ * burst size — the measurement script imports it rather than restating it, so
+ * the recorded numbers describe the shape the product runs (D-140).
+ */
+export const CATALOG_SCAN_BATCH = 8;
 
 export interface SymbolGraphRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;

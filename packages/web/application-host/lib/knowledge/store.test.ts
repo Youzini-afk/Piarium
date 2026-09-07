@@ -505,4 +505,73 @@ describe("KnowledgeStore", () => {
       expect(store.dim).toBe(8);
     });
   });
+
+  /**
+   * Graph writes flush on a trailing debounce because a per-file flush made a
+   * catalog build quadratic (D-140). The contract that matters is that nothing
+   * is lost: a burst is readable at once and survives a close.
+   */
+  describe("derived graph flush", () => {
+    const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 9 };
+
+    it("keeps a burst of graph writes readable before any flush settles", async () => {
+      await Promise.all(Array.from({ length: 12 }, (_unused, index) => (
+        store.replaceFileSymbols(
+          `src/burst-${index}.ts`,
+          "typescript",
+          [{ name: `burst${index}`, kind: "function", range }],
+          `rev-${index}`,
+        )
+      )));
+
+      expect(await store.searchSymbols("burst7", 5)).toHaveLength(1);
+      expect((await store.catalogStats()).fileCount).toBe(12);
+    });
+
+    it("persists a deferred graph write across close and reopen", async () => {
+      const dir = join(TEST_DIR, "graph-durability");
+      mkdirSync(dir, { recursive: true });
+      const open = () => openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-durability",
+        embedding: null,
+      });
+
+      const first = await open();
+      await first.replaceFileSymbols(
+        "src/deferred.ts",
+        "typescript",
+        [{ name: "deferred", kind: "function", range }],
+        "rev-1",
+      );
+      // No wait for the debounce: closing has to settle it.
+      await first.close();
+
+      const second = await open();
+      expect((await second.searchSymbols("deferred", 5)).map((row) => row.path)).toEqual(["src/deferred.ts"]);
+      await second.close();
+    });
+
+    it("does not defer a knowledge write behind a graph burst", async () => {
+      const range0 = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 4 };
+      const writes = Array.from({ length: 8 }, (_unused, index) => (
+        store.replaceFileSymbols(`src/mixed-${index}.ts`, "typescript", [{ name: `mixed${index}`, kind: "function", range: range0 }], `rev-${index}`)
+      ));
+      const knowledge = store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "user data is not derived",
+        trigger: "always",
+      });
+      await Promise.all([...writes, knowledge]);
+
+      // User-data call sites still flush inside their own write; only the graph
+      // ones debounce. That timing is by construction, so what is asserted here
+      // is that mixing the two loses neither.
+      expect((await store.listKnowledge({ scope: "workspace" })).map((item) => item.content))
+        .toContain("user data is not derived");
+      expect((await store.catalogStats()).fileCount).toBe(8);
+    });
+  });
 });

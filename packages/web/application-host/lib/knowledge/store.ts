@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Knowledge store v1 — TriviumDB-backed workspace knowledge base.
  *
  * Design: agent-harness.md §7.1, §7.2, §7.2.1
@@ -331,6 +331,10 @@ export interface KnowledgeStore {
 // ── Implementation ─────────────────────────────────────────────────
 
 const PLACEHOLDER_DIM = 8;
+/** Quiet period before a derived graph write is persisted (D-140). */
+const GRAPH_FLUSH_QUIET_MS = 250;
+/** Upper bound on deferral, so a long catalog scan still persists as it goes. */
+const GRAPH_FLUSH_MAX_DEFER_MS = 30_000;
 const BLOCK_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_RETENTION_BATCH = 5000;
 
@@ -683,6 +687,57 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     const result = writeTail.then(fn, fn);
     writeTail = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  /**
+   * `db.flush()` writes the whole store, so its cost grows with the store: one
+   * flush cost ~66 ms at 400 catalog files on this repository, and a catalog
+   * build flushed once per file. That is what made a full build quadratic.
+   *
+   * The symbol graph is derived — a catalog scan rebuilds it and skips files
+   * whose disk revision already matches — so graph writes are flushed on a
+   * trailing debounce instead. Queue occupancy is deliberately not the trigger:
+   * a scan interleaves a ~47 ms parse between writes, so the queue is almost
+   * always down to one entry and an occupancy check flushes every time anyway
+   * (measured: it moved a full build 18.4 → 17.6 min, i.e. not at all).
+   *
+   * `GRAPH_FLUSH_MAX_DEFER_MS` bounds how much derived work a crash can cost,
+   * so a long scan still persists as it goes. Knowledge, blocks, events and
+   * sessions are user data and keep flushing inside their own write, so this
+   * never widens their window (D-140).
+   */
+  let graphFlushDirty = false;
+  let graphFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let graphFlushDeadline = 0;
+
+  function flushGraphNow(): void {
+    if (graphFlushTimer) {
+      clearTimeout(graphFlushTimer);
+      graphFlushTimer = null;
+    }
+    graphFlushDeadline = 0;
+    if (!graphFlushDirty) return;
+    graphFlushDirty = false;
+    db.flush();
+  }
+
+  function scheduleGraphFlush(): void {
+    graphFlushDirty = true;
+    const now = Date.now();
+    if (graphFlushDeadline === 0) graphFlushDeadline = now + GRAPH_FLUSH_MAX_DEFER_MS;
+    if (now >= graphFlushDeadline) {
+      flushGraphNow();
+      return;
+    }
+    if (graphFlushTimer) clearTimeout(graphFlushTimer);
+    const delay = Math.min(GRAPH_FLUSH_QUIET_MS, Math.max(0, graphFlushDeadline - now));
+    graphFlushTimer = setTimeout(() => {
+      graphFlushTimer = null;
+      // Ordered behind whatever is already queued so it never interleaves with
+      // a transaction in progress.
+      void enqueueWrite(() => flushGraphNow());
+    }, delay);
+    graphFlushTimer.unref?.();
   }
 
   const store: KnowledgeStore = {
@@ -1148,7 +1203,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         // A new path can make another file's specifier resolve.
         invalidateImporters();
         db.indexText(fileId, normalizedPath);
-        db.flush();
+        scheduleGraphFlush();
         return fileId;
       });
     },
@@ -1299,7 +1354,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           db.indexText(id, `${link.value} ${normalizedPath}`);
           db.indexKeyword(id, link.value);
         }
-        db.flush();
+        scheduleGraphFlush();
         return { fileId, symbols: symbolIds.length, edges: symbolIds.length + linkIds.length };
       });
     },
@@ -1324,7 +1379,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         forgetSymbolQueryRows(normalizedPath);
         forgetLinkQueryRows(normalizedPath);
         fileLanguageByPath.delete(normalizedPath);
-        db.flush();
+        scheduleGraphFlush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
     },
@@ -1529,6 +1584,8 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async close(): Promise<void> {
       return enqueueWrite(() => {
+        // A graph burst may have deferred its flush; closing is the last chance.
+        flushGraphNow();
         db.flush();
         db.close();
       });
