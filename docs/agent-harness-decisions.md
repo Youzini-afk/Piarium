@@ -2825,6 +2825,52 @@ TriviumDB」的主要论据是查询模型不匹配——store 为此叠了八�
 
 状态：已实施。
 
+### D-142 · 2026-09-07 · 观察回路：一个读不了的文件不许让整次检索归零
+
+类型：问题与解法
+
+背景：plan 0.7 说下一步「按观察到的『找不到入口』决定词法索引/桥接/embedding」，但产生这个观察的机制从来不存在——T4 回放被 D-078 降级后，
+所有证据都是单测与对照数字，**没有一次拿真实问题打过真实仓库然后由人读结果**。而在 D-140 之前这个观察也做不了：枚举要 spawn 4363 个 git 进程、
+建目录 18.4 分钟，图来源只会一直报 `empty`。D-140/D-141 之后（枚举 199 ms、建目录 4.8 分钟、`searchSymbols` 11.5 ms）第一次可行。
+
+`packages/web/scripts/explore-observe.ts`（`bun run --cwd packages/web explore:observe`）对本仓库问 10 个真实问题，
+走**真实的** `createHarnessServiceHost` / `createExploreSearchService` / rg / 结构来源 / 知识库，把可见正文与 `details` 原样打印。
+按 D-140 的教训不做平行实现：三次量错都源于脚本量了产品不跑的形状。`--data-dir` 复用已建目录（一次约 5 分钟，之后每轮 30 秒），
+`--only N` 单问，`--full` 打全文。没有编辑器所以没有脏缓冲，`agentInputDraftPaths` 返回空——这正是「无未保存内容」时的生产路径（D-082）。
+
+**第一次运行，10 个问题里 9 个直接抛错**，不是没找到，是根本没返回。追下来是一条四层放大的缺陷链：
+
+1. ripgrep 的约定是 `0` 有匹配、`1` 无匹配、**`2` 完成但过程中出错**（匹配依然有效）。真实工作区里 exit 2 是常态：一个正在被写、
+   walk 途中被删、或被短暂锁住的文件就够了。实测拿到的诊断是 `code=2 hitCount=238`——**rg 已经交出 238 条有效命中**。
+2. `content.ts` 把 exit 2 当彻底失败，把已解析的 238–432 条命中全部丢弃。
+3. `search-service` 把 failure 转成 `unavailable`。
+4. `explore-service` 里**任何一个词项模式 `unavailable` 就整次 `explore.search` 抛错**。
+
+于是「某个无关文件恰好被占用」变成「explore 这一轮什么都不返回」。它只在高频查询上发作（词项多、并发 rg 多、撞上概率高），
+而单测用小 fixture 永远走不到，这就是它一直没被发现的原因。
+
+决定：exit 2 **且已有命中**时按部分覆盖处理——保留命中，`ready` 带 `incomplete: true`，`search-service` 把它并进 `partial`，
+最终落到 explore 的 `searched.incomplete`。exit 2 **且零命中**仍然是 `failure`：此时「确实没匹配」与「根本没搜到」无法区分，按 A2/A6 fail-closed。
+同时保留 rg stderr 的第一行（上限 200 字符）到 Host 控制台——原实现整个丢弃 stderr，导致这类问题在生产里无从诊断；正文仍不记录，只记路径与原因。
+
+复验：改前 10 问 9 抛错；改后 **10 问全部返回、0 失败**。
+
+**记两个我自己判断错的地方。** 一是先怀疑「达到上限主动 kill 后把自己杀掉的退出码当失败」——读代码发现 `finish(ready())` 在 `kill()` 之前，
+那条路径本来就对，改动已撤。二是先怀疑「冷扫描后同进程搜索超时是堆压力」——实际也是这条 exit-2 路径，触发者是我把观察输出重定向进了仓库，
+rg 走到正在被写的那个文件上。两次都是先给结论后验证，顺序错了。
+
+不改：explore 单个模式失败仍会让整次调用抛错（根因修掉后 exit 2 不再产生 `unavailable`；这条降级属于行为变更，另议）；
+D-103 第 1、3 项；候选池排序。
+
+遗留（已观察到，未修）：候选池被 lockfile 与文档淹没。问「explore.search 在哪注册」，返回的片段里 `bun.lock` 占多数、其余是
+`docs/architecture.md` 与 `docs/roadmap.md`，**源码一个没有**，正确答案 `harness-services.ts` 未出现；图这一路是活的
+（`graph.status = ready`，54 个定义候选）但压不住泛词命中。这是观察要回答的下一个问题。
+
+影响：`lib/search/content.ts`（结果类型加 `incomplete`、close 处理、stderr 首行）；`lib/harness/search-service.ts`（并进 `partial`）；
+`lib/search/content.test.ts`（+2）；`packages/web/scripts/explore-observe.ts`（新）；`packages/web/package.json`；`.gitignore`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2972,3 +3018,4 @@ TriviumDB」的主要论据是查询模型不匹配——store 为此叠了八�
 | D-139 | implementation（按调用次数量：反向 import 反向索引、catalogStats 不逐文件读、EPIPE 只吞死管道、boost 查表、图那趟复用主物化形状、related 正文按段设上限；892 → 52 ms） | — | knowledge/store.ts；explore.ts；related-tool.ts；run/test-supervisor.ts |
 | D-140 | implementation（目录前置条件：枚举一次 `git ls-files` 而非每目录 `check-ignore`；派生图写入尾随去抖 flush；测量脚本改成生产的成批形状。枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟） | — | lib/fs/search.ts + search.test.ts；knowledge/store.ts；symbol-runtime.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
 | D-141 | implementation + 实验结果（TriviumDB 0.8.5 → 0.8.6；`payloadCacheMb: 0` 绕开其 O(N) payload 缓存；符号图八张内存表换原生索引，剩计数器 + 形状缓存；短词只精确匹配；建目录 290 → 257 s，`searchSymbols` 17 → 11.5 ms） | — | packages/web/package.json；knowledge/store.ts + store.test.ts；设计 7.5 |
+| D-142 | implementation（观察回路 `explore:observe` 走真实服务；rg exit 2 有命中时按部分覆盖保留并标 `incomplete`、零命中仍 fail-closed；保留 stderr 首行。改前 10 问 9 抛错 → 改后 0 失败） | — | lib/search/content.ts + content.test.ts；harness/search-service.ts；scripts/explore-observe.ts；status 3.2/3.12 |

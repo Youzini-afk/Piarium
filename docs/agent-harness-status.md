@@ -115,7 +115,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 顺序见 plan 0.7；D-082–D-086 已完成窗口 snapshot 到 explore/grep/read/find/ls、持久线程基线及显式 ignored 结果范围，D-087 已完成语言
 服务视图隔离与正文修订绑定，D-088/D-089 已完成写入失效与写入守卫；D-090 第一组与 D-092（候选广度与同批小项）已实施。
-3.12 已接（符号图读者，D-133–D-138），验收另把「目录建得起来」这个前置条件从不可用修到可用（枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟，D-140）。下一步按仍然观察得到的「找不到入口」决定词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是笼统召回提升。plan 3.11 第 1–5 步与 3.12 已做（D-091/D-093–D-140）。D-103 第 2 项（崩溃隔离用例未捕获 `EPIPE` 使 `packages/web` 套件退出码与断言脱钩）已由 D-133 修；第 1 项（`thread-runtime` 20ms stalled）和第 3 项（pi-host `harness-e2e` #3）仍待。
+3.12 已接（符号图读者，D-133–D-138），验收另把「目录建得起来」这个前置条件从不可用修到可用（枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟，D-140）。**观察回路已建**（D-142）：`bun run --cwd packages/web explore:observe` 对本仓库问 10 个真实问题、走真实服务链、原样打印可见正文与 `details`；第一次运行就抓到 rg exit 2 被当成彻底失败、把已有命中丢弃并让整次 `explore.search` 抛错（改前 9/10 抛错，改后 0 失败）。**下一步按已经观察到的现象决定**：问「explore.search 在哪注册」时候选池被 `bun.lock` 与 `docs/` 占满、源码一个没有（图这一路 `ready`、54 个定义候选也压不住泛词），这是要回答的下一个问题，然后才是词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是笼统召回提升。plan 3.11 第 1–5 步与 3.12 已做（D-091/D-093–D-140）。D-103 第 2 项（崩溃隔离用例未捕获 `EPIPE` 使 `packages/web` 套件退出码与断言脱钩）已由 D-133 修；第 1 项（`thread-runtime` 20ms stalled）和第 3 项（pi-host `harness-e2e` #3）仍待。
 以下区分已接线行为与仍缺证据。
 
 | 范围 | 已确认现状 / 待做 | 验证与外部边界 |
