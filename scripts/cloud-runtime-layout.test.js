@@ -121,6 +121,7 @@ describe('Piarium cloud runtime layout', () => {
     expect(builderSource).toContain("case '--update-lock'");
     expect(builderSource).toContain('pruneNonRuntimeFiles');
     expect(builderSource).toContain("require('better-sqlite3')");
+    expect(builderSource).toContain("require.resolve('web-tree-sitter')");
     expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual(['node-pty']);
   });
 
