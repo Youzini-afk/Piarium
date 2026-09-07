@@ -513,14 +513,44 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     connectionLiteralsByPath.delete(path);
   }
   const importSpecifiersByPath = new Map<string, string[]>();
+  /**
+   * Resolved reverse imports, built once per catalog shape. Resolution depends
+   * on the whole known-path set, so any change to the paths or to a file's
+   * specifiers drops it; `findImporters` then rebuilds on the next call instead
+   * of re-resolving every specifier per query (D-139).
+   */
+  let importersByTargetCache: Map<string, Array<{ path: string; specifier: string }>> | null = null;
+  function invalidateImporters(): void {
+    importersByTargetCache = null;
+  }
   function rememberImportSpecifier(path: string, specifier: string): void {
+    invalidateImporters();
     const values = importSpecifiersByPath.get(path);
     if (values) values.push(specifier);
     else importSpecifiersByPath.set(path, [specifier]);
   }
   function forgetImportSpecifiers(path: string): void {
+    invalidateImporters();
     importSpecifiersByPath.delete(path);
   }
+  function importersByTarget(): Map<string, Array<{ path: string; specifier: string }>> {
+    if (importersByTargetCache) return importersByTargetCache;
+    const known = new Set(graphFileIds.keys());
+    const byTarget = new Map<string, Array<{ path: string; specifier: string }>>();
+    for (const [importer, specifiers] of importSpecifiersByPath) {
+      for (const specifier of specifiers) {
+        const result = resolveImportSpecifier(importer, specifier, known);
+        if (result.status !== "resolved") continue;
+        const bucket = byTarget.get(result.resolvedPath);
+        if (bucket) bucket.push({ path: importer, specifier });
+        else byTarget.set(result.resolvedPath, [{ path: importer, specifier }]);
+      }
+    }
+    importersByTargetCache = byTarget;
+    return byTarget;
+  }
+  /** File language for `catalogStats`, so counting does not read a payload per file. */
+  const fileLanguageByPath = new Map<string, string>();
   /**
    * Denormalized catalog rows for query. Built on open and each write so
    * searchSymbols / findLinks do not pay getPayload per id (D-134).
@@ -570,6 +600,13 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ? graphLinkIds
           : null;
     if (!target) continue;
+    if (
+      payload["type"] === "file"
+      && typeof payload["language"] === "string"
+      && !fileLanguageByPath.has(payload["path"])
+    ) {
+      fileLanguageByPath.set(payload["path"], payload["language"]);
+    }
     if (
       payload["type"] === "link"
       && payload["kind"] === "connects"
@@ -1107,6 +1144,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         ];
         db.commitTransaction(operations);
         graphFileIds.set(normalizedPath, new Set([fileId]));
+        fileLanguageByPath.set(normalizedPath, normalizedLanguage);
+        // A new path can make another file's specifier resolve.
+        invalidateImporters();
         db.indexText(fileId, normalizedPath);
         db.flush();
         return fileId;
@@ -1220,6 +1260,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         forgetImportSpecifiers(normalizedPath);
         forgetSymbolQueryRows(normalizedPath);
         forgetLinkQueryRows(normalizedPath);
+        fileLanguageByPath.set(normalizedPath, normalizedLanguage);
         for (let index = 0; index < symbolIds.length; index += 1) {
           const symbol = symbols[index]!;
           rememberSymbolQueryRow({
@@ -1282,6 +1323,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         forgetImportSpecifiers(normalizedPath);
         forgetSymbolQueryRows(normalizedPath);
         forgetLinkQueryRows(normalizedPath);
+        fileLanguageByPath.delete(normalizedPath);
         db.flush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
@@ -1427,9 +1469,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       let linkCount = 0;
       for (const rows of linkQueryByPath.values()) linkCount += rows.length;
       const languages = new Set<string>();
-      for (const [path] of graphFileIds) {
-        const file = fileNodes(path)[0];
-        if (typeof file?.payload["language"] === "string") languages.add(file.payload["language"]);
+      for (const path of graphFileIds.keys()) {
+        const language = fileLanguageByPath.get(path);
+        if (language) languages.add(language);
       }
       return {
         symbolCount,
@@ -1442,16 +1484,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async findImporters(path) {
       const target = normalizeGraphPath(assertGraphText(path, "File path"));
-      const known = new Set(graphFileIds.keys());
-      const resolved: Array<{ path: string; specifier: string }> = [];
-      for (const [importer, specifiers] of importSpecifiersByPath) {
-        for (const specifier of specifiers) {
-          const result = resolveImportSpecifier(importer, specifier, known);
-          if (result.status === "resolved" && result.resolvedPath === target) {
-            resolved.push({ path: importer, specifier });
-          }
-        }
-      }
+      const resolved = [...(importersByTarget().get(target) ?? [])];
       return {
         path: target,
         resolved: resolved.toSorted((left, right) => left.path.localeCompare(right.path) || left.specifier.localeCompare(right.specifier)),

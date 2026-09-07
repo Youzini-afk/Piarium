@@ -403,6 +403,23 @@ describe("KnowledgeStore", () => {
         "lib/harness/explore.ts",
         "lib/other.ts",
       ]);
+      expect(stats.languages).toEqual(["typescript"]);
+    });
+
+    it("re-resolves reverse imports when the known path set changes", async () => {
+      await store.replaceFileSymbols("lib/app.ts", "typescript", [
+        { name: "app", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "./core.js", line: 1 },
+      ]);
+      // The target is not in the catalog yet, so the specifier cannot resolve.
+      expect((await store.findImporters("lib/core.ts")).resolved).toEqual([]);
+      await store.touchFile("lib/core.ts", "typescript");
+      expect((await store.findImporters("lib/core.ts")).resolved).toEqual([
+        { path: "lib/app.ts", specifier: "./core.js" },
+      ]);
+      await store.removeFileSymbols("lib/app.ts");
+      expect((await store.findImporters("lib/core.ts")).resolved).toEqual([]);
     });
   });
 
