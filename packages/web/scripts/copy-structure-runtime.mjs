@@ -14,6 +14,8 @@ const require = createRequire(import.meta.url);
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const destDir = path.join(webRoot, "application-host", "lib", "structure", "runtime");
 const force = process.argv.includes("--force");
+// Checked-in wasm in destDir is the source of truth (D-101). This script
+// skips existing files larger than 1 KiB; pass --force to refresh from npm.
 
 const log = (message) => process.stdout.write(`[copy-structure-runtime] ${message}\n`);
 

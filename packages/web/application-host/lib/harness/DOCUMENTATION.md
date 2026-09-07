@@ -249,13 +249,17 @@ can be released.
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
 materialized. Production tries tree-sitter, then the agent-view LSP outline.
-Small units are emitted in full; large units keep the signature, the hit block,
-omission markers, and a full-unit read entry. When the source is missing, cold,
-unsupported, stale, or failed, explore falls back to the ±3 line window and
-records that status on the snippet and in `details.structure`. After materialize,
-tree-sitter may classify hit lines so declaration names outrank comments and
-strings in `windowScore`; unread candidates are not parsed. It does not call
-`documentSymbols` itself.
+Slice units are containers (function/class/interface/…); a hit on an ordinary
+value binding stays inside the enclosing function or class (D-098). Small
+containers are emitted in full; large ones keep the signature, the hit block,
+omission markers, and a full-unit read entry. An earlier `empty` outline or a
+ready outline that misses a hit does not hide a later provider; that later call
+is `warmOnly` and will not start a cold language server (D-099). When the source
+is missing, cold, unsupported, stale, or failed, explore falls back to the ±3
+line window and records that status on the snippet and in `details.structure`.
+After materialize, tree-sitter may classify hit lines so declaration names
+outrank comments and strings in `windowScore`; unread candidates are not
+parsed. It does not call `documentSymbols` itself.
 
 ### LspNavigationServices (`lsp-nav.ts`)
 

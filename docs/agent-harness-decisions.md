@@ -2011,6 +2011,74 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-098 · 2026-09-07 · 3.11（切片单位是容器，不是最小语法捕获）
+
+类型：问题与解法
+
+背景：验收实测同一 63 行函数只改命中位置：`const needle = 1` 切成 1 行 `variable`，比旧 ±3 窗口更差；`handle(needle)` 才切到外层函数。成因是 `TYPESCRIPT_DEFINITION_QUERY` 把每个 `lexical_declaration` 标成 `@unit`，`enclosingSymbol` 取最小包含范围。同一问题也出现在 interface 成员、`method_signature`、字段、单行 type alias、enum 成员上。
+
+决定：切片只认**容器**（function / method / constructor / class / interface / enum / module / namespace / type / struct / package）。tree-sitter 仍捕获 lexical / var / 字段以便分类，但只有初始化器是函数/箭头/类表达式时才作为单元发出，且 kind 是 `function` / `class`。`enclosingSliceSymbol` 忽略非容器。单行 type alias 仍是容器（它就是整条定义）。D-093 的 24 行阈值不改。
+
+原因：读者必须能判断命中属于哪个函数/类；定义绑定必须继续单独切开，不能整条删掉 lexical 查询。按 kind 过滤比「给小单元并入 ±3」更连贯——后者会把 `const foo = () => {}` 与外层函数糊在一起，或让 1 行 interface 签名看起来像自包含单元。
+
+考虑过的替代：(1) 只在初始化器是函数/类时认 lexical 为单元、切片仍取最小范围——能修 const，但 LSP 仍可能发出 1 行 `method` / `variable`，同一缺陷换来源还会出现。(2) 小单元与外层签名或 ±3 取并——残留「单位就是那个绑定」，status 仍超报，且定义绑定与值绑定要两套下限。(3) 把 `enclosingSymbol` 改成「最小定义型单元」却继续把值绑定当定义——只换名字。
+
+不改：24 行阈值；命中分类分值；JS/JSX 作为目标语言。
+
+影响：`lib/structure/kinds.ts` / `slice.ts` / `tree-sitter-provider.ts` / `queries.ts`；explore 结构切片；agent-harness 6.1 slice、plan 3.2/3.11、status 3.11。
+
+状态：已实施。
+
+### D-099 · 2026-09-07 · 3.11（empty / 覆盖缺口可问后续，但 warmOnly 不冷启动 LSP）
+
+类型：问题与解法
+
+背景：`createStructureSource` 在第一个 `ready` **或 `empty`** 时返回。tree-sitter 对 `var zeta = 1`、`declare function` 等形状会 `empty` 或部分轮廓（namespace 只有内层 `z`）。配合 D-097 的 tree-sitter 优先，阶段 1 的 LSP outline 在这些形状上永不被问，explore 静默退窗口。D-097 把 tree-sitter 放前面正是为了避开 833ms 冷启动；「empty 就问 LSP」会把它请回来。
+
+决定：第一个覆盖全部 `hitLines` 的 `ready` 立即获胜。`empty`、或 `ready` 但有命中落在任何容器外，设置 `priorAnswered` 并以 `warmOnly: true` 问下一个。第一个 provider 的 `unavailable`（缺 wasm）仍允许冷启动。LSP 在 `warmOnly` 下先 `getStatus(workspaceId, languageId, AGENT_LANGUAGE_VIEW)`；不是 `ready`/`degraded` 就返回 `unavailable`，不 `bind`。explore 把证据行传进 `outline`。后续 `ready` **替换**前答，不合并。容器规则（D-098）阻止 LSP 的 1 行 variable 再变成切片单位。顺带扩查询：`variable_declaration`、`function_signature`、`internal_module`/`module`、匿名 `export default class {}`、object-literal `method_definition`；箭头与 `export default function` 实测本来就能出轮廓，之前自评的缺口记错了。
+
+代价：热 LSP 会话上，tree-sitter `empty`/缺口会多一次 `documentSymbols`；冷会话付出的是一次 `getStatus`（不拉起进程）。不阻塞 explore：未就绪就窗口降级。
+
+考虑过的替代：(1) empty 无条件问 LSP——把 833ms 请回每次 explore。(2) 合并两个 outline——需要冲突规则，且会把 LSP 的 1 行成员和 tree-sitter 容器叠在一起。(3) 云端/缺 wasm 才问 LSP——修不了「ready 但有缺口」。
+
+不改：D-097 的生产顺序；不在 renderer 起解析；不把连接边写入本步。
+
+影响：`lib/structure/source.ts` / `types.ts` / `lsp-provider.ts` / `queries.ts`；`explore.ts` 传 `hitLines`。
+
+状态：已实施。
+
+### D-100 · 2026-09-07 · 3.11（云运行时把 web-tree-sitter 当生产能力）
+
+类型：默认值调整
+
+背景：`web-tree-sitter` 在 `packages/web` 的生产依赖里，云镜像构建 `packages/web` 并以其 CLI 为入口，但 `scripts/cloud-runtime.bun.lock` 未锁上它，冒烟 `require` 清单也只有 `better-sqlite3` / `node-pty` / `sherpa-onnx-node`。云部署里 tree-sitter 会是 `unavailable`，只能走 LSP/窗口。
+
+决定：按既有 `--update-lock` 重生成 lock，并把 `require.resolve('web-tree-sitter')` 加入云运行时冒烟。缺依赖必须被构建抓住，而不是运行期才发现 explore 只能降级。
+
+考虑过的替代：明确让云端 explore 走 LSP/窗口、不锁 wasm——省 lock 体积，但云与桌面生产能力分叉，且 D-097 的第一来源在云上永久 `unavailable`。
+
+影响：`scripts/cloud-runtime.bun.lock`；`scripts/build-cloud-runtime.mjs`；`scripts/cloud-runtime-layout.test.js`。
+
+状态：已实施。
+
+### D-101 · 2026-09-07 · 3.11（语法 wasm 以 git 为事实来源）
+
+类型：问题与解法
+
+背景：D-096 记了 wasm 存放位置与 ASAR 重映射，没有记「约 3 MB 二进制 vendor 进 git」这个取舍。`.gitignore` 不排除 `lib/structure/runtime/*.wasm`。`copy-structure-runtime.mjs` 的 `copyIfNeeded` 在目标已存在且 >1024 字节时跳过，所以正常检出下脚本是 no-op，只有 `--force` 才从 npm 包刷新。
+
+决定：接受把 `web-tree-sitter.wasm` 与 TS/TSX grammar wasm 检入仓库。git 是检出后的事实来源；copy 脚本是升级 web-tree-sitter / tree-sitter-typescript 时的刷新工具，不是每次构建的下载步骤。不把「脚本会在缺文件时补上」写成日常路径——新鲜 clone 若缺文件，应视为 git 内容缺失。
+
+原因：wasm 必须在 Electron/Web/云构建里不依赖开发机的 `tree-sitter-typescript` 解析结果；grammar 包是 `devDependency`，生产安装不会带它。检入二进制避免每个环境重跑 copy，并让 ASAR 解包路径稳定。
+
+考虑过的替代：(1) gitignore wasm、构建必跑 copy——云/CI 必须装 `tree-sitter-typescript`，与「语法 wasm 随 Host 走」不一致。(2) 运行期从 npm 解包——多一套失败模式，且 Electron asar 仍要带文件。
+
+不改：D-096 正文（路径与 ABI 选择仍有效）；不声称体积或加载时间。
+
+影响：决策索引中 D-096 的补充说明；`lib/structure/DOCUMENTATION.md`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2107,10 +2175,14 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
 | D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片已由 3.11 第 1、3 步接上） | D-091（tree-sitter 第 4–5 步仍待决）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
-| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-097（第 1–3 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–3 步已接，第 4–5 步待做 |
+| D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-101（第 1–3 步实施拍板与验收缺陷） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–3 步已接，第 4–5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
 | D-093 | implementation（小/大函数阈值 24 行，一个典型编辑器视口） | — | structure/constants.ts；3.11 切片 |
 | D-094 | implementation（结构切片字段放在 ExploreSearchSnippet 与 details.structure，不进 why） | — | protocol harness explore.search；Host explore + structure；pi-host explore-tool details |
 | D-095 | implementation（命中分类只打已物化窗口分，不解析 200 文件候选池） | — | structure/constants.ts；explore windowScore；tree-sitter classifyHits |
-| D-096 | implementation（wasm 放 lib/structure/runtime，ASAR 重映射复用 extension-builtins；语法取 tree-sitter-typescript 0.23.2 而非 tree-sitter-wasms） | — | packages/web 依赖与 copy/build；structure/runtime-path.ts |
-| D-097 | implementation（生产顺序 tree-sitter → LSP → ±3 窗口） | — | application-host/index.ts；structure/source.ts；explore |
+| D-096 | implementation（wasm 放 lib/structure/runtime，ASAR 重映射复用 extension-builtins；语法取 tree-sitter-typescript 0.23.2 而非 tree-sitter-wasms） | D-101（补充：二进制以 git 为事实来源，copy 仅 `--force` 刷新） | packages/web 依赖与 copy/build；structure/runtime-path.ts |
+| D-097 | implementation（生产顺序 tree-sitter → LSP → ±3 窗口） | D-099（empty / 缺口不再直接获胜） | application-host/index.ts；structure/source.ts；explore |
+| D-098 | implementation（切片单位是容器；值绑定切所属函数/类；定义绑定仍是自己的单元） | — | structure kinds/slice/tree-sitter；agent-harness 6.1；plan/status 3.11 |
+| D-099 | implementation（empty/缺口可问后续 provider，warmOnly 不冷启动 LSP） | — | structure source/lsp-provider；explore hitLines |
+| D-100 | implementation（云 lock 与冒烟包含 web-tree-sitter） | — | scripts/cloud-runtime.bun.lock；build-cloud-runtime.mjs |
+| D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |

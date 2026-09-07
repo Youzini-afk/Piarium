@@ -96,7 +96,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：窗口读取与 explore（3.2）**：自动消息来源、固定 dirty snapshot、draft-aware explore/grep/read/find/ls、线程草稿基线、
    写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组与 D-092（候选广度按文件铺开及同批小项）已实施。
-   3.11 第 1–3 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX 与命中分类，D-091/D-093–D-097）。下一步是第 4–5 步
+   3.11 第 1–3 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX 与命中分类，D-091/D-093–D-101）。下一步是第 4–5 步
    （连接边、冷仓库目录、按需下载）以及按观察到的"找不到入口"决定词法索引/桥接/embedding。缺可选来源仍返回已有正文，不等
    全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
@@ -236,7 +236,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
 | 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`；✓ D-092 候选广度按文件轮转分配（30 文件×12 命中、预算 200 时 30 个文件都进候选，总命中 ≤ 预算；文件数超过预算才丢文件并报 `filesDropped`；grep 深度优先截断不变）。同批小项：句柄提示计入字节预算、返回对象只含协议字段、空白 anchor 过滤、`rgSearch` 局部 partial、`fileScore` 每文件一次、候选排序加权组数。验收复验又补两项：`filesDropped` 跨词项与重叠搜索根不求和，取单次查询最大值作下界、正文说"至少"（原实现两处相加会虚报去重后的文件数）；pi-host 工具 schema 不再给 anchor 元素加 `minLength`，与 Host 的"接受并过滤空白"同口径（原实现两层口径相反，`""` 撞 schema 而 `"  "` 被优雅过滤）。覆盖：`explore.test.ts` T1/T3–T8 与 filesDropped/空白 anchor/加权排序、`explore-service.test.ts` T2/T8（含 `showHandle` 为真时的字节预算）与空白 anchor、`search-service.test.ts` 广度优先与 `filesDropped`、`explore-tool.test.ts` / `session-e2e.test.ts` T9。✓ 结构切片消费 6.4 / tree-sitter 带修订范围（D-091 第 1、3 步；小/大阈值 D-093，协议字段 D-094） |
 | 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 3.11 的 tree-sitter provider 承担）；定义/引用/测试配对/co-change 按可用性接入，派生路径重新授权 |
-| 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），生产顺序 tree-sitter → LSP（D-097），冷/热为显式条件、缺时退行窗口；命中分类只打已物化窗口分（D-095）；RRF 融合保留来源，不用分差当置信度 |
+| 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（容器：小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口；普通值绑定切所属函数/类，D-098），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），生产顺序 tree-sitter → LSP（D-097），`empty`/覆盖缺口可问后续但 `warmOnly` 不冷启动 LSP（D-099），缺时退行窗口；命中分类只打已物化窗口分（D-095）；RRF 融合保留来源，不用分差当置信度 |
 | 打包 | 内部找全、外部只给支撑判断的材料；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |
 | 模型 | pi-host 使用 models.explore；按"当前缺的那一步"选一种：无仓库词汇 → intent，目标缺席 → 受限修复（须能提新词项/入口），候选多 → 比较；intent 可并行，judge 等正文，修复仅类型化搜索/导航；无槽位零模型调用 |
 | 上下文 | 同 revision/span 仍在实际请求才省正文；无覆盖表或压缩后未知时返回正文 |
@@ -379,13 +379,13 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 
 语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"；两者在 Application Host 长期共存，不进 renderer。
 消费者：explore 结构切片、命中分类（6.1 fuse 段"名称/路径/注释/字符串/正文不同计分"的落地）、连接边形状识别、冷仓库符号目录与
-`imports` 边、线程/压缩用的仓库地图。它给不了类型、跨文件解析与诊断。第 1–3 步已实施（D-093–D-097）；第 4–5 步未做。
+`imports` 边、线程/压缩用的仓库地图。它给不了类型、跨文件解析与诊断。第 1–3 步已实施（D-093–D-101）；第 4–5 步未做。
 交付顺序，每步独立可验证：
 
 1. **结构来源接口 + LSP 实现。** 定义带修订绑定的 provider：输入语言 ID（复用 `languageIdForPath`）、正文、修订；输出符号轮廓
    （名字/种类/范围）、命中节点分类、带字面量调用、import，能力标志声明能给哪些。首个实现包装 6.4 agent 视图的 `documentSymbol`；
-   explore 切片只认接口，冷/热为显式条件，缺时退行窗口并说明来源状态。无新依赖。验收：切片单位按 D-090（小函数全文、大函数签名 +
-   命中语法块 + 省略标记 + 完整读取入口），`explore.search` 的 worker—protocol—Host 链能在一次结果里看见。
+   explore 切片只认接口，冷/热为显式条件，缺时退行窗口并说明来源状态。无新依赖。验收：切片单位按 D-090 / D-098（容器：小函数全文、大函数签名 +
+   命中语法块 + 省略标记 + 完整读取入口；普通值绑定切所属函数/类），`explore.search` 的 worker—protocol—Host 链能在一次结果里看见。
 2. **冷启动对照基线。** 在本仓库量一次 agent 视图从冷启动到 `documentSymbol` 可用的时间，记入 status；这是第 3 步"好了多少"的对照，
    不再是"要不要做"的门。
 3. **web-tree-sitter + TS/TSX 包作第二 provider，同时接命中分类。** 引入依赖与 `.wasm` 打包路径（Electron/Web 宿主都能读到）；

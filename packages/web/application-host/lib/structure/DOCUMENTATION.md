@@ -32,10 +32,21 @@ runtime), `unsupported` (no language, or no `documentSymbolProvider`), `stale`,
 `failed`, `cancelled`. They must not collapse into one successful empty list.
 
 `createStructureSource` tries configured providers in order. The first `ready`
-or `empty` outline wins. An earlier `unavailable` does not hide a later provider
-that can still answer.
+outline that covers every supplied hit line wins immediately. `empty`, or a
+`ready` outline that misses a hit, does not hide a later provider: the next
+call is `warmOnly` so a cold language server is not started (D-099). The first
+provider's `unavailable` still allows a cold start on the next one. A later
+`ready` outline replaces the earlier one; results are not merged.
 
 ## Slice
+
+Slice units are **containers**: function, method, constructor, class, interface,
+enum, module/namespace, type, struct, package (D-098). Ordinary value bindings,
+fields, method signatures, and enum members are names inside a container, not
+the unit. A hit on `const needle = 1` inside `function big` selects `big`.
+`const foo = () => {}` / `const C = class {}` stay their own units because the
+tree-sitter provider emits them as `function` / `class` after inspecting the
+initializer.
 
 `sliceStructureWindows` turns an outline plus hit lines into explore windows:
 
@@ -45,10 +56,37 @@ that can still answer.
   markers that include a full-unit `read path:start-end` entry.
 - Missing, empty, unsupported, unavailable, failed, cancelled, or stale
   outlines → the existing ±3 line window. Stale outlines are not applied to the
-  current text.
+  current text. A value-binding hit inside a container is never a one-line
+  unit.
 
 That ±3 fallback is a runtime degradation, not a compatibility layer for old
 callers.
+
+## Tree-sitter coverage (TS/TSX)
+
+Wired language ids are `typescript` and `typescriptreact` only.
+
+Covered as outline units: function / generator / class / abstract class
+(including named `export default` and anonymous `export default class {}`),
+interface, type alias, enum, `method_definition` (class and object-literal
+methods), `function_signature` (`declare function`), `internal_module` /
+`module` (`namespace`, `declare namespace`, `module`), and lexical / `var` /
+public-field bindings whose initializer is a function, arrow, or class.
+
+Covered as names only (classification, not slice units): ordinary
+`const` / `let` / `var` value bindings, `method_signature` /
+`abstract_method_signature`, and public fields with a non-definition
+initializer.
+
+Not covered: JS/JSX language ids, import aliases, enum members as units,
+interface members as units, parameters, decorators, unnamed
+`export default abstract class {}` (the grammar emits an error node), and a
+full grammar-node census. Arrow bindings (`const beta = () => {}`,
+`export const gamma = () => {}`) and `export default function` outline
+normally; they are not a coverage gap.
+
+The parse cache pins in-use trees so LRU eviction cannot `tree.delete()` a
+wasm object a caller still holds after `await`.
 
 ## Wiring
 
