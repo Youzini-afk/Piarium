@@ -57,3 +57,5 @@ Thumbs.db
 docs/personal/*
 packages/intellij/
 src/main/resources/webview/
+
+.observe/
