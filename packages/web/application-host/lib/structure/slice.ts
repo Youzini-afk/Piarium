@@ -1,5 +1,6 @@
 import { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
-import { isStructureContainerKind, structureSpanLines } from "./kinds.js";
+import { languageIdForPath } from "@piarium/protocol";
+import { isStructureContainerKind, structureContainerPredicate, structureSpanLines } from "./kinds.js";
 import { clipRange, mergeAdjacentRanges, rangeContainsLine } from "./ranges.js";
 import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "./types.js";
 
@@ -46,10 +47,14 @@ const flattenSymbols = (symbols: readonly StructureSymbol[]): StructureSymbol[] 
  * Smallest enclosing *container*. Value bindings and members are ignored so a
  * hit on `const needle = 1` inside `function big` selects `big` (D-098).
  */
-export function enclosingSliceSymbol(symbols: readonly StructureSymbol[], line: number): StructureSymbol | undefined {
+export function enclosingSliceSymbol(
+  symbols: readonly StructureSymbol[],
+  line: number,
+  isContainer: (kind: string) => boolean = isStructureContainerKind,
+): StructureSymbol | undefined {
   let best: StructureSymbol | undefined;
   for (const symbol of flattenSymbols(symbols)) {
-    if (!isStructureContainerKind(symbol.kind) || !rangeContainsLine(symbol.range, line)) continue;
+    if (!isContainer(symbol.kind) || !rangeContainsLine(symbol.range, line)) continue;
     if (!best) {
       best = symbol;
       continue;
@@ -63,8 +68,12 @@ export function enclosingSliceSymbol(symbols: readonly StructureSymbol[], line: 
   return best;
 }
 
-export function outlineCoversHitLines(symbols: readonly StructureSymbol[], lines: readonly number[]): boolean {
-  return lines.length > 0 && lines.every((line) => enclosingSliceSymbol(symbols, line) !== undefined);
+export function outlineCoversHitLines(
+  symbols: readonly StructureSymbol[],
+  lines: readonly number[],
+  isContainer?: (kind: string) => boolean,
+): boolean {
+  return lines.length > 0 && lines.every((line) => enclosingSliceSymbol(symbols, line, isContainer) !== undefined);
 }
 
 const lineWindow = (line: number, lineCount: number): StructureLineRange => ({
@@ -217,10 +226,11 @@ export function sliceStructureWindows(input: StructureSliceInput): StructureSlic
   if (!outlineUsableForText(outline, input.revision) || !outline.symbols.length) {
     return fallbackWindows(input.lines, hits);
   }
+  const isContainer = structureContainerPredicate(languageIdForPath(input.path));
   const grouped = new Map<StructureSymbol, number[]>();
   const unstructured: StructureSliceHit[] = [];
   for (const hit of hits) {
-    const symbol = enclosingSliceSymbol(outline.symbols, hit.line);
+    const symbol = enclosingSliceSymbol(outline.symbols, hit.line, isContainer);
     if (!symbol) {
       unstructured.push(hit);
       continue;

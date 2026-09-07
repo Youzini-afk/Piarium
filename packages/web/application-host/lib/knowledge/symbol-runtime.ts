@@ -6,6 +6,7 @@ import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { languageIdForPath } from "../harness/language-id.js";
 import { classifyLiteralCall } from "../structure/connections.js";
+import { CATALOG_SCAN_LANGUAGES } from "../structure/languages.js";
 import type { StructureSource, StructureSymbol } from "../structure/types.js";
 import { createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
 import type {
@@ -18,7 +19,7 @@ import type {
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   "syncDocument" | "documentSymbols">;
 
-export const CATALOG_SCAN_LANGUAGES = new Set(["typescript", "typescriptreact"]);
+export { CATALOG_SCAN_LANGUAGES };
 const CATALOG_SCAN_BATCH = 8;
 
 export interface SymbolGraphRuntimeOptions {

@@ -2,8 +2,9 @@ Piarium structure runtime third-party notices
 ===========================================
 
 This directory vendors WebAssembly used by the Application Host structure
-provider. Only the TypeScript and TSX grammars are copied (D-091 / D-096).
-Authorization and source paths are checked on every load, including cache hits.
+provider. Bundled grammars are TypeScript, TSX, JavaScript/JSX, and JSON
+(D-091 / D-096). Authorization and source paths are checked on every load,
+including cache hits.
 
 1. web-tree-sitter
    Source: https://www.npmjs.com/package/web-tree-sitter
@@ -18,6 +19,21 @@ Authorization and source paths are checked on every load, including cache hits.
    Grammar license: MIT. See LICENSE.tree-sitter-typescript.
    ABI 14, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
 
-3. Piarium tree-sitter queries
+3. tree-sitter-javascript grammar wasm
+   Published wasm from tree-sitter-javascript 0.25.0
+   https://github.com/tree-sitter/tree-sitter-javascript
+   File: tree-sitter-javascript.wasm
+   Grammar license: MIT. See LICENSE.tree-sitter-javascript.
+   ABI 15, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
+   Serves both javascript and javascriptreact.
+
+4. tree-sitter-json grammar wasm
+   Published wasm from tree-sitter-json 0.24.8
+   https://github.com/tree-sitter/tree-sitter-json
+   File: tree-sitter-json.wasm
+   Grammar license: MIT. See LICENSE.tree-sitter-json.
+   ABI 14, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
+
+5. Piarium tree-sitter queries
    Adapted from Apache-2.0 query sets in Aider (paul-gauthier/aider) and
    nvim-treesitter (nvim-treesitter/nvim-treesitter). See queries.ts.

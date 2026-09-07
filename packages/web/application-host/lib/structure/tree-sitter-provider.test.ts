@@ -2,15 +2,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { languageIdForPath } from "@piarium/protocol";
 import { describe, expect, it } from "vitest";
-import { isStructureContainerKind } from "./kinds.js";
-import { capabilitiesFromSpec, treeSitterLanguageSpec } from "./languages.js";
+import { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
+import { CATALOG_SCAN_LANGUAGES, capabilitiesFromSpec, treeSitterLanguageSpec } from "./languages.js";
 import { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
 import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
 
 const request = (text: string, path = "sample.ts") => ({
   path,
-  languageId: path.endsWith(".tsx") ? "typescriptreact" : "typescript",
+  languageId: languageIdForPath(path),
   text,
   revision: "rev-1",
 });
@@ -31,11 +32,33 @@ describe("tree-sitter language specs", () => {
     expect(createTreeSitterStructureProvider().capabilities("typescriptreact")).toEqual(expected);
   });
 
-  it("derives no capabilities when the language has no spec", () => {
-    expect(treeSitterLanguageSpec("javascript")).toBeUndefined();
-    expect(treeSitterLanguageSpec("json")).toBeUndefined();
+  it("derives JS capabilities including imports and JSON without imports", () => {
+    expect(capabilitiesFromSpec(treeSitterLanguageSpec("javascript"))).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: true,
+      imports: true,
+    });
+    expect(capabilitiesFromSpec(treeSitterLanguageSpec("javascriptreact"))).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: true,
+      imports: true,
+    });
+    expect(capabilitiesFromSpec(treeSitterLanguageSpec("json"))).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: false,
+      imports: false,
+    });
+    expect(createTreeSitterStructureProvider().capabilities("json")).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: false,
+      imports: false,
+    });
     expect(capabilitiesFromSpec(undefined)).toEqual(NO_STRUCTURE_CAPABILITIES);
-    expect(createTreeSitterStructureProvider().capabilities("javascript")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    expect(createTreeSitterStructureProvider().capabilities("python")).toEqual(NO_STRUCTURE_CAPABILITIES);
     expect(createTreeSitterStructureProvider().capabilities(null)).toEqual(NO_STRUCTURE_CAPABILITIES);
   });
 
@@ -225,5 +248,80 @@ describe("createTreeSitterStructureProvider", () => {
     const result = await provider.outline(request("export function needle() { return 1; }"));
     expect(result.status).toBe("unavailable");
     expect(result.message).toMatch(/not readable/i);
+  });
+
+  it("outlines JavaScript functions, require imports, and field definitions", async () => {
+    const provider = parsingProvider();
+    const text = [
+      "const { join } = require(\"node:path\");",
+      "function boot() {",
+      "  router.register(\"explore.search\");",
+      "  console.log(\"explore.search\");",
+      "  return join(\"a\");",
+      "}",
+      "class Box {",
+      "  ready = () => 1;",
+      "}",
+    ].join("\n");
+    const outline = await provider.outline(request(text, "boot.js"));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["boot", "Box", "ready"]));
+    expect(outline.symbols.find((symbol) => symbol.name === "ready")?.kind).toBe("function");
+    const imports = await provider.imports(request(text, "boot.js"));
+    expect(imports.status).toBe("ready");
+    expect(imports.imports).toEqual(expect.arrayContaining([expect.objectContaining({ source: "node:path" })]));
+    const calls = await provider.literalCalls(request(text, "boot.js"));
+    expect(calls.status).toBe("ready");
+    expect(calls.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "register", literal: "explore.search" }),
+      expect.objectContaining({ name: "log", literal: "explore.search" }),
+    ]));
+  });
+
+  it("outlines a JSX component from the JavaScript grammar", async () => {
+    const provider = parsingProvider();
+    const text = [
+      "export function Badge({ label }) {",
+      "  return <span className=\"badge\">{label}</span>;",
+      "}",
+    ].join("\n");
+    const outline = await provider.outline(request(text, "Badge.jsx"));
+    expect(outline.status).toBe("ready");
+    expect(outline.symbols.find((symbol) => symbol.name === "Badge")?.kind).toBe("function");
+  });
+
+  it("outlines JSON pairs and object containers, and rejects imports", async () => {
+    const provider = parsingProvider();
+    const text = [
+      "{",
+      "  \"name\": \"piarium\",",
+      "  \"config\": {",
+      "    \"enabled\": true,",
+      "    \"nested\": { \"needle\": 1 }",
+      "  }",
+      "}",
+    ].join("\n");
+    const outline = await provider.outline(request(text, "pkg.json"));
+    expect(outline.status).toBe("ready");
+    const names = outline.symbols.map((symbol) => symbol.name);
+    expect(names).toEqual(expect.arrayContaining(["$", "name", "config", "nested"]));
+    expect(names).not.toContain("enabled");
+    expect(names).not.toContain("needle");
+    expect(outline.symbols.find((symbol) => symbol.name === "name")?.kind).toBe("property");
+    expect(outline.symbols.find((symbol) => symbol.kind === "object" && symbol.name === "config")).toBeTruthy();
+    expect(isJsonStructureContainerKind("property")).toBe(true);
+    expect(isStructureContainerKind("property")).toBe(false);
+    expect(CATALOG_SCAN_LANGUAGES.has("json")).toBe(false);
+    expect(CATALOG_SCAN_LANGUAGES.has("javascript")).toBe(true);
+    const imports = await provider.imports(request(text, "pkg.json"));
+    expect(imports.status).toBe("unsupported");
+    const calls = await provider.literalCalls(request(text, "pkg.json"));
+    expect(calls.status).toBe("unsupported");
+    const classified = await provider.classifyHits({ ...request(text, "pkg.json"), lines: [2, 4] });
+    expect(classified.status).toBe("ready");
+    expect(classified.hits).toEqual(expect.arrayContaining([
+      { line: 2, class: "name" },
+    ]));
   });
 });

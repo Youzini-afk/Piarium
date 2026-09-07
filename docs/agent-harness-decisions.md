@@ -2307,6 +2307,42 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-114 · 2026-09-07 · 3.11 第 5 步（JSON 进切片、不进目录）
+
+类型：问题与解法
+
+背景：plan 要 JS/JSON 语法包。JSON 键名不是 `searchSymbols` 要回答的东西，全量入图会淹没符号表。但大 JSON 命中若退回 ±3 行窗口，agent 看不到所在对象。D-113 已经把目录查询和切片查询拆开。
+
+决定：JSON **只服务切片**。轮廓收顶层 `pair`、值为 `object`/`array` 的 `pair`（`kind: property`），并额外收 object/array 节点作切片容器；深度上限 **8**、符号上限 **256**，文档根 object/array 始终保留，所以触顶时仍切到根容器而不是裸 ±3。`isJsonStructureContainerKind` 接受 `property`/`object`/`array`，**不**并进 `isStructureContainerKind`（否则会放宽 D-098 对 TS/JS 的 `property`）。JSON 的 `literalCalls`/`imports` 报 `unsupported`。JSON **不进**冷目录扫描。
+
+原因：切片要的是「命中落在哪一段」，目录要的是「这个名字指什么」。JSON 只有前者。
+
+考虑过的替代：(1) JSON 也进目录——`name`/`version`/`scripts` 会淹没 `searchSymbols`。(2) 只出 pair、不出 object/array——顶层数组里的对象命中没有容器。(3) 把 `property` 加进 D-098 容器集合——TS/JS 的 property 成员会变成切片单位。
+
+不改：D-098 的 TS/JS 容器集合；候选池。
+
+影响：`json-outline.ts`；`kinds.ts` `isJsonStructureContainerKind`；`slice.ts` / `source.ts` 按语言选容器谓词；冷扫描跳过 json。
+
+状态：已实施。
+
+### D-115 · 2026-09-07 · 3.11 第 5 步（D-104 被取代：冷目录含 JS）
+
+类型：偏离
+
+背景：D-104 把冷目录收成 TS/TSX，因为当时只有这两份语法。本刀加上 JS/JSX 语法后，再跳过 `.js`/`.jsx` 是把已有能力藏起来。
+
+决定：冷目录语言改为规格表里**带 `importQuery` 的语言**（今日：`typescript` / `typescriptreact` / `javascript` / `javascriptreact`）。JSON 没有 import 查询，继续不进目录（D-114）。D-104 正文不改；本条取代它的覆盖范围。事件驱动路径对未知语言仍 `touchFile`。
+
+原因：目录该覆盖 tree-sitter 已经能诚实抽出 defines/imports/连接边的语言，而不是永远停在第 4 步的 TS/TSX 快照。
+
+考虑过的替代：(1) 继续只扫 TS/TSX——JS 仓库的图是空的。(2) 一切有 outline 的语言都扫——JSON 会进目录，与 D-114 冲突。
+
+不改：D-104 原文；非目录语言的 `touchFile`；扫描不挡启动（D-107）。
+
+影响：`CATALOG_SCAN_LANGUAGES` 改由规格表推导；`catalog-scan.test.ts`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2416,7 +2452,9 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |
 | D-102 | implementation（解析预算是跑飞兜底、250ms、测试自带预算；签名即全体的单元按 ±3 取并补齐） | — | structure/constants.ts + slice.ts；structure/explore 测试；structure/DOCUMENTATION.md；status 3.11 |
 | D-103 | open（三处既有挂钟/子进程收尾项已立项未修：thread-runtime 20ms stalled、run/supervisor 未捕获 EPIPE 使套件退出码与断言脱钩、pi-host harness-e2e #3） | — | thread-runtime.test.ts；run/supervisor.test.ts；pi-host harness-e2e.test.ts；status 3.2/3.11 |
-| D-104 | implementation（冷目录只采集 TS/TSX；非 TS 跳过不 touchFile） | — | symbol-runtime catalog scan；status 3.11 |
+| D-104 | implementation（冷目录只采集 TS/TSX；非 TS 跳过不 touchFile） | D-115 | symbol-runtime catalog scan；status 3.11 |
+| D-114 | implementation（JSON 进切片不进目录；深度 8、符号 256；根容器始终保留） | — | json-outline.ts；kinds/slice/source；catalog scan |
+| D-115 | implementation（冷目录扩到带 importQuery 的语言：TS/TSX/JS/JSX；取代 D-104 覆盖范围） | — | languages.ts CATALOG_SCAN_LANGUAGES |
 | D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |

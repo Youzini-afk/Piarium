@@ -1,4 +1,5 @@
 import { languageIdForPath } from "@piarium/protocol";
+import { structureContainerPredicate } from "./kinds.js";
 import { outlineCoversHitLines } from "./slice.js";
 import type {
   StructureCapabilities,
@@ -79,7 +80,11 @@ export function createStructureSource(providers: readonly StructureProvider[]): 
         const result = await provider.outline({ ...nextRequest, warmOnly: priorAnswered });
         if (result.status === "cancelled") return result;
         if (result.status === "ready") {
-          const covered = hitLines.length === 0 || outlineCoversHitLines(result.symbols, hitLines);
+          const covered = hitLines.length === 0 || outlineCoversHitLines(
+            result.symbols,
+            hitLines,
+            structureContainerPredicate(languageId),
+          );
           if (covered) return result;
           firstReady = result;
           priorAnswered = true;

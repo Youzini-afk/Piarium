@@ -279,4 +279,82 @@ describe("sliceStructureWindows", () => {
     expect(windows[0]?.unit).toBeUndefined();
     expect(windows[0]?.text).toBe("line 4\nline 5\nline 6\nneedle\nline 8\nline 9\nline 10");
   });
+
+  it("slices a JSON hit to the enclosing object, not a ±3 window", () => {
+    const lines = [
+      "{",
+      "  \"pad0\": 0,",
+      ...Array.from({ length: 40 }, (_, index) => `  "pad${index + 1}": ${index + 1},`),
+      "  \"config\": {",
+      "    \"enabled\": true,",
+      "    \"needle\": \"hit\"",
+      "  }",
+      "}",
+    ];
+    const configStart = lines.findIndex((line) => line.includes("\"config\"")) + 1;
+    const hitLine = lines.findIndex((line) => line.includes("needle")) + 1;
+    const windows = sliceStructureWindows({
+      path: "big.json",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: hitLine }],
+      outline: readyOutline([
+        {
+          name: "$",
+          kind: "object",
+          range: { startLine: 1, endLine: lines.length },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "config",
+          kind: "property",
+          range: { startLine: configStart, endLine: lines.length - 1 },
+          signature: { startLine: configStart, endLine: configStart },
+        },
+        {
+          name: "config",
+          kind: "object",
+          range: { startLine: configStart, endLine: lines.length - 1 },
+          signature: { startLine: configStart, endLine: configStart },
+        },
+      ]),
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.fallback).toBe(false);
+    expect(windows[0]?.unit).toMatchObject({ name: "config", kind: "object" });
+    expect(windows[0]?.text).toContain("\"needle\": \"hit\"");
+    expect(windows[0]?.start).toBe(configStart);
+    expect(windows[0]?.end).toBe(lines.length - 1);
+    expect(windows[0]?.text.split("\n").length).toBeLessThan(10);
+  });
+
+  it("does not treat JSON property kinds as TS/JS slice units", () => {
+    const lines = [
+      "export function wrap() {",
+      "  const property = 1;",
+      "  return property;",
+      "}",
+    ];
+    const windows = sliceStructureWindows({
+      path: "sample.ts",
+      lines,
+      revision: "rev-1",
+      hits: [{ line: 2 }],
+      outline: readyOutline([
+        {
+          name: "wrap",
+          kind: "function",
+          range: { startLine: 1, endLine: 4 },
+          signature: { startLine: 1, endLine: 1 },
+        },
+        {
+          name: "property",
+          kind: "property",
+          range: { startLine: 2, endLine: 2 },
+          signature: { startLine: 2, endLine: 2 },
+        },
+      ]),
+    });
+    expect(windows[0]?.unit).toMatchObject({ name: "wrap", kind: "function" });
+  });
 });

@@ -32,3 +32,11 @@ export const STRUCTURE_HIT_CLASS_SCORE = {
  * assert either outcome (D-102).
  */
 export const STRUCTURE_PARSE_BUDGET_MS = 250;
+
+/**
+ * JSON outline caps (D-114). Depth counts object/array ancestors from the
+ * document value. The root object/array is always kept so a capped file still
+ * slices to that container instead of a bare ±3 window.
+ */
+export const JSON_OUTLINE_MAX_DEPTH = 8;
+export const JSON_OUTLINE_MAX_SYMBOLS = 256;

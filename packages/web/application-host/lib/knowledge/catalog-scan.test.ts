@@ -19,7 +19,7 @@ const parsingSource = () => createStructureSource([
 ]);
 
 describe("cold workspace catalog scan", () => {
-  it("indexes unmodified TS files from disk and skips dirty buffers and non-TS paths", async () => {
+  it("indexes unmodified TS and JS files from disk and skips dirty buffers, markdown, and JSON", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
     const store: KnowledgeStore = await openWorkspaceKnowledge({
@@ -40,8 +40,21 @@ describe("cold workspace catalog scan", () => {
       "}",
     ].join("\n"), "utf8");
     writeFileSync(join(documents.workspaceRoot, "notes.md"), "# not a catalog language\n", "utf8");
+    writeFileSync(join(documents.workspaceRoot, "pkg.json"), "{\"name\":\"jsOnly\",\"nested\":{\"a\":1}}\n", "utf8");
     mkdirSync(join(documents.workspaceRoot, "src"), { recursive: true });
-    writeFileSync(join(documents.workspaceRoot, "src", "skip.js"), "export const jsOnly = 1;\n", "utf8");
+    writeFileSync(join(documents.workspaceRoot, "src", "cold.js"), [
+      "const { join } = require(\"node:path\");",
+      "function jsOnly() {",
+      "  router.register(\"explore.search\");",
+      "  return join(\"a\");",
+      "}",
+      "module.exports = { jsOnly };",
+    ].join("\n"), "utf8");
+    writeFileSync(join(documents.workspaceRoot, "src", "Badge.jsx"), [
+      "export function Badge() {",
+      "  return <span>ok</span>;",
+      "}",
+    ].join("\n"), "utf8");
 
     const disk = await documents.authority.read(documents.resource("cold.ts"));
     expect(disk.status).toBe("ready");
@@ -93,7 +106,9 @@ describe("cold workspace catalog scan", () => {
     expect(readAgentInputSnapshot).not.toHaveBeenCalled();
     expect((await store.searchSymbols("coldSymbol", 5)).map((entry) => entry.name)).toEqual(["coldSymbol"]);
     expect((await store.searchSymbols("dirtySymbol", 5))).toEqual([]);
-    expect((await store.searchSymbols("jsOnly", 5))).toEqual([]);
+    expect((await store.searchSymbols("jsOnly", 5)).map((entry) => entry.name)).toEqual(["jsOnly"]);
+    expect((await store.searchSymbols("Badge", 5)).map((entry) => entry.name)).toEqual(["Badge"]);
+    expect((await store.searchSymbols("name", 5))).toEqual([]);
     const relations = await store.getFileRelations("cold.ts");
     expect(relations).toMatchObject({
       documentRevision: disk.revision,
@@ -104,7 +119,13 @@ describe("cold workspace catalog scan", () => {
         expect.objectContaining({ callee: "log", literal: "explore.search" }),
       ]),
     });
+    const jsRelations = await store.getFileRelations("src/cold.js");
+    expect(jsRelations).toMatchObject({
+      danglingEdges: 0,
+      imports: [expect.objectContaining({ specifier: "node:path" })],
+      connections: [expect.objectContaining({ callee: "register", literal: "explore.search" })],
+    });
     expect(await store.getFileRelations("notes.md")).toBeNull();
-    expect(await store.getFileRelations("src/skip.js")).toBeNull();
+    expect(await store.getFileRelations("pkg.json")).toBeNull();
   });
 });

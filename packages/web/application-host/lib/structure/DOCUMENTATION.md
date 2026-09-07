@@ -22,7 +22,7 @@ provider can actually answer for a language:
 
 | Operation | Meaning | Providers |
 | --- | --- | --- |
-| `outline` | Named units with signature and full span | tree-sitter (languages in the spec table), then LSP `documentSymbol` |
+| `outline` | Named units with signature and full span | tree-sitter (TS/TSX/JS/JSX/JSON), then LSP `documentSymbol` |
 | `classifyHits` | Hit line → name / body / string / comment | tree-sitter (not LSP) |
 | `literalCalls` | Call + string-literal shapes | tree-sitter when the spec has `literalCallQuery`; `StructureSource` fans out like outline (D-106); graph write classifies `connects` vs `associates` |
 | `imports` | Import sources | tree-sitter when the spec has `importQuery`; same fan-out; specifier strings are written as `imports` edges |
@@ -91,9 +91,12 @@ Tree-sitter capabilities are derived from `TREE_SITTER_LANGUAGE_SPECS` in
 `literalCallQuery`, is `unsupported` (D-099 / D-106 already fan that out).
 Do not hard-code the four flags.
 
-## Tree-sitter coverage (TS/TSX)
+## Tree-sitter coverage
 
-Wired language ids are `typescript` and `typescriptreact` only.
+Wired language ids are `typescript`, `typescriptreact`, `javascript`,
+`javascriptreact`, and `json`. JS and JSX share `tree-sitter-javascript.wasm`.
+
+### TypeScript / TSX
 
 Covered as outline units: function / generator / class / abstract class
 (including named `export default` and anonymous `export default class {}`),
@@ -107,12 +110,27 @@ Covered as names only (classification, not slice units): ordinary
 `abstract_method_signature`, and public fields with a non-definition
 initializer.
 
-Not covered: JS/JSX language ids, import aliases, enum members as units,
-interface members as units, parameters, decorators, unnamed
-`export default abstract class {}` (the grammar emits an error node), and a
-full grammar-node census. Arrow bindings (`const beta = () => {}`,
-`export const gamma = () => {}`) and `export default function` outline
-normally; they are not a coverage gap.
+Not covered: import aliases, enum members as units, interface members as units,
+parameters, decorators, unnamed `export default abstract class {}` (the grammar
+emits an error node), and a full grammar-node census. Arrow bindings
+(`const beta = () => {}`, `export const gamma = () => {}`) and
+`export default function` outline normally; they are not a coverage gap.
+
+### JavaScript / JSX
+
+Same outline and slice rules as TypeScript, minus types: no interface / type
+alias / enum / `function_signature` / `abstract_class` / `internal_module`.
+Fields use `field_definition`. Import and literal-call queries match the
+TypeScript shape. Cold catalog scan includes `javascript` and `javascriptreact`
+(D-115).
+
+### JSON
+
+JSON is sliced, not cataloged (D-114). Outline keeps top-level pairs and pairs
+whose value is `object` or `array` (`kind: property`), plus object/array
+nodes as slice containers. Caps: depth 8, 256 symbols; the document root is
+always kept. `literalCalls` / `imports` are `unsupported`. JSON files do not
+enter the cold catalog — key names are not what `searchSymbols` answers.
 
 The parse cache pins in-use trees so LRU eviction cannot `tree.delete()` a
 wasm object a caller still holds after `await`.
@@ -125,7 +143,8 @@ the LSP provider (D-097). Explore consumes the interface only; it does not call
 `documentSymbols` itself.
 
 Runtime wasm lives in `lib/structure/runtime/` (`web-tree-sitter.wasm` plus the
-TS/TSX grammars from `tree-sitter-typescript@0.23.2`). Paths go through the same
+TS/TSX grammars from `tree-sitter-typescript@0.23.2`, JavaScript from
+`tree-sitter-javascript@0.25.0`, and JSON from `tree-sitter-json@0.24.8`). Paths go through the same
 asar / asar.unpacked remap as `extension-builtins` (D-096). A missing or
 unloadable wasm is `unavailable`; explore then tries LSP or the ±3 window.
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Place the pinned tree-sitter runtime and TS/TSX grammar wasm next to the
- * Host structure module. Grammars come from the pinned tree-sitter-typescript
- * package (ABI-compatible with web-tree-sitter 0.27). Do not pull the
- * tree-sitter-wasms 0.1.13 pack — those artifacts lack dylink.0.
+ * Place the pinned tree-sitter runtime and grammar wasm next to the Host
+ * structure module. Grammars come from the pinned npm packages (ABI-compatible
+ * with web-tree-sitter 0.27). Do not pull the tree-sitter-wasms 0.1.13 pack —
+ * those artifacts lack dylink.0.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,11 +34,19 @@ const copyIfNeeded = (source, destName) => {
   log(`copied ${destName} from ${source} (${fs.statSync(dest).size} bytes)`);
 };
 
+const packageRoot = (name) => path.dirname(require.resolve(`${name}/package.json`));
+
 const webTreeSitterWasm = fileURLToPath(import.meta.resolve("web-tree-sitter/web-tree-sitter.wasm"));
 copyIfNeeded(webTreeSitterWasm, "web-tree-sitter.wasm");
 
-const grammarRoot = path.dirname(require.resolve("tree-sitter-typescript/package.json"));
-copyIfNeeded(path.join(grammarRoot, "tree-sitter-typescript.wasm"), "tree-sitter-typescript.wasm");
-copyIfNeeded(path.join(grammarRoot, "tree-sitter-tsx.wasm"), "tree-sitter-tsx.wasm");
+const typescriptRoot = packageRoot("tree-sitter-typescript");
+copyIfNeeded(path.join(typescriptRoot, "tree-sitter-typescript.wasm"), "tree-sitter-typescript.wasm");
+copyIfNeeded(path.join(typescriptRoot, "tree-sitter-tsx.wasm"), "tree-sitter-tsx.wasm");
+
+const javascriptRoot = packageRoot("tree-sitter-javascript");
+copyIfNeeded(path.join(javascriptRoot, "tree-sitter-javascript.wasm"), "tree-sitter-javascript.wasm");
+
+const jsonRoot = packageRoot("tree-sitter-json");
+copyIfNeeded(path.join(jsonRoot, "tree-sitter-json.wasm"), "tree-sitter-json.wasm");
 
 log(`runtime assets ready in ${destDir}`);

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { languageIdForPath } from "@piarium/protocol";
 import { LANGUAGE_VERSION, Language, MIN_COMPATIBLE_VERSION, Parser, Query, type Node } from "web-tree-sitter";
 import { STRUCTURE_PARSE_BUDGET_MS } from "./constants.js";
+import { collectJsonOutline } from "./json-outline.js";
 import { capabilitiesFromSpec, treeSitterLanguageSpec, type TreeSitterLanguageSpec } from "./languages.js";
 import { resolveStructureRuntimeFile } from "./runtime-path.js";
 import {
@@ -67,7 +68,9 @@ const initializerOf = (node: Node): Node | null => {
     const declarator = node.descendantsOfType("variable_declarator")[0];
     return declarator?.childForFieldName("value") ?? null;
   }
-  if (node.type === "public_field_definition") return node.childForFieldName("value");
+  if (node.type === "public_field_definition" || node.type === "field_definition") {
+    return node.childForFieldName("value");
+  }
   return null;
 };
 
@@ -272,9 +275,6 @@ export function createTreeSitterStructureProvider(
         tree.delete();
         return { status: "failed", message: "Parse budget exhausted before the file was finished." };
       }
-      const definitionQuery = new Query(language, spec.definitionQuery);
-      const matches = definitionQuery.matches(tree.rootNode);
-      definitionQuery.delete();
       if (request.signal?.aborted) {
         tree.delete();
         return { status: "cancelled", message: "Structure request was cancelled." };
@@ -283,32 +283,41 @@ export function createTreeSitterStructureProvider(
         tree.delete();
         return { status: "failed", message: "Parse budget exhausted before the file was finished." };
       }
-      const symbols: StructureSymbol[] = [];
-      const nameLines = new Set<number>();
-      const seen = new Set<string>();
-      for (const match of matches) {
-        const unit = match.captures.find((capture) => capture.name === "unit")?.node;
-        const name = match.captures.find((capture) => capture.name === "name")?.node;
-        if (name) nameLines.add(name.startPosition.row + 1);
-        if (!unit || !isOutlineUnit(unit, spec)) continue;
-        const unitName = nameOfUnit(unit, name);
-        const initializer = initializerOf(unit);
-        const range = pointToLines(unit.startPosition, unit.endPosition);
-        const signature = name
-          ? pointToLines(name.startPosition, name.endPosition)
-          : { startLine: range.startLine, endLine: range.startLine };
-        const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        symbols.push({
-          name: unitName,
-          kind: kindForType(unit.type, initializer?.type),
-          range,
-          signature: {
-            startLine: Math.max(range.startLine, signature.startLine),
-            endLine: Math.min(range.endLine, signature.endLine),
-          },
-        });
+      let symbols: StructureSymbol[] = [];
+      let nameLines = new Set<number>();
+      if (spec.jsonOutline) {
+        const collected = collectJsonOutline(tree.rootNode, spec.jsonOutline);
+        symbols = collected.symbols;
+        nameLines = collected.nameLines;
+      } else {
+        const definitionQuery = new Query(language, spec.definitionQuery);
+        const matches = definitionQuery.matches(tree.rootNode);
+        definitionQuery.delete();
+        const seen = new Set<string>();
+        for (const match of matches) {
+          const unit = match.captures.find((capture) => capture.name === "unit")?.node;
+          const name = match.captures.find((capture) => capture.name === "name")?.node;
+          if (name) nameLines.add(name.startPosition.row + 1);
+          if (!unit || !isOutlineUnit(unit, spec)) continue;
+          const unitName = nameOfUnit(unit, name);
+          const initializer = initializerOf(unit);
+          const range = pointToLines(unit.startPosition, unit.endPosition);
+          const signature = name
+            ? pointToLines(name.startPosition, name.endPosition)
+            : { startLine: range.startLine, endLine: range.startLine };
+          const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          symbols.push({
+            name: unitName,
+            kind: kindForType(unit.type, initializer?.type),
+            range,
+            signature: {
+              startLine: Math.max(range.startLine, signature.startLine),
+              endLine: Math.min(range.endLine, signature.endLine),
+            },
+          });
+        }
       }
       const entry: ParsedCache = { hash, languageId, tree, language, symbols, nameLines };
       cache.set(cacheKey, entry);
@@ -365,7 +374,7 @@ export function createTreeSitterStructureProvider(
     async outline(request): Promise<StructureOutlineResult> {
       const resolved = resolveSpec(request);
       if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, symbols: [], message: "tree-sitter outline is only wired for typescript/tsx." };
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, symbols: [], message: "tree-sitter has no grammar spec for this language." };
       }
       const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
@@ -385,7 +394,7 @@ export function createTreeSitterStructureProvider(
     async classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult> {
       const resolved = resolveSpec(request);
       if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, hits: [], message: "Hit classification is only wired for typescript/tsx." };
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, hits: [], message: "Hit classification has no grammar spec for this language." };
       }
       const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
       if (parsed.status !== "ready") {
@@ -405,7 +414,7 @@ export function createTreeSitterStructureProvider(
     async literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult> {
       const resolved = resolveSpec(request);
       if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction is only wired for typescript/tsx." };
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction has no grammar spec for this language." };
       }
       if (!resolved.spec.literalCallQuery) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction is not available for this language." };
@@ -432,7 +441,7 @@ export function createTreeSitterStructureProvider(
     async imports(request: StructureOutlineRequest): Promise<StructureImportsResult> {
       const resolved = resolveSpec(request);
       if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction is only wired for typescript/tsx." };
+        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction has no grammar spec for this language." };
       }
       if (!resolved.spec.importQuery) {
         return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction is not available for this language." };

@@ -61,3 +61,16 @@ const STRUCTURE_CONTAINER_KINDS = new Set([
 export function isStructureContainerKind(kind: string): boolean {
   return STRUCTURE_CONTAINER_KINDS.has(kind);
 }
+
+/**
+ * JSON slice containers. `property` is a pair; `object` / `array` are the
+ * value nodes. This is not folded into `isStructureContainerKind` — that
+ * would let a TS/JS `property` kind become a slice unit (D-098 / D-114).
+ */
+export function isJsonStructureContainerKind(kind: string): boolean {
+  return kind === "property" || kind === "object" || kind === "array";
+}
+
+export function structureContainerPredicate(languageId: string | null | undefined): (kind: string) => boolean {
+  return languageId === "json" ? isJsonStructureContainerKind : isStructureContainerKind;
+}

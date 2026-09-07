@@ -770,4 +770,64 @@ describe("explore structure slices", () => {
     });
     expect(result.snippets[0]?.unit).toBeUndefined();
   });
+
+  it("slices a JavaScript hit to its function and a JSX hit to its component", async () => {
+    const js = [
+      "function decoy() { return 0; }",
+      "function boot() {",
+      "  router.register(\"explore.search\");",
+      "  return 1;",
+      "}",
+    ].join("\n");
+    const jsx = [
+      "export function decoy() { return null; }",
+      "export function Badge() {",
+      "  return <span>needle</span>;",
+      "}",
+    ].join("\n");
+    const structure = createStructureSource([parsingProvider()]);
+    const jsResult = await explore({ question: "explore.search" }, {
+      rgSearch: async () => [{ path: "boot.js", line: 3, text: "  router.register(\"explore.search\");" }],
+      readFile: async () => ready(js),
+      structure,
+    });
+    expect(jsResult.snippets[0]).toMatchObject({
+      path: "boot.js",
+      unit: { name: "boot", kind: "function" },
+      structure: { provider: "tree-sitter", status: "ready" },
+    });
+    expect(jsResult.snippets[0]?.text).toContain("router.register");
+    const jsxResult = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "Badge.jsx", line: 3, text: "  return <span>needle</span>;" }],
+      readFile: async () => ready(jsx),
+      structure,
+    });
+    expect(jsxResult.snippets[0]).toMatchObject({
+      path: "Badge.jsx",
+      unit: { name: "Badge", kind: "function" },
+    });
+  });
+
+  it("slices a large JSON hit to the enclosing object instead of a ±3 window", async () => {
+    const lines = [
+      "{",
+      ...Array.from({ length: 40 }, (_, index) => `  "pad${index}": ${index},`),
+      "  \"config\": {",
+      "    \"enabled\": true,",
+      "    \"needle\": \"hit\"",
+      "  }",
+      "}",
+    ];
+    const content = lines.join("\n");
+    const hitLine = lines.findIndex((line) => line.includes("needle")) + 1;
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "big.json", line: hitLine, text: "    \"needle\": \"hit\"" }],
+      readFile: async () => ready(content),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    expect(result.snippets[0]?.unit).toMatchObject({ name: "config" });
+    expect(result.snippets[0]?.text).toContain("\"needle\": \"hit\"");
+    expect(result.snippets[0]?.text).not.toContain("\"pad0\"");
+    expect((result.snippets[0]?.endLine ?? 0) - (result.snippets[0]?.startLine ?? 0)).toBeLessThan(8);
+  });
 });
