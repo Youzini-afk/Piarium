@@ -23,6 +23,7 @@ import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerDocumentRoutes } from '../documents/routes.js';
 import { registerWorkspaceSearchRoutes } from '../search/routes.js';
 import { registerLanguageRoutes } from '../lsp/routes.js';
+import { registerLanguageSupportRoutes } from '../language-support/routes.js';
 import { registerRunRoutes } from '../run/routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -63,6 +64,7 @@ export interface PlatformRouteDependencies {
   getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
   getPiariumEventClients: PiariumEventDependencies['getPiariumEventClients'];
   languageSupervisor?: LanguageRouteDependencies['language'];
+  languageSupport?: import('../language-support/runtime.js').LanguageSupportRuntime;
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
   onGitStatus?: (scope: string, status: unknown) => void | Promise<void>;
   openFilesystemPath?: RuntimeManagerDependencies['openFilesystemPath'];
@@ -177,6 +179,7 @@ export const createPlatformRoutesRuntime = ({
       uiAuthController,
       documents,
       languageSupervisor,
+      languageSupport,
       runRuntime,
     } = dependencies;
 
@@ -310,6 +313,9 @@ export const createPlatformRoutesRuntime = ({
     }
     if (languageSupervisor) {
       registerLanguageRoutes(app, { language: languageSupervisor, uiAuthController });
+    }
+    if (languageSupport) {
+      registerLanguageSupportRoutes(app, { languageSupport, uiAuthController });
     }
     if (runRuntime) {
       registerRunRoutes(app, {

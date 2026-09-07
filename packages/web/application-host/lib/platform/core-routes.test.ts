@@ -17,6 +17,7 @@ describe('core-routes', () => {
   it.each([
     '/api/documents/workspace/resolve',
     '/api/language/sync',
+    '/api/language-support/status',
     '/api/tasks/run',
     '/api/debug/start',
     '/api/tests/run',

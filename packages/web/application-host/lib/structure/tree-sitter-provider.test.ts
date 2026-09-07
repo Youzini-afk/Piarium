@@ -78,6 +78,23 @@ describe("tree-sitter language specs", () => {
     });
   });
 
+  it("notifies the host when a structure request names a language", async () => {
+    const seen: Array<{ languageId: string; workspaceId?: string }> = [];
+    const provider = createTreeSitterStructureProvider({
+      onLanguageRequest: (languageId, workspaceId) => {
+        seen.push(workspaceId ? { languageId, workspaceId } : { languageId });
+      },
+    });
+    await provider.outline({
+      path: "app.py",
+      languageId: "python",
+      text: "print('x')",
+      revision: "r1",
+      workspaceId: "ws-1",
+    });
+    expect(seen).toEqual([{ languageId: "python", workspaceId: "ws-1" }]);
+  });
+
   it("turns a missing import or literal-call query into unsupported, not failed", async () => {
     const provider = createTreeSitterStructureProvider({ parseBudgetMs: 30_000 });
     const python = await provider.literalCalls({

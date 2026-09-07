@@ -2184,6 +2184,50 @@ export interface LanguageServicesAPI {
   disposeWorkspace(workspaceId: string): Promise<void>;
 }
 
+export type StructureGrammarStatus =
+  | 'bundled'
+  | 'installed'
+  | 'available'
+  | 'absent'
+  | 'user-unverified';
+
+export interface LanguageSupportCapabilities {
+  outline: boolean;
+  classifyHits: boolean;
+  literalCalls: boolean;
+  imports: boolean;
+}
+
+export interface LanguageSupportLanguageRow {
+  languageId: string;
+  grammarStatus: StructureGrammarStatus;
+  capabilities: LanguageSupportCapabilities;
+  fileCount: number;
+  wanted: boolean;
+}
+
+export interface LanguageSupportStatus {
+  workspaceId: string;
+  languages: LanguageSupportLanguageRow[];
+  partial: boolean;
+  scannedFiles: number;
+  fileLimit: number;
+}
+
+export type LanguageSupportFailureReason = 'failed' | 'unsupported' | 'cancelled' | 'integrity' | 'absent';
+
+export type LanguageSupportInstallResult =
+  | { status: 'ready'; languageId: string; grammarStatus: StructureGrammarStatus }
+  | { status: 'failed'; languageId: string; message: string; reason: LanguageSupportFailureReason }
+  | { status: 'cancelled'; languageId: string };
+
+export interface LanguageSupportAPI {
+  getStatus(request: { workspaceId: string }): Promise<LanguageSupportStatus>;
+  install(request: { languageId: string }): Promise<LanguageSupportInstallResult>;
+  cancelInstall(request: { languageId: string }): Promise<LanguageSupportInstallResult>;
+  importUserGrammar(request: { languageId: string; path: string }): Promise<LanguageSupportInstallResult>;
+}
+
 export type PiariumTaskConfigurationType = 'node' | 'process' | 'npm';
 
 export type PiariumTaskConfiguration = {
@@ -2364,6 +2408,7 @@ export interface RuntimeAPIs {
   documents: DocumentsAPI;
   workspaceSearch: WorkspaceSearchAPI;
   language: LanguageServicesAPI;
+  languageSupport: LanguageSupportAPI;
   tasks: WorkspaceTasksAPI;
   debug: WorkspaceDebugAPI;
   tests: WorkspaceTestAPI;

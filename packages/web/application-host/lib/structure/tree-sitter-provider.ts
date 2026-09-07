@@ -25,6 +25,8 @@ export interface TreeSitterStructureProviderOptions {
   runtimeFromUrl?: string;
   parseBudgetMs?: number;
   pathExists?: (candidate: string) => boolean;
+  /** Demand signal for installable-but-missing grammars. Host never downloads from here. */
+  onLanguageRequest?: (languageId: string, workspaceId?: string) => void;
 }
 
 const FUNCTION_LIKE_TYPES = new Set([
@@ -361,6 +363,7 @@ export function createTreeSitterStructureProvider(
 
   const resolveSpec = (request: StructureOutlineRequest): { languageId: string; spec: TreeSitterLanguageSpec } | null => {
     const languageId = request.languageId ?? languageIdForPath(request.path);
+    if (languageId) options.onLanguageRequest?.(languageId, request.workspaceId);
     if (!languageId) return null;
     const spec = treeSitterLanguageSpec(languageId);
     return spec ? { languageId, spec } : null;

@@ -12,6 +12,7 @@ import { createVSCodeWorkspaceAPI } from './workspace';
 import { createVSCodeDocumentsAPI } from './documents';
 import { createVSCodeWorkspaceSearchAPI } from './workspace-search';
 import { createVSCodeLanguageServicesAPI } from './language';
+import { createVSCodeLanguageSupportAPI } from './language-support';
 import {
   createVSCodeWorkspaceDebugAPI,
   createVSCodeWorkspaceTasksAPI,
@@ -46,6 +47,7 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   documents: createVSCodeDocumentsAPI(),
   workspaceSearch: createVSCodeWorkspaceSearchAPI(),
   language: createVSCodeLanguageServicesAPI(),
+  languageSupport: createVSCodeLanguageSupportAPI(),
   tasks: createVSCodeWorkspaceTasksAPI(),
   debug: createVSCodeWorkspaceDebugAPI(),
   tests: createVSCodeWorkspaceTestAPI(),

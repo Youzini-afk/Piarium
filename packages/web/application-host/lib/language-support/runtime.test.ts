@@ -1,0 +1,103 @@
+import { describe, expect, it } from "vitest";
+import { createLanguageSupportRuntime, LANGUAGE_DISTRIBUTION_FILE_LIMIT } from "./runtime.js";
+import type { FileSearchItem } from "../fs/types.js";
+
+const file = (relativePath: string): FileSearchItem => ({
+  name: relativePath.split("/").at(-1) ?? relativePath,
+  path: `/ws/${relativePath}`,
+  relativePath,
+});
+
+describe("createLanguageSupportRuntime", () => {
+  it("buckets workspace files on demand and marks the scan partial at the file cap", async () => {
+    let searches = 0;
+    const runtime = createLanguageSupportRuntime({
+      fileLimit: 3,
+      cacheTtlMs: 60_000,
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async (_root, options) => {
+        searches += 1;
+        expect(options.limit).toBe(4);
+        return [
+          file("a.ts"),
+          file("b.ts"),
+          file("c.js"),
+          file("d.py"),
+          file("notes.md"),
+        ];
+      },
+    });
+    const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(status).toMatchObject({
+      workspaceId: "ws-1",
+      partial: true,
+      scannedFiles: 3,
+      fileLimit: 3,
+    });
+    expect(status.languages.map((row) => row.languageId)).toEqual(["typescript", "javascript"]);
+    expect(status.languages[0]).toMatchObject({
+      languageId: "typescript",
+      grammarStatus: "bundled",
+      fileCount: 2,
+      wanted: false,
+      capabilities: { outline: true, classifyHits: true, literalCalls: true, imports: true },
+    });
+    expect(status.languages[1]).toMatchObject({
+      languageId: "javascript",
+      grammarStatus: "bundled",
+      fileCount: 1,
+    });
+    await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(searches).toBe(1);
+  });
+
+  it("records wanted only for installable languages that are not present, and still leaves structure unsupported", async () => {
+    const runtime = createLanguageSupportRuntime({
+      installableLanguageIds: () => ["python"],
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [file("app.py"), file("main.ts")],
+    });
+    runtime.noteRequest("python", "ws-1");
+    runtime.noteRequest("typescript", "ws-1");
+    runtime.noteRequest("python");
+    expect(runtime.peekWanted("ws-1")).toEqual(["python"]);
+    const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(status.languages[0]).toMatchObject({
+      languageId: "python",
+      grammarStatus: "available",
+      wanted: true,
+      fileCount: 1,
+      capabilities: { outline: false, classifyHits: false, literalCalls: false, imports: false },
+    });
+    expect(status.languages[1]).toMatchObject({
+      languageId: "typescript",
+      grammarStatus: "bundled",
+      wanted: false,
+      fileCount: 1,
+    });
+  });
+
+  it("does not enumerate files until getStatus is called", async () => {
+    let searches = 0;
+    createLanguageSupportRuntime({
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => {
+        searches += 1;
+        return [];
+      },
+    });
+    expect(searches).toBe(0);
+    expect(LANGUAGE_DISTRIBUTION_FILE_LIMIT).toBe(8_000);
+  });
+
+  it("reports install as unsupported until a download pipeline is wired", async () => {
+    const runtime = createLanguageSupportRuntime({
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [],
+    });
+    await expect(runtime.install({ languageId: "python" })).resolves.toMatchObject({
+      status: "failed",
+      reason: "unsupported",
+    });
+  });
+});

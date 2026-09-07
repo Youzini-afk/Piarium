@@ -72,6 +72,7 @@ import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
+import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
@@ -1426,19 +1427,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Decision suggestion failed:', errorMessage(error)),
   });
   observeKnowledgeBlockChange = decisionSuggestionRuntime.observeBlockChange;
-  const structureSource = createStructureSource([
-    createTreeSitterStructureProvider(),
-    createLspStructureProvider({
-      documents: documentsAuthority,
-      supervisor: languageSupervisor,
-    }),
-  ]);
   const catalogFileSearch = createFsSearchRuntimeFactory({
     fsPromises,
     path,
     spawn,
     resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
   });
+  const languageSupportRuntime = createLanguageSupportRuntime({
+    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
+    inspectWorkspace: async (workspaceId) => documentsAuthority.inspectWorkspace(workspaceId),
+  });
+  const structureSource = createStructureSource([
+    createTreeSitterStructureProvider({
+      onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
+    }),
+    createLspStructureProvider({
+      documents: documentsAuthority,
+      supervisor: languageSupervisor,
+    }),
+  ]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
     getStore: getKnowledgeStoreForWorkspace,
     documents: documentsAuthority,
@@ -1946,6 +1953,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
     onGitStatus: observeKnowledgeGitStatus,
     languageSupervisor,
+    languageSupport: languageSupportRuntime,
     runRuntime,
     reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
   });

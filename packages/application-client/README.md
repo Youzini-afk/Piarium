@@ -4,10 +4,10 @@ Framework-neutral Piarium application client boundary.
 
 ## Purpose
 
-This package owns the `RuntimeAPIs` aggregate interface, all 24 API interfaces (Terminal, Git,
-Files, Documents, Settings, Permissions, Notifications, Extensions, Language, Tasks, Debug, Tests,
+This package owns the `RuntimeAPIs` aggregate interface, all 25 API interfaces (Terminal, Git,
+Files, Documents, Settings, Permissions, Notifications, Extensions, Language, LanguageSupport, Tasks, Debug, Tests,
 etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesError`,
-`RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
+`LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
 `DraftStarterRef`, `FileEditorSettingsPatch`), and the single desktop IPC contract (`desktop.ts`).
 
 The desktop contract defines:

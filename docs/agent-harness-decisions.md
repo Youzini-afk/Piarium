@@ -2343,6 +2343,42 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-120 · 2026-09-07 · 3.11 第 5 步（语言分布现算、上限与缓存）
+
+类型：默认值调整
+
+背景：设置页需要按工作区列出语言，但仓库里没有语言分布索引。开机时扫全仓会挡启动。
+
+决定：`LanguageSupportAPI.getStatus` 被调用时用冷扫描那条 `searchFilesystemFiles` + `languageIdForPath` 现算。文件上限 **8000**，多出来的那一份只用来置 `partial: true`。按工作区缓存 **30 秒**。不落盘，不进启动路径。无 `languageId` 的文件计入扫描数但不占语言行。
+
+原因：设置页是用户主动打开的；几百毫秒可以接受，开机不行。上限避免一次枚举把 Host 拖死。
+
+考虑过的替代：(1) 持久化分布——又一份会过期的索引。(2) 复用冷目录扫描的文件名单——那份只含目录语言，JSON/Python 会消失。
+
+不改：冷目录扫描本身；启动路径。
+
+影响：`lib/language-support/runtime.ts`；`/api/language-support/status`。
+
+状态：已实施。
+
+### D-121 · 2026-09-07 · 3.11 第 5 步（wanted 是内存需求信号）
+
+类型：问题与解法
+
+背景：plan 的「按需」容易被做成 Host 自己下载。本机没有 embedding 下载管道可抄，而且结构请求今天对缺包语言已经返回 `unsupported`。
+
+决定：结构请求在规格表没有、但清单标明可装的语言上，把 languageId 记进**按工作区的内存** wanted 集合，**仍然返回 `unsupported`**。`getStatus` 把 wanted 行排最前。没有工作区 id 的请求不记。Host 不因此发起网络。
+
+原因：「按需」是需求信号，不是自动下载。同意模型是下一刀的明确安装动作。
+
+考虑过的替代：(1) 全局 wanted——A 工作区的 Python 请求会污染 B 的设置页。(2) 请求时自动下载——Host 自发网络。
+
+不改：`unsupported` 语义；D-099 fan-out。
+
+影响：tree-sitter `onLanguageRequest`；`LanguageSupportRuntime.noteRequest`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2455,6 +2491,8 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-104 | implementation（冷目录只采集 TS/TSX；非 TS 跳过不 touchFile） | D-115 | symbol-runtime catalog scan；status 3.11 |
 | D-114 | implementation（JSON 进切片不进目录；深度 8、符号 256；根容器始终保留） | — | json-outline.ts；kinds/slice/source；catalog scan |
 | D-115 | implementation（冷目录扩到带 importQuery 的语言：TS/TSX/JS/JSX；取代 D-104 覆盖范围） | — | languages.ts CATALOG_SCAN_LANGUAGES |
+| D-120 | implementation（语言分布现算；文件上限 8000；工作区缓存 30s） | — | language-support/runtime.ts |
+| D-121 | implementation（wanted 按工作区内存记，结构仍报 unsupported；Host 不自发网络） | — | tree-sitter onLanguageRequest；LanguageSupportRuntime |
 | D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |
