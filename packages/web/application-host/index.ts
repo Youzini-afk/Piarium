@@ -74,7 +74,7 @@ import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
 import { createGrammarAbiInspector, GRAMMAR_MAX_ABI, GRAMMAR_MIN_ABI } from './lib/structure/grammar-abi.js';
 import { createGrammarInstaller } from './lib/structure/grammar-installer.js';
-import { loadCommittedGrammarPackManifest } from './lib/structure/grammar-manifest.js';
+import { EMPTY_GRAMMAR_PACK_MANIFEST, loadCommittedGrammarPackManifest } from './lib/structure/grammar-manifest.js';
 import { createGrammarStore } from './lib/structure/grammar-store.js';
 import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
@@ -1438,7 +1438,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     spawn,
     resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
   });
-  const grammarManifest = loadCommittedGrammarPackManifest();
+  // A grammar catalog must not be able to stop the Host from starting: an
+  // unreadable manifest means "nothing is installable", not "no server".
+  let grammarManifest = EMPTY_GRAMMAR_PACK_MANIFEST;
+  try {
+    grammarManifest = loadCommittedGrammarPackManifest();
+  } catch (error) {
+    console.error('[LanguageSupport] Grammar pack manifest is unusable:', errorMessage(error));
+  }
   const grammarStore = createGrammarStore(PIARIUM_DATA_DIR);
   const grammarInstaller = createGrammarInstaller({
     store: grammarStore,
@@ -1458,6 +1465,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     createTreeSitterStructureProvider({
       onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
       resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
+      resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
     }),
     createLspStructureProvider({
       documents: documentsAuthority,

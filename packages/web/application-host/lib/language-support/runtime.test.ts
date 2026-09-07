@@ -1,5 +1,9 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createLanguageSupportRuntime, LANGUAGE_DISTRIBUTION_FILE_LIMIT } from "./runtime.js";
+import { createGrammarStore, grammarIntegrityOf } from "../structure/grammar-store.js";
 import type { FileSearchItem } from "../fs/types.js";
 
 const file = (relativePath: string): FileSearchItem => ({
@@ -121,6 +125,8 @@ describe("createLanguageSupportRuntime", () => {
             bytes: 12,
             abi: 15,
             licensePath: null,
+            tagsPath: "package/queries/tags.scm",
+            tagsIntegrity: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           },
         },
         skipped: {},
@@ -132,14 +138,74 @@ describe("createLanguageSupportRuntime", () => {
       },
     });
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(status.grammarStore).toBe("ready");
     expect(status.languages[0]).toMatchObject({
       languageId: "python",
       grammarStatus: "available",
-      pack: { abi: 15, packageName: "tree-sitter-python", version: "0.25.0" },
+      pack: { abi: 15, packageName: "tree-sitter-python", version: "0.25.0", providesOutline: true },
     });
     await expect(runtime.install({ languageId: "python" })).resolves.toMatchObject({
       status: "ready",
       grammarStatus: "installed",
     });
+  });
+
+  it("wires an installed grammar that shipped a query and reports the rest as installed-only", async () => {
+    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-language-support-")));
+    const wasm = new Uint8Array([1, 2, 3]);
+    const tags = new TextEncoder().encode("(class_declaration) @definition.class");
+    store.put(
+      "python",
+      wasm,
+      { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-python.wasm" },
+      { bytes: tags, integrity: grammarIntegrityOf(tags) },
+    );
+    store.put("go", wasm, { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-go.wasm" });
+    const runtime = createLanguageSupportRuntime({
+      store,
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [file("app.py"), file("main.go")],
+    });
+
+    expect(runtime.installedStructureSpec("python")).toMatchObject({ grammarFile: "tree-sitter-python.wasm" });
+    // A grammar with no query cannot outline, so it is not wired at all.
+    expect(runtime.installedStructureSpec("go")).toBeNull();
+    expect(runtime.installedStructureSpec("typescript")).toBeNull();
+
+    const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
+    expect(byLanguage.get("python")).toMatchObject({
+      grammarStatus: "installed",
+      capabilities: { outline: true, classifyHits: true, literalCalls: false, imports: false },
+    });
+    expect(byLanguage.get("go")).toMatchObject({
+      grammarStatus: "installed",
+      capabilities: { outline: false, classifyHits: false, literalCalls: false, imports: false },
+    });
+  });
+
+  it("reports an unreadable index as unknown instead of nothing installed", async () => {
+    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-language-support-")));
+    const wasm = new Uint8Array([4, 5, 6]);
+    store.put("python", wasm, {
+      integrity: grammarIntegrityOf(wasm),
+      source: "manifest",
+      grammarFile: "tree-sitter-python.wasm",
+    });
+    writeFileSync(join(store.root, "index.json"), "{ broken", "utf8");
+    const runtime = createLanguageSupportRuntime({
+      store,
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [file("app.py"), file("main.ts")],
+    });
+
+    const status = await runtime.getStatus({ workspaceId: "ws-1" });
+    expect(status.grammarStore).toBe("unreadable");
+    const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
+    expect(byLanguage.get("python")?.grammarStatus).toBe("unknown");
+    // The bundled table is still authoritative on its own.
+    expect(byLanguage.get("typescript")?.grammarStatus).toBe("bundled");
+    // Demand tracking must not turn a broken index into a structure failure.
+    expect(() => runtime.noteRequest("python", "ws-1")).not.toThrow();
   });
 });

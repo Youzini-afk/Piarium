@@ -14,6 +14,13 @@ export interface GrammarPackEntry {
   bytes: number;
   abi: number;
   licensePath: string | null;
+  /**
+   * Upstream `queries/tags.scm`. Present only when the publish-time script
+   * compiled it against the grammar, so a pack that carries one is a pack that
+   * produces an outline once installed.
+   */
+  tagsPath: string | null;
+  tagsIntegrity: string | null;
 }
 
 export interface GrammarPackManifest {
@@ -23,6 +30,14 @@ export interface GrammarPackManifest {
   packs: Record<string, GrammarPackEntry>;
   skipped: Record<string, string>;
 }
+
+export const EMPTY_GRAMMAR_PACK_MANIFEST: GrammarPackManifest = {
+  generatedAt: "",
+  minCompatibleAbi: 0,
+  maxCompatibleAbi: 0,
+  packs: {},
+  skipped: {},
+};
 
 export const isGrammarIntegrity = (value: string): boolean => GRAMMAR_INTEGRITY_PATTERN.test(value);
 
@@ -37,6 +52,7 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
     throw new Error("Grammar pack manifest is missing ABI bounds.");
   }
   const packs: Record<string, GrammarPackEntry> = {};
+  const excluded: Record<string, string> = {};
   const rawPacks = raw.packs && typeof raw.packs === "object" && !Array.isArray(raw.packs)
     ? raw.packs as Record<string, unknown>
     : {};
@@ -56,6 +72,18 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
     ) {
       throw new Error(`Grammar pack manifest entry for ${languageId} is invalid.`);
     }
+    // A pack advertised outside the window the manifest itself declares can
+    // never load, so it is not offered as installable.
+    if (pack.abi < raw.minCompatibleAbi || pack.abi > raw.maxCompatibleAbi) {
+      excluded[languageId] = `abi ${pack.abi} is outside the manifest window ${raw.minCompatibleAbi}-${raw.maxCompatibleAbi}`;
+      continue;
+    }
+    const path = typeof pack.tagsPath === "string" && pack.tagsPath.trim() ? pack.tagsPath : null;
+    const digest = typeof pack.tagsIntegrity === "string" && isGrammarIntegrity(pack.tagsIntegrity)
+      ? pack.tagsIntegrity
+      : null;
+    // Both halves or neither: a query we cannot verify is not installed.
+    const hasQuery = Boolean(path && digest);
     packs[languageId] = {
       languageId,
       packageName: pack.packageName,
@@ -67,6 +95,8 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
       bytes: pack.bytes,
       abi: pack.abi,
       licensePath: typeof pack.licensePath === "string" ? pack.licensePath : null,
+      tagsPath: hasQuery ? path : null,
+      tagsIntegrity: hasQuery ? digest : null,
     };
   }
   const skipped = raw.skipped && typeof raw.skipped === "object" && !Array.isArray(raw.skipped)
@@ -80,7 +110,7 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
     minCompatibleAbi: raw.minCompatibleAbi,
     maxCompatibleAbi: raw.maxCompatibleAbi,
     packs,
-    skipped,
+    skipped: { ...skipped, ...excluded },
   };
 }
 

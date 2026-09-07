@@ -21,11 +21,13 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
   canImportGrammar,
   canInstallGrammar,
+  formatPackBytes,
   grammarStatusKey,
   grammarStatusTone,
   languageServerStatusKey,
   languageServerStatusTone,
   statusToneClass,
+  structureNoteKey,
 } from './presentation';
 
 const StatusValue: React.FC<{ tone: ReturnType<typeof grammarStatusTone>; label: string }> = ({
@@ -45,6 +47,7 @@ const LanguageRow: React.FC<{
 }> = ({ busy, languageServerStatus, onCancel, onImport, onInstall, row }) => {
   const { t } = useI18n();
   const lspStatus = languageServerStatus ?? 'absent';
+  const noteKey = structureNoteKey(row);
   const capabilityKeys: I18nKey[] = [];
   if (row.capabilities.outline) capabilityKeys.push('settings.languageSupport.capability.outline');
   if (row.capabilities.classifyHits) capabilityKeys.push('settings.languageSupport.capability.classifyHits');
@@ -69,6 +72,8 @@ const LanguageRow: React.FC<{
             {row.pack ? (
               <span className={SETTINGS_HELPER_CLASS}>
                 {t('settings.languageSupport.field.abi', { abi: row.pack.abi })}
+                {' · '}
+                {formatPackBytes(row.pack.bytes)}
               </span>
             ) : null}
           </div>
@@ -83,7 +88,7 @@ const LanguageRow: React.FC<{
             settingsItem={`language-support.grammar.${row.languageId}`}
           >
             <StatusValue
-              tone={grammarStatusTone(row.grammarStatus)}
+              tone={grammarStatusTone(row.grammarStatus, row.capabilities)}
               label={t(grammarStatusKey(row.grammarStatus))}
             />
           </SettingsFieldRow>
@@ -91,6 +96,9 @@ const LanguageRow: React.FC<{
             <p className={SETTINGS_HELPER_CLASS}>
               {capabilityKeys.map((key) => t(key)).join(' · ')}
             </p>
+          ) : null}
+          {noteKey ? (
+            <p className="typography-micro text-[var(--status-warning)]">{t(noteKey)}</p>
           ) : null}
         </div>
         {canInstallGrammar(row.grammarStatus) || canImportGrammar(row.grammarStatus) ? (
@@ -247,6 +255,11 @@ export const LanguageSupportPage: React.FC = () => {
               {t('settings.languageSupport.actions.refresh')}
             </Button>
           </div>
+        ) : null}
+        {workspace.status === 'ready' && status?.grammarStore === 'unreadable' ? (
+          <p className="typography-micro text-[var(--status-error)]">
+            {t('settings.languageSupport.storeUnreadable')}
+          </p>
         ) : null}
         {workspace.status === 'ready' && status?.partial ? (
           <p className="typography-micro text-[var(--status-warning)]">

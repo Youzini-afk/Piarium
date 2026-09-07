@@ -4,10 +4,16 @@ import { languageIdForPath } from "@piarium/protocol";
 import { LANGUAGE_VERSION, Language, MIN_COMPATIBLE_VERSION, Parser, Query, type Node } from "web-tree-sitter";
 import { STRUCTURE_PARSE_BUDGET_MS } from "./constants.js";
 import { collectJsonOutline } from "./json-outline.js";
-import { capabilitiesFromSpec, treeSitterLanguageSpec, type TreeSitterLanguageSpec } from "./languages.js";
+import {
+  capabilitiesFromSpec,
+  tagsDefinitionKind,
+  treeSitterLanguageSpec,
+  treeSitterTagsSpec,
+  type StructureTypeMatcher,
+  type TreeSitterLanguageSpec,
+} from "./languages.js";
 import { resolveStructureRuntimeFile } from "./runtime-path.js";
 import {
-  type StructureCapabilities,
   type StructureClassifyRequest,
   type StructureClassifyResult,
   type StructureHitClass,
@@ -27,8 +33,14 @@ export interface TreeSitterStructureProviderOptions {
   pathExists?: (candidate: string) => boolean;
   /** Demand signal for installable-but-missing grammars. Host never downloads from here. */
   onLanguageRequest?: (languageId: string, workspaceId?: string) => void;
-  /** Second-level lookup after the bundled runtime directory (D-118). */
+  /** Second-level lookup after the bundled runtime directory (D-126). */
   resolveInstalled?: (fileName: string) => string | null;
+  /**
+   * Wiring for a language that is installed rather than bundled. The caller
+   * owns the memo and clears it on install/remove, so this provider never
+   * caches a "not installed" answer past the install that fixes it (D-129).
+   */
+  resolveInstalledLanguage?: (languageId: string) => { grammarFile: string; tagsQuery: string } | null;
 }
 
 const FUNCTION_LIKE_TYPES = new Set([
@@ -120,9 +132,52 @@ const pointToLines = (start: { row: number; column: number }, end: { row: number
   return { startLine, endLine: Math.max(startLine, endLine) };
 };
 
-const capabilitiesFor = (languageId: string | null): StructureCapabilities => (
-  capabilitiesFromSpec(treeSitterLanguageSpec(languageId))
-);
+/**
+ * Outline from an upstream `tags.scm`. Those queries pair a `@definition.*`
+ * capture on the whole declaration with `@name` on its identifier, which is
+ * exactly the unit/name split the slicer wants — so one adapter serves every
+ * language we can install instead of a hand-written query per language.
+ */
+function collectTagsOutline(
+  language: Language,
+  tagsQuery: string,
+  root: Node,
+): { symbols: StructureSymbol[]; nameLines: Set<number> } {
+  const symbols: StructureSymbol[] = [];
+  const nameLines = new Set<number>();
+  const query = new Query(language, tagsQuery);
+  try {
+    const seen = new Set<string>();
+    for (const match of query.matches(root)) {
+      const name = match.captures.find((capture) => capture.name === "name")?.node;
+      if (name) nameLines.add(name.startPosition.row + 1);
+      const definition = match.captures.find((capture) => tagsDefinitionKind(capture.name) !== null);
+      if (!definition) continue;
+      const unit = definition.node;
+      const named = name ?? unit.childForFieldName("name");
+      if (!named) continue;
+      const unitName = named.text.trim();
+      if (!unitName) continue;
+      const range = pointToLines(unit.startPosition, unit.endPosition);
+      const signature = pointToLines(named.startPosition, named.endPosition);
+      const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      symbols.push({
+        name: unitName,
+        kind: tagsDefinitionKind(definition.name) ?? "unknown",
+        range,
+        signature: {
+          startLine: Math.max(range.startLine, signature.startLine),
+          endLine: Math.min(range.endLine, signature.endLine),
+        },
+      });
+    }
+  } finally {
+    query.delete();
+  }
+  return { symbols, nameLines };
+}
 
 interface ParsedCache {
   hash: string;
@@ -174,6 +229,18 @@ export function createTreeSitterStructureProvider(
     resolveStructureRuntimeFile(name, fromUrl ?? import.meta.url, pathExists, options.resolveInstalled)
   );
 
+  /**
+   * Bundled table first, then an installed grammar with its upstream tags
+   * query. Nothing is memoized here — the caller's lookup is the memo, so an
+   * install takes effect on the next request instead of the next restart.
+   */
+  const specFor = (languageId: string): TreeSitterLanguageSpec | undefined => {
+    const bundled = treeSitterLanguageSpec(languageId);
+    if (bundled) return bundled;
+    const installed = options.resolveInstalledLanguage?.(languageId);
+    return installed ? treeSitterTagsSpec(installed.grammarFile, installed.tagsQuery) : undefined;
+  };
+
   const ensureRuntime = (): { status: "ok" } | { status: "unavailable"; message: string } => {
     const runtime = runtimeFile("web-tree-sitter.wasm");
     if (!pathExists(runtime)) {
@@ -194,14 +261,17 @@ export function createTreeSitterStructureProvider(
     await initPromise;
   };
 
-  const loadLanguage = (languageId: string, spec: TreeSitterLanguageSpec): Promise<Language> => {
-    const existing = languages.get(languageId);
+  /**
+   * Keyed by resolved path, not language id: an on-demand grammar lives at a
+   * content-addressed path, so reinstalling different bytes must not reuse the
+   * `Language` loaded from the old ones.
+   */
+  const loadLanguage = (grammarPath: string): Promise<Language> => {
+    const existing = languages.get(grammarPath);
     if (existing) return existing;
-    const fileName = spec.grammarFile;
     const loading = (async () => {
-      const grammarPath = runtimeFile(fileName);
       if (!pathExists(grammarPath)) {
-        throw new Error(`Grammar wasm is not readable: ${fileName}`);
+        throw new Error(`Grammar wasm is not readable: ${grammarPath}`);
       }
       const language = await Language.load(grammarPath);
       if (language.abiVersion < MIN_COMPATIBLE_VERSION || language.abiVersion > LANGUAGE_VERSION) {
@@ -211,9 +281,9 @@ export function createTreeSitterStructureProvider(
       }
       return language;
     })();
-    languages.set(languageId, loading);
+    languages.set(grammarPath, loading);
     void loading.catch(() => {
-      if (languages.get(languageId) === loading) languages.delete(languageId);
+      if (languages.get(grammarPath) === loading) languages.delete(grammarPath);
     });
     return loading;
   };
@@ -230,11 +300,12 @@ export function createTreeSitterStructureProvider(
     try {
     const runtime = ensureRuntime();
     if (runtime.status !== "ok") return runtime;
+    const grammarPath = runtimeFile(spec.grammarFile);
     const hash = contentHash(request.text);
-    const cacheKey = `${languageId}:${hash}`;
+    const cacheKey = `${languageId}:${grammarPath}:${hash}`;
     const cached = cache.get(cacheKey);
     if (cached && cached.languageId === languageId) {
-      if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(runtimeFile(spec.grammarFile))) {
+      if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(grammarPath)) {
         return { status: "unavailable", message: "Grammar wasm is not readable." };
       }
       pin(cacheKey);
@@ -242,7 +313,7 @@ export function createTreeSitterStructureProvider(
     }
       await initParser();
       if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
-      const language = await loadLanguage(languageId, spec);
+      const language = await loadLanguage(grammarPath);
       if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
       const started = performance.now();
       const parser = new Parser();
@@ -279,18 +350,14 @@ export function createTreeSitterStructureProvider(
         tree.delete();
         return { status: "failed", message: "Parse budget exhausted before the file was finished." };
       }
-      if (request.signal?.aborted) {
-        tree.delete();
-        return { status: "cancelled", message: "Structure request was cancelled." };
-      }
-      if (performance.now() - started > parseBudgetMs) {
-        tree.delete();
-        return { status: "failed", message: "Parse budget exhausted before the file was finished." };
-      }
       let symbols: StructureSymbol[] = [];
       let nameLines = new Set<number>();
       if (spec.jsonOutline) {
         const collected = collectJsonOutline(tree.rootNode, spec.jsonOutline);
+        symbols = collected.symbols;
+        nameLines = collected.nameLines;
+      } else if (spec.tagsOutline) {
+        const collected = collectTagsOutline(language, spec.definitionQuery, tree.rootNode);
         symbols = collected.symbols;
         nameLines = collected.nameLines;
       } else {
@@ -348,10 +415,10 @@ export function createTreeSitterStructureProvider(
     node.startPosition.row <= zeroLine && node.endPosition.row >= zeroLine
   );
 
-  const lineHasType = (node: Node, zeroLine: number, types: ReadonlySet<string>): boolean => {
+  const lineHasType = (node: Node, zeroLine: number, matches: StructureTypeMatcher): boolean => {
     if (!nodeTouchesLine(node, zeroLine)) return false;
-    if (types.has(node.type)) return true;
-    return node.children.some((child) => lineHasType(child, zeroLine, types));
+    if (matches(node.type)) return true;
+    return node.children.some((child) => lineHasType(child, zeroLine, matches));
   };
 
   const classifyLine = (entry: ParsedCache, spec: TreeSitterLanguageSpec, line: number): StructureHitClass => {
@@ -367,14 +434,14 @@ export function createTreeSitterStructureProvider(
     const languageId = request.languageId ?? languageIdForPath(request.path);
     if (languageId) options.onLanguageRequest?.(languageId, request.workspaceId);
     if (!languageId) return null;
-    const spec = treeSitterLanguageSpec(languageId);
+    const spec = specFor(languageId);
     return spec ? { languageId, spec } : null;
   };
 
   return {
     id: "tree-sitter",
     capabilities(languageId) {
-      return capabilitiesFor(languageId);
+      return capabilitiesFromSpec(languageId ? specFor(languageId) : undefined);
     },
     async outline(request): Promise<StructureOutlineResult> {
       const resolved = resolveSpec(request);

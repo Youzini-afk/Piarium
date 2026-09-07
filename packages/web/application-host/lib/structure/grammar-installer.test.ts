@@ -8,6 +8,8 @@ import { createGrammarStore, grammarIntegrityOf } from "./grammar-store.js";
 
 const wasm = new Uint8Array([0, 1, 2, 3, 4, 5]);
 const integrity = grammarIntegrityOf(wasm);
+const tags = new TextEncoder().encode("(function_definition name: (identifier) @name) @definition.function\n");
+const tagsIntegrity = grammarIntegrityOf(tags);
 
 const manifest = parseGrammarPackManifest({
   generatedAt: "2026-09-07",
@@ -25,12 +27,31 @@ const manifest = parseGrammarPackManifest({
       bytes: wasm.byteLength,
       abi: 15,
       licensePath: "package/LICENSE",
+      tagsPath: "package/queries/tags.scm",
+      tagsIntegrity,
     },
   },
   skipped: {},
 });
 
 const storeOf = () => createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-grammar-install-")));
+
+const files = (entries: Record<string, Uint8Array>) => async (
+  _tarball: Uint8Array,
+  paths: readonly string[],
+) => {
+  const found = new Map<string, Uint8Array>();
+  for (const path of paths) {
+    const bytes = entries[path];
+    if (bytes) found.set(path, bytes);
+  }
+  return found;
+};
+
+const published = files({
+  "package/tree-sitter-python.wasm": wasm,
+  "package/queries/tags.scm": tags,
+});
 
 describe("createGrammarInstaller", () => {
   it("rejects a digest mismatch and does not keep the file", async () => {
@@ -41,7 +62,7 @@ describe("createGrammarInstaller", () => {
       minAbi: 13,
       maxAbi: 15,
       download: async () => new Uint8Array([9, 9, 9]),
-      extractWasm: async () => new Uint8Array([9, 9, 9]),
+      extractFiles: files({ "package/tree-sitter-python.wasm": new Uint8Array([9, 9, 9]) }),
       inspectAbi: async () => 15,
     });
     await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
@@ -49,6 +70,45 @@ describe("createGrammarInstaller", () => {
       reason: "integrity",
     });
     expect(store.has("python")).toBe(false);
+  });
+
+  it("rejects a query digest mismatch, because the query is part of the anchor", async () => {
+    const store = storeOf();
+    const installer = createGrammarInstaller({
+      store,
+      manifest,
+      minAbi: 13,
+      maxAbi: 15,
+      download: async () => wasm,
+      extractFiles: files({
+        "package/tree-sitter-python.wasm": wasm,
+        "package/queries/tags.scm": new TextEncoder().encode("(other) @definition.class"),
+      }),
+      inspectAbi: async () => 15,
+    });
+    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+      status: "failed",
+      reason: "integrity",
+    });
+    expect(store.has("python")).toBe(false);
+  });
+
+  it("stores the verified query next to the grammar", async () => {
+    const store = storeOf();
+    const installer = createGrammarInstaller({
+      store,
+      manifest,
+      minAbi: 13,
+      maxAbi: 15,
+      download: async () => wasm,
+      extractFiles: published,
+      inspectAbi: async () => 15,
+    });
+    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+      status: "ready",
+      grammarStatus: "installed",
+    });
+    expect(store.readTagsQuery("python")).toContain("@definition.function");
   });
 
   it("cancels an in-flight download", async () => {
@@ -66,7 +126,7 @@ describe("createGrammarInstaller", () => {
         });
         return wasm;
       },
-      extractWasm: async () => wasm,
+      extractFiles: published,
       inspectAbi: async () => 15,
     });
     const pending = installer.install({ languageId: "python" });
@@ -79,7 +139,32 @@ describe("createGrammarInstaller", () => {
     release?.();
   });
 
-  it("rejects an ABI outside the application window and cleans up", async () => {
+  it("joins a download already in progress instead of cancelling the first click", async () => {
+    const store = storeOf();
+    let downloads = 0;
+    const installer = createGrammarInstaller({
+      store,
+      manifest,
+      minAbi: 13,
+      maxAbi: 15,
+      download: async () => {
+        downloads += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return wasm;
+      },
+      extractFiles: published,
+      inspectAbi: async () => 15,
+    });
+    const [first, second] = await Promise.all([
+      installer.install({ languageId: "python" }),
+      installer.install({ languageId: "python" }),
+    ]);
+    expect(first).toMatchObject({ status: "ready" });
+    expect(second).toMatchObject({ status: "ready" });
+    expect(downloads).toBe(1);
+  });
+
+  it("rejects an ABI outside the application window with its own reason", async () => {
     const store = storeOf();
     const installer = createGrammarInstaller({
       store,
@@ -87,12 +172,12 @@ describe("createGrammarInstaller", () => {
       minAbi: 13,
       maxAbi: 15,
       download: async () => wasm,
-      extractWasm: async () => wasm,
+      extractFiles: published,
       inspectAbi: async () => 16,
     });
     await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
       status: "failed",
-      reason: "failed",
+      reason: "abi",
     });
     expect(store.has("python")).toBe(false);
   });
@@ -112,5 +197,45 @@ describe("createGrammarInstaller", () => {
       grammarStatus: "user-unverified",
     });
     expect(store.get("kotlin")?.source).toBe("user");
+  });
+
+  it("does not echo filesystem errors back to the caller", async () => {
+    const store = storeOf();
+    const installer = createGrammarInstaller({
+      store,
+      manifest,
+      minAbi: 13,
+      maxAbi: 15,
+      readLocal: async () => {
+        throw Object.assign(new Error("EACCES: permission denied, open '/etc/shadow'"), { code: "EACCES" });
+      },
+      inspectAbi: async () => 14,
+    });
+    const result = await installer.importUserGrammar({ languageId: "kotlin", path: "/etc/shadow.wasm" });
+    expect(result).toMatchObject({ status: "failed", reason: "failed" });
+    expect(result).not.toMatchObject({ message: expect.stringContaining("EACCES") });
+    expect(store.has("kotlin")).toBe(false);
+  });
+
+  it("refuses a path that is not a wasm file and a file over the ceiling", async () => {
+    const store = storeOf();
+    const installer = createGrammarInstaller({
+      store,
+      manifest,
+      minAbi: 13,
+      maxAbi: 15,
+      readLocal: async () => new Uint8Array(64),
+      inspectAbi: async () => 14,
+      maxUserBytes: 32,
+    });
+    await expect(installer.importUserGrammar({ languageId: "kotlin", path: "/tmp/grammar.txt" })).resolves.toMatchObject({
+      status: "failed",
+      reason: "unsupported",
+    });
+    await expect(installer.importUserGrammar({ languageId: "kotlin", path: "/tmp/grammar.wasm" })).resolves.toMatchObject({
+      status: "failed",
+      reason: "failed",
+    });
+    expect(store.has("kotlin")).toBe(false);
   });
 });

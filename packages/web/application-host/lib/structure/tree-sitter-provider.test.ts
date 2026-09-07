@@ -5,7 +5,13 @@ import { pathToFileURL } from "node:url";
 import { languageIdForPath } from "@piarium/protocol";
 import { describe, expect, it } from "vitest";
 import { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
-import { CATALOG_SCAN_LANGUAGES, capabilitiesFromSpec, treeSitterLanguageSpec } from "./languages.js";
+import {
+  CATALOG_SCAN_LANGUAGES,
+  capabilitiesFromSpec,
+  tagsDefinitionKind,
+  treeSitterLanguageSpec,
+  treeSitterTagsSpec,
+} from "./languages.js";
 import { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
 import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
 
@@ -63,19 +69,87 @@ describe("tree-sitter language specs", () => {
   });
 
   it("derives outline and classifyHits from a spec, and optional queries from presence", () => {
-    const outlineOnly = capabilitiesFromSpec({
-      grammarFile: "x.wasm",
-      definitionQuery: "(program) @unit",
-      commentTypes: new Set(["comment"]),
-      stringTypes: new Set(["string"]),
-      bindingTypes: new Set(),
-    });
+    const outlineOnly = capabilitiesFromSpec(treeSitterTagsSpec("x.wasm", "(program) @definition.module"));
     expect(outlineOnly).toEqual({
       outline: true,
       classifyHits: true,
       literalCalls: false,
       imports: false,
     });
+  });
+
+  it("maps upstream tags captures onto slice kinds and leaves the rest as catalog names", () => {
+    expect(tagsDefinitionKind("definition.function")).toBe("function");
+    expect(tagsDefinitionKind("definition.trait")).toBe("interface");
+    expect(tagsDefinitionKind("definition.namespace")).toBe("module");
+    expect(isStructureContainerKind(tagsDefinitionKind("definition.class")!)).toBe(true);
+    // A constant is a name inside a container, so it never becomes a unit.
+    expect(isStructureContainerKind(tagsDefinitionKind("definition.constant")!)).toBe(false);
+    expect(tagsDefinitionKind("definition.something-new")).toBe("unknown");
+    expect(tagsDefinitionKind("reference.call")).toBeNull();
+    expect(tagsDefinitionKind("name")).toBeNull();
+  });
+
+  /**
+   * The bundled JavaScript grammar stands in for a downloaded one: what is
+   * under test is the tags adapter, and this is the same capture shape every
+   * upstream `queries/tags.scm` uses (D-128).
+   */
+  it("outlines an installed grammar through its upstream tags query", async () => {
+    const provider = createTreeSitterStructureProvider({
+      parseBudgetMs: 30_000,
+      resolveInstalledLanguage: (languageId) => (languageId === "ruby" ? {
+        grammarFile: "tree-sitter-javascript.wasm",
+        tagsQuery: [
+          "(function_declaration name: (identifier) @name) @definition.function",
+          "(class_declaration name: (identifier) @name) @definition.class",
+          "(variable_declarator name: (identifier) @name) @definition.constant",
+        ].join("\n"),
+      } : null),
+    });
+    expect(provider.capabilities("ruby")).toEqual({
+      outline: true,
+      classifyHits: true,
+      literalCalls: false,
+      imports: false,
+    });
+    const text = [
+      "class Box {}",
+      "function needle() {",
+      "  const inner = 1;",
+      "  return inner;",
+      "}",
+    ].join("\n");
+    const outline = await provider.outline({ path: "sample.rb", languageId: "ruby", text, revision: "rev-1" });
+    expect(outline.status).toBe("ready");
+    expect(outline.provider).toBe("tree-sitter");
+    const needle = outline.symbols.find((symbol) => symbol.name === "needle");
+    expect(needle).toMatchObject({ kind: "function", range: { startLine: 2, endLine: 5 } });
+    expect(needle?.signature).toEqual({ startLine: 2, endLine: 2 });
+    expect(outline.symbols.find((symbol) => symbol.name === "Box")?.kind).toBe("class");
+    // Catalog name, not a slice unit.
+    expect(outline.symbols.find((symbol) => symbol.name === "inner")?.kind).toBe("variable");
+
+    const classified = await provider.classifyHits({
+      path: "sample.rb",
+      languageId: "ruby",
+      text,
+      revision: "rev-1",
+      lines: [2, 3],
+    });
+    expect(classified.status).toBe("ready");
+    expect(classified.hits.find((hit) => hit.line === 2)?.class).toBe("name");
+  });
+
+  it("reports unsupported for a language with a grammar but no query", async () => {
+    const provider = createTreeSitterStructureProvider({
+      parseBudgetMs: 30_000,
+      resolveInstalledLanguage: () => null,
+    });
+    expect(provider.capabilities("ruby")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    const outline = await provider.outline({ path: "a.rb", languageId: "ruby", text: "x = 1", revision: "rev-1" });
+    expect(outline.status).toBe("unsupported");
+    expect(outline.symbols).toEqual([]);
   });
 
   it("notifies the host when a structure request names a language", async () => {

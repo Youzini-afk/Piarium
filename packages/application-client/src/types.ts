@@ -2189,7 +2189,9 @@ export type StructureGrammarStatus =
   | 'installed'
   | 'available'
   | 'absent'
-  | 'user-unverified';
+  | 'user-unverified'
+  /** The installed-grammar index could not be read, so this is not "absent". */
+  | 'unknown';
 
 export interface LanguageSupportCapabilities {
   outline: boolean;
@@ -2203,6 +2205,12 @@ export interface LanguageSupportPackInfo {
   bytes: number;
   packageName: string;
   version: string;
+  /**
+   * The pack ships a query that was compiled against its grammar at publish
+   * time. When false, installing it adds a parser and no outline, so callers
+   * must say that before the user installs rather than after.
+   */
+  providesOutline: boolean;
 }
 
 export interface LanguageSupportLanguageRow {
@@ -2214,15 +2222,30 @@ export interface LanguageSupportLanguageRow {
   pack?: LanguageSupportPackInfo;
 }
 
+/**
+ * `unreadable` means the installed-grammar index could not be read, so the
+ * grammar columns are unknown rather than empty. Callers must not render an
+ * unreadable store as "nothing installed".
+ */
+export type LanguageSupportStoreStatus = 'ready' | 'unreadable';
+
 export interface LanguageSupportStatus {
   workspaceId: string;
   languages: LanguageSupportLanguageRow[];
   partial: boolean;
   scannedFiles: number;
   fileLimit: number;
+  grammarStore: LanguageSupportStoreStatus;
 }
 
-export type LanguageSupportFailureReason = 'failed' | 'unsupported' | 'cancelled' | 'integrity' | 'absent';
+export type LanguageSupportFailureReason =
+  | 'failed'
+  | 'unsupported'
+  | 'cancelled'
+  | 'integrity'
+  | 'abi'
+  | 'store-unreadable'
+  | 'absent';
 
 export type LanguageSupportInstallResult =
   | { status: 'ready'; languageId: string; grammarStatus: StructureGrammarStatus }

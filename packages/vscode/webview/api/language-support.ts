@@ -15,6 +15,9 @@ export const createVSCodeLanguageSupportAPI = (): LanguageSupportAPI => ({
       partial: false,
       scannedFiles: 0,
       fileLimit: 0,
+      // The companion installs no packs, so an empty list is exact here rather
+      // than an index this surface failed to read.
+      grammarStore: 'ready',
     };
   },
   install: ({ languageId }) => unsupported(languageId),

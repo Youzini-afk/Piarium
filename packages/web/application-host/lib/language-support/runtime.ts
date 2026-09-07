@@ -4,13 +4,14 @@ import type {
   LanguageSupportInstallResult,
   LanguageSupportLanguageRow,
   LanguageSupportStatus,
+  LanguageSupportStoreStatus,
   StructureGrammarStatus,
 } from "@piarium/application-client";
 import { NO_STRUCTURE_CAPABILITIES } from "../structure/types.js";
-import { capabilitiesFromSpec, treeSitterLanguageSpec } from "../structure/languages.js";
+import { capabilitiesFromSpec, treeSitterLanguageSpec, treeSitterTagsSpec } from "../structure/languages.js";
 import type { GrammarInstaller } from "../structure/grammar-installer.js";
 import type { GrammarPackManifest } from "../structure/grammar-manifest.js";
-import type { GrammarStore } from "../structure/grammar-store.js";
+import { GrammarStoreUnreadableError, type GrammarStore } from "../structure/grammar-store.js";
 import type { FileSearchItem } from "../fs/types.js";
 
 /** Enumerate this many files, then stop and set `partial` (D-120). */
@@ -42,6 +43,12 @@ export interface LanguageSupportRuntimeOptions {
 export interface LanguageSupportRuntime extends LanguageSupportAPI {
   noteRequest(languageId: string, workspaceId?: string): void;
   peekWanted(workspaceId: string): readonly string[];
+  /**
+   * Structure wiring for a language that was installed rather than bundled.
+   * This runtime owns the memo because it also owns install and remove, so the
+   * structure provider never has to guess when to forget a miss (D-129).
+   */
+  installedStructureSpec(languageId: string): { grammarFile: string; tagsQuery: string } | null;
 }
 
 const unsupportedInstall = (languageId: string): LanguageSupportInstallResult => ({
@@ -57,9 +64,13 @@ export function resolveGrammarStatus(
     installable: ReadonlySet<string>;
     installed: ReadonlySet<string>;
     userUnverified: ReadonlySet<string>;
+    storeStatus?: LanguageSupportStoreStatus;
   },
 ): StructureGrammarStatus {
   if (treeSitterLanguageSpec(languageId)) return "bundled";
+  // Bundled grammars are known from the table alone; everything else depends on
+  // an index we could not read, so it is unknown rather than absent.
+  if (options.storeStatus === "unreadable") return "unknown";
   if (options.userUnverified.has(languageId)) return "user-unverified";
   if (options.installed.has(languageId)) return "installed";
   if (options.installable.has(languageId)) return "available";
@@ -88,10 +99,54 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     userUnverified: new Set(userUnverifiedLanguageIds()),
   });
 
+  const specMemo = new Map<string, { grammarFile: string; tagsQuery: string } | null>();
+
+  const installedStructureSpec = (languageId: string): { grammarFile: string; tagsQuery: string } | null => {
+    if (treeSitterLanguageSpec(languageId)) return null;
+    const memoized = specMemo.get(languageId);
+    if (memoized !== undefined) return memoized;
+    let resolved: { grammarFile: string; tagsQuery: string } | null = null;
+    try {
+      const record = options.store?.get(languageId);
+      if (record) {
+        const tagsQuery = options.store?.readTagsQuery(languageId) ?? null;
+        // A grammar with no query cannot produce an outline, so it is installed
+        // but not wired. Saying so is the point (D-128).
+        if (tagsQuery?.trim()) resolved = { grammarFile: record.grammarFile, tagsQuery };
+      }
+    } catch (error) {
+      if (!(error instanceof GrammarStoreUnreadableError)) throw error;
+      // The structure path has no way to say "unknown", so it degrades to
+      // unsupported. `getStatus` reads the store itself and still reports
+      // `grammarStore: 'unreadable'`, so the user is not told "nothing here".
+      return null;
+    }
+    specMemo.set(languageId, resolved);
+    return resolved;
+  };
+
+  const capabilitiesFor = (languageId: string) => {
+    const bundled = treeSitterLanguageSpec(languageId);
+    if (bundled) return capabilitiesFromSpec(bundled);
+    const installed = installedStructureSpec(languageId);
+    return capabilitiesFromSpec(installed ? treeSitterTagsSpec(installed.grammarFile, installed.tagsQuery) : undefined);
+  };
+
+  const forget = (): void => {
+    specMemo.clear();
+    cache.clear();
+  };
+
   const noteRequest = (languageId: string, workspaceId?: string): void => {
     if (!languageId || !workspaceId) return;
-    const catalog = sets();
-    const status = resolveGrammarStatus(languageId, catalog);
+    let status: StructureGrammarStatus;
+    try {
+      status = resolveGrammarStatus(languageId, sets());
+    } catch {
+      // Demand is a hint for the settings page. An unreadable index is reported
+      // by getStatus; it must not turn a structure request into a failure.
+      return;
+    }
     if (status !== "available") return;
     const wanted = wantedByWorkspace.get(workspaceId) ?? new Set<string>();
     wanted.add(languageId);
@@ -102,12 +157,20 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
   const getStatus = async (request: { workspaceId: string }): Promise<LanguageSupportStatus> => {
     const workspaceId = request.workspaceId.trim();
     if (!workspaceId) {
-      return { workspaceId, languages: [], partial: false, scannedFiles: 0, fileLimit };
+      return { workspaceId, languages: [], partial: false, scannedFiles: 0, fileLimit, grammarStore: "ready" };
     }
     const cached = cache.get(workspaceId);
     if (cached && cached.expiresAt > now()) return cached.status;
 
-    const catalog = sets();
+    let grammarStore: LanguageSupportStoreStatus = "ready";
+    let catalog: ReturnType<typeof sets>;
+    try {
+      catalog = sets();
+    } catch (error) {
+      if (!(error instanceof GrammarStoreUnreadableError)) throw error;
+      grammarStore = "unreadable";
+      catalog = { installable: new Set(), installed: new Set(), userUnverified: new Set() };
+    }
     const workspace = await options.inspectWorkspace(workspaceId);
     const files = await options.searchFilesystemFiles(workspace.root, {
       query: "",
@@ -129,8 +192,10 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
       const pack = options.manifest?.packs[languageId];
       return {
         languageId,
-        grammarStatus: resolveGrammarStatus(languageId, catalog),
-        capabilities: capabilitiesFromSpec(treeSitterLanguageSpec(languageId)),
+        grammarStatus: resolveGrammarStatus(languageId, { ...catalog, storeStatus: grammarStore }),
+        capabilities: grammarStore === "unreadable"
+          ? capabilitiesFromSpec(treeSitterLanguageSpec(languageId))
+          : capabilitiesFor(languageId),
         fileCount: counts.get(languageId) ?? 0,
         wanted: wanted.has(languageId),
         ...(pack ? {
@@ -139,6 +204,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
             bytes: pack.bytes,
             packageName: pack.packageName,
             version: pack.version,
+            providesOutline: Boolean(pack.tagsPath),
           },
         } : {}),
       };
@@ -155,6 +221,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
       partial,
       scannedFiles: scanned.length,
       fileLimit,
+      grammarStore,
     };
     cache.set(workspaceId, { expiresAt: now() + cacheTtlMs, status });
     return status;
@@ -163,11 +230,12 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
   return {
     noteRequest,
     peekWanted: (workspaceId) => [...(wantedByWorkspace.get(workspaceId) ?? [])],
+    installedStructureSpec,
     getStatus,
     install: async (request) => {
       if (!options.installer) return unsupportedInstall(request.languageId);
       const result = await options.installer.install(request);
-      cache.clear();
+      forget();
       return result;
     },
     cancelInstall: async (request) => {
@@ -177,7 +245,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     importUserGrammar: async (request) => {
       if (!options.installer) return unsupportedInstall(request.languageId);
       const result = await options.installer.importUserGrammar(request);
-      cache.clear();
+      forget();
       return result;
     },
   };

@@ -40,3 +40,10 @@ export const STRUCTURE_PARSE_BUDGET_MS = 250;
  */
 export const JSON_OUTLINE_MAX_DEPTH = 8;
 export const JSON_OUTLINE_MAX_SYMBOLS = 256;
+
+/**
+ * Ceiling for a user-supplied grammar. The largest published grammar we list is
+ * under 6 MB, so this leaves room for a locally built one while keeping a stray
+ * pick from being read into memory whole.
+ */
+export const MAX_USER_GRAMMAR_BYTES = 32 * 1024 * 1024;

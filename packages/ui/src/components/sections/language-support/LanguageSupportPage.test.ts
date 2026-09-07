@@ -15,4 +15,13 @@ describe('Language Support settings page', () => {
     expect(source).not.toContain('web-tree-sitter');
     expect(source).not.toContain('searchFilesystemFiles');
   });
+
+  test('states the download size, the structure note and an unreadable index', () => {
+    const source = readFileSync(new URL('./LanguageSupportPage.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('formatPackBytes(row.pack.bytes)');
+    expect(source).toContain('structureNoteKey(row)');
+    expect(source).toContain('grammarStatusTone(row.grammarStatus, row.capabilities)');
+    expect(source).toContain("status?.grammarStore === 'unreadable'");
+    expect(source).toContain('settings.languageSupport.storeUnreadable');
+  });
 });

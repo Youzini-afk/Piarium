@@ -1,4 +1,9 @@
-import type { PiariumLanguageProviderStatus, StructureGrammarStatus } from '@piarium/application-client';
+import type {
+  LanguageSupportCapabilities,
+  LanguageSupportLanguageRow,
+  PiariumLanguageProviderStatus,
+  StructureGrammarStatus,
+} from '@piarium/application-client';
 import type { I18nKey } from '@/lib/i18n/store';
 
 export type StatusTone = 'success' | 'warning' | 'danger' | 'muted';
@@ -48,25 +53,62 @@ export const grammarStatusKey = (status: StructureGrammarStatus): I18nKey => {
       return 'settings.languageSupport.grammar.absent';
     case 'user-unverified':
       return 'settings.languageSupport.grammar.userUnverified';
+    case 'unknown':
+      return 'settings.languageSupport.grammar.unknown';
   }
 };
 
-export const grammarStatusTone = (status: StructureGrammarStatus): StatusTone => {
+/**
+ * A grammar that is present but produces no outline is not a success: the
+ * parser is on disk and nothing in the product can use it. Tone follows what
+ * the language can actually do, not whether bytes were downloaded (D-128).
+ */
+export const grammarStatusTone = (
+  status: StructureGrammarStatus,
+  capabilities?: LanguageSupportCapabilities,
+): StatusTone => {
   switch (status) {
     case 'bundled':
-    case 'installed':
       return 'success';
-    case 'available':
+    case 'installed':
     case 'user-unverified':
+      return capabilities?.outline ? 'success' : 'warning';
+    case 'available':
       return 'warning';
     case 'absent':
+    case 'unknown':
       return 'muted';
   }
 };
 
+/**
+ * The one line that tells a reader whether this language does anything. Ordered
+ * by what would surprise them most.
+ */
+export const structureNoteKey = (row: LanguageSupportLanguageRow): I18nKey | null => {
+  if (row.grammarStatus === 'unknown') return 'settings.languageSupport.note.storeUnreadable';
+  if (row.capabilities.outline) return null;
+  if (row.grammarStatus === 'installed' || row.grammarStatus === 'user-unverified') {
+    return 'settings.languageSupport.note.installedWithoutQuery';
+  }
+  if (row.grammarStatus === 'available' && row.pack && !row.pack.providesOutline) {
+    return 'settings.languageSupport.note.packWithoutQuery';
+  }
+  return null;
+};
+
 export const canInstallGrammar = (status: StructureGrammarStatus): boolean => status === 'available';
 
-export const canImportGrammar = (status: StructureGrammarStatus): boolean => status !== 'bundled';
+export const canImportGrammar = (status: StructureGrammarStatus): boolean => (
+  status !== 'bundled' && status !== 'unknown'
+);
+
+/** Pack sizes reach several megabytes and there is no resume, so show them. */
+export const formatPackBytes = (bytes: number): string => {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+};
 
 export const statusToneClass = (tone: StatusTone): string => {
   switch (tone) {

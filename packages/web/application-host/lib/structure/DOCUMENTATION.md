@@ -155,7 +155,28 @@ plus `index.json`. `resolveStructureRuntimeFile` looks at the bundled
 never starts a grammar download by itself; the settings page Install click is
 the consent (D-124). User-supplied wasm uses the same store with
 `source: 'user'` and stays `user-unverified` (D-123). ABI is still enforced in
-`loadLanguage`. Packs without a query spec stay `unsupported` for outline.
+`loadLanguage`.
+
+An on-demand grammar gets its outline from the pack's own upstream
+`queries/tags.scm`. `treeSitterTagsSpec` turns that query into a runtime
+language spec: `tagsDefinitionKind` maps `definition.*` capture suffixes to
+symbol kinds, unrecognized suffixes become `unknown` (catalog name, never a
+slice unit), and `reference.*` produces nothing. Hit classification falls back
+to matching node type names, which is a tree-sitter naming convention rather
+than a per-language table. `literalCalls` and `imports` need hand-written
+queries and stay off. `refresh-grammar-manifest.mjs` compiles the query against
+that pack's own wasm at publish time and only records `tagsPath` /
+`tagsIntegrity` when it compiles; install verifies both digests. A pack that
+ships no query installs a parser with every capability off, and
+`LanguageSupportStatus` reports that distinctly so the settings page does not
+show it as working (D-128).
+
+`GrammarStore` treats only ENOENT as an empty store; a parse error or an IO
+failure raises `GrammarStoreUnreadableError` rather than reporting nothing
+installed, and `index.json` is written through a temp file and rename. The
+language-support runtime turns that error into `grammarStore: 'unreadable'`
+with per-language `unknown`, which disables install instead of inviting a
+click that would overwrite real records (D-129).
 
 `STRUCTURE_PARSE_BUDGET_MS` bounds parse plus query after the wasm is loaded.
 It is a wall clock and a runaway guard, not a latency target: a value near an
