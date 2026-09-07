@@ -19,6 +19,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { normalizeGraphPath, resolveImportSpecifier } from "./import-resolve.js";
 
 // triviumdb is a CJS package — use createRequire to avoid ESM named-import
 // issues when running under pure Node (outside vite-node/vitest).
@@ -179,16 +180,33 @@ export interface SymbolGraphSymbolInput {
   range: SymbolGraphRange;
 }
 
+export type SymbolMatchTier = "exact" | "name-contains" | "path-contains";
+
 export interface SymbolGraphSearchResult extends SymbolGraphSymbolInput {
   id: NodeId;
   path: string;
   score: number;
+  /** Which score bucket produced this hit. Definition ranking depends on the distinction. */
+  match: SymbolMatchTier;
   /**
    * Disk revision the range was computed from, or null for rows written before
    * ranges carried a text identity (D-087). A consumer that cannot match it
    * against the current text must degrade instead of trusting the range.
    */
   documentRevision: string | null;
+}
+
+export interface SymbolGraphCatalogStats {
+  symbolCount: number;
+  fileCount: number;
+  linkCount: number;
+  languages: string[];
+  paths: string[];
+}
+
+export interface SymbolGraphImportersResult {
+  path: string;
+  resolved: Array<{ path: string; specifier: string }>;
 }
 
 export type SymbolGraphLinkKind = "import" | "connects" | "associates";
@@ -294,9 +312,11 @@ export interface KnowledgeStore {
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
-  getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score">>>;
+  getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
   findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
+  catalogStats(): Promise<SymbolGraphCatalogStats>;
+  findImporters(path: string): Promise<SymbolGraphImportersResult>;
   /**
    * Values that are a confirmed connection literal somewhere in the graph.
    * Gates association candidates: plan 3.11 marks a *same-name* string as a
@@ -316,6 +336,30 @@ const MAX_RETENTION_BATCH = 5000;
 
 function zeroVector(dim: number): Vector {
   return new Array(dim).fill(0);
+}
+
+function scoreSymbolMatch(
+  name: string,
+  path: string,
+  terms: readonly string[],
+): { score: number; match: SymbolMatchTier } | null {
+  const normalizedName = name.toLowerCase();
+  const haystack = `${normalizedName} ${path.toLowerCase()}`;
+  let score = 0;
+  let match: SymbolMatchTier | undefined;
+  for (const term of terms) {
+    if (normalizedName === term) {
+      score += 4;
+      match = "exact";
+    } else if (normalizedName.includes(term)) {
+      score += 2;
+      if (match !== "exact") match = "name-contains";
+    } else if (haystack.includes(term)) {
+      score += 1;
+      if (!match) match = "path-contains";
+    }
+  }
+  return score > 0 && match ? { score, match } : null;
 }
 
 export interface OpenWorkspaceKnowledgeDeps {
@@ -448,6 +492,15 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     }
     connectionLiteralsByPath.delete(path);
   }
+  const importSpecifiersByPath = new Map<string, string[]>();
+  function rememberImportSpecifier(path: string, specifier: string): void {
+    const values = importSpecifiersByPath.get(path);
+    if (values) values.push(specifier);
+    else importSpecifiersByPath.set(path, [specifier]);
+  }
+  function forgetImportSpecifiers(path: string): void {
+    importSpecifiersByPath.delete(path);
+  }
   for (const id of db.allNodeIds()) {
     const payload = db.getPayload(id) as Record<string, unknown> | null;
     if (!payload || typeof payload["path"] !== "string") continue;
@@ -466,6 +519,14 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       && typeof payload["value"] === "string"
     ) {
       rememberConnectionLiteral(payload["path"], payload["value"]);
+    }
+    if (
+      payload["type"] === "link"
+      && payload["kind"] === "import"
+      && payload["active"] === true
+      && typeof payload["value"] === "string"
+    ) {
+      rememberImportSpecifier(payload["path"], payload["value"]);
     }
     const ids = target.get(payload["path"]) ?? new Set<number>();
     ids.add(id);
@@ -1074,8 +1135,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         if (linkIds.length > 0) graphLinkIds.set(normalizedPath, new Set(linkIds));
         else graphLinkIds.delete(normalizedPath);
         forgetConnectionLiterals(normalizedPath);
+        forgetImportSpecifiers(normalizedPath);
         for (const link of links) {
           if (link.kind === "connects") rememberConnectionLiteral(normalizedPath, link.value);
+          if (link.kind === "import") rememberImportSpecifier(normalizedPath, link.value);
         }
         db.indexText(fileId, normalizedPath);
         for (let index = 0; index < symbolIds.length; index += 1) {
@@ -1111,6 +1174,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         graphSymbolIds.delete(normalizedPath);
         graphLinkIds.delete(normalizedPath);
         forgetConnectionLiterals(normalizedPath);
+        forgetImportSpecifiers(normalizedPath);
         db.flush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
@@ -1119,19 +1183,31 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     async searchSymbols(query, k) {
       const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
       if (terms.length === 0 || !Number.isSafeInteger(k) || k <= 0) return [];
-      return scanNodes((payload) => payload["type"] === "symbol" && payload["active"] === true)
-        .flatMap(({ id, payload }) => {
+      const results: SymbolGraphSearchResult[] = [];
+      for (const ids of graphSymbolIds.values()) {
+        for (const id of ids) {
+          const payload = db.getPayload(id) as Record<string, unknown> | null;
+          if (!payload || payload["type"] !== "symbol" || payload["active"] !== true) continue;
           const name = typeof payload["name"] === "string" ? payload["name"] : "";
           const path = typeof payload["path"] === "string" ? payload["path"] : "";
           const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
           const range = payload["range"] as SymbolGraphRange | undefined;
-          if (!name || !path || !range || !validRange(range)) return [];
-          const documentRevision = typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null;
-          const normalizedName = name.toLowerCase();
-          const haystack = `${normalizedName} ${path.toLowerCase()}`;
-          const score = terms.reduce((total, term) => total + (normalizedName === term ? 4 : normalizedName.includes(term) ? 2 : haystack.includes(term) ? 1 : 0), 0);
-          return score > 0 ? [{ id, name, path, kind, range: { ...range }, score, documentRevision }] : [];
-        })
+          if (!name || !path || !range || !validRange(range)) continue;
+          const scored = scoreSymbolMatch(name, path, terms);
+          if (!scored) continue;
+          results.push({
+            id,
+            name,
+            path,
+            kind,
+            range: { ...range },
+            score: scored.score,
+            match: scored.match,
+            documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+          });
+        }
+      }
+      return results
         .toSorted((left, right) => right.score - left.score || left.name.localeCompare(right.name) || left.path.localeCompare(right.path))
         .slice(0, k);
     },
@@ -1233,24 +1309,72 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async findLinks(value) {
       const normalized = assertGraphText(value, "Link value");
-      return scanNodes((payload) => (
-        payload["type"] === "link"
-        && payload["active"] === true
-        && payload["value"] === normalized
-      )).flatMap(({ payload }) => {
-        const path = typeof payload["path"] === "string" ? payload["path"] : "";
-        const kind = payload["kind"];
-        const line = payload["line"];
-        if (!path || !LINK_KINDS.has(kind as SymbolGraphLinkKind) || !validLinkLine(Number(line))) return [];
-        return [{
-          path,
-          kind: kind as SymbolGraphLinkKind,
-          value: normalized,
-          line: Number(line),
-          ...(typeof payload["callee"] === "string" ? { callee: payload["callee"] } : {}),
-          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
-        }];
-      }).toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.kind.localeCompare(right.kind));
+      const results: SymbolGraphLinkSearchResult[] = [];
+      for (const ids of graphLinkIds.values()) {
+        for (const id of ids) {
+          const payload = db.getPayload(id) as Record<string, unknown> | null;
+          if (!payload || payload["type"] !== "link" || payload["active"] !== true || payload["value"] !== normalized) continue;
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          const kind = payload["kind"];
+          const line = payload["line"];
+          if (!path || !LINK_KINDS.has(kind as SymbolGraphLinkKind) || !validLinkLine(Number(line))) continue;
+          results.push({
+            path,
+            kind: kind as SymbolGraphLinkKind,
+            value: normalized,
+            line: Number(line),
+            ...(typeof payload["callee"] === "string" ? { callee: payload["callee"] } : {}),
+            documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+          });
+        }
+      }
+      return results.toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.kind.localeCompare(right.kind));
+    },
+
+    async catalogStats() {
+      let symbolCount = 0;
+      let linkCount = 0;
+      const languages = new Set<string>();
+      for (const ids of graphSymbolIds.values()) {
+        for (const id of ids) {
+          const payload = db.getPayload(id) as Record<string, unknown> | null;
+          if (payload?.["type"] === "symbol" && payload["active"] === true) {
+            symbolCount += 1;
+            if (typeof payload["language"] === "string") languages.add(payload["language"]);
+          }
+        }
+      }
+      for (const ids of graphLinkIds.values()) {
+        for (const id of ids) {
+          const payload = db.getPayload(id) as Record<string, unknown> | null;
+          if (payload?.["type"] === "link" && payload["active"] === true) linkCount += 1;
+        }
+      }
+      return {
+        symbolCount,
+        fileCount: graphFileIds.size,
+        linkCount,
+        languages: [...languages].toSorted(),
+        paths: [...graphFileIds.keys()].toSorted(),
+      };
+    },
+
+    async findImporters(path) {
+      const target = normalizeGraphPath(assertGraphText(path, "File path"));
+      const known = new Set(graphFileIds.keys());
+      const resolved: Array<{ path: string; specifier: string }> = [];
+      for (const [importer, specifiers] of importSpecifiersByPath) {
+        for (const specifier of specifiers) {
+          const result = resolveImportSpecifier(importer, specifier, known);
+          if (result.status === "resolved" && result.resolvedPath === target) {
+            resolved.push({ path: importer, specifier });
+          }
+        }
+      }
+      return {
+        path: target,
+        resolved: resolved.toSorted((left, right) => left.path.localeCompare(right.path) || left.specifier.localeCompare(right.specifier)),
+      };
     },
 
     async deleteSession(sessionId: string): Promise<void> {

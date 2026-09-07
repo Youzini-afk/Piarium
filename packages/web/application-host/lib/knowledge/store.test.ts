@@ -359,6 +359,51 @@ describe("KnowledgeStore", () => {
       expect(await store.findLinks("old.event")).toEqual([]);
       expect(await store.searchSymbols("Alpha", 10)).toEqual([]);
     });
+
+    it("reports exact, name-contains, and path-contains match tiers", async () => {
+      await store.replaceFileSymbols("src/harness/explore.ts", "typescript", [
+        { name: "explore", kind: "function", range },
+        { name: "exploreSearch", kind: "function", range: { ...range, startLine: 2, endLine: 2 } },
+      ], "disk-r1");
+      const exact = await store.searchSymbols("explore", 10);
+      expect(exact[0]).toMatchObject({ name: "explore", match: "exact", score: 4 });
+      expect(exact.find((entry) => entry.name === "exploreSearch")).toMatchObject({ match: "name-contains", score: 2 });
+      const byPath = await store.searchSymbols("harness", 10);
+      expect(byPath.every((entry) => entry.match === "path-contains")).toBe(true);
+    });
+
+    it("resolves reverse imports at query time and leaves non-relative specifiers unresolved", async () => {
+      await store.replaceFileSymbols("lib/harness/explore.ts", "typescript", [
+        { name: "explore", kind: "function", range },
+      ], "disk-r1");
+      await store.replaceFileSymbols("lib/harness/explore-service.ts", "typescript", [
+        { name: "createExploreSearchService", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "./explore.js", line: 1 },
+        { kind: "import", value: "@piarium/protocol", line: 2 },
+      ]);
+      await store.replaceFileSymbols("lib/other.ts", "typescript", [
+        { name: "other", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "../missing", line: 1 },
+      ]);
+      expect(await store.findImporters("lib/harness/explore.ts")).toEqual({
+        path: "lib/harness/explore.ts",
+        resolved: [{ path: "lib/harness/explore-service.ts", specifier: "./explore.js" }],
+      });
+      expect(await store.findImporters("lib/missing.ts")).toEqual({
+        path: "lib/missing.ts",
+        resolved: [],
+      });
+      const stats = await store.catalogStats();
+      expect(stats.symbolCount).toBe(3);
+      expect(stats.fileCount).toBe(3);
+      expect(stats.paths).toEqual([
+        "lib/harness/explore-service.ts",
+        "lib/harness/explore.ts",
+        "lib/other.ts",
+      ]);
+    });
   });
 
   describe("recall", () => {
