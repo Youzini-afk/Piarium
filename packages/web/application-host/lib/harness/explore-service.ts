@@ -1,4 +1,4 @@
-import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { AgentInputContext, ExploreFileRelation, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -38,8 +38,30 @@ const ownedDirtyPathsFor = (
   ));
 };
 
+async function loadSnippetRelations(
+  host: Pick<HarnessServiceHost, "fileRelations">,
+  workspaceId: string,
+  paths: readonly string[],
+  signal: AbortSignal,
+): Promise<{ files: ExploreFileRelation[] } | undefined> {
+  if (!host.fileRelations || paths.length === 0) return undefined;
+  const seen = new Set<string>();
+  const files: ExploreFileRelation[] = [];
+  for (const path of paths) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    signal.throwIfAborted();
+    const relation = await host.fileRelations(workspaceId, path);
+    if (!relation) continue;
+    if (relation.imports.length === 0 && relation.connections.length === 0 && relation.associations.length === 0) continue;
+    files.push(relation);
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return files.length > 0 ? { files } : undefined;
+}
+
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations">,
 ): HarnessService<"explore.search"> {
   return {
     handle: async (params, ctx) => {
@@ -129,6 +151,12 @@ export function createExploreSearchService(
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
       const incomplete = searchPartial || result.searched.incomplete;
+      const relations = await loadSnippetRelations(
+        host,
+        workspaceId,
+        result.snippets.map((snippet) => snippet.path),
+        ctx.signal,
+      );
       const formatted = {
         snippets: result.snippets,
         issues: result.issues,
@@ -143,6 +171,7 @@ export function createExploreSearchService(
           incomplete,
           ...(result.searched.filesDropped !== undefined ? { filesDropped: result.searched.filesDropped } : {}),
         },
+        ...(relations ? { relations } : {}),
       };
       const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
       const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
@@ -161,6 +190,7 @@ export function createExploreSearchService(
           anchors: result.details.anchors,
           byteBudget: DEFAULT_BYTE_BUDGET,
           ...(result.details.structure ? { structure: result.details.structure } : {}),
+          ...(relations ? { relations } : {}),
         },
       };
     },

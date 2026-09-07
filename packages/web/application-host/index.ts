@@ -1346,6 +1346,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     );
   });
 
+  const catalogScan = {
+    start(_workspaceId: string): void {},
+  };
   async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore> {
     const existing = knowledgeStores.get(workspaceId);
     if (existing) return existing;
@@ -1365,6 +1368,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
     }).then((store) => {
       knowledgeStores.set(workspaceId, store);
+      catalogScan.start(workspaceId);
       return store;
     });
     knowledgeStoreLoads.set(workspaceId, loading);
@@ -1422,12 +1426,35 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Decision suggestion failed:', errorMessage(error)),
   });
   observeKnowledgeBlockChange = decisionSuggestionRuntime.observeBlockChange;
+  const structureSource = createStructureSource([
+    createTreeSitterStructureProvider(),
+    createLspStructureProvider({
+      documents: documentsAuthority,
+      supervisor: languageSupervisor,
+    }),
+  ]);
+  const catalogFileSearch = createFsSearchRuntimeFactory({
+    fsPromises,
+    path,
+    spawn,
+    resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
+  });
   const symbolGraphRuntime = createSymbolGraphRuntime({
     getStore: getKnowledgeStoreForWorkspace,
     documents: documentsAuthority,
     supervisor: languageSupervisor,
+    structureSource,
+    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
+  catalogScan.start = (workspaceId: string): void => {
+    queueMicrotask(() => {
+      void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
+        console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
+      });
+    });
+  };
+  for (const workspaceId of knowledgeStores.keys()) catalogScan.start(workspaceId);
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -1565,13 +1592,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       documents: documentsAuthority,
       supervisor: languageSupervisor,
     }),
-    structureSource: createStructureSource([
-      createTreeSitterStructureProvider(),
-      createLspStructureProvider({
-        documents: documentsAuthority,
-        supervisor: languageSupervisor,
-      }),
-    ]),
+    structureSource,
+    fileRelations: async (workspaceId, resourceId) => {
+      const store = await getKnowledgeStoreForWorkspace(workspaceId);
+      const relations = await store.getFileRelations(resourceId);
+      if (!relations) return null;
+      if (relations.imports.length === 0 && relations.connections.length === 0 && relations.associations.length === 0) {
+        return null;
+      }
+      return {
+        path: relations.path,
+        documentRevision: relations.documentRevision,
+        imports: relations.imports.map(({ specifier, line }) => ({ specifier, line })),
+        connections: relations.connections.map(({ callee, literal, line }) => ({ callee, literal, line })),
+        associations: relations.associations.map(({ callee, literal, line }) => ({ callee, literal, line })),
+      };
+    },
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,

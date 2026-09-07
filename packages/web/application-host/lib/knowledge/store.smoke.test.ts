@@ -52,6 +52,32 @@ describe("knowledge store — Node smoke (built artifact)", () => {
       assert.equal((await store.searchSymbols("Example", 5))[0]?.path, "src/example.ts");
       assert.equal((await store.searchSymbols("Example", 5))[0]?.documentRevision, "disk-r1");
 
+      await store.replaceFileSymbols("src/example.ts", "typescript", [{
+        name: "Example",
+        kind: "class",
+        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
+      }], "disk-r1", [
+        { kind: "import", value: "./dep", line: 1 },
+        { kind: "connects", value: "explore.search", callee: "register", line: 4 },
+      ]);
+      const first = await store.getFileRelations("src/example.ts");
+      assert.equal(first?.imports[0]?.specifier, "./dep");
+      assert.equal(first?.connections[0]?.literal, "explore.search");
+      assert.equal(first?.danglingEdges, 0);
+      await store.replaceFileSymbols("src/example.ts", "typescript", [{
+        name: "Example",
+        kind: "class",
+        range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 },
+      }], "disk-r2", [
+        { kind: "import", value: "./other", line: 1 },
+      ]);
+      const second = await store.getFileRelations("src/example.ts");
+      assert.equal(second?.documentRevision, "disk-r2");
+      assert.equal(second?.imports[0]?.specifier, "./other");
+      assert.equal(second?.connections.length, 0);
+      assert.equal(second?.danglingEdges, 0);
+      assert.equal((await store.findLinks("./dep")).length, 0);
+
       await store.close();
     } finally {
       try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }

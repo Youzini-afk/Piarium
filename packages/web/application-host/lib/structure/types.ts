@@ -115,6 +115,8 @@ export interface StructureProvider {
 export interface StructureSource {
   outline(request: StructureOutlineRequest): Promise<StructureOutlineResult>;
   classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult>;
+  literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult>;
+  imports(request: StructureOutlineRequest): Promise<StructureImportsResult>;
 }
 
 export const NO_STRUCTURE_CAPABILITIES: StructureCapabilities = {

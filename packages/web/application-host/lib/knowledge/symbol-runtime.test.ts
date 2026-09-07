@@ -132,4 +132,109 @@ describe("symbol graph runtime", () => {
       await documents.cleanup();
     }
   });
+
+  it("writes structure imports and classified calls, and preserves the graph when extraction is unavailable", async () => {
+    let imports: Array<{ source: string; line: number }> = [{ source: "./old", line: 1 }];
+    let calls: Array<{ name: string; literal: string; line: number }> = [
+      { name: "register", literal: "explore.search", line: 3 },
+      { name: "log", literal: "explore.search", line: 4 },
+    ];
+    let importStatus: "ready" | "unavailable" = "ready";
+    const read = vi.fn(async () => ({
+      status: "ready" as const,
+      resource: { workspaceId: "workspace", resourceId: "src/router.ts" },
+      content: "import { boot } from \"./old\";\nexport function boot() {}\n",
+      revision: "disk-r1",
+      encoding: "utf-8",
+      bom: false,
+      byteLength: 20,
+      epoch: 1,
+    }));
+    const structureSource = {
+      outline: async (request: { revision: string }) => ({
+        status: "ready" as const,
+        provider: "tree-sitter" as const,
+        revision: request.revision,
+        symbols: [{
+          name: "boot",
+          kind: "function",
+          range: { startLine: 2, endLine: 2 },
+          signature: { startLine: 2, endLine: 2 },
+        }],
+      }),
+      classifyHits: async (request: { revision: string }) => ({
+        status: "unsupported" as const,
+        provider: "tree-sitter" as const,
+        revision: request.revision,
+        hits: [],
+      }),
+      literalCalls: async (request: { revision: string }) => ({
+        status: "ready" as const,
+        provider: "tree-sitter" as const,
+        revision: request.revision,
+        calls,
+      }),
+      imports: async (request: { revision: string }) => (
+        importStatus === "ready"
+          ? { status: "ready" as const, provider: "tree-sitter" as const, revision: request.revision, imports }
+          : { status: "unavailable" as const, provider: "tree-sitter" as const, revision: request.revision, imports: [] }
+      ),
+    };
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: { read, readAgentInputSnapshot: () => ({ status: "disk" as const }) } as never,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "should not be used when structureSource is present" }),
+      } as never,
+      structureSource,
+    });
+    const mutation = { workspaceId: "workspace", resourceId: "src/router.ts", kind: "modified" as const, owner: { kind: "web-route", id: "editor" } };
+    try {
+      runtime.observeDocumentMutation(mutation);
+      await runtime.drain();
+      expect((await store.getDefinedSymbols("src/router.ts")).map((symbol) => symbol.name)).toEqual(["boot"]);
+      expect(await store.getFileRelations("src/router.ts")).toMatchObject({
+        documentRevision: "disk-r1",
+        danglingEdges: 0,
+        imports: [{ specifier: "./old", line: 1 }],
+        connections: [{ callee: "register", literal: "explore.search" }],
+        associations: [{ callee: "log", literal: "explore.search" }],
+      });
+      expect(read).toHaveBeenCalled();
+
+      imports = [{ source: "./new", line: 1 }];
+      calls = [{ name: "on", literal: "ready", line: 6 }];
+      read.mockResolvedValue({
+        status: "ready" as const,
+        resource: { workspaceId: "workspace", resourceId: "src/router.ts" },
+        content: "import { boot } from \"./new\";\nexport function boot() {}\n",
+        revision: "disk-r2",
+        encoding: "utf-8",
+        bom: false,
+        byteLength: 20,
+        epoch: 1,
+      });
+      runtime.observeDocumentMutation(mutation);
+      await runtime.drain();
+      expect(await store.getFileRelations("src/router.ts")).toMatchObject({
+        documentRevision: "disk-r2",
+        danglingEdges: 0,
+        imports: [{ specifier: "./new", line: 1 }],
+        connections: [{ callee: "on", literal: "ready" }],
+        associations: [],
+      });
+      expect(await store.findLinks("./old")).toEqual([]);
+
+      importStatus = "unavailable";
+      runtime.observeDocumentMutation(mutation);
+      await runtime.drain();
+      expect(await store.getFileRelations("src/router.ts")).toMatchObject({
+        documentRevision: "disk-r2",
+        imports: [{ specifier: "./new", line: 1 }],
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });

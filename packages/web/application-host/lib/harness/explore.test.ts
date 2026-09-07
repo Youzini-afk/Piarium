@@ -346,6 +346,45 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.searched.filesDropped).toBeLessThan(summed);
     expect(result.searched.incomplete).toBe(true);
   });
+
+  it("formats confirmed connections separately from association candidates and counts them against the byte budget", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "router.ts", line: 1, text: "needle" }],
+      readFile: async () => ready("needle"),
+    });
+    const withoutGraph = formatExploreOutput(result);
+    const withGraph = formatExploreOutput({
+      ...result,
+      relations: {
+        files: [{
+          path: "router.ts",
+          documentRevision: "disk-r1",
+          imports: [{ specifier: "./protocol", line: 1 }],
+          connections: [{ callee: "register", literal: "explore.search", line: 4 }],
+          associations: [{ callee: "log", literal: "explore.search", line: 5 }],
+        }],
+      },
+    });
+    expect(withoutGraph.visibleText).not.toContain("Relations");
+    expect(withGraph.visibleText).toContain("router.ts imports ./protocol (L1)");
+    expect(withGraph.visibleText).toContain("router.ts connects register(\"explore.search\") (L4)");
+    expect(withGraph.visibleText).toContain("router.ts associates log(\"explore.search\") (L5) [candidate]");
+    expect(withGraph.storedBody).toContain("unverified candidates");
+    const tight = formatExploreOutput({
+      ...result,
+      relations: {
+        files: [{
+          path: "router.ts",
+          documentRevision: "disk-r1",
+          imports: [{ specifier: "./protocol", line: 1 }],
+          connections: [],
+          associations: [],
+        }],
+      },
+    }, { byteBudget: Buffer.byteLength(withoutGraph.visibleText, "utf8") });
+    expect(tight.visibleText).not.toContain("imports ./protocol");
+    expect(Buffer.byteLength(tight.visibleText, "utf8")).toBeLessThanOrEqual(Buffer.byteLength(withoutGraph.visibleText, "utf8"));
+  });
 });
 
 const structureSource = (outline: StructureOutlineResult): Pick<StructureSource, "outline" | "classifyHits"> => ({

@@ -639,8 +639,35 @@ export async function explore(
   };
 }
 
+export type ExploreFormatInput = Pick<
+  ExploreResult,
+  "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched"
+> & {
+  relations?: NonNullable<WireResult["details"]["relations"]>;
+};
+
+function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined): string[] {
+  const files = relations?.files.filter((file) => (
+    file.imports.length > 0 || file.connections.length > 0 || file.associations.length > 0
+  )) ?? [];
+  if (files.length === 0) return [];
+  const lines = ["Relations (graph; associates are unverified candidates, not confirmed connections):"];
+  for (const file of files) {
+    for (const item of file.imports) {
+      lines.push(`- ${file.path} imports ${item.specifier} (L${item.line})`);
+    }
+    for (const item of file.connections) {
+      lines.push(`- ${file.path} connects ${item.callee}("${item.literal}") (L${item.line})`);
+    }
+    for (const item of file.associations) {
+      lines.push(`- ${file.path} associates ${item.callee}("${item.literal}") (L${item.line}) [candidate]`);
+    }
+  }
+  return lines;
+}
+
 function packExploreVisible(
-  result: Pick<ExploreResult, "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched">,
+  result: ExploreFormatInput,
   byteBudget: number,
 ): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
   const header: string[] = [
@@ -670,7 +697,9 @@ function packExploreVisible(
     ? `Unread candidates (not-requested, ${result.notRequested.count}): ${result.notRequested.paths.join(", ")}`
     : "";
 
+  const graphLines = relationLines(result.relations);
   const storedParts = [...header, ...snippetBlocks];
+  if (graphLines.length > 0) storedParts.push(...graphLines);
   if (omittedLines.length > 0) storedParts.push("Omitted supports:", ...omittedLines);
   if (unreadLine) storedParts.push(unreadLine);
   storedParts.push(...issueLines);
@@ -698,6 +727,7 @@ function packExploreVisible(
       });
     }
   });
+  for (const line of graphLines) pushIfFits(line);
   const extraOmitted = omitted.filter((item) => item.reason === "over byte budget");
   if (omitted.length > 0) {
     pushIfFits("Omitted supports:");
@@ -720,7 +750,7 @@ function packExploreVisible(
 }
 
 export function formatExploreOutput(
-  result: Pick<ExploreResult, "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched">,
+  result: ExploreFormatInput,
   options?: { byteBudget?: number; handle?: string },
 ): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
   const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;

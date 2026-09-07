@@ -390,6 +390,14 @@ export interface ExploreSearchProvenance {
   matchedGroups: string[];
 }
 
+export interface ExploreFileRelation {
+  path: string;
+  documentRevision: string | null;
+  imports: Array<{ specifier: string; line: number }>;
+  connections: Array<{ callee: string; literal: string; line: number }>;
+  associations: Array<{ callee: string; literal: string; line: number }>;
+}
+
 export interface ExploreSearchResult {
   text: string;
   snippets: ExploreSearchSnippet[];
@@ -415,6 +423,11 @@ export interface ExploreSearchResult {
         status: ExploreStructureStatus;
       }>;
     };
+    /**
+     * Outbound graph facts for excerpt paths only. `connections` are confirmed
+     * call/register shapes; `associations` are unverified same-string candidates.
+     */
+    relations?: { files: ExploreFileRelation[] };
   };
 }
 

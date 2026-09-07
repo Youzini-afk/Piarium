@@ -6,6 +6,7 @@ const unused = async () => ({
   status: "unsupported" as const,
   provider: "lsp" as const,
   revision: "rev",
+  symbols: [],
   hits: [],
   calls: [],
   imports: [],
@@ -186,5 +187,202 @@ describe("createStructureSource", () => {
     expect(result.status).toBe("unsupported");
     expect(result.symbols).toEqual([]);
     expect(result.provider).toBeNull();
+  });
+
+  it("returns the first ready literal-call set and does not consult a later provider", async () => {
+    let later = 0;
+    const source = createStructureSource([
+      provider({
+        id: "tree-sitter",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          calls: [{ name: "register", literal: "explore.search", line: 2 }],
+        }),
+        imports: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          imports: [{ source: "./dep", line: 1 }],
+        }),
+      }),
+      provider({
+        id: "lsp",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async () => {
+          later += 1;
+          return { status: "ready", provider: "lsp", revision: "rev", calls: [] };
+        },
+        imports: async () => {
+          later += 1;
+          return { status: "ready", provider: "lsp", revision: "rev", imports: [] };
+        },
+      }),
+    ]);
+    const request = { path: "a.ts", languageId: "typescript", text: "fn", revision: "rev-1" };
+    await expect(source.literalCalls(request)).resolves.toMatchObject({
+      status: "ready",
+      provider: "tree-sitter",
+      calls: [{ name: "register", literal: "explore.search", line: 2 }],
+    });
+    await expect(source.imports(request)).resolves.toMatchObject({
+      status: "ready",
+      provider: "tree-sitter",
+      imports: [{ source: "./dep", line: 1 }],
+    });
+    expect(later).toBe(0);
+  });
+
+  it("does not let an empty literal-call result hide a later ready provider", async () => {
+    const calls: Array<boolean | undefined> = [];
+    const source = createStructureSource([
+      provider({
+        id: "tree-sitter",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: false }),
+        outline: unused,
+        literalCalls: async (request) => ({
+          status: "empty",
+          provider: "tree-sitter",
+          revision: request.revision,
+          calls: [],
+        }),
+      }),
+      provider({
+        id: "lsp",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: false }),
+        outline: unused,
+        literalCalls: async (request) => {
+          calls.push(request.warmOnly);
+          return {
+            status: "ready",
+            provider: "lsp",
+            revision: request.revision,
+            calls: [{ name: "on", literal: "ready", line: 4 }],
+          };
+        },
+      }),
+    ]);
+    const result = await source.literalCalls({
+      path: "a.ts",
+      languageId: "typescript",
+      text: "fn",
+      revision: "rev-1",
+    });
+    expect(result).toMatchObject({ status: "ready", provider: "lsp", calls: [{ name: "on", literal: "ready" }] });
+    expect(calls).toEqual([true]);
+  });
+
+  it("allows a later provider to cold-start after an earlier unavailable literal-call result", async () => {
+    const source = createStructureSource([
+      provider({
+        id: "tree-sitter",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async (request) => ({
+          status: "unavailable",
+          provider: "tree-sitter",
+          revision: request.revision,
+          calls: [],
+          message: "wasm missing",
+        }),
+        imports: async (request) => ({
+          status: "unavailable",
+          provider: "tree-sitter",
+          revision: request.revision,
+          imports: [],
+          message: "wasm missing",
+        }),
+      }),
+      provider({
+        id: "lsp",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async (request) => {
+          expect(request.warmOnly).toBe(false);
+          return {
+            status: "ready",
+            provider: "lsp",
+            revision: request.revision,
+            calls: [{ name: "request", literal: "open", line: 1 }],
+          };
+        },
+        imports: async (request) => {
+          expect(request.warmOnly).toBe(false);
+          return { status: "ready", provider: "lsp", revision: request.revision, imports: [{ source: "fs", line: 1 }] };
+        },
+      }),
+    ]);
+    const request = { path: "a.ts", languageId: "typescript", text: "fn", revision: "rev-1" };
+    await expect(source.literalCalls(request)).resolves.toMatchObject({ status: "ready", provider: "lsp" });
+    await expect(source.imports(request)).resolves.toMatchObject({ status: "ready", provider: "lsp" });
+  });
+
+  it("returns cancelled literal-call and import results immediately", async () => {
+    let later = 0;
+    const source = createStructureSource([
+      provider({
+        id: "tree-sitter",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async (request) => ({
+          status: "cancelled",
+          provider: "tree-sitter",
+          revision: request.revision,
+          calls: [],
+        }),
+        imports: async (request) => ({
+          status: "cancelled",
+          provider: "tree-sitter",
+          revision: request.revision,
+          imports: [],
+        }),
+      }),
+      provider({
+        id: "lsp",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: true, imports: true }),
+        outline: unused,
+        literalCalls: async () => {
+          later += 1;
+          return { status: "ready", provider: "lsp", revision: "rev", calls: [] };
+        },
+        imports: async () => {
+          later += 1;
+          return { status: "ready", provider: "lsp", revision: "rev", imports: [] };
+        },
+      }),
+    ]);
+    const request = { path: "a.ts", languageId: "typescript", text: "fn", revision: "rev-1" };
+    await expect(source.literalCalls(request)).resolves.toMatchObject({ status: "cancelled" });
+    await expect(source.imports(request)).resolves.toMatchObject({ status: "cancelled" });
+    expect(later).toBe(0);
+  });
+
+  it("reports unsupported rather than failed when no provider can extract calls or imports", async () => {
+    const source = createStructureSource([
+      provider({
+        id: "lsp",
+        capabilities: () => ({ outline: true, classifyHits: false, literalCalls: false, imports: false }),
+        outline: unused,
+        literalCalls: async () => {
+          throw new Error("should not be called");
+        },
+        imports: async () => {
+          throw new Error("should not be called");
+        },
+      }),
+    ]);
+    const request = { path: "a.ts", languageId: "typescript", text: "fn", revision: "rev-1" };
+    const calls = await source.literalCalls(request);
+    const imports = await source.imports(request);
+    expect(calls.status).toBe("unsupported");
+    expect(calls.calls).toEqual([]);
+    expect(calls.provider).toBeNull();
+    expect(imports.status).toBe("unsupported");
+    expect(imports.imports).toEqual([]);
+    expect(imports.provider).toBeNull();
   });
 });

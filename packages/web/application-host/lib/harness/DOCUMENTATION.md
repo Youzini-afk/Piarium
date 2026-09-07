@@ -261,6 +261,12 @@ After materialize, tree-sitter may classify hit lines so declaration names
 outrank comments and strings in `windowScore`; unread candidates are not
 parsed. It does not call `documentSymbols` itself.
 
+After excerpts are chosen, an optional `fileRelations` callback may attach
+outbound graph facts for those paths only (`details.relations` and a compact
+English block in the visible/stored body). Confirmed `connections` stay
+distinct from unverified `associations`. This does not add files to the
+candidate pool or change byte/candidate budgets (D-108).
+
 ### LspNavigationServices (`lsp-nav.ts`)
 
 `symbols` / `definition` / `references` / `hover` bind the queried document in

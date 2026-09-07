@@ -4,9 +4,10 @@
  * Design: agent-harness.md §7.1, §7.2, §7.2.1
  * Plan: agent-harness-plan.md §2.1
  *
- * Node types: event, session, block, knowledge.
+ * Node types: event, session, block, knowledge, file, symbol, link.
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),
- * references (symbol → symbol). Phase 2 only needs event/session/block/knowledge.
+ * imports / connects / associates (file → link). Additive link kinds share the
+ * file generation; there is no schema version or migration runner (D-105).
  *
  * Placeholder vector mode: dim=8, all-zero vectors, recall uses searchHybrid
  * with hybridAlpha=0 (text + graph only, no vector contribution).
@@ -188,6 +189,40 @@ export interface SymbolGraphSearchResult extends SymbolGraphSymbolInput {
   documentRevision: string | null;
 }
 
+export type SymbolGraphLinkKind = "import" | "connects" | "associates";
+
+export interface SymbolGraphLinkInput {
+  kind: SymbolGraphLinkKind;
+  value: string;
+  /** Inclusive, 1-based. */
+  line: number;
+  /** Required for connects/associates; omitted for import specifiers. */
+  callee?: string;
+}
+
+export interface SymbolGraphFileRelations {
+  path: string;
+  documentRevision: string | null;
+  generation: string | null;
+  imports: Array<{ specifier: string; line: number; documentRevision: string | null }>;
+  connections: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
+  associations: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
+  /**
+   * Outgoing file edges whose target payload is gone. Used to assert that a
+   * re-collect participates in the same generation lifecycle.
+   */
+  danglingEdges: number;
+}
+
+export interface SymbolGraphLinkSearchResult {
+  path: string;
+  kind: SymbolGraphLinkKind;
+  value: string;
+  line: number;
+  callee?: string;
+  documentRevision: string | null;
+}
+
 // ── Store interface ────────────────────────────────────────────────
 
 export interface KnowledgeStore {
@@ -247,10 +282,13 @@ export interface KnowledgeStore {
     language: string,
     symbols: SymbolGraphSymbolInput[],
     documentRevision: string,
+    links?: readonly SymbolGraphLinkInput[],
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score">>>;
+  getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
+  findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
   deleteSession(sessionId: string): Promise<void>;
   runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }>;
   close(): Promise<void>;
@@ -374,10 +412,17 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
   const graphFileIds = new Map<string, Set<number>>();
   const graphSymbolIds = new Map<string, Set<number>>();
+  const graphLinkIds = new Map<string, Set<number>>();
   for (const id of db.allNodeIds()) {
     const payload = db.getPayload(id) as Record<string, unknown> | null;
     if (!payload || typeof payload["path"] !== "string") continue;
-    const target = payload["type"] === "file" ? graphFileIds : payload["type"] === "symbol" ? graphSymbolIds : null;
+    const target = payload["type"] === "file"
+      ? graphFileIds
+      : payload["type"] === "symbol"
+        ? graphSymbolIds
+        : payload["type"] === "link"
+          ? graphLinkIds
+          : null;
     if (!target) continue;
     const ids = target.get(payload["path"]) ?? new Set<number>();
     ids.add(id);
@@ -391,6 +436,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   );
   const fileNodes = (path: string) => graphNodes(graphFileIds, path);
   const symbolNodes = (path: string) => graphNodes(graphSymbolIds, path);
+  const linkNodes = (path: string) => graphNodes(graphLinkIds, path);
+  const LINK_KINDS = new Set<SymbolGraphLinkKind>(["import", "connects", "associates"]);
+  const edgeLabelForKind = (kind: SymbolGraphLinkKind): "imports" | "connects" | "associates" => (
+    kind === "import" ? "imports" : kind
+  );
+  const validLinkLine = (line: number): boolean => Number.isSafeInteger(line) && line >= 1;
   const assertGraphText = (value: string, label: string): string => {
     const text = value.trim();
     if (!text) throw new KnowledgeMutationError("invalid", `${label} is required`);
@@ -851,12 +902,15 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const normalizedPath = assertGraphText(path, "File path");
         const normalizedLanguage = assertGraphText(language, "File language");
         const existing = fileNodes(normalizedPath);
+        const previous = existing[0]?.payload ?? {};
         const payload = {
           type: "file",
           path: normalizedPath,
           language: normalizedLanguage,
           modifiedAt: Date.now(),
           active: true,
+          ...(typeof previous["generation"] === "string" ? { generation: previous["generation"] } : {}),
+          ...(typeof previous["documentRevision"] === "string" ? { documentRevision: previous["documentRevision"] } : {}),
         };
         const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
         graphFileIds.set(normalizedPath, new Set([fileId, ...existing.slice(1).map(({ id }) => id)]));
@@ -872,7 +926,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async replaceFileSymbols(path, language, symbols, documentRevision) {
+    async replaceFileSymbols(path, language, symbols, documentRevision, links = []) {
       return enqueueWrite(() => {
         const normalizedPath = assertGraphText(path, "File path");
         const normalizedLanguage = assertGraphText(language, "File language");
@@ -882,9 +936,16 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           assertGraphText(symbol.kind, "Symbol kind");
           if (!validRange(symbol.range)) throw new KnowledgeMutationError("invalid", `Invalid range for symbol ${symbol.name}`);
         }
+        for (const link of links) {
+          if (!LINK_KINDS.has(link.kind)) throw new KnowledgeMutationError("invalid", `Invalid link kind ${String(link.kind)}`);
+          assertGraphText(link.value, "Link value");
+          if (!validLinkLine(link.line)) throw new KnowledgeMutationError("invalid", `Invalid line for link ${link.value}`);
+          if (link.kind !== "import") assertGraphText(link.callee ?? "", "Link callee");
+        }
         const generation = randomUUID();
         const previousFiles = fileNodes(normalizedPath);
         const previousSymbols = symbolNodes(normalizedPath);
+        const previousLinks = linkNodes(normalizedPath);
         const fileId = previousFiles[0]?.id ?? db.insert(placeholderVec, {
           type: "file",
           path: normalizedPath,
@@ -906,11 +967,28 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           documentRevision: normalizedRevision,
           active: false,
         }));
+        const pendingLinkPayloads = links.map((link) => ({
+          type: "link",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          kind: link.kind,
+          value: link.value,
+          line: link.line,
+          ...(link.kind !== "import" && link.callee ? { callee: link.callee } : {}),
+          generation,
+          documentRevision: normalizedRevision,
+          active: false,
+        }));
         const symbolIds = pendingPayloads.length > 0
           ? db.batchInsert(pendingPayloads.map(() => placeholderVec), pendingPayloads)
           : [];
+        const linkIds = pendingLinkPayloads.length > 0
+          ? db.batchInsert(pendingLinkPayloads.map(() => placeholderVec), pendingLinkPayloads)
+          : [];
         graphSymbolIds.set(normalizedPath, new Set([...previousSymbols.map(({ id }) => id), ...symbolIds]));
+        graphLinkIds.set(normalizedPath, new Set([...previousLinks.map(({ id }) => id), ...linkIds]));
         const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
+        const activeLinkPayloads = pendingLinkPayloads.map((payload) => ({ ...payload, active: true }));
         const filePayload = {
           type: "file",
           path: normalizedPath,
@@ -920,19 +998,36 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           generation,
           documentRevision: normalizedRevision,
         };
+        const previousTargets = new Set([
+          ...previousSymbols.map(({ id }) => id),
+          ...previousLinks.map(({ id }) => id),
+        ]);
+        const outgoingUnlinks: TransactionOperation[] = db.getEdges(fileId).flatMap((edge) => (
+          previousTargets.has(edge.targetId)
+            ? [{ type: "unlinkLabel" as const, src: fileId, dst: edge.targetId, label: edge.label }]
+            : []
+        ));
         const operations: TransactionOperation[] = [
           { type: "updatePayload", id: fileId, payload: filePayload },
           ...previousFiles.slice(1).map(({ id }) => ({ type: "delete" as const, id })),
+          ...outgoingUnlinks,
           ...previousSymbols.map(({ id }) => ({ type: "delete" as const, id })),
+          ...previousLinks.map(({ id }) => ({ type: "delete" as const, id })),
           ...symbolIds.flatMap((id, index): TransactionOperation[] => [
             { type: "updatePayload", id, payload: activePayloads[index] },
             { type: "upsertEdge", src: fileId, dst: id, label: "defines", weight: 1 },
+          ]),
+          ...linkIds.flatMap((id, index): TransactionOperation[] => [
+            { type: "updatePayload", id, payload: activeLinkPayloads[index] },
+            { type: "upsertEdge", src: fileId, dst: id, label: edgeLabelForKind(links[index]!.kind), weight: 1 },
           ]),
         ];
         db.commitTransaction(operations);
         graphFileIds.set(normalizedPath, new Set([fileId]));
         if (symbolIds.length > 0) graphSymbolIds.set(normalizedPath, new Set(symbolIds));
         else graphSymbolIds.delete(normalizedPath);
+        if (linkIds.length > 0) graphLinkIds.set(normalizedPath, new Set(linkIds));
+        else graphLinkIds.delete(normalizedPath);
         db.indexText(fileId, normalizedPath);
         for (let index = 0; index < symbolIds.length; index += 1) {
           const id = symbolIds[index]!;
@@ -940,8 +1035,14 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           db.indexText(id, `${symbol.name} ${normalizedPath}`);
           db.indexKeyword(id, symbol.name);
         }
+        for (let index = 0; index < linkIds.length; index += 1) {
+          const id = linkIds[index]!;
+          const link = links[index]!;
+          db.indexText(id, `${link.value} ${normalizedPath}`);
+          db.indexKeyword(id, link.value);
+        }
         db.flush();
-        return { fileId, symbols: symbolIds.length, edges: symbolIds.length };
+        return { fileId, symbols: symbolIds.length, edges: symbolIds.length + linkIds.length };
       });
     },
 
@@ -950,13 +1051,16 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const normalizedPath = assertGraphText(path, "File path");
         const files = fileNodes(normalizedPath);
         const symbols = symbolNodes(normalizedPath);
+        const links = linkNodes(normalizedPath);
         const operations: TransactionOperation[] = [
           ...symbols.map(({ id }) => ({ type: "delete" as const, id })),
+          ...links.map(({ id }) => ({ type: "delete" as const, id })),
           ...files.map(({ id }) => ({ type: "delete" as const, id })),
         ];
         if (operations.length > 0) db.commitTransaction(operations);
         graphFileIds.delete(normalizedPath);
         graphSymbolIds.delete(normalizedPath);
+        graphLinkIds.delete(normalizedPath);
         db.flush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
@@ -1009,6 +1113,85 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
             : [];
         })
         .toSorted((left, right) => left.range.startLine - right.range.startLine || left.range.startCharacter - right.range.startCharacter || left.name.localeCompare(right.name));
+    },
+
+    async getFileRelations(path) {
+      const normalizedPath = assertGraphText(path, "File path");
+      const file = fileNodes(normalizedPath)[0];
+      if (!file) return null;
+      const documentRevision = typeof file.payload["documentRevision"] === "string" ? file.payload["documentRevision"] : null;
+      const generation = typeof file.payload["generation"] === "string" ? file.payload["generation"] : null;
+      const imports: SymbolGraphFileRelations["imports"] = [];
+      const connections: SymbolGraphFileRelations["connections"] = [];
+      const associations: SymbolGraphFileRelations["associations"] = [];
+      let danglingEdges = 0;
+      for (const edge of db.getEdges(file.id)) {
+        const payload = db.getPayload(edge.targetId) as Record<string, unknown> | null;
+        if (!payload) {
+          danglingEdges += 1;
+          continue;
+        }
+        const line = payload["line"];
+        const value = typeof payload["value"] === "string" ? payload["value"] : "";
+        const revision = typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null;
+        if (edge.label === "imports" && payload["type"] === "link" && payload["active"] === true && value && validLinkLine(Number(line))) {
+          imports.push({ specifier: value, line: Number(line), documentRevision: revision });
+          continue;
+        }
+        if (
+          (edge.label === "connects" || edge.label === "associates")
+          && payload["type"] === "link"
+          && payload["active"] === true
+          && value
+          && typeof payload["callee"] === "string"
+          && validLinkLine(Number(line))
+        ) {
+          const entry = { callee: payload["callee"], literal: value, line: Number(line), documentRevision: revision };
+          if (edge.label === "connects") connections.push(entry);
+          else associations.push(entry);
+          continue;
+        }
+        if (edge.label === "defines" && payload["type"] === "symbol") continue;
+        if (edge.label === "defines" || edge.label === "imports" || edge.label === "connects" || edge.label === "associates") {
+          danglingEdges += 1;
+        }
+      }
+      const byLine = <T extends { line: number; specifier?: string; literal?: string; callee?: string }>(left: T, right: T) => (
+        left.line - right.line
+        || (left.specifier ?? left.literal ?? "").localeCompare(right.specifier ?? right.literal ?? "")
+        || (left.callee ?? "").localeCompare(right.callee ?? "")
+      );
+      return {
+        path: normalizedPath,
+        documentRevision,
+        generation,
+        imports: imports.toSorted(byLine),
+        connections: connections.toSorted(byLine),
+        associations: associations.toSorted(byLine),
+        danglingEdges,
+      };
+    },
+
+    async findLinks(value) {
+      const normalized = assertGraphText(value, "Link value");
+      return scanNodes((payload) => (
+        payload["type"] === "link"
+        && payload["active"] === true
+        && payload["value"] === normalized
+      )).flatMap(({ payload }) => {
+        const path = typeof payload["path"] === "string" ? payload["path"] : "";
+        const kind = payload["kind"];
+        const line = payload["line"];
+        if (!path || !LINK_KINDS.has(kind as SymbolGraphLinkKind) || !validLinkLine(Number(line))) return [];
+        return [{
+          path,
+          kind: kind as SymbolGraphLinkKind,
+          value: normalized,
+          line: Number(line),
+          ...(typeof payload["callee"] === "string" ? { callee: payload["callee"] } : {}),
+          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+        }];
+      }).toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.kind.localeCompare(right.kind));
     },
 
     async deleteSession(sessionId: string): Promise<void> {

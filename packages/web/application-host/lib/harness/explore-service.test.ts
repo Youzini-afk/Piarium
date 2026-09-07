@@ -16,7 +16,11 @@ import { createHarnessRouter } from "./router.js";
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
-async function fixture(scope?: string[], structureSource?: StructureSource) {
+async function fixture(
+  scope?: string[],
+  structureSource?: StructureSource,
+  fileRelations?: (workspaceId: string, path: string) => Promise<import("@piarium/protocol").ExploreFileRelation | null>,
+) {
   const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-explore-service-"));
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace);
@@ -33,6 +37,7 @@ async function fixture(scope?: string[], structureSource?: StructureSource) {
     resolveWorkspaceRoot: async () => workspace,
     readExploreFile: createExploreFileReader(documents, paths),
     ...(structureSource ? { structureSource } : {}),
+    ...(fileRelations ? { fileRelations } : {}),
   });
   let response: unknown;
   const router = createHarnessRouter({
@@ -321,6 +326,8 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
         }],
       }),
       classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+      literalCalls: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, calls: [] }),
+      imports: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, imports: [] }),
     };
     const f = await fixture(undefined, structureSource);
     await fs.writeFile(
@@ -339,5 +346,40 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.result.snippets[0]?.text).toContain("read large.ts:1-50");
     expect(response.result.details.structure?.files).toEqual([{ path: "large.ts", provider: "lsp", status: "ready" }]);
     expect(response.result.text).toMatch(/structure lsp\/ready/);
+  });
+
+  it("attaches graph relations for excerpt paths without expanding the candidate pool", async () => {
+    const f = await fixture(undefined, undefined, async (_workspaceId, path) => (
+      path === "router.ts"
+        ? {
+            path: "router.ts",
+            documentRevision: "disk-r1",
+            imports: [{ specifier: "./protocol", line: 1 }],
+            connections: [{ callee: "register", literal: "explore.search", line: 4 }],
+            associations: [{ callee: "log", literal: "explore.search", line: 5 }],
+          }
+        : null
+    ));
+    await fs.writeFile(
+      path.join(f.workspace, "router.ts"),
+      "import { x } from \"./protocol\";\nexport function boot() { register(\"explore.search\"); }\n",
+      "utf8",
+    );
+    await fs.writeFile(path.join(f.workspace, "other.ts"), "export const unused = 1;\n", "utf8");
+    const response = await f.request({ question: "explore.search" });
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.details.relations?.files).toEqual([{
+      path: "router.ts",
+      documentRevision: "disk-r1",
+      imports: [{ specifier: "./protocol", line: 1 }],
+      connections: [{ callee: "register", literal: "explore.search", line: 4 }],
+      associations: [{ callee: "log", literal: "explore.search", line: 5 }],
+    }]);
+    expect(response.result.snippets.every((snippet) => snippet.path === "router.ts")).toBe(true);
+    expect(response.result.notRequested.paths).not.toContain("other.ts");
+    expect(response.result.text).toContain("router.ts connects register(\"explore.search\") (L4)");
+    expect(response.result.text).toContain("[candidate]");
+    expect(response.result.searched.files).toBe(1);
   });
 });

@@ -101,6 +101,7 @@ export interface HarnessServiceHost {
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   structureSource: StructureSource | null;
+  fileRelations: ((workspaceId: string, path: string) => Promise<import("@piarium/protocol").ExploreFileRelation | null>) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -164,6 +165,7 @@ export interface HarnessServiceHostOptions {
   diagnosticsProvider?: DiagnosticsProvider;
   lspNavigationServices?: ReturnType<typeof createLspNavigationServices>;
   structureSource?: StructureSource;
+  fileRelations?: HarnessServiceHost["fileRelations"];
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -220,6 +222,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const diagnosticsProvider = options.diagnosticsProvider ?? null;
   const lspNavigationServices = options.lspNavigationServices ?? null;
   const structureSource = options.structureSource ?? null;
+  const fileRelations = options.fileRelations ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -369,6 +372,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     diagnosticsProvider,
     lspNavigationServices,
     structureSource,
+    fileRelations,
     webFetchService,
     webSearchService,
     documentReadSource,

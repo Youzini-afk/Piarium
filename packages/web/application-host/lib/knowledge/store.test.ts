@@ -281,6 +281,7 @@ describe("KnowledgeStore", () => {
 
       await store.touchFile("src/a.ts", "typescript");
       expect(await store.searchSymbols("Beta", 10)).toHaveLength(1);
+      expect((await store.getFileRelations("src/a.ts"))?.documentRevision).toBe("disk-r1");
       await store.replaceFileSymbols("src/a.ts", "typescript", [
         { name: "Gamma", kind: "variable", range },
       ], "disk-r2");
@@ -308,6 +309,55 @@ describe("KnowledgeStore", () => {
         { name: "Unattributed", kind: "class", range },
       ], "")).rejects.toMatchObject({ code: "invalid" });
       expect(await store.searchSymbols("Unattributed", 10)).toEqual([]);
+    });
+
+    it("keeps confirmed connections distinct from association candidates and binds imports to the revision", async () => {
+      await store.replaceFileSymbols("src/router.ts", "typescript", [
+        { name: "boot", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "./protocol", line: 1 },
+        { kind: "connects", value: "explore.search", callee: "register", line: 4 },
+        { kind: "associates", value: "explore.search", callee: "log", line: 5 },
+      ]);
+      const relations = await store.getFileRelations("src/router.ts");
+      expect(relations).toMatchObject({
+        path: "src/router.ts",
+        documentRevision: "disk-r1",
+        danglingEdges: 0,
+        imports: [{ specifier: "./protocol", line: 1, documentRevision: "disk-r1" }],
+        connections: [{ callee: "register", literal: "explore.search", line: 4, documentRevision: "disk-r1" }],
+        associations: [{ callee: "log", literal: "explore.search", line: 5, documentRevision: "disk-r1" }],
+      });
+      expect(relations?.connections).not.toEqual(relations?.associations);
+      expect(await store.findLinks("explore.search")).toEqual([
+        expect.objectContaining({ kind: "connects", callee: "register", path: "src/router.ts" }),
+        expect.objectContaining({ kind: "associates", callee: "log", path: "src/router.ts" }),
+      ]);
+    });
+
+    it("drops previous link nodes and leaves no hanging edges after a re-collect", async () => {
+      await store.replaceFileSymbols("src/a.ts", "typescript", [
+        { name: "Alpha", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "./old", line: 1 },
+        { kind: "connects", value: "old.event", callee: "on", line: 2 },
+      ]);
+      await store.replaceFileSymbols("src/a.ts", "typescript", [
+        { name: "Beta", kind: "function", range },
+      ], "disk-r2", [
+        { kind: "import", value: "./new", line: 1 },
+      ]);
+      const relations = await store.getFileRelations("src/a.ts");
+      expect(relations).toMatchObject({
+        documentRevision: "disk-r2",
+        danglingEdges: 0,
+        imports: [{ specifier: "./new", line: 1, documentRevision: "disk-r2" }],
+        connections: [],
+        associations: [],
+      });
+      expect(await store.findLinks("./old")).toEqual([]);
+      expect(await store.findLinks("old.event")).toEqual([]);
+      expect(await store.searchSymbols("Alpha", 10)).toEqual([]);
     });
   });
 

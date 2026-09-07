@@ -980,6 +980,8 @@ describe("session e2e — explore", () => {
           }],
         }),
         classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+        literalCalls: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, calls: [] }),
+        imports: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, imports: [] }),
       };
       const faux = registerFauxProvider();
       let exploreResult = "";

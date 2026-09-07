@@ -24,8 +24,8 @@ provider can actually answer for a language:
 | --- | --- | --- |
 | `outline` | Named units with signature and full span | tree-sitter (TS/TSX), then LSP `documentSymbol` |
 | `classifyHits` | Hit line → name / body / string / comment | tree-sitter (not LSP) |
-| `literalCalls` | Call + string-literal shapes | tree-sitter can extract; graph write is step 4 |
-| `imports` | Import sources | tree-sitter can extract; graph write is step 4 |
+| `literalCalls` | Call + string-literal shapes | tree-sitter extracts; `StructureSource` fans out like outline (D-106); graph write classifies `connects` vs `associates` |
+| `imports` | Import sources | tree-sitter extracts; same fan-out; specifier strings are written as `imports` edges |
 
 Statuses stay distinct: `ready`, `empty`, `unavailable` (cold or missing
 runtime), `unsupported` (no language, or no `documentSymbolProvider`), `stale`,
@@ -37,6 +37,10 @@ outline that covers every supplied hit line wins immediately. `empty`, or a
 call is `warmOnly` so a cold language server is not started (D-099). The first
 provider's `unavailable` still allows a cold start on the next one. A later
 `ready` outline replaces the earlier one; results are not merged.
+`literalCalls` and `imports` use the same cancelled / empty / warmOnly /
+unavailable rules without hit-line coverage. When no configured provider
+declares the capability, the facade status is `unsupported`, not `failed`
+(D-106). LSP still reports `unsupported` for those two operations.
 
 ## Slice
 

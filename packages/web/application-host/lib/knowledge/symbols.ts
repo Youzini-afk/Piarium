@@ -2,11 +2,13 @@
 
 import type {
   KnowledgeStore,
+  SymbolGraphLinkInput,
   SymbolGraphSymbolInput,
 } from "./store.js";
 
 export interface CollectedSymbols {
   symbols: SymbolGraphSymbolInput[];
+  links?: SymbolGraphLinkInput[];
   /** Disk revision the ranges were computed from. */
   documentRevision: string;
 }
@@ -46,7 +48,13 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
     }
     const collected = await deps.getDocumentSymbols(change.path, language);
     if (collected === null) await deps.store.touchFile(change.path, language);
-    else await deps.store.replaceFileSymbols(change.path, language, collected.symbols, collected.documentRevision);
+    else await deps.store.replaceFileSymbols(
+      change.path,
+      language,
+      collected.symbols,
+      collected.documentRevision,
+      collected.links,
+    );
   };
 
   const observe = (change: SymbolDocumentChange): void => {
