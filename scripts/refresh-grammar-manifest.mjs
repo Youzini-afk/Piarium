@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 /**
- * Publish-time grammar pack manifest (D-117).
+ * Publish-time grammar pack manifest (D-125).
  *
- * Packs each candidate from npm, extracts the published wasm, hashes it
- * ourselves, and records ABI via web-tree-sitter. The committed JSON is the
- * authority — runtime does not trust a network-supplied digest.
+ * Packs each candidate from npm, extracts the published wasm and its
+ * `queries/tags.scm`, hashes both ourselves, records ABI via web-tree-sitter,
+ * and compiles the query against the grammar so an advertised pack is one that
+ * actually produces an outline. The committed JSON is the authority — runtime
+ * does not trust a network-supplied digest.
+ *
+ * By default every candidate is fetched at the version already recorded in the
+ * committed manifest, so a re-run reproduces the same versions and digests.
+ * Pass `--latest` to move packs forward to the newest published version.
  */
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -27,7 +33,7 @@ const destPath = path.join(
   "grammar-packs.json",
 );
 
-/** Plan 3.11 coverage targets, keyed by protocol language ids (D-119). */
+/** Plan 3.11 coverage targets, keyed by protocol language ids (D-127). */
 const CANDIDATES = [
   { languageId: "python", packages: ["tree-sitter-python"] },
   { languageId: "go", packages: ["tree-sitter-go"] },
@@ -85,17 +91,23 @@ const licenseFile = (files) => (
   files.find((file) => /(?:^|\/)(?:license|copying|licence)(?:\.[^/]+)?$/i.test(file)) ?? null
 );
 
-const inspectPackage = async (languageId, packageName, workDir, loadAbi) => {
+const TAGS_ENTRY = /(?:^|\/)queries\/tags\.scm$/;
+
+const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedVersion) => {
   let metadata;
   try {
     metadata = await fetchJson(registryUrl(packageName));
   } catch (error) {
     return { skip: `${packageName}: registry lookup failed (${error instanceof Error ? error.message : error})` };
   }
-  const version = metadata["dist-tags"]?.latest;
+  const version = pinnedVersion ?? metadata["dist-tags"]?.latest;
   const versionMeta = version ? metadata.versions?.[version] : null;
   if (!version || !versionMeta?.dist?.tarball) {
-    return { skip: `${packageName}: no latest tarball on npm` };
+    return {
+      skip: pinnedVersion
+        ? `${packageName}: pinned version ${pinnedVersion} is not on npm`
+        : `${packageName}: no latest tarball on npm`,
+    };
   }
   const tarballPath = path.join(workDir, `${packageName.replace(/[\\/@]/g, "_")}-${version}.tgz`);
   await downloadTo(versionMeta.dist.tarball, tarballPath);
@@ -117,7 +129,27 @@ const inspectPackage = async (languageId, packageName, workDir, loadAbi) => {
     return { skip: `${packageName}@${version}: tarball has no .wasm` };
   }
   const wasmBytes = await fs.readFile(path.join(extractDir, wasmRelative));
-  const abi = await loadAbi(path.join(extractDir, wasmRelative));
+  const language = await runtime.loadGrammar(path.join(extractDir, wasmRelative));
+
+  // A grammar with no usable tags query installs but cannot answer anything, so
+  // the query is verified here rather than discovered by a user (D-128).
+  let tagsPath = null;
+  let tagsIntegrity = null;
+  let tagsNote = null;
+  const tagsRelative = files.find((file) => TAGS_ENTRY.test(file.replace(/\\/g, "/")));
+  if (!tagsRelative) {
+    tagsNote = "no queries/tags.scm";
+  } else {
+    const tagsBytes = await fs.readFile(path.join(extractDir, tagsRelative));
+    try {
+      runtime.compileQuery(language, tagsBytes.toString("utf8"));
+      tagsPath = tagsRelative.replace(/\\/g, "/");
+      tagsIntegrity = integrityOf(tagsBytes);
+    } catch (error) {
+      tagsNote = `tags.scm did not compile (${error instanceof Error ? error.message.split("\n")[0] : error})`;
+    }
+  }
+
   return {
     pack: {
       languageId,
@@ -128,14 +160,17 @@ const inspectPackage = async (languageId, packageName, workDir, loadAbi) => {
       grammarFile: path.posix.basename(wasmRelative.replace(/\\/g, "/")),
       integrity: integrityOf(wasmBytes),
       bytes: wasmBytes.byteLength,
-      abi,
+      abi: language.abiVersion,
       licensePath: licenseFile(files)?.replace(/\\/g, "/") ?? null,
+      tagsPath,
+      tagsIntegrity,
     },
+    tagsNote,
   };
 };
 
 const loadWebTreeSitter = async () => {
-  const { Parser, Language, MIN_COMPATIBLE_VERSION, LANGUAGE_VERSION } = await import(
+  const { Parser, Language, Query, MIN_COMPATIBLE_VERSION, LANGUAGE_VERSION } = await import(
     pathToFileURL(require.resolve("web-tree-sitter")).href
   );
   const wasm = require.resolve("web-tree-sitter/web-tree-sitter.wasm");
@@ -144,25 +179,44 @@ const loadWebTreeSitter = async () => {
     // web-tree-sitter 0.27 window. Named exports are missing from some builds.
     min: typeof MIN_COMPATIBLE_VERSION === "number" ? MIN_COMPATIBLE_VERSION : 13,
     max: typeof LANGUAGE_VERSION === "number" ? LANGUAGE_VERSION : 15,
-    loadAbi: async (grammarPath) => {
-      const language = await Language.load(grammarPath);
-      return language.abiVersion;
+    loadGrammar: (grammarPath) => Language.load(grammarPath),
+    compileQuery: (language, source) => {
+      const query = new Query(language, source);
+      query.delete();
     },
   };
 };
 
+const readCommittedVersions = async () => {
+  try {
+    const committed = JSON.parse(await fs.readFile(destPath, "utf8"));
+    const byLanguage = new Map();
+    for (const [languageId, pack] of Object.entries(committed.packs ?? {})) {
+      if (pack?.packageName && pack?.version) byLanguage.set(languageId, pack);
+    }
+    return byLanguage;
+  } catch {
+    return new Map();
+  }
+};
+
 const main = async () => {
+  const useLatest = process.argv.includes("--latest");
+  const pinned = useLatest ? new Map() : await readCommittedVersions();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-grammar-manifest-"));
   const runtime = await loadWebTreeSitter();
   const packs = {};
   const skipped = {};
+  log(useLatest ? "resolving latest published versions" : `reusing ${pinned.size} committed pack version(s)`);
   try {
     for (const candidate of CANDIDATES) {
       let recorded = false;
       const reasons = [];
+      const pin = pinned.get(candidate.languageId);
       for (const packageName of candidate.packages) {
         try {
-          const result = await inspectPackage(candidate.languageId, packageName, workDir, runtime.loadAbi);
+          const pinnedVersion = pin?.packageName === packageName ? pin.version : undefined;
+          const result = await inspectPackage(candidate.languageId, packageName, workDir, runtime, pinnedVersion);
           if (result.skip) {
             reasons.push(result.skip);
             continue;
@@ -175,7 +229,8 @@ const main = async () => {
           }
           packs[candidate.languageId] = result.pack;
           recorded = true;
-          log(`${candidate.languageId}: ${packageName}@${result.pack.version} abi=${result.pack.abi} ${result.pack.bytes}B`);
+          const outline = result.pack.tagsPath ? "outline" : `no outline (${result.tagsNote})`;
+          log(`${candidate.languageId}: ${packageName}@${result.pack.version} abi=${result.pack.abi} ${result.pack.bytes}B ${outline}`);
           break;
         } catch (error) {
           reasons.push(`${packageName}: ${error instanceof Error ? error.message : error}`);
@@ -191,7 +246,7 @@ const main = async () => {
   }
 
   const manifest = {
-    generatedAt: "2026-09-07",
+    generatedAt: new Date().toISOString().slice(0, 10),
     minCompatibleAbi: runtime.min,
     maxCompatibleAbi: runtime.max,
     packs,

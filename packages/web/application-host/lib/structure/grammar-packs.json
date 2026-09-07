@@ -13,7 +13,9 @@
       "integrity": "sha256-16108b50df4ee9a30168794252ab55e7c93bfc5765d7fa0aa3e335752c515f47",
       "bytes": 457883,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-d0f3e577878167bfabc30e526e497bce58d1699b9bcabf8ab3a50698efb5ca3e"
     },
     "go": {
       "languageId": "go",
@@ -25,7 +27,9 @@
       "integrity": "sha256-9504573f352b20be7f2f1911754d710622aedc15afff16d5ed8fb5645681aee7",
       "bytes": 217182,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-d1a9b1f678fe0278b85054e2dc56a28ef26aa478b8c88fb2b0dd83cdcdb9db35"
     },
     "rust": {
       "languageId": "rust",
@@ -37,7 +41,9 @@
       "integrity": "sha256-f65f354215611fd94ad34134b3427eb3d58cbb745df7b6509ba722184db73d57",
       "bytes": 1102547,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-f22867fdebde5cb091861c08d34690dc2540f4318068bf81be9f6b0d348ab8c1"
     },
     "java": {
       "languageId": "java",
@@ -49,7 +55,9 @@
       "integrity": "sha256-4fdeac4ca6ca089f06c6f7e562abcac1733cd465728cc7031ebb73c2019122c4",
       "bytes": 414641,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-bcb22147b8582d92743fc973864cefb894a4c12b3957f16f3d472b2ec7cd4c49"
     },
     "c": {
       "languageId": "c",
@@ -61,7 +69,9 @@
       "integrity": "sha256-c852c2a85ebf2beb636aa3b0ef7f7e70458684d74f6741b20dcb296885bed9f9",
       "bytes": 625918,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-774ca67cfe23b0e0d1d3a4f01788049a822beb1311feee72b20a595a37be1e28"
     },
     "cpp": {
       "languageId": "cpp",
@@ -73,7 +83,9 @@
       "integrity": "sha256-174eb0deb75b2ec7881bcacda9f995648d8e683956e5c2267e69ab6dc503fcbf",
       "bytes": 3434931,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-029731ca946e32f919491d9f76c85a50e5deb5ad1934e37fd6849312c0d4a705"
     },
     "csharp": {
       "languageId": "csharp",
@@ -85,7 +97,9 @@
       "integrity": "sha256-6f69e1cae44e1c32c1eccc170dc5a9778fb94ff716f71113fe1f8c4299aa2f40",
       "bytes": 5350581,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-4ed08da0162ecd48206ac34bebe7ea9757a8c7b617f6ad8f70c168d685d514fe"
     },
     "kotlin": {
       "languageId": "kotlin",
@@ -97,7 +111,9 @@
       "integrity": "sha256-7009d69453bc8735e438b2818a633efb21c88f99782769abba60dffedfab73f7",
       "bytes": 3441042,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     },
     "ruby": {
       "languageId": "ruby",
@@ -109,7 +125,9 @@
       "integrity": "sha256-09a96427d7c72f0613ed470cd9812223fc4a91d6a9c025c0235cc6bd59ff96f4",
       "bytes": 2106352,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-ed1e7dc07a95b87aef267e7f9715c6717a70f09efbd7b6f48bbd51c7b7510cf3"
     },
     "php": {
       "languageId": "php",
@@ -121,7 +139,9 @@
       "integrity": "sha256-d4df6a6ff08c87c3ec4f9cbb785fe09998a0cb570e03f57d7b19b3acfb146aa7",
       "bytes": 1058041,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": "package/queries/tags.scm",
+      "tagsIntegrity": "sha256-4ac5e30f99f3abe5417dcb42219e0790c66f9b4bb3be071bc60160dd012f3cd8"
     },
     "shellscript": {
       "languageId": "shellscript",
@@ -133,7 +153,9 @@
       "integrity": "sha256-8292919c88a0f7d3fb31d0cd0253ca5a9531bc1ede82b0537f2c63dd8abe6a7a",
       "bytes": 1358224,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     },
     "css": {
       "languageId": "css",
@@ -145,7 +167,9 @@
       "integrity": "sha256-8a23977fe271357cce6f254ef88c9bebf3854602d8046605aef6a45c02135c59",
       "bytes": 128668,
       "abi": 15,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     },
     "html": {
       "languageId": "html",
@@ -157,7 +181,9 @@
       "integrity": "sha256-c48fcd82c7ea8bf943180088ba7f28c48b2bb5287874179168bf9d31e394cf85",
       "bytes": 18385,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     },
     "yaml": {
       "languageId": "yaml",
@@ -169,7 +195,9 @@
       "integrity": "sha256-e752dc21c3591df9b45692fe417d101f45d1828c28c44d79005f4066dc7e4e91",
       "bytes": 189255,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     },
     "toml": {
       "languageId": "toml",
@@ -181,7 +209,9 @@
       "integrity": "sha256-1ac6a83826c35a68857f8325e00c78f6bcbef4eb6db3931a6cf3041f76e5e09f",
       "bytes": 24040,
       "abi": 14,
-      "licensePath": "package/LICENSE"
+      "licensePath": "package/LICENSE",
+      "tagsPath": null,
+      "tagsIntegrity": null
     }
   },
   "skipped": {
