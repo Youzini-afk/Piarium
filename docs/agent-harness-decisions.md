@@ -2665,6 +2665,105 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-139 · 2026-09-07 · 3.12 验收复验：图查询按调用次数量，不按单次量
+
+类型：问题与解法
+
+背景：3.12 验收复验重量了一次。D-134 的对照数字是**每种查询各一次**，但 explore 一次调用会做 `catalogStats` 一次、
+`searchSymbols` × 每个 distinctive 词、`getFileRelations` × 已选窗口、`findImporters` × 每个种子路径（最多 20）。
+`findImporters` 当时在查询期对全库每条 import specifier 重跑一遍 `resolveImportSpecifier`；`catalogStats` 为了 `languages`
+逐文件 `getPayload`，而 explore 只要 `symbolCount`。同量级目录（2270 文件 / 23321 符号 / 12370 边）实测**一次 explore
+调用的图工作 892.2 ms**，其中 `findImporters` 58.15 ms × 20 个种子是主项——正是 D-134 声称已经消除的那类成本。
+另外三处：D-133 的 `error` 监听器只对 EPIPE `return`，else 分支什么也不做，而挂上监听器本身就取消了默认抛出，
+于是**所有** stdio 错误都被静音（D-133 正文明确说不要吞真实错误）；打包用的 `graphBoost` 靠 `startsWith("definition of ")`
+前缀匹配展示文案得出；图新增候选一次 `Promise.all` 读最多 28 个文件，绕开 `readBudget` 和 `DEFAULT_READ_PARALLELISM = 3`；
+`related` 正文没有预算，hub 文件或撞多路径的名字会把「装不下什么」交给通用 32 KiB 头尾截断器，被切掉的通常是中间的
+`Imported by`。
+
+决定：
+
+1. **反向 import 建解析后的反向索引。** 按目录形状缓存一次（路径集合变化或任一文件的 specifier 变化即整份失效），
+   `findImporters` 变查表。`catalogStats` 的 `languages` 从内存 `fileLanguageByPath` 取，不再逐文件 `getPayload`。
+2. **D-133 的处理器只吞已死管道**，其他 stdio 错误重新抛出，恢复默认的未捕获行为。
+3. **打包 boost 查表。** evidence 带结构化 `graphSources`（`definition` / `connection` / `import`），
+   `GRAPH_PACK_BOOST` 按它取值；`why` 只管展示。
+4. **图新增候选复用主物化形状**：`maxMaterializeReads` 定预算、按 `DEFAULT_READ_PARALLELISM` 分批。超预算的仍是候选，
+   走既有 `not-requested`，不另计 `filesDropped`（那是「没进候选池」的意思）。主循环与图那一趟的物化合成一个
+   `materializeBatch`，不再有两份三十行副本。
+5. **`related` 正文按段设可见上限**：每段 40 条，名字锚点最多走 8 个路径，超出写明「还有 N 条，完整在 details」。
+   `details` 保持完整——只有正文有上限，与 explore「进通用工具结果之前自己打完包」同口径（设计 6.1）。
+
+复验数字（同一探针、同一机器、`packages` ∩ `CATALOG_SCAN_LANGUAGES` = 2270 文件）：`catalogStats` 14.19 → 1.13 ms；
+`findImporters` 58.15 ms/次 → 首次 124.89 ms 建索引、之后 0.164 ms；**一次 explore 调用的图工作 892.2 → 51.7 ms**。
+仍是对照数字，不是省时声称。
+
+原因：单次查询的墙钟不是判据，热路径上的调用次数才是。缓存的失效条件必须是「解析结果可能变了」而不是「路径集合变了」——
+新增一个文件会让别的文件原本解析不了的 specifier 突然解析得了，所以任一写入都整份丢。EPIPE 那条的范围最小化只有在
+真错误仍然抛出时才成立。前缀匹配展示文案会在改一句文案时静默改掉排序。
+
+不改：D-134/D-137 的预算数值与 RRF 权重；持久格式；`related` 的 `details` 完整性；D-103 第 1、3 项。
+
+影响：`knowledge/store.ts`；`harness/explore.ts`；`harness/related-tool.ts`；`run/test-supervisor.ts`；
+`store.test.ts` / `related-tool.test.ts`；plan 3.12；status 3.1/3.3/3.12。
+
+状态：已实施。
+
+### D-140 · 2026-09-07 · 3.12 验收：目录建不起来，图就没有可读的东西
+
+类型：问题与解法
+
+背景：3.12 验收复审。D-134/D-139 把**查询**量清楚了，但**目录本身**建不起来这件事只作为对照数字的方法学注脚留在
+status（「该路径每个目录 spawn `git check-ignore`，在本机挂了 11+ 分钟」），没有当成未兑现的前置条件立项。而 3.12 的全部价值都
+压在目录存在上，且失败是静默的：冷扫描是火忘（D-107），explore 又如实报 `graph: empty`——用户既没有收益也没有信号。
+
+两笔成本都实测了。**枚举**：冷扫描传 `respectGitignore: true` 且无 `limit`，`searchFilesystemFiles` 每个目录 spawn 一个
+`git check-ignore`。本仓库 4363 个目录，裸遍历 1.58 s，单次 spawn 84.8 ms，5 路并行投影约 74 s。同一条路还有两个消费者：
+设置页语言分布（D-120，上限 8000）和 workbench 的 `/api/find/file`。**建目录**：2358 文件 / 4143 次解析耗 1104500 ms
+（18.4 分钟）。`replaceFileSymbols` 每写一个文件 `db.flush()` 一次整库；隔离测量显示在 400 文件的库上 `touchFile`（只写一个
+小节点）单次 66.8 ms，同样 20 次作为一批并发则合计 91 ms（4.6 ms/次）——flush 是主项，且成本随库增长，所以整体是二次的。
+
+决定：
+
+1. **枚举一次问 git，不是每目录问一次。** `searchFilesystemFiles` 改成用一次
+   `git ls-files -z --cached --others --exclude-standard` 建「未被忽略」的路径集合，文件按集合判定、目录按前缀判定。
+   非 Git 目录或 git 不可用时返回 null，等于不声称任何东西被忽略——与旧实现 spawn 失败时的答案一致。
+   顺带修正两处语义：被强制 add 的文件（`--cached` 会列出）不再被当成忽略而丢掉；只含被忽略文件的目录不再被下降。
+2. **派生图的写入按尾随去抖 flush。** 符号图是派生数据——冷扫描会重建，且按磁盘修订幂等跳过——所以
+   `replaceFileSymbols` / `removeFileSymbols` / `touchFile` 改为标脏 + 安静 250 ms 后 flush，并以 30 s 为最大延迟上限，
+   让长扫描仍然边跑边落盘。知识、块、事件、会话是用户数据，仍在各自的写入里即时 flush，窗口不变宽。
+3. **测量脚本必须量生产做的事。** `symbol-graph-query.ts` 原先逐个 await 写入，量的是产品不会跑的形状。改为按
+   `CATALOG_SCAN_BATCH` 成批并发（收集器按路径串行、不同路径并发，所以这也是 store 看到的突发大小），常量从
+   `symbol-runtime.ts` 导出而不是抄一遍。脚本头部关于 `searchFilesystemFiles` 挂住的说明同时作废。
+
+**第一次尝试是错的，记下来。** 去抖最初写成看写队列占用（`pending > 1` 就延后）。它在 400 文件探针上显示写入快 8 倍，
+但那个探针先把解析 await 完再连续入队；真实形状里每次写入之间隔着约 47 ms 的解析，队列几乎总是只剩一个，于是每次都照样
+flush。全库实测 18.4 → 17.6 分钟，等于没动。占用不是判据，安静期才是。
+
+复验数字（同一机器、同一脚本、2358 文件 / 4143 次解析）：
+
+| 项 | 之前 | 之后 |
+| --- | --- | --- |
+| 枚举（`respectGitignore: true`） | 投影 ≈ 74 s，4363 次 git spawn | **199 ms**，1 次 |
+| 建目录 | 1104500 ms（18.4 分钟） | **290502 ms（4.8 分钟）** |
+| `searchSymbols` / `findImporters` | 186 / 42 ms（D-134 首测） | 17 / 41 ms |
+
+仍是对照数字，不是省时声称。
+
+原因：派生数据的持久化频率是可以选的，用户数据的不行。把两者混在一个 `db.flush()` 策略里，就只能按用户数据的要求付钱。
+枚举那条更简单：忽略规则是仓库级事实，不是每目录事实，按目录问就是把一个 O(1) 的问题问了 O(目录数) 次。
+
+不改：`CATALOG_SCAN_BATCH = 8`；D-107 的火忘；D-115 的语言覆盖；查询侧的内存结构（D-134/D-139）；
+`/api/find/file` 与设置页的调用签名（它们免费受益）。
+
+遗留（本条不修，见状态）：4143 次解析对 2358 个文件——同名闸门再访重新解析了 1785 个。D-109 正文称
+「解析按内容哈希缓存，这一遍便宜」，但解析缓存上限是 32 条，在这个规模上早已淘汰完，所以再访是完整的第二遍解析
+（约 47 ms × 1785 ≈ 84 s，占改进后建目录时间的三成）。要么提高缓存、要么让再访只重跑 `literalCalls`，都是设计改动。
+
+影响：`lib/fs/search.ts`（+ 新增 `search.test.ts`，此前该文件无测试）；`lib/knowledge/store.ts`；
+`lib/knowledge/symbol-runtime.ts`（导出 `CATALOG_SCAN_BATCH`）；`scripts/symbol-graph-query.ts`；status 3.1/3.12。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2803,9 +2902,11 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-130 | implementation（导入校验后缀与体积；不回传文件系统错误原文；ABI 检查异常变 `abi` 失败） | — | grammar-installer.ts importUserGrammar |
 | D-131 | implementation（清单加载失败退空清单；解析期筛 ABI 超窗；刷新脚本按已提交版本可复现；重复安装并流） | — | grammar-manifest.ts；application-host/index.ts；grammar-installer.ts；refresh 脚本 |
 | D-132 | active-design（D-116–D-119 永久空号，引用改指真实条目） | — | 本文件治理规则 |
-| D-133 | implementation（D-103 第 2 项：崩溃隔离用例忽略已死管道的 EPIPE） | — | lib/run/test-supervisor.ts；status 3.2/3.12 |
-| D-134 | implementation（查询走内存行缓存 + linksByValue；searchSymbols 暴露 match 分档；对照数字后不加名字哈希） | — | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
-| D-135 | implementation（反向 import 查询期解析；未解析可见；`.js`→`.ts` 孪生；多命中不猜） | — | knowledge/import-resolve.ts；store.findImporters；related imports.unresolved |
+| D-133 | implementation（D-103 第 2 项：崩溃隔离用例忽略已死管道的 EPIPE） | D-139（改为只吞死管道，其他重抛） | lib/run/test-supervisor.ts；status 3.2/3.12 |
+| D-134 | implementation（查询走内存行缓存 + linksByValue；searchSymbols 暴露 match 分档；对照数字后不加名字哈希） | D-139（反向 import 反向索引；catalogStats 不逐文件读） | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
+| D-135 | implementation（反向 import 未解析可见；`.js`→`.ts` 孪生；多命中不猜） | D-139（解析时机改为反向索引，不再每次查询重解析） | knowledge/import-resolve.ts；store.findImporters；related imports.unresolved |
 | D-136 | implementation（取代 D-108「不扩候选池」：explore 增加图路径候选） | — | explore.ts / explore-graph.ts；protocol details.graph；设计 6.1/6.2；plan 3.12 |
 | D-137 | implementation（定义召回始终跑；连线与反向 import 等第一次打包之后；独立预算与 filesDropped max） | — | explore.ts；explore-graph.ts |
 | D-138 | implementation（related 是文件级拓扑，不是 references，无 PageRank；store 未开 → unavailable） | — | protocol related.query；Host related-tool/service；pi-host related-tool；session-e2e |
+| D-139 | implementation（按调用次数量：反向 import 反向索引、catalogStats 不逐文件读、EPIPE 只吞死管道、boost 查表、图那趟复用主物化形状、related 正文按段设上限；892 → 52 ms） | — | knowledge/store.ts；explore.ts；related-tool.ts；run/test-supervisor.ts |
+| D-140 | implementation（目录前置条件：枚举一次 `git ls-files` 而非每目录 `check-ignore`；派生图写入尾随去抖 flush；测量脚本改成生产的成批形状。枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟） | — | lib/fs/search.ts + search.test.ts；knowledge/store.ts；symbol-runtime.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |

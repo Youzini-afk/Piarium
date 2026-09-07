@@ -98,7 +98,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    写入失效与写入守卫（D-088/D-089）、语言服务视图隔离与符号修订（D-087）已接。D-090 第一组与 D-092（候选广度按文件铺开及同批小项）已实施。
    3.11 第 1–5 步已接（结构接口 + LSP outline、冷启动对照、web-tree-sitter TS/TSX/JS/JSON、连接边/冷目录/`imports`、
    语言支持设置页与可验证按需下载，其中按需语言经上游 `tags.scm` 适配器真出轮廓，D-091/D-093–D-132）。
-   3.12 已接（符号图读者：explore 定义优先 / 连线补全 / 反向 import，以及接线的 `related`，D-133–D-138）。
+   3.12 已接（符号图读者：explore 定义优先 / 连线补全 / 反向 import，以及接线的 `related`，D-133–D-138；
+   验收又把「目录建得起来」这个前置条件修到可用：枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟，D-140）。
    下一步按仍然观察得到的「找不到入口」决定词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是通用召回提升。
    缺可选来源仍返回已有正文，不等全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
@@ -439,12 +440,21 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 1. **退出码（D-103 第 2 项）。** 崩溃隔离用例给已死子进程 stdio 加上 `EPIPE` / `ERR_STREAM_DESTROYED` 处理。
    第 1、3 项（挂钟阈值）本刀不碰。
 2. **可查的 store。** 先量再决定要不要内存索引。`searchSymbols` 暴露精确 / 名字含 / 路径含分档。
-   反向 import 在查询期解析相对 specifier（含 `.js`→`.ts` 孪生）；解析不了可见地报，不猜。
+   反向 import 解析相对 specifier（含 `.js`→`.ts` 孪生）；解析不了可见地报，不猜。
+   量要按**热路径上的调用次数**量，不按单次量：反向 import 建解析后的反向索引，写入即整份失效
+   （新增一个文件会让别的 specifier 突然解析得了），`catalogStats` 不为了 `languages` 逐文件读 payload（D-139）。
 3. **explore 第二候选来源。** 定义候选始终跑（只要 store 开着且目录非空）；连线补全和反向 import 在第一次
    打包之后，用已选中摘录里确认过的字面量/路径。三路进现有 `rankCandidates` RRF，不另起排序。
-   取代 D-108 的「不扩候选池」。摘录出边注解仍在。
+   取代 D-108 的「不扩候选池」。摘录出边注解仍在。打包 boost 按结构化来源查表，不靠展示文案的前缀；
+   图那一趟物化复用主循环的预算与并行度形状，超预算的仍是候选、走 `not-requested`（D-139）。
 4. **`related`。** 丢掉 PageRank facade，按路径或名字回答定义 / import / 谁 import 了它 / 连线另一端。
    接进 pi-host（协议 + 工具定义 + 默认注册）。工具描述写明和 `lsp.references` 的分工。
+   正文按段设可见上限、`details` 保持完整，不把「装不下什么」交给通用截断器（D-139）。
+5. **前置条件：目录得建得起来（D-140）。** 读者再好，目录建不出来就没有可读的东西，而且失败是静默的
+   （冷扫描火忘 + `graph: empty`）。枚举一次问 git（`git ls-files -z --cached --others --exclude-standard`），
+   不是每目录 spawn 一次 `check-ignore`；派生图写入按安静期去抖 flush，用户数据仍在各自写入里即时 flush；
+   测量脚本按 `CATALOG_SCAN_BATCH` 成批并发，量产品真会跑的形状。数字进 status。
+   同名闸门再访仍会重新解析（解析缓存 32 条），未修。
 
 不做：PageRank、多跳、`references`/`calls` 边、embedding、词法索引、BM25、语法包/设置页、记忆/压缩/线程/权限、
 explore 模型增强。不声称检索质量或速度提升；量到的数字进 status，标明是对照数字。
