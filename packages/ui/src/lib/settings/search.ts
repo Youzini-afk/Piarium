@@ -775,6 +775,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['markdown', 'prompt', 'template'],
   },
   {
+    id: 'language-support.workspace',
+    page: 'language-support',
+    titleKey: 'settings.languageSupport.section.workspace',
+    descriptionKey: 'settings.page.languageSupport.description',
+    keywords: ['language', 'grammar', 'structure', 'tree-sitter', 'lsp', 'language server'],
+  },
+  {
+    id: 'language-support.pack',
+    page: 'language-support',
+    titleKey: 'settings.languageSupport.row.structurePack',
+    keywords: ['grammar', 'wasm', 'install', 'structure pack'],
+  },
+  {
     id: 'runtime.current',
     page: 'runtime',
     titleKey: 'settings.runtime.section.current',

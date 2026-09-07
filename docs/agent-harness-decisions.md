@@ -2379,6 +2379,24 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-122 · 2026-09-07 · 3.11 第 5 步（语言支持设置页）
+
+类型：默认值调整
+
+背景：plan 要求设置「语言支持」页按工作区列语言，每种两行状态。`piarium:*` 渲染器会被转成 `PiariumSettingsPage` 分节，本页需要自己的组件。
+
+决定：普通 `language-support` 渲染器，`group: 'pi'`，`order: 38`（紧挨 runtime 39）。页面只读 `LanguageSupportAPI` 与已有的 `LanguageServicesAPI.getStatus`。用户自带 wasm 的导入按钮留到下载管道落地；本页先提供状态与「安装」动作。
+
+原因：设置页不能碰文件系统、网络或 tree-sitter。LSP 状态已有 owner，不另造一份。
+
+考虑过的替代：(1) `piarium:language-support` 分节——会被应用设置壳吞掉。(2) 本页自己扫工作区——越权。
+
+不改：LanguageServicesAPI；Host 下载管道。
+
+影响：`builtin-page-metadata.ts`；`LanguageSupportPage`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2493,6 +2511,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-115 | implementation（冷目录扩到带 importQuery 的语言：TS/TSX/JS/JSX；取代 D-104 覆盖范围） | — | languages.ts CATALOG_SCAN_LANGUAGES |
 | D-120 | implementation（语言分布现算；文件上限 8000；工作区缓存 30s） | — | language-support/runtime.ts |
 | D-121 | implementation（wanted 按工作区内存记，结构仍报 unsupported；Host 不自发网络） | — | tree-sitter onLanguageRequest；LanguageSupportRuntime |
+| D-122 | implementation（语言支持设置页：普通渲染器 order 38；LSP 复用 LanguageServicesAPI） | — | LanguageSupportPage；builtin-page-metadata |
 | D-105 | implementation（link 节点与 imports/connects/associates 加法写入，generation 同寿；touchFile 保留修订） | — | knowledge/store.ts；symbol collector/runtime |
 | D-106 | implementation（StructureSource literalCalls/imports fan-out；确认 callee 允许名单） | — | structure/source.ts + connections.ts |
 | D-107 | implementation（冷扫描 queueMicrotask，不挡启动/首 turn） | — | application-host/index.ts；symbol-runtime.scanWorkspace |
