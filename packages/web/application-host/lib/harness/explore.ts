@@ -444,6 +444,7 @@ async function outlineForSnapshot(
   snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
   deps: ExploreDeps,
   signal: AbortSignal,
+  hitLines: number[],
 ): Promise<StructureOutlineResult | { status: "not-requested"; provider: null }> {
   if (!deps.structure) return { status: "not-requested", provider: null };
   try {
@@ -454,6 +455,7 @@ async function outlineForSnapshot(
       text: snapshot.content,
       revision: snapshot.revision,
       signal,
+      hitLines,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw error;
@@ -569,7 +571,8 @@ export async function explore(
         continue;
       }
       const lines = snapshot.content.split(/\r\n|\n|\r/);
-      const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal);
+      const hitLines = [...candidate.evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
+      const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal, hitLines);
       if (outline.status !== "not-requested") {
         structureFiles.set(candidate.path, {
           path: candidate.path,

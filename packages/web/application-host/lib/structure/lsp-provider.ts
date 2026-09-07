@@ -18,7 +18,7 @@ import {
   type StructureSymbol,
 } from "./types.js";
 
-type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "documentSymbols" | "syncDocument">;
+type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "documentSymbols" | "syncDocument" | "getStatus">;
 
 export interface LspStructureProviderOptions {
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
@@ -114,6 +114,18 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
       }
       if (!request.workspaceId) {
         return { status: "unavailable", provider: "lsp", revision: request.revision, symbols: [], message: "Workspace is unavailable for language binding." };
+      }
+      if (request.warmOnly) {
+        const status = options.supervisor.getStatus(request.workspaceId, languageId, AGENT_LANGUAGE_VIEW).status;
+        if (status !== "ready" && status !== "degraded") {
+          return {
+            status: "unavailable",
+            provider: "lsp",
+            revision: request.revision,
+            symbols: [],
+            message: "Language server is not already running for this view.",
+          };
+        }
       }
       const bound = await binder.bind({
         workspaceId: request.workspaceId,

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
@@ -130,6 +130,37 @@ describe("createLspStructureProvider", () => {
       await language.dispose();
       await harness.cleanup();
     }
+  });
+
+  it("does not bind a cold language session when warmOnly is set", async () => {
+    const getStatus = vi.fn((workspaceId: string, languageId: string, view = "agent") => ({
+      status: "absent",
+      workspaceId,
+      languageId,
+      view,
+    }));
+    const documentSymbols = vi.fn();
+    const syncDocument = vi.fn();
+    const read = vi.fn();
+    const readAgentInputSnapshot = vi.fn();
+    const provider = createLspStructureProvider({
+      documents: { read, readAgentInputSnapshot },
+      supervisor: { getStatus, documentSymbols, syncDocument },
+    });
+    const result = await provider.outline({
+      path: "a.ts",
+      languageId: "typescript",
+      text: "export function x() {}",
+      revision: "rev-1",
+      workspaceId: "ws-1",
+      warmOnly: true,
+    });
+    expect(result.status).toBe("unavailable");
+    expect(result.message).toMatch(/not already running/i);
+    expect(getStatus).toHaveBeenCalledWith("ws-1", "typescript", "agent");
+    expect(documentSymbols).not.toHaveBeenCalled();
+    expect(syncDocument).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("marks an unknown language unsupported instead of unavailable", async () => {

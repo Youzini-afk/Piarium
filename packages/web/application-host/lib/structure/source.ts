@@ -1,4 +1,5 @@
 import { languageIdForPath } from "@piarium/protocol";
+import { outlineCoversHitLines } from "./slice.js";
 import type {
   StructureClassifyRequest,
   StructureClassifyResult,
@@ -24,24 +25,43 @@ const better = <Result extends { status: StructureStatus }>(current: Result | un
 );
 
 /**
- * Fan-out across structure providers. Callers try providers in order; the first
- * ready/empty outline wins. A later provider may still succeed when an earlier
- * one is cold or failed — that is the tree-sitter / LSP pairing.
+ * Fan-out across structure providers.
+ *
+ * The first `ready` outline that covers every supplied hit line wins. `empty`
+ * and a `ready` outline that misses a hit do not hide a later provider, but
+ * that later call is `warmOnly` so a cold language server is not started
+ * (D-097 / D-099). `unavailable` from an earlier provider still allows a
+ * cold start on the next one.
  */
 export function createStructureSource(providers: readonly StructureProvider[]): StructureSource {
   return {
     async outline(request: StructureOutlineRequest): Promise<StructureOutlineResult> {
       const languageId = request.languageId ?? languageIdForPath(request.path);
       const nextRequest = { ...request, languageId };
+      const hitLines = (request.hitLines ?? []).filter((line) => Number.isSafeInteger(line) && line >= 1);
       let fallback: StructureOutlineResult | undefined;
+      let firstReady: StructureOutlineResult | undefined;
+      let priorAnswered = false;
       for (const provider of providers) {
         if (!provider.capabilities(languageId).outline) continue;
-        const result = await provider.outline(nextRequest);
-        if (result.status === "ready" || result.status === "empty") return result;
-        fallback = better(fallback, result);
+        const result = await provider.outline({ ...nextRequest, warmOnly: priorAnswered });
         if (result.status === "cancelled") return result;
+        if (result.status === "ready") {
+          const covered = hitLines.length === 0 || outlineCoversHitLines(result.symbols, hitLines);
+          if (covered) return result;
+          firstReady = result;
+          priorAnswered = true;
+          fallback = better(fallback, result);
+          continue;
+        }
+        if (result.status === "empty") {
+          priorAnswered = true;
+          fallback = better(fallback, result);
+          continue;
+        }
+        fallback = better(fallback, result);
       }
-      return fallback ?? {
+      return firstReady ?? fallback ?? {
         status: languageId ? "unavailable" : "unsupported",
         provider: null,
         revision: request.revision,
@@ -53,12 +73,14 @@ export function createStructureSource(providers: readonly StructureProvider[]): 
       const languageId = request.languageId ?? languageIdForPath(request.path);
       const nextRequest = { ...request, languageId };
       let fallback: StructureClassifyResult | undefined;
+      let priorAnswered = false;
       for (const provider of providers) {
         if (!provider.capabilities(languageId).classifyHits) continue;
-        const result = await provider.classifyHits(nextRequest);
-        if (result.status === "ready" || result.status === "empty") return result;
-        fallback = better(fallback, result);
+        const result = await provider.classifyHits({ ...nextRequest, warmOnly: priorAnswered });
+        if (result.status === "ready") return result;
         if (result.status === "cancelled") return result;
+        if (result.status === "empty") priorAnswered = true;
+        fallback = better(fallback, result);
       }
       return fallback ?? {
         status: "unsupported",
