@@ -198,8 +198,21 @@ interface FileEvidence {
   distinctive: Set<string>;
   anchors: Set<string>;
   graphWhy: string[];
+  graphSources: Set<GraphCandidateSource>;
   graphLocate: Array<{ text: string; kind: "identifier" | "literal" }>;
 }
+
+type GraphCandidateSource = "definition" | "connection" | "import";
+
+/**
+ * Pack-time boost per graph source. Complementary packing does not read the RRF
+ * ranking, so a mention would otherwise outrank the file that defines the name.
+ */
+const GRAPH_PACK_BOOST: Record<GraphCandidateSource, number> = {
+  definition: 30,
+  connection: 16,
+  import: 4,
+};
 
 interface RankedCandidate {
   path: string;
@@ -231,10 +244,17 @@ const emptyEvidence = (): FileEvidence => ({
   distinctive: new Set(),
   anchors: new Set(),
   graphWhy: [],
+  graphSources: new Set(),
   graphLocate: [],
 });
 
-function attachGraphWhy(evidence: FileEvidence, why: string, locate: FileEvidence["graphLocate"][number]): void {
+function attachGraphWhy(
+  evidence: FileEvidence,
+  source: GraphCandidateSource,
+  why: string,
+  locate: FileEvidence["graphLocate"][number],
+): void {
+  evidence.graphSources.add(source);
   if (!evidence.graphWhy.includes(why)) evidence.graphWhy.push(why);
   if (!evidence.graphLocate.some((item) => item.kind === locate.kind && item.text === locate.text)) {
     evidence.graphLocate.push(locate);
@@ -377,13 +397,8 @@ function windowsFor(
     const why = evidence.graphWhy.length > 0
       ? (matched ? `${evidence.graphWhy.join("; ")}; ${matched}` : evidence.graphWhy.join("; "))
       : (matched || "matched search terms");
-    const graphBoost = evidence.graphWhy.some((item) => item.startsWith("definition of "))
-      ? 30
-      : evidence.graphWhy.some((item) => item.startsWith("other end of connection "))
-        ? 16
-        : evidence.graphWhy.some((item) => item.startsWith("imports "))
-          ? 4
-          : 0;
+    const graphBoost = [...evidence.graphSources]
+      .reduce((best, source) => Math.max(best, GRAPH_PACK_BOOST[source]), 0);
     const structure = outline.status === "not-requested"
       ? undefined
       : {
@@ -629,7 +644,7 @@ export async function explore(
             }
             if (already) acceptDefinition(hit.path, hit.match);
             const evidence = byFile.get(hit.path) ?? emptyEvidence();
-            attachGraphWhy(evidence, `definition of ${hit.name} (${hit.kind})`, { text: hit.name, kind: "identifier" });
+            attachGraphWhy(evidence, "definition", `definition of ${hit.name} (${hit.kind})`, { text: hit.name, kind: "identifier" });
             byFile.set(hit.path, evidence);
             graphDefinitions += 1;
           }
@@ -669,20 +684,7 @@ export async function explore(
     });
   };
 
-  while (next < ranked.length && reads < readBudget) {
-    const selected = packComplementary(prepared, excerptLimit);
-    const filesUsed = new Set(selected.map((window) => window.path)).size;
-    const needComplement = excerptLimit >= 2 && filesUsed < 2 && next < ranked.length;
-    if (selected.length >= excerptLimit && !needComplement) break;
-    const batchSize = Math.min(
-      DEFAULT_READ_PARALLELISM,
-      ranked.length - next,
-      readBudget - reads,
-      Math.max(1, excerptLimit - selected.length + DEFAULT_READ_LOOKAHEAD),
-    );
-    if (batchSize <= 0) break;
-    const batch = ranked.slice(next, next + batchSize);
-    next += batch.length;
+  const materializeBatch = async (batch: readonly RankedCandidate[]): Promise<void> => {
     const snapshots = await Promise.all(batch.map(async (candidate) => {
       signal.throwIfAborted();
       try {
@@ -692,7 +694,6 @@ export async function explore(
         return [candidate, { status: "failed" as const, message: "Document read failed. Search again or inspect workspace availability." }] as const;
       }
     }));
-    reads += batch.length;
     signal.throwIfAborted();
     for (const [candidate, snapshot] of snapshots) {
       if (snapshot.status !== "ready") {
@@ -713,8 +714,7 @@ export async function explore(
       }
       const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
       const windows = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
-      const stale = sliced.stale;
-      if (stale) {
+      if (sliced.stale) {
         issues.push({
           path: candidate.path,
           status: "stale",
@@ -722,12 +722,30 @@ export async function explore(
         });
       }
       if (windows.length === 0) {
-        markProvenance(candidate.path, stale ? "stale" : "empty", snapshot);
+        markProvenance(candidate.path, sliced.stale ? "stale" : "empty", snapshot);
         continue;
       }
       markProvenance(candidate.path, "ready", snapshot);
       prepared.push(...windows);
     }
+  };
+
+  while (next < ranked.length && reads < readBudget) {
+    const selected = packComplementary(prepared, excerptLimit);
+    const filesUsed = new Set(selected.map((window) => window.path)).size;
+    const needComplement = excerptLimit >= 2 && filesUsed < 2 && next < ranked.length;
+    if (selected.length >= excerptLimit && !needComplement) break;
+    const batchSize = Math.min(
+      DEFAULT_READ_PARALLELISM,
+      ranked.length - next,
+      readBudget - reads,
+      Math.max(1, excerptLimit - selected.length + DEFAULT_READ_LOOKAHEAD),
+    );
+    if (batchSize <= 0) break;
+    const batch = ranked.slice(next, next + batchSize);
+    next += batch.length;
+    reads += batch.length;
+    await materializeBatch(batch);
   }
 
   let latestRanked = ranked;
@@ -758,7 +776,7 @@ export async function explore(
             continue;
           }
           const evidence = byFile.get(end.path) ?? emptyEvidence();
-          attachGraphWhy(evidence, `other end of connection "${literal}"`, { text: literal, kind: "literal" });
+          attachGraphWhy(evidence, "connection", `other end of connection "${literal}"`, { text: literal, kind: "literal" });
           byFile.set(end.path, evidence);
           graphConnections += 1;
           if (already || seenNew.has(end.path)) continue;
@@ -782,7 +800,7 @@ export async function explore(
             continue;
           }
           const evidence = byFile.get(importer.path) ?? emptyEvidence();
-          attachGraphWhy(evidence, `imports ${seed}`, { text: importer.specifier, kind: "literal" });
+          attachGraphWhy(evidence, "import", `imports ${seed}`, { text: importer.specifier, kind: "literal" });
           byFile.set(importer.path, evidence);
           graphImports += 1;
           if (already || seenNew.has(importer.path)) continue;
@@ -803,50 +821,16 @@ export async function explore(
         && !preparedPaths.has(candidate.path)
         && !issues.some((issue) => issue.path === candidate.path)
       ));
-      const extraBudget = Math.min(newcomers.length, DEFAULT_GRAPH_CONNECTION_BUDGET + DEFAULT_GRAPH_IMPORT_BUDGET);
-      const extraBatch = newcomers.slice(0, extraBudget);
-      const extraSnapshots = await Promise.all(extraBatch.map(async (candidate) => {
+      // Graph newcomers get an independent read budget so they can still
+      // compete when rg already filled the pack, but they reuse the main
+      // materialization shape instead of one wide fan-out. Newcomers past the
+      // budget stay ranked candidates and are reported `not-requested` (D-139).
+      const extraBatch = newcomers.slice(0, maxMaterializeReads(newcomers.length, excerptLimit));
+      for (let offset = 0; offset < extraBatch.length; offset += DEFAULT_READ_PARALLELISM) {
         signal.throwIfAborted();
-        try {
-          return [candidate, await deps.readFile(candidate.path)] as const;
-        } catch {
-          signal.throwIfAborted();
-          return [candidate, { status: "failed" as const, message: "Document read failed. Search again or inspect workspace availability." }] as const;
-        }
-      }));
-      reads += extraBatch.length;
-      for (const [candidate, snapshot] of extraSnapshots) {
-        if (snapshot.status !== "ready") {
-          issues.push({ path: candidate.path, status: snapshot.status, message: snapshot.message });
-          markProvenance(candidate.path, snapshot.status, snapshot);
-          continue;
-        }
-        const lines = snapshot.content.split(/\r\n|\n|\r/);
-        applyGraphLocate(lines, candidate.evidence);
-        const hitLines = [...candidate.evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
-        const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal, hitLines);
-        if (outline.status !== "not-requested") {
-          structureFiles.set(candidate.path, {
-            path: candidate.path,
-            provider: outline.provider,
-            status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
-          });
-        }
-        const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
-        const windows = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
-        if (sliced.stale) {
-          issues.push({
-            path: candidate.path,
-            status: "stale",
-            message: "Some search hits no longer match this document revision; those hits were omitted.",
-          });
-        }
-        if (windows.length === 0) {
-          markProvenance(candidate.path, sliced.stale ? "stale" : "empty", snapshot);
-          continue;
-        }
-        markProvenance(candidate.path, "ready", snapshot);
-        prepared.push(...windows);
+        const slice = extraBatch.slice(offset, offset + DEFAULT_READ_PARALLELISM);
+        reads += slice.length;
+        await materializeBatch(slice);
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;

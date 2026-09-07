@@ -17,6 +17,21 @@ export interface RelatedQueryInput {
   anchor: string;
 }
 
+/**
+ * Visible caps so a hub file or a common name cannot hand the generic 32 KiB
+ * tool-result truncation the decision of which section disappears. `details`
+ * still carries every item; only the text is capped, and it says how many it
+ * left out (D-139).
+ */
+export const RELATED_SECTION_LIMIT = 40;
+export const RELATED_FOCUS_LIMIT = 8;
+
+function capped<T>(items: readonly T[], limit: number): { shown: readonly T[]; omitted: number } {
+  return items.length <= limit
+    ? { shown: items, omitted: 0 }
+    : { shown: items.slice(0, limit), omitted: items.length - limit };
+}
+
 const looksLikePath = (anchor: string): boolean => (
   /[\\/]/.test(anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(anchor)
 );
@@ -84,7 +99,8 @@ export async function executeRelated(
   let importersIncomplete = false;
   let connectionsIncomplete = false;
 
-  for (const path of focusPaths.toSorted(compareText)) {
+  const focus = capped(focusPaths.toSorted(compareText), RELATED_FOCUS_LIMIT);
+  for (const path of focus.shown) {
     for (const symbol of await store.getDefinedSymbols(path)) {
       definitions.push({ name: symbol.name, kind: symbol.kind, path: symbol.path });
     }
@@ -141,49 +157,67 @@ export async function executeRelated(
       incomplete: connectionsIncomplete,
     },
   };
-  result.text = formatRelatedText(result);
+  result.text = formatRelatedText(result, focus.omitted);
   return result;
 }
 
-function formatRelatedText(result: RelatedQueryResult): string {
+function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): string {
   const lines: string[] = [
     `related ${result.anchor.value} (${result.anchor.kind}) · ${result.status}`,
     "File-level import topology and connection endpoints from the symbol graph. Use lsp.references for precise who-references-this-symbol at a position; related does not need a language server.",
   ];
+  if (focusOmitted > 0) {
+    lines.push(`Anchor matched ${focusOmitted} more file(s) than were walked; the first ${RELATED_FOCUS_LIMIT} in path order are below. Narrow the anchor to a path for the rest.`);
+  }
+  const note = (omitted: number): void => {
+    if (omitted > 0) lines.push(`- … ${omitted} more (full list in details)`);
+  };
   if (result.definitions.length === 0) lines.push("Defines: none");
   else {
     lines.push("Defines:");
-    for (const item of result.definitions) lines.push(`- ${item.path} ${item.name} (${item.kind})`);
+    const shown = capped(result.definitions, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) lines.push(`- ${item.path} ${item.name} (${item.kind})`);
+    note(shown.omitted);
   }
   if (result.imports.items.length === 0 && result.imports.unresolved.length === 0) {
     lines.push(result.imports.incomplete ? "Imports: incomplete (edge extraction was blocked for this revision)" : "Imports: none");
   } else {
     lines.push("Imports:");
-    for (const item of result.imports.items) {
+    const shown = capped(result.imports.items, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) {
       lines.push(`- ${item.path} ${item.specifier} → ${item.resolvedPath ?? "resolved"}`);
     }
-    for (const item of result.imports.unresolved) {
+    note(shown.omitted);
+    const unresolved = capped(result.imports.unresolved, RELATED_SECTION_LIMIT);
+    for (const item of unresolved.shown) {
       lines.push(`- ${item.path} ${item.specifier} [unresolved: ${item.reason}]`);
     }
+    note(unresolved.omitted);
     if (result.imports.incomplete) lines.push("- import edges are incomplete for this revision");
   }
   if (result.importers.items.length === 0) {
     lines.push(result.importers.incomplete ? "Imported by: incomplete" : "Imported by: none");
   } else {
     lines.push("Imported by:");
-    for (const item of result.importers.items) lines.push(`- ${item.path} via ${item.specifier}`);
+    const shown = capped(result.importers.items, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) lines.push(`- ${item.path} via ${item.specifier}`);
+    note(shown.omitted);
     if (result.importers.incomplete) lines.push("- reverse imports may be incomplete");
   }
   if (result.connections.items.length === 0) {
     lines.push(result.connections.incomplete ? "Connections: incomplete" : "Connections: none");
   } else {
     lines.push("Connections:");
-    for (const item of result.connections.items) {
-      const ends = item.otherEnds.length === 0
+    const shown = capped(result.connections.items, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) {
+      const ends = capped(item.otherEnds, RELATED_SECTION_LIMIT);
+      const rendered = ends.shown.map((end) => `${end.path}${end.callee ? ` ${end.callee}` : ""}`).join(", ");
+      const text = item.otherEnds.length === 0
         ? "no other end in the catalog"
-        : item.otherEnds.map((end) => `${end.path}${end.callee ? ` ${end.callee}` : ""}`).join(", ");
-      lines.push(`- ${item.path} ${item.callee}("${item.literal}") — ${ends}`);
+        : ends.omitted > 0 ? `${rendered}, … ${ends.omitted} more` : rendered;
+      lines.push(`- ${item.path} ${item.callee}("${item.literal}") — ${text}`);
     }
+    note(shown.omitted);
     if (result.connections.incomplete) lines.push("- connection edges are incomplete for this revision");
   }
   return lines.join("\n");

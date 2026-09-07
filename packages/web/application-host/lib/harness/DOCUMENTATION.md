@@ -284,6 +284,11 @@ if the name is gone, that window is omitted — it does not become line 1.
 `details.graph` reports `not-requested | ready | empty | unavailable | failed`.
 An unusable graph leaves the rg excerpts in place. Graph `filesDropped` is a
 floor and is combined with rg by taking the maximum, not the sum (D-092).
+Graph newcomers get their own read budget but reuse `maxMaterializeReads` and
+the main loop's parallelism; a newcomer past that budget stays a ranked
+candidate and is reported `not-requested` rather than counted as dropped. The
+pack-time boost comes from the structured source recorded on the evidence, not
+from the display `why` text (D-139).
 
 Relations are an annotation, so they never make a successful search fail
 (D-112). `fileRelations` throwing — a corrupt store, or no store open for that
@@ -300,7 +305,10 @@ tell the agent what the result does not contain.
 `related.query` answers file-level topology for one path or symbol name:
 definitions, imports (resolved and visibly unresolved), reverse importers, and
 connection endpoints. It is not `lsp.references`. A missing open store is
-`unavailable`; the read path does not open a database.
+`unavailable`; the read path does not open a database. The text caps each
+section and a name anchor's walked paths, saying how many it left out, so a hub
+file cannot hand the generic tool-result truncation the choice of which section
+disappears; `details` still carries every item (D-139).
 
 ### LspNavigationServices (`lsp-nav.ts`)
 

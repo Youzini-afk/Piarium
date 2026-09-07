@@ -83,6 +83,38 @@ describe("related tool", () => {
     expect(byName.text).not.toContain("rank ");
   });
 
+  it("caps each text section and says how much it left out", async () => {
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      name: `sym${index}`,
+      kind: "function",
+      range,
+    }));
+    await store.replaceFileSymbols("lib/hub.ts", "typescript", many, "disk-r1");
+    for (let index = 0; index < 60; index += 1) {
+      await store.replaceFileSymbols(`lib/consumer-${index}.ts`, "typescript", [
+        { name: `consumer${index}`, kind: "function", range },
+      ], "disk-r1", [{ kind: "import", value: "./hub.js", line: 1 }]);
+    }
+    const result = await executeRelated({ anchor: "lib/hub.ts" }, store);
+    expect(result.definitions).toHaveLength(120);
+    expect(result.importers.items).toHaveLength(60);
+    expect(result.text).toContain("… 80 more (full list in details)");
+    expect(result.text).toContain("… 20 more (full list in details)");
+    expect(Buffer.byteLength(result.text, "utf8")).toBeLessThan(24 * 1024);
+  });
+
+  it("walks a bounded number of paths when a name matches many files", async () => {
+    for (let index = 0; index < 12; index += 1) {
+      await store.replaceFileSymbols(`lib/dup-${index}.ts`, "typescript", [
+        { name: "shared", kind: "function", range },
+      ], "disk-r1");
+    }
+    const result = await executeRelated({ anchor: "shared" }, store);
+    expect(result.anchor.kind).toBe("name");
+    expect(result.definitions).toHaveLength(8);
+    expect(result.text).toContain("matched 4 more file(s) than were walked");
+  });
+
   it("distinguishes an empty catalog from a miss", async () => {
     const empty = await executeRelated({ anchor: "explore" }, store);
     expect(empty.status).toBe("empty");

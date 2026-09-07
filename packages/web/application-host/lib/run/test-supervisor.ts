@@ -245,12 +245,15 @@ export const createTestSupervisor = ({
       if (!child.stdout || !child.stdin) {
         throw new Error('Test provider did not expose protocol streams');
       }
-      // A crashed fixture closes the pipe; writing `initialized` (or a follow-up
+      // A crashed provider closes the pipe; writing `initialized` (or a follow-up
       // RPC frame) then emits uncaught `write EPIPE` and makes the suite exit 1
-      // while every assertion still passed (D-103 / D-133).
+      // while every assertion still passed (D-103 / D-133). Only a dead pipe is
+      // absorbed — any other stdio error is rethrown so it stays uncaught, since
+      // attaching a listener at all is what suppresses the default throw (D-139).
       const ignoreClosedPipe = (stream: NodeJS.EventEmitter | null | undefined): void => {
         stream?.on('error', (error: NodeJS.ErrnoException) => {
           if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') return;
+          throw error;
         });
       };
       ignoreClosedPipe(child.stdin);
