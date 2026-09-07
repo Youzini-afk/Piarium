@@ -372,6 +372,83 @@ describe("KnowledgeStore", () => {
       expect(byPath.every((entry) => entry.match === "path-contains")).toBe(true);
     });
 
+    it("matches case-insensitively through the lowercased n-gram fields", async () => {
+      await store.replaceFileSymbols("src/LanguageSupportPage.tsx", "typescriptreact", [
+        { name: "LanguageSupportPage", kind: "function", range },
+      ], "disk-r1");
+      expect((await store.searchSymbols("languagesupport", 10)).map((row) => row.name)).toEqual(["LanguageSupportPage"]);
+      expect((await store.searchSymbols("SUPPORTPAGE", 10)).map((row) => row.name)).toEqual(["LanguageSupportPage"]);
+    });
+
+    it("matches a term shorter than three characters only as an exact name", async () => {
+      await store.replaceFileSymbols("src/db/index.ts", "typescript", [
+        { name: "db", kind: "variable", range },
+        { name: "dbPath", kind: "variable", range: { ...range, startLine: 2, endLine: 2 } },
+      ], "disk-r1");
+      // The n-gram index rejects needles under three characters, so `db` can
+      // reach `db` exactly, not `dbPath` and not the `src/db/` path (D-141).
+      expect((await store.searchSymbols("db", 10)).map((row) => row.name)).toEqual(["db"]);
+      expect((await store.searchSymbols("dbp", 10)).map((row) => row.name)).toEqual(["dbPath"]);
+    });
+
+    it("answers catalog queries after a reopen without rebuilding anything in memory", async () => {
+      const dir = join(TEST_DIR, "graph-reopen-indexes");
+      mkdirSync(dir, { recursive: true });
+      const open = () => openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-reopen",
+        embedding: null,
+      });
+      const first = await open();
+      await first.replaceFileSymbols("lib/a.ts", "typescript", [
+        { name: "alphaThing", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "connects", value: "wire.one", line: 3, callee: "register" },
+      ]);
+      await first.replaceFileSymbols("lib/b.ts", "javascript", [
+        { name: "betaThing", kind: "function", range },
+      ], "disk-r1", [
+        { kind: "import", value: "./a.js", line: 1 },
+        { kind: "connects", value: "wire.one", line: 5, callee: "request" },
+      ]);
+      await first.close();
+
+      const second = await open();
+      expect(await second.catalogStats()).toEqual({
+        symbolCount: 2,
+        fileCount: 2,
+        linkCount: 3,
+        languages: ["javascript", "typescript"],
+        paths: ["lib/a.ts", "lib/b.ts"],
+      });
+      expect((await second.searchSymbols("thing", 10)).map((row) => row.name).toSorted()).toEqual(["alphaThing", "betaThing"]);
+      expect((await second.findLinks("wire.one")).map((row) => row.path)).toEqual(["lib/a.ts", "lib/b.ts"]);
+      expect(await second.connectionLiterals(["wire.one", "wire.none"])).toEqual(new Set(["wire.one"]));
+      expect((await second.findImporters("lib/a.ts")).resolved).toEqual([{ path: "lib/b.ts", specifier: "./a.js" }]);
+      await second.close();
+    });
+
+    it("keeps counts and shape current across replace, touch and remove", async () => {
+      await store.replaceFileSymbols("lib/x.ts", "typescript", [
+        { name: "one", kind: "function", range },
+        { name: "two", kind: "function", range: { ...range, startLine: 2, endLine: 2 } },
+      ], "disk-r1", [{ kind: "import", value: "./y.js", line: 1 }]);
+      expect(await store.catalogStats()).toMatchObject({ symbolCount: 2, fileCount: 1, linkCount: 1 });
+
+      // Same path, fewer symbols: the counter must follow the replacement.
+      await store.replaceFileSymbols("lib/x.ts", "typescript", [
+        { name: "one", kind: "function", range },
+      ], "disk-r2");
+      expect(await store.catalogStats()).toMatchObject({ symbolCount: 1, fileCount: 1, linkCount: 0 });
+
+      await store.touchFile("lib/y.ts", "typescript");
+      expect(await store.catalogStats()).toMatchObject({ fileCount: 2, paths: ["lib/x.ts", "lib/y.ts"] });
+
+      await store.removeFileSymbols("lib/x.ts");
+      expect(await store.catalogStats()).toMatchObject({ symbolCount: 0, fileCount: 1, linkCount: 0, paths: ["lib/y.ts"] });
+    });
+
     it("resolves reverse imports at query time and leaves non-relative specifiers unresolved", async () => {
       await store.replaceFileSymbols("lib/harness/explore.ts", "typescript", [
         { name: "explore", kind: "function", range },

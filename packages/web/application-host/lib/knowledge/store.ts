@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Knowledge store v1 — TriviumDB-backed workspace knowledge base.
  *
  * Design: agent-harness.md §7.1, §7.2, §7.2.1
@@ -331,6 +331,18 @@ export interface KnowledgeStore {
 // ── Implementation ─────────────────────────────────────────────────
 
 const PLACEHOLDER_DIM = 8;
+/** `substringLookup` rejects shorter needles (TriviumDB 0.8.6 n-gram index). */
+const NGRAM_MIN_CHARS = 3;
+/**
+ * `maxResults` on `indexedLookup` / `substringLookup` is a fail-closed row
+ * budget, not a LIMIT: exceeding it throws `TDB_QUERY_BUDGET`, and the default
+ * is 10,000 — below one repository's symbol count. The graph's whole-type reads
+ * (counters, file shape, import resolution) and substring candidates need to
+ * see everything, so they raise the ceiling to the API's maximum (1,000,000).
+ * It still throws rather than truncating, which is the honest failure for
+ * derived data (D-141).
+ */
+const GRAPH_RESULT_CEILING = 1_000_000;
 /** Quiet period before a derived graph write is persisted (D-140). */
 const GRAPH_FLUSH_QUIET_MS = 250;
 /** Upper bound on deferral, so a long catalog scan still persists as it goes. */
@@ -340,26 +352,6 @@ const MAX_RETENTION_BATCH = 5000;
 
 function zeroVector(dim: number): Vector {
   return new Array(dim).fill(0);
-}
-
-interface SymbolQueryRow {
-  id: NodeId;
-  name: string;
-  nameLower: string;
-  path: string;
-  pathLower: string;
-  kind: string;
-  range: SymbolGraphRange;
-  documentRevision: string | null;
-}
-
-interface LinkQueryRow {
-  path: string;
-  kind: SymbolGraphLinkKind;
-  value: string;
-  line: number;
-  callee?: string;
-  documentRevision: string | null;
 }
 
 function scoreSymbolMatch(
@@ -407,9 +399,18 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     dim,
     syncMode: "normal",
     loadTextIndex: true,
+    // 0.8.6's parsed-payload LRU cache makes every payload access O(store
+    // size): getPayload measured 60 µs at 50K nodes against 1.7 µs on 0.8.5,
+    // and indexedLookup/substringLookup over a large result set went
+    // quadratic (2.7 s for 50K ids). Disabling the cache restores 0.8.5
+    // behaviour (2 µs, 42 ms) — the bug is in the cache bookkeeping, not in
+    // capacity, since 1024 MB was no better than 64 MB (D-141).
+    payloadCacheMb: 0,
   });
 
-  // Create indexes for common queries
+  // Property indexes. All are persistent and idempotent to create, and
+  // creating one over existing rows backfills it, so an older database picks
+  // these up on its first open after an upgrade (D-141).
   db.createIndex("type");
   db.createIndex("sessionId");
   db.createOrderedIndex("at");
@@ -417,6 +418,15 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("scope");
   db.createIndex("path");
   db.createIndex("active");
+  // Symbol graph: equality lookups that used to be JS-side maps rebuilt on
+  // every open (D-134 / D-139), and substring search over lowercased names and
+  // paths. `substringLookup` needs three characters, so exact matches on short
+  // names go through the hash index on `nameLower` instead.
+  db.createIndex("kind");
+  db.createIndex("value");
+  db.createIndex("nameLower");
+  db.createNgramIndex("nameLower");
+  db.createNgramIndex("pathLower");
 
   const placeholderVec = zeroVector(dim);
   const publishBlocksChanged = (sessionId: string, change: BlockChange): void => {
@@ -492,100 +502,23 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     return selected;
   };
 
-  const graphFileIds = new Map<string, Set<number>>();
-  const graphSymbolIds = new Map<string, Set<number>>();
-  const graphLinkIds = new Map<string, Set<number>>();
   /**
-   * Confirmed connection literals, refcounted so a path can be re-collected
-   * without losing values another path still declares. This is what gates
-   * association candidates, so it must stay in step with the link nodes.
+   * Symbol graph reads go through TriviumDB's property indexes. Before 0.8.6 the
+   * store kept eight JS-side maps (path → ids, links by value, connection literal
+   * refcounts, denormalized symbol and link rows, file languages) that every
+   * write had to keep consistent and every open rebuilt by walking all nodes
+   * (D-109 / D-134 / D-139). `indexedLookup` and `substringLookup` answer the
+   * same questions from persistent indexes, so what remains in memory is:
+   *
+   * - three lazily seeded counters, because counting rows through an index
+   *   call still marshals every id (24K symbol ids ≈ 90 ms), and `explore`
+   *   asks for the count once per query;
+   * - one lazily rebuilt shape cache (file paths, languages, resolved reverse
+   *   imports), because import resolution is Piarium's rule, not the
+   *   database's, and it depends on the whole path set (D-139).
+   *
+   * Both are dropped on any graph write and rebuilt on the next read (D-141).
    */
-  const connectionLiteralCounts = new Map<string, number>();
-  const connectionLiteralsByPath = new Map<string, string[]>();
-  function rememberConnectionLiteral(path: string, value: string): void {
-    connectionLiteralCounts.set(value, (connectionLiteralCounts.get(value) ?? 0) + 1);
-    const values = connectionLiteralsByPath.get(path);
-    if (values) values.push(value);
-    else connectionLiteralsByPath.set(path, [value]);
-  }
-  function forgetConnectionLiterals(path: string): void {
-    for (const value of connectionLiteralsByPath.get(path) ?? []) {
-      const next = (connectionLiteralCounts.get(value) ?? 0) - 1;
-      if (next > 0) connectionLiteralCounts.set(value, next);
-      else connectionLiteralCounts.delete(value);
-    }
-    connectionLiteralsByPath.delete(path);
-  }
-  const importSpecifiersByPath = new Map<string, string[]>();
-  /**
-   * Resolved reverse imports, built once per catalog shape. Resolution depends
-   * on the whole known-path set, so any change to the paths or to a file's
-   * specifiers drops it; `findImporters` then rebuilds on the next call instead
-   * of re-resolving every specifier per query (D-139).
-   */
-  let importersByTargetCache: Map<string, Array<{ path: string; specifier: string }>> | null = null;
-  function invalidateImporters(): void {
-    importersByTargetCache = null;
-  }
-  function rememberImportSpecifier(path: string, specifier: string): void {
-    invalidateImporters();
-    const values = importSpecifiersByPath.get(path);
-    if (values) values.push(specifier);
-    else importSpecifiersByPath.set(path, [specifier]);
-  }
-  function forgetImportSpecifiers(path: string): void {
-    invalidateImporters();
-    importSpecifiersByPath.delete(path);
-  }
-  function importersByTarget(): Map<string, Array<{ path: string; specifier: string }>> {
-    if (importersByTargetCache) return importersByTargetCache;
-    const known = new Set(graphFileIds.keys());
-    const byTarget = new Map<string, Array<{ path: string; specifier: string }>>();
-    for (const [importer, specifiers] of importSpecifiersByPath) {
-      for (const specifier of specifiers) {
-        const result = resolveImportSpecifier(importer, specifier, known);
-        if (result.status !== "resolved") continue;
-        const bucket = byTarget.get(result.resolvedPath);
-        if (bucket) bucket.push({ path: importer, specifier });
-        else byTarget.set(result.resolvedPath, [{ path: importer, specifier }]);
-      }
-    }
-    importersByTargetCache = byTarget;
-    return byTarget;
-  }
-  /** File language for `catalogStats`, so counting does not read a payload per file. */
-  const fileLanguageByPath = new Map<string, string>();
-  /**
-   * Denormalized catalog rows for query. Built on open and each write so
-   * searchSymbols / findLinks do not pay getPayload per id (D-134).
-   */
-  const symbolQueryByPath = new Map<string, SymbolQueryRow[]>();
-  const linksByValue = new Map<string, LinkQueryRow[]>();
-  const linkQueryByPath = new Map<string, LinkQueryRow[]>();
-  function rememberSymbolQueryRow(row: SymbolQueryRow): void {
-    const rows = symbolQueryByPath.get(row.path);
-    if (rows) rows.push(row);
-    else symbolQueryByPath.set(row.path, [row]);
-  }
-  function forgetSymbolQueryRows(path: string): void {
-    symbolQueryByPath.delete(path);
-  }
-  function rememberLinkQueryRow(row: LinkQueryRow): void {
-    const byPath = linkQueryByPath.get(row.path);
-    if (byPath) byPath.push(row);
-    else linkQueryByPath.set(row.path, [row]);
-    const byValue = linksByValue.get(row.value);
-    if (byValue) byValue.push(row);
-    else linksByValue.set(row.value, [row]);
-  }
-  function forgetLinkQueryRows(path: string): void {
-    for (const row of linkQueryByPath.get(path) ?? []) {
-      const remaining = (linksByValue.get(row.value) ?? []).filter((item) => item.path !== path);
-      if (remaining.length > 0) linksByValue.set(row.value, remaining);
-      else linksByValue.delete(row.value);
-    }
-    linkQueryByPath.delete(path);
-  }
   const LINK_KINDS = new Set<SymbolGraphLinkKind>(["import", "connects", "associates"]);
   const validLinkLine = (line: number): boolean => Number.isSafeInteger(line) && line >= 1;
   const validRange = (range: SymbolGraphRange): boolean => (
@@ -593,84 +526,84 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       .every((value) => Number.isSafeInteger(value) && value >= 0)
     && (range.endLine > range.startLine || (range.endLine === range.startLine && range.endCharacter >= range.startCharacter))
   );
-  for (const id of db.allNodeIds()) {
-    const payload = db.getPayload(id) as Record<string, unknown> | null;
-    if (!payload || typeof payload["path"] !== "string") continue;
-    const target = payload["type"] === "file"
-      ? graphFileIds
-      : payload["type"] === "symbol"
-        ? graphSymbolIds
-        : payload["type"] === "link"
-          ? graphLinkIds
-          : null;
-    if (!target) continue;
-    if (
-      payload["type"] === "file"
-      && typeof payload["language"] === "string"
-      && !fileLanguageByPath.has(payload["path"])
-    ) {
-      fileLanguageByPath.set(payload["path"], payload["language"]);
-    }
-    if (
-      payload["type"] === "link"
-      && payload["kind"] === "connects"
-      && payload["active"] === true
-      && typeof payload["value"] === "string"
-    ) {
-      rememberConnectionLiteral(payload["path"], payload["value"]);
-    }
-    if (
-      payload["type"] === "link"
-      && payload["kind"] === "import"
-      && payload["active"] === true
-      && typeof payload["value"] === "string"
-    ) {
-      rememberImportSpecifier(payload["path"], payload["value"]);
-    }
-    if (payload["type"] === "symbol" && payload["active"] === true) {
-      const name = typeof payload["name"] === "string" ? payload["name"] : "";
-      const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
-      const range = payload["range"] as SymbolGraphRange | undefined;
-      if (name && kind && range && validRange(range)) {
-        rememberSymbolQueryRow({
-          id,
-          name,
-          nameLower: name.toLowerCase(),
-          path: payload["path"],
-          pathLower: payload["path"].toLowerCase(),
-          kind,
-          range: { ...range },
-          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
-        });
-      }
-    }
-    if (payload["type"] === "link" && payload["active"] === true && typeof payload["value"] === "string") {
-      const kind = payload["kind"];
-      const line = payload["line"];
-      if (LINK_KINDS.has(kind as SymbolGraphLinkKind) && validLinkLine(Number(line))) {
-        rememberLinkQueryRow({
-          path: payload["path"],
-          kind: kind as SymbolGraphLinkKind,
-          value: payload["value"],
-          line: Number(line),
-          ...(typeof payload["callee"] === "string" ? { callee: payload["callee"] } : {}),
-          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
-        });
-      }
-    }
-    const ids = target.get(payload["path"]) ?? new Set<number>();
-    ids.add(id);
-    target.set(payload["path"], ids);
-  }
-  const graphNodes = (index: Map<string, Set<number>>, path: string) => (
-    [...(index.get(path) ?? [])].flatMap((id) => {
+
+  type GraphNode = { id: number; payload: Record<string, unknown> };
+  const lookup = (equalities: Record<string, unknown>): GraphNode[] => (
+    db.indexedLookup(equalities, GRAPH_RESULT_CEILING).flatMap((id) => {
       const payload = db.getPayload(id) as Record<string, unknown> | null;
       return payload ? [{ id, payload }] : [];
     })
   );
-  const fileNodes = (path: string) => graphNodes(graphFileIds, path);
-  const symbolNodes = (path: string) => graphNodes(graphSymbolIds, path);
-  const linkNodes = (path: string) => graphNodes(graphLinkIds, path);
+  const fileNodes = (path: string) => lookup({ type: "file", path });
+  const symbolNodes = (path: string) => lookup({ type: "symbol", path });
+  const linkNodes = (path: string) => lookup({ type: "link", path });
+
+  interface GraphCounters { files: number; symbols: number; links: number }
+  let graphCounters: GraphCounters | null = null;
+  const counters = (): GraphCounters => {
+    if (graphCounters) return graphCounters;
+    graphCounters = {
+      files: db.indexedLookup({ type: "file" }, GRAPH_RESULT_CEILING).length,
+      symbols: db.indexedLookup({ type: "symbol", active: true }, GRAPH_RESULT_CEILING).length,
+      links: db.indexedLookup({ type: "link", active: true }, GRAPH_RESULT_CEILING).length,
+    };
+    return graphCounters;
+  };
+  const bumpCounters = (delta: Partial<GraphCounters>): void => {
+    if (!graphCounters) return;
+    graphCounters = {
+      files: graphCounters.files + (delta.files ?? 0),
+      symbols: graphCounters.symbols + (delta.symbols ?? 0),
+      links: graphCounters.links + (delta.links ?? 0),
+    };
+  };
+
+  /**
+   * Two lazy layers, dropped together on any graph write. The file layer is
+   * cheap (one indexed lookup over file nodes) and is all `catalogStats` needs;
+   * the importer layer resolves every import specifier against the path set and
+   * is only paid when `findImporters` is actually asked.
+   */
+  interface FileShape { paths: Set<string>; sortedPaths: string[]; languages: string[] }
+  type ImportersByTarget = Map<string, Array<{ path: string; specifier: string }>>;
+  let fileShapeCache: FileShape | null = null;
+  let importersCache: ImportersByTarget | null = null;
+  const invalidateGraphShape = (): void => {
+    fileShapeCache = null;
+    importersCache = null;
+  };
+  const fileShape = (): FileShape => {
+    if (fileShapeCache) return fileShapeCache;
+    const paths = new Set<string>();
+    const languages = new Set<string>();
+    for (const { payload } of lookup({ type: "file" })) {
+      if (typeof payload["path"] !== "string") continue;
+      paths.add(payload["path"]);
+      if (typeof payload["language"] === "string") languages.add(payload["language"]);
+    }
+    fileShapeCache = { paths, sortedPaths: [...paths].toSorted(), languages: [...languages].toSorted() };
+    return fileShapeCache;
+  };
+  const importers = (): ImportersByTarget => {
+    if (importersCache) return importersCache;
+    // Resolution needs the whole path set: a file added later can make another
+    // file's specifier resolve, which is why any write drops this (D-139).
+    const known = fileShape().paths;
+    const byTarget: ImportersByTarget = new Map();
+    for (const { payload } of lookup({ type: "link", kind: "import", active: true })) {
+      const importer = payload["path"];
+      const specifier = payload["value"];
+      if (typeof importer !== "string" || typeof specifier !== "string") continue;
+      const result = resolveImportSpecifier(importer, specifier, known);
+      if (result.status !== "resolved") continue;
+      const bucket = byTarget.get(result.resolvedPath);
+      if (bucket) bucket.push({ path: importer, specifier });
+      else byTarget.set(result.resolvedPath, [{ path: importer, specifier }]);
+    }
+    importersCache = byTarget;
+    return byTarget;
+  };
+
   const edgeLabelForKind = (kind: SymbolGraphLinkKind): "imports" | "connects" | "associates" => (
     kind === "import" ? "imports" : kind
   );
@@ -1192,16 +1125,13 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ...(previous["linksIncomplete"] === true ? { linksIncomplete: true } : {}),
         };
         const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
-        graphFileIds.set(normalizedPath, new Set([fileId, ...existing.slice(1).map(({ id }) => id)]));
         const operations: TransactionOperation[] = [
           { type: "updatePayload", id: fileId, payload },
           ...existing.slice(1).map(({ id }) => ({ type: "delete" as const, id })),
         ];
         db.commitTransaction(operations);
-        graphFileIds.set(normalizedPath, new Set([fileId]));
-        fileLanguageByPath.set(normalizedPath, normalizedLanguage);
-        // A new path can make another file's specifier resolve.
-        invalidateImporters();
+        bumpCounters({ files: existing.length === 0 ? 1 : 1 - existing.length });
+        invalidateGraphShape();
         db.indexText(fileId, normalizedPath);
         scheduleGraphFlush();
         return fileId;
@@ -1237,12 +1167,16 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           generation,
           documentRevision: normalizedRevision,
         });
-        graphFileIds.set(normalizedPath, new Set([fileId, ...previousFiles.slice(1).map(({ id }) => id)]));
+        // `nameLower` / `pathLower` exist for the n-gram indexes: substring
+        // search is case-sensitive and `searchSymbols` compares lowercased.
+        const pathLower = normalizedPath.toLowerCase();
         const pendingPayloads = symbols.map((symbol) => ({
           type: "symbol",
           path: normalizedPath,
+          pathLower,
           language: normalizedLanguage,
           name: symbol.name,
+          nameLower: symbol.name.toLowerCase(),
           kind: symbol.kind,
           range: { ...symbol.range },
           generation,
@@ -1267,8 +1201,6 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const linkIds = pendingLinkPayloads.length > 0
           ? db.batchInsert(pendingLinkPayloads.map(() => placeholderVec), pendingLinkPayloads)
           : [];
-        graphSymbolIds.set(normalizedPath, new Set([...previousSymbols.map(({ id }) => id), ...symbolIds]));
-        graphLinkIds.set(normalizedPath, new Set([...previousLinks.map(({ id }) => id), ...linkIds]));
         const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
         const activeLinkPayloads = pendingLinkPayloads.map((payload) => ({ ...payload, active: true }));
         const filePayload = {
@@ -1306,41 +1238,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ]),
         ];
         db.commitTransaction(operations);
-        graphFileIds.set(normalizedPath, new Set([fileId]));
-        if (symbolIds.length > 0) graphSymbolIds.set(normalizedPath, new Set(symbolIds));
-        else graphSymbolIds.delete(normalizedPath);
-        if (linkIds.length > 0) graphLinkIds.set(normalizedPath, new Set(linkIds));
-        else graphLinkIds.delete(normalizedPath);
-        forgetConnectionLiterals(normalizedPath);
-        forgetImportSpecifiers(normalizedPath);
-        forgetSymbolQueryRows(normalizedPath);
-        forgetLinkQueryRows(normalizedPath);
-        fileLanguageByPath.set(normalizedPath, normalizedLanguage);
-        for (let index = 0; index < symbolIds.length; index += 1) {
-          const symbol = symbols[index]!;
-          rememberSymbolQueryRow({
-            id: symbolIds[index]!,
-            name: symbol.name,
-            nameLower: symbol.name.toLowerCase(),
-            path: normalizedPath,
-            pathLower: normalizedPath.toLowerCase(),
-            kind: symbol.kind,
-            range: { ...symbol.range },
-            documentRevision: normalizedRevision,
-          });
-        }
-        for (const link of links) {
-          if (link.kind === "connects") rememberConnectionLiteral(normalizedPath, link.value);
-          if (link.kind === "import") rememberImportSpecifier(normalizedPath, link.value);
-          rememberLinkQueryRow({
-            path: normalizedPath,
-            kind: link.kind,
-            value: link.value,
-            line: link.line,
-            ...(link.kind !== "import" && link.callee ? { callee: link.callee } : {}),
-            documentRevision: normalizedRevision,
-          });
-        }
+        bumpCounters({
+          files: previousFiles.length === 0 ? 1 : 1 - previousFiles.length,
+          symbols: symbolIds.length - previousSymbols.filter(({ payload }) => payload["active"] === true).length,
+          links: linkIds.length - previousLinks.filter(({ payload }) => payload["active"] === true).length,
+        });
+        invalidateGraphShape();
         db.indexText(fileId, normalizedPath);
         for (let index = 0; index < symbolIds.length; index += 1) {
           const id = symbolIds[index]!;
@@ -1371,14 +1274,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ...files.map(({ id }) => ({ type: "delete" as const, id })),
         ];
         if (operations.length > 0) db.commitTransaction(operations);
-        graphFileIds.delete(normalizedPath);
-        graphSymbolIds.delete(normalizedPath);
-        graphLinkIds.delete(normalizedPath);
-        forgetConnectionLiterals(normalizedPath);
-        forgetImportSpecifiers(normalizedPath);
-        forgetSymbolQueryRows(normalizedPath);
-        forgetLinkQueryRows(normalizedPath);
-        fileLanguageByPath.delete(normalizedPath);
+        bumpCounters({
+          files: -files.length,
+          symbols: -symbols.filter(({ payload }) => payload["active"] === true).length,
+          links: -links.filter(({ payload }) => payload["active"] === true).length,
+        });
+        invalidateGraphShape();
         scheduleGraphFlush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
       });
@@ -1387,22 +1288,41 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     async searchSymbols(query, k) {
       const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
       if (terms.length === 0 || !Number.isSafeInteger(k) || k <= 0) return [];
-      const results: SymbolGraphSearchResult[] = [];
-      for (const rows of symbolQueryByPath.values()) {
-        for (const row of rows) {
-          const scored = scoreSymbolMatch(row.nameLower, row.pathLower, terms);
-          if (!scored) continue;
-          results.push({
-            id: row.id,
-            name: row.name,
-            path: row.path,
-            kind: row.kind,
-            range: { ...row.range },
-            score: scored.score,
-            match: scored.match,
-            documentRevision: row.documentRevision,
-          });
+      // Candidates come from the indexes; scoring is unchanged and still runs
+      // over every term, so a candidate found through one term is scored on
+      // all of them. The n-gram index needs three characters, so a shorter term
+      // can only match a name exactly — `db` finds `db`, not `dbPath`, and
+      // never matches a path (D-141).
+      const candidateIds = new Set<number>();
+      for (const term of terms) {
+        if (term.length >= NGRAM_MIN_CHARS) {
+          for (const id of db.substringLookup("nameLower", term, GRAPH_RESULT_CEILING)) candidateIds.add(id);
+          for (const id of db.substringLookup("pathLower", term, GRAPH_RESULT_CEILING)) candidateIds.add(id);
+        } else {
+          for (const id of db.indexedLookup({ type: "symbol", nameLower: term }, GRAPH_RESULT_CEILING)) candidateIds.add(id);
         }
+      }
+      const results: SymbolGraphSearchResult[] = [];
+      for (const id of candidateIds) {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "symbol" || payload["active"] !== true) continue;
+        const name = typeof payload["name"] === "string" ? payload["name"] : "";
+        const path = typeof payload["path"] === "string" ? payload["path"] : "";
+        const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
+        const range = payload["range"] as SymbolGraphRange | undefined;
+        if (!name || !path || !kind || !range || !validRange(range)) continue;
+        const scored = scoreSymbolMatch(name.toLowerCase(), path.toLowerCase(), terms);
+        if (!scored) continue;
+        results.push({
+          id,
+          name,
+          path,
+          kind,
+          range: { ...range },
+          score: scored.score,
+          match: scored.match,
+          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+        });
       }
       return results
         .toSorted((left, right) => right.score - left.score || left.name.localeCompare(right.name) || left.path.localeCompare(right.path))
@@ -1498,48 +1418,47 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async connectionLiterals(values) {
       const found = new Set<string>();
-      for (const value of values) {
-        if (connectionLiteralCounts.has(value)) found.add(value);
+      for (const value of new Set(values)) {
+        if (db.indexedLookup({ type: "link", kind: "connects", value, active: true }, GRAPH_RESULT_CEILING).length > 0) found.add(value);
       }
       return found;
     },
 
     async findLinks(value) {
       const normalized = assertGraphText(value, "Link value");
-      return [...(linksByValue.get(normalized) ?? [])]
-        .map((row) => ({
-          path: row.path,
-          kind: row.kind,
-          value: row.value,
-          line: row.line,
-          ...(row.callee ? { callee: row.callee } : {}),
-          documentRevision: row.documentRevision,
-        }))
+      return lookup({ type: "link", value: normalized, active: true })
+        .flatMap(({ payload }) => {
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          const kind = payload["kind"];
+          const line = Number(payload["line"]);
+          if (!path || !LINK_KINDS.has(kind as SymbolGraphLinkKind) || !validLinkLine(line)) return [];
+          return [{
+            path,
+            kind: kind as SymbolGraphLinkKind,
+            value: normalized,
+            line,
+            ...(typeof payload["callee"] === "string" ? { callee: payload["callee"] } : {}),
+            documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+          }];
+        })
         .toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.kind.localeCompare(right.kind));
     },
 
     async catalogStats() {
-      let symbolCount = 0;
-      for (const rows of symbolQueryByPath.values()) symbolCount += rows.length;
-      let linkCount = 0;
-      for (const rows of linkQueryByPath.values()) linkCount += rows.length;
-      const languages = new Set<string>();
-      for (const path of graphFileIds.keys()) {
-        const language = fileLanguageByPath.get(path);
-        if (language) languages.add(language);
-      }
+      const counts = counters();
+      const files = fileShape();
       return {
-        symbolCount,
-        fileCount: graphFileIds.size,
-        linkCount,
-        languages: [...languages].toSorted(),
-        paths: [...graphFileIds.keys()].toSorted(),
+        symbolCount: counts.symbols,
+        fileCount: counts.files,
+        linkCount: counts.links,
+        languages: files.languages,
+        paths: files.sortedPaths,
       };
     },
 
     async findImporters(path) {
       const target = normalizeGraphPath(assertGraphText(path, "File path"));
-      const resolved = [...(importersByTarget().get(target) ?? [])];
+      const resolved = [...(importers().get(target) ?? [])];
       return {
         path: target,
         resolved: resolved.toSorted((left, right) => left.path.localeCompare(right.path) || left.specifier.localeCompare(right.specifier)),

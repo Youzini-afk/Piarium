@@ -383,7 +383,7 @@
         "sherpa-onnx-node": "1.12.28",
         "simple-git": "^3.28.0",
         "tar": "^7.5.13",
-        "triviumdb": "0.8.5",
+        "triviumdb": "0.8.6",
         "turndown": "7.2.4",
         "web-push": "^3.6.7",
         "web-tree-sitter": "^0.27.0",
@@ -3111,7 +3111,7 @@
 
     "trim-lines": ["trim-lines@3.0.1", "", {}, "sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg=="],
 
-    "triviumdb": ["triviumdb@0.8.5", "", {}, "sha512-qofTMI5Y8J8dbbJmV5oTozl3t9JCn2VZx6Ka7NZQqluPI4cgna84VgSqBPdK3jz4kNTpfS5El5R5wjKFV+jOAg=="],
+    "triviumdb": ["triviumdb@0.8.6", "", {}, "sha512-Q5oZnSEFZSOPW+9NYyzdyr+E0k23RVoken2OBfQo5znLoTEVMYxugFkO+L4+XiNsIswx6tvyHRhcOtOb8/4a7w=="],
 
     "truncate-utf8-bytes": ["truncate-utf8-bytes@1.0.2", "", { "dependencies": { "utf8-byte-length": "^1.0.1" } }, "sha512-95Pu1QXQvruGEhv62XCMO3Mm90GscOCClvrIUwCM0PYOXK3kaF3l3sIHxx71ThJfcbM2O5Au6SO3AWCSEfW4mQ=="],
 
