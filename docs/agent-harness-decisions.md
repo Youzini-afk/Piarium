@@ -2097,6 +2097,28 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-103 · 2026-09-07 · 测试套件里的挂钟阈值与未捕获 EPIPE
+
+类型：问题与解法
+
+背景：D-102 的并发压测（`packages/web` 完整套件与 `packages/pi-host` 整套同时跑）暴露三处与结构来源无关的既有项，都不是断言逻辑错，而是挂钟阈值贴得太紧或子进程收尾未捕获。
+
+1. `packages/web/application-host/lib/harness/thread-runtime.test.ts`「marks an event-silent Run as stalled and clears it on the next observed event」用 `stalledAfterMs: () => 20`。20ms 阈值在并发负载下失败，单独跑该文件 22/22 通过。由 `036b43e3`（2026-09-04，`feat(harness): run durable child threads`）引入。
+2. `packages/web/application-host/lib/run/supervisor.test.ts`「discovers and runs Node tests, and isolates a crashed test provider」在满载时抛未捕获的 `write EPIPE`（`errno -4047`）。**后果是完整 `packages/web` 套件退出码间歇为 1，而 196 个文件、1653 项断言全过**——CI 会红，但红的原因不是任何测试失败。单独跑该文件 3 遍 8/8 且退出码 0。
+3. `packages/pi-host/test/harness/harness-e2e.test.ts:198`「background command + get_output retrieves output」。status 3.2 已记「待单独立项」；在 D-092 之前的 `53350ec2` 上同样失败、之后又自行通过，是既有时序抖动。
+
+决定：本条只立项与固定证据，不在 3.11 里修。方向：(1) 与 (3) 把挂钟阈值换成可注入的时钟或事件驱动等待，而不是调大数值——调大只是把抖动推远。(2) 属于崩溃隔离用例向已死子进程写 stdin，应在该测试内捕获 `EPIPE` 或在写入前检查管道存活，使套件退出码只反映断言结果。三项都不改产品行为，只改测试与其时钟来源。
+
+原因：挂钟阈值与 CPU 争抢共享同一个时钟，这类失败会随机器和并发度漂移，长期会训练维护者忽略红色。(2) 尤其有害，因为它让「退出码」与「有测试失败」解耦——按 plan 0.1 的验证纪律，套件的退出码必须能作为判据。
+
+考虑过的替代：(1) 只把 20ms 调大到几百毫秒——延长了单测时间又没有消除负载相关性。(2) 在 CI 上串行跑 `packages/web` 与 `packages/pi-host`——掩盖问题且拖慢反馈。(3) 把 EPIPE 加进 vitest 的 `dangerouslyIgnoreUnhandledErrors`——会一并吞掉真实的未捕获错误。
+
+不改：`STRUCTURE_PARSE_BUDGET_MS`（D-102 已标定）；三处涉及的产品代码；不把这三项算进 3.11 的验收范围。
+
+影响：`lib/harness/thread-runtime.test.ts`；`lib/run/supervisor.test.ts`；`packages/pi-host/test/harness/harness-e2e.test.ts`；status 3.2 已有的「待单独立项」记述。
+
+状态：待实施（不阻塞 3.11 第 4–5 步；建议在下一次触及这三个模块时一并收）。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2205,3 +2227,4 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-100 | implementation（云 lock 与冒烟包含 web-tree-sitter） | — | scripts/cloud-runtime.bun.lock；build-cloud-runtime.mjs |
 | D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |
 | D-102 | implementation（解析预算是跑飞兜底、250ms、测试自带预算；签名即全体的单元按 ±3 取并补齐） | — | structure/constants.ts + slice.ts；structure/explore 测试；structure/DOCUMENTATION.md；status 3.11 |
+| D-103 | open（三处既有挂钟/子进程收尾项已立项未修：thread-runtime 20ms stalled、run/supervisor 未捕获 EPIPE 使套件退出码与断言脱钩、pi-host harness-e2e #3） | — | thread-runtime.test.ts；run/supervisor.test.ts；pi-host harness-e2e.test.ts；status 3.2/3.11 |
