@@ -2079,6 +2079,24 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 状态：已实施。
 
+### D-102 · 2026-09-07 · 3.11（解析预算是跑飞兜底；签名即全体的单元补齐窗口）
+
+类型：问题与解法
+
+背景：D-098 / D-099 验收复跑暴露两件事。其一，`packages/web` 完整套件里 `tree-sitter-provider.test.ts`「outlines TypeScript units from the vendored wasm」与 `explore.test.ts`「keeps a value-binding hit inside its enclosing function」失败，单独跑同样两个文件 44/44 通过；失败时收到的状态是 `failed`，而那条路径上 `failed` 只由 `STRUCTURE_PARSE_BUDGET_MS` 产生——40ms 挂钟在满载 runner 上被调度延迟吃掉。其二，D-098 只按 kind 认容器，而 `documentSymbol` 把接口调用签名报成 `method`，所以最小容器可以是一行：命中该行时切出 19 字节的 `  needle(): string;`，比它替换掉的 ±3 窗口（145 字节 / 7 行）更少，而 status 3.11 已经写下「至少不差于 ±3」。
+
+决定：(1) 预算定位为跑飞文件的兜底闸，不是延迟目标，默认值上调到 250ms 并在常量注释里写明理由；断言真实解析或断言预算耗尽的测试都自带预算，不继承生产值。(2) 单元的签名范围覆盖整个单元范围时，视为没有自己函数体的片段，按每个命中的 ±3 窗口取并补齐；有函数体的单元仍精确输出。
+
+原因：挂钟预算与 CPU 争抢共享同一个时钟，贴着普通文件解析时间设值会让能力变成负载相关，且降级是静默的（`failed` → 窗口，不是错答案），最难发现。判据用「签名是否即全体」而不是跨度或 kind 表：它对 provider 无关，能同时接住 LSP 的一行 `method`、ambient 声明和单行定义，又不会把自包含的小定义（嵌套 3 行箭头函数）撑宽成外层噪声。
+
+考虑过的替代：(1) 对所有小单元与 ±3 窗口取并——会把 `const foo = () => {}` 这类完整定义也拉进外层签名和右括号，抹掉结构切片相对窗口的全部收益，并推翻已验收的嵌套单元断言。(2) 跨度阈值（容器 ≤ N 行就跳过）——会跳过大函数里真正有用的小嵌套函数。(3) 只扩容器 kind 黑名单——要逐 provider 追 kind 表，且 `method` 既是真方法也是接口签名，无法只靠 kind 区分。(4) 把预算改成按字节相对计算——仍要挑系数，本刀不需要。
+
+不改：`SMALL_STRUCTURE_SPAN_LINES`（24，D-093）；`STRUCTURE_HIT_CLASS_SCORE`（D-095）；容器 kind 集合（D-098）；provider 顺序与 `warmOnly` 契约（D-097 / D-099）。不声称解析耗时或省时比例。
+
+影响：`lib/structure/constants.ts`；`lib/structure/slice.ts`；`lib/structure/slice.test.ts`；`lib/structure/tree-sitter-provider.test.ts`；`lib/harness/explore.test.ts`；`lib/structure/DOCUMENTATION.md`；status 3.11。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -2186,3 +2204,4 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 | D-099 | implementation（empty/缺口可问后续 provider，warmOnly 不冷启动 LSP） | — | structure source/lsp-provider；explore hitLines |
 | D-100 | implementation（云 lock 与冒烟包含 web-tree-sitter） | — | scripts/cloud-runtime.bun.lock；build-cloud-runtime.mjs |
 | D-101 | implementation（约 3 MB grammar wasm 检入 git；copy 脚本只在 `--force` 时刷新） | — | structure/DOCUMENTATION.md；copy-structure-runtime.mjs 行为说明 |
+| D-102 | implementation（解析预算是跑飞兜底、250ms、测试自带预算；签名即全体的单元按 ±3 取并补齐） | — | structure/constants.ts + slice.ts；structure/explore 测试；structure/DOCUMENTATION.md；status 3.11 |

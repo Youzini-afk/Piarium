@@ -52,6 +52,11 @@ initializer.
 
 - Inclusive span ≤ `SMALL_STRUCTURE_SPAN_LINES` (24; one typical editor
   viewport, D-093) → the whole unit.
+- A unit whose signature spans the whole unit carries no body of its own, so it
+  is padded to at least the ±3 window around each hit (D-102). Container kinds
+  alone do not prevent this: `documentSymbol` types an interface call signature
+  as `method`, so the smallest container can be one line. Units that do have a
+  body stay exact.
 - Larger → signature + hit block (±3 clipped to the unit) + explicit omission
   markers that include a full-unit `read path:start-end` entry.
 - Missing, empty, unsupported, unavailable, failed, cancelled, or stale
@@ -99,6 +104,12 @@ Runtime wasm lives in `lib/structure/runtime/` (`web-tree-sitter.wasm` plus the
 TS/TSX grammars from `tree-sitter-typescript@0.23.2`). Paths go through the same
 asar / asar.unpacked remap as `extension-builtins` (D-096). A missing or
 unloadable wasm is `unavailable`; explore then tries LSP or the ±3 window.
+
+`STRUCTURE_PARSE_BUDGET_MS` bounds parse plus query after the wasm is loaded.
+It is a wall clock and a runaway guard, not a latency target: a value near an
+ordinary file's parse time makes a busy Host report `failed` and silently drop
+to ±3 windows. Tests that assert a real parse pin their own budget rather than
+inheriting the production value (D-102).
 
 Hit classification (D-095) runs only after a file is materialized. Candidate
 ranking before `readFile` is unchanged. `windowScore` then adds
