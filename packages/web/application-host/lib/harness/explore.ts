@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExplorePurpose, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreIndexLifecycle, type ExplorePurpose, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -40,6 +40,8 @@ import {
   rankReverseImporters,
   type ExploreGraphRecall,
 } from "./explore-graph.js";
+import { fuseFileRanks } from "./explore-rrf.js";
+import { relocateSemanticFocus } from "../knowledge/semantic/relocate.js";
 
 export {
   DEFAULT_ANCHOR_CAP,
@@ -85,11 +87,38 @@ export interface ExploreRgSearchOptions {
   hitsPerFile?: number;
 }
 
+export type ExploreSemanticHit = {
+  documentId: string;
+  blockId: string;
+  parentUnitId: string;
+  parentName: string;
+  parentKind: string;
+  startLine: number;
+  endLine: number;
+  contentHash: string;
+  body: string;
+  similarity: number;
+  rank: number;
+};
+
+export type ExploreSemanticSearch = {
+  status: ExploreSemanticStatus;
+  coverage: ExploreSemanticCoverage;
+  generation?: string;
+  spaceId?: string;
+  scope?: { scopeKind: string; scopeId: string };
+  lifecycle: ExploreIndexLifecycle;
+  hits: ExploreSemanticHit[];
+};
+
 export interface ExploreDeps {
   rgSearch(pattern: string, options: ExploreRgSearchOptions): Promise<RgSearchReturn>;
   readFile(path: string): Promise<ExploreFileSnapshot>;
   structure?: Pick<StructureSource, "outline" | "classifyHits"> & Partial<Pick<StructureSource, "literalCalls">>;
   graph?: ExploreGraphRecall;
+  semantic?: {
+    search(question: string, limit?: number): Promise<ExploreSemanticSearch>;
+  };
 }
 
 export interface ExploreResult {
@@ -115,6 +144,8 @@ export const DEFAULT_READ_PARALLELISM = 3;
 export const DEFAULT_READ_LOOKAHEAD = 2;
 /** Below the 32 KiB generic tool-result truncation so explore packs first. */
 export const DEFAULT_BYTE_BUDGET = 24 * 1024;
+/** Working nearest-neighbor budget. Not a product hard reject. */
+export const DEFAULT_SEMANTIC_RECALL = 24;
 
 export function exploreHandleHint(handle: string): string {
   return `\nMore: get_output("${handle}") for the full pack and unread candidate list (session-local, ephemeral).`;
@@ -163,6 +194,19 @@ type GraphCandidateSource = "definition" | "connection" | "association" | "impor
 /** Why this graph edge was walked (D-163). Same-container is ordinary supplement. */
 export type GraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
 
+interface SemanticClue {
+  blockId: string;
+  parentUnitId: string;
+  parentName: string;
+  parentKind: string;
+  startLine: number;
+  endLine: number;
+  contentHash: string;
+  body: string;
+  similarity: number;
+  rank: number;
+}
+
 interface GraphClue {
   source: GraphCandidateSource;
   why: string;
@@ -186,6 +230,7 @@ interface FileEvidence {
   distinctive: Set<string>;
   anchors: Set<string>;
   graphClues: GraphClue[];
+  semanticClues: SemanticClue[];
   verifiedRelation: boolean;
   verifiedCallees: Set<string>;
 }
@@ -196,6 +241,7 @@ interface RankedCandidate {
   tier: number;
   roleFit: number;
   weightedCoverage: number;
+  rrf: number;
 }
 
 interface PreparedWindow {
@@ -231,6 +277,7 @@ const emptyEvidence = (): FileEvidence => ({
   distinctive: new Set(),
   anchors: new Set(),
   graphClues: [],
+  semanticClues: [],
   verifiedRelation: false,
   verifiedCallees: new Set(),
 });
@@ -428,7 +475,21 @@ function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups
   return 4;
 }
 
-/** Same-tier order is weighted coverage, then bounded role preference (D-154). */
+function lexicalFileRanks(
+  byFile: Map<string, FileEvidence>,
+  groups: TermGroup[],
+  weights: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const ordered = [...byFile.entries()]
+    .filter(([, evidence]) => evidence.hits.size > 0 || evidence.groups.size > 0)
+    .sort((left, right) => (
+      weightedCoverage(right[1], groups, weights) - weightedCoverage(left[1], groups, weights)
+      || comparePath(left[0], right[0])
+    ));
+  return new Map(ordered.map(([path], index) => [path, index + 1]));
+}
+
+/** Same-tier order: file-level RRF when a semantic source is present, else weighted coverage (D-170). */
 function rankCandidates(
   byFile: Map<string, FileEvidence>,
   groups: TermGroup[],
@@ -436,21 +497,33 @@ function rankCandidates(
   table: ExploreDistinctivenessDetails,
 ): RankedCandidate[] {
   const weights = weightByGroupId(groups, table);
+  const lexicalRanks = lexicalFileRanks(byFile, groups, weights);
+  const anySemantic = [...byFile.values()].some((evidence) => evidence.semanticClues.length > 0);
   return [...byFile.entries()]
     .map(([path, evidence]) => {
       const role = classifyFileRole(path);
       const fit = fileRoleFit(role, parsed.domain, parsed.preferTests);
       const tier = candidateTier(evidence, parsed, groups);
+      const semanticRank = evidence.semanticClues.length > 0
+        ? Math.min(...evidence.semanticClues.map((clue) => clue.rank))
+        : undefined;
+      const lexicalRank = lexicalRanks.get(path);
+      const rrf = fuseFileRanks({
+        ...(lexicalRank !== undefined ? { lexical: lexicalRank } : {}),
+        ...(semanticRank !== undefined ? { semantic: semanticRank } : {}),
+      });
       return {
         path,
         evidence,
         tier,
         roleFit: fit,
         weightedCoverage: weightedCoverage(evidence, groups, weights),
+        rrf,
       };
     })
     .sort((left, right) => (
       left.tier - right.tier
+      || (anySemantic ? right.rrf - left.rrf : 0)
       || right.weightedCoverage - left.weightedCoverage
       || right.roleFit - left.roleFit
       || comparePath(left.path, right.path)
@@ -547,10 +620,20 @@ function arrivalsForWindow(
   covered: ReadonlySet<string>,
   names: readonly string[],
   windowClues: readonly GraphClue[],
+  semanticClues: readonly SemanticClue[] = [],
 ): ExploreArrival[] {
   const arrivals: ExploreArrival[] = [];
   if (covered.size > 0) {
     arrivals.push({ kind: "lexical", groups: [...covered], hits: [...names] });
+  }
+  for (const clue of semanticClues) {
+    if (arrivals.some((item) => item.kind === "semantic" && item.blockId === clue.blockId)) continue;
+    arrivals.push({
+      kind: "semantic",
+      blockId: clue.blockId,
+      rank: clue.rank,
+      similarity: clue.similarity,
+    });
   }
   for (const clue of windowClues) {
     if (arrivals.some((item) => (
@@ -586,6 +669,7 @@ function windowsFor(
     else matches.push(line);
   }
   matches.sort((a, b) => a - b);
+  const languageId = languageIdForPath(path);
   const usable = outlineUsableForText(outline, snapshot.revision)
     ? outline
     : outline.status === "not-requested"
@@ -596,11 +680,27 @@ function windowsFor(
         revision: snapshot.revision,
         symbols: [] as StructureOutlineResult["symbols"],
       };
+  const semanticFocuses = evidence.semanticClues.map((clue) => {
+    const relocated = relocateSemanticFocus({
+      lines,
+      languageId,
+      recorded: clue,
+      symbols: "symbols" in usable ? usable.symbols : [],
+    });
+    return { ...relocated, clue };
+  });
   const slices = sliceStructureWindows({
     path,
     lines,
     revision: snapshot.revision,
-    focusRanges: matches.map((line) => ({ startLine: line, endLine: line, origin: "lexical-hit" as const })),
+    focusRanges: [
+      ...matches.map((line) => ({ startLine: line, endLine: line, origin: "lexical-hit" as const })),
+      ...semanticFocuses.map((focus) => ({
+        startLine: focus.startLine,
+        endLine: focus.endLine,
+        origin: "semantic-block" as const,
+      })),
+    ],
     outline: usable,
   });
   const nameById = new Map(groups.map((group) => [group.id, group.distinctive]));
@@ -629,12 +729,18 @@ function windowsFor(
       if (evidence.anchors.has(groupId)) hasAnchor = true;
     }
     const names = [...covered].map((id) => nameById.get(id) ?? id);
+    const semanticForWindow = semanticFocuses
+      .filter((focus) => focus.startLine <= slice.end && focus.endLine >= slice.start)
+      .map((focus) => focus.clue);
     const matched = names.length === 1
       ? `matched ${names[0]}`
       : names.length > 1
         ? `matched ${names.length} term groups (${names.join(", ")})`
         : "";
-    const whyParts = windowClues.map((clue) => clue.why);
+    const whyParts = [
+      ...windowClues.map((clue) => clue.why),
+      ...semanticForWindow.map((clue) => `semantic neighbor rank ${clue.rank}`),
+    ];
     const why = whyParts.length > 0
       ? (matched ? `${whyParts.join("; ")}; ${matched}` : whyParts.join("; "))
       : (matched || "matched search terms");
@@ -650,7 +756,7 @@ function windowsFor(
         verified || evidence.verifiedRelation && hasDistinctiveObject,
         covered.size > 0,
       );
-    const arrivals = arrivalsForWindow(covered, names, windowClues);
+    const arrivals = arrivalsForWindow(covered, names, windowClues, semanticForWindow);
     const offTopic = windowClues.some((clue) => clue.offTopic)
       && !hasDistinctiveObject
       && !verified
@@ -663,7 +769,9 @@ function windowsFor(
       };
     const factKey = windowClues[0]
       ? `${path}:${windowClues[0]!.source}:${windowClues[0]!.locate.text}`
-      : `${path}:${slice.start}:${[...covered].sort().join(",")}`;
+      : semanticForWindow[0]
+        ? `${path}:semantic:${semanticForWindow[0]!.blockId}`
+        : `${path}:${slice.start}:${[...covered].sort().join(",")}`;
     const roleFit = fileRoleFit(classifyFileRole(path), parsed.domain, parsed.preferTests);
     return {
       path,
@@ -1093,6 +1201,13 @@ export async function explore(
     if (!byFile.has(object)) byFile.set(object, emptyEvidence());
   }
 
+  let semanticReport: ExploreSemanticDetails = {
+    status: deps.semantic ? "unavailable" : "not-requested",
+    coverage: "empty",
+    index: { lifecycle: "idle" },
+  };
+  let semanticBlocks = 0;
+
   let graphStatus: ExploreGraphStatus = deps.graph ? "unavailable" : "not-requested";
   const definitionFiles = new Set<string>();
   const connectionFiles = new Set<string>();
@@ -1188,7 +1303,48 @@ export async function explore(
     }
   };
 
-  await Promise.all([runRg(objectPatterns), runGraphSeeds()]);
+  const runSemantic = async (): Promise<void> => {
+    if (!deps.semantic) return;
+    try {
+      const result = await deps.semantic.search(input.question, DEFAULT_SEMANTIC_RECALL);
+      semanticReport = {
+        status: result.status,
+        coverage: result.coverage,
+        ...(result.generation ? { generation: result.generation } : {}),
+        ...(result.spaceId ? { spaceId: result.spaceId } : {}),
+        ...(result.scope ? { scope: result.scope } : {}),
+        index: { lifecycle: result.lifecycle },
+        blocks: result.hits.length,
+      };
+      semanticBlocks = result.hits.length;
+      if (result.status === "unavailable" || result.status === "failed" || result.status === "stale") return;
+      for (const hit of result.hits) {
+        if (!pathInRoots(hit.documentId, input.paths)) continue;
+        const evidence = byFile.get(hit.documentId) ?? emptyEvidence();
+        if (!evidence.semanticClues.some((clue) => clue.blockId === hit.blockId)) {
+          evidence.semanticClues.push({
+            blockId: hit.blockId,
+            parentUnitId: hit.parentUnitId,
+            parentName: hit.parentName,
+            parentKind: hit.parentKind,
+            startLine: hit.startLine,
+            endLine: hit.endLine,
+            contentHash: hit.contentHash,
+            body: hit.body,
+            similarity: hit.similarity,
+            rank: hit.rank,
+          });
+        }
+        byFile.set(hit.documentId, evidence);
+      }
+      if (semanticBlocks === 0 && result.status === "ready") semanticReport.status = "empty";
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      semanticReport = { ...semanticReport, status: "failed" };
+    }
+  };
+
+  await Promise.all([runRg(objectPatterns), runGraphSeeds(), runSemantic()]);
 
   const issues: ExploreIssue[] = [];
   const provenance = new Map<string, ExploreProvenance>();
@@ -1271,7 +1427,10 @@ export async function explore(
       }
     }
     rescanBodyGroups(lines, groups, evidence);
-    const hitLines = [...evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
+    const hitLines = [
+      ...evidence.hits.keys(),
+      ...evidence.semanticClues.map((clue) => clue.startLine),
+    ].filter((line) => Number.isSafeInteger(line) && line >= 1);
     const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines);
     if (outline.status !== "not-requested") {
       structureFiles.set(path, {
@@ -1574,6 +1733,14 @@ export async function explore(
         : {}),
       distinctiveness,
       ...(windowTraces.length > 0 ? { windows: windowTraces } : {}),
+      semantic: {
+        ...semanticReport,
+        blocks: semanticBlocks,
+        units: windowTraces.filter((window) => window.arrivals.some((item) => item.kind === "semantic")).length,
+        primary: windowTraces.filter((window) => (
+          window.purpose === "primary" && window.arrivals.some((item) => item.kind === "semantic")
+        )).length,
+      },
     },
   };
 }

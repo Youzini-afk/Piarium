@@ -18,6 +18,8 @@ export {
 export type { IndexRecipeIdentity, SemanticDocumentKey, SemanticScopeKey, VectorSpaceIdentity } from "./identity.js";
 export { buildEmbedText, splitSourceLines, textOfLines } from "./embed-text.js";
 export type { EmbedTextParts, TokenCounter } from "./embed-text.js";
+export { relocateSemanticFocus } from "./relocate.js";
+export type { SemanticRelocateMode, SemanticRelocateResult } from "./relocate.js";
 export { chunkDocument } from "./chunker.js";
 export type { ChunkDocumentInput, SemanticChunk } from "./chunker.js";
 export { cosineSimilarity, createHashEmbedder, hashEmbed } from "./embedder.js";

@@ -1869,3 +1869,188 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
   });
 });
 
+describe("explore semantic recall", () => {
+  const reclaim = [
+    "export function reclaimLease(handle: string) {",
+    "  parkedHandles.delete(handle);",
+    "  return handle;",
+    "}",
+  ].join("\n");
+
+  const semanticHit = {
+    documentId: "src/reclaim.ts",
+    blockId: "src%2Freclaim.ts#1-4",
+    parentUnitId: "src%2Freclaim.ts#reclaimLease#function",
+    parentName: "reclaimLease",
+    parentKind: "function",
+    startLine: 1,
+    endLine: 4,
+    contentHash: "unused",
+    body: reclaim,
+    similarity: 0.81,
+    rank: 1,
+  };
+
+  it("puts a lexical-gap semantic hit in the visible body as primary", async () => {
+    const result = await explore({ question: "how does the runtime discard idle tokens" }, {
+      rgSearch: async () => [],
+      readFile: async (path) => ready(path === "src/reclaim.ts" ? reclaim : ""),
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "complete",
+          lifecycle: "ready",
+          generation: "g1",
+          spaceId: "space",
+          scope: { scopeKind: "workspace", scopeId: "ws" },
+          hits: [semanticHit],
+        }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.text.includes("reclaimLease"))).toBe(true);
+    expect(formatExploreOutput({ ...result, graph: result.details.graph }).visibleText).toContain("reclaimLease");
+    const window = result.details.windows?.find((item) => item.path === "src/reclaim.ts");
+    expect(window?.arrivals.some((item) => item.kind === "semantic")).toBe(true);
+    expect(window?.arrivals.some((item) => item.kind === "lexical")).toBe(false);
+    expect(window?.purpose).toBe("primary");
+    expect(result.details.semantic?.status).toBe("ready");
+    expect(result.details.semantic?.primary).toBeGreaterThanOrEqual(1);
+  });
+
+  it("relocates a shifted block instead of keeping the stale recorded range", async () => {
+    const decoy = [
+      "export function decoyBanner() {",
+      ...Array.from({ length: 18 }, (_, index) => `  const filler${index} = ${index};`),
+      "}",
+    ].join("\n");
+    const shifted = `${decoy}\n${reclaim}`;
+    const result = await explore({ question: "how does the runtime discard idle tokens" }, {
+      rgSearch: async () => [],
+      readFile: async () => ready(shifted),
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "complete",
+          lifecycle: "ready",
+          hits: [{ ...semanticHit, startLine: 1, endLine: 4, contentHash: "stale-hash" }],
+        }),
+      },
+    });
+    const packed = result.snippets.find((snippet) => snippet.path === "src/reclaim.ts");
+    expect(packed?.text).toContain("reclaimLease");
+    expect(packed?.text).not.toContain("decoyBanner");
+    expect(packed?.startLine).toBeGreaterThan(4);
+  });
+
+  it("re-slices a rewritten unit instead of keeping the stale recorded range", async () => {
+    const rewritten = [
+      "export function reclaimLease(handle: string) {",
+      ...Array.from({ length: 30 }, (_, index) => `  const step${index} = handle;`),
+      "  return yieldOrphanedLease(handle);",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "how does the runtime discard idle tokens" }, {
+      rgSearch: async () => [],
+      readFile: async () => ready(rewritten),
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "complete",
+          lifecycle: "ready",
+          hits: [{ ...semanticHit, startLine: 1, endLine: 4, contentHash: "stale-hash", body: reclaim }],
+        }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.text.includes("yieldOrphanedLease"))).toBe(true);
+  });
+
+  it("returns published semantic hits while coverage is still partial", async () => {
+    const result = await explore({ question: "how does the runtime discard idle tokens" }, {
+      rgSearch: async () => [],
+      readFile: async () => ready(reclaim),
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "partial",
+          lifecycle: "building",
+          hits: [semanticHit],
+        }),
+      },
+    });
+    expect(result.details.semantic?.coverage).toBe("partial");
+    expect(result.details.semantic?.index.lifecycle).toBe("building");
+    expect(result.snippets.some((snippet) => snippet.text.includes("reclaimLease"))).toBe(true);
+  });
+
+  it("merges lexical and semantic arrivals on the same function instead of copying the unit", async () => {
+    const result = await explore({ question: "reclaimLease" }, {
+      rgSearch: async (pattern) => pattern === "reclaimLease"
+        ? [{ path: "src/reclaim.ts", line: 1, text: "export function reclaimLease(handle: string) {" }]
+        : [],
+      readFile: async () => ready(reclaim),
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "complete",
+          lifecycle: "ready",
+          hits: [semanticHit],
+        }),
+      },
+    });
+    const units = result.details.windows?.filter((item) => item.path === "src/reclaim.ts" && item.packed) ?? [];
+    expect(units).toHaveLength(1);
+    expect(units[0]?.arrivals.map((item) => item.kind).sort()).toEqual(["lexical", "semantic"]);
+  });
+
+  it("schedules a semantic-only file and does not give ten blocks ten votes", async () => {
+    const reads: string[] = [];
+    const noisyHits = Array.from({ length: 10 }, (_, index) => ({
+      ...semanticHit,
+      documentId: "src/noisy.ts",
+      blockId: `noisy#${index}`,
+      rank: 2 + index,
+      body: "export function noisy() { return 1; }",
+    }));
+    await explore({ question: "how does the runtime discard idle tokens" }, {
+      rgSearch: async () => [],
+      readFile: async (path) => {
+        reads.push(path);
+        return ready(path === "src/reclaim.ts" ? reclaim : "export function noisy() { return 1; }");
+      },
+      structure: createStructureSource([parsingProvider()]),
+      semantic: {
+        search: async () => ({
+          status: "ready",
+          coverage: "complete",
+          lifecycle: "ready",
+          hits: [...noisyHits, semanticHit],
+        }),
+      },
+    });
+    expect(reads[0]).toBe("src/reclaim.ts");
+  });
+
+  it("keeps lexical plus graph results when the semantic source is unavailable", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "a.ts", line: 1, text: "needle" }],
+      readFile: async () => ready("needle"),
+      semantic: {
+        search: async () => ({
+          status: "unavailable",
+          coverage: "empty",
+          lifecycle: "idle",
+          hits: [],
+        }),
+      },
+    });
+    expect(result.snippets[0]?.text).toContain("needle");
+    expect(result.details.semantic?.status).toBe("unavailable");
+  });
+});
+
+

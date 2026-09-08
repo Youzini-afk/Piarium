@@ -543,6 +543,29 @@ export interface ExploreSkippedQueries {
   patterns: string[];
 }
 
+export type ExploreSemanticStatus =
+  | "not-requested"
+  | "ready"
+  | "empty"
+  | "unavailable"
+  | "failed"
+  | "stale";
+
+export type ExploreSemanticCoverage = "empty" | "partial" | "complete";
+export type ExploreIndexLifecycle = "idle" | "building" | "rebuilding" | "ready";
+
+export interface ExploreSemanticDetails {
+  status: ExploreSemanticStatus;
+  coverage: ExploreSemanticCoverage;
+  generation?: string;
+  spaceId?: string;
+  scope?: { scopeKind: string; scopeId: string };
+  index: { lifecycle: ExploreIndexLifecycle };
+  blocks?: number;
+  units?: number;
+  primary?: number;
+}
+
 export interface ExploreGraphDetails {
   status: ExploreGraphStatus;
   /** Distinct definition files, not hit count. */
@@ -619,6 +642,7 @@ export interface ExploreSearchResult {
     skippedQueries?: ExploreSkippedQueries;
     distinctiveness?: ExploreDistinctivenessDetails;
     windows?: ExploreWindowTrace[];
+    semantic?: ExploreSemanticDetails;
   };
 }
 

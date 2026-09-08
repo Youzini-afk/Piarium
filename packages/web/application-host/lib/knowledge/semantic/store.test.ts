@@ -22,6 +22,7 @@ const chunk = (documentId: string, body: string, startLine = 1, endLine = 3): Se
   startLine,
   endLine,
   contentHash: `hash-${body}`,
+  body,
   embedText: body,
   fallback: false,
 });

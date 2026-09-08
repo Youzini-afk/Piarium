@@ -12,6 +12,7 @@ import {
   DEFAULT_BYTE_BUDGET,
   DEFAULT_CANDIDATE_BUDGET,
   DEFAULT_HITS_PER_FILE,
+  DEFAULT_SEMANTIC_RECALL,
   explore,
   formatExploreOutput,
   type ExploreIssue,
@@ -86,7 +87,7 @@ async function loadSnippetRelations(
 }
 
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall" | "semanticRecall">,
   /**
    * Window traces are an observation meter, not a product field: one entry per
    * generated window with its hit text, measured at 482 windows / 185 KB for a
@@ -193,6 +194,11 @@ export function createExploreSearchService(
           },
         } : {}),
         ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
+        ...(host.semanticRecall ? {
+          semantic: {
+            search: (question: string, limit?: number) => host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL),
+          },
+        } : {}),
       }, ctx.signal);
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
@@ -240,6 +246,7 @@ export function createExploreSearchService(
           ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
           ...(result.details.distinctiveness ? { distinctiveness: result.details.distinctiveness } : {}),
           ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
+          ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
         },
       };
     },

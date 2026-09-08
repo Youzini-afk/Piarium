@@ -40,6 +40,7 @@ export type SemanticHit = {
   endLine: number;
   contentHash: string;
   fallback: boolean;
+  body: string;
   similarity: number;
   rank: number;
   scope: SemanticScopeKey;
@@ -69,6 +70,7 @@ type BlockPayload = {
   endLine: number;
   contentHash: string;
   fallback: boolean;
+  body: string;
   embedText: string;
 };
 
@@ -268,6 +270,7 @@ export function createSemanticGenerationStore(options: {
             endLine: chunk.endLine,
             contentHash: chunk.contentHash,
             fallback: chunk.fallback,
+            body: chunk.body,
             embedText: chunk.embedText,
           };
           db.insert(vectors[index] ?? new Array(space.dim).fill(0), payload);
@@ -336,6 +339,7 @@ export function createSemanticGenerationStore(options: {
             endLine: hit.payload.endLine,
             contentHash: hit.payload.contentHash,
             fallback: hit.payload.fallback,
+            body: typeof hit.payload.body === "string" ? hit.payload.body : "",
             similarity: hit.score,
             rank: index + 1,
             scope: options.scope,

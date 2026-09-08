@@ -3475,6 +3475,31 @@ web tsc。
 
 状态：已实施。
 
+### D-170 · 2026-09-08 · 语义线索进同一证据管线；文件级 RRF 只调度读取
+
+背景：3.15 已把入口改成 `focusRanges` 与三字段证据单元。索引侧（D-166–D-169）能出块，但 explore 仍只认命中行。
+词汇缺口的验收是：一条 rg 完全找不到的块，必须出现在可见正文里，且 `arrival = semantic`、`purpose = primary`。
+
+决定：
+
+- Host 把 `semanticIndexRuntime.search(workspaceScope(workspaceId), …)` 绑到 `semanticRecall`。`workspaceId` 只在这一处变成 `scopeId`。
+- 查询嵌入原问题，近邻块写成语义线索。`windowsFor` 对每条线索跑 `relocateSemanticFocus`，成功范围以 `origin: semantic-block` 进入切片。哈希一致用原范围；正文平移按父符号与块正文重定位；实质变化重切当前单元，不沿用旧范围，也不因问题词不在正文里丢掉线索。
+- 同一窗口合并 lexical / graph / semantic 到达理由，不复制证据单元。
+- `rankCandidates`：池里出现语义线索时 `tier → RRF → L(f) → roleFit → 路径`。词法文件排名是加权覆盖序；语义文件排名取该文件最小块名次（十个块不是十票）。\(k=60\)。某来源没有该文件就没有那一项。无语义线索时保持 3.14 的 `tier → L(f) → roleFit → 路径`，避免空 RRF 改变既有顺序。这不是 D-145：RRF 只吃排名、只在文件级、只管读取调度，不进打包。
+- 打包仍由 assessment 首槽分区 + `windowScore`（已无 `GRADE_RANK`）。语义单元可以是 `purpose = primary`，不要求先有词法命中。相似度不进 assessment。
+- `details.semantic` 始终有：`not-requested`（未绑来源）/ `ready` / `empty` / `unavailable` / `failed` / `stale`，另报 `coverage`、`generation`、`spaceId`、`scope`、`index.lifecycle`、blocks/units/primary。语义失败或不可用时词法加图照出。
+- `explore.paths` 过滤在本片把工作区 `documentId` 当相对路径做前缀匹配；类型上仍不把 `documentId` 当成路径去 `join` 或当 glob。
+
+已验证：词汇缺口夹具（问题词与代码零重合）经 `formatExploreOutput.visibleText` 看见目标函数，arrival=semantic、purpose=primary；同一函数 rg+向量只一份单元两条到达；十个语义块不赢过该文件最好名次为 1 的另一文件（读顺序）；哈希失效后重定位躲开占行 1–4 的 decoy；实质改写后可见正文含重切单元里的新标识、旧四行范围装不下它；`coverage: partial` 仍返回已发布块；semantic `unavailable` 仍出词法摘录；`explore-rrf` \(k=60\)；application-host tsc；既有 explore / explore-service 组。
+
+未验证：真实 MiniLM 近邻（夹具注入 `deps.semantic.search`）；十问回归（第六步）；Electron asar 打包加载 transformers；held-out 词汇缺口（维护者写，本刀不参与）；自造探针未写入观察脚本。`windowScore` 未删。
+
+不改：24 KiB / 20 条 / 读预算 / 图预算；不设信任门与花费守卫；不做重排、查询扩展、远程嵌入、摘要、草稿 overlay、零样本分类。
+
+影响：`explore.ts`、`explore-rrf.ts`、`explore-service.ts`、`service-host.ts`、`application-host/index.ts`；protocol `ExploreSemanticDetails`；设计 6.1 fan-out / fuse / pack；plan 3.16 第一片检索侧；status。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3639,10 +3664,10 @@ web tsc。
 | D-156 | implementation（定位题有答案后 offTopic 不展开不进包；无法判定无关 ≠ 已证明有关） | — | explore.ts expand/pack；设计 6.1 |
 | D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
 | D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |
-| D-158 | planned（语义来源排期 3.16：嵌入第三路候选 / 重排 / 查询扩展；本地默认远程可选按槽位；索引指纹；不设信任门与花费守卫） | — | 设计 6 头、6.1、8.5；plan 3.16 |
+| D-158 | superseded in part（排期与「不设信任门」仍有效；本地召回已由 D-166–D-170 落地，重排 / 远程 / 查询扩展仍待） | D-166–D-170 | 设计 6 头、6.1、8.5；plan 3.16 |
 | D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉） | D-163 | 设计 6.1 目标形态；plan 3.15 |
 | D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
-| D-161 | superseded in part（联合设计仍有效；focusRanges 与三字段接口已由 D-165 落地；空间/配方身份已由 D-166 落地；RRF/重排仍待） | D-165（接口）；D-166（身份） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
+| D-161 | superseded in part（联合设计仍有效；focusRanges / 三字段已由 D-165 落地；空间/配方身份已由 D-166 落地；文件级 RRF 调度已由 D-170 落地；重排删 windowScore 仍待第二片） | D-165（接口）；D-166（身份）；D-170（RRF 调度） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
 | D-162 | superseded in part（范围分层原则仍在；范围键与 documentId 接缝已由 D-167 落地，用户级/工作集/集合范围仍不实现） | D-167 | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
 | D-164 | implementation（explore/related 共用查询期文件角色；依据 filename-pattern / project-declaration / unknown；不入图） | — | file-role.ts；related.query roles；plan 3.15② |
@@ -3651,3 +3676,4 @@ web tsc。
 | D-167 | implementation（范围键路径与查询；documentId 不透明；workspaceScope 是唯一焊点） | — | semantic/identity.ts store.ts runtime.ts；设计 7.1 |
 | D-168 | implementation（结构递归切块；正文优先装饰；缺结构走重叠 fallback） | — | semantic/chunker.ts embed-text.ts |
 | D-169 | implementation（独立代际 TDB；Host 工作区扫描；缺包 unavailable；transformers 动态加载） | — | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |
+| D-170 | implementation（语义线索进 focusRanges / 读取调度 / 打包；文件级 RRF k=60；details.semantic；无语义线索保持 3.14 顺序） | — | explore.ts explore-rrf.ts explore-service.ts；protocol ExploreSemanticDetails |

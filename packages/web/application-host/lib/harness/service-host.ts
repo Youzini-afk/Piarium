@@ -112,6 +112,11 @@ export interface HarnessServiceHost {
    * store is not open; the caller must degrade, not open a database (D-112).
    */
   graphRecall: ((workspaceId: string) => import("../knowledge/store.js").KnowledgeStore | null) | null;
+  semanticRecall: ((
+    workspaceId: string,
+    question: string,
+    limit: number,
+  ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -177,6 +182,7 @@ export interface HarnessServiceHostOptions {
   structureSource?: StructureSource;
   fileRelations?: HarnessServiceHost["fileRelations"];
   graphRecall?: HarnessServiceHost["graphRecall"];
+  semanticRecall?: HarnessServiceHost["semanticRecall"];
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -235,6 +241,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const structureSource = options.structureSource ?? null;
   const fileRelations = options.fileRelations ?? null;
   const graphRecall = options.graphRecall ?? null;
+  const semanticRecall = options.semanticRecall ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -386,6 +393,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     structureSource,
     fileRelations,
     graphRecall,
+    semanticRecall,
     webFetchService,
     webSearchService,
     documentReadSource,

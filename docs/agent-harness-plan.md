@@ -105,7 +105,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    **3.15①②④接口 已接**（D-163 / D-164 / D-165）：图到达理由；共享文件角色；`focusRanges` 与
    `arrival` / `assessment` / `purpose` 已替换 `hitLines` / `EvidenceGrade`。
    **接下来三刀并行排期，不再写"等观察决定"**（D-158 / D-159 / D-160）：**3.15** 按设计复查把 explore 收敛到
-   "答案要求 → 取证 → 证据单元 → 一次联合选择 → 正文与呈现记录"五段，拆掉十一项打分公式（①②④接口已接，③⑤与重排删除 windowScore 待做）；**3.16** 语义来源——嵌入召回、
+   "答案要求 → 取证 → 证据单元 → 一次联合选择 → 正文与呈现记录"五段，拆掉十一项打分公式（①②④接口已接，③⑤与重排删除 windowScore 待做）；   **3.16** 语义来源——嵌入召回（第一片索引侧 D-166–D-169、检索侧 D-170 已接）、
    重排、可选查询扩展，各自本地/远程可选，配了远程就用、没配就本地，不设信任门与花费守卫；**3.17** bash 输出压缩按命令分派
    规则解析，替掉字节头尾切。缺可选来源仍返回已有正文——这是"不依赖"，不是"不做"。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
@@ -586,7 +586,7 @@ pooling/归一化 + 运行配方）走语法包的内容寻址存储，默认包
 接入 3.15：语义线索经 `focusRanges` 进证据单元（块哈希一致直接采用范围，否则按父符号身份重定位，实质变化则重切），
 `rankCandidates` 的文件级融合从此有词法 + 语义两路（RRF 吃排名、只在文件级、只管读取调度）；`arrival = semantic` 的单元
 经同样的结构核验可以是 `purpose = primary`。`details.semantic` 报 `ready / empty / unavailable / failed / stale` 与 coverage。
-**检索侧待本片后半。**
+**检索侧已接**（D-170）：召回线索进 `focusRanges` / 读取调度 / 打包 / `details.semantic`；无语义线索时 `rankCandidates` 保持 3.14 顺序。
 **不做**：重排、扩展、摘要、草稿 overlay、零样本分类、远程后端。远程留 `models.embedding` 槽位与 provider kind 的配置解析，
 但第一片只本地跑通。Electron asar 原生模块必须验。
 

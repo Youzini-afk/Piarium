@@ -21,6 +21,7 @@ export type SemanticChunk = {
   startLine: number;
   endLine: number;
   contentHash: string;
+  body: string;
   embedText: string;
   fallback: boolean;
 };
@@ -123,6 +124,7 @@ const makeChunk = (
     startLine: range.startLine,
     endLine: range.endLine,
     contentHash: contentHashOf(body),
+    body,
     embedText,
     fallback,
   };

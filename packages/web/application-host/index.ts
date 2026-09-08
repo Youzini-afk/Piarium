@@ -49,6 +49,7 @@ import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.j
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
+import { workspaceScope } from './lib/knowledge/semantic/identity.js';
 import { createSemanticIndexRuntime } from './lib/knowledge/semantic/runtime.js';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
@@ -1645,6 +1646,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
+    semanticRecall: async (workspaceId, question, limit) => {
+      const result = await semanticIndexRuntime.search(workspaceScope(workspaceId), question, limit);
+      return {
+        status: result.status.status,
+        coverage: result.status.coverage,
+        ...(result.status.generation ? { generation: result.status.generation } : {}),
+        ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
+        scope: result.status.scope,
+        lifecycle: result.status.lifecycle,
+        hits: result.hits,
+      };
+    },
     fileRelations: async (workspaceId, resourceId) => {
       const store = knowledgeStores.get(workspaceId);
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
