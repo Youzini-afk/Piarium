@@ -161,11 +161,14 @@ const searchVariantsOf = (group: TermGroup): string[] => {
 
 type GraphCandidateSource = "definition" | "connection" | "association" | "import";
 type EvidenceGrade = ExploreEvidenceGrade;
+/** Why this graph edge was walked (D-163). Same-container is ordinary supplement. */
+export type GraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
 
 interface GraphClue {
   source: GraphCandidateSource;
   why: string;
   locate: { text: string; kind: "identifier" | "literal" };
+  arrivalReason: GraphArrivalReason;
   edgeKind?: "connects" | "associates";
   match?: "exact" | "name-contains";
   callee?: string;
@@ -239,11 +242,66 @@ const GRADE_RANK: Record<EvidenceGrade, number> = {
   lexical: 0,
 };
 
+const ARRIVAL_RANK: Record<GraphArrivalReason, number> = {
+  "object-triggered": 2,
+  "statement-evidence": 1,
+  "same-container": 0,
+};
+
 function attachGraphClue(evidence: FileEvidence, clue: GraphClue): void {
-  if (evidence.graphClues.some((item) => item.source === clue.source && item.why === clue.why && item.locate.text === clue.locate.text)) {
+  const existing = evidence.graphClues.find((item) => (
+    item.source === clue.source && item.why === clue.why && item.locate.text === clue.locate.text
+  ));
+  if (!existing) {
+    evidence.graphClues.push(clue);
     return;
   }
-  evidence.graphClues.push(clue);
+  if (ARRIVAL_RANK[clue.arrivalReason] > ARRIVAL_RANK[existing.arrivalReason]) {
+    existing.arrivalReason = clue.arrivalReason;
+    if (clue.offTopic) existing.offTopic = true;
+    else delete existing.offTopic;
+  }
+}
+
+function objectMatchesValue(object: string, value: string): boolean {
+  return value === object || value.includes(object) || object.includes(value);
+}
+
+function literalOnHitLine(literal: string, windows: readonly PreparedWindow[]): boolean {
+  for (const window of windows) {
+    if (!window.text.includes(literal)) continue;
+    const lines = window.text.split(/\r\n|\n|\r/);
+    for (const hitLine of window.hitLines) {
+      const text = lines[hitLine - window.start];
+      if (text?.includes(literal)) return true;
+    }
+  }
+  return false;
+}
+
+function arrivalForLiteral(
+  literal: string,
+  parsed: ExploreQueryParse,
+  windows: readonly PreparedWindow[],
+): GraphArrivalReason {
+  if (parsed.objects.some((object) => objectMatchesValue(object, literal))) return "object-triggered";
+  if (literalOnHitLine(literal, windows)) return "statement-evidence";
+  return "same-container";
+}
+
+function arrivalForImport(specifier: string, seedPath: string, parsed: ExploreQueryParse): GraphArrivalReason {
+  if (parsed.objects.some((object) => objectMatchesValue(object, specifier) || objectMatchesValue(object, seedPath))) {
+    return "object-triggered";
+  }
+  return "same-container";
+}
+
+function isDirectArrival(reason: GraphArrivalReason): boolean {
+  return reason === "object-triggered" || reason === "statement-evidence";
+}
+
+function isDirectConnectionClue(clue: GraphClue): boolean {
+  return clue.source === "connection" && isDirectArrival(clue.arrivalReason) && !clue.offTopic;
 }
 
 function applyGraphLocate(lines: readonly string[], evidence: FileEvidence): void {
@@ -355,7 +413,7 @@ function rescanBodyGroups(lines: readonly string[], groups: readonly TermGroup[]
 function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups: TermGroup[]): number {
   if (evidence.verifiedRelation) return 0;
   const objectIds = new Set(objectGroupsOf(groups).map((group) => group.id));
-  const hasConnects = evidence.graphClues.some((clue) => clue.source === "connection");
+  const hasConnects = evidence.graphClues.some(isDirectConnectionClue);
   const hasExactObjectDef = evidence.graphClues.some((clue) => (
     clue.source === "definition"
     && clue.match === "exact"
@@ -409,7 +467,7 @@ function primaryObjectFor(evidence: FileEvidence, groups: TermGroup[], parsed: E
 }
 
 function isDirectClue(evidence: FileEvidence, groups: TermGroup[], parsed: ExploreQueryParse): boolean {
-  if (evidence.graphClues.some((clue) => clue.source === "connection")) return true;
+  if (evidence.graphClues.some(isDirectConnectionClue)) return true;
   if (evidence.graphClues.some((clue) => (
     clue.source === "definition"
     && clue.match === "exact"
@@ -474,7 +532,7 @@ function literalOffTopic(literal: string, parsed: ExploreQueryParse): boolean {
 
 function windowGrade(windowClues: GraphClue[], hasDistinctiveObject: boolean, hasAnchor: boolean, verified: boolean): EvidenceGrade {
   if (verified) return "verified-relation";
-  if (windowClues.some((clue) => clue.source === "connection" && !clue.offTopic)) return "connects-clue";
+  if (windowClues.some(isDirectConnectionClue)) return "connects-clue";
   if (windowClues.some((clue) => clue.source === "definition" && clue.match === "exact")) return "exact-definition";
   if (hasAnchor || hasDistinctiveObject) return "full-object";
   if (windowClues.some((clue) => (
@@ -559,7 +617,7 @@ function windowsFor(
     const offTopic = windowClues.some((clue) => clue.offTopic)
       && !hasDistinctiveObject
       && !verified
-      && !windowClues.some((clue) => clue.source === "connection" && !clue.offTopic);
+      && !windowClues.some(isDirectConnectionClue);
     const structure = outline.status === "not-requested"
       ? undefined
       : {
@@ -1018,6 +1076,7 @@ export async function explore(
             source: "definition",
             why: `definition of ${hit.name} (${hit.kind})`,
             locate: { text: hit.name, kind: "identifier" },
+            arrivalReason: "object-triggered",
             match: hit.match === "exact" ? "exact" : "name-contains",
           });
           byFile.set(hit.path, evidence);
@@ -1048,6 +1107,7 @@ export async function explore(
               ? `other end of connection "${object}"`
               : `associated mention of "${object}"`,
             locate: { text: object, kind: "literal" },
+            arrivalReason: "object-triggered",
             edgeKind: connects ? "connects" : "associates",
             ...(end.callee ? { callee: end.callee } : {}),
           });
@@ -1278,11 +1338,13 @@ export async function explore(
         signal.throwIfAborted();
         const offTopic = literalOffTopic(literal, parsed);
         if ((locatingDone || bothEndsDone) && offTopic) continue;
+        const arrivalReason = arrivalForLiteral(literal, parsed, prepared);
         for (const end of await deps.graph.findLinks(literal)) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const connects = end.kind === "connects";
           const alreadyRead = readPaths.has(end.path);
-          if (!alreadyRead && connectionPaths.length >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
+          const extraRead = isDirectArrival(arrivalReason);
+          if (!alreadyRead && extraRead && connectionPaths.length >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
             connectionDropped += 1;
             continue;
           }
@@ -1293,6 +1355,7 @@ export async function explore(
               ? `other end of connection "${literal}"`
               : `associated mention of "${literal}"`,
             locate: { text: literal, kind: "literal" },
+            arrivalReason,
             edgeKind: connects ? "connects" : "associates",
             ...(end.callee ? { callee: end.callee } : {}),
             ...(offTopic ? { offTopic: true as const } : {}),
@@ -1300,7 +1363,7 @@ export async function explore(
           byFile.set(end.path, evidence);
           if (connects) connectionFiles.add(end.path);
           else associateFiles.add(end.path);
-          if (alreadyRead || seenNew.has(end.path)) continue;
+          if (!extraRead || alreadyRead || seenNew.has(end.path)) continue;
           seenNew.add(end.path);
           connectionPaths.push(end.path);
         }
@@ -1325,6 +1388,7 @@ export async function explore(
             source: "import",
             why: `imports ${seed}`,
             locate: { text: importer.specifier, kind: "literal" },
+            arrivalReason: arrivalForImport(importer.specifier, seed, parsed),
           });
           byFile.set(importer.path, evidence);
           importFiles.add(importer.path);

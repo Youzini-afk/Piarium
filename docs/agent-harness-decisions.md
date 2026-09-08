@@ -3320,6 +3320,39 @@ Notes / Downloads，还有一半不是文件。整个 Host 又是按 `{hostId}/{
 
 状态：方向已决定；对 3.16 的约束待随第一片实施；其余待 profile 消费者。
 
+### D-163 · 2026-09-08 · 图线索到达理由；same-container 不拿直接线索与图补充物化
+
+背景：`candidateTier` 与 `isDirectClue` 把任何 `connection` 线索当成 tier 1 / 直接线索。Q2 的十七条未核验 connects
+占 tier 1、吃掉图补充物化，是因为一份已读注册表窗口含有它注册的全部字面量，展开后每一端都与「有连接」不可区分。
+D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对象 how 问句 `literalOffTopic` 一律 false，整张表都升档。
+计划 3.15① 要求按到达理由而不是把连接预算改小。
+
+决定：
+
+- 每条图线索记录 `arrivalReason`：`object-triggered`（问题对象的 `searchDefinitions` / `findLinks`）、
+  `statement-evidence`（当前窗口**命中行**上的字面量；该语句已经凭词法或对象参与解释）、`same-container`
+  （字面量只出现在同一窗口正文的其他行，或反向 import 的 specifier / 种子路径不是问题对象）。
+- 无对象问句可以从命中行上的字面量产生新对象（`statement-evidence`），不能机械确认相关性的展开只是普通补充。
+- `same-container` 不拿直接线索待遇：不是 tier 1、不进 `isDirectClue`、窗口不升到 `connects-clue`、
+  不进入图补充物化名单。连接预算 16 未改，只把它花在前两种到达理由上。
+- 同一 `(source, why, locate)` 再到达时保留更强的理由。反向 import 仍可补充物化——它们本来就不是 tier 1，
+  现有「import 候选不是 rg 命中」测试依赖这条路径。
+- `offTopic` 仍按 D-151 / D-156：定位或两端已验证后不展开无关字面量；未完成时 `statement-evidence` 即使
+  与对象名对不上也仍可读另一端（support 档），避免把「语句里的连线」误判成同容器噪音。
+
+已验证：`explore.test.ts` 同容器 16 条 wire 在无修复时 extra-read（先红）、修复后不读且 `src/ranking.ts` 仍在包内；
+命中行上的 `rank.pipeline.core` 仍 extra-read；原有连线另一端 / 反向 import / 定位后 offTopic 仍绿。explore 相关
+89 项通过。
+
+未验证：十问观察（尤其 Q2 读预算是否因此松开）；词汇缺口探针未写；`windowScore` / `EvidenceGrade` 仍在，
+到达理由还没有进协议 `details`（3.15④）。
+
+不改：24 KiB / 20 条 / 读预算与图预算数值；不把连接上限改小当作相关性判断。
+
+影响：`explore.ts` GraphClue / candidateTier / isDirectClue / 读后展开；设计 6.1 fan-out；plan 3.15①；status。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3485,7 +3518,8 @@ Notes / Downloads，还有一半不是文件。整个 Host 又是按 `{hostId}/{
 | D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
 | D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |
 | D-158 | planned（语义来源排期 3.16：嵌入第三路候选 / 重排 / 查询扩展；本地默认远程可选按槽位；索引指纹；不设信任门与花费守卫） | — | 设计 6 头、6.1、8.5；plan 3.16 |
-| D-159 | planned（三缺口框架为 3.15 组织原则；六处事实修正——读预算≈46、无对象有部分规格、relationRoleRank 非谓词、管线非线性、tier 1 是取舍、量具读裁剪前数组） | — | 设计 6.1 目标形态；plan 3.15 |
+| D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉） | D-163 | 设计 6.1 目标形态；plan 3.15 |
 | D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
 | D-161 | planned（3.15/3.16 联合设计采纳：arrival/assessment/purpose、focusRanges、文件级 RRF 限读取调度、重排替掉 windowScore、三类身份、生命周期轴、捕获时 overlay；四片串行；起点修正：embedding.ts 七家适配器已有、AFT 切块是反例、.tdb 单维度）；代际存储路径被 D-162 参数化 | D-162（路径） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
 | D-162 | planned（不索引整个电脑；范围分层、语义跟注意力走；scope 是一等参数；文档身份不绑路径；3.16 第一片守两条接缝约束） | — | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
+| D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |

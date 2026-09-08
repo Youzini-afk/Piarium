@@ -1733,5 +1733,104 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
     expect(result.snippets.some((snippet) => snippet.path.includes("other.service"))).toBe(false);
     expect(result.details.provenance.some((entry) => entry.path.includes("other.service"))).toBe(false);
   });
+
+  it("does not give same-container connection clues direct-clue or extra-read treatment", async () => {
+    const ranking = [
+      "export function ranking() {",
+      "  return materialize();",
+      "}",
+      "function materialize() {",
+      "  return { kind: \"ranking-plan\", note: \"candidates\" };",
+      "}",
+    ].join("\n");
+    const registry = [
+      "export function bootTable() {",
+      "  // candidates table used at startup",
+      ...Array.from({ length: 16 }, (_, index) => `  register("wire.alpha.${index}", noop);`),
+      "}",
+    ].join("\n");
+    const bodies = new Map<string, string>([
+      ["src/ranking.ts", ranking],
+      ["src/registry.ts", registry],
+    ]);
+    const readPaths: string[] = [];
+    const result = await explore({ question: "how does ranking materialize candidates", limit: 6 }, {
+      rgSearch: async (pattern) => {
+        const hits: Array<{ path: string; line: number; text: string }> = [];
+        for (const [path, content] of bodies) {
+          for (const [index, text] of content.split("\n").entries()) {
+            if (text.includes(pattern)) hits.push({ path, line: index + 1, text });
+          }
+        }
+        return hits;
+      },
+      readFile: async (path) => {
+        readPaths.push(path);
+        return ready(bodies.get(path) ?? `register("${path}", impl);`);
+      },
+      structure: createStructureSource([parsingProvider()]),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 20 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => {
+          if (!value.startsWith("wire.alpha.")) return [];
+          return [
+            { path: "src/registry.ts", kind: "connects", value, callee: "register" },
+            { path: `src/${value}.ts`, kind: "connects", value, callee: "register" },
+          ];
+        },
+        fileRelations: async (path) => path === "src/registry.ts"
+          ? {
+            connections: Array.from({ length: 16 }, (_, index) => ({
+              callee: "register",
+              literal: `wire.alpha.${index}`,
+            })),
+            linksIncomplete: false,
+          }
+          : null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.path === "src/ranking.ts")).toBe(true);
+    expect(readPaths.some((path) => path.includes("wire.alpha"))).toBe(false);
+    expect(result.snippets.some((snippet) => snippet.path.includes("wire.alpha"))).toBe(false);
+    expect(result.details.provenance.some((entry) => entry.path.includes("wire.alpha") && entry.status === "ready")).toBe(false);
+  });
+
+  it("still extra-reads a connection literal that sits on a relevant statement", async () => {
+    const ranking = [
+      "export function ranking() {",
+      "  return materialize(\"rank.pipeline.core\");",
+      "}",
+    ].join("\n");
+    const pipeline = "export function rankPipelineCore() { return materialize(\"rank.pipeline.core\"); }\n";
+    const result = await explore({ question: "how does ranking materialize candidates", limit: 6 }, {
+      rgSearch: async (pattern) => {
+        const hits: Array<{ path: string; line: number; text: string }> = [];
+        for (const [index, text] of ranking.split("\n").entries()) {
+          if (text.includes(pattern)) hits.push({ path: "src/ranking.ts", line: index + 1, text });
+        }
+        return hits;
+      },
+      readFile: async (path) => ready(path === "src/pipeline-core.ts" ? pipeline : ranking),
+      structure: createStructureSource([parsingProvider()]),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 2 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => value === "rank.pipeline.core"
+          ? [
+            { path: "src/ranking.ts", kind: "connects", value, callee: "materialize" },
+            { path: "src/pipeline-core.ts", kind: "connects", value, callee: "register" },
+          ]
+          : [],
+        fileRelations: async (path) => path === "src/ranking.ts"
+          ? { connections: [{ callee: "materialize", literal: "rank.pipeline.core" }], linksIncomplete: false }
+          : null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.path === "src/pipeline-core.ts")).toBe(true);
+    expect(result.snippets.find((snippet) => snippet.path === "src/pipeline-core.ts")?.why).toContain("other end of connection \"rank.pipeline.core\"");
+  });
 });
 
