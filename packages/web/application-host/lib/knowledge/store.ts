@@ -225,6 +225,15 @@ export interface SymbolGraphFileRelations {
   documentRevision: string | null;
   generation: string | null;
   /**
+   * Version of the extractor (queries, call classification, outline flatten)
+   * that produced this generation, or null for rows written before it was
+   * recorded. The catalog is a function of the file *and* the extractor, so a
+   * scan re-collects a file whose revision is current but whose extractor is
+   * not (D-143). This is a cache key, not a schema version: nothing reads or
+   * converts the old rows, they are recomputed from source.
+   */
+  extractor: number | null;
+  /**
    * Link extraction was blocked when this generation was written, so the edge
    * set is a floor. Distinct from a file that genuinely has no edges.
    */
@@ -308,7 +317,7 @@ export interface KnowledgeStore {
     symbols: SymbolGraphSymbolInput[],
     documentRevision: string,
     links?: readonly SymbolGraphLinkInput[],
-    options?: { linksIncomplete?: boolean },
+    options?: { linksIncomplete?: boolean; extractor?: number },
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
@@ -1123,6 +1132,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ...(typeof previous["generation"] === "string" ? { generation: previous["generation"] } : {}),
           ...(typeof previous["documentRevision"] === "string" ? { documentRevision: previous["documentRevision"] } : {}),
           ...(previous["linksIncomplete"] === true ? { linksIncomplete: true } : {}),
+          ...(Number.isSafeInteger(previous["extractor"]) ? { extractor: previous["extractor"] } : {}),
         };
         const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
         const operations: TransactionOperation[] = [
@@ -1212,6 +1222,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           generation,
           documentRevision: normalizedRevision,
           ...(options.linksIncomplete ? { linksIncomplete: true } : {}),
+          ...(Number.isSafeInteger(options.extractor) ? { extractor: options.extractor } : {}),
         };
         const previousTargets = new Set([
           ...previousSymbols.map(({ id }) => id),
@@ -1408,6 +1419,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         path: normalizedPath,
         documentRevision,
         generation,
+        extractor: Number.isSafeInteger(file.payload["extractor"]) ? file.payload["extractor"] as number : null,
         linksIncomplete: file.payload["linksIncomplete"] === true,
         imports: imports.toSorted(byLine),
         connections: connections.toSorted(byLine),

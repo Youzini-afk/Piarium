@@ -8,6 +8,7 @@ import { createStructureSource } from "../structure/source.js";
 import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createSymbolGraphRuntime } from "./symbol-runtime.js";
+import { CATALOG_EXTRACTOR_VERSION } from "./symbols.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -127,5 +128,62 @@ describe("cold workspace catalog scan", () => {
     });
     expect(await store.getFileRelations("notes.md")).toBeNull();
     expect(await store.getFileRelations("pkg.json")).toBeNull();
+    expect(relations?.extractor).toBe(CATALOG_EXTRACTOR_VERSION);
+  });
+
+  /**
+   * The catalog is a function of the file and of the extractor that read it.
+   * Skipping on revision alone meant a fixed query never reached files whose
+   * content had not changed — the missing request end of "explore.search" in
+   * explore-tool.ts would have stayed missing forever (D-143).
+   */
+  it("re-collects an unchanged file whose rows came from an older extractor, and skips a current one", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    writeFileSync(join(documents.workspaceRoot, "stale.ts"), [
+      "export async function ask(bridge: { request<T>(k: string, p: object): Promise<T> }) {",
+      "  return await bridge.request<\"explore.search\">(\"explore.search\", {});",
+      "}",
+    ].join("\n"), "utf8");
+    writeFileSync(join(documents.workspaceRoot, "fresh.ts"), "export const fresh = 1;\n", "utf8");
+    const staleDisk = await documents.authority.read(documents.resource("stale.ts"));
+    const freshDisk = await documents.authority.read(documents.resource("fresh.ts"));
+    if (staleDisk.status !== "ready" || freshDisk.status !== "ready") throw new Error("expected disk text");
+
+    // Rows as an older extractor left them: right revision, no request edge.
+    await store.replaceFileSymbols("stale.ts", "typescript", [
+      { name: "ask", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 2, endCharacter: 1 } },
+    ], staleDisk.revision, [], { extractor: CATALOG_EXTRACTOR_VERSION - 1 });
+    await store.replaceFileSymbols("fresh.ts", "typescript", [
+      { name: "fresh", kind: "variable", range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 24 } },
+    ], freshDisk.revision, [], { extractor: CATALOG_EXTRACTOR_VERSION });
+    const freshBefore = await store.getFileRelations("fresh.ts");
+
+    const search = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: search.searchFilesystemFiles,
+    });
+    disposes.push(() => runtime.dispose());
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+
+    const stale = await store.getFileRelations("stale.ts");
+    expect(stale?.extractor).toBe(CATALOG_EXTRACTOR_VERSION);
+    expect(stale?.connections).toEqual([expect.objectContaining({ callee: "request", literal: "explore.search" })]);
+    // Same revision and current extractor: not rewritten, so the generation holds.
+    expect((await store.getFileRelations("fresh.ts"))?.generation).toBe(freshBefore?.generation);
   });
 });

@@ -6,6 +6,20 @@ import type {
   SymbolGraphSymbolInput,
 } from "./store.js";
 
+/**
+ * Identity of everything that turns a file into graph rows: the tree-sitter
+ * queries in `structure/queries.ts`, `classifyLiteralCall` in
+ * `structure/connections.ts`, and the outline flatten in `symbol-runtime.ts`.
+ * Bump it whenever any of those changes what it emits. A file whose disk
+ * revision is unchanged but whose stored extractor is older is re-collected by
+ * the next catalog scan, so a fixed query actually reaches the graph instead
+ * of waiting for every affected file to be edited (D-143).
+ *
+ * History: 1 = D-105/D-106 first link extraction; 2 = literal-call query pins
+ * the string to the first argument and matches awaited generic calls.
+ */
+export const CATALOG_EXTRACTOR_VERSION = 2;
+
 export interface CollectedSymbols {
   symbols: SymbolGraphSymbolInput[];
   links?: SymbolGraphLinkInput[];
@@ -56,7 +70,10 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
       collected.symbols,
       collected.documentRevision,
       collected.links,
-      { ...(collected.linksIncomplete ? { linksIncomplete: true } : {}) },
+      {
+        ...(collected.linksIncomplete ? { linksIncomplete: true } : {}),
+        extractor: CATALOG_EXTRACTOR_VERSION,
+      },
     );
   };
 

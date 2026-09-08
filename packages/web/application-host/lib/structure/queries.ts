@@ -85,14 +85,37 @@ export const TYPESCRIPT_DEFINITION_QUERY = `
     name: (identifier) @name)) @unit
 `;
 
+/**
+ * Calls whose *first* argument is a string literal — the shape a registration
+ * or request takes (`register("x", …)`, `bridge.request("x", …)`).
+ *
+ * The `.` anchor pins the string to the first named argument. Without it the
+ * query matched a string anywhere in the argument list, so
+ * `register(handler, "not-first")` produced a "connection" and
+ * `register("a", "b")` produced two (D-143).
+ *
+ * The `await_expression` alternative exists because tree-sitter-typescript
+ * resolves the `<` ambiguity in `await x.request<T>(…)` by attaching `await`
+ * to the callee rather than the call — the tree is
+ * `(call_expression function: (await_expression …) type_arguments: … )`.
+ * That is how every awaited generic bridge request in this repository parses,
+ * and it is why `explore-tool.ts`'s request end of "explore.search" was
+ * missing from the graph.
+ */
 export const TYPESCRIPT_LITERAL_CALL_QUERY = `
 (call_expression
   function: [
     (identifier) @fn
     (member_expression
       property: (property_identifier) @fn)
+    (await_expression [
+      (identifier) @fn
+      (member_expression
+        property: (property_identifier) @fn)
+    ])
   ]
   arguments: (arguments
+    .
     (string) @literal)) @call
 `;
 

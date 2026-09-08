@@ -207,6 +207,30 @@ describe("createTreeSitterStructureProvider", () => {
     expect(imports.imports).toEqual(expect.arrayContaining([expect.objectContaining({ source: "node:path" })]));
   });
 
+  /**
+   * A "connection" is a call whose *first* argument is the string. The query
+   * used to match a string anywhere in the arguments, and it missed awaited
+   * generic calls because tree-sitter-typescript attaches `await` to the callee
+   * in `await x.request<T>(…)` (D-143).
+   */
+  it("extracts literal calls only from a leading string argument, including awaited generics", async () => {
+    const provider = parsingProvider();
+    const text = [
+      "router.register(handler, \"not-first\");",
+      "router.register(\"actual\", \"second\");",
+      "const r = await bridge.request<\"explore.search\">(\"explore.search\", { q });",
+      "await request<\"wire\">(\"wire\");",
+      "emit(`tpl-${a}`, payload);",
+    ].join("\n");
+    const calls = await provider.literalCalls(request(text));
+    expect(calls.status).toBe("ready");
+    expect(calls.calls.map((call) => `${call.name}:${call.literal}@${call.line}`)).toEqual([
+      "register:actual@2",
+      "request:explore.search@3",
+      "request:wire@4",
+    ]);
+  });
+
   it("classifies declaration names differently from comments and strings", async () => {
     const provider = parsingProvider();
     const text = [

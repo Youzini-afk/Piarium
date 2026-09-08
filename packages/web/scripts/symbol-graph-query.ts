@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { languageIdForPath } from "../application-host/lib/harness/language-id.js";
 import { openWorkspaceKnowledge, type SymbolGraphLinkInput } from "../application-host/lib/knowledge/store.js";
 import { CATALOG_SCAN_BATCH } from "../application-host/lib/knowledge/symbol-runtime.js";
+import { CATALOG_EXTRACTOR_VERSION } from "../application-host/lib/knowledge/symbols.js";
 import { classifyLiteralCall } from "../application-host/lib/structure/connections.js";
 import { CATALOG_SCAN_LANGUAGES } from "../application-host/lib/structure/languages.js";
 import { createStructureSource } from "../application-host/lib/structure/source.js";
@@ -150,7 +151,7 @@ const main = async (): Promise<void> => {
       symbols,
       revision,
       links,
-      { ...(linksIncomplete ? { linksIncomplete: true } : {}) },
+      { ...(linksIncomplete ? { linksIncomplete: true } : {}), extractor: CATALOG_EXTRACTOR_VERSION },
     );
     parsed += 1;
     if (parsed % 50 === 0) {

@@ -8,7 +8,7 @@ import { languageIdForPath } from "../harness/language-id.js";
 import { classifyLiteralCall } from "../structure/connections.js";
 import { CATALOG_SCAN_LANGUAGES } from "../structure/languages.js";
 import type { StructureSource, StructureSymbol } from "../structure/types.js";
-import { createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
+import { CATALOG_EXTRACTOR_VERSION, createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
 import type {
   KnowledgeStore,
   SymbolGraphLinkInput,
@@ -309,7 +309,9 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
           }
           if (snapshot.status !== "ready") continue;
           const existing = await store.getFileRelations(file.relativePath);
-          if (existing?.documentRevision === snapshot.revision) continue;
+          // Current only if both the source and the extractor that read it are
+          // unchanged; rows from an older extractor are recomputed (D-143).
+          if (existing?.documentRevision === snapshot.revision && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
           collector.observe({ path: file.relativePath, kind: "modified" });
         }
         await collector.drain();
