@@ -551,6 +551,7 @@ describe("harness search service", () => {
     expect(exploreMode.files.at(-1)?.path).toBe("dir29/file.ts");
     expect(exploreMode.filesDropped).toBe(0);
     expect(exploreMode.partial).toBe(true);
+    expect(exploreMode.fileCoverage).toBe("complete");
 
     const grepMode = await service.search({ pattern: "token" }, {
       workspaceId: "ws-1",
@@ -583,6 +584,7 @@ describe("harness search service", () => {
     expect(result.files.every((file) => file.hits.length === 1)).toBe(true);
     expect(result.filesDropped).toBe(2);
     expect(result.partial).toBe(true);
+    expect(result.fileCoverage).toBe("lower-bound");
     expect(result.totalFiles).toBe(5);
   });
 

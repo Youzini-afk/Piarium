@@ -142,16 +142,24 @@ export function createExploreSearchService(
               hits: search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))),
               partial: callPartial,
               filesDropped: search.filesDropped ?? 0,
+              fileCoverage: search.fileCoverage
+                ?? ((search.filesDropped ?? 0) > 0 ? "lower-bound" as const : callPartial ? "unknown" as const : "complete" as const),
             };
           }));
           const callPartial = batches.some((batch) => batch.partial);
           // Search roots may overlap (`src` and `src/lib`), so summing would double-count files.
           const callFilesDropped = batches.reduce((most, batch) => Math.max(most, batch.filesDropped), 0);
+          const callCoverage = batches.some((batch) => batch.fileCoverage === "lower-bound")
+            ? "lower-bound" as const
+            : batches.some((batch) => batch.fileCoverage === "unknown")
+              ? "unknown" as const
+              : "complete" as const;
           searchPartial ||= callPartial;
           return {
             hits: batches.flatMap((batch) => batch.hits),
             partial: callPartial,
             filesDropped: callFilesDropped,
+            fileCoverage: callCoverage,
           };
         },
         readFile: (path) => readFile(ctx.actor, path, ctx.signal, inputContext),
@@ -223,6 +231,8 @@ export function createExploreSearchService(
           ...(result.details.graph ? { graph: result.details.graph } : {}),
           ...(result.details.query ? { query: result.details.query } : {}),
           ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
+          ...(result.details.distinctiveness ? { distinctiveness: result.details.distinctiveness } : {}),
+          ...(result.details.windows ? { windows: result.details.windows } : {}),
         },
       };
     },

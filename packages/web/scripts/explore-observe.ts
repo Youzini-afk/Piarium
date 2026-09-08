@@ -253,18 +253,33 @@ const line = (char = "─"): string => char.repeat(78);
 const needMet = (snippet: { text?: string; why?: string }, need: TargetNeed): boolean =>
   need.match.test(`${snippet.text ?? ""} ${snippet.why ?? ""}`);
 
+type ObservePayload = {
+  snippets?: Array<{ path: string; text?: string; why?: string }>;
+  details?: {
+    provenance?: Array<{ path: string; status: string }>;
+    graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
+    skippedQueries?: { reason: string; patterns: string[] };
+    query?: { objects?: string[]; relation?: string; domain?: string };
+    distinctiveness?: {
+      scope?: string;
+      poolFiles?: number;
+      terms?: Array<{ term: string; uniqueFiles: number; coverage: string; weight: number }>;
+    };
+    windows?: Array<{
+      path: string;
+      startLine: number;
+      endLine: number;
+      why: string;
+      packed: boolean;
+      hits: string[];
+    }>;
+  };
+  notRequested?: { paths?: string[] };
+};
+
 const stageForTarget = (
   target: ObserveQuestion["targets"][number],
-  payload: {
-    snippets?: Array<{ path: string; text?: string; why?: string }>;
-    details?: {
-      provenance?: Array<{ path: string; status: string }>;
-      graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
-      skippedQueries?: { reason: string; patterns: string[] };
-      query?: { objects?: string[]; relation?: string; domain?: string };
-    };
-    notRequested?: { paths?: string[] };
-  },
+  payload: ObservePayload,
 ): string => {
   const snippets = payload.snippets ?? [];
   const provenance = payload.details?.provenance ?? [];
@@ -273,7 +288,9 @@ const stageForTarget = (
     .map((snippet, index) => ({ snippet, index }))
     .filter((item) => item.snippet.path.includes(target.pathIncludes));
   const met = fromPath.find((item) => needMet(item.snippet, target.need));
-  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0;
+  const generated = (payload.details?.windows ?? []).filter((window) => window.path.includes(target.pathIncludes));
+  const generatedMet = generated.find((window) => needMet({ text: window.hits.join("\n"), why: window.why }, target.need));
+  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0 || generated.length > 0;
   const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
   if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
     return `${target.id}: acquired → not-requested: read budget`;
@@ -284,25 +301,26 @@ const stageForTarget = (
   if (met) {
     return `${target.id}: acquired → scheduled → read → ${target.need.label} verified → visible #${met.index + 1}`;
   }
-  // A visible window from the right file is not the evidence the question asked
-  // for. Say which window was packed instead, and never call it verified (D-151).
+  // Split "right file, wrong window" into the two failures that need
+  // different fixes (D-153): the matching window was never sliced, or it
+  // was sliced and then packed out.
+  if (generatedMet && !generatedMet.packed) {
+    return `${target.id}: matching window generated ${generatedMet.startLine}-${generatedMet.endLine}, not selected`;
+  }
+  if (fromPath[0] && !generatedMet) {
+    return `${target.id}: read → visible #${fromPath[0].index + 1}, but matching window was never generated (${target.need.label})`;
+  }
   if (fromPath[0]) {
     return `${target.id}: read → visible #${fromPath[0].index + 1}, but ${target.need.label} not in that window`;
   }
-  if (entry?.status === "ready") return `${target.id}: read → packed out`;
+  if (entry?.status === "ready" && generatedMet) {
+    return `${target.id}: matching window generated ${generatedMet.startLine}-${generatedMet.endLine}, packed out`;
+  }
+  if (entry?.status === "ready") return `${target.id}: read, but matching window was never generated`;
   return `${target.id}: acquired → scheduled → not visible`;
 };
 
-const printDiagnostic = (question: ObserveQuestion, payload: {
-  snippets?: Array<{ path: string; text?: string; why?: string }>;
-  details?: {
-    provenance?: Array<{ path: string; status: string }>;
-    graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
-    skippedQueries?: { reason: string; patterns: string[] };
-    query?: { objects?: string[]; relation?: string; domain?: string };
-  };
-  notRequested?: { paths?: string[] };
-}): void => {
+const printDiagnostic = (question: ObserveQuestion, payload: ObservePayload): void => {
   const query = payload.details?.query;
   const graph = payload.details?.graph;
   process.stdout.write(
@@ -324,6 +342,16 @@ const printDiagnostic = (question: ObserveQuestion, payload: {
   if (payload.details?.skippedQueries) {
     process.stdout.write(
       `skipped: ${payload.details.skippedQueries.reason} ${JSON.stringify(payload.details.skippedQueries.patterns)}\n`,
+    );
+  }
+  const distinct = payload.details?.distinctiveness;
+  if (distinct?.terms?.length) {
+    process.stdout.write(
+      `weights:  scope=${distinct.scope ?? "—"} pool=${distinct.poolFiles ?? "—"} `
+      + distinct.terms
+        .map((term) => `${term.term}:${term.weight.toFixed(3)}/${term.coverage}/df=${term.uniqueFiles}`)
+        .join(" ")
+      + "\n",
     );
   }
 };
@@ -405,13 +433,20 @@ const main = async (): Promise<void> => {
     agentInputDraftPaths: () => [],
     search: async (request, options) => {
       const started = performance.now();
+      // This script stores the ten questions, so it is a trivially strong
+      // lexical candidate. Excluding it changes slot occupancy vs the
+      // 6f92b49c baseline (Q4 and Q6 each lose one polluted visible slot)
+      // but not the wants or target files (D-153).
       const outcome = await contentSearch.searchContent({
         query: request.query,
         workspaceId: request.workspaceId,
         maxResults: request.maxResults,
         ...(request.paths === undefined ? {} : { paths: request.paths }),
         ...(request.glob === undefined ? {} : { glob: request.glob }),
-        ...(request.excludeResourceIds === undefined ? {} : { excludeResourceIds: request.excludeResourceIds }),
+        excludeResourceIds: [
+          path.relative(repoRoot, fileURLToPath(import.meta.url)).split(path.sep).join("/"),
+          ...(request.excludeResourceIds ?? []),
+        ],
         ...(request.ignoreCase === undefined ? {} : { ignoreCase: request.ignoreCase }),
         ...(request.fixedStrings === undefined ? {} : { fixedStrings: request.fixedStrings }),
       }, options);
@@ -492,19 +527,15 @@ const main = async (): Promise<void> => {
     }
     const elapsed = Math.round(performance.now() - started);
 
-    const payload = result as unknown as {
+    const payload = result as unknown as ObservePayload & {
       text?: string;
       snippets?: Array<{ path: string; startLine: number; endLine: number; why: string; text?: string; unit?: { name: string; kind: string } }>;
       searched?: unknown;
       issues?: unknown[];
       notRequested?: { count: number; paths: string[] };
-      details?: {
-        graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
+      details?: ObservePayload["details"] & {
         structure?: unknown;
         relations?: unknown;
-        provenance?: Array<{ path: string; status: string }>;
-        query?: { objects?: string[]; relation?: string; domain?: string };
-        skippedQueries?: { reason: string; patterns: string[] };
       };
     };
 
@@ -522,6 +553,7 @@ const main = async (): Promise<void> => {
     }
     process.stdout.write(`\nsearched: ${JSON.stringify(payload.searched)}\n`);
     if (payload.details?.query) process.stdout.write(`query:    ${JSON.stringify(payload.details.query)}\n`);
+    if (payload.details?.distinctiveness) process.stdout.write(`weights:  ${JSON.stringify(payload.details.distinctiveness)}\n`);
     if (payload.details?.graph) process.stdout.write(`graph:    ${JSON.stringify(payload.details.graph)}\n`);
     if (payload.details?.skippedQueries) process.stdout.write(`skipped:  ${JSON.stringify(payload.details.skippedQueries)}\n`);
     if (payload.details?.structure) process.stdout.write(`structure:${JSON.stringify(payload.details.structure)}\n`);

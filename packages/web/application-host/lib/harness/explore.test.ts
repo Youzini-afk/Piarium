@@ -1322,3 +1322,94 @@ describe("explore 3.13 ranking and verification", () => {
     expect(result.snippets[0]?.why).toContain("verified register(\"explore.search\")");
   });
 });
+
+describe("explore query-internal distinctiveness", () => {
+  it("does not treat a truncated pattern as an exact document frequency", async () => {
+    const result = await explore({ question: "rareword commonword" }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "rareword") {
+          return {
+            hits: [
+              { path: "src/rare.ts", line: 1, text: "rareword here" },
+              { path: "src/also.ts", line: 1, text: "rareword also" },
+            ],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        return {
+          hits: Array.from({ length: 3 }, (_, index) => ({
+            path: `src/common-${index}.ts`,
+            line: 1,
+            text: "commonword",
+          })),
+          filesDropped: 40,
+          fileCoverage: "lower-bound",
+        };
+      },
+      readFile: async (path) => ready(path.includes("rare") || path.includes("also") ? "rareword here" : "commonword"),
+    });
+    const terms = result.details.distinctiveness?.terms ?? [];
+    const rare = terms.find((term) => term.term === "rareword");
+    const common = terms.find((term) => term.term === "commonword");
+    expect(result.details.distinctiveness?.scope).toBe("query-pool");
+    expect(result.details.distinctiveness?.poolFiles).toBeGreaterThanOrEqual(5);
+    expect(rare?.coverage).toBe("complete");
+    expect(rare?.uniqueFiles).toBe(2);
+    expect(common?.coverage).toBe("lower-bound");
+    expect(common?.uniqueFiles).toBe(3);
+    expect(common?.weight).toBe(1);
+    expect(rare?.weight).toBeGreaterThan(common!.weight);
+  });
+
+  it("keeps unique-file coverage complete when only per-file hits were capped", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => ({
+        hits: [
+          { path: "a.ts", line: 1, text: "needle" },
+          { path: "b.ts", line: 1, text: "needle" },
+        ],
+        partial: true,
+        filesDropped: 0,
+        fileCoverage: "complete",
+      }),
+      readFile: async () => ready("needle"),
+    });
+    const needle = result.details.distinctiveness?.terms.find((term) => term.term === "needle");
+    expect(needle?.coverage).toBe("complete");
+    expect(needle?.uniqueFiles).toBe(2);
+    // Pool is two files and both match, so complete coverage still has no
+    // rarity bonus. The assertion is the state, not a fake IDF.
+    expect(needle?.weight).toBe(1);
+  });
+
+  it("lists generated windows so a packed-out match is distinguishable from a missing window", async () => {
+    const content = [
+      "function decoy() { return needle; }",
+      ...Array.from({ length: 20 }, (_, index) => `const pad${index} = ${index};`),
+      "function target() { return needle + extra; }",
+    ].join("\n");
+    const lines = content.split("\n");
+    const result = await explore({ question: "needle extra", limit: 1 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "needle") {
+          return [
+            { path: "src/a.ts", line: 1, text: lines[0]! },
+            { path: "src/a.ts", line: 22, text: lines[21]! },
+          ];
+        }
+        if (pattern === "extra") return [{ path: "src/a.ts", line: 22, text: lines[21]! }];
+        return [];
+      },
+      readFile: async () => ready(content),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    const windows = result.details.windows ?? [];
+    expect(windows.length).toBeGreaterThan(1);
+    expect(windows.some((window) => window.packed)).toBe(true);
+    expect(windows.some((window) => !window.packed)).toBe(true);
+    expect(windows.every((window) => typeof window.why === "string")).toBe(true);
+    expect(windows.some((window) => window.hits.some((hit) => hit.includes("extra")))).toBe(true);
+  });
+});
+

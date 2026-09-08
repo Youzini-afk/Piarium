@@ -104,6 +104,13 @@ export interface SearchContentHit {
   after: string[];
 }
 
+/**
+ * Unique-file coverage of one search pattern. Distinct from hit-level
+ * `partial`: a per-file hit cap does not change how many matching files
+ * were seen. Explore candidate-mode only.
+ */
+export type ExploreTermCoverage = "complete" | "lower-bound" | "unknown";
+
 export interface SearchContentFile {
   path: string;
   hits: SearchContentHit[];
@@ -123,6 +130,12 @@ export interface SearchContentResult {
    * single query. Absent on grep.
    */
   filesDropped?: number;
+  /**
+   * Unique-file coverage for this pattern. Distinct from `partial`, which also
+   * folds per-file hit caps and display-budget trims that do not change how
+   * many matching files were seen. Absent on grep.
+   */
+  fileCoverage?: ExploreTermCoverage;
 }
 
 export interface DiagnosticItem {
@@ -447,6 +460,40 @@ export interface ExploreQueryDetails {
   domain: ExploreQueryDomain;
 }
 
+export interface ExploreTermWeight {
+  term: string;
+  kind: "object" | "content" | "anchor";
+  /** Distinct files in this call's candidate pool that matched the group. */
+  uniqueFiles: number;
+  coverage: ExploreTermCoverage;
+  variants: string[];
+  /**
+   * Query-internal weight. Ordinary match contribution is 1. Extra
+   * distinctiveness is added only when `coverage` is `complete`.
+   */
+  weight: number;
+}
+
+/**
+ * Per-call term weights. This is not corpus IDF: N and df are this
+ * query's candidate pool after hit-budget truncation.
+ */
+export interface ExploreDistinctivenessDetails {
+  scope: "query-pool";
+  poolFiles: number;
+  terms: ExploreTermWeight[];
+}
+
+/** Generated windows for this call, packed or not. Used by observation meters. */
+export interface ExploreWindowTrace {
+  path: string;
+  startLine: number;
+  endLine: number;
+  why: string;
+  packed: boolean;
+  hits: string[];
+}
+
 export interface ExploreSkippedQueries {
   /** Broad/content-word patterns not launched because a direct clue already verified. */
   reason: "direct-verified";
@@ -527,6 +574,8 @@ export interface ExploreSearchResult {
     graph?: ExploreGraphDetails;
     query?: ExploreQueryDetails;
     skippedQueries?: ExploreSkippedQueries;
+    distinctiveness?: ExploreDistinctivenessDetails;
+    windows?: ExploreWindowTrace[];
   };
 }
 

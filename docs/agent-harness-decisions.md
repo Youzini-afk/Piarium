@@ -3042,6 +3042,44 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施。
 
+### D-153 · 2026-09-08 · 查询内区分度：去重文件数、截断三态、不冒充全仓库 IDF
+
+背景：3.13 之后比较器仍把 `breadthPenalty` 埋在 `score` 末位，且惩罚是二值的；命中行数也不是文档频率。所需数据已经在
+`filesDropped` 与返回 hits 的去重路径里，不必建持久索引或改搜索协议。`partial` 混了 per-file 命中帽与丢文件，前者不影响
+去重文件数。
+
+决定：
+
+- 每次 `explore()` 调用内建一张词组权重表。\(N\) 是本调用候选池去重文件数，\(df(g)\) 是该词组命中的去重文件数。
+  公式起点 \(w(g)=1+\ln\frac{N+1}{df(g)+1}\)，只在覆盖为 `complete` 时加上对数项。这叫**查询内区分度**，不是全仓库 IDF——
+  池子是命中预算截断后的有偏样本。选这个公式是因为它可执行、对稀有词单调，且未对本仓库定标；换公式要另记决策。
+- 覆盖三态：`complete`（该词组已启动的变体都没有丢文件、也没有不完整后端扫描）、`lower-bound`（`filesDropped>0` 或
+  后端扫描不完整）、`unknown`（后端命中帽、混合 `partial`、或词组未启动）。per-file 命中帽单独不把覆盖标成不完整。
+  覆盖不完整的词权重停在普通匹配贡献 \(1\)，不拿未经证明的稀有奖励。
+- 同一概念的变体共一行；同一文件反复命中同一词不增加 \(df\)。表写进 `details.distinctiveness`（`scope: query-pool`）。
+- 本检查点**不改** `rankCandidates` 比较顺序。把连续 IDF 塞进现有 `score` 而不动 `tier → roleFit → objectCoverage`
+  等于没改，所以权重先可见、后进比较。
+- 观察量具加 `details.windows`（path / why / packed / 命中行），阶段诊断分开「匹配窗口从未生成」与「生成了但没被选中」。
+  观察脚本把自身路径加入 `excludeResourceIds`。这改变与 `6f92b49c` 基线的槽位可比性：问题 4 和 6 各少一个被问题原文占用的
+  可见槽，`wants` 与目标文件不变。`self:` 行仍保留，排除生效时应为 0。
+
+观察（同一目录 `--skip-scan`；脚本路径已排除，相对 `6f92b49c` 问题 4/6 各少一个被问题原文占用的可见槽）：
+问题 1 仍满足，`register("explore.search")` 可见 #2；问题 9 请求端 #1、注册端 #3；五个入口变体仍满足。
+问题 2/3/5/7/8 仍是读预算；问题 10 仍是 `not acquired`。问题 4 可见 #6，诊断改为「匹配窗口从未生成」
+（`capabilitiesFromSpec`/`tagsPath` 没有进入任何窗口）。问题 6 诊断改为「匹配窗口已生成 291-412，未被选中」——
+与改前「该文件只有 matched tree-sitter」不同：量具现在能看见正确窗口已经切出来，断点在打包而不是生成。
+权重行可读：例如问题 5 的 `associates` 为 complete/df=16/w≈4.05，`code` 为 unknown/w=1；截断词（`after`/`returns`/`when`）
+标 `lower-bound` 且权重为 1。排名未改，无对象六题没有因此翻转到可见正文。
+
+不改：排名比较器；`roleFit` 等级墙；窗口等级混淆；打包公式；读预算与字节预算；embedding / BM25 / 持久词法索引；
+多词邻近性；D-090「测试路径不默认降权」原则。
+
+影响：`explore-distinctiveness.ts`；`explore.ts` 召回与 `details`；`search-service.ts` `fileCoverage`；
+`explore-service.ts` 转发；`scripts/explore-observe.ts`；protocol `details.distinctiveness` / `details.windows` /
+`SearchContentResult.fileCoverage`；设计 6.1 词项分组；plan 3.14 检查点一。
+
+状态：已实施（检查点一）。检查点二、三另记。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3199,4 +3237,5 @@ D-103 第 1、3 项；候选池排序。
 | D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
 | D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
 | D-151 | implementation（量具不得未核验就报已核验；注册表窗口的无关另一端降 support 档；文档头部与提交同批） | — | scripts/explore-observe.ts；explore.ts windowGrade |
-| D-152 | implementation（已读快照按新增证据重算窗口；观察脚本自身问题文本的占用如实上报） | — | explore.ts 物化/刷新；scripts/explore-observe.ts |
+| D-152 | superseded in part（已读证据重算成立；「只上报 self:、不改问题存放」被本刀排除观察脚本路径取代） | D-153 | explore.ts 物化/刷新；scripts/explore-observe.ts |
+| D-153 | implementation（查询内区分度表；截断三态；details 可见；量具区分窗口未生成/未选中；观察脚本自排除。排名未改） | — | explore-distinctiveness.ts；explore.ts details；search-service fileCoverage；explore-observe.ts |

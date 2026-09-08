@@ -4,6 +4,7 @@ import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
 import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
 import { compileGlobFilter } from "./glob-matcher.js";
+import { uniqueFileCoverage } from "./explore-distinctiveness.js";
 
 export interface HarnessSearchDeps {
   search: (request: {
@@ -400,7 +401,14 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             totalFiles: grouped.totalFiles,
             searchedFiles: grouped.totalFiles,
             partial: backendIncomplete || grouped.totalHits > limit || grouped.perFileCapped || grouped.filesDropped > 0,
-            ...(candidateMode ? { filesDropped: grouped.filesDropped } : {}),
+            ...(candidateMode ? {
+              filesDropped: grouped.filesDropped,
+              fileCoverage: uniqueFileCoverage({
+                filesDropped: grouped.filesDropped,
+                backendIncomplete,
+                backendCapped: false,
+              }),
+            } : {}),
           };
         }
         if (result.status === "failure" || result.status === "cancelled") {
@@ -462,7 +470,14 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             totalFiles,
             searchedFiles: totalFiles,
             partial,
-            ...(candidateMode ? { filesDropped } : {}),
+            ...(candidateMode ? {
+              filesDropped,
+              fileCoverage: uniqueFileCoverage({
+                filesDropped,
+                backendIncomplete,
+                backendCapped,
+              }),
+            } : {}),
           };
         }
         return unavailableResult();

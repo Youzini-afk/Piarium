@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreGraphDetails, type ExploreGraphStatus, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { STRUCTURE_HIT_CLASS_SCORE } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -21,6 +21,11 @@ import {
   type TermGroup,
   type TermGroupKind,
 } from "./explore-query.js";
+import {
+  buildTermWeightTable,
+  coverageFromSearch,
+  type PatternCoverage,
+} from "./explore-distinctiveness.js";
 import {
   DEFAULT_GRAPH_CONNECTION_BUDGET,
   DEFAULT_GRAPH_DEFINITION_BUDGET,
@@ -57,7 +62,12 @@ export interface RgHit {
   text: string;
 }
 
-export type RgSearchReturn = RgHit[] | { hits: RgHit[]; partial?: boolean; filesDropped?: number };
+export type RgSearchReturn = RgHit[] | {
+  hits: RgHit[];
+  partial?: boolean;
+  filesDropped?: number;
+  fileCoverage?: ExploreTermCoverage;
+};
 
 export interface ExploreInput {
   question: string;
@@ -110,11 +120,28 @@ export function exploreHandleHint(handle: string): string {
 
 const comparePath = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 
-const normalizeRgResult = (value: RgSearchReturn): { hits: RgHit[]; partial: boolean; filesDropped: number } => (
-  Array.isArray(value)
-    ? { hits: value, partial: false, filesDropped: 0 }
-    : { hits: value.hits, partial: value.partial === true, filesDropped: value.filesDropped ?? 0 }
-);
+const normalizeRgResult = (value: RgSearchReturn): {
+  hits: RgHit[];
+  partial: boolean;
+  filesDropped: number;
+  fileCoverage: ExploreTermCoverage;
+} => {
+  if (Array.isArray(value)) {
+    return { hits: value, partial: false, filesDropped: 0, fileCoverage: "unknown" };
+  }
+  const filesDropped = value.filesDropped ?? 0;
+  const partial = value.partial === true;
+  return {
+    hits: value.hits,
+    partial,
+    filesDropped,
+    fileCoverage: coverageFromSearch({
+      filesDropped,
+      ...(value.fileCoverage ? { fileCoverage: value.fileCoverage } : {}),
+      partial,
+    }),
+  };
+};
 
 export function maxMaterializeReads(candidateCount: number, excerptLimit: number): number {
   return Math.min(
@@ -813,6 +840,7 @@ export async function explore(
   let filesDropped = 0;
   let launchedPatterns = 0;
   const skippedContent: string[] = [];
+  const launchedCoverage = new Map<string, PatternCoverage>();
 
   const runRg = async (patterns: Map<string, Array<{ group: TermGroup; distinctive: boolean }>>): Promise<void> => {
     launchedPatterns += patterns.size;
@@ -828,6 +856,17 @@ export async function explore(
       signal.throwIfAborted();
       if (result.partial || result.filesDropped > 0) searchIncomplete = true;
       filesDropped = Math.max(filesDropped, result.filesDropped);
+      const previous = launchedCoverage.get(pattern);
+      launchedCoverage.set(pattern, {
+        coverage: previous
+          ? (previous.coverage === "lower-bound" || result.fileCoverage === "lower-bound"
+            ? "lower-bound"
+            : previous.coverage === "unknown" || result.fileCoverage === "unknown"
+              ? "unknown"
+              : "complete")
+          : result.fileCoverage,
+        filesDropped: Math.max(previous?.filesDropped ?? 0, result.filesDropped),
+      });
       for (const hit of result.hits) {
         for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
       }
@@ -1231,6 +1270,21 @@ export async function explore(
   ranked = rankCandidates(byFile, groups, parsed);
   const packed = packComplementary(prepared, excerptLimit);
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
+  const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);
+  const windowTraces: ExploreWindowTrace[] = prepared.map((window) => {
+    const evidence = byFile.get(window.path);
+    return {
+      path: window.path,
+      startLine: window.start,
+      endLine: window.end,
+      why: window.why,
+      packed: packedKeys.has(`${window.path}:${window.start}-${window.end}`),
+      hits: window.hitLines.flatMap((line) => {
+        const text = evidence?.hits.get(line)?.text;
+        return text ? [text] : [];
+      }),
+    };
+  });
   const omittedFromPack = prepared
     .filter((window) => !packedKeys.has(`${window.path}:${window.start}-${window.end}`))
     .map((window) => ({
@@ -1281,6 +1335,8 @@ export async function explore(
       ...(skippedContent.length > 0
         ? { skippedQueries: { reason: "direct-verified" as const, patterns: skippedContent } }
         : {}),
+      distinctiveness,
+      ...(windowTraces.length > 0 ? { windows: windowTraces } : {}),
     },
   };
 }
