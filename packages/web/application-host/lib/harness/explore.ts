@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { STRUCTURE_HIT_CLASS_SCORE } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -24,6 +24,8 @@ import {
 import {
   buildTermWeightTable,
   coverageFromSearch,
+  weightByGroupId,
+  weightedCoverage,
   type PatternCoverage,
 } from "./explore-distinctiveness.js";
 import {
@@ -191,8 +193,7 @@ interface RankedCandidate {
   evidence: FileEvidence;
   tier: number;
   roleFit: number;
-  objectCoverage: number;
-  score: number;
+  weightedCoverage: number;
 }
 
 interface PreparedWindow {
@@ -291,18 +292,6 @@ function contentGroupsOf(groups: TermGroup[]): TermGroup[] {
   return groups.filter((group) => group.kind === "question");
 }
 
-function observedBreadth(byFile: Map<string, FileEvidence>, groups: TermGroup[]): Map<string, number> {
-  const breadth = new Map<string, number>();
-  for (const group of groups) {
-    let count = 0;
-    for (const evidence of byFile.values()) {
-      if (evidence.groups.has(group.id)) count += 1;
-    }
-    breadth.set(group.id, count);
-  }
-  return breadth;
-}
-
 function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups: TermGroup[]): number {
   if (evidence.verifiedRelation) return 0;
   const objectIds = new Set(objectGroupsOf(groups).map((group) => group.id));
@@ -321,56 +310,31 @@ function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups
   return 4;
 }
 
-function objectCoverage(evidence: FileEvidence, groups: TermGroup[]): number {
-  let coverage = 0;
-  for (const group of objectGroupsOf(groups)) {
-    if (evidence.distinctive.has(group.id)) coverage += 2;
-    else if (evidence.groups.has(group.id)) coverage += 1;
-  }
-  for (const group of contentGroupsOf(groups)) {
-    if (evidence.groups.has(group.id)) coverage += 1;
-  }
-  coverage += evidence.anchors.size;
-  return coverage;
-}
-
-function breadthPenalty(evidence: FileEvidence, breadth: Map<string, number>, poolSize: number): number {
-  let penalty = 0;
-  for (const groupId of evidence.groups) {
-    const files = breadth.get(groupId) ?? 0;
-    if (files >= 20 || (poolSize > 0 && files / poolSize >= 0.5)) penalty += 1;
-  }
-  return penalty;
-}
-
+/** Same-tier order is weighted coverage, then bounded role preference (D-154). */
 function rankCandidates(
   byFile: Map<string, FileEvidence>,
   groups: TermGroup[],
   parsed: ExploreQueryParse,
+  table: ExploreDistinctivenessDetails,
 ): RankedCandidate[] {
-  const breadth = observedBreadth(byFile, groups);
-  const poolSize = byFile.size;
+  const weights = weightByGroupId(groups, table);
   return [...byFile.entries()]
     .map(([path, evidence]) => {
       const role = classifyFileRole(path);
       const fit = fileRoleFit(role, parsed.domain, parsed.preferTests);
       const tier = candidateTier(evidence, parsed, groups);
-      const coverage = objectCoverage(evidence, groups);
-      const penalty = breadthPenalty(evidence, breadth, poolSize);
       return {
         path,
         evidence,
         tier,
         roleFit: fit,
-        objectCoverage: coverage,
-        score: -tier * 100 + fit * 10 + coverage - penalty,
+        weightedCoverage: weightedCoverage(evidence, groups, weights),
       };
     })
     .sort((left, right) => (
       left.tier - right.tier
+      || right.weightedCoverage - left.weightedCoverage
       || right.roleFit - left.roleFit
-      || right.objectCoverage - left.objectCoverage
-      || right.score - left.score
       || comparePath(left.path, right.path)
     ));
 }
@@ -841,6 +805,12 @@ export async function explore(
   let launchedPatterns = 0;
   const skippedContent: string[] = [];
   const launchedCoverage = new Map<string, PatternCoverage>();
+  const rankNow = (): RankedCandidate[] => rankCandidates(
+    byFile,
+    groups,
+    parsed,
+    buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf),
+  );
 
   const runRg = async (patterns: Map<string, Array<{ group: TermGroup; distinctive: boolean }>>): Promise<void> => {
     launchedPatterns += patterns.size;
@@ -1106,18 +1076,12 @@ export async function explore(
 
   const shouldStop = (scheduled: readonly RankedCandidate[], next: number, budget: number): boolean => {
     if (next >= scheduled.length || reads >= budget) return true;
-    const unreadDirect = scheduled.slice(next).some((candidate) => isDirectClue(candidate.evidence, groups, parsed));
     if (!allSites && locating && hasVerifiedRegister(prepared)) return true;
     if (!allSites && wantsBothEnds && hasBothConnectsEnds(prepared)) return true;
-    if (unreadDirect) return false;
-    const packed = packComplementary(prepared, excerptLimit);
-    if (packed.length < excerptLimit) return false;
-    const packedMinGrade = Math.min(...packed.map((window) => GRADE_RANK[window.grade]));
-    const strongerUnread = scheduled.slice(next).some((candidate) => {
-      const tier = candidateTier(candidate.evidence, parsed, groups);
-      return tier < 3 && GRADE_RANK["full-object"] >= packedMinGrade;
-    });
-    return !strongerUnread;
+    // `limit` is an output cap, not a reason to stop reading. Locating
+    // and both-ends questions already returned above. How-questions use
+    // the remaining read budget.
+    return false;
   };
 
   const materializeScheduled = async (scheduled: RankedCandidate[], budget: number): Promise<void> => {
@@ -1137,7 +1101,7 @@ export async function explore(
     }
   };
 
-  let ranked = rankCandidates(byFile, groups, parsed);
+  let ranked = rankNow();
   let scheduled = scheduleReads(ranked, groups, parsed);
   await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
 
@@ -1150,7 +1114,7 @@ export async function explore(
     // Check the content words against text already in hand before spending a
     // read on a new file: the answer may be in a file the object pass read.
     await refreshReadEvidence();
-    ranked = rankCandidates(byFile, groups, parsed);
+    ranked = rankNow();
     scheduled = scheduleReads(ranked, groups, parsed);
     await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
   }
@@ -1245,8 +1209,8 @@ export async function explore(
       // A graph clue landing on an already-read file is otherwise never located
       // in its text, because that path is not a newcomer to materialize.
       await refreshReadEvidence();
-      ranked = rankCandidates(byFile, groups, parsed);
-      const newcomers = rankCandidates(byFile, groups, parsed).filter((candidate) => (
+      ranked = rankNow();
+      const newcomers = ranked.filter((candidate) => (
         (connectionPaths.includes(candidate.path) || importPaths.includes(candidate.path))
         && !readPaths.has(candidate.path)
         && !issues.some((issue) => issue.path === candidate.path)
@@ -1267,7 +1231,7 @@ export async function explore(
   filesDropped = Math.max(filesDropped, graphFilesDropped);
   if (graphFilesDropped > 0) searchIncomplete = true;
 
-  ranked = rankCandidates(byFile, groups, parsed);
+  ranked = rankNow();
   const packed = packComplementary(prepared, excerptLimit);
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
   const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);

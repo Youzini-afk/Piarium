@@ -3080,6 +3080,21 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施（检查点一）。检查点二、三另记。
 
+### D-154 · 2026-09-08 · 加权覆盖进主比较；角色退回有界偏好
+
+背景：D-153 把权重算出来了，但 `rankCandidates` 仍是 `tier → roleFit → objectCoverage → score`。同 tier 同角色下，覆盖 4 个泛词的文件在 `objectCoverage` 就赢了，`breadthPenalty` 与连续权重都没有比较机会。D-148 的 `roleFit` 排在覆盖之前，任意弱相关源码压过任意强相关清单或文档。
+
+决定：已核验且符合所求关系的直接证据仍走 tier 0，这条不动。其余候选的主比较改为 \(L(f)=\sum_g w(g)\,m(g,f)\)，同组不重复，完整原词 \(m=1\)、回退变体 \(m=0.5\)。排序键改为 `tier → L(f) → roleFit → 路径`。`fileRoleFit` 的数值表仍按问题域给明确目标让路（依赖→lockfile，设计→文档），但只在加权覆盖之后作区分，不再是跨不过去的等级墙。区分度在 \(L(f)\) 里，不回到比较器末位。
+how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读预算公式与数值未改，只是把名额用尽从停止条件里拿掉（D-151 停读一侧）。只比较「未读 \(L\) 是否高于已读最小 \(L\)」会漏掉同权互补文件，且第一批并行读 3 个文件后包已经满，测不到第四个文件；因此 how 问句直接用完剩余读预算。展开与打包里的 `offTopic` 仍留检查点三。
+
+不改：`maxMaterializeReads` 与字节预算的数值；窗口等级与打包公式（检查点三）；D-090 测试路径原则；结构切片；多词邻近性；无对象问句上未核验 `connects` 仍走 tier 1（D-147）。
+
+观察（同一目录 `--skip-scan`，脚本已自排除）：1/9 与 V1–V5 仍满足。3 的 supersede 可见 #15，observeWrite 仍读预算。5 的 classify 可见 #6，write 已读但匹配窗口从未生成。7 的 `document.writeGuard` 注册可见 #7，inspect 仍读预算。8 的 reclaim 可见 #3。2 已进池仍读预算（17 条未核验 connects 占 tier 1）。10 仍 `not acquired`。4/6 未翻转，断点仍在窗口生成/选择。
+
+影响：`explore.ts` `rankCandidates` / `shouldStop`；设计 6.1 fuse 与物化；plan 3.14 检查点二。订正 D-148：角色表仍成立，它在比较器里先于内容证据的位置不成立。
+
+状态：已实施（检查点二）。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3232,10 +3247,11 @@ D-103 第 1、3 项；候选池排序。
 | D-144 | implementation（对象优先于问句；关系闭表；只有对象查图） | — | explore-query.ts；设计 6.1 seed；plan 3.13 |
 | D-145 | implementation（任务匹配分层；路径只作 tie-break；不再混加 GROUP_WEIGHT 与 RRF） | — | explore.ts；设计 6.1 fuse |
 | D-146 | implementation（问题对象先查；在池里 ≠ 已验证；修订 D-137） | — | explore.ts；设计 6.1 fan-out |
-| D-147 | implementation（理由绑窗口；connects/associates 分等；limit 是上限；direct-verified 与读预算分开） | — | explore.ts；protocol details.query/skippedQueries |
-| D-148 | implementation（文件角色按问题；测试路径条件式；definitionDropped 去重） | — | explore-query.ts；explore.ts |
+| D-147 | implementation（理由绑窗口；connects/associates 分等；limit 是上限；direct-verified 与读预算分开）。how 问句「摘录包已满仍停读」由 D-154 拿掉，定位早停仍成立 | — | explore.ts；protocol details.query/skippedQueries |
+| D-148 | superseded in part（角色表与条件式测试优先仍成立；`roleFit` 先于内容证据的比较位置由 D-154 取代） | D-154 | explore-query.ts；explore.ts |
 | D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
 | D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
 | D-151 | implementation（量具不得未核验就报已核验；注册表窗口的无关另一端降 support 档；文档头部与提交同批） | — | scripts/explore-observe.ts；explore.ts windowGrade |
 | D-152 | superseded in part（已读证据重算成立；「只上报 self:、不改问题存放」被本刀排除观察脚本路径取代） | D-153 | explore.ts 物化/刷新；scripts/explore-observe.ts |
 | D-153 | implementation（查询内区分度表；截断三态；details 可见；量具区分窗口未生成/未选中；观察脚本自排除。排名未改） | — | explore-distinctiveness.ts；explore.ts details；search-service fileCoverage；explore-observe.ts |
+| D-154 | implementation（同 tier 比较加权覆盖；roleFit 退到其后作有界偏好；how 问句不因摘录包已满停读） | — | explore.ts rankCandidates / shouldStop；设计 6.1 fuse 与物化 |

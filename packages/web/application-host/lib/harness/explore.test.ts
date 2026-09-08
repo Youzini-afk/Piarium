@@ -1411,5 +1411,89 @@ describe("explore query-internal distinctiveness", () => {
     expect(windows.every((window) => typeof window.why === "string")).toBe(true);
     expect(windows.some((window) => window.hits.some((hit) => hit.includes("extra")))).toBe(true);
   });
+
+  it("lets two rare complete content words outrank a file that only stacks generic terms", async () => {
+    const genericFiles = Array.from({ length: 20 }, (_, index) => `src/flood-${index}.ts`);
+    const result = await explore({ question: "alphaword betaword gammaword deltaword epsilonword zetaword", limit: 2 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "alphaword" || pattern === "betaword") {
+          return {
+            hits: [{ path: "src/rare.ts", line: 1, text: "alphaword betaword" }],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        return {
+          hits: [
+            { path: "src/generic.ts", line: 1, text: "gammaword deltaword epsilonword zetaword" },
+            ...genericFiles.map((path) => ({ path, line: 1, text: pattern })),
+          ],
+          filesDropped: 0,
+          fileCoverage: "complete",
+        };
+      },
+      readFile: async (path) => ready(
+        path === "src/rare.ts" ? "alphaword betaword" : "gammaword deltaword epsilonword zetaword",
+      ),
+    });
+    expect(result.details.distinctiveness?.terms.find((term) => term.term === "alphaword")?.coverage).toBe("complete");
+    expect(result.details.distinctiveness?.terms.find((term) => term.term === "gammaword")?.uniqueFiles).toBeGreaterThan(10);
+    expect(result.snippets[0]?.path).toBe("src/rare.ts");
+    expect(result.snippets.map((snippet) => snippet.path)).toContain("src/rare.ts");
+  });
+
+  it("does not let roleFit wall a weak source file ahead of a stronger manifest", async () => {
+    const genericFiles = Array.from({ length: 18 }, (_, index) => `src/flood-${index}.ts`);
+    const result = await explore({ question: "how does alphaword betaword gammaword deltaword epsilonword zetaword", limit: 1 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "alphaword" || pattern === "betaword") {
+          return {
+            hits: [{ path: "config/manifest.json", line: 1, text: "alphaword betaword" }],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        return {
+          hits: [
+            { path: "src/weak.ts", line: 1, text: "gammaword deltaword epsilonword zetaword" },
+            ...genericFiles.map((path) => ({ path, line: 1, text: pattern })),
+          ],
+          filesDropped: 0,
+          fileCoverage: "complete",
+        };
+      },
+      readFile: async (path) => ready(
+        path.endsWith(".json") ? "alphaword betaword" : "gammaword deltaword epsilonword zetaword",
+      ),
+    });
+    expect(result.snippets[0]?.path).toBe("config/manifest.json");
+  });
+
+  it("does not treat a full excerpt pack as a reason to skip another high-weight file", async () => {
+    const paths = ["src/aaa.ts", "src/bbb.ts", "src/ccc.ts", "src/zzz.ts"];
+    const block = (name: string) => Array.from(
+      { length: 25 },
+      (_, index) => `function ${name}${index}() { return "alphaword betaword"; }`,
+    ).join("\n");
+    const reads: string[] = [];
+    await explore({ question: "alphaword betaword", limit: 2 }, {
+      rgSearch: async () => ({
+        hits: paths.map((path) => ({
+          path,
+          line: 1,
+          text: `function ${path.slice(4, 7)}0() { return "alphaword betaword"; }`,
+        })),
+        filesDropped: 0,
+        fileCoverage: "complete",
+      }),
+      readFile: async (path) => {
+        reads.push(path);
+        return ready(block(path.slice(4, 7)));
+      },
+      structure: createStructureSource([parsingProvider()]),
+    });
+    expect(reads).toEqual(expect.arrayContaining(paths));
+    expect(reads).toContain("src/zzz.ts");
+  });
 });
 
