@@ -3005,6 +3005,25 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施（观察记录）。
 
+### D-151 · 2026-09-08 · 量具不得在未核验时报「已核验」；注册表窗口的无关另一端降等
+
+背景：3.13 验收复跑发现三处。一，`92e03fa9` 改了设计文档却没 bump 它的 `Last updated`，该提交本身 `docs:validate` 是红的——校验跑在提交之前。二，`stageForTarget` 的 `need` 是可选的，缺省时「该文件有任何窗口可见」就打印 `relation verified`；十问里六个 target 没有 `need`，问题 6 因此报 `parse-budget: … relation verified → visible #2`，而那个窗口是 `ensureRuntime`（只检查 runtime wasm 在不在），与预算判定无关。三，D-150 记的「只展开当前窗口正文里的连接字面量」在生产形状下不构成约束：容器切片（D-098）让种子窗口等于整张注册表 `harness-services.ts:501-588`，37 个字面量全在正文里，所以 `related.query` / `thread.merge` / `surface.snapshot.commit` 的另一端仍以 `connects` 档进包，占据可见 #4–#6。守它的单测没有结构提供者，窗口退化成 ±3 回退，正好绕开了这个形状——与 D-140 同一类错误。
+
+决定：
+
+- 文档头部与提交同批。`docs:validate` 在提交后复跑，不在提交前。
+- 观察脚本每个 target 必须写明所需证据（`label` + 匹配式），`need` 不再可选。所需证据从改前写好的 `wants` 推导，不看输出。未命中时打印 `visible #N, but <label> not in that window`，只有真正命中才说 `<label> verified`。量具不得声称自己没核验过的事。
+- 按读发现的连线字面量，若问句给了对象而该字面量既不是对象也不含于对象，标 `offTopic`：排序上让本对象的字面量先占连接预算，`windowGrade` 把它降到 `support`。没有对象时不判无关——那时正文里每根线都同等在题。
+- 守这条的单测必须跑真解析器的容器切片，且要先验证它在无修复时会红。
+
+不改：连接预算数值；`limit` 与字节预算；无对象问句的行为。
+
+观察（同一目录 `--skip-scan`）：问题 1 的三个无关另一端从 #4/#5/#6 退到 #11/#12/#13，排在全部八个 `explore.search` 窗口之后；`limit=20` 未被更好证据填满时它们仍占尾部槽位，**没有消失**。问题 1/9 与五个变体仍满足 `wants`。问题 4/6 的诊断改为如实报告窗口不含所需证据。尾部噪声与无对象 how 问句留给下一层。
+
+影响：`docs/agent-harness.md` 头部；`scripts/explore-observe.ts`；`explore.ts` 连线展开与 `windowGrade`；`explore.test.ts`；订正 D-149 的诊断要求与 D-150 第三条。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3159,5 +3178,6 @@ D-103 第 1、3 项；候选池排序。
 | D-146 | implementation（问题对象先查；在池里 ≠ 已验证；修订 D-137） | — | explore.ts；设计 6.1 fan-out |
 | D-147 | implementation（理由绑窗口；connects/associates 分等；limit 是上限；direct-verified 与读预算分开） | — | explore.ts；protocol details.query/skippedQueries |
 | D-148 | implementation（文件角色按问题；测试路径条件式；definitionDropped 去重） | — | explore-query.ts；explore.ts |
-| D-149 | implementation（观察 wants/阶段诊断/五个变体；输出不写回仓库） | — | scripts/explore-observe.ts；status 3.13 |
-| D-150 | implementation（观察记录：已知入口可用；无对象 how 问句仍被读预算挡住；整文件连线展开已收窄到窗口） | — | status 3.13；explore.ts 窗口内展开 |
+| D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
+| D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
+| D-151 | implementation（量具不得未核验就报已核验；注册表窗口的无关另一端降 support 档；文档头部与提交同批） | — | scripts/explore-observe.ts；explore.ts windowGrade |
