@@ -13,6 +13,10 @@
  *   bun run --cwd packages/web explore:observe
  *   bun run --cwd packages/web explore:observe -- --only 3 --full
  *
+ * Do not redirect stdout into this repository. rg would then read the file
+ * being written and can fail with exit 2 (D-142). Keep expected answers in
+ * this script and compare after the run.
+ *
  * Shape discipline (D-140): this goes through the real
  * `createHarnessServiceHost` / `createExploreSearchService` / rg / structure
  * source / knowledge store. It does not reimplement retrieval, because the
@@ -43,47 +47,120 @@ import { createFsSearchRuntime } from "../application-host/lib/fs/search.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
+type ObserveQuestion = {
+  ask: string;
+  wants: string;
+  anchors?: string[];
+  targets: Array<{
+    id: string;
+    pathIncludes: string;
+    /** Visible body must contain this relation, not only mention the name. */
+    need?: "register" | "request" | "classify" | "literal";
+  }>;
+};
+
 /**
- * Real questions, each with the answer a maintainer would accept. `wants` is
- * only printed next to the result so a reader can judge; nothing scores it.
+ * Real questions. `wants` is the minimum evidence a maintainer would accept;
+ * written before this run, not widened after seeing output (D-149).
  */
-const QUESTIONS: Array<{ ask: string; wants: string; anchors?: string[] }> = [
+const QUESTIONS: ObserveQuestion[] = [
   {
     ask: "where is the explore.search service registered on the host router",
-    wants: "harness-services.ts registering explore.search, and/or explore-service.ts creating it",
+    wants: "visible snippet shows the current register(...) call with the full explore.search connection value. A doc or fixture that only mentions the name does not count.",
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
   },
   {
     ask: "how does explore decide which files to read after ripgrep returns hits",
-    wants: "explore.ts rankCandidates / maxMaterializeReads / materializeBatch",
+    wants: "visible snippet from explore.ts that implements ranking or on-demand materialize (schedule/rank/materialize). A design paragraph that only names those functions does not count.",
+    targets: [{ id: "materialize", pathIncludes: "explore.ts" }],
   },
   {
     ask: "what stops the agent from reading a stale captured draft after it writes a file",
-    wants: "surface-snapshot-store supersede + documents/authority observeWrite (D-088)",
+    wants: "visible snippet of the invalidate/supersede or observeWrite path that drops a captured draft after an agent write. Naming D-088 is not enough.",
+    targets: [
+      { id: "supersede", pathIncludes: "surface-snapshot-store" },
+      { id: "observe-write", pathIncludes: "authority" },
+    ],
   },
   {
     ask: "where do we decide a tree-sitter grammar can produce an outline",
-    wants: "languages.ts treeSitterTagsSpec / capabilitiesFromSpec, grammar-manifest tagsPath (D-128)",
+    wants: "visible snippet that decides outline capability from a grammar spec or tagsPath. A string constant listing language ids does not count.",
+    targets: [{ id: "outline-capability", pathIncludes: "languages.ts" }],
   },
   {
     ask: "which code writes connects and associates edges into the knowledge graph",
-    wants: "symbol-runtime loadGraphFacts + structure/connections classifyLiteralCall (D-109)",
+    wants: "visible classify or write-path operation that assigns connects vs associates. A definition of the string constants alone does not count.",
+    targets: [
+      { id: "classify", pathIncludes: "connections.ts", need: "classify" },
+      { id: "write", pathIncludes: "symbol-runtime.ts" },
+    ],
   },
   {
     ask: "how is the parse budget for tree-sitter enforced and what happens when it runs out",
-    wants: "tree-sitter-provider parseDocument progressCallback + constants STRUCTURE_PARSE_BUDGET_MS (D-102)",
+    wants: "visible snippet of the parse progress/budget check and the exhausted outcome. Naming STRUCTURE_PARSE_BUDGET_MS is not enough.",
+    targets: [{ id: "parse-budget", pathIncludes: "tree-sitter-provider.ts" }],
   },
   {
     ask: "where is the write guard that refuses to overwrite unsaved user changes",
-    wants: "documents/authority inspectAgentWriteTarget, document.writeGuard service (D-089)",
+    wants: "visible inspect/write-guard decision that refuses a write over unsaved user changes, or the document.writeGuard registration of that function.",
+    targets: [
+      { id: "inspect", pathIncludes: "authority" },
+      { id: "register-guard", pathIncludes: "harness-services.ts" },
+    ],
   },
   {
     ask: "how does a thread get its own working directory and when is it reclaimed",
-    wants: "thread-worktree.ts materialize/reclaim, worktree-reclaim-guard (D-077)",
+    wants: "visible materialize and reclaim (or reclaim-guard) operations. A comment that only mentions worktrees does not count.",
+    targets: [{ id: "worktree", pathIncludes: "thread-worktree.ts" }],
   },
-  { ask: "explore.search", wants: "the registration end and the request end of that literal (wire completion)" },
+  {
+    ask: "explore.search",
+    wants: "both the register end and the request end of that connection are visible. One end must be reported as missing the other.",
+    targets: [
+      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+    ],
+  },
   {
     ask: "what limits how many bytes explore returns to the model",
-    wants: "explore.ts packExploreVisible / DEFAULT_BYTE_BUDGET and the OutputStore handle (D-090)",
+    wants: "visible packExploreVisible / DEFAULT_BYTE_BUDGET (or the OutputStore handle reservation). A docs sentence that only names the budget does not count.",
+    targets: [{ id: "byte-budget", pathIncludes: "explore.ts" }],
+  },
+];
+
+/** Same entry, five surface forms. Full object + direct clue must survive all of them. */
+const VARIANTS: ObserveQuestion[] = [
+  {
+    ask: "explore.search",
+    wants: "same minimum as question 9: register end and request end visible.",
+    targets: [
+      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+    ],
+  },
+  {
+    ask: "`explore.search`",
+    wants: "backticks must not drop the object; register or request call still visible.",
+    targets: [
+      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+    ],
+  },
+  {
+    ask: "where is explore.search registered on the host router",
+    wants: "polite English locating form still shows the current register(...) call.",
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+  },
+  {
+    ask: "请找一下 explore.search 的注册位置",
+    wants: "Chinese locating form still shows the current register(...) call.",
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+  },
+  {
+    ask: "where is this registered",
+    wants: "explicit anchors must drive the same object; current register(...) call visible.",
+    anchors: ["explore.search"],
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
   },
 ];
 
@@ -105,6 +182,86 @@ const skipScan = args.includes("--skip-scan");
 const dataDirArg = flag("data-dir");
 
 const line = (char = "─"): string => char.repeat(78);
+
+const relationVisible = (
+  snippet: { path: string; text?: string; why?: string },
+  need: NonNullable<ObserveQuestion["targets"][number]["need"]>,
+): boolean => {
+  const text = `${snippet.text ?? ""} ${snippet.why ?? ""}`;
+  if (need === "register") return /register\s*\(\s*["'`]explore\.search/.test(text) || /verified register\("explore\.search"\)/.test(text);
+  if (need === "request") return /request\s*\(\s*["'`]explore\.search/.test(text) || /verified request\("explore\.search"\)/.test(text);
+  if (need === "classify") return /classifyLiteralCall|connects|associates/.test(text);
+  return text.includes("explore.search");
+};
+
+const stageForTarget = (
+  target: ObserveQuestion["targets"][number],
+  payload: {
+    snippets?: Array<{ path: string; text?: string; why?: string }>;
+    details?: {
+      provenance?: Array<{ path: string; status: string }>;
+      graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
+      skippedQueries?: { reason: string; patterns: string[] };
+      query?: { objects?: string[]; relation?: string; domain?: string };
+    };
+    notRequested?: { paths?: string[] };
+  },
+): string => {
+  const snippets = payload.snippets ?? [];
+  const provenance = payload.details?.provenance ?? [];
+  const unread = new Set(payload.notRequested?.paths ?? []);
+  const visibleIndex = snippets.findIndex((snippet) => {
+    if (!snippet.path.includes(target.pathIncludes)) return false;
+    return target.need ? relationVisible(snippet, target.need) : true;
+  });
+  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes))
+    || snippets.some((snippet) => snippet.path.includes(target.pathIncludes));
+  const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
+  if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
+    return `${target.id}: acquired → not-requested: read budget`;
+  }
+  if (!acquired) return `${target.id}: not acquired`;
+  if (entry?.status === "not-requested") return `${target.id}: acquired → not-requested: read budget`;
+  if (entry?.status && entry.status !== "ready") return `${target.id}: acquired → ${entry.status}`;
+  const readHit = snippets.find((snippet) => snippet.path.includes(target.pathIncludes));
+  if (!readHit && entry?.status === "ready") return `${target.id}: read → packed out`;
+  if (!readHit) return `${target.id}: acquired → scheduled → not visible`;
+  if (target.need && !relationVisible(readHit, target.need)) {
+    return `${target.id}: read → literal found, ${target.need} relation not verified`;
+  }
+  if (visibleIndex >= 0) {
+    return `${target.id}: acquired → scheduled → read → relation verified → visible #${visibleIndex + 1}`;
+  }
+  return `${target.id}: read → not visible`;
+};
+
+const printDiagnostic = (question: ObserveQuestion, payload: {
+  snippets?: Array<{ path: string; text?: string; why?: string }>;
+  details?: {
+    provenance?: Array<{ path: string; status: string }>;
+    graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
+    skippedQueries?: { reason: string; patterns: string[] };
+    query?: { objects?: string[]; relation?: string; domain?: string };
+  };
+  notRequested?: { paths?: string[] };
+}): void => {
+  const query = payload.details?.query;
+  const graph = payload.details?.graph;
+  process.stdout.write(
+    `query:   object=${(query?.objects ?? []).join(",") || "—"}  relation=${query?.relation ?? "—"}  domain=${query?.domain ?? "—"}\n`,
+  );
+  process.stdout.write(
+    `direct:  connects=${graph?.connections ?? 0} paths  associates=${graph?.associates ?? 0} paths  definitions=${graph?.definitions ?? 0} files  graph=${graph?.status ?? "—"}\n`,
+  );
+  for (const target of question.targets) {
+    process.stdout.write(`target:  ${stageForTarget(target, payload)}\n`);
+  }
+  if (payload.details?.skippedQueries) {
+    process.stdout.write(
+      `skipped: ${payload.details.skippedQueries.reason} ${JSON.stringify(payload.details.skippedQueries.patterns)}\n`,
+    );
+  }
+};
 
 const main = async (): Promise<void> => {
   const dataDir = dataDirArg
@@ -243,10 +400,11 @@ const main = async (): Promise<void> => {
     signal: new AbortController().signal,
   } as never;
 
-  const selected = only === null ? QUESTIONS : QUESTIONS.slice(only - 1, only);
-  for (const [index, question] of selected.entries()) {
-    const number = only === null ? index + 1 : only;
-    process.stdout.write(`\n${line("═")}\n[${number}] ${question.ask}\n`);
+  const runQuestion = async (
+    question: ObserveQuestion,
+    label: string,
+  ): Promise<void> => {
+    process.stdout.write(`\n${line("═")}\n[${label}] ${question.ask}\n`);
     if (question.anchors) process.stdout.write(`anchors: ${question.anchors.join(", ")}\n`);
     process.stdout.write(`looking for: ${question.wants}\n${line()}\n`);
 
@@ -265,24 +423,32 @@ const main = async (): Promise<void> => {
         const frames = error.stack.split("\n").slice(1, 5).map((frame) => frame.trim());
         process.stdout.write(`  ${frames.join("\n  ")}\n`);
       }
-      continue;
+      return;
     }
     const elapsed = Math.round(performance.now() - started);
 
     const payload = result as unknown as {
       text?: string;
-      snippets?: Array<{ path: string; startLine: number; endLine: number; why: string; unit?: { name: string; kind: string } }>;
+      snippets?: Array<{ path: string; startLine: number; endLine: number; why: string; text?: string; unit?: { name: string; kind: string } }>;
       searched?: unknown;
       issues?: unknown[];
-      details?: { graph?: unknown; structure?: unknown; relations?: unknown; provenance?: unknown[] };
+      notRequested?: { count: number; paths: string[] };
+      details?: {
+        graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
+        structure?: unknown;
+        relations?: unknown;
+        provenance?: Array<{ path: string; status: string }>;
+        query?: { objects?: string[]; relation?: string; domain?: string };
+        skippedQueries?: { reason: string; patterns: string[] };
+      };
     };
 
     process.stdout.write(`took ${elapsed} ms\n\n`);
+    printDiagnostic(question, payload);
+    process.stdout.write("\n");
     if (full) {
       process.stdout.write(`${payload.text ?? "(no text)"}\n`);
     } else {
-      // Paths and reasons first: that is what decides whether the agent would
-      // have found the entry point.
       for (const snippet of payload.snippets ?? []) {
         const unit = snippet.unit ? ` ${snippet.unit.kind} ${snippet.unit.name}` : "";
         process.stdout.write(`  ${snippet.path}:${snippet.startLine}-${snippet.endLine}${unit}\n      why: ${snippet.why}\n`);
@@ -290,10 +456,24 @@ const main = async (): Promise<void> => {
       if ((payload.snippets ?? []).length === 0) process.stdout.write("  (no snippets)\n");
     }
     process.stdout.write(`\nsearched: ${JSON.stringify(payload.searched)}\n`);
+    if (payload.details?.query) process.stdout.write(`query:    ${JSON.stringify(payload.details.query)}\n`);
     if (payload.details?.graph) process.stdout.write(`graph:    ${JSON.stringify(payload.details.graph)}\n`);
+    if (payload.details?.skippedQueries) process.stdout.write(`skipped:  ${JSON.stringify(payload.details.skippedQueries)}\n`);
     if (payload.details?.structure) process.stdout.write(`structure:${JSON.stringify(payload.details.structure)}\n`);
     if (payload.details?.relations) process.stdout.write(`relations:${JSON.stringify(payload.details.relations)}\n`);
     if ((payload.issues ?? []).length > 0) process.stdout.write(`issues:   ${JSON.stringify(payload.issues)}\n`);
+  };
+
+  const selected = only === null ? QUESTIONS : QUESTIONS.slice(only - 1, only);
+  for (const [index, question] of selected.entries()) {
+    const number = only === null ? index + 1 : only;
+    await runQuestion(question, String(number));
+  }
+  if (only === null) {
+    process.stdout.write(`\n${line("═")}\nvariants of the explore.search entry\n`);
+    for (const [index, question] of VARIANTS.entries()) {
+      await runQuestion(question, `V${index + 1}`);
+    }
   }
 
   await host.dispose();
