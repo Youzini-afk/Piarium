@@ -2917,6 +2917,94 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施。
 
+### D-144 · 2026-09-08 · 先提取对象，再处理问句
+
+背景：`buildTermGroups` 把 `[$_\p{L}][$_\p{L}\p{M}\p{N}]*` 一律当 identifier（权重 4）。`where is explore.search registered on the host router` 会让 host/service/search/router 各投一票，并拿这些泛词去 `searchDefinitions`。`on`/`do`/`we`/`it` 会填满 40 条定义预算。
+
+决定：先提取并保护对象。完整技术字面量（含 `.`/`-`/`:`）、引号/反引号、显式 anchors 是对象；拆分只作同组回退变体，不再单独投票。普通问句词是内容词，不驱动图、不拿 identifier 权重。关系词是闭表：register/registered/registers/注册/连接、import/imports/imported/导入、define/defined/defines/定义；`registers`/`imported`/`defines` 是同一英语词的屈折，不是新关系。其余一律 unknown。`on(...)` /「名为 on」是对象；单独输入 `on` 保留为短对象查询。中文按对象/关系/内容切，不建完整停用词表。连线值看 `.`/`:` 或协议斜杠，不把 `tree-sitter` 这种连字符包名当连接值；路径对象要有斜杠或真实扩展名，`explore.search` 不是路径。
+
+不改：NLU、词法索引、IDF。本次观察到的文件广度可以软降权词法贡献，但不冒充语料频率，也不做硬判据。
+
+影响：`explore-query.ts`；设计 6.1 seed；plan 3.13。
+
+状态：已实施。
+
+### D-145 · 2026-09-08 · 任务匹配分层，不再混加 RRF 与原始组分
+
+背景：词组内按路径字母序生成名次再送进 RRF，`bun.lock` 在每个词组都是第一名。RRF 分再与 `GROUP_WEIGHT` 混加，五个泛词 +20，图定义权重 10 进 RRF 只贡献约 0.16。
+
+决定：删除这两处。排名层次为：当前正文已核验的直接关系 → 完整对象提及 / connects 线索 → 该对象的精确定义 → associates / 名字含 → 散文词法。词法与文件角色只在同级比较。路径序只作同分稳定 tie-break。观察广度可软降权，不作硬过滤。
+
+不改：既有读预算与字节预算；不引入 BM25。
+
+影响：`explore.ts` rank/pack；设计 6.1 fuse；plan 3.13。
+
+状态：已实施。
+
+### D-146 · 2026-09-08 · 问题对象先查；在池里不等于已验证（修订 D-137）
+
+背景：D-137 把连线种子限制在已选摘录正文。问题 1 的对象 `explore.search` 图里已经有两端，却要等第一次打包。已在 rg 池的 `harness-services.ts` 被 `already → continue` 挡住，永远不进补充物化。
+
+决定：问题本身提供的完整连接值立刻 `findLinks`，明确符号立刻 `searchDefinitions`，明确路径直接读。读后新发现的种子仍按 D-137 展开。直接线索在既有 `maxMaterializeReads` 内优先物化，多个锚点轮流；不是所有 exact 档都保护——`explore` 的定义不是 `explore.search` 注册位置的答案。补充物化看是否已读取、是否已有对应当前证据；已读复用本轮快照。超预算的直接线索仍是 `not-requested`。
+
+不改：D-137 的「读后展开」与独立图预算；D-090/D-139 读预算数值。
+
+影响：`explore.ts`；设计 6.1 fan-out/物化；D-137 索引行。
+
+状态：已实施。
+
+### D-147 · 2026-09-08 · 证据绑定窗口，按所需证据打包，limit 是上限
+
+背景：`graphBoost` 赋给文件里每一个窗口，问题 9 输出 9 段同一 fixture。`findLinks` 把 associates 标成 other end of connection。主循环 `selected.length >= excerptLimit` 即停，前 20 个错误片段把正确答案挡在外面。
+
+决定：图理由只绑定当前核验成立的窗口。同一事实被图和 rg 发现不叠加票数。`connects` 与 `associates` 分等、分文案。对已物化文件复用 `literalCalls` 核验关系；没有结构能力时仍返回原文，理由降成「完整字面量命中；图曾指向这里」，不宣称已确认注册。打包覆盖问题所需证据，不是词组覆盖。`limit` 是上限：定位题找到可用注册片段可早停；「所有注册端」不能找到一个就停；一般问题不伪造语义充分性。因直接线索已验证而未启动的泛词记 `details.skippedQueries.reason=direct-verified`，与读预算 `not-requested` 分开。
+
+不改：字节预算；取消传播；固定草稿。
+
+影响：`explore.ts` pack/verify；protocol `ExploreQueryDetails` / `ExploreSkippedQueries`；设计 6.1 pack。
+
+状态：已实施。
+
+### D-148 · 2026-09-08 · 文件角色按问题决定；测试路径条件式；定义丢弃去重
+
+背景：实现/注册类问题把 lockfile 和文档排在源码前面。D-090「测试路径不默认降权」需要落实为条件，而不是继续中性到让 fixture 压过注册入口。`definitionDropped` 按 hit 递增，同一超预算文件被多个词命中会重复计数。
+
+决定：用文件名/路径/语言 id 轻量分类 source/test/docs/lock。实现/注册/写入优先源码；设计/取舍优先文档；依赖/许可/变更历史才轮到 lockfile。结构来源 `unsupported`/`unavailable` 不得成为相关性惩罚；「图里没有符号所以不是源码」不成立。问题里的 `host` 只是软范围线索，不是目录。问题明确查生产实现/注册时，对象与关系匹配相当则优先非测试；查测试时反过来；无法判断保持中性。`definitionDropped` 与 `details.graph.definitions` 按去重路径。
+
+不改：D-090 原则本身；不按 provider 状态判源码。
+
+影响：`explore-query.ts` fileRole；`explore.ts`；plan 3.13。
+
+状态：已实施。
+
+### D-149 · 2026-09-08 · 观察脚本收紧最小证据、阶段诊断、入口变体
+
+背景：D-142 的 `wants` 是文件列表，过了也看不出图有没有发挥作用。把观察输出重定向进仓库会让 rg 读到正在写的文件。
+
+决定：十问 `wants` 改成最小证据要求，由人写清，看到结果后不放宽。每题从既有 `details` 打阶段诊断（query / direct / target 断在哪一级），不建遥测。对同一入口加五个变体：裸字面量、反引号、英文礼貌句、中文礼貌句、`anchors`。确定性用例进单测，不进观察脚本。观察输出不写回被检索仓库。十问前后比较保持原始问题、预算、运行条件可追溯；足以证明已知入口能被利用，不足以证明泛化。
+
+不改：新评测框架；不把十问当成性能基准。
+
+影响：`scripts/explore-observe.ts`；status 3.13。
+
+状态：已实施。
+
+### D-150 · 2026-09-08 · 观察：已知入口已能利用；无对象的 how 问句仍会被读预算挡住
+
+背景：3.13 十问按收紧后的 wants 重跑（已有目录 `--skip-scan`，输出在进程临时目录，未写回仓库）。不放宽 wants。
+
+决定：相信观察。
+
+- **已知入口可用。** 问题 1：`object=explore.search relation=register`，`harness-services.ts` 的当前 `register("explore.search")` 可见 #2，泛词 `service/host/router` 记 `direct-verified`。问题 9 与变体 V1–V5：注册端与请求端都可见（问题 9 请求端 #1、注册端 #3）。礼貌词、中文、反引号、`anchors` 都没有丢掉完整对象。改前这十问的成功片段里没有源码。
+- **无对象的实现问句仍失败。** 问题 2/3/5/7/8/10 没有技术对象，内容词 rg 在 600 处截断，目标文件进了候选池但 `not-requested: read budget`。问题 4 读到了 `languages.ts` 但打包时被挤出。问题 6 读到了 `tree-sitter-provider.ts` 的 runtime 窗口，不是解析预算判定。这不是「图没用」，是对象优先把泛词降权之后，没有对象的问句回到词法洪水——本刀明确不建 IDF/词法索引。
+- **连线展开曾按整文件 fileRelations 放大。** 第一轮问题 1/9 的可见包里出现 `shell.exec` / `lsp.diagnostics` 等无关另一端。已改为只展开**当前窗口正文**里出现的连接字面量，另加单测守住。这不是放宽 wants。
+
+不把十问写成质量或速度提升。词法索引/桥接/embedding 仍按 plan 0.7 等下一次观察。
+
+影响：status 3.13；本刀报告。
+
+状态：已实施（观察记录）。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3059,10 +3147,17 @@ D-103 第 1、3 项；候选池排序。
 | D-134 | implementation（searchSymbols 暴露 match 分档保留；内存行缓存与 linksByValue 已换成 0.8.6 原生索引） | D-139（反向 import 反向索引）；D-141（内存表 → 原生索引） | knowledge/store.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
 | D-135 | implementation（反向 import 未解析可见；`.js`→`.ts` 孪生；多命中不猜） | D-139（解析时机改为反向索引，不再每次查询重解析） | knowledge/import-resolve.ts；store.findImporters；related imports.unresolved |
 | D-136 | implementation（取代 D-108「不扩候选池」：explore 增加图路径候选） | — | explore.ts / explore-graph.ts；protocol details.graph；设计 6.1/6.2；plan 3.12 |
-| D-137 | implementation（定义召回始终跑；连线与反向 import 等第一次打包之后；独立预算与 filesDropped max） | — | explore.ts；explore-graph.ts |
+| D-137 | superseded in part（读后展开与独立预算保留；问题对象改为打包前先查） | D-146 | explore.ts；explore-graph.ts |
 | D-138 | implementation（related 是文件级拓扑，不是 references，无 PageRank；store 未开 → unavailable） | — | protocol related.query；Host related-tool/service；pi-host related-tool；session-e2e |
 | D-139 | implementation（按调用次数量：反向 import 反向索引、catalogStats 不逐文件读、EPIPE 只吞死管道、boost 查表、图那趟复用主物化形状、related 正文按段设上限；892 → 52 ms） | — | knowledge/store.ts；explore.ts；related-tool.ts；run/test-supervisor.ts |
 | D-140 | implementation（目录前置条件：枚举一次 `git ls-files` 而非每目录 `check-ignore`；派生图写入尾随去抖 flush；测量脚本改成生产的成批形状。枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟） | — | lib/fs/search.ts + search.test.ts；knowledge/store.ts；symbol-runtime.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
 | D-141 | implementation + 实验结果（TriviumDB 0.8.5 → 0.8.6；`payloadCacheMb: 0` 绕开其 O(N) payload 缓存；符号图八张内存表换原生索引，剩计数器 + 形状缓存；短词只精确匹配；建目录 290 → 257 s，`searchSymbols` 17 → 11.5 ms） | — | packages/web/package.json；knowledge/store.ts + store.test.ts；设计 7.5 |
 | D-142 | implementation（观察回路 `explore:observe` 走真实服务；rg exit 2 有命中时按部分覆盖保留并标 `incomplete`、零命中仍 fail-closed；保留 stderr 首行。改前 10 问 9 抛错 → 改后 0 失败） | — | lib/search/content.ts + content.test.ts；harness/search-service.ts；scripts/explore-observe.ts；status 3.2/3.12 |
-| D-143 | implementation（literal-call 查询加首参锚点并接受 awaited 泛型；`CATALOG_EXTRACTOR_VERSION` 进跳过条件，重扫 2360 文件、边 14040 → 13459；连线补全首次触发，正确端仍被 §3.13 的三处排名/打包缺陷挡住） | — | structure/queries.ts；knowledge/symbols.ts + store.ts + symbol-runtime.ts；tree-sitter-provider.test.ts；catalog-scan.test.ts；status 3.1/3.11 |
+| D-143 | implementation（literal-call 查询加首参锚点并接受 awaited 泛型；`CATALOG_EXTRACTOR_VERSION` 进跳过条件，重扫 2360 文件、边 14040 → 13459；连线补全首次触发，正确端的排名/打包缺陷由 3.13 接） | D-144–D-149 | structure/queries.ts；knowledge/symbols.ts + store.ts + symbol-runtime.ts；tree-sitter-provider.test.ts；catalog-scan.test.ts；status 3.1/3.11 |
+| D-144 | implementation（对象优先于问句；关系闭表；只有对象查图） | — | explore-query.ts；设计 6.1 seed；plan 3.13 |
+| D-145 | implementation（任务匹配分层；路径只作 tie-break；不再混加 GROUP_WEIGHT 与 RRF） | — | explore.ts；设计 6.1 fuse |
+| D-146 | implementation（问题对象先查；在池里 ≠ 已验证；修订 D-137） | — | explore.ts；设计 6.1 fan-out |
+| D-147 | implementation（理由绑窗口；connects/associates 分等；limit 是上限；direct-verified 与读预算分开） | — | explore.ts；protocol details.query/skippedQueries |
+| D-148 | implementation（文件角色按问题；测试路径条件式；definitionDropped 去重） | — | explore-query.ts；explore.ts |
+| D-149 | implementation（观察 wants/阶段诊断/五个变体；输出不写回仓库） | — | scripts/explore-observe.ts；status 3.13 |
+| D-150 | implementation（观察记录：已知入口可用；无对象 how 问句仍被读预算挡住；整文件连线展开已收窄到窗口） | — | status 3.13；explore.ts 窗口内展开 |

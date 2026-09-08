@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
@@ -100,7 +100,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    语言支持设置页与可验证按需下载，其中按需语言经上游 `tags.scm` 适配器真出轮廓，D-091/D-093–D-132）。
    3.12 已接（符号图读者：explore 定义优先 / 连线补全 / 反向 import，以及接线的 `related`，D-133–D-138；
    验收又把「目录建得起来」这个前置条件修到可用：枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟，D-140）。
-   下一步按仍然观察得到的「找不到入口」决定词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是通用召回提升。
+   3.13 已接：已有精确线索获得验证机会，验证后的证据决定 explore 输出（D-144–D-149）。
+   下一步才是按观察决定词法索引/桥接/embedding——图给的是定义位置、连线配对和反向 import，不是通用召回提升。
    缺可选来源仍返回已有正文，不等全图/向量/索引/BM25 基线；模型增强按槽位与缺口接入。
 4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
    合并预览随线程服务实现，不设独立收益审批。
@@ -238,11 +239,11 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 | 环节 | 实施 |
 | --- | --- |
 | 来源 | ✓ UI prompt/steer/follow-up 自动捕获全部 dirty records，正文走 Documents、runtime 只带 ref；失败保留 dirty paths，headless 读磁盘；explore/grep/同名 read/find/ls 消费固定来源，dispatch 已把固定草稿复制进持久隔离线程基线。观察到写入后该路径的草稿失效、全部消费者回到磁盘（D-088）；shell 与外部写入仍未观察 |
-| seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
+| seed | ✓ Unicode 标识符、引号字面量与连续中文分词；✓ `explore.search` `anchors?: string[]`（protocol、pi-host 工具 schema 与描述、Host seed），锚点优先取候选、独立预算、字面匹配、非硬过滤；✓ 对象优先于问句（D-144）：完整技术字面量整体保留，普通问句词不再自动升级为 identifier，关系词受控小表，只有对象驱动图查询；**待做**：继续补路径、错误/栈帧的类型化提取（D-090） |
 | 候选获取与物化 | ✓ D-090 缺陷 2–8 与 `anchors`；✓ D-092 候选广度按文件轮转分配（30 文件×12 命中、预算 200 时 30 个文件都进候选，总命中 ≤ 预算；文件数超过预算才丢文件并报 `filesDropped`；grep 深度优先截断不变）。同批小项：句柄提示计入字节预算、返回对象只含协议字段、空白 anchor 过滤、`rgSearch` 局部 partial、`fileScore` 每文件一次、候选排序加权组数。验收复验又补两项：`filesDropped` 跨词项与重叠搜索根不求和，取单次查询最大值作下界、正文说"至少"（原实现两处相加会虚报去重后的文件数）；pi-host 工具 schema 不再给 anchor 元素加 `minLength`，与 Host 的"接受并过滤空白"同口径（原实现两层口径相反，`""` 撞 schema 而 `"  "` 被优雅过滤）。覆盖：`explore.test.ts` T1/T3–T8 与 filesDropped/空白 anchor/加权排序、`explore-service.test.ts` T2/T8（含 `showHandle` 为真时的字节预算）与空白 anchor、`search-service.test.ts` 广度优先与 `filesDropped`、`explore-tool.test.ts` / `session-e2e.test.ts` T9。✓ 结构切片消费 6.4 / tree-sitter 带修订范围（D-091 第 1、3 步；小/大阈值 D-093，协议字段 D-094） |
-| 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图路径候选（✓ 定义优先 / 连线补全 / 反向 import，3.12，取代 D-108 的「不扩候选池」）+ 摘录出边注解（D-108/D-112 保留）、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 tree-sitter 承担并写入图）；`references`/测试配对/co-change 按可用性接入，派生路径重新授权。图给定义位置、连线配对和反向 import，不是笼统扩大召回 |
-| 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（容器：小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口；普通值绑定切所属函数/类，D-098），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），生产顺序 tree-sitter → LSP（D-097），`empty`/覆盖缺口可问后续但 `warmOnly` 不冷启动 LSP（D-099），缺时退行窗口；命中分类只打已物化窗口分（D-095）；RRF 融合保留来源，不用分差当置信度 |
-| 打包 | 内部找全、外部只给支撑判断的材料；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |
+| 召回/展开 | rg 经 search-service 单一路径（✓ D-090）、按种子文件选择 LSP、符号图路径候选（✓ 定义优先 / 连线补全 / 反向 import，3.12，取代 D-108 的「不扩候选池」；✓ 问题对象先查、已读未验证仍可补物化，3.13 / D-146）+ 摘录出边注解（D-108/D-112 保留）、配置的向量；注册点/协议字面量/配置键/事件名作为连接点，从可靠识别的调用/注册形状取证、同名字符串标关联候选（形状识别由 tree-sitter 承担并写入图）；`references`/测试配对/co-change 按可用性接入，派生路径重新授权。图给定义位置、连线配对和反向 import，不是笼统扩大召回 |
+| 版本与融合 | 按来源重读与问题相关、尽可能自包含的原文单元（容器：小函数全文，大函数签名 + 命中语法块 + 省略标记 + 完整读取入口；普通值绑定切所属函数/类，D-098），位置匹配版本；结构来源为带修订绑定的可插拔 provider（3.11），生产顺序 tree-sitter → LSP（D-097），`empty`/覆盖缺口可问后续但 `warmOnly` 不冷启动 LSP（D-099），缺时退行窗口；命中分类只打已物化窗口分（D-095）；任务匹配分层、路径只作 tie-break（✓ D-145），不用分差当置信度 |
+| 打包 | 内部找全、外部只给支撑判断的材料；按问题所需证据而不是词组覆盖（✓ D-147）；目标与所需支撑组成 bundle，支撑可空，省略说明；歧义返回区分依据；字节预算在 explore 内落实（✓ D-090）；真实 OutputStore 与 UTF-8 分页 |
 | 模型 | pi-host 使用 models.explore；按"当前缺的那一步"选一种：无仓库词汇 → intent，目标缺席 → 受限修复（须能提新词项/入口），候选多 → 比较；intent 可并行，judge 等正文，修复仅类型化搜索/导航；无槽位零模型调用 |
 | 上下文 | 同 revision/span 仍在实际请求才省正文；无覆盖表或压缩后未知时返回正文 |
 | 注册 | 可用来源、正文、授权、句柄和工具链通过相关验证即默认注册，不等所有增强或独立评测 |
@@ -252,7 +253,7 @@ protocol 统一解析，真实 provider 目录预设只填空槽；只有 hardIm
 视图隔离与修订绑定已按 3.8（D-087）完成；D-090 候选获取/物化与 `anchors` 已实施，结构切片已按 3.11 第 1、3 步接入，连接边与
 TS/JS 冷目录已按第 4 步写入同一张图。3.12 让 explore 读定义/连线另一端/反向 import 作路径候选（D-136），摘录出边注解仍在。
 贯穿验收例子是 `explore.search` 的 worker—protocol—Host 链——主 agent 能否从一次结果看见这条链，而不是"多了一个 symbols 调用"。
-`related` 已接线（3.12）；co-change、测试配对、embedding 各自推进。仓库级词法索引仍等观察到「找不到入口」再定。
+`related` 已接线（3.12）。3.13 已让已有精确线索被验证并进入可见正文；仓库级词法索引 / 桥接 / embedding 仍等观察决定，不在本刀。
 冷目录只覆盖带 `importQuery` 的语言（TS/TSX/JS/JSX）。
 每来源保留 not-requested/ready/empty/unavailable/failed/
 stale/timed-out/cancelled，不能压成空成功。模型结局与 used/ignored 分开，迟到成功不伪报超时；不新增分项费用看板。
@@ -458,6 +459,28 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
 
 不做：PageRank、多跳、`references`/`calls` 边、embedding、词法索引、BM25、语法包/设置页、记忆/压缩/线程/权限、
 explore 模型增强。不声称检索质量或速度提升；量到的数字进 status，标明是对照数字。
+
+### 3.13 验证已有精确线索，并让验证后的证据决定输出
+
+D-142 观察：8 个成功返回的问题、约 160 个片段，没有一个来自源码——全是 `docs/*.md`、`CHANGELOG.md`、`LICENSE`、`bun.lock`。
+图里已经有答案（`findLinks("explore.search")` → `harness-services.ts` 的 `connects register`，D-143 后还有 `explore-tool.ts` 的
+`connects request`），explore 没去问。六个核实过的缺陷：词组内按路径字母序当 RRF 名次；原始 `GROUP_WEIGHT` 与 RRF 混加；
+`findLinks` 不看 `end.kind`；已在 rg 池的文件被图找到后不进补充物化；`graphBoost` 是文件级；`limit` 凑满即停。
+
+本刀三部分，都不引入 embedding / BM25 / 词法索引 / NLU：
+
+1. **查询入口（D-144）。** 先提取对象，再处理问句。完整技术字面量整体保留；普通问句词是内容词。关系词表写死为注册/连接、
+   import、定义。只有对象驱动 `searchDefinitions` / `findLinks`。
+2. **候选验证（D-145 / D-146 / D-148）。** 任务匹配分层，路径只作 tie-break。直接线索在既有读预算内优先物化。补充物化看
+   是否已读、是否已有当前证据。文件角色按问题决定；测试路径条件式优先。`definitionDropped` 改为去重路径。
+3. **证据打包（D-147）。** 理由绑定窗口；`connects` 与 `associates` 分等；核验区分「含有名字」与「在这里定义/注册」。
+   `limit` 是上限。因直接线索已验证而跳过的泛词记 `direct-verified`，与读预算 `not-requested` 分开。
+
+观察脚本收紧十问的最小证据要求，每题打印阶段诊断，并对同一入口加五个变体（D-149）。十问足以证明「已知入口现在能被利用」，
+不足以证明泛化或普遍性能提升。
+
+不做：embedding、BM25、词法索引、新评测框架、NLU、`related`、结构切片、符号图写入侧、TriviumDB。不改 D-090「测试路径不默认降权」
+原则本身。不声称检索质量或速度提升。
 
 ## 阶段 3b：权限与插件
 

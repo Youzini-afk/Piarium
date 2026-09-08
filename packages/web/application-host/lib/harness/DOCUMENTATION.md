@@ -274,21 +274,28 @@ English block in the visible/stored body). Confirmed `connections` stay
 distinct from unverified `associations`. That annotation does not change
 byte/candidate budgets (D-108 / D-112).
 
+Query parse is object-first (D-144): technical literals, quotes, and anchors
+are objects; ordinary sentence words are content and do not drive graph
+queries. Relation words are a closed table (register / import / define).
+
 A second, independent graph path (`graphRecall`, already-open store only) may
-add **path** candidates before and after the first pack: definition hits for
-distinctive terms, other ends of connection literals that appear in selected
-excerpt text, and a capped set of reverse importers (D-136 / D-137). The graph
-never supplies line numbers for excerpts. After `readFile`, explore relocates
-the symbol name or literal in the current text and only then writes `hits`;
-if the name is gone, that window is omitted — it does not become line 1.
-`details.graph` reports `not-requested | ready | empty | unavailable | failed`.
-An unusable graph leaves the rg excerpts in place. Graph `filesDropped` is a
-floor and is combined with rg by taking the maximum, not the sum (D-092).
-Graph newcomers get their own read budget but reuse `maxMaterializeReads` and
-the main loop's parallelism; a newcomer past that budget stays a ranked
-candidate and is reported `not-requested` rather than counted as dropped. The
-pack-time boost comes from the structured source recorded on the evidence, not
-from the display `why` text (D-139).
+add **path** candidates. Objects from the question run `findLinks` /
+`searchDefinitions` before the first pack (D-146, revising D-137). Seeds
+discovered after a read still expand. The graph never supplies line numbers
+for excerpts. After `readFile`, explore relocates the symbol name or literal
+in the current text and only then writes `hits`; if the name is gone, that
+window is omitted — it does not become line 1. Graph why/boost bind to the
+window that verified, not the file. `connects` and `associates` are different
+evidence grades. `details.graph` reports
+`not-requested | ready | empty | unavailable | failed`, with unique-file
+`definitions` / `connections` / `associates`. An unusable graph leaves the rg
+excerpts in place. Graph `filesDropped` is a unique-path floor and is combined
+with rg by taking the maximum, not the sum (D-092). Direct clues get priority
+reads inside the existing `maxMaterializeReads` budget; a path already in the
+rg pool but not yet read can still be materialized. Ranking is by task-match
+tier (D-145); path order is only a tie-break. `limit` is a cap. Content-word
+rg skipped because a direct clue verified is `details.skippedQueries`
+`direct-verified`, distinct from unread `not-requested` (D-147).
 
 Relations are an annotation, so they never make a successful search fail
 (D-112). `fileRelations` throwing — a corrupt store, or no store open for that
