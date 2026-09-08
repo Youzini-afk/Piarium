@@ -140,6 +140,13 @@ interface GraphClue {
   edgeKind?: "connects" | "associates";
   match?: "exact" | "name-contains";
   callee?: string;
+  /**
+   * Reached by completing a wire whose literal is unrelated to the question
+   * object. A registration table window holds every service it registers, so
+   * expanding it would otherwise pack unrelated counterparts at connects grade
+   * (D-151).
+   */
+  offTopic?: true;
 }
 
 interface FileEvidence {
@@ -390,12 +397,26 @@ function windowLooksLikeCallee(text: string, callee: string, object: string): bo
   return new RegExp(`${callee}\\(\\s*["'\`]${escaped}`, "u").test(text);
 }
 
+/**
+ * A wire literal found by reading is off topic when the question named an
+ * object and the literal is neither that object nor part of it. With no object
+ * every wire in the body is equally on topic.
+ */
+function literalOffTopic(literal: string, parsed: ExploreQueryParse): boolean {
+  if (parsed.objects.length === 0) return false;
+  return !parsed.objects.some((object) => (
+    literal === object || literal.includes(object) || object.includes(literal)
+  ));
+}
+
 function windowGrade(windowClues: GraphClue[], hasDistinctiveObject: boolean, hasAnchor: boolean, verified: boolean): EvidenceGrade {
   if (verified) return "verified-relation";
-  if (windowClues.some((clue) => clue.source === "connection")) return "connects-clue";
+  if (windowClues.some((clue) => clue.source === "connection" && !clue.offTopic)) return "connects-clue";
   if (windowClues.some((clue) => clue.source === "definition" && clue.match === "exact")) return "exact-definition";
   if (hasAnchor || hasDistinctiveObject) return "full-object";
-  if (windowClues.some((clue) => clue.source === "association" || clue.source === "import" || clue.match === "name-contains")) {
+  if (windowClues.some((clue) => (
+    clue.source === "association" || clue.source === "import" || clue.match === "name-contains" || clue.offTopic
+  ))) {
     return "support";
   }
   return "lexical";
@@ -870,12 +891,10 @@ export async function explore(
           const connects = end.kind === "connects";
           if (!connects && end.kind !== "associates") continue;
           const alreadyReadHint = byFile.has(end.path);
-          const budget = connects ? connectionFiles.size : associateFiles.size;
           if (!alreadyReadHint && connects && connectionFiles.size >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
             connectionDropped += 1;
             continue;
           }
-          void budget;
           const evidence = byFile.get(end.path) ?? emptyEvidence();
           attachGraphClue(evidence, {
             source: connects ? "connection" : "association",
@@ -1060,9 +1079,16 @@ export async function explore(
           if (window.text.includes(conn.literal)) literals.add(conn.literal);
         }
       }
+      // A window that is a registration table holds every literal it registers,
+      // so spend the wire budget on the question's own object first and let the
+      // rest in only at support grade (D-151).
+      const ordered = [...literals].sort((left, right) => (
+        Number(literalOffTopic(left, parsed)) - Number(literalOffTopic(right, parsed))
+      ));
       let connectionDropped = 0;
-      for (const literal of literals) {
+      for (const literal of ordered) {
         signal.throwIfAborted();
+        const offTopic = literalOffTopic(literal, parsed);
         for (const end of await deps.graph.findLinks(literal)) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const connects = end.kind === "connects";
@@ -1080,6 +1106,7 @@ export async function explore(
             locate: { text: literal, kind: "literal" },
             edgeKind: connects ? "connects" : "associates",
             ...(end.callee ? { callee: end.callee } : {}),
+            ...(offTopic ? { offTopic: true as const } : {}),
           });
           byFile.set(end.path, evidence);
           if (connects) connectionFiles.add(end.path);

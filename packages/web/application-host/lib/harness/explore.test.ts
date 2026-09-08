@@ -1184,26 +1184,41 @@ describe("explore 3.13 ranking and verification", () => {
     expect(defined[0]?.text).toContain("createExploreFixture");
   });
 
-  it("does not expand every connection on a materialized file, only literals in the current window", async () => {
+  it("does not let an off-topic wire end from a registration table outrank the question's own object", async () => {
+    // A container slice of a registration table holds every literal it
+    // registers, so the window filter alone does not keep the other services
+    // out. Use the real parser so the window is the whole function (D-151).
     const registrar = [
       "export function registerHarnessServices() {",
-      ...Array.from({ length: 40 }, (_, index) => `  register("other.service.${index}", noop);`),
+      ...Array.from({ length: 10 }, (_, index) => `  register("other.service.${index}", noop);`),
       "  register(\"explore.search\", createExploreSearchService);",
       "}",
     ].join("\n");
-    const result = await explore({ question: "where is explore.search registered", limit: 4 }, {
+    const usage = [
+      "export function describeWiring() {",
+      "  return \"explore.search is answered by the application host\";",
+      "}",
+    ].join("\n");
+    const registrarHit = registrar.split("\n").findIndex((line) => line.includes("explore.search")) + 1;
+    const result = await explore({ question: "where is explore.search registered", limit: 2 }, {
       rgSearch: async (pattern) => pattern === "explore.search"
-        ? [{ path: "src/harness-services.ts", line: 42, text: "  register(\"explore.search\", createExploreSearchService);" }]
+        ? [
+          { path: "src/harness-services.ts", line: registrarHit, text: "  register(\"explore.search\", createExploreSearchService);" },
+          { path: "src/describe-wiring.ts", line: 2, text: "  return \"explore.search is answered by the application host\";" },
+        ]
         : [],
-      readFile: async (path) => path === "src/harness-services.ts"
-        ? ready(registrar)
-        : ready("register(\"shell.exec\", createBashTool);"),
+      readFile: async (path) => {
+        if (path === "src/harness-services.ts") return ready(registrar);
+        if (path === "src/describe-wiring.ts") return ready(usage);
+        return ready("register(\"other.service.0\", noop);");
+      },
+      structure: createStructureSource([parsingProvider()]),
       graph: {
         catalogStats: async () => ({ symbolCount: 3 }),
         searchDefinitions: async () => [],
         findLinks: async (value) => {
           if (value === "explore.search") return [{ path: "src/harness-services.ts", kind: "connects", value, callee: "register" }];
-          if (value.startsWith("other.service") || value === "shell.exec") {
+          if (value.startsWith("other.service")) {
             return [{ path: "src/bash-tool.ts", kind: "connects", value, callee: "register" }];
           }
           return [];
@@ -1211,7 +1226,7 @@ describe("explore 3.13 ranking and verification", () => {
         fileRelations: async (path) => path === "src/harness-services.ts"
           ? {
             connections: [
-              ...Array.from({ length: 40 }, (_, index) => ({ callee: "register", literal: `other.service.${index}` })),
+              ...Array.from({ length: 10 }, (_, index) => ({ callee: "register", literal: `other.service.${index}` })),
               { callee: "register", literal: "explore.search" },
             ],
             linksIncomplete: false,
@@ -1220,8 +1235,10 @@ describe("explore 3.13 ranking and verification", () => {
         findImporters: async () => ({ resolved: [] }),
       },
     });
-    expect(result.snippets.some((snippet) => snippet.path === "src/harness-services.ts")).toBe(true);
-    expect(result.snippets.some((snippet) => snippet.path === "src/bash-tool.ts")).toBe(false);
+    const paths = result.snippets.map((snippet) => snippet.path);
+    expect(paths).toContain("src/harness-services.ts");
+    expect(paths).toContain("src/describe-wiring.ts");
+    expect(paths).not.toContain("src/bash-tool.ts");
   });
 
   it("records skipped content-word queries as direct-verified, not as unread budget", async () => {
