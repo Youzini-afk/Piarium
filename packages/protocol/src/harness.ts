@@ -438,10 +438,29 @@ export type ExploreGraphStatus =
   | "stale"
   | "not-requested";
 
+export type ExploreQueryRelation = "register" | "import" | "define" | "unknown";
+export type ExploreQueryDomain = "implementation" | "design" | "dependency" | "unknown";
+
+export interface ExploreQueryDetails {
+  objects: string[];
+  relation: ExploreQueryRelation;
+  domain: ExploreQueryDomain;
+}
+
+export interface ExploreSkippedQueries {
+  /** Broad/content-word patterns not launched because a direct clue already verified. */
+  reason: "direct-verified";
+  patterns: string[];
+}
+
 export interface ExploreGraphDetails {
   status: ExploreGraphStatus;
+  /** Distinct definition files, not hit count. */
   definitions: number;
+  /** Distinct confirmed-connection (`connects`) files. */
   connections: number;
+  /** Distinct association-candidate files. Not the same evidence grade as `connections`. */
+  associates?: number;
   imports: number;
   /**
    * Floor of graph-source files that exceeded the independent graph budget.
@@ -506,6 +525,8 @@ export interface ExploreSearchResult {
      * already-selected excerpts.
      */
     graph?: ExploreGraphDetails;
+    query?: ExploreQueryDetails;
+    skippedQueries?: ExploreSkippedQueries;
   };
 }
 

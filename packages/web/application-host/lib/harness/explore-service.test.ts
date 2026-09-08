@@ -212,7 +212,8 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     );
     const response = await scoped.request({ question: "privateDraftNeedle" }, otherSession);
     expect(response).toMatchObject({ ok: true, result: { snippets: [] } });
-    expect(JSON.stringify(response)).not.toContain("privateDraftNeedle");
+    expect(response.result.text).not.toContain("privateDraftNeedle");
+    expect(JSON.stringify(response.result.snippets)).not.toContain("privateDraftNeedle");
 
     const inScopeOtherSession = await scoped.capture(
       "allowed/draft.ts",

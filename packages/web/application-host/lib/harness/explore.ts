@@ -1,23 +1,49 @@
 import { languageIdForPath, type ExploreGraphDetails, type ExploreGraphStatus, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { STRUCTURE_HIT_CLASS_SCORE } from "../structure/constants.js";
+import { classifyLiteralCall } from "../structure/connections.js";
 import { outlineUsableForText, sliceStructureWindows } from "../structure/slice.js";
 import type { StructureHitClass, StructureOutlineResult, StructureSource } from "../structure/types.js";
+import {
+  DEFAULT_ANCHOR_CAP,
+  buildRgPatterns,
+  buildTermGroups,
+  classifyFileRole,
+  extractIdentifierGroups,
+  extractIdentifiers,
+  extractQuotedLiterals,
+  fileRoleFit,
+  looksLikeConnectionValue,
+  looksLikePathObject,
+  looksLikeSymbolName,
+  parseExploreQuery,
+  type ExploreQueryParse,
+  type TermGroup,
+  type TermGroupKind,
+} from "./explore-query.js";
 import {
   DEFAULT_GRAPH_CONNECTION_BUDGET,
   DEFAULT_GRAPH_DEFINITION_BUDGET,
   DEFAULT_GRAPH_DEFINITIONS_PER_TERM,
   DEFAULT_GRAPH_IMPORT_BUDGET,
   DEFAULT_GRAPH_IMPORT_PER_SEED,
-  GRAPH_CONNECTION_WEIGHT,
-  GRAPH_DEFINITION_WEIGHT,
-  GRAPH_IMPORT_WEIGHT,
   locateIdentifierLines,
   locateLiteralLines,
   pathInRoots,
   rankReverseImporters,
   type ExploreGraphRecall,
 } from "./explore-graph.js";
+
+export {
+  DEFAULT_ANCHOR_CAP,
+  buildRgPatterns,
+  buildTermGroups,
+  extractIdentifierGroups,
+  extractIdentifiers,
+  extractQuotedLiterals,
+  parseExploreQuery,
+};
+export type { TermGroup, TermGroupKind };
 
 type WireResult = HarnessServiceMap["explore.search"]["result"];
 export type ExploreSnippet = WireResult["snippets"][number];
@@ -50,7 +76,7 @@ export interface ExploreRgSearchOptions {
 export interface ExploreDeps {
   rgSearch(pattern: string, options: ExploreRgSearchOptions): Promise<RgSearchReturn>;
   readFile(path: string): Promise<ExploreFileSnapshot>;
-  structure?: Pick<StructureSource, "outline" | "classifyHits">;
+  structure?: Pick<StructureSource, "outline" | "classifyHits"> & Partial<Pick<StructureSource, "literalCalls">>;
   graph?: ExploreGraphRecall;
 }
 
@@ -65,16 +91,7 @@ export interface ExploreResult {
   details: WireResult["details"];
 }
 
-export type TermGroupKind = "anchor" | "literal" | "identifier" | "question";
-
-export interface TermGroup {
-  id: string;
-  kind: TermGroupKind;
-  distinctive: string;
-  variants: string[];
-}
-
-/** Output excerpt count default. `limit` never caps the candidate pool. */
+/** Output excerpt count default. `limit` is a cap, not a quota. */
 export const DEFAULT_EXCERPT_LIMIT = 20;
 /** Working candidate-hit budget per generic/literal/identifier pattern. */
 export const DEFAULT_CANDIDATE_BUDGET = 200;
@@ -82,29 +99,10 @@ export const DEFAULT_CANDIDATE_BUDGET = 200;
 export const DEFAULT_ANCHOR_BUDGET = 80;
 /** Per-file hit cap inside the candidate pool (not a product hard reject). */
 export const DEFAULT_HITS_PER_FILE = 12;
-/** Working cap on supplied anchors; extras are dropped and reported. */
-export const DEFAULT_ANCHOR_CAP = 16;
 export const DEFAULT_READ_PARALLELISM = 3;
 export const DEFAULT_READ_LOOKAHEAD = 2;
 /** Below the 32 KiB generic tool-result truncation so explore packs first. */
 export const DEFAULT_BYTE_BUDGET = 24 * 1024;
-const RRF_K = 60;
-
-const QUESTION_WORDS = new Set([
-  "how", "does", "where", "what", "why", "which", "is", "are", "the", "a", "an", "of", "to", "in", "and", "find",
-  "这个", "那个", "这里", "那里", "哪里", "怎么", "如何", "为什么", "什么", "是否", "的", "了", "在", "是", "和", "与", "或", "请", "帮", "找", "查", "看看", "一下",
-]);
-
-const CHINESE_WORD_SEGMENTER = typeof Intl.Segmenter === "function"
-  ? new Intl.Segmenter("zh", { granularity: "word" })
-  : null;
-
-const GROUP_WEIGHT: Record<TermGroupKind, number> = {
-  anchor: 8,
-  literal: 6,
-  identifier: 4,
-  question: 1,
-};
 
 export function exploreHandleHint(handle: string): string {
   return `\nMore: get_output("${handle}") for the full pack and unread candidate list (session-local, ephemeral).`;
@@ -117,66 +115,6 @@ const normalizeRgResult = (value: RgSearchReturn): { hits: RgHit[]; partial: boo
     ? { hits: value, partial: false, filesDropped: 0 }
     : { hits: value.hits, partial: value.partial === true, filesDropped: value.filesDropped ?? 0 }
 );
-
-export function extractIdentifiers(question: string): string[] {
-  return [...new Set(extractIdentifierGroups(question).flatMap((group) => group.variants))];
-}
-
-export function extractIdentifierGroups(question: string): Array<{ distinctive: string; variants: string[] }> {
-  const identifiers = question.match(/[$_\p{L}][$_\p{L}\p{M}\p{N}]*/gu) ?? [];
-  const groups: Array<{ distinctive: string; variants: string[] }> = [];
-  for (const identifier of identifiers) {
-    if (QUESTION_WORDS.has(identifier.toLowerCase())) continue;
-    const variants = new Set<string>([identifier]);
-    for (const part of identifier.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2").split(/[\s_]+/u)) {
-      if (part && !QUESTION_WORDS.has(part.toLowerCase())) variants.add(part);
-    }
-    if (CHINESE_WORD_SEGMENTER && /\p{Script=Han}/u.test(identifier)) {
-      for (const segment of CHINESE_WORD_SEGMENTER.segment(identifier)) {
-        if (segment.isWordLike && !QUESTION_WORDS.has(segment.segment)) variants.add(segment.segment);
-      }
-    }
-    groups.push({ distinctive: identifier, variants: [...variants] });
-  }
-  return groups;
-}
-
-export function extractQuotedLiterals(question: string): string[] {
-  return [...question.matchAll(/"([^"]+)"|'([^']+)'|\x60([^\x60]+)\x60|“([^”]+)”|‘([^’]+)’/gu)]
-    .map((match) => match.slice(1).find((value) => value !== undefined)!)
-    .filter(Boolean);
-}
-
-/** Query terms are literal input, never executable regular expressions. */
-export function buildRgPatterns(identifiers: string[], literals: string[]): Array<{ pattern: string; fixedStrings: true }> {
-  return [...new Set([...literals, ...identifiers])].map((pattern) => ({ pattern, fixedStrings: true }));
-}
-
-export function buildTermGroups(question: string, anchors: readonly string[] = []): {
-  groups: TermGroup[];
-  suppliedAnchors: string[];
-  usedAnchors: string[];
-  anchorsTruncated: number;
-} {
-  const suppliedAnchors = [...anchors];
-  const usable = anchors.map((anchor) => anchor.trim()).filter(Boolean);
-  const usedAnchors = usable.slice(0, DEFAULT_ANCHOR_CAP);
-  const anchorsTruncated = Math.max(0, usable.length - usedAnchors.length);
-  const groups: TermGroup[] = [];
-  const seen = new Set<string>();
-  const add = (kind: TermGroupKind, distinctive: string, variants: string[]): void => {
-    const key = distinctive;
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    const unique = [...new Set(variants.filter(Boolean))];
-    groups.push({ id: `${kind}:${distinctive}`, kind, distinctive, variants: unique.length > 0 ? unique : [distinctive] });
-  };
-  for (const anchor of usedAnchors) add("anchor", anchor, [anchor]);
-  for (const literal of extractQuotedLiterals(question)) add("literal", literal, [literal]);
-  for (const group of extractIdentifierGroups(question)) add("identifier", group.distinctive, group.variants);
-  if (groups.length === 0 && question.trim()) add("question", question.trim(), [question.trim()]);
-  return { groups, suppliedAnchors, usedAnchors, anchorsTruncated };
-}
 
 export function maxMaterializeReads(candidateCount: number, excerptLimit: number): number {
   return Math.min(
@@ -192,31 +130,34 @@ const searchVariantsOf = (group: TermGroup): string[] => {
   return group.variants.filter((variant) => variant === group.distinctive || variant.length > 1);
 };
 
+type GraphCandidateSource = "definition" | "connection" | "association" | "import";
+type EvidenceGrade = "verified-relation" | "connects-clue" | "exact-definition" | "full-object" | "support" | "lexical";
+
+interface GraphClue {
+  source: GraphCandidateSource;
+  why: string;
+  locate: { text: string; kind: "identifier" | "literal" };
+  edgeKind?: "connects" | "associates";
+  match?: "exact" | "name-contains";
+  callee?: string;
+}
+
 interface FileEvidence {
-  hits: Map<number, { text: string; groups: Set<string>; distinctive: Set<string> }>;
+  hits: Map<number, { text: string; groups: Set<string>; distinctive: Set<string>; clues: GraphClue[] }>;
   groups: Set<string>;
   distinctive: Set<string>;
   anchors: Set<string>;
-  graphWhy: string[];
-  graphSources: Set<GraphCandidateSource>;
-  graphLocate: Array<{ text: string; kind: "identifier" | "literal" }>;
+  graphClues: GraphClue[];
+  verifiedRelation: boolean;
+  verifiedCallees: Set<string>;
 }
-
-type GraphCandidateSource = "definition" | "connection" | "import";
-
-/**
- * Pack-time boost per graph source. Complementary packing does not read the RRF
- * ranking, so a mention would otherwise outrank the file that defines the name.
- */
-const GRAPH_PACK_BOOST: Record<GraphCandidateSource, number> = {
-  definition: 30,
-  connection: 16,
-  import: 4,
-};
 
 interface RankedCandidate {
   path: string;
   evidence: FileEvidence;
+  tier: number;
+  roleFit: number;
+  objectCoverage: number;
   score: number;
 }
 
@@ -235,7 +176,10 @@ interface PreparedWindow {
   structure?: ExploreSnippet["structure"];
   hitLines: number[];
   hitClass?: StructureHitClass;
-  graphBoost: number;
+  grade: EvidenceGrade;
+  verifiedCallees: string[];
+  factKey: string;
+  roleFit: number;
 }
 
 const emptyEvidence = (): FileEvidence => ({
@@ -243,35 +187,45 @@ const emptyEvidence = (): FileEvidence => ({
   groups: new Set(),
   distinctive: new Set(),
   anchors: new Set(),
-  graphWhy: [],
-  graphSources: new Set(),
-  graphLocate: [],
+  graphClues: [],
+  verifiedRelation: false,
+  verifiedCallees: new Set(),
 });
 
-function attachGraphWhy(
-  evidence: FileEvidence,
-  source: GraphCandidateSource,
-  why: string,
-  locate: FileEvidence["graphLocate"][number],
-): void {
-  evidence.graphSources.add(source);
-  if (!evidence.graphWhy.includes(why)) evidence.graphWhy.push(why);
-  if (!evidence.graphLocate.some((item) => item.kind === locate.kind && item.text === locate.text)) {
-    evidence.graphLocate.push(locate);
+const GRADE_RANK: Record<EvidenceGrade, number> = {
+  "verified-relation": 5,
+  "connects-clue": 4,
+  "exact-definition": 3,
+  "full-object": 2,
+  support: 1,
+  lexical: 0,
+};
+
+function attachGraphClue(evidence: FileEvidence, clue: GraphClue): void {
+  if (evidence.graphClues.some((item) => item.source === clue.source && item.why === clue.why && item.locate.text === clue.locate.text)) {
+    return;
   }
+  evidence.graphClues.push(clue);
 }
 
 function applyGraphLocate(lines: readonly string[], evidence: FileEvidence): void {
-  for (const locate of evidence.graphLocate) {
-    const found = locate.kind === "identifier"
-      ? locateIdentifierLines(lines, locate.text)
-      : locateLiteralLines(lines, locate.text);
+  for (const clue of evidence.graphClues) {
+    const found = clue.locate.kind === "identifier"
+      ? locateIdentifierLines(lines, clue.locate.text)
+      : locateLiteralLines(lines, clue.locate.text);
     for (const line of found) {
-      if (evidence.hits.has(line)) continue;
+      const existing = evidence.hits.get(line);
+      if (existing) {
+        if (!existing.clues.some((item) => item.why === clue.why && item.locate.text === clue.locate.text)) {
+          existing.clues.push(clue);
+        }
+        continue;
+      }
       evidence.hits.set(line, {
         text: lines[line - 1]!,
         groups: new Set(),
         distinctive: new Set(),
+        clues: [clue],
       });
     }
   }
@@ -279,7 +233,12 @@ function applyGraphLocate(lines: readonly string[], evidence: FileEvidence): voi
 
 function recordHit(byFile: Map<string, FileEvidence>, hit: RgHit, group: TermGroup, distinctive: boolean): void {
   const evidence = byFile.get(hit.path) ?? emptyEvidence();
-  const line = evidence.hits.get(hit.line) ?? { text: hit.text, groups: new Set<string>(), distinctive: new Set<string>() };
+  const line = evidence.hits.get(hit.line) ?? {
+    text: hit.text,
+    groups: new Set<string>(),
+    distinctive: new Set<string>(),
+    clues: [],
+  };
   line.text = hit.text;
   line.groups.add(group.id);
   if (distinctive) line.distinctive.add(group.id);
@@ -290,56 +249,156 @@ function recordHit(byFile: Map<string, FileEvidence>, hit: RgHit, group: TermGro
   byFile.set(hit.path, evidence);
 }
 
+function objectGroupsOf(groups: TermGroup[]): TermGroup[] {
+  return groups.filter((group) => group.kind === "anchor" || group.kind === "literal" || group.kind === "identifier");
+}
+
+function contentGroupsOf(groups: TermGroup[]): TermGroup[] {
+  return groups.filter((group) => group.kind === "question");
+}
+
+function observedBreadth(byFile: Map<string, FileEvidence>, groups: TermGroup[]): Map<string, number> {
+  const breadth = new Map<string, number>();
+  for (const group of groups) {
+    let count = 0;
+    for (const evidence of byFile.values()) {
+      if (evidence.groups.has(group.id)) count += 1;
+    }
+    breadth.set(group.id, count);
+  }
+  return breadth;
+}
+
+function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups: TermGroup[]): number {
+  if (evidence.verifiedRelation) return 0;
+  const objectIds = new Set(objectGroupsOf(groups).map((group) => group.id));
+  const hasConnects = evidence.graphClues.some((clue) => clue.source === "connection");
+  const hasExactObjectDef = evidence.graphClues.some((clue) => (
+    clue.source === "definition"
+    && clue.match === "exact"
+    && parsed.objects.includes(clue.locate.text)
+  ));
+  const hasFullObject = [...evidence.distinctive].some((id) => objectIds.has(id)) || evidence.anchors.size > 0;
+  if (hasConnects || hasExactObjectDef) return 1;
+  if (hasFullObject) return 2;
+  if (evidence.graphClues.some((clue) => clue.source === "association" || clue.source === "import" || clue.match === "name-contains")) {
+    return 3;
+  }
+  return 4;
+}
+
+function objectCoverage(evidence: FileEvidence, groups: TermGroup[]): number {
+  let coverage = 0;
+  for (const group of objectGroupsOf(groups)) {
+    if (evidence.distinctive.has(group.id)) coverage += 2;
+    else if (evidence.groups.has(group.id)) coverage += 1;
+  }
+  for (const group of contentGroupsOf(groups)) {
+    if (evidence.groups.has(group.id)) coverage += 1;
+  }
+  coverage += evidence.anchors.size;
+  return coverage;
+}
+
+function breadthPenalty(evidence: FileEvidence, breadth: Map<string, number>, poolSize: number): number {
+  let penalty = 0;
+  for (const groupId of evidence.groups) {
+    const files = breadth.get(groupId) ?? 0;
+    if (files >= 20 || (poolSize > 0 && files / poolSize >= 0.5)) penalty += 1;
+  }
+  return penalty;
+}
+
 function rankCandidates(
   byFile: Map<string, FileEvidence>,
   groups: TermGroup[],
-  extra: ReadonlyArray<{ weight: number; paths: readonly string[] }> = [],
+  parsed: ExploreQueryParse,
 ): RankedCandidate[] {
-  const scores = new Map<string, number>();
-  const bump = (path: string, amount: number): void => {
-    scores.set(path, (scores.get(path) ?? 0) + amount);
-  };
-  for (const group of groups) {
-    const distinctive: string[] = [];
-    const variantOnly: string[] = [];
-    for (const [path, evidence] of byFile) {
-      if (!evidence.groups.has(group.id)) continue;
-      if (evidence.distinctive.has(group.id)) distinctive.push(path);
-      else variantOnly.push(path);
-    }
-    distinctive.sort(comparePath);
-    variantOnly.sort(comparePath);
-    const ranked = [...distinctive, ...variantOnly];
-    const weight = GROUP_WEIGHT[group.kind];
-    ranked.forEach((path, rank) => {
-      const specificity = rank < distinctive.length ? 1 : 0.25;
-      bump(path, (weight * specificity) / (RRF_K + rank + 1));
-    });
-  }
-  for (const source of extra) {
-    source.paths.forEach((path, rank) => {
-      bump(path, source.weight / (RRF_K + rank + 1));
-    });
-  }
+  const breadth = observedBreadth(byFile, groups);
+  const poolSize = byFile.size;
   return [...byFile.entries()]
-    .map(([path, evidence]) => ({
-      path,
-      evidence,
-      score: (scores.get(path) ?? 0) + evidenceWeight(evidence, groups),
-    }))
-    .sort((left, right) => right.score - left.score || comparePath(left.path, right.path));
+    .map(([path, evidence]) => {
+      const role = classifyFileRole(path);
+      const fit = fileRoleFit(role, parsed.domain, parsed.preferTests);
+      const tier = candidateTier(evidence, parsed, groups);
+      const coverage = objectCoverage(evidence, groups);
+      const penalty = breadthPenalty(evidence, breadth, poolSize);
+      return {
+        path,
+        evidence,
+        tier,
+        roleFit: fit,
+        objectCoverage: coverage,
+        score: -tier * 100 + fit * 10 + coverage - penalty,
+      };
+    })
+    .sort((left, right) => (
+      left.tier - right.tier
+      || right.roleFit - left.roleFit
+      || right.objectCoverage - left.objectCoverage
+      || right.score - left.score
+      || comparePath(left.path, right.path)
+    ));
 }
 
-/** Weighted group mass at GROUP_WEIGHT scale so one anchor outranks three identifier groups. */
-function evidenceWeight(evidence: FileEvidence, groups: TermGroup[]): number {
-  let weight = 0;
-  for (const group of groups) {
-    if (!evidence.groups.has(group.id)) continue;
-    const specificity = evidence.distinctive.has(group.id) ? 1 : 0.25;
-    weight += GROUP_WEIGHT[group.kind] * specificity;
+function primaryObjectFor(evidence: FileEvidence, groups: TermGroup[], parsed: ExploreQueryParse): string {
+  for (const object of parsed.objects) {
+    const group = groups.find((item) => item.distinctive === object);
+    if (group && (evidence.distinctive.has(group.id) || evidence.groups.has(group.id))) return object;
+    if (evidence.graphClues.some((clue) => clue.locate.text === object)) return object;
   }
-  weight += GROUP_WEIGHT.anchor * evidence.anchors.size;
-  return weight;
+  return parsed.objects[0] ?? "";
+}
+
+function isDirectClue(evidence: FileEvidence, groups: TermGroup[], parsed: ExploreQueryParse): boolean {
+  if (evidence.graphClues.some((clue) => clue.source === "connection")) return true;
+  if (evidence.graphClues.some((clue) => (
+    clue.source === "definition"
+    && clue.match === "exact"
+    && parsed.objects.includes(clue.locate.text)
+  ))) return true;
+  if (evidence.anchors.size > 0) return true;
+  return objectGroupsOf(groups).some((group) => (
+    (group.kind === "literal" || group.kind === "anchor") && evidence.distinctive.has(group.id)
+  ));
+}
+
+function scheduleReads(ranked: RankedCandidate[], groups: TermGroup[], parsed: ExploreQueryParse): RankedCandidate[] {
+  const directs = ranked.filter((candidate) => isDirectClue(candidate.evidence, groups, parsed));
+  const rest = ranked.filter((candidate) => !isDirectClue(candidate.evidence, groups, parsed));
+  const buckets = new Map<string, RankedCandidate[]>();
+  for (const candidate of directs) {
+    const key = primaryObjectFor(candidate.evidence, groups, parsed) || candidate.path;
+    const bucket = buckets.get(key) ?? [];
+    bucket.push(candidate);
+    buckets.set(key, bucket);
+  }
+  const interleaved: RankedCandidate[] = [];
+  const queues = [...buckets.values()];
+  let index = 0;
+  while (queues.some((queue) => queue.length > 0)) {
+    const queue = queues[index % queues.length]!;
+    const next = queue.shift();
+    if (next) interleaved.push(next);
+    index += 1;
+  }
+  return [...interleaved, ...rest];
+}
+
+function windowLooksLikeCallee(text: string, callee: string, object: string): boolean {
+  const escaped = object.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${callee}\\(\\s*["'\`]${escaped}`, "u").test(text);
+}
+
+function windowGrade(windowClues: GraphClue[], hasDistinctiveObject: boolean, hasAnchor: boolean, verified: boolean): EvidenceGrade {
+  if (verified) return "verified-relation";
+  if (windowClues.some((clue) => clue.source === "connection")) return "connects-clue";
+  if (windowClues.some((clue) => clue.source === "definition" && clue.match === "exact")) return "exact-definition";
+  if (hasAnchor || hasDistinctiveObject) return "full-object";
+  if (windowClues.some((clue) => clue.source === "association" || clue.source === "import" || clue.match === "name-contains")) {
+    return "support";
+  }
+  return "lexical";
 }
 
 function windowsFor(
@@ -349,6 +408,7 @@ function windowsFor(
   snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
   groups: TermGroup[],
   outline: StructureOutlineResult | { status: "not-requested"; provider: null },
+  parsed: ExploreQueryParse,
 ): { windows: PreparedWindow[]; stale: boolean } {
   const matches: number[] = [];
   let stale = false;
@@ -375,8 +435,10 @@ function windowsFor(
     outline: usable,
   });
   const nameById = new Map(groups.map((group) => [group.id, group.distinctive]));
+  const objectIds = new Set(objectGroupsOf(groups).map((group) => group.id));
   const windows = slices.map((slice) => {
     const covered = new Set<string>();
+    const windowClues: GraphClue[] = [];
     let hasDistinctive = false;
     let hasAnchor = false;
     for (const line of slice.hitLines) {
@@ -384,6 +446,11 @@ function windowsFor(
       if (!hit) continue;
       for (const groupId of hit.groups) covered.add(groupId);
       if (hit.distinctive.size > 0) hasDistinctive = true;
+      for (const clue of hit.clues) {
+        if (!windowClues.some((item) => item.why === clue.why && item.locate.text === clue.locate.text)) {
+          windowClues.push(clue);
+        }
+      }
     }
     for (const groupId of covered) {
       if (evidence.anchors.has(groupId)) hasAnchor = true;
@@ -394,17 +461,26 @@ function windowsFor(
       : names.length > 1
         ? `matched ${names.length} term groups (${names.join(", ")})`
         : "";
-    const why = evidence.graphWhy.length > 0
-      ? (matched ? `${evidence.graphWhy.join("; ")}; ${matched}` : evidence.graphWhy.join("; "))
+    const whyParts = windowClues.map((clue) => clue.why);
+    const why = whyParts.length > 0
+      ? (matched ? `${whyParts.join("; ")}; ${matched}` : whyParts.join("; "))
       : (matched || "matched search terms");
-    const graphBoost = [...evidence.graphSources]
-      .reduce((best, source) => Math.max(best, GRAPH_PACK_BOOST[source]), 0);
+    const hasDistinctiveObject = [...covered].some((id) => objectIds.has(id) && evidence.distinctive.has(id));
+    const verified = evidence.verifiedRelation && windowClues.some((clue) => clue.source === "connection" || clue.why.startsWith("verified "));
+    const looksLikeRegister = parsed.objects.some((object) => windowLooksLikeCallee(slice.text, "register", object));
+    const grade = looksLikeRegister && parsed.relation === "register"
+      ? (verified ? "verified-relation" : "connects-clue")
+      : windowGrade(windowClues, hasDistinctiveObject || hasDistinctive, hasAnchor, verified || evidence.verifiedRelation && hasDistinctiveObject);
     const structure = outline.status === "not-requested"
       ? undefined
       : {
         provider: outline.provider,
         status: usable.status === "not-requested" ? "not-requested" as const : usable.status,
       };
+    const factKey = windowClues[0]
+      ? `${path}:${windowClues[0]!.source}:${windowClues[0]!.locate.text}`
+      : `${path}:${slice.start}:${[...covered].sort().join(",")}`;
+    const roleFit = fileRoleFit(classifyFileRole(path), parsed.domain, parsed.preferTests);
     return {
       path,
       start: slice.start,
@@ -419,7 +495,10 @@ function windowsFor(
       ...(slice.unit ? { unit: slice.unit } : {}),
       ...(structure ? { structure } : {}),
       hitLines: slice.hitLines,
-      graphBoost,
+      grade,
+      verifiedCallees: [...evidence.verifiedCallees],
+      factKey,
+      roleFit,
     };
   });
   return { windows, stale };
@@ -477,15 +556,124 @@ async function classifyPreparedWindows(
   }
 }
 
+function weakenUnverifiedConnectionWhy(windows: PreparedWindow[], objects: readonly string[]): PreparedWindow[] {
+  return windows.map((window) => {
+    if (window.grade === "verified-relation") return window;
+    if (!objects.some((object) => window.text.includes(object))) return window;
+    if (!/graph pointed here|other end of connection|associated mention/.test(window.why)) return window;
+    if (/verified register|verified request|verified connection/.test(window.why)) return window;
+    return {
+      ...window,
+      why: window.why.includes("full literal hit")
+        ? window.why
+        : `${window.why}; full literal hit; graph pointed here`,
+    };
+  });
+}
+
+async function verifyMaterializedRelations(
+  path: string,
+  snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
+  evidence: FileEvidence,
+  windows: PreparedWindow[],
+  parsed: ExploreQueryParse,
+  deps: ExploreDeps,
+  signal: AbortSignal,
+): Promise<PreparedWindow[]> {
+  const objects = [...parsed.objects, ...parsed.usedAnchors].filter(Boolean);
+  if (objects.length === 0) return windows;
+  if (!deps.structure?.literalCalls) {
+    return weakenUnverifiedConnectionWhy(windows, objects);
+  }
+  try {
+    signal.throwIfAborted();
+    const calls = await deps.structure.literalCalls({
+      path,
+      languageId: languageIdForPath(path),
+      text: snapshot.content,
+      revision: snapshot.revision,
+      signal,
+    });
+    if (calls.status !== "ready") return weakenUnverifiedConnectionWhy(windows, objects);
+    const verified: Array<{ line: number; name: string; literal: string; kind: "connects" | "associates" }> = [];
+    for (const call of calls.calls) {
+      if (!objects.includes(call.literal)) continue;
+      const kind = classifyLiteralCall(call);
+      if (!kind) continue;
+      verified.push({ line: call.line, name: call.name, literal: call.literal, kind });
+    }
+    if (verified.length === 0) return weakenUnverifiedConnectionWhy(windows, objects);
+    return windows.map((window) => {
+      const hit = verified.find((item) => item.line >= window.start && item.line <= window.end);
+      if (!hit) return window;
+      if (hit.kind === "associates") {
+        const why = `associated mention of "${hit.literal}" via ${hit.name}()`;
+        return {
+          ...window,
+          grade: window.grade === "verified-relation" ? window.grade : "support",
+          why: window.why.includes(why) ? window.why : (window.why ? `${why}; ${window.why}` : why),
+        };
+      }
+      evidence.verifiedRelation = parsed.relation === "unknown" || parsed.relation === "register" || hit.name === "register" || hit.name === "request";
+      evidence.verifiedCallees.add(hit.name);
+      const why = `verified ${hit.name}("${hit.literal}")`;
+      return {
+        ...window,
+        grade: "verified-relation",
+        verifiedCallees: [...new Set([...window.verifiedCallees, hit.name])],
+        why: window.why.includes(why) ? window.why : (window.why ? `${why}; ${window.why}` : why),
+        factKey: `${path}:verified:${hit.name}:${hit.literal}`,
+      };
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    return weakenUnverifiedConnectionWhy(windows, objects);
+  }
+}
+
+function questionWantsAllSites(question: string): boolean {
+  return /\b(all|every)\b/iu.test(question) || /所有/.test(question);
+}
+
+function hasVerifiedRegister(windows: readonly PreparedWindow[]): boolean {
+  return windows.some((window) => (
+    window.grade === "verified-relation"
+    && (window.verifiedCallees.includes("register") || window.why.includes("verified register(") || /register\("/.test(window.text))
+  ));
+}
+
+function hasBothConnectsEnds(windows: readonly PreparedWindow[]): boolean {
+  const callees = new Set(windows.flatMap((window) => window.verifiedCallees));
+  const registerEnd = callees.has("register") || windows.some((window) => /register\(["'`]/.test(window.text));
+  const requestEnd = callees.has("request") || windows.some((window) => /request\(["'`]/.test(window.text));
+  return registerEnd && requestEnd;
+}
+
 function windowScore(window: PreparedWindow, selected: PreparedWindow[]): number {
-  const covered = new Set(selected.flatMap((item) => [...item.groups]));
+  const sameFile = selected.filter((item) => item.path === window.path).length;
+  const sameFact = selected.some((item) => item.factKey === window.factKey);
+  const coveredEnds = new Set(selected.flatMap((item) => item.verifiedCallees));
+  const coveredGroups = new Set(selected.flatMap((item) => [...item.groups]));
+  let newEnd = 0;
+  for (const callee of window.verifiedCallees) {
+    if (!coveredEnds.has(callee)) newEnd += 1;
+  }
   let newGroups = 0;
   for (const groupId of window.groups) {
-    if (!covered.has(groupId)) newGroups += 1;
+    if (!coveredGroups.has(groupId)) newGroups += 1;
   }
   const newFile = selected.some((item) => item.path === window.path) ? 0 : 1;
   const hitClassScore = window.hitClass ? STRUCTURE_HIT_CLASS_SCORE[window.hitClass] : 0;
-  return (window.hasAnchor ? 100 : 0) + (window.hasDistinctive ? 20 : 0) + newGroups * 10 + newFile * 8 + window.groups.size + hitClassScore + window.graphBoost;
+  const repeatPenalty = sameFact ? 80 : sameFile * 40;
+  return GRADE_RANK[window.grade] * 200
+    + window.roleFit * 30
+    + (window.hasAnchor ? 80 : 0)
+    + (window.hasDistinctive ? 20 : 0)
+    + newEnd * 60
+    + newGroups * 10
+    + newFile * 8
+    + hitClassScore
+    - repeatPenalty;
 }
 
 function packComplementary(windows: PreparedWindow[], limit: number): PreparedWindow[] {
@@ -553,6 +741,18 @@ async function outlineForSnapshot(
   }
 }
 
+function collectPatterns(groups: TermGroup[]): Map<string, Array<{ group: TermGroup; distinctive: boolean }>> {
+  const patternOwners = new Map<string, Array<{ group: TermGroup; distinctive: boolean }>>();
+  for (const group of groups) {
+    for (const variant of searchVariantsOf(group)) {
+      const owners = patternOwners.get(variant) ?? [];
+      owners.push({ group, distinctive: variant === group.distinctive });
+      patternOwners.set(variant, owners);
+    }
+  }
+  return patternOwners;
+}
+
 /**
  * Deterministic retrieval only. Models and credentials belong to the pi-host coordinator.
  * Every emitted excerpt comes from a successfully read, versioned Document snapshot.
@@ -565,111 +765,151 @@ export async function explore(
   const startedAt = Date.now();
   signal.throwIfAborted();
   const excerptLimit = input.limit ?? DEFAULT_EXCERPT_LIMIT;
-  const { groups, suppliedAnchors, usedAnchors, anchorsTruncated } = buildTermGroups(input.question, input.anchors ?? []);
-  const patternOwners = new Map<string, Array<{ group: TermGroup; distinctive: boolean }>>();
-  for (const group of groups) {
-    for (const variant of searchVariantsOf(group)) {
-      const owners = patternOwners.get(variant) ?? [];
-      owners.push({ group, distinctive: variant === group.distinctive });
-      patternOwners.set(variant, owners);
-    }
-  }
-  if (patternOwners.size === 0 && input.question.trim()) {
+  const parsed = parseExploreQuery(input.question, input.anchors ?? []);
+  const groups = parsed.groups;
+  const { suppliedAnchors, usedAnchors, anchorsTruncated } = parsed;
+  const objectPatterns = collectPatterns(objectGroupsOf(groups));
+  const contentPatterns = collectPatterns(contentGroupsOf(groups));
+  if (objectPatterns.size === 0 && contentPatterns.size === 0 && input.question.trim()) {
     const fallback: TermGroup = { id: "question:raw", kind: "question", distinctive: input.question.trim(), variants: [input.question.trim()] };
     groups.push(fallback);
-    patternOwners.set(fallback.distinctive, [{ group: fallback, distinctive: true }]);
+    contentPatterns.set(fallback.distinctive, [{ group: fallback, distinctive: true }]);
   }
 
   const byFile = new Map<string, FileEvidence>();
   let searchIncomplete = false;
   let filesDropped = 0;
-  await Promise.all([...patternOwners.entries()].map(async ([pattern, owners]) => {
-    signal.throwIfAborted();
-    const anchorOwned = owners.some((owner) => owner.group.kind === "anchor");
-    const result = normalizeRgResult(await deps.rgSearch(pattern, {
-      fixedStrings: true,
-      ...(input.paths ? { paths: input.paths } : {}),
-      candidateBudget: anchorOwned ? DEFAULT_ANCHOR_BUDGET : DEFAULT_CANDIDATE_BUDGET,
-      hitsPerFile: DEFAULT_HITS_PER_FILE,
-    }));
-    signal.throwIfAborted();
-    if (result.partial || result.filesDropped > 0) searchIncomplete = true;
-    // Query terms match overlapping file sets, so the union is unknowable from counts alone.
-    // Take the largest single-term drop: a floor that never claims more files than were dropped.
-    filesDropped = Math.max(filesDropped, result.filesDropped);
-    for (const hit of result.hits) {
-      for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
-    }
-  }));
+  let launchedPatterns = 0;
+  const skippedContent: string[] = [];
 
-  const extraRanks: Array<{ weight: number; paths: string[] }> = [];
+  const runRg = async (patterns: Map<string, Array<{ group: TermGroup; distinctive: boolean }>>): Promise<void> => {
+    launchedPatterns += patterns.size;
+    await Promise.all([...patterns.entries()].map(async ([pattern, owners]) => {
+      signal.throwIfAborted();
+      const anchorOwned = owners.some((owner) => owner.group.kind === "anchor");
+      const result = normalizeRgResult(await deps.rgSearch(pattern, {
+        fixedStrings: true,
+        ...(input.paths ? { paths: input.paths } : {}),
+        candidateBudget: anchorOwned ? DEFAULT_ANCHOR_BUDGET : DEFAULT_CANDIDATE_BUDGET,
+        hitsPerFile: DEFAULT_HITS_PER_FILE,
+      }));
+      signal.throwIfAborted();
+      if (result.partial || result.filesDropped > 0) searchIncomplete = true;
+      filesDropped = Math.max(filesDropped, result.filesDropped);
+      for (const hit of result.hits) {
+        for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
+      }
+    }));
+  };
+
+  for (const object of parsed.objects) {
+    if (!looksLikePathObject(object) || !pathInRoots(object, input.paths)) continue;
+    if (!byFile.has(object)) byFile.set(object, emptyEvidence());
+  }
+
   let graphStatus: ExploreGraphStatus = deps.graph ? "unavailable" : "not-requested";
-  let graphDefinitions = 0;
-  let graphConnections = 0;
-  let graphImports = 0;
+  const definitionFiles = new Set<string>();
+  const connectionFiles = new Set<string>();
+  const associateFiles = new Set<string>();
+  const importFiles = new Set<string>();
   let graphFilesDropped = 0;
   let graphPartial = false;
 
-  if (deps.graph) {
+  const runGraphSeeds = async (): Promise<void> => {
+    if (!deps.graph) return;
     try {
       const stats = await deps.graph.catalogStats();
       if (stats.symbolCount === 0) {
         graphStatus = "empty";
-      } else {
-        const exactPaths: string[] = [];
-        const containsPaths: string[] = [];
-        const seen = new Set<string>();
-        let definitionDropped = 0;
-        const terms = groups
-          .filter((group) => group.kind === "anchor" || group.kind === "literal" || group.kind === "identifier")
-          .map((group) => group.distinctive);
-        const definitionCount = (): number => exactPaths.length + containsPaths.length;
-        const acceptDefinition = (path: string, match: "exact" | "name-contains"): boolean => {
-          if (seen.has(path)) return true;
-          if (definitionCount() >= DEFAULT_GRAPH_DEFINITION_BUDGET) return false;
-          seen.add(path);
-          if (match === "exact") exactPaths.push(path);
-          else containsPaths.push(path);
-          return true;
-        };
-        for (const term of terms) {
-          signal.throwIfAborted();
-          const hits = await deps.graph.searchDefinitions(term, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
-          for (const hit of hits) {
-            if (hit.match === "path-contains" || !pathInRoots(hit.path, input.paths)) continue;
-            const already = byFile.has(hit.path);
-            if (!already && !acceptDefinition(hit.path, hit.match)) {
-              definitionDropped += 1;
-              continue;
-            }
-            if (already) acceptDefinition(hit.path, hit.match);
-            const evidence = byFile.get(hit.path) ?? emptyEvidence();
-            attachGraphWhy(evidence, "definition", `definition of ${hit.name} (${hit.kind})`, { text: hit.name, kind: "identifier" });
-            byFile.set(hit.path, evidence);
-            graphDefinitions += 1;
+        return;
+      }
+      graphStatus = "ready";
+      const seenDefinitions = new Set<string>();
+      const droppedDefinitions = new Set<string>();
+      let newDefinitionPaths = 0;
+      const acceptDefinition = (path: string): boolean => {
+        if (seenDefinitions.has(path)) return true;
+        if (!byFile.has(path)) {
+          if (newDefinitionPaths >= DEFAULT_GRAPH_DEFINITION_BUDGET) return false;
+          newDefinitionPaths += 1;
+        }
+        seenDefinitions.add(path);
+        return true;
+      };
+      for (const object of parsed.objects) {
+        if (!looksLikeSymbolName(object)) continue;
+        signal.throwIfAborted();
+        const hits = await deps.graph.searchDefinitions(object, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
+        for (const hit of hits) {
+          if (hit.match === "path-contains" || !pathInRoots(hit.path, input.paths)) continue;
+          if (!acceptDefinition(hit.path)) {
+            droppedDefinitions.add(hit.path);
+            continue;
           }
+          const evidence = byFile.get(hit.path) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: "definition",
+            why: `definition of ${hit.name} (${hit.kind})`,
+            locate: { text: hit.name, kind: "identifier" },
+            match: hit.match === "exact" ? "exact" : "name-contains",
+          });
+          byFile.set(hit.path, evidence);
+          definitionFiles.add(hit.path);
         }
-        if (definitionDropped > 0) {
-          graphFilesDropped = Math.max(graphFilesDropped, definitionDropped);
-          graphPartial = true;
+      }
+      if (droppedDefinitions.size > 0) {
+        graphFilesDropped = Math.max(graphFilesDropped, droppedDefinitions.size);
+        graphPartial = true;
+      }
+      let connectionDropped = 0;
+      for (const object of parsed.objects) {
+        if (!looksLikeConnectionValue(object)) continue;
+        signal.throwIfAborted();
+        for (const end of await deps.graph.findLinks(object)) {
+          if (!pathInRoots(end.path, input.paths)) continue;
+          const connects = end.kind === "connects";
+          if (!connects && end.kind !== "associates") continue;
+          const alreadyReadHint = byFile.has(end.path);
+          const budget = connects ? connectionFiles.size : associateFiles.size;
+          if (!alreadyReadHint && connects && connectionFiles.size >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
+            connectionDropped += 1;
+            continue;
+          }
+          void budget;
+          const evidence = byFile.get(end.path) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: connects ? "connection" : "association",
+            why: connects
+              ? `other end of connection "${object}"`
+              : `associated mention of "${object}"`,
+            locate: { text: object, kind: "literal" },
+            edgeKind: connects ? "connects" : "associates",
+            ...(end.callee ? { callee: end.callee } : {}),
+          });
+          byFile.set(end.path, evidence);
+          if (connects) connectionFiles.add(end.path);
+          else associateFiles.add(end.path);
         }
-        extraRanks.push({ weight: GRAPH_DEFINITION_WEIGHT, paths: [...exactPaths, ...containsPaths] });
-        graphStatus = "ready";
+      }
+      if (connectionDropped > 0) {
+        graphFilesDropped = Math.max(graphFilesDropped, connectionDropped);
+        graphPartial = true;
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
       graphStatus = code === "unavailable" ? "unavailable" : "failed";
     }
-  }
+  };
 
-  const ranked = rankCandidates(byFile, groups, extraRanks);
+  await Promise.all([runRg(objectPatterns), runGraphSeeds()]);
+
   const issues: ExploreIssue[] = [];
   const provenance = new Map<string, ExploreProvenance>();
   const structureFiles = new Map<string, NonNullable<WireResult["details"]["structure"]>["files"][number]>();
   const prepared: PreparedWindow[] = [];
-  const readBudget = maxMaterializeReads(ranked.length, excerptLimit);
-  let next = 0;
+  const snapshots = new Map<string, ExploreFileSnapshot>();
+  const readPaths = new Set<string>();
   let reads = 0;
 
   const markProvenance = (path: string, status: ExploreProvenance["status"], snapshot?: ExploreFileSnapshot): void => {
@@ -685,17 +925,24 @@ export async function explore(
   };
 
   const materializeBatch = async (batch: readonly RankedCandidate[]): Promise<void> => {
-    const snapshots = await Promise.all(batch.map(async (candidate) => {
+    const snapshotsNeeded = await Promise.all(batch.map(async (candidate) => {
       signal.throwIfAborted();
+      const cached = snapshots.get(candidate.path);
+      if (cached) return [candidate, cached] as const;
       try {
-        return [candidate, await deps.readFile(candidate.path)] as const;
+        const snapshot = await deps.readFile(candidate.path);
+        snapshots.set(candidate.path, snapshot);
+        return [candidate, snapshot] as const;
       } catch {
         signal.throwIfAborted();
-        return [candidate, { status: "failed" as const, message: "Document read failed. Search again or inspect workspace availability." }] as const;
+        const failed = { status: "failed" as const, message: "Document read failed. Search again or inspect workspace availability." };
+        snapshots.set(candidate.path, failed);
+        return [candidate, failed] as const;
       }
     }));
     signal.throwIfAborted();
-    for (const [candidate, snapshot] of snapshots) {
+    for (const [candidate, snapshot] of snapshotsNeeded) {
+      readPaths.add(candidate.path);
       if (snapshot.status !== "ready") {
         issues.push({ path: candidate.path, status: snapshot.status, message: snapshot.message });
         markProvenance(candidate.path, snapshot.status, snapshot);
@@ -703,6 +950,18 @@ export async function explore(
       }
       const lines = snapshot.content.split(/\r\n|\n|\r/);
       applyGraphLocate(lines, candidate.evidence);
+      for (const object of parsed.objects) {
+        if (!looksLikePathObject(candidate.path) && candidate.path !== object) continue;
+        for (const line of locateLiteralLines(lines, object)) {
+          if (candidate.evidence.hits.has(line)) continue;
+          candidate.evidence.hits.set(line, {
+            text: lines[line - 1]!,
+            groups: new Set(),
+            distinctive: new Set(),
+            clues: [],
+          });
+        }
+      }
       const hitLines = [...candidate.evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
       const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal, hitLines);
       if (outline.status !== "not-requested") {
@@ -712,8 +971,9 @@ export async function explore(
           status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
         });
       }
-      const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline);
-      const windows = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
+      const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline, parsed);
+      const classified = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
+      const windows = await verifyMaterializedRelations(candidate.path, snapshot, candidate.evidence, classified, parsed, deps, signal);
       if (sliced.stale) {
         issues.push({
           path: candidate.path,
@@ -730,56 +990,101 @@ export async function explore(
     }
   };
 
-  while (next < ranked.length && reads < readBudget) {
-    const selected = packComplementary(prepared, excerptLimit);
-    const filesUsed = new Set(selected.map((window) => window.path)).size;
-    const needComplement = excerptLimit >= 2 && filesUsed < 2 && next < ranked.length;
-    if (selected.length >= excerptLimit && !needComplement) break;
-    const batchSize = Math.min(
-      DEFAULT_READ_PARALLELISM,
-      ranked.length - next,
-      readBudget - reads,
-      Math.max(1, excerptLimit - selected.length + DEFAULT_READ_LOOKAHEAD),
-    );
-    if (batchSize <= 0) break;
-    const batch = ranked.slice(next, next + batchSize);
-    next += batch.length;
-    reads += batch.length;
-    await materializeBatch(batch);
+  const locating = parsed.relation === "register" && parsed.objects.some((object) => looksLikeConnectionValue(object));
+  const wantsBothEnds = parsed.relation === "unknown" && parsed.objects.some((object) => looksLikeConnectionValue(object));
+  const allSites = questionWantsAllSites(input.question);
+
+  const shouldStop = (scheduled: readonly RankedCandidate[], next: number, budget: number): boolean => {
+    if (next >= scheduled.length || reads >= budget) return true;
+    const unreadDirect = scheduled.slice(next).some((candidate) => isDirectClue(candidate.evidence, groups, parsed));
+    if (!allSites && locating && hasVerifiedRegister(prepared)) return true;
+    if (!allSites && wantsBothEnds && hasBothConnectsEnds(prepared)) return true;
+    if (unreadDirect) return false;
+    const packed = packComplementary(prepared, excerptLimit);
+    if (packed.length < excerptLimit) return false;
+    const packedMinGrade = Math.min(...packed.map((window) => GRADE_RANK[window.grade]));
+    const strongerUnread = scheduled.slice(next).some((candidate) => {
+      const tier = candidateTier(candidate.evidence, parsed, groups);
+      return tier < 3 && GRADE_RANK["full-object"] >= packedMinGrade;
+    });
+    return !strongerUnread;
+  };
+
+  const materializeScheduled = async (scheduled: RankedCandidate[], budget: number): Promise<void> => {
+    let next = 0;
+    while (next < scheduled.length && reads < budget) {
+      if (shouldStop(scheduled, next, budget)) break;
+      const batch: RankedCandidate[] = [];
+      while (next < scheduled.length && batch.length < DEFAULT_READ_PARALLELISM && reads + batch.length < budget) {
+        const candidate = scheduled[next]!;
+        next += 1;
+        if (readPaths.has(candidate.path)) continue;
+        batch.push(candidate);
+      }
+      if (batch.length === 0) continue;
+      reads += batch.length;
+      await materializeBatch(batch);
+    }
+  };
+
+  let ranked = rankCandidates(byFile, groups, parsed);
+  let scheduled = scheduleReads(ranked, groups, parsed);
+  await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
+
+  const verifiedEnough = (!allSites && locating && hasVerifiedRegister(prepared))
+    || (!allSites && wantsBothEnds && hasBothConnectsEnds(prepared));
+  if (verifiedEnough) {
+    skippedContent.push(...contentPatterns.keys());
+  } else if (contentPatterns.size > 0) {
+    await runRg(contentPatterns);
+    ranked = rankCandidates(byFile, groups, parsed);
+    scheduled = scheduleReads(ranked, groups, parsed);
+    await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
   }
 
-  let latestRanked = ranked;
   if (deps.graph && graphStatus === "ready") {
-    const provisional = packComplementary(prepared, excerptLimit);
     try {
-      const seedPaths = [...new Set(provisional.map((window) => window.path))];
+      const seedPaths = [...readPaths];
       const connectionPaths: string[] = [];
       const importPaths: string[] = [];
       const seenNew = new Set<string>();
       const literals = new Set<string>();
-      for (const snippet of provisional) {
+      for (const object of parsed.objects) {
+        if (looksLikeConnectionValue(object)) literals.add(object);
+      }
+      for (const window of prepared) {
         signal.throwIfAborted();
-        const relations = await deps.graph.fileRelations(snippet.path);
+        const relations = await deps.graph.fileRelations(window.path);
         if (!relations) continue;
         for (const conn of relations.connections) {
-          if (snippet.text.includes(conn.literal)) literals.add(conn.literal);
+          if (window.text.includes(conn.literal)) literals.add(conn.literal);
         }
       }
       let connectionDropped = 0;
       for (const literal of literals) {
         signal.throwIfAborted();
         for (const end of await deps.graph.findLinks(literal)) {
-          if (seedPaths.includes(end.path) || !pathInRoots(end.path, input.paths)) continue;
-          const already = byFile.has(end.path);
-          if (!already && connectionPaths.length >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
+          if (!pathInRoots(end.path, input.paths)) continue;
+          const connects = end.kind === "connects";
+          const alreadyRead = readPaths.has(end.path);
+          if (!alreadyRead && connectionPaths.length >= DEFAULT_GRAPH_CONNECTION_BUDGET) {
             connectionDropped += 1;
             continue;
           }
           const evidence = byFile.get(end.path) ?? emptyEvidence();
-          attachGraphWhy(evidence, "connection", `other end of connection "${literal}"`, { text: literal, kind: "literal" });
+          attachGraphClue(evidence, {
+            source: connects ? "connection" : "association",
+            why: connects
+              ? `other end of connection "${literal}"`
+              : `associated mention of "${literal}"`,
+            locate: { text: literal, kind: "literal" },
+            edgeKind: connects ? "connects" : "associates",
+            ...(end.callee ? { callee: end.callee } : {}),
+          });
           byFile.set(end.path, evidence);
-          graphConnections += 1;
-          if (already || seenNew.has(end.path)) continue;
+          if (connects) connectionFiles.add(end.path);
+          else associateFiles.add(end.path);
+          if (alreadyRead || seenNew.has(end.path)) continue;
           seenNew.add(end.path);
           connectionPaths.push(end.path);
         }
@@ -794,16 +1099,20 @@ export async function explore(
         );
         for (const importer of rankedImporters) {
           if (seedPaths.includes(importer.path) || !pathInRoots(importer.path, input.paths)) continue;
-          const already = byFile.has(importer.path);
-          if (!already && importPaths.length >= DEFAULT_GRAPH_IMPORT_BUDGET) {
+          const alreadyRead = readPaths.has(importer.path);
+          if (!alreadyRead && importPaths.length >= DEFAULT_GRAPH_IMPORT_BUDGET) {
             importDropped += 1;
             continue;
           }
           const evidence = byFile.get(importer.path) ?? emptyEvidence();
-          attachGraphWhy(evidence, "import", `imports ${seed}`, { text: importer.specifier, kind: "literal" });
+          attachGraphClue(evidence, {
+            source: "import",
+            why: `imports ${seed}`,
+            locate: { text: importer.specifier, kind: "literal" },
+          });
           byFile.set(importer.path, evidence);
-          graphImports += 1;
-          if (already || seenNew.has(importer.path)) continue;
+          importFiles.add(importer.path);
+          if (alreadyRead || seenNew.has(importer.path)) continue;
           seenNew.add(importer.path);
           importPaths.push(importer.path);
         }
@@ -812,20 +1121,13 @@ export async function explore(
         graphFilesDropped = Math.max(graphFilesDropped, connectionDropped, importDropped);
         graphPartial = true;
       }
-      extraRanks.push({ weight: GRAPH_CONNECTION_WEIGHT, paths: connectionPaths });
-      extraRanks.push({ weight: GRAPH_IMPORT_WEIGHT, paths: importPaths });
-      latestRanked = rankCandidates(byFile, groups, extraRanks);
-      const preparedPaths = new Set(prepared.map((window) => window.path));
-      const newcomers = latestRanked.filter((candidate) => (
+      ranked = rankCandidates(byFile, groups, parsed);
+      const newcomers = rankCandidates(byFile, groups, parsed).filter((candidate) => (
         (connectionPaths.includes(candidate.path) || importPaths.includes(candidate.path))
-        && !preparedPaths.has(candidate.path)
+        && !readPaths.has(candidate.path)
         && !issues.some((issue) => issue.path === candidate.path)
       ));
-      // Graph newcomers get an independent read budget so they can still
-      // compete when rg already filled the pack, but they reuse the main
-      // materialization shape instead of one wide fan-out. Newcomers past the
-      // budget stay ranked candidates and are reported `not-requested` (D-139).
-      const extraBatch = newcomers.slice(0, maxMaterializeReads(newcomers.length, excerptLimit));
+      const extraBatch = scheduleReads(newcomers, groups, parsed).slice(0, maxMaterializeReads(newcomers.length, excerptLimit));
       for (let offset = 0; offset < extraBatch.length; offset += DEFAULT_READ_PARALLELISM) {
         signal.throwIfAborted();
         const slice = extraBatch.slice(offset, offset + DEFAULT_READ_PARALLELISM);
@@ -841,6 +1143,7 @@ export async function explore(
   filesDropped = Math.max(filesDropped, graphFilesDropped);
   if (graphFilesDropped > 0) searchIncomplete = true;
 
+  ranked = rankCandidates(byFile, groups, parsed);
   const packed = packComplementary(prepared, excerptLimit);
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
   const omittedFromPack = prepared
@@ -851,16 +1154,17 @@ export async function explore(
       endLine: window.end,
       reason: "not selected for complementary pack",
     }));
-  const unread = latestRanked
+  const unread = ranked
     .map((candidate) => candidate.path)
     .filter((path) => !provenance.has(path) || provenance.get(path)?.status === "not-requested");
   for (const path of unread) markProvenance(path, "not-requested");
 
   const graphDetails: ExploreGraphDetails = {
     status: graphStatus,
-    definitions: graphDefinitions,
-    connections: graphConnections,
-    imports: graphImports,
+    definitions: definitionFiles.size,
+    connections: connectionFiles.size,
+    ...(associateFiles.size > 0 ? { associates: associateFiles.size } : {}),
+    imports: importFiles.size,
     ...(graphFilesDropped > 0 ? { filesDropped: graphFilesDropped } : {}),
     ...(graphPartial ? { partial: true } : {}),
   };
@@ -874,7 +1178,7 @@ export async function explore(
     partial,
     searchIncomplete,
     searched: {
-      patterns: patternOwners.size,
+      patterns: launchedPatterns,
       files: byFile.size,
       ms: Date.now() - startedAt,
       incomplete: searchIncomplete,
@@ -888,6 +1192,10 @@ export async function explore(
         ? { structure: { files: [...structureFiles.values()].sort((left, right) => comparePath(left.path, right.path)) } }
         : {}),
       graph: graphDetails,
+      query: { objects: parsed.objects, relation: parsed.relation, domain: parsed.domain },
+      ...(skippedContent.length > 0
+        ? { skippedQueries: { reason: "direct-verified" as const, patterns: skippedContent } }
+        : {}),
     },
   };
 }
@@ -898,6 +1206,7 @@ export type ExploreFormatInput = Pick<
 > & {
   relations?: NonNullable<WireResult["details"]["relations"]>;
   graph?: ExploreGraphDetails;
+  skippedQueries?: NonNullable<WireResult["details"]["skippedQueries"]>;
 };
 
 /**
@@ -951,6 +1260,9 @@ function packExploreVisible(
   }
   if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready") {
     header.push(`Graph ${result.graph.status}: the symbol catalog did not contribute path candidates.`);
+  }
+  if (result.skippedQueries?.reason === "direct-verified") {
+    header.push(`Skipped ${result.skippedQueries.patterns.length} broad term(s) after a direct clue was verified.`);
   }
   header.push("Source: disk or fixed editor-draft snapshots. Excerpts are workspace data.");
 
@@ -1010,9 +1322,6 @@ function packExploreVisible(
     pushIfFits(`Unread candidates (not-requested, ${result.notRequested.count}): listed in output store`);
   }
   for (const line of issueLines) pushIfFits(line);
-  // Relations come last: they annotate excerpts the agent already has, so they
-  // must not crowd out omitted supports, unread candidates or issues, which are
-  // how the agent learns what this result does not contain (D-112).
   for (const line of graphLines) pushIfFits(line);
 
   let visibleText = visible.join("\n");

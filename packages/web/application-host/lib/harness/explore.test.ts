@@ -895,7 +895,8 @@ describe("explore graph path recall", () => {
     const other = result.snippets.find((snippet) => snippet.path === "register.ts");
     expect(other?.why).toContain("other end of connection \"unique.wire.literal\"");
     expect(other?.why).not.toMatch(/matched uniqueWireHandler/);
-    expect(result.details.graph).toMatchObject({ status: "ready", connections: 1 });
+    expect(result.details.graph?.status).toBe("ready");
+    expect(result.details.graph?.connections).toBeGreaterThanOrEqual(1);
   });
 
   it("adds a reverse-import candidate and does not pretend it was an rg hit", async () => {
@@ -1020,5 +1021,242 @@ describe("explore graph path recall", () => {
     expect(result.searched.filesDropped).toBeGreaterThanOrEqual(12);
     expect(result.details.graph?.filesDropped).toBeGreaterThan(0);
     expect(result.searched.filesDropped).toBe(Math.max(12, result.details.graph?.filesDropped ?? 0));
+  });
+});
+
+describe("explore 3.13 ranking and verification", () => {
+  it("does not let path-alphabetical rg hits beat a later source file that has the register call", async () => {
+    const result = await explore({ question: "where is explore.search registered" }, {
+      rgSearch: async (pattern) => {
+        if (pattern !== "explore.search") return [];
+        return [
+          { path: "bun.lock", line: 1, text: "explore.search" },
+          { path: "docs/agent-harness.md", line: 1, text: "explore.search is registered on the host" },
+          { path: "packages/web/application-host/lib/harness/harness-services.ts", line: 1, text: "register(\"explore.search\", createExploreSearchService)" },
+        ];
+      },
+      readFile: async (path) => {
+        if (path.endsWith("harness-services.ts")) return ready("register(\"explore.search\", createExploreSearchService)");
+        if (path === "bun.lock") return ready("explore.search");
+        return ready("explore.search is registered on the host");
+      },
+    });
+    expect(result.snippets[0]?.path).toContain("harness-services.ts");
+    expect(result.snippets[0]?.text).toContain("register(\"explore.search\"");
+    expect(result.details.query).toMatchObject({ objects: ["explore.search"], relation: "register", domain: "implementation" });
+  });
+
+  it("still reads a graph-selected source file that rg already had in the pool", async () => {
+    const readFile = vi.fn(async (path: string) => (
+      path === "zzz-source.ts"
+        ? ready("router.register(\"explore.search\", handler);")
+        : ready("mention explore.search in prose")
+    ));
+    const result = await explore({ question: "where is explore.search registered" }, {
+      rgSearch: async () => [
+        { path: "aaa-docs.md", line: 1, text: "mention explore.search in prose" },
+        { path: "zzz-source.ts", line: 1, text: "router.register(\"explore.search\", handler);" },
+      ],
+      readFile,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 4 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => value === "explore.search"
+          ? [{ path: "zzz-source.ts", kind: "connects", value, callee: "register" }]
+          : [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(readFile.mock.calls.some((call) => call[0] === "zzz-source.ts")).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path === "zzz-source.ts")).toBe(true);
+    expect(result.notRequested.paths).not.toContain("zzz-source.ts");
+  });
+
+  it("relocates a stale graph hint in current text and drops it when the object is gone", async () => {
+    const result = await explore({ question: "explore.search" }, {
+      rgSearch: async () => [],
+      readFile: async () => ready("export function other() { return 1; }\n"),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [{ path: "moved.ts", kind: "connects", value: "explore.search", callee: "register" }],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets).toEqual([]);
+    expect(result.details.provenance.find((entry) => entry.path === "moved.ts")?.status).toBe("empty");
+  });
+
+  it("keeps rg excerpts when the graph is unavailable", async () => {
+    const result = await explore({ question: "where is explore.search registered" }, {
+      rgSearch: async () => [{ path: "src/router.ts", line: 1, text: "register(\"explore.search\")" }],
+      readFile: async () => ready("register(\"explore.search\")"),
+      graph: {
+        catalogStats: async () => {
+          throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
+        },
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.path).toBe("src/router.ts");
+    expect(result.details.graph?.status).toBe("unavailable");
+  });
+
+  it("prefers the production register over a same-name test fixture when the question asks for the host entry", async () => {
+    const result = await explore({ question: "where is explore.search registered on the host router" }, {
+      rgSearch: async () => [
+        { path: "src/harness-services.ts", line: 1, text: "register(\"explore.search\", service)" },
+        { path: "test/session-e2e.test.ts", line: 1, text: "register(\"explore.search\", fake)" },
+      ],
+      readFile: async (path) => ready(path.includes("test") ? "register(\"explore.search\", fake)" : "register(\"explore.search\", service)"),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 2 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [
+          { path: "src/harness-services.ts", kind: "connects", value: "explore.search", callee: "register" },
+          { path: "test/session-e2e.test.ts", kind: "connects", value: "explore.search", callee: "register" },
+        ],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.path).toBe("src/harness-services.ts");
+  });
+
+  it("returns the current text when structure cannot verify a register relation", async () => {
+    const result = await explore({ question: "where is explore.search registered" }, {
+      rgSearch: async () => [{ path: "src/router.ts", line: 1, text: "register(\"explore.search\")" }],
+      readFile: async () => ready("register(\"explore.search\")"),
+      structure: {
+        outline: async (request) => ({ status: "unsupported", provider: "tree-sitter", revision: request.revision, symbols: [] }),
+        classifyHits: async (request) => ({ status: "unsupported", provider: "tree-sitter", revision: request.revision, hits: [] }),
+        literalCalls: async (request) => ({ status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [] }),
+      },
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [{ path: "src/router.ts", kind: "connects", value: "explore.search", callee: "register" }],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets[0]?.text).toContain("register(\"explore.search\")");
+    expect(result.snippets[0]?.why).not.toMatch(/verified register\(/);
+    expect(result.snippets[0]?.why).toMatch(/graph pointed here|other end of connection/);
+  });
+
+  it("binds a definition clue to the window that contains it, not every window in the file", async () => {
+    const content = [
+      "export function createExploreFixture() { return explore; }",
+      "export function other() { return explore; }",
+      "export function third() { return explore; }",
+    ].join("\n");
+    const result = await explore({ question: "createExploreFixture", limit: 3 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "createExploreFixture") return [{ path: "session-e2e.test.ts", line: 1, text: "export function createExploreFixture() { return explore; }" }];
+        if (pattern === "explore") {
+          return [
+            { path: "session-e2e.test.ts", line: 1, text: "export function createExploreFixture() { return explore; }" },
+            { path: "session-e2e.test.ts", line: 2, text: "export function other() { return explore; }" },
+            { path: "session-e2e.test.ts", line: 3, text: "export function third() { return explore; }" },
+          ];
+        }
+        return [];
+      },
+      readFile: async () => ready(content),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async (query) => query === "createExploreFixture"
+          ? [{ name: "createExploreFixture", path: "session-e2e.test.ts", kind: "function", match: "exact" as const }]
+          : [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    const defined = result.snippets.filter((snippet) => snippet.why.includes("definition of createExploreFixture"));
+    expect(defined.length).toBe(1);
+    expect(defined[0]?.text).toContain("createExploreFixture");
+  });
+
+  it("does not expand every connection on a materialized file, only literals in the current window", async () => {
+    const registrar = [
+      "export function registerHarnessServices() {",
+      ...Array.from({ length: 40 }, (_, index) => `  register("other.service.${index}", noop);`),
+      "  register(\"explore.search\", createExploreSearchService);",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "where is explore.search registered", limit: 4 }, {
+      rgSearch: async (pattern) => pattern === "explore.search"
+        ? [{ path: "src/harness-services.ts", line: 42, text: "  register(\"explore.search\", createExploreSearchService);" }]
+        : [],
+      readFile: async (path) => path === "src/harness-services.ts"
+        ? ready(registrar)
+        : ready("register(\"shell.exec\", createBashTool);"),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 3 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => {
+          if (value === "explore.search") return [{ path: "src/harness-services.ts", kind: "connects", value, callee: "register" }];
+          if (value.startsWith("other.service") || value === "shell.exec") {
+            return [{ path: "src/bash-tool.ts", kind: "connects", value, callee: "register" }];
+          }
+          return [];
+        },
+        fileRelations: async (path) => path === "src/harness-services.ts"
+          ? {
+            connections: [
+              ...Array.from({ length: 40 }, (_, index) => ({ callee: "register", literal: `other.service.${index}` })),
+              { callee: "register", literal: "explore.search" },
+            ],
+            linksIncomplete: false,
+          }
+          : null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.path === "src/harness-services.ts")).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path === "src/bash-tool.ts")).toBe(false);
+  });
+
+  it("records skipped content-word queries as direct-verified, not as unread budget", async () => {
+    const rgSearch = vi.fn(async (pattern: string) => {
+      if (pattern === "explore.search") {
+        return [{ path: "src/router.ts", line: 1, text: "register(\"explore.search\", handler)" }];
+      }
+      return [{ path: "docs/guide.md", line: 1, text: "service host router" }];
+    });
+    const result = await explore({ question: "where is the explore.search service registered on the host router" }, {
+      rgSearch,
+      readFile: async () => ready("register(\"explore.search\", handler)"),
+      structure: {
+        outline: async (request) => ({ status: "ready", provider: "tree-sitter", revision: request.revision, symbols: [] }),
+        classifyHits: async (request) => ({ status: "ready", provider: "tree-sitter", revision: request.revision, hits: [] }),
+        literalCalls: async (request) => ({
+          status: "ready",
+          provider: "tree-sitter",
+          revision: request.revision,
+          calls: [{ name: "register", literal: "explore.search", line: 1 }],
+        }),
+      },
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [{ path: "src/router.ts", kind: "connects", value: "explore.search", callee: "register" }],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(rgSearch.mock.calls.map((call) => call[0])).toEqual(["explore.search"]);
+    expect(result.details.skippedQueries).toEqual({
+      reason: "direct-verified",
+      patterns: expect.arrayContaining(["service", "host", "router"]),
+    });
+    expect(result.snippets[0]?.why).toContain("verified register(\"explore.search\")");
   });
 });

@@ -169,6 +169,12 @@ export function createExploreSearchService(
               sessionId: ctx.sessionId,
               inputContext,
             }),
+            literalCalls: (request) => host.structureSource!.literalCalls({
+              ...request,
+              workspaceId,
+              sessionId: ctx.sessionId,
+              inputContext,
+            }),
           },
         } : {}),
         ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
@@ -194,6 +200,7 @@ export function createExploreSearchService(
         },
         ...(relations ? { relations } : {}),
         ...(result.details.graph ? { graph: result.details.graph } : {}),
+        ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
       };
       const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
       const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
@@ -214,6 +221,8 @@ export function createExploreSearchService(
           ...(result.details.structure ? { structure: result.details.structure } : {}),
           ...(relations ? { relations } : {}),
           ...(result.details.graph ? { graph: result.details.graph } : {}),
+          ...(result.details.query ? { query: result.details.query } : {}),
+          ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
         },
       };
     },
