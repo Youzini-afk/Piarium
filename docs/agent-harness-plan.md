@@ -573,7 +573,10 @@ AFT 证明这是几个模块的工程量，不是研究——但它的切块是�
 
 **第一片：语义召回端到端通。** 本地 `all-MiniLM-L6-v2` 经 `@huggingface/transformers`，模型包（权重 + tokenizer + 配置 +
 pooling/归一化 + 运行配方）走语法包的内容寻址存储，默认包随发行版；切块按设计 6.1（小单元整块、大单元按语法块递归、父单元名与签名
-随块、按 tokenizer 实际长度、无结构时重叠行块记 fallback）；独立代际存储 `semantic/{spaceId}/{generation}`，不进权威 `.tdb`；
+随块、按 tokenizer 实际长度、无结构时重叠行块记 fallback）；独立代际存储，不进权威 `.tdb`。**两条接缝约束**（D-162，
+为将来的用户级 / 工作集 / 集合范围留门，本片不实现它们）：存储路径与查询接口以**范围键** `{ scopeKind, scopeId }` 为参数，
+本片 `scopeKind` 只有 `workspace`，但 `workspaceId` 不许作为字面量焊进路径、块身份、父单元身份或查询签名；索引里的
+**文档身份是 `{ scopeKind, scopeId, documentId, revision }`**，`documentId` 对文件范围是相对路径，类型上不假定它是路径。
 向量空间身份 / 索引配方身份两类先落（查询与重排身份等第二片）；后台建索引由配置 authority 给工作区有效绑定，不依赖聊天 session；
 按文件/分片原子发布、查询固定检查点、`index.lifecycle` 与 `query.status` 两轴、建到一半用一半；以 Documents 修订增量更新。
 接入 3.15：语义线索经 `focusRanges` 进证据单元（块哈希一致直接采用范围，否则按父符号身份重定位，实质变化则重切），
