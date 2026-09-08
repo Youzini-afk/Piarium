@@ -3521,6 +3521,35 @@ web tsc。
 
 状态：已实施。
 
+### D-172 · 2026-09-08 · 本地嵌入器补上运行时并首次真跑；主证据是分区不是首条；import 到达理由补语句取证
+
+背景：3.15①②④ + 3.16 第一片的验收（D-163–D-171）。管道部分实、范围键守住、探针没进观察脚本、量具改读渲染正文，这些都复核成立；十问我逐格重跑与报告一致。三处报告未列：
+
+**一、本地 MiniLM 在任何环境都没有运行时。** 报告写的是「本机缺 ONNX」「发行包里没有 `@huggingface/transformers`」，实际是**任何 package.json 都没有声明这个依赖**，`node_modules` 里也没有；而 `minilm.ts` 用 `new Function("specifier", "return import(specifier)")` 加载，打包器与 `tsc` 都看不见它，CI 永远不会报缺依赖。`minilm.ts` 110 行零测试引用。所以「本地 MiniLM 端到端」不是未验证，是按当时代码无法验证；D-169 把缺依赖写成了健壮性属性（「未安装不得让 Host 启动失败」）而不是未完成的交付。修的时候暴露出四层都没跑过：`new Function` 形式在测试运行器下直接抛「A dynamic import callback was not specified」；transformers.js 解析本地包要 `env.localModelPath` + 目录名，传 file:// URL 会读错 `tokenizer_config.json` 的基准；权重要按 `dtype` 决定文件名（`q8` → `onnx/model_quantized.onnx`）；而复制脚本把 `onnx/` 子目录拍平了、recipe 里 `onnxFile` 也少了这一层。四处都改。
+
+**二、主证据分区只在挑第一条时生效。** `packComplementary` 里 `const partition = selected.length === 0`，第二条起 `assessment` 一律记 0，而 `GRADE_RANK * 8` 已按上一轮 prompt 从 `windowScore` 删掉——已核验证据从 #2 起没有任何优势。设计说的是「先构造满足要求的主证据，再按相关性填支撑」，那是**所有**满足要求的片段。这一条我有责任：删 `GRADE_RANK` 是我在 prompt 里要的，同时把完整联合选择划到了第二片之外，但「分区」被实现成「只管第一条」是对设计的误读。
+
+**三、`arrivalForImport` 永不返回 `statement-evidence`。** 对比 `arrivalForLiteral` 会查 `literalOnHitLine`，import 那条不查，于是无对象问句的每条反向 import 线索永久是 `same-container`，即使 specifier 就在当前正文的命中行上。
+
+决定：
+
+- `@huggingface/transformers` 进 `packages/web` 依赖；动态加载改为 `await import(/* @vite-ignore */ MODULE_ID)`——仍不进打包器静态图，但真能加载、可测。模型包按上游布局保留 `onnx/` 子目录，`dtype: "q8"`，`env.localModelPath` 指向包的父目录、模型 id 用目录名。
+- 新增 `minilm.live.test.ts`（包缺失时 `skipIf` 跳过，权重由 `semantic:copy-model` 取、不入库）：真分词、真 384 维归一化向量、**词汇缺口排序**（`how does the runtime discard idle tokens` 对 `reclaimLease` 正文的余弦高于对 CSS 常量），以及**经真运行时的端到端**——真嵌入器扫两个文件、用零词汇重合的问题查回 `lease.ts`，`lifecycle=ready`、`coverage=complete`。这是这一片的招牌交付第一次真的发生。
+- 主证据分区改为覆盖全部挑选轮次，成员判据收窄为 `assessment === "verified-relation"`（仅含有对象不算，否则会把只重复对象的窗口抬到同文件机制块前面，与 D-155 冲突）；定义偏好仍只作首条 tie-break（`limit: 1` 的「哪一个窗口定义了 X」本就只关心第一条）。
+- `arrivalForImport` 增加 `literalOnHitLine` 判据。
+
+观察（同一目录 `--skip-scan`）：语义状态从 `unavailable` 变为 `empty`——模型包已能解析，索引空是因为观察脚本不触发语义扫描，两态按不变量 3 分开报。分区修复让问题 9 注册端从可见 #5 升到 #3、问题 6 从 #2 到 #3；请求端仍在 #19，**原因未定位**，不是分区造成的。问题 7、8 仍断在读取调度，import 到达理由的修复对它们没有效果——它们的目标不是经反向 import 到达的。
+
+另记两条方法问题：报告的前后对照表**混了两套量具**——3.14/D-157 的位次是 `snippets` 数组下标，本轮量具（D-171）改读渲染正文的段号，两者不可直接相减，而报告把「#16 → #18」当同一标尺呈现并给了「本观察目录、现仓库词法池」的解释。以后跨刀比较位次要注明标尺。问题 8 相对 `5092b682` 的变差，准确说法不是「语义源未参与」：到达理由降等**拿掉了一个原先把 `thread-worktree.ts` 抬进 tier 1 的信号**，而本该补上的语义召回当时是死的——这是步骤一的代价，不是中性变化。
+
+不改：范围键与文档身份接缝；量具读渲染正文；`windowScore` 其余项（等第二片接重排时整体替换）；读预算、字节预算、`limit` 数值。
+
+未验证：全仓库 MiniLM 冷扫描墙钟（观察脚本不触发语义扫描，这一片也没接）；Electron asar 里真实 `import("@huggingface/transformers")`（依赖刚加，未重跑打包 smoke）；问题 9 请求端 #19 的成因。
+
+影响：`explore.ts` packComplementary / arrivalForImport；`semantic/minilm.ts`；`scripts/copy-semantic-model.mjs`；`semantic/runtime/all-minilm-l6-v2/recipe.json`；`packages/web/package.json`；订正 D-169 的交付描述与 D-171 的可比性。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3696,6 +3725,7 @@ web tsc。
 | D-166 | implementation（MiniLM 有效长度 512 写入空间身份；切块按 tokenizer 计数） | — | semantic/identity.ts；设计 6.1 |
 | D-167 | implementation（范围键路径与查询；documentId 不透明；workspaceScope 是唯一焊点） | — | semantic/identity.ts store.ts runtime.ts；设计 7.1 |
 | D-168 | implementation（结构递归切块；正文优先装饰；缺结构走重叠 fallback） | — | semantic/chunker.ts embed-text.ts |
-| D-169 | implementation（独立代际 TDB；Host 工作区扫描；缺包 unavailable；transformers 动态加载） | — | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |
+| D-169 | superseded in part（代际库、扫描、缺包 unavailable 成立；「transformers 动态加载」当时无依赖声明、无测试、任何环境都跑不起来，被 D-172 补齐并首次真跑） | D-172 | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |
 | D-170 | implementation（语义线索进 focusRanges / 读取调度 / 打包；文件级 RRF k=60；details.semantic；无语义线索保持 3.14 顺序） | — | explore.ts explore-rrf.ts explore-service.ts；protocol ExploreSemanticDetails |
-| D-171 | implementation（观察量具读 text；semantic 诊断行；观察 host 绑 semanticRecall 但不冷扫 MiniLM） | — | scripts/explore-observe.ts explore-observe-stage.ts |
+| D-171 | implementation（观察量具读 text；semantic 诊断行；观察 host 绑 semanticRecall 但不冷扫 MiniLM）；换了标尺，位次不可与 3.14/D-157 的 snippets 下标直接相减（D-172） | — | scripts/explore-observe.ts explore-observe-stage.ts |
+| D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |

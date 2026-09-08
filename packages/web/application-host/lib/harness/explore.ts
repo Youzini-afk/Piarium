@@ -336,10 +336,19 @@ function arrivalForLiteral(
   return "same-container";
 }
 
-function arrivalForImport(specifier: string, seedPath: string, parsed: ExploreQueryParse): GraphArrivalReason {
+function arrivalForImport(
+  specifier: string,
+  seedPath: string,
+  parsed: ExploreQueryParse,
+  windows: readonly PreparedWindow[],
+): GraphArrivalReason {
   if (parsed.objects.some((object) => objectMatchesValue(object, specifier) || objectMatchesValue(object, seedPath))) {
     return "object-triggered";
   }
+  // An import whose specifier sits on a hit line of the current body is the
+  // same statement evidence a connection literal would be. Without this an
+  // object-less question can never reach a direct import clue (D-172).
+  if (literalOnHitLine(specifier, windows)) return "statement-evidence";
   return "same-container";
 }
 
@@ -1043,19 +1052,33 @@ function packComplementary(
 ): PreparedWindow[] {
   const selected: PreparedWindow[] = [];
   const remaining = locatingDone ? windows.filter((window) => !window.offTopic) : [...windows];
+  // Main evidence is a partition, not a first pick: every window that meets the
+  // asked object or relation is placed before support. Gating this on
+  // `selected.length === 0` left verified evidence with no advantage from the
+  // second slot on, because `GRADE_RANK` had already left windowScore — a
+  // connection's second end landed near the tail (D-172).
+  // Only a verified relation is main evidence. Merely containing the object is
+  // not: D-155 keeps a same-file mechanism block that does not repeat the
+  // object competing on its own added value.
+  const mainEvidence = new Set(
+    remaining.filter((window) => window.assessment === "verified-relation" && !window.offTopic),
+  );
   while (selected.length < limit && remaining.length > 0) {
     let bestIndex = 0;
     let bestRank = Number.NEGATIVE_INFINITY;
     let bestScore = Number.NEGATIVE_INFINITY;
     remaining.forEach((window, index) => {
       const rank = relationRoleRank(window, preferProduction);
-      const partition = selected.length === 0;
-      const assessment = partition ? ASSESSMENT_RANK[window.assessment] : 0;
-      const definition = partition ? definitionArrivalRank(window) : 0;
+      // The partition holds for every pick; the definition preference stays a
+      // first-pick tie-break, which is what "which one window defines X"
+      // needs (D-172).
+      const firstPick = selected.length === 0;
+      const assessment = mainEvidence.has(window) ? ASSESSMENT_RANK[window.assessment] : 0;
+      const definition = firstPick ? definitionArrivalRank(window) : 0;
       const score = windowScore(window, selected, weights);
       const best = remaining[bestIndex]!;
-      const bestAssessment = partition ? ASSESSMENT_RANK[best.assessment] : 0;
-      const bestDefinition = partition ? definitionArrivalRank(best) : 0;
+      const bestAssessment = mainEvidence.has(best) ? ASSESSMENT_RANK[best.assessment] : 0;
+      const bestDefinition = firstPick ? definitionArrivalRank(best) : 0;
       const better = rank > bestRank
         || (rank === bestRank && assessment > bestAssessment)
         || (rank === bestRank && assessment === bestAssessment && definition > bestDefinition)
@@ -1608,7 +1631,7 @@ export async function explore(
             source: "import",
             why: `imports ${seed}`,
             locate: { text: importer.specifier, kind: "literal" },
-            arrivalReason: arrivalForImport(importer.specifier, seed, parsed),
+            arrivalReason: arrivalForImport(importer.specifier, seed, parsed, prepared),
           });
           byFile.set(importer.path, evidence);
           importFiles.add(importer.path);

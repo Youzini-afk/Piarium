@@ -5,7 +5,7 @@
  */
 
 import os from "node:os";
-import { pathToFileURL } from "node:url";
+import { basename, dirname } from "node:path";
 import { intraOpThreads, LOCAL_MINILM_SPACE, type VectorSpaceIdentity } from "./identity.js";
 import type { SemanticEmbedder, SemanticEmbedderStatus } from "./embedder.js";
 import { resolveInstalledModelPack, type ResolvedModelPack } from "./model-store.js";
@@ -14,6 +14,8 @@ type Encoded = { length: number } | ArrayLike<number>;
 
 type TransformersModule = {
   env: {
+    allowRemoteModels?: boolean;
+    localModelPath?: string;
     backends?: {
       onnx?: {
         wasm?: { numThreads?: number };
@@ -28,7 +30,7 @@ type TransformersModule = {
   pipeline: (
     task: "feature-extraction",
     model: string,
-    options?: { local_files_only?: boolean },
+    options?: { local_files_only?: boolean; dtype?: string },
   ) => Promise<(
     texts: string | string[],
     options?: { pooling?: string; normalize?: boolean },
@@ -39,10 +41,18 @@ const encodedLength = (value: Encoded): number => (
   typeof (value as { length: number }).length === "number" ? (value as { length: number }).length : 0
 );
 
-const loadTransformers = async (): Promise<TransformersModule> => {
-  const load = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<TransformersModule>;
-  return load("@huggingface/transformers");
-};
+/**
+ * Kept out of the bundler's static graph so a desktop build does not inline the
+ * runtime, but a real dynamic import so it actually loads and is testable — the
+ * previous `new Function("return import(...)")` form threw "A dynamic import
+ * callback was not specified" under the test runner, which is why this path had
+ * never run (D-172).
+ */
+const TRANSFORMERS_MODULE_ID = "@huggingface/transformers";
+
+const loadTransformers = async (): Promise<TransformersModule> => (
+  await import(/* @vite-ignore */ TRANSFORMERS_MODULE_ID) as TransformersModule
+);
 
 export function createLocalMinilmEmbedder(options: {
   dataDir: string;
@@ -74,7 +84,12 @@ export function createLocalMinilmEmbedder(options: {
       }
       const mod = await loadTransformers();
       configureThreads(mod);
-      const source = pack.root.startsWith("file:") ? pack.root : pathToFileURL(pack.root).href;
+      // transformers.js resolves a local pack as `${env.localModelPath}/${id}`
+      // and looks for `onnx/<file>` inside it. A file:// URL as the id makes it
+      // read `tokenizer_config.json` off the wrong base (D-172).
+      mod.env.allowRemoteModels = false;
+      mod.env.localModelPath = dirname(pack.root);
+      const source = basename(pack.root);
       if (pack.tokenizerPath) {
         const tokenizer = await mod.AutoTokenizer.from_pretrained(source, { local_files_only: true });
         encode = (text) => {
@@ -83,7 +98,9 @@ export function createLocalMinilmEmbedder(options: {
         };
       }
       if (pack.onnxPath) {
-        const pipe = await mod.pipeline("feature-extraction", source, { local_files_only: true });
+        // `dtype` picks the weight filename: q8 resolves `onnx/model_quantized.onnx`,
+        // which is the file the pack recipe names (D-172).
+        const pipe = await mod.pipeline("feature-extraction", source, { local_files_only: true, dtype: "q8" });
         extractor = async (texts) => {
           const vectors: number[][] = [];
           for (const text of texts) {

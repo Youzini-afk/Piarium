@@ -7,6 +7,6 @@
   "pooling": "mean",
   "normalize": true,
   "maxTokens": 512,
-  "onnxFile": "model_quantized.onnx",
+  "onnxFile": "onnx/model_quantized.onnx",
   "tokenizerFile": "tokenizer.json"
 }

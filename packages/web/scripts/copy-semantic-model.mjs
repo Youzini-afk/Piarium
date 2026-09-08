@@ -36,7 +36,9 @@ const log = (message) => process.stdout.write(`[copy-semantic-model] ${message}\
 await mkdir(destDir, { recursive: true });
 for (const name of files) {
   const url = `${base}/${name}`;
-  const dest = join(destDir, name === "onnx/model_quantized.onnx" ? "model_quantized.onnx" : name);
+  // Keep the upstream layout: transformers.js resolves weights as
+  // `<pack>/onnx/<file>`, so flattening the path hides them (D-172).
+  const dest = join(destDir, ...name.split("/"));
   await mkdir(dirname(dest), { recursive: true });
   log(`fetch ${name}`);
   const response = await fetch(url);

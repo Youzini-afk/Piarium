@@ -1869,6 +1869,64 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
   });
 });
 
+describe("explore main-evidence partition", () => {
+  it("keeps both verified ends of one connection ahead of support windows", async () => {
+    // Bare `explore.search`: relation is unknown, so relationRoleRank is 0 and
+    // nothing but the partition protects verified evidence. Both ends must be
+    // packed before the filler that merely mentions the value.
+    // The register end is a large registration table, so its body cost is high
+    // and it adds no new term groups once the request end is picked. That is
+    // the real shape: without the partition it sinks below the small fillers.
+    const registrar = [
+      "export function registerHarnessServices() {",
+      ...Array.from({ length: 60 }, (_, index) => `  register("other.service.${index}", noop);`),
+      "  register(\"explore.search\", createExploreSearchService);",
+      "}",
+    ].join("\n");
+    const registrarHitLine = registrar.split("\n").findIndex((line) => line.includes("explore.search")) + 1;
+    const requester = [
+      "export function createExploreTool() {",
+      "  return request(\"explore.search\", params);",
+      "}",
+    ].join("\n");
+    // Fillers win on lexical coverage: they carry every content word. Only the
+    // partition can keep the two verified ends ahead of them.
+    const filler = (index: number) => [
+      `export function mention${index}() {`,
+      "  const host = router.service(\"explore.search\");",
+      "  return { host, router, service: \"explore.search\" };",
+      "}",
+    ].join("\n");
+    const fillerPaths = Array.from({ length: 12 }, (_, index) => `src/mention-${index}.ts`);
+    const result = await explore({ question: "explore.search host router service", limit: 4 }, {
+      rgSearch: async (pattern) => {
+        const hits: Array<{ path: string; line: number; text: string }> = [];
+        if (pattern === "explore.search") {
+          hits.push({ path: "src/harness-services.ts", line: registrarHitLine, text: "  register(\"explore.search\", createExploreSearchService);" });
+          hits.push({ path: "src/explore-tool.ts", line: 2, text: "  return request(\"explore.search\", params);" });
+        }
+        if (pattern === "explore.search" || pattern === "host" || pattern === "router" || pattern === "service") {
+          hits.push(...fillerPaths.map((path) => ({ path, line: 2, text: "  const host = router.service(\"explore.search\");" })));
+        }
+        return hits;
+      },
+      readFile: async (path) => {
+        if (path === "src/harness-services.ts") return ready(registrar);
+        if (path === "src/explore-tool.ts") return ready(requester);
+        const index = fillerPaths.indexOf(path);
+        return ready(filler(index >= 0 ? index : 0));
+      },
+      structure: createStructureSource([parsingProvider()]),
+    });
+    const paths = result.snippets.map((snippet) => snippet.path);
+    const registerAt = paths.indexOf("src/harness-services.ts");
+    const requestAt = paths.indexOf("src/explore-tool.ts");
+    expect(registerAt).toBeGreaterThanOrEqual(0);
+    expect(requestAt).toBeGreaterThanOrEqual(0);
+    expect(Math.max(registerAt, requestAt)).toBeLessThan(2);
+  });
+});
+
 describe("explore semantic recall", () => {
   const reclaim = [
     "export function reclaimLease(handle: string) {",
