@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "provider": "local",
+  "model": "all-MiniLM-L6-v2",
+  "modelRevision": "xenova-quantized-1",
+  "dim": 384,
+  "pooling": "mean",
+  "normalize": true,
+  "maxTokens": 512,
+  "onnxFile": "model_quantized.onnx",
+  "tokenizerFile": "tokenizer.json"
+}

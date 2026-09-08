@@ -48,6 +48,8 @@ import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from '.
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
+import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
+import { createSemanticIndexRuntime } from './lib/knowledge/semantic/runtime.js';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
@@ -1480,10 +1482,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
+  const semanticIndexRuntime = createSemanticIndexRuntime({
+    dataDir: PIARIUM_DATA_DIR,
+    hostId,
+    documents: documentsAuthority,
+    structureSource,
+    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
+    embedder: createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR }),
+    onError: (error) => console.error('[HarnessKnowledge] Semantic index failed:', errorMessage(error)),
+  });
   catalogScan.start = (workspaceId: string): void => {
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
         console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
+      });
+      void semanticIndexRuntime.scanWorkspace(workspaceId).catch((error) => {
+        console.error('[HarnessKnowledge] Semantic scan failed:', errorMessage(error));
       });
     });
   };
@@ -1496,6 +1510,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   observeKnowledgeDocumentMutation = (event) => {
     knowledgeContextRuntime.observeDocumentMutation(event);
     symbolGraphRuntime.observeDocumentMutation(event);
+    semanticIndexRuntime.observeDocumentMutation(event);
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
@@ -2083,6 +2098,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await piWriterTracker.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       observeKnowledgeBlockChange = () => undefined;
+      await semanticIndexRuntime.dispose();
       await symbolGraphRuntime.dispose();
       await decisionSuggestionRuntime.dispose();
       await knowledgeContextRuntime.dispose();

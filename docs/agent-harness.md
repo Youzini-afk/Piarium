@@ -736,7 +736,16 @@ Engine:      seeds → 可用来源召回 → 结构展开 → 当前来源重�
   不重嵌，换重排器不重嵌。**重建中是索引生命周期，不是查询结果的第五种状态**：`index.lifecycle = rebuilding` 与
   `query.status` 两轴分开投影，新代际按文件/分片原子发布、查询固定一个已发布检查点，建到一半就用一半
   （`query.coverage = partial`），不等全库建完；新模型的查询向量只查兼容空间；查询超时只结束该次查询，不取消后台建设。
-  索引以 Documents 修订为准增量更新，与符号目录同一套机制。**固定草稿与线程分支是 overlay**（Piarium 特有，AFT 没有这个问题）：
+  索引以 Documents 修订为准增量更新，与符号目录同一套机制。
+  **已交付（3.16 第一片索引侧，D-166–D-169）。** 本地空间身份钉 `provider=local`、`all-MiniLM-L6-v2`、384 维、mean pooling、
+  L2 归一化、**有效长度 512**（模型卡 256 是质量提示，随发行配方的 ONNX 位置表是 512；切块问 tokenizer 计数，不按字符估）。
+  索引配方身份含切块器版本、`CATALOG_EXTRACTOR_VERSION`、文本装饰版本。存储路径与查询只吃范围键
+  `{ scopeKind, scopeId }`；`workspaceId` 只在 `workspaceScope` 写成 `scopeId`。`documentId` 是不透明身份，块与父单元
+  引用它，不做 `path.join` / 分隔符切分。切块用 3.11 容器切片：小单元整块，大单元按子容器递归，过长再重叠行块并记
+  `fallback`；编码材料正文优先，路径和签名装不下就丢掉。独立代际 TDB 不进权威 `.tdb`；近邻先 `searchExact`，没有则暴力余弦。
+  Host 在工作区打开时后台扫描，按文件原子发布，Documents 修订增量更新；模型包走语法包那种内容寻址存储，缺 ONNX 是
+  `unavailable`，不是空成功。**检索进 explore 仍待本片后半。**
+  **固定草稿与线程分支是 overlay**（Piarium 特有，AFT 没有这个问题）：
   基础索引 + 当前分支变化 + 本轮固定草稿覆盖 − 被替代路径；草稿在**捕获时**按内容哈希切块批量嵌入成短生命周期覆盖层
   （每条用户消息一次，不是每次 explore 一次），同路径磁盘块在该视图被遮蔽；线程基线同理，不从 live 父目录漏进后来新增的文件。
   向量计算可共享，路径与视图归属不能错。
@@ -924,6 +933,7 @@ TriviumDB，仍由 Host 唯一写。用户换嵌入模型或维度时作废并�
 `scopeKind` 现在只有 `workspace`，将来有 `roots` / `working-set` / `collection` / `user`；同一台机器上不同范围的索引并列存放、
 共用向量空间身份与配方身份，一个范围重建不牵动另一个。索引里的**文档身份是 `{ scopeKind, scopeId, documentId, revision }`**，
 `documentId` 对文件范围是相对路径，对将来的连接器范围是连接器给的稳定标识——不把"文件路径"焊进块身份或父单元身份。
+已交付（D-167）：路径构造与查询签名只接受范围键；`workspaceScope` 是 `workspaceId` → `scopeId` 的唯一处。
 
 "桌面 + `piarium serve` 同机同目录"的两个 host 问题已决定：`serve` 启动时检测到桌面 host 在运行则**复用它**，不起
 第二个——一个用户、一台机器、一个 host，知识库与恢复日志都不必面对同一工作区的两份。

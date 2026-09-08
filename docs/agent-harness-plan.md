@@ -581,9 +581,12 @@ pooling/归一化 + 运行配方）走语法包的内容寻址存储，默认包
 **文档身份是 `{ scopeKind, scopeId, documentId, revision }`**，`documentId` 对文件范围是相对路径，类型上不假定它是路径。
 向量空间身份 / 索引配方身份两类先落（查询与重排身份等第二片）；后台建索引由配置 authority 给工作区有效绑定，不依赖聊天 session；
 按文件/分片原子发布、查询固定检查点、`index.lifecycle` 与 `query.status` 两轴、建到一半用一半；以 Documents 修订增量更新。
+**索引侧已接**（D-166–D-169）：512 有效长度进空间身份；范围键路径与不透明 `documentId`；结构递归切块；代际 TDB + Host
+工作区扫描。缺 ONNX 为 `unavailable`。
 接入 3.15：语义线索经 `focusRanges` 进证据单元（块哈希一致直接采用范围，否则按父符号身份重定位，实质变化则重切），
 `rankCandidates` 的文件级融合从此有词法 + 语义两路（RRF 吃排名、只在文件级、只管读取调度）；`arrival = semantic` 的单元
 经同样的结构核验可以是 `purpose = primary`。`details.semantic` 报 `ready / empty / unavailable / failed / stale` 与 coverage。
+**检索侧待本片后半。**
 **不做**：重排、扩展、摘要、草稿 overlay、零样本分类、远程后端。远程留 `models.embedding` 槽位与 provider kind 的配置解析，
 但第一片只本地跑通。Electron asar 原生模块必须验。
 

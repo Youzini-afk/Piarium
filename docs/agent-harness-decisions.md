@@ -3410,6 +3410,71 @@ web tsc。
 
 状态：已实施。
 
+### D-166 · 2026-09-08 · MiniLM 有效长度 512 写入向量空间身份
+
+背景：同名 `all-MiniLM-L6-v2` 模型卡写 256 word pieces，AFT 覆盖为 512。切块若按字符估，大函数后半段会像 AFT 那样编不进去。
+
+决定：空间身份钉 `maxTokens=512`。这是随发行配方的 ONNX `max_position_embeddings`，不是模型卡的质量提示。切块把这段长度交给所用 tokenizer 计数，不按「几字符约一 token」。256 与 512 是不同空间，换长度必须重嵌。
+
+已验证：`spaceIdOf` 在 256 与 512 下不同；切块测试用注入的计数器卡上限，真解析器覆盖大函数每一行。
+
+未验证：真实 MiniLM tokenizer.json 未随仓库提交（`semantic:copy-model` 现取）；未用 ONNX 对同一段正文量实际 word-piece 数。
+
+不改：不接远程嵌入；不把 256 写成兼容别名。
+
+影响：`semantic/identity.ts`；设计 6.1 身份；plan 3.16 第一片索引侧。
+
+状态：已实施。
+
+### D-167 · 2026-09-08 · 范围键路径与不透明 documentId（兑现 D-162 接缝）
+
+背景：D-162 要求第一片就参数化范围，避免以后焊死 `workspaceId`。
+
+决定：存储路径与查询签名只接受 `{ scopeKind, scopeId }`。`workspaceScope` 是把工作区 id 写成 `scopeId` 的唯一处。块身份 / 父单元身份 / 查询都不读名为 `workspaceId` 的字段。`documentId` 对文件范围恰好是相对路径，类型上当不透明字符串：`encodeURIComponent` 进块 id，不 `path.join`、不按分隔符切、不当 glob。`mail:abc123` 必须能建能查。
+
+已验证：两个 `scopeId` 的代际库互不串；`mail:abc123` 的块身份与近邻查询正常。
+
+未验证：`roots` / `working-set` / `collection` / `user` 范围（本片不实现）。
+
+不改：权威 `{hostId}/{workspaceId}.tdb` 的命名。
+
+影响：`semantic/identity.ts`、`store.ts`、`runtime.ts`；设计 7.1。
+
+状态：已实施。
+
+### D-168 · 2026-09-08 · 结构递归切块；路径和签名不许挤掉正文
+
+背景：AFT `build_embed_text_with_lines`（符号名 + 签名 400 字符 + 正文前 300 字符）是反例。
+
+决定：单元边界复用 3.11 tree-sitter 容器切片，不另写程序切片器。小单元整块；大单元按子容器递归，仍超长再用有重叠行块并记 `fallback`。每个源码行至少落在一个块里。编码材料先保留子块正文，签名 / 名字 / 注释 / `documentId` 只在 tokenizer 还装得下时追加。缺结构能力时整文件走 fallback。切块器不调用 `languageIdForPath(documentId)`——语言由调用方传入。
+
+已验证：大函数真解析器覆盖每一行且 embed 文本不超过注入上限；无结构时重叠 fallback；长路径在字符计数器下被丢掉、正文保留。
+
+未验证：生产 MiniLM tokenizer 下的块数与质量；JSON / 按需语言的切块观感。
+
+不改：24 KiB 可见预算；不建 BM25。
+
+影响：`semantic/chunker.ts`、`embed-text.ts`。
+
+状态：已实施。
+
+### D-169 · 2026-09-08 · 独立代际语义库；Host 绑定工作区；缺包即 unavailable
+
+背景：权威 `.tdb` 开库时定单一 `dim`。语义索引必须能换模型重建而不牵动符号图。
+
+决定：每范围每空间一代一个 TDB，路径
+`knowledge/{hostId}/semantic/{scopeKind}/{scopeId}/{spaceId}/{generation}`。`payloadCacheMb: 0`，原生索引，`indexedLookup` 用 1_000_000 封顶。近邻先 `searchExact`，失败再暴力余弦。按文档事务替换块并发布检查点；建到一半 `coverage=partial`、查询已发布部分。Host 在工作区知识库打开时启动扫描，Documents 变更观察增量更新，不依赖聊天 session。模型包走 `semantic-models/` 内容寻址存储，捆绑目录走与语法 wasm 相同的 asar remap；缺 ONNX 时 embedder `unavailable`，扫描空操作。`@huggingface/transformers` 运行时动态加载，未安装不得让 Host 启动失败。intra-op 线程为核数一半。
+
+已验证：半建覆盖 partial；embedder unavailable 不写库、runtime 报 unavailable；asar 路径重写单测。Host `index.ts` 已接线。
+
+未验证：真实 MiniLM / onnxruntime 在 Electron asar 里加载（本刀有脚本、无打包 smoke）；全仓库冷扫描墙钟；TDB `searchExact` 在三万块上的延迟（暴力余弦按设计可接受）。
+
+不改：不进权威 `.tdb`；不设信任门与花费守卫；不接 explore 检索（下一提交）。
+
+影响：`semantic/store.ts`、`runtime.ts`、`model-store.ts`、`minilm.ts`；`application-host/index.ts`。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3577,8 +3642,12 @@ web tsc。
 | D-158 | planned（语义来源排期 3.16：嵌入第三路候选 / 重排 / 查询扩展；本地默认远程可选按槽位；索引指纹；不设信任门与花费守卫） | — | 设计 6 头、6.1、8.5；plan 3.16 |
 | D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉） | D-163 | 设计 6.1 目标形态；plan 3.15 |
 | D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
-| D-161 | superseded in part（联合设计仍有效；focusRanges 与三字段接口已由 D-165 落地，RRF/重排/身份仍待） | D-165（接口） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
-| D-162 | planned（不索引整个电脑；范围分层、语义跟注意力走；scope 是一等参数；文档身份不绑路径；3.16 第一片守两条接缝约束） | — | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
+| D-161 | superseded in part（联合设计仍有效；focusRanges 与三字段接口已由 D-165 落地；空间/配方身份已由 D-166 落地；RRF/重排仍待） | D-165（接口）；D-166（身份） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
+| D-162 | superseded in part（范围分层原则仍在；范围键与 documentId 接缝已由 D-167 落地，用户级/工作集/集合范围仍不实现） | D-167 | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
 | D-164 | implementation（explore/related 共用查询期文件角色；依据 filename-pattern / project-declaration / unknown；不入图） | — | file-role.ts；related.query roles；plan 3.15② |
 | D-165 | implementation（focusRanges 入口；arrival/assessment/purpose；同一连接值才算两端；windowScore 去掉 GRADE_RANK 项） | — | slice.ts；explore.ts；protocol ExploreWindowTrace；plan 3.15④ |
+| D-166 | implementation（MiniLM 有效长度 512 写入空间身份；切块按 tokenizer 计数） | — | semantic/identity.ts；设计 6.1 |
+| D-167 | implementation（范围键路径与查询；documentId 不透明；workspaceScope 是唯一焊点） | — | semantic/identity.ts store.ts runtime.ts；设计 7.1 |
+| D-168 | implementation（结构递归切块；正文优先装饰；缺结构走重叠 fallback） | — | semantic/chunker.ts embed-text.ts |
+| D-169 | implementation（独立代际 TDB；Host 工作区扫描；缺包 unavailable；transformers 动态加载） | — | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |

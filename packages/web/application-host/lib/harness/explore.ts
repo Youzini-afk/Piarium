@@ -684,7 +684,7 @@ function windowsFor(
       hitLines: slice.hitLines,
       arrivals,
       assessment,
-      purpose: "candidate",
+      purpose: "candidate" as const,
       verifiedCallees: [...evidence.verifiedCallees],
       verifiedRelations: [],
       factKey,
@@ -1368,7 +1368,7 @@ export async function explore(
     await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
   }
 
-  if (deps.graph && graphStatus === "ready") {
+  if (deps.graph && (graphStatus as ExploreGraphStatus) === "ready") {
     try {
       const seedPaths = [...readPaths];
       const connectionPaths: string[] = [];
