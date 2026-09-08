@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
