@@ -126,4 +126,26 @@ describe("related tool", () => {
     expect(miss.status).toBe("empty");
     expect(miss.text).toContain("nothing in the catalog matched");
   });
+
+  it("decorates walked paths with the shared query-time file role and does not persist it", async () => {
+    await store.replaceFileSymbols("lib/core.ts", "typescript", [
+      { name: "core", kind: "function", range },
+    ], "disk-r1");
+    await store.replaceFileSymbols("package.json", "json", [
+      { name: "name", kind: "property", range },
+    ], "disk-r1");
+    const source = await executeRelated({ anchor: "lib/core.ts" }, store);
+    const manifest = await executeRelated({ anchor: "package.json" }, store);
+    expect(source.roles).toEqual([
+      { path: "lib/core.ts", role: "source", ground: "filename-pattern" },
+    ]);
+    expect(manifest.roles).toEqual([
+      { path: "package.json", role: "other", ground: "project-declaration" },
+    ]);
+    expect(source.text).toContain("lib/core.ts source · filename-pattern");
+    expect(manifest.text).toContain("package.json other · project-declaration");
+    expect(source.text).toContain("query-time");
+    const relations = await store.getFileRelations("lib/core.ts");
+    expect(JSON.stringify(relations ?? {})).not.toMatch(/filename-pattern|project-declaration|"role"/);
+  });
 });

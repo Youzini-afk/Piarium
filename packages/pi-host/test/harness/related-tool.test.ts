@@ -17,6 +17,7 @@ describe("Host-backed related tool", () => {
           text: "related target.ts (path) · ready",
           status: "ready",
           anchor: { kind: "path", value: "target.ts" },
+          roles: [],
           definitions: [],
           imports: { items: [], unresolved: [], incomplete: false },
           importers: { items: [], incomplete: false },

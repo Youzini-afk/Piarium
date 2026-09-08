@@ -3353,6 +3353,31 @@ D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对�
 
 状态：已实施。
 
+### D-164 · 2026-09-08 · explore 与 related 共用查询期文件角色；依据三态；不入图
+
+背景：plan 3.15② 要求两份工具用同一套分类，依据是文件名模式 / 项目声明 / 未知。角色随测试根和清单文件变，
+写入符号图就要管失效。当时 `classifyFileRole` 只活在 `explore-query.ts`，`related` 不分类。
+
+决定：
+
+- 抽出 `file-role.ts`。`explore` 与 `related` 都走 `classifyFileRole` / `classifyFileRoleDecision`。
+- 依据：`filename-pattern` / `project-declaration` / `unknown`。项目声明名单是常见清单文件
+  （`package.json`、`tsconfig*.json`、`pyproject.toml`、`go.mod` 等），**角色仍是 `other`**，不新增会改
+  `fileRoleFit` 的枚举值——本步是共享规则，不是重调 explore 排序。
+- lockfile 继续按文件名模式归 `lock`，即使名字像清单（`package-lock.json`）。
+- `related` 结果增加 `roles`（路径 + 角色 + 依据），正文标明 query-time、不在图上。协议字段必填，空结果给 `[]`。
+
+已验证：related 在无 `roles` 时先红后绿；`package.json` 为 `other` + `project-declaration`；explore 的
+`classifyFileRole` 是同一函数；既有 file-role / related / explore-query 测试。
+
+未验证：related 正文加 Roles 段对十问无影响（related 不在十问里）；项目声明名单是否该含工作区自有配置文件。
+
+不改：`fileRoleFit` 数值表；符号图 schema。
+
+影响：`file-role.ts`；`related.query` 结果；设计 6.1 / 6.2；plan 3.15②；status。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3523,3 +3548,4 @@ D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对�
 | D-161 | planned（3.15/3.16 联合设计采纳：arrival/assessment/purpose、focusRanges、文件级 RRF 限读取调度、重排替掉 windowScore、三类身份、生命周期轴、捕获时 overlay；四片串行；起点修正：embedding.ts 七家适配器已有、AFT 切块是反例、.tdb 单维度）；代际存储路径被 D-162 参数化 | D-162（路径） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
 | D-162 | planned（不索引整个电脑；范围分层、语义跟注意力走；scope 是一等参数；文档身份不绑路径；3.16 第一片守两条接缝约束） | — | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
+| D-164 | implementation（explore/related 共用查询期文件角色；依据 filename-pattern / project-declaration / unknown；不入图） | — | file-role.ts；related.query roles；plan 3.15② |

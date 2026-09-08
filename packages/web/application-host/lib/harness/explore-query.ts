@@ -9,9 +9,19 @@
  * else is unknown. This is not NLU.
  */
 
+import {
+  classifyFileRole,
+  classifyFileRoleDecision,
+  fileRoleFit,
+  type ExploreFileRole,
+  type FileRoleGround,
+} from "./file-role.js";
+
+export type { ExploreFileRole, FileRoleGround };
+export { classifyFileRole, classifyFileRoleDecision, fileRoleFit };
+
 export type ExploreQueryRelation = "register" | "import" | "define" | "unknown";
 export type ExploreQueryDomain = "implementation" | "design" | "dependency" | "unknown";
-export type ExploreFileRole = "source" | "test" | "docs" | "lock" | "other";
 
 export type TermGroupKind = "anchor" | "literal" | "identifier" | "question";
 
@@ -154,47 +164,6 @@ export function classifyExploreDomain(question: string, relation: ExploreQueryRe
   if (relation === "register" || relation === "import" || relation === "define") return "implementation";
   if (DOMAIN_IMPLEMENT.test(question)) return "implementation";
   return "unknown";
-}
-
-export function classifyFileRole(path: string): ExploreFileRole {
-  const normalized = path.replace(/\\/g, "/");
-  const base = normalized.slice(normalized.lastIndexOf("/") + 1).toLowerCase();
-  if (
-    base === "license" || base === "licence" || base.startsWith("changelog")
-    || base === "bun.lock" || base === "package-lock.json" || base === "yarn.lock" || base === "pnpm-lock.yaml"
-    || base.endsWith(".lock")
-  ) return "lock";
-  if (normalized.startsWith("docs/") || base.endsWith(".md")) return "docs";
-  if (
-    /\.(test|spec)\.[cm]?[tj]sx?$/.test(base)
-    || /(^|\/)tests?\//.test(normalized)
-    || /(^|\/)__tests__\//.test(normalized)
-  ) return "test";
-  if (/\.[cm]?[tj]sx?$/.test(base)) return "source";
-  return "other";
-}
-
-/**
- * File-role fit for this question. Structure-source availability must not
- * enter this function (D-148).
- */
-export function fileRoleFit(
-  role: ExploreFileRole,
-  domain: ExploreQueryDomain,
-  preferTests: boolean | null,
-): number {
-  if (domain === "dependency") return role === "lock" ? 2 : role === "docs" ? 0 : -1;
-  if (domain === "design") return role === "docs" ? 2 : role === "source" ? 0 : -1;
-  if (domain === "implementation") {
-    if (role === "lock") return -2;
-    if (role === "docs") return -1;
-    if (role === "source") return preferTests === true ? 0 : 2;
-    if (role === "test") return preferTests === true ? 2 : preferTests === false ? 0 : 1;
-    return 0;
-  }
-  if (preferTests === true) return role === "test" ? 2 : 0;
-  if (preferTests === false) return role === "test" ? 0 : role === "source" ? 1 : 0;
-  return 0;
 }
 
 export function preferTestFiles(question: string, domain: ExploreQueryDomain, relation: ExploreQueryRelation): boolean | null {

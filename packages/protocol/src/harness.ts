@@ -342,10 +342,22 @@ export interface RelatedQueryParams {
 
 export type RelatedQueryStatus = "ready" | "empty" | "unavailable" | "failed";
 
+/** Query-time file class shared by explore and related. Not stored on the graph. */
+export type HarnessFileRole = "source" | "test" | "docs" | "lock" | "other";
+export type HarnessFileRoleGround = "filename-pattern" | "project-declaration" | "unknown";
+
+export interface HarnessFileRoleDecision {
+  path: string;
+  role: HarnessFileRole;
+  ground: HarnessFileRoleGround;
+}
+
 export interface RelatedQueryResult {
   text: string;
   status: RelatedQueryStatus;
   anchor: { kind: "path" | "name"; value: string };
+  /** Query-time decoration of every path in this result. Not a graph fact. */
+  roles: HarnessFileRoleDecision[];
   definitions: Array<{ name: string; kind: string; path: string }>;
   imports: {
     items: Array<{ specifier: string; path: string; resolvedPath?: string }>;

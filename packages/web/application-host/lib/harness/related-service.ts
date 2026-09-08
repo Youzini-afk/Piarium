@@ -10,6 +10,7 @@ const unavailable = (anchor: string, message: string): RelatedQueryResult => ({
   text: message,
   status: "unavailable",
   anchor: { kind: /[\\/]/.test(anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(anchor) ? "path" : "name", value: anchor },
+  roles: [],
   definitions: [],
   imports: { items: [], unresolved: [], incomplete: false },
   importers: { items: [], incomplete: false },

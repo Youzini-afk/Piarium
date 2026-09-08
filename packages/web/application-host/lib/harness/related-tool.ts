@@ -9,9 +9,10 @@
  * Plan: agent-harness-plan.md §3.12
  */
 
-import type { RelatedQueryResult, RelatedQueryStatus } from "@piarium/protocol";
+import type { HarnessFileRoleDecision, RelatedQueryResult, RelatedQueryStatus } from "@piarium/protocol";
 import { resolveImportSpecifier } from "../knowledge/import-resolve.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
+import { classifyFileRoleDecision } from "./file-role.js";
 
 export interface RelatedQueryInput {
   anchor: string;
@@ -47,6 +48,7 @@ export async function executeRelated(
     text: message,
     status,
     anchor: { kind, value: anchor },
+    roles: [],
     definitions: [],
     imports: { items: [], unresolved: [], incomplete: false },
     importers: { items: [], incomplete: false },
@@ -142,6 +144,7 @@ export async function executeRelated(
     text: "",
     status: "ready",
     anchor: { kind, value: anchor },
+    roles: [],
     definitions: definitions.toSorted((left, right) => left.path.localeCompare(right.path) || left.name.localeCompare(right.name)),
     imports: {
       items: importItems.toSorted((left, right) => left.path.localeCompare(right.path) || left.specifier.localeCompare(right.specifier)),
@@ -157,8 +160,29 @@ export async function executeRelated(
       incomplete: connectionsIncomplete,
     },
   };
+  result.roles = rolesForRelated(result);
   result.text = formatRelatedText(result, focus.omitted);
   return result;
+}
+
+function rolesForRelated(result: RelatedQueryResult): HarnessFileRoleDecision[] {
+  const paths = new Set<string>();
+  if (result.anchor.kind === "path" && result.anchor.value) paths.add(result.anchor.value.replace(/\\/g, "/"));
+  for (const item of result.definitions) paths.add(item.path);
+  for (const item of result.imports.items) {
+    paths.add(item.path);
+    if (item.resolvedPath) paths.add(item.resolvedPath);
+  }
+  for (const item of result.imports.unresolved) paths.add(item.path);
+  for (const item of result.importers.items) paths.add(item.path);
+  for (const item of result.connections.items) {
+    paths.add(item.path);
+    for (const end of item.otherEnds) paths.add(end.path);
+  }
+  return [...paths].toSorted(compareText).map((path) => {
+    const decision = classifyFileRoleDecision(path);
+    return { path, role: decision.role, ground: decision.ground };
+  });
 }
 
 function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): string {
@@ -168,6 +192,12 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
   ];
   if (focusOmitted > 0) {
     lines.push(`Anchor matched ${focusOmitted} more file(s) than were walked; the first ${RELATED_FOCUS_LIMIT} in path order are below. Narrow the anchor to a path for the rest.`);
+  }
+  if (result.roles.length > 0) {
+    lines.push("Roles (query-time, not stored on the graph):");
+    const shown = capped(result.roles, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) lines.push(`- ${item.path} ${item.role} · ${item.ground}`);
+    if (shown.omitted > 0) lines.push(`- … ${shown.omitted} more (full list in details)`);
   }
   const note = (omitted: number): void => {
     if (omitted > 0) lines.push(`- … ${omitted} more (full list in details)`);

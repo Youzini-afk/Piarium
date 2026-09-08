@@ -33,6 +33,7 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
           details: {
             status: result.status,
             anchor: result.anchor,
+            roles: result.roles,
             definitions: result.definitions,
             imports: result.imports,
             importers: result.importers,
