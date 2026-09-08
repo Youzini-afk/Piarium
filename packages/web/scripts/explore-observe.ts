@@ -45,6 +45,15 @@ import { createTreeSitterStructureProvider } from "../application-host/lib/struc
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../application-host/lib/knowledge/store.js";
 import { createSymbolGraphRuntime } from "../application-host/lib/knowledge/symbol-runtime.js";
 import { createFsSearchRuntime } from "../application-host/lib/fs/search.js";
+import { createLocalMinilmEmbedder } from "../application-host/lib/knowledge/semantic/minilm.js";
+import { workspaceScope } from "../application-host/lib/knowledge/semantic/identity.js";
+import { createSemanticIndexRuntime } from "../application-host/lib/knowledge/semantic/runtime.js";
+import {
+  formatSemanticLine,
+  stageForTarget,
+  type ObserveStageNeed,
+  type ObserveStagePayload,
+} from "./explore-observe-stage.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -53,12 +62,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
  * without it the script can only observe "some window of this file is visible",
  * and must not report that as verified evidence (D-151).
  */
-type TargetNeed = {
-  /** Human words for the required evidence, printed in the stage line. */
-  label: string;
-  /** Matched against the snippet body, and against `why` for graph-verified relations. */
-  match: RegExp;
-};
+type TargetNeed = ObserveStageNeed;
 
 type ObserveQuestion = {
   ask: string;
@@ -251,9 +255,6 @@ const dataDirArg = flag("data-dir");
 
 const line = (char = "─"): string => char.repeat(78);
 
-const needMet = (snippet: { text?: string; why?: string }, need: TargetNeed): boolean =>
-  need.match.test(`${snippet.text ?? ""} ${snippet.why ?? ""}`);
-
 /** Lines of the workspace file that satisfy the requirement. */
 const needLinesIn = (relativePath: string, need: TargetNeed): number[] => {
   try {
@@ -264,94 +265,7 @@ const needLinesIn = (relativePath: string, need: TargetNeed): number[] => {
   }
 };
 
-type ObservePayload = {
-  snippets?: Array<{ path: string; text?: string; why?: string }>;
-  details?: {
-    provenance?: Array<{ path: string; status: string }>;
-    graph?: { connections?: number; associates?: number; definitions?: number; status?: string };
-    skippedQueries?: { reason: string; patterns: string[] };
-    query?: { objects?: string[]; relation?: string; domain?: string };
-    distinctiveness?: {
-      scope?: string;
-      poolFiles?: number;
-      terms?: Array<{ term: string; uniqueFiles: number; coverage: string; weight: number }>;
-    };
-    windows?: Array<{
-      path: string;
-      startLine: number;
-      endLine: number;
-      why: string;
-      packed: boolean;
-      hits: string[];
-      arrivals?: Array<{ kind: string }>;
-      assessment?: string;
-      purpose?: string;
-      unit?: { name: string; kind: string; startLine: number; endLine: number };
-    }>;
-  };
-  notRequested?: { paths?: string[] };
-};
-
-const stageForTarget = (
-  target: ObserveQuestion["targets"][number],
-  payload: ObservePayload,
-): string => {
-  const snippets = payload.snippets ?? [];
-  const provenance = payload.details?.provenance ?? [];
-  const unread = new Set(payload.notRequested?.paths ?? []);
-  const fromPath = snippets
-    .map((snippet, index) => ({ snippet, index }))
-    .filter((item) => item.snippet.path.includes(target.pathIncludes));
-  const met = fromPath.find((item) => needMet(item.snippet, target.need));
-  const generated = (payload.details?.windows ?? []).filter((window) => window.path.includes(target.pathIncludes));
-  const generatedMet = generated.find((window) => needMet({
-    text: [window.hits.join("\n"), window.unit?.name ?? ""].filter(Boolean).join("\n"),
-    why: window.why,
-  }, target.need));
-  // A large unit is packed as signature plus hit blocks, so the required line
-  // can sit inside the unit the engine chose and still be cut from the body.
-  // That is neither "never generated" nor "not selected" (D-157).
-  const omittedFromBody = generated.find((window) => {
-    if (!window.unit?.omitted?.length || !window.packed) return false;
-    return needLinesIn(window.path, target.need).some((line) => (
-      line >= window.unit!.startLine
-      && line <= window.unit!.endLine
-      && window.unit!.omitted!.some((gap) => line >= gap.startLine && line <= gap.endLine)
-    ));
-  });
-  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0 || generated.length > 0;
-  const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
-  if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
-    return `${target.id}: acquired → not-requested: read budget`;
-  }
-  if (!acquired) return `${target.id}: not acquired`;
-  if (entry?.status === "not-requested") return `${target.id}: acquired → not-requested: read budget`;
-  if (entry?.status && entry.status !== "ready") return `${target.id}: acquired → ${entry.status}`;
-  if (met) {
-    return `${target.id}: acquired → scheduled → read → ${target.need.label} verified → visible #${met.index + 1}`;
-  }
-  // Split "right file, wrong window" into the two failures that need
-  // different fixes (D-153): the matching window was never sliced, or it
-  // was sliced and then packed out.
-  if (generatedMet && !generatedMet.packed) {
-    return `${target.id}: matching window generated ${generatedMet.startLine}-${generatedMet.endLine}, not selected`;
-  }
-  if (omittedFromBody?.unit) {
-    return `${target.id}: unit ${omittedFromBody.unit.name} ${omittedFromBody.unit.startLine}-${omittedFromBody.unit.endLine}`
-      + ` selected, but ${target.need.label} sits outside the packed body ${omittedFromBody.startLine}-${omittedFromBody.endLine}`;
-  }
-  if (fromPath[0] && !generatedMet) {
-    return `${target.id}: read → visible #${fromPath[0].index + 1}, but matching window was never generated (${target.need.label})`;
-  }
-  if (fromPath[0]) {
-    return `${target.id}: read → visible #${fromPath[0].index + 1}, but ${target.need.label} not in that window`;
-  }
-  if (entry?.status === "ready" && generatedMet) {
-    return `${target.id}: matching window generated ${generatedMet.startLine}-${generatedMet.endLine}, packed out`;
-  }
-  if (entry?.status === "ready") return `${target.id}: read, but matching window was never generated`;
-  return `${target.id}: acquired → scheduled → not visible`;
-};
+type ObservePayload = ObserveStagePayload;
 
 const printDiagnostic = (question: ObserveQuestion, payload: ObservePayload): void => {
   const query = payload.details?.query;
@@ -362,6 +276,7 @@ const printDiagnostic = (question: ObserveQuestion, payload: ObservePayload): vo
   process.stdout.write(
     `direct:  connects=${graph?.connections ?? 0} paths  associates=${graph?.associates ?? 0} paths  definitions=${graph?.definitions ?? 0} files  graph=${graph?.status ?? "—"}\n`,
   );
+  process.stdout.write(`${formatSemanticLine(payload.details?.semantic)}\n`);
   // This file holds the question text, so it is a trivially strong lexical
   // candidate for every question. Measure that instead of hiding it (D-152).
   const selfPacked = (payload.snippets ?? []).filter((snippet) => snippet.path.includes("explore-observe.ts")).length;
@@ -370,7 +285,7 @@ const printDiagnostic = (question: ObserveQuestion, payload: ObservePayload): vo
     process.stdout.write(`self:    question text in this script took ${selfPacked} visible slot(s), ${selfUnread} unread candidate(s)\n`);
   }
   for (const target of question.targets) {
-    process.stdout.write(`target:  ${stageForTarget(target, payload)}\n`);
+    process.stdout.write(`target:  ${stageForTarget(target, payload, { needLinesIn })}\n`);
   }
   if (payload.details?.skippedQueries) {
     process.stdout.write(
@@ -459,6 +374,16 @@ const main = async (): Promise<void> => {
     await symbolGraph.dispose();
   }
 
+  const semanticRuntime = createSemanticIndexRuntime({
+    dataDir,
+    hostId: "explore-observe",
+    documents,
+    structureSource,
+    searchFilesystemFiles: fileSearch.searchFilesystemFiles,
+    embedder: createLocalMinilmEmbedder({ dataDir }),
+    onError: (error) => process.stderr.write(`semantic: ${String(error)}\n`),
+  });
+
   const host = createHarnessServiceHost({
     resolveWorkspaceRoot: async () => repoRoot,
     readExploreFile: createExploreFileReader(documents, paths),
@@ -505,6 +430,18 @@ const main = async (): Promise<void> => {
     },
     structureSource,
     graphRecall: () => openStore,
+    semanticRecall: async (workspaceId, question, limit) => {
+      const result = await semanticRuntime.search(workspaceScope(workspaceId), question, limit);
+      return {
+        status: result.status.status,
+        coverage: result.status.coverage,
+        ...(result.status.generation ? { generation: result.status.generation } : {}),
+        ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
+        scope: result.status.scope,
+        lifecycle: result.status.lifecycle,
+        hits: result.hits,
+      };
+    },
     // Same shape as index.ts. The first version of this callback omitted
     // `associations` and crashed `relationLines` — on exactly the two
     // questions whose excerpts were source files with graph edges.
@@ -598,6 +535,7 @@ const main = async (): Promise<void> => {
     if (payload.details?.query) process.stdout.write(`query:    ${JSON.stringify(payload.details.query)}\n`);
     if (payload.details?.distinctiveness) process.stdout.write(`weights:  ${JSON.stringify(payload.details.distinctiveness)}\n`);
     if (payload.details?.graph) process.stdout.write(`graph:    ${JSON.stringify(payload.details.graph)}\n`);
+    if (payload.details?.semantic) process.stdout.write(`semantic: ${JSON.stringify(payload.details.semantic)}\n`);
     if (payload.details?.skippedQueries) process.stdout.write(`skipped:  ${JSON.stringify(payload.details.skippedQueries)}\n`);
     if (payload.details?.structure) process.stdout.write(`structure:${JSON.stringify(payload.details.structure)}\n`);
     if (payload.details?.relations) process.stdout.write(`relations:${JSON.stringify(payload.details.relations)}\n`);
@@ -617,6 +555,7 @@ const main = async (): Promise<void> => {
   }
 
   await host.dispose();
+  await semanticRuntime.dispose();
   await store?.close();
   process.stdout.write(`\n${line("═")}\ndata dir kept for inspection: ${dataDir}\n`);
 };

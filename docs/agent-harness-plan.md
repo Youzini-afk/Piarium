@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
@@ -587,6 +587,7 @@ pooling/归一化 + 运行配方）走语法包的内容寻址存储，默认包
 `rankCandidates` 的文件级融合从此有词法 + 语义两路（RRF 吃排名、只在文件级、只管读取调度）；`arrival = semantic` 的单元
 经同样的结构核验可以是 `purpose = primary`。`details.semantic` 报 `ready / empty / unavailable / failed / stale` 与 coverage。
 **检索侧已接**（D-170）：召回线索进 `focusRanges` / 读取调度 / 打包 / `details.semantic`；无语义线索时 `rankCandidates` 保持 3.14 顺序。
+观察量具已改读 `text` 并加 `semantic:` 行（D-171）；十问仍是回归护栏。
 **不做**：重排、扩展、摘要、草稿 overlay、零样本分类、远程后端。远程留 `models.embedding` 槽位与 provider kind 的配置解析，
 但第一片只本地跑通。Electron asar 原生模块必须验。
 

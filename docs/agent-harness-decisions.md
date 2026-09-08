@@ -3500,6 +3500,27 @@ web tsc。
 
 状态：已实施。
 
+### D-171 · 2026-09-09 · 观察量具读可见正文；semantic 诊断单独一行
+
+背景：D-159 第 6 条已经写过 `stageForTarget` 读的是字节裁剪前的 `snippets`。3.16 第一片的验收是「进可见正文」，量具再读数组会把超预算摘录算成可见。十问仍是回归护栏，不是这刀的成功标准。
+
+决定：
+
+- `stageForTarget` 从服务返回的 `text` 里按 `--- path:start-end ---` 块判可见并编号。`snippets` 里有所需证据但 `text` 没有，报 `packed snippet has …, not in visible text`，不再报 `visible #N`。
+- 阶段诊断加 `semantic:` 一行：`status` / `coverage` / `index.lifecycle` / `blocks` / `units` / `primary`。
+- 观察 host 按生产形状绑 `semanticRecall`。`--skip-scan` 不建 MiniLM 代际（会压过目录扫描、也不是十问回归）。缺 ONNX 时该行是 `unavailable`，explore 仍出词法加图。
+- 不把开发期词汇缺口探针写进观察脚本。
+
+已验证：`explore-observe-stage.test.ts` 先证明读 snippets 会把裁掉的块报成 visible，再改读 `text`；语义行格式。
+
+未验证：本机十问全跑（提交后用 `$TEMP\piarium-observe --skip-scan`）；真实 MiniLM 近邻改变十问任一条；Electron asar 打包加载。
+
+不改：十问 `wants` 与五个变体；24 KiB 预算。
+
+影响：`scripts/explore-observe.ts`、`explore-observe-stage.ts`；status。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3665,7 +3686,7 @@ web tsc。
 | D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
 | D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |
 | D-158 | superseded in part（排期与「不设信任门」仍有效；本地召回已由 D-166–D-170 落地，重排 / 远程 / 查询扩展仍待） | D-166–D-170 | 设计 6 头、6.1、8.5；plan 3.16 |
-| D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉） | D-163 | 设计 6.1 目标形态；plan 3.15 |
+| D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉；量具改读 text 已由 D-171 落地） | D-163；D-171（量具） | 设计 6.1 目标形态；plan 3.15 |
 | D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
 | D-161 | superseded in part（联合设计仍有效；focusRanges / 三字段已由 D-165 落地；空间/配方身份已由 D-166 落地；文件级 RRF 调度已由 D-170 落地；重排删 windowScore 仍待第二片） | D-165（接口）；D-166（身份）；D-170（RRF 调度） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
 | D-162 | superseded in part（范围分层原则仍在；范围键与 documentId 接缝已由 D-167 落地，用户级/工作集/集合范围仍不实现） | D-167 | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
@@ -3677,3 +3698,4 @@ web tsc。
 | D-168 | implementation（结构递归切块；正文优先装饰；缺结构走重叠 fallback） | — | semantic/chunker.ts embed-text.ts |
 | D-169 | implementation（独立代际 TDB；Host 工作区扫描；缺包 unavailable；transformers 动态加载） | — | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |
 | D-170 | implementation（语义线索进 focusRanges / 读取调度 / 打包；文件级 RRF k=60；details.semantic；无语义线索保持 3.14 顺序） | — | explore.ts explore-rrf.ts explore-service.ts；protocol ExploreSemanticDetails |
+| D-171 | implementation（观察量具读 text；semantic 诊断行；观察 host 绑 semanticRecall 但不冷扫 MiniLM） | — | scripts/explore-observe.ts explore-observe-stage.ts |
