@@ -1,6 +1,6 @@
-import { languageIdForPath, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreDistinctivenessDetails, type ExploreEvidenceGrade, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
-import { STRUCTURE_HIT_CLASS_SCORE } from "../structure/constants.js";
+import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
 import { outlineUsableForText, sliceStructureWindows } from "../structure/slice.js";
 import type { StructureHitClass, StructureOutlineResult, StructureSource } from "../structure/types.js";
@@ -160,7 +160,7 @@ const searchVariantsOf = (group: TermGroup): string[] => {
 };
 
 type GraphCandidateSource = "definition" | "connection" | "association" | "import";
-type EvidenceGrade = "verified-relation" | "connects-clue" | "exact-definition" | "full-object" | "support" | "lexical";
+type EvidenceGrade = ExploreEvidenceGrade;
 
 interface GraphClue {
   source: GraphCandidateSource;
@@ -202,8 +202,11 @@ interface PreparedWindow {
   end: number;
   text: string;
   groups: Set<string>;
+  distinctive: Set<string>;
   hasDistinctive: boolean;
   hasAnchor: boolean;
+  offTopic: boolean;
+  windowWeight: number;
   revision: string;
   source: "disk" | "surface-draft";
   why: string;
@@ -290,6 +293,63 @@ function objectGroupsOf(groups: TermGroup[]): TermGroup[] {
 
 function contentGroupsOf(groups: TermGroup[]): TermGroup[] {
   return groups.filter((group) => group.kind === "question");
+}
+
+const termLocate = (lines: readonly string[], term: string, group: TermGroup): number[] => {
+  if (!term) return [];
+  if (group.kind === "literal" || looksLikeConnectionValue(term) || term.includes("-")) {
+    return locateLiteralLines(lines, term);
+  }
+  return locateIdentifierLines(lines, term);
+};
+
+/**
+ * After a snapshot is in hand, check every live group against the body.
+ * rg's candidate budget can drop the line we need; the file is already paid
+ * for. Seed at most one hit per group that has no hit yet (D-155).
+ */
+function rescanBodyGroups(lines: readonly string[], groups: readonly TermGroup[], evidence: FileEvidence): void {
+  for (const group of groups) {
+    const found: Array<{ line: number; distinctive: boolean }> = [];
+    for (const variant of searchVariantsOf(group)) {
+      const distinctive = variant === group.distinctive;
+      for (const line of termLocate(lines, variant, group)) {
+        const existing = found.find((item) => item.line === line);
+        if (existing) {
+          if (distinctive) existing.distinctive = true;
+          continue;
+        }
+        found.push({ line, distinctive });
+      }
+    }
+    if (found.length === 0) continue;
+    evidence.groups.add(group.id);
+    if (found.some((item) => item.distinctive)) evidence.distinctive.add(group.id);
+    if (group.kind === "anchor") evidence.anchors.add(group.id);
+    // Seed original-term lines that are not already inside an existing
+    // hit's small container. One early mention must not hide a later
+    // cluster of the same group (D-155).
+    if (!found.some((item) => item.distinctive)) continue;
+    const existing = [...evidence.hits.entries()]
+      .filter(([, hit]) => hit.groups.has(group.id))
+      .map(([line]) => line);
+    let seeded = 0;
+    for (const seed of found.filter((item) => item.distinctive)) {
+      if (existing.some((line) => Math.abs(line - seed.line) < SMALL_STRUCTURE_SPAN_LINES)) continue;
+      const line = evidence.hits.get(seed.line) ?? {
+        text: lines[seed.line - 1]!,
+        groups: new Set<string>(),
+        distinctive: new Set<string>(),
+        clues: [],
+      };
+      line.groups.add(group.id);
+      line.distinctive.add(group.id);
+      evidence.hits.set(seed.line, line);
+      existing.push(seed.line);
+      seeded += 1;
+      if (seeded >= 3) break;
+    }
+  }
 }
 
 function candidateTier(evidence: FileEvidence, parsed: ExploreQueryParse, groups: TermGroup[]): number {
@@ -389,11 +449,6 @@ function windowLooksLikeCallee(text: string, callee: string, object: string): bo
 }
 
 /**
- * A wire literal found by reading is off topic when the question named an
- * object and the literal is neither that object nor part of it. With no object
- * every wire in the body is equally on topic.
- */
-/**
  * Cheap identity of "what this file's evidence says right now". Windows are
  * rebuilt when it moves, so a hit or clue that arrived after the read still
  * reaches the model.
@@ -404,6 +459,12 @@ function evidenceSignature(evidence: FileEvidence): string {
   return `${lines}|${groups}|${evidence.graphClues.length}|${evidence.verifiedRelation ? 1 : 0}`;
 }
 
+/**
+ * A wire literal found by reading is off topic when the question named an
+ * object and the literal is neither that object nor part of it. No object
+ * means we cannot judge off-topic — that is not the same as proven on-topic
+ * (D-156).
+ */
 function literalOffTopic(literal: string, parsed: ExploreQueryParse): boolean {
   if (parsed.objects.length === 0) return false;
   return !parsed.objects.some((object) => (
@@ -432,6 +493,7 @@ function windowsFor(
   groups: TermGroup[],
   outline: StructureOutlineResult | { status: "not-requested"; provider: null },
   parsed: ExploreQueryParse,
+  weights: ReadonlyMap<string, number>,
 ): { windows: PreparedWindow[]; stale: boolean } {
   const matches: number[] = [];
   let stale = false;
@@ -461,14 +523,14 @@ function windowsFor(
   const objectIds = new Set(objectGroupsOf(groups).map((group) => group.id));
   const windows = slices.map((slice) => {
     const covered = new Set<string>();
+    const distinctive = new Set<string>();
     const windowClues: GraphClue[] = [];
-    let hasDistinctive = false;
     let hasAnchor = false;
     for (const line of slice.hitLines) {
       const hit = evidence.hits.get(line);
       if (!hit) continue;
       for (const groupId of hit.groups) covered.add(groupId);
-      if (hit.distinctive.size > 0) hasDistinctive = true;
+      for (const groupId of hit.distinctive) distinctive.add(groupId);
       for (const clue of hit.clues) {
         if (!windowClues.some((item) => item.why === clue.why && item.locate.text === clue.locate.text)) {
           windowClues.push(clue);
@@ -488,12 +550,16 @@ function windowsFor(
     const why = whyParts.length > 0
       ? (matched ? `${whyParts.join("; ")}; ${matched}` : whyParts.join("; "))
       : (matched || "matched search terms");
-    const hasDistinctiveObject = [...covered].some((id) => objectIds.has(id) && evidence.distinctive.has(id));
+    const hasDistinctiveObject = [...covered].some((id) => objectIds.has(id) && distinctive.has(id));
     const verified = evidence.verifiedRelation && windowClues.some((clue) => clue.source === "connection" || clue.why.startsWith("verified "));
     const looksLikeRegister = parsed.objects.some((object) => windowLooksLikeCallee(slice.text, "register", object));
     const grade = looksLikeRegister && parsed.relation === "register"
       ? (verified ? "verified-relation" : "connects-clue")
-      : windowGrade(windowClues, hasDistinctiveObject || hasDistinctive, hasAnchor, verified || evidence.verifiedRelation && hasDistinctiveObject);
+      : windowGrade(windowClues, hasDistinctiveObject, hasAnchor, verified || evidence.verifiedRelation && hasDistinctiveObject);
+    const offTopic = windowClues.some((clue) => clue.offTopic)
+      && !hasDistinctiveObject
+      && !verified
+      && !windowClues.some((clue) => clue.source === "connection" && !clue.offTopic);
     const structure = outline.status === "not-requested"
       ? undefined
       : {
@@ -510,8 +576,11 @@ function windowsFor(
       end: slice.end,
       text: slice.text,
       groups: covered,
-      hasDistinctive,
+      distinctive,
+      hasDistinctive: distinctive.size > 0,
       hasAnchor,
+      offTopic,
+      windowWeight: weightedCoverage({ groups: covered, distinctive }, groups, weights),
       revision: snapshot.revision,
       source: snapshot.source,
       why,
@@ -672,41 +741,75 @@ function hasBothConnectsEnds(windows: readonly PreparedWindow[]): boolean {
   return registerEnd && requestEnd;
 }
 
-function windowScore(window: PreparedWindow, selected: PreparedWindow[]): number {
-  const sameFile = selected.filter((item) => item.path === window.path).length;
+function groupContribution(window: PreparedWindow, groupId: string, weights: ReadonlyMap<string, number>): number {
+  const match = window.distinctive.has(groupId) ? 1 : window.groups.has(groupId) ? 0.5 : 0;
+  if (match === 0) return 0;
+  return (weights.get(groupId) ?? 1) * match;
+}
+
+/**
+ * Own relevance, added evidence, and body cost. Same-file complements keep
+ * their added-local value; switching files is not a bonus (D-155).
+ */
+function isImplementationUnit(window: PreparedWindow): boolean {
+  return window.unit?.kind === "function" || window.unit?.kind === "method";
+}
+
+function windowScore(
+  window: PreparedWindow,
+  selected: PreparedWindow[],
+  weights: ReadonlyMap<string, number>,
+): number {
   const sameFact = selected.some((item) => item.factKey === window.factKey);
   const coveredEnds = new Set(selected.flatMap((item) => item.verifiedCallees));
   const coveredGroups = new Set(selected.flatMap((item) => [...item.groups]));
+  const sameFile = selected.filter((item) => item.path === window.path);
+  const implementation = isImplementationUnit(window);
+  const localImplGroups = new Set(
+    sameFile.filter(isImplementationUnit).flatMap((item) => [...item.groups]),
+  );
   let newEnd = 0;
   for (const callee of window.verifiedCallees) {
     if (!coveredEnds.has(callee)) newEnd += 1;
   }
-  let newGroups = 0;
+  let addedGlobal = 0;
+  let addedLocal = 0;
   for (const groupId of window.groups) {
-    if (!coveredGroups.has(groupId)) newGroups += 1;
+    const value = groupContribution(window, groupId, weights);
+    if (!coveredGroups.has(groupId)) addedGlobal += value;
+    else if (implementation && sameFile.length > 0 && !localImplGroups.has(groupId)) addedLocal += value;
   }
-  const newFile = selected.some((item) => item.path === window.path) ? 0 : 1;
-  const hitClassScore = window.hitClass ? STRUCTURE_HIT_CLASS_SCORE[window.hitClass] : 0;
-  const repeatPenalty = sameFact ? 80 : sameFile * 40;
-  return GRADE_RANK[window.grade] * 200
-    + window.roleFit * 30
-    + (window.hasAnchor ? 80 : 0)
-    + (window.hasDistinctive ? 20 : 0)
-    + newEnd * 60
-    + newGroups * 10
-    + newFile * 8
+  const complement = addedLocal > 0 ? 36 : 0;
+  const unitBonus = implementation ? 15 : 0;
+  const hitClassScore = window.hitClass === "name" ? 6 : window.hitClass === "body" ? 2 : window.hitClass === "comment" ? -2 : 0;
+  const cost = Math.log(1 + utf8Bytes(window.text) / 200);
+  return window.windowWeight * 10
+    + addedGlobal * 12
+    + addedLocal * 20
+    + complement
+    + unitBonus
+    + GRADE_RANK[window.grade] * 8
+    + window.roleFit * 3
+    + (window.hasAnchor ? 8 : 0)
+    + newEnd * 20
     + hitClassScore
-    - repeatPenalty;
+    - cost
+    - (sameFact ? 80 : 0);
 }
 
-function packComplementary(windows: PreparedWindow[], limit: number): PreparedWindow[] {
+function packComplementary(
+  windows: PreparedWindow[],
+  limit: number,
+  weights: ReadonlyMap<string, number>,
+  locatingDone: boolean,
+): PreparedWindow[] {
   const selected: PreparedWindow[] = [];
-  const remaining = [...windows];
+  const remaining = locatingDone ? windows.filter((window) => !window.offTopic) : [...windows];
   while (selected.length < limit && remaining.length > 0) {
     let bestIndex = 0;
     let bestScore = Number.NEGATIVE_INFINITY;
     remaining.forEach((window, index) => {
-      const score = windowScore(window, selected);
+      const score = windowScore(window, selected, weights);
       const best = remaining[bestIndex]!;
       const better = score > bestScore
         || (score === bestScore && (comparePath(window.path, best.path) < 0 || (window.path === best.path && window.start < best.start)));
@@ -1023,6 +1126,7 @@ export async function explore(
         });
       }
     }
+    rescanBodyGroups(lines, groups, evidence);
     const hitLines = [...evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
     const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines);
     if (outline.status !== "not-requested") {
@@ -1032,7 +1136,8 @@ export async function explore(
         status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
       });
     }
-    const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed);
+    const weights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
+    const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed, weights);
     const classified = await classifyPreparedWindows(path, snapshot, sliced.windows, deps, signal);
     const windows = await verifyMaterializedRelations(path, snapshot, evidence, classified, parsed, deps, signal);
     if (sliced.stale && !issues.some((issue) => issue.path === path && issue.status === "stale")) {
@@ -1140,6 +1245,8 @@ export async function explore(
       // A window that is a registration table holds every literal it registers,
       // so spend the wire budget on the question's own object first and let the
       // rest in only at support grade (D-151).
+      const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
+      const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
       const ordered = [...literals].sort((left, right) => (
         Number(literalOffTopic(left, parsed)) - Number(literalOffTopic(right, parsed))
       ));
@@ -1147,6 +1254,7 @@ export async function explore(
       for (const literal of ordered) {
         signal.throwIfAborted();
         const offTopic = literalOffTopic(literal, parsed);
+        if ((locatingDone || bothEndsDone) && offTopic) continue;
         for (const end of await deps.graph.findLinks(literal)) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const connects = end.kind === "connects";
@@ -1232,7 +1340,10 @@ export async function explore(
   if (graphFilesDropped > 0) searchIncomplete = true;
 
   ranked = rankNow();
-  const packed = packComplementary(prepared, excerptLimit);
+  const packWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
+  const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
+  const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
+  const packed = packComplementary(prepared, excerptLimit, packWeights, locatingDone || bothEndsDone);
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
   const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);
   const windowTraces: ExploreWindowTrace[] = prepared.map((window) => {
@@ -1243,6 +1354,8 @@ export async function explore(
       endLine: window.end,
       why: window.why,
       packed: packedKeys.has(`${window.path}:${window.start}-${window.end}`),
+      grade: window.grade,
+      ...(window.unit ? { unit: window.unit } : {}),
       hits: window.hitLines.flatMap((line) => {
         const text = evidence?.hits.get(line)?.text;
         return text ? [text] : [];

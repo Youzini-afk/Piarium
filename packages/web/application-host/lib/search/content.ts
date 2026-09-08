@@ -247,15 +247,13 @@ export const createWorkspaceContentSearch = ({
       let stdoutBuffer = '';
       const hits: WorkspaceSearchHit[] | null = options.collect === false ? null : [];
       let hitCount = 0;
-      const excludedResourceIds = new Set((request.excludeResourceIds ?? []).map((resourceId) => (
-        process.platform === 'win32' ? resourceId.toLowerCase() : resourceId
-      )));
+      const excludeKey = (resourceId: string): string => {
+        const normalized = resourceId.replace(/\\/g, '/');
+        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      };
+      const excludedResourceIds = new Set((request.excludeResourceIds ?? []).map(excludeKey));
       const publish = (batch: WorkspaceSearchHit[]): boolean => {
-        const eligible = batch.filter((hit) => (
-          !excludedResourceIds.has(process.platform === 'win32'
-            ? hit.resource.resourceId.toLowerCase()
-            : hit.resource.resourceId)
-        ));
+        const eligible = batch.filter((hit) => !excludedResourceIds.has(excludeKey(hit.resource.resourceId)));
         if (eligible.length === 0) return false;
         const remaining = maxResults === null ? eligible.length : Math.max(0, maxResults - hitCount);
         const accepted = remaining >= eligible.length ? eligible : eligible.slice(0, remaining);

@@ -98,8 +98,12 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.ok).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
     const { result } = response;
-    expect(result.snippets.map((snippet) => snippet.path)).toEqual(["first/a.ts", "second/b.ts"]);
-    expect(result.snippets[0]).toMatchObject({ source: "disk", startLine: 1, text: "header\na.*b\nfirst body\n" });
+    expect(result.snippets.map((snippet) => snippet.path).sort()).toEqual(["first/a.ts", "second/b.ts"]);
+    expect(result.snippets.find((snippet) => snippet.path === "first/a.ts")).toMatchObject({
+      source: "disk",
+      startLine: 1,
+      text: "header\na.*b\nfirst body\n",
+    });
     expect(result.snippets[0]?.revision).toBeTruthy();
     expect(result.handle).toMatch(/^out_/);
     expect(result.details.provenance.length).toBeGreaterThan(0);

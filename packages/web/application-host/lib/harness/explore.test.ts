@@ -1497,3 +1497,203 @@ describe("explore query-internal distinctiveness", () => {
   });
 });
 
+describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
+  it("does not give a content-word-only window full-object grade", async () => {
+    const content = [
+      "function checkBudget(budget: number) {",
+      "  return budget > 0;",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "how is the budget enforced", limit: 1 }, {
+      rgSearch: async (pattern) => pattern === "budget"
+        ? [{ path: "src/budget.ts", line: 2, text: "  return budget > 0;" }]
+        : [],
+      readFile: async () => ready(content),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    const window = result.details.windows?.find((item) => item.path === "src/budget.ts");
+    expect(window).toBeDefined();
+    expect(window?.grade).toBe("lexical");
+  });
+
+  it("packs two complementary blocks from one file ahead of a weak second file", async () => {
+    const target = [
+      "function ensureRuntime() {",
+      "  return \"tree-sitter\";",
+      "}",
+      ...Array.from({ length: 40 }, (_, index) => `const pad${index} = ${index};`),
+      "function parseDocument(elapsed: number, parseBudget: number) {",
+      "  if (elapsed > parseBudget) {",
+      "    throw new Error(\"alphaword betaword\");",
+      "  }",
+      "  return true;",
+      "}",
+    ].join("\n");
+    const lines = target.split("\n");
+    const lineOf = (needle: string) => lines.findIndex((line) => line.includes(needle)) + 1;
+    const genericFiles = Array.from({ length: 3 }, (_, index) => `src/flood-${index}.ts`);
+    const result = await explore({
+      question: "how is the alphaword betaword gammaword for tree-sitter enforced",
+      limit: 2,
+    }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "tree-sitter") {
+          return {
+            hits: [{ path: "src/provider.ts", line: lineOf("\"tree-sitter\""), text: lines[lineOf("\"tree-sitter\"") - 1]! }],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        if (pattern === "alphaword" || pattern === "betaword") {
+          return {
+            hits: [{ path: "src/provider.ts", line: lineOf("alphaword betaword"), text: lines[lineOf("alphaword betaword") - 1]! }],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        if (pattern === "gammaword") {
+          return {
+            hits: [
+              { path: "src/weak.ts", line: 1, text: "function mention() { return \"gammaword\"; }" },
+              ...genericFiles.map((path) => ({ path, line: 1, text: "gammaword" })),
+            ],
+            filesDropped: 0,
+            fileCoverage: "complete",
+          };
+        }
+        return { hits: [], filesDropped: 0, fileCoverage: "complete" };
+      },
+      readFile: async (path) => ready(
+        path === "src/provider.ts" ? target : "function mention() { return \"gammaword\"; }",
+      ),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    expect(result.notRequested.paths).not.toContain("src/weak.ts");
+    expect(result.snippets.some((snippet) => snippet.text.includes("elapsed > parseBudget"))).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.text.includes("tree-sitter"))).toBe(true);
+    expect(result.snippets.every((snippet) => snippet.path !== "src/weak.ts")).toBe(true);
+  });
+
+  it("packs a same-file implementation function ahead of another file that only repeats covered terms", async () => {
+    const languages = [
+      "export const TREE_SITTER_LANGUAGE_SPECS = {",
+      "  typescript: { grammarFile: \"tree-sitter-typescript.wasm\", outline: true },",
+      "};",
+      ...Array.from({ length: 40 }, (_, index) => `export const pad${index} = ${index};`),
+      "export function capabilitiesFromSpec(spec?: { grammarFile: string }) {",
+      "  return { outline: Boolean(spec) };",
+      "}",
+    ].join("\n");
+    const other = [
+      "export const OTHER_SPECS = {",
+      "  rust: { grammarFile: \"tree-sitter-rust.wasm\" },",
+      "};",
+    ].join("\n");
+    const langLines = languages.split("\n");
+    const otherLines = other.split("\n");
+    const lineOf = (source: string[], needle: string) => source.findIndex((line) => line.includes(needle)) + 1;
+    const result = await explore({
+      question: "where do we decide a tree-sitter grammar can produce an outline",
+      limit: 2,
+    }, {
+      rgSearch: async (pattern) => {
+        const hits: Array<{ path: string; line: number; text: string }> = [];
+        const push = (path: string, source: string[], needle: string): void => {
+          const line = lineOf(source, needle);
+          if (line > 0) hits.push({ path, line, text: source[line - 1]! });
+        };
+        if (pattern === "tree-sitter") {
+          push("src/languages.ts", langLines, "tree-sitter-typescript");
+          push("src/other.ts", otherLines, "tree-sitter-rust");
+        }
+        if (pattern === "grammar") {
+          push("src/languages.ts", langLines, "grammarFile: \"tree-sitter-typescript");
+          push("src/other.ts", otherLines, "grammarFile: \"tree-sitter-rust");
+        }
+        if (pattern === "outline") {
+          push("src/languages.ts", langLines, "outline: true");
+          push("src/languages.ts", langLines, "outline: Boolean");
+        }
+        return { hits, filesDropped: 0, fileCoverage: "complete" };
+      },
+      readFile: async (path) => ready(path === "src/languages.ts" ? languages : other),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    expect(result.snippets.some((snippet) => snippet.text.includes("capabilitiesFromSpec"))).toBe(true);
+    expect(result.snippets.every((snippet) => snippet.path !== "src/other.ts")).toBe(true);
+  });
+
+  it("rescans a snapshot so a dropped content-word hit still becomes a window", async () => {
+    const content = [
+      "function ensureRuntime() {",
+      "  return \"tree-sitter\";",
+      "}",
+      ...Array.from({ length: 40 }, (_, index) => `const pad${index} = ${index};`),
+      "function parseDocument(elapsed: number, parseBudget: number) {",
+      "  if (elapsed > parseBudget) {",
+      "    throw new Error(\"alphaword\");",
+      "  }",
+      "  return true;",
+      "}",
+    ].join("\n");
+    const lines = content.split("\n");
+    const lineOf = (needle: string) => lines.findIndex((line) => line.includes(needle)) + 1;
+    const result = await explore({ question: "how is the alphaword for tree-sitter enforced", limit: 4 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "tree-sitter") {
+          return [{ path: "src/provider.ts", line: lineOf("\"tree-sitter\""), text: lines[lineOf("\"tree-sitter\"") - 1]! }];
+        }
+        return [];
+      },
+      readFile: async () => ready(content),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    expect(result.details.windows?.some((window) => window.hits.some((hit) => hit.includes("alphaword")))).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.text.includes("alphaword"))).toBe(true);
+  });
+
+  it("does not fill leftover excerpt slots with off-topic wire ends after a locating hit", async () => {
+    const registrar = [
+      "export function registerHarnessServices() {",
+      ...Array.from({ length: 10 }, (_, index) => `  register("other.service.${index}", noop);`),
+      "  register(\"explore.search\", createExploreSearchService);",
+      "}",
+    ].join("\n");
+    const registrarHit = registrar.split("\n").findIndex((line) => line.includes("explore.search")) + 1;
+    const result = await explore({ question: "where is explore.search registered", limit: 6 }, {
+      rgSearch: async (pattern) => pattern === "explore.search"
+        ? [{ path: "src/harness-services.ts", line: registrarHit, text: "  register(\"explore.search\", createExploreSearchService);" }]
+        : [],
+      readFile: async (path) => {
+        if (path === "src/harness-services.ts") return ready(registrar);
+        return ready(`register("${path}", noop);`);
+      },
+      structure: createStructureSource([parsingProvider()]),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 3 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => {
+          if (value === "explore.search") return [{ path: "src/harness-services.ts", kind: "connects", value, callee: "register" }];
+          if (value.startsWith("other.service")) {
+            return [{ path: `src/${value}.ts`, kind: "connects", value, callee: "register" }];
+          }
+          return [];
+        },
+        fileRelations: async (path) => path === "src/harness-services.ts"
+          ? {
+            connections: [
+              ...Array.from({ length: 10 }, (_, index) => ({ callee: "register", literal: `other.service.${index}` })),
+              { callee: "register", literal: "explore.search" },
+            ],
+            linksIncomplete: false,
+          }
+          : null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.snippets.some((snippet) => snippet.text.includes("register(\"explore.search\""))).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path.includes("other.service"))).toBe(false);
+    expect(result.details.provenance.some((entry) => entry.path.includes("other.service"))).toBe(false);
+  });
+});
+

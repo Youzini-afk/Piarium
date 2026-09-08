@@ -3095,6 +3095,39 @@ how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读�
 
 状态：已实施（检查点二）。
 
+### D-155 · 2026-09-08 · 查询内权重进入局部选择与打包；内容词不再拿完整对象档
+
+背景：`windowsFor` 把 `hasDistinctive`（任何原词命中，含内容词）传给 `windowGrade`，只命中一个泛词的窗口也能拿 `full-object`（×200）。单独修它会让带对象的错误窗口赢得更稳（问题 6 的 `ensureRuntime` 对 `parseDocument`）。打包用新增词组个数和 `sameFile * 40` / `newFile * 8`，同文件互补块无条件让给第二个文件的弱片段。rg 候选预算丢掉的内容词也不会在已读正文里补种窗口。
+
+决定：
+
+- `full-object` 只给对象或锚点的原词命中。内容词原词命中是 `lexical`。
+- 物化后在正文里核对全部有效词组。回退变体只更新文件级覆盖，不凭拆分新开窗口。原词命中若与已有同组命中相距超过一个小容器（24 行），另算一簇，最多 3 簇。结构只负责怎么切，不独自决定值不值得读。
+- 打包用同一张权重表：自身 \(L\)、相对已选（含同文件已选窗口）新增的词组价值、正文字节成本。同文件出现新的本地词组给互补加分。入口窗口（接口/清单）已经占住的词组，同一文件里尚未选中的函数/方法仍算本地互补——机制片段不必再重复对象。换文件不再是奖励。`sameFile * 40` 拿掉。等级与角色是有界微调，不是墙。函数/方法单元有小幅偏好，不是新的等级墙。不给「文件里还有函数」的入口窗口额外抢位，否则测试夹具里的 function 会把定位题的 register 挤出可见前几条。
+- `details.windows` 带上 `grade` 与可选 `unit`。量具用 unit 名判断窗口是否已生成，避免 hit 行只有 `outline: true` 时把 `capabilitiesFromSpec` 误报成从未切出。
+- 多词邻近性不做。
+- 观察脚本对自身路径做 `excludeResourceIds` 后再按后缀滤一遍 hit。问题 5 仍出现 `self:`：rg 排除之后，反向 import 把脚本重新拉进候选，问题原文在正文重扫里变成高覆盖窗口。这改变与检查点二的槽位可比性，不放宽 `wants`。
+
+观察（同一目录 `--skip-scan`）：1 满足，`register("explore.search")` 在 `harness-services.ts` 可见 #3。9 满足，request #1、register #3。V1–V5 满足（register #2 或 #3）。6：`parseDocument` 进度/超限可见 #2。4：`languages.ts` `capabilitiesFromSpec` 可见 #16，`wants` 成立。5：classify 可见 #15；write 已读，匹配窗口从未生成；`self:` 占 3 个可见槽。7：`document.writeGuard` 注册窗口已生成 501-522，未选中；inspect 仍读预算。3：supersede 可见 #1；8：reclaim 可见 #2。2 仍读预算（未核验 connects 占 tier 1）。10 仍 `not acquired`。不声称质量或速度提升。
+
+不改：读预算与字节预算数值；D-090 测试路径原则；结构切片本身；embedding / BM25 / 持久词法索引。
+
+影响：`explore.ts` 窗口等级、正文重扫、打包；protocol `ExploreWindowTrace.grade` / `unit`；设计 6.1 词项分组与物化；plan 3.14 检查点三。
+
+状态：已实施（检查点三）。
+
+### D-156 · 2026-09-08 · 定位题有直接答案后不再展开或填 offTopic；无法判定无关 ≠ 已经证明有关
+
+背景：D-151 把无关连线降到 `support`，但 `limit` 还有空位时它们仍被 `findLinks` 并填进正文。设计 6.1 写过「问句没有对象时不判无关，那时正文里每根线同等在题」，把「无法判定」写成了「已经证明有关」。
+
+决定：定位题或双端题已经拿到直接答案时，`offTopic` 字面量不再 `findLinks`，打包池直接去掉 `offTopic` 窗口。降位不是省查找成本的替代，也不该继续污染上下文。`limit` 是上限，同时落在停止（D-154）、展开和打包。无对象问句可以按内容词、当前局部证据和可行动缺口做有限展开，不把整张注册表的连接都当潜在支撑。
+
+不改：连接预算数值；无对象 how 问句上未核验 `connects` 的 tier（D-147）。
+
+影响：`explore.ts` 连线展开与 `packComplementary`；设计 6.1 fan-out 与物化。订正 D-151：降等规则仍成立，定位题已有答案后仍用 `offTopic` 填满 `limit` 不成立。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3251,7 +3284,9 @@ how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读�
 | D-148 | superseded in part（角色表与条件式测试优先仍成立；`roleFit` 先于内容证据的比较位置由 D-154 取代） | D-154 | explore-query.ts；explore.ts |
 | D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
 | D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
-| D-151 | implementation（量具不得未核验就报已核验；注册表窗口的无关另一端降 support 档；文档头部与提交同批） | — | scripts/explore-observe.ts；explore.ts windowGrade |
+| D-151 | superseded in part（降等与量具必填证据仍成立；定位题已有答案后仍用 offTopic 填满 limit 由 D-156 拿掉） | D-156 | scripts/explore-observe.ts；explore.ts windowGrade |
 | D-152 | superseded in part（已读证据重算成立；「只上报 self:、不改问题存放」被本刀排除观察脚本路径取代） | D-153 | explore.ts 物化/刷新；scripts/explore-observe.ts |
 | D-153 | implementation（查询内区分度表；截断三态；details 可见；量具区分窗口未生成/未选中；观察脚本自排除。排名未改） | — | explore-distinctiveness.ts；explore.ts details；search-service fileCoverage；explore-observe.ts |
 | D-154 | implementation（同 tier 比较加权覆盖；roleFit 退到其后作有界偏好；how 问句不因摘录包已满停读） | — | explore.ts rankCandidates / shouldStop；设计 6.1 fuse 与物化 |
+| D-155 | implementation（权重进入局部选择与打包；内容词不得拿 full-object；正文补种远距原词簇） | — | explore.ts windowsFor / packComplementary / rescanBodyGroups；protocol ExploreWindowTrace.grade |
+| D-156 | implementation（定位题有答案后 offTopic 不展开不进包；无法判定无关 ≠ 已证明有关） | — | explore.ts expand/pack；设计 6.1 |

@@ -272,6 +272,8 @@ type ObservePayload = {
       why: string;
       packed: boolean;
       hits: string[];
+      grade?: string;
+      unit?: { name: string; kind: string };
     }>;
   };
   notRequested?: { paths?: string[] };
@@ -289,7 +291,10 @@ const stageForTarget = (
     .filter((item) => item.snippet.path.includes(target.pathIncludes));
   const met = fromPath.find((item) => needMet(item.snippet, target.need));
   const generated = (payload.details?.windows ?? []).filter((window) => window.path.includes(target.pathIncludes));
-  const generatedMet = generated.find((window) => needMet({ text: window.hits.join("\n"), why: window.why }, target.need));
+  const generatedMet = generated.find((window) => needMet({
+    text: [window.hits.join("\n"), window.unit?.name ?? ""].filter(Boolean).join("\n"),
+    why: window.why,
+  }, target.need));
   const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0 || generated.length > 0;
   const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
   if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
@@ -437,6 +442,10 @@ const main = async (): Promise<void> => {
       // lexical candidate. Excluding it changes slot occupancy vs the
       // 6f92b49c baseline (Q4 and Q6 each lose one polluted visible slot)
       // but not the wants or target files (D-153).
+      const observeScriptId = path.relative(repoRoot, fileURLToPath(import.meta.url)).split(path.sep).join("/");
+      const isObserveScript = (resourceId: string): boolean => (
+        resourceId.replace(/\\/g, "/").toLowerCase().endsWith("explore-observe.ts")
+      );
       const outcome = await contentSearch.searchContent({
         query: request.query,
         workspaceId: request.workspaceId,
@@ -444,21 +453,27 @@ const main = async (): Promise<void> => {
         ...(request.paths === undefined ? {} : { paths: request.paths }),
         ...(request.glob === undefined ? {} : { glob: request.glob }),
         excludeResourceIds: [
-          path.relative(repoRoot, fileURLToPath(import.meta.url)).split(path.sep).join("/"),
+          observeScriptId,
           ...(request.excludeResourceIds ?? []),
         ],
         ...(request.ignoreCase === undefined ? {} : { ignoreCase: request.ignoreCase }),
         ...(request.fixedStrings === undefined ? {} : { fixedStrings: request.fixedStrings }),
       }, options);
+      const filtered = outcome.status === "ready"
+        ? outcome.hits.filter((hit) => !isObserveScript(hit.resource.resourceId))
+        : [];
+      const droppedSelf = outcome.status === "ready" ? outcome.hits.length - filtered.length : 0;
+      const resolved = outcome.status === "ready" && droppedSelf > 0 ? { ...outcome, hits: filtered } : outcome;
       // The harness search service reports any failure as a bare "unavailable",
       // so the pattern, elapsed time and raw status are logged here.
-      const hits = outcome.status === "ready" ? outcome.hits.length : 0;
+      const hits = resolved.status === "ready" ? resolved.hits.length : 0;
       process.stderr.write(
         `  rg ${JSON.stringify(request.query)} max=${request.maxResults ?? "none"} `
-        + `→ ${outcome.status} hits=${hits} ${Math.round(performance.now() - started)} ms`
-        + `${outcome.status === "failure" ? ` :: ${outcome.message}` : ""}\n`,
+        + `→ ${resolved.status} hits=${hits} ${Math.round(performance.now() - started)} ms`
+        + `${droppedSelf > 0 ? ` self-filter=-${droppedSelf}` : ""}`
+        + `${resolved.status === "failure" ? ` :: ${resolved.message}` : ""}\n`,
       );
-      return outcome;
+      return resolved;
     },
     structureSource,
     graphRecall: () => openStore,

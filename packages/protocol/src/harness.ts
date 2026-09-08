@@ -484,6 +484,14 @@ export interface ExploreDistinctivenessDetails {
   terms: ExploreTermWeight[];
 }
 
+export type ExploreEvidenceGrade =
+  | "verified-relation"
+  | "connects-clue"
+  | "exact-definition"
+  | "full-object"
+  | "support"
+  | "lexical";
+
 /** Generated windows for this call, packed or not. Used by observation meters. */
 export interface ExploreWindowTrace {
   path: string;
@@ -492,6 +500,8 @@ export interface ExploreWindowTrace {
   why: string;
   packed: boolean;
   hits: string[];
+  grade: ExploreEvidenceGrade;
+  unit?: ExploreStructureUnit;
 }
 
 export interface ExploreSkippedQueries {
