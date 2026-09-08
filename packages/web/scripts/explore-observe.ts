@@ -47,6 +47,18 @@ import { createFsSearchRuntime } from "../application-host/lib/fs/search.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
+/**
+ * What the visible body must actually contain for the target to count. Mandatory:
+ * without it the script can only observe "some window of this file is visible",
+ * and must not report that as verified evidence (D-151).
+ */
+type TargetNeed = {
+  /** Human words for the required evidence, printed in the stage line. */
+  label: string;
+  /** Matched against the snippet body, and against `why` for graph-verified relations. */
+  match: RegExp;
+};
+
 type ObserveQuestion = {
   ask: string;
   wants: string;
@@ -54,9 +66,17 @@ type ObserveQuestion = {
   targets: Array<{
     id: string;
     pathIncludes: string;
-    /** Visible body must contain this relation, not only mention the name. */
-    need?: "register" | "request" | "classify" | "literal";
+    need: TargetNeed;
   }>;
+};
+
+const NEED_REGISTER: TargetNeed = {
+  label: "register(\"explore.search\")",
+  match: /register\s*\(\s*["'`]explore\.search|verified register\("explore\.search"\)/,
+};
+const NEED_REQUEST: TargetNeed = {
+  label: "request(\"explore.search\")",
+  match: /request\s*\(\s*["'`]explore\.search|verified request\("explore\.search"\)/,
 };
 
 /**
@@ -67,64 +87,111 @@ const QUESTIONS: ObserveQuestion[] = [
   {
     ask: "where is the explore.search service registered on the host router",
     wants: "visible snippet shows the current register(...) call with the full explore.search connection value. A doc or fixture that only mentions the name does not count.",
-    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER }],
   },
   {
     ask: "how does explore decide which files to read after ripgrep returns hits",
     wants: "visible snippet from explore.ts that implements ranking or on-demand materialize (schedule/rank/materialize). A design paragraph that only names those functions does not count.",
-    targets: [{ id: "materialize", pathIncludes: "explore.ts" }],
+    targets: [{
+      id: "materialize",
+      pathIncludes: "explore.ts",
+      need: {
+        label: "rank/schedule/materialize body",
+        match: /(?:const|function)\s+(?:rankCandidates|scheduleReads|materializeScheduled|materializeBatch)\b|(?:rankCandidates|scheduleReads|materializeScheduled)\s*\(/,
+      },
+    }],
   },
   {
     ask: "what stops the agent from reading a stale captured draft after it writes a file",
     wants: "visible snippet of the invalidate/supersede or observeWrite path that drops a captured draft after an agent write. Naming D-088 is not enough.",
     targets: [
-      { id: "supersede", pathIncludes: "surface-snapshot-store" },
-      { id: "observe-write", pathIncludes: "authority" },
+      {
+        id: "supersede",
+        pathIncludes: "surface-snapshot-store",
+        need: { label: "supersede/observeWrite body", match: /supersede|observeWrite/ },
+      },
+      {
+        id: "observe-write",
+        pathIncludes: "authority",
+        need: { label: "observeWrite call", match: /observeWrite\s*\(/ },
+      },
     ],
   },
   {
     ask: "where do we decide a tree-sitter grammar can produce an outline",
     wants: "visible snippet that decides outline capability from a grammar spec or tagsPath. A string constant listing language ids does not count.",
-    targets: [{ id: "outline-capability", pathIncludes: "languages.ts" }],
+    targets: [{
+      id: "outline-capability",
+      pathIncludes: "languages.ts",
+      need: { label: "capability decision from spec/tagsPath", match: /capabilitiesFromSpec|tagsPath/ },
+    }],
   },
   {
     ask: "which code writes connects and associates edges into the knowledge graph",
     wants: "visible classify or write-path operation that assigns connects vs associates. A definition of the string constants alone does not count.",
     targets: [
-      { id: "classify", pathIncludes: "connections.ts", need: "classify" },
-      { id: "write", pathIncludes: "symbol-runtime.ts" },
+      {
+        id: "classify",
+        pathIncludes: "connections.ts",
+        need: { label: "connects/associates classification", match: /classifyLiteralCall/ },
+      },
+      {
+        id: "write",
+        pathIncludes: "symbol-runtime.ts",
+        need: { label: "link write with the classified kind", match: /links\.push|kind:\s*classified/ },
+      },
     ],
   },
   {
     ask: "how is the parse budget for tree-sitter enforced and what happens when it runs out",
     wants: "visible snippet of the parse progress/budget check and the exhausted outcome. Naming STRUCTURE_PARSE_BUDGET_MS is not enough.",
-    targets: [{ id: "parse-budget", pathIncludes: "tree-sitter-provider.ts" }],
+    targets: [{
+      id: "parse-budget",
+      pathIncludes: "tree-sitter-provider.ts",
+      need: { label: "progress check and exhausted outcome", match: /progressCallback|stopReason|Parse budget exhausted/ },
+    }],
   },
   {
     ask: "where is the write guard that refuses to overwrite unsaved user changes",
     wants: "visible inspect/write-guard decision that refuses a write over unsaved user changes, or the document.writeGuard registration of that function.",
     targets: [
-      { id: "inspect", pathIncludes: "authority" },
-      { id: "register-guard", pathIncludes: "harness-services.ts" },
+      {
+        id: "inspect",
+        pathIncludes: "authority",
+        need: { label: "unsaved-changes refusal", match: /unsaved editor changes|writeGuard/ },
+      },
+      {
+        id: "register-guard",
+        pathIncludes: "harness-services.ts",
+        need: { label: "register(\"document.writeGuard\")", match: /register\s*\(\s*["'`]document\.writeGuard/ },
+      },
     ],
   },
   {
     ask: "how does a thread get its own working directory and when is it reclaimed",
     wants: "visible materialize and reclaim (or reclaim-guard) operations. A comment that only mentions worktrees does not count.",
-    targets: [{ id: "worktree", pathIncludes: "thread-worktree.ts" }],
+    targets: [{
+      id: "worktree",
+      pathIncludes: "thread-worktree.ts",
+      need: { label: "reclaim body", match: /reclaim(?:ed)?\s*[=:(]/ },
+    }],
   },
   {
     ask: "explore.search",
     wants: "both the register end and the request end of that connection are visible. One end must be reported as missing the other.",
     targets: [
-      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
-      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+      { id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: NEED_REQUEST },
     ],
   },
   {
     ask: "what limits how many bytes explore returns to the model",
     wants: "visible packExploreVisible / DEFAULT_BYTE_BUDGET (or the OutputStore handle reservation). A docs sentence that only names the budget does not count.",
-    targets: [{ id: "byte-budget", pathIncludes: "explore.ts" }],
+    targets: [{
+      id: "byte-budget",
+      pathIncludes: "explore.ts",
+      need: { label: "packExploreVisible / DEFAULT_BYTE_BUDGET", match: /packExploreVisible|DEFAULT_BYTE_BUDGET/ },
+    }],
   },
 ];
 
@@ -134,33 +201,33 @@ const VARIANTS: ObserveQuestion[] = [
     ask: "explore.search",
     wants: "same minimum as question 9: register end and request end visible.",
     targets: [
-      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
-      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+      { id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: NEED_REQUEST },
     ],
   },
   {
     ask: "`explore.search`",
     wants: "backticks must not drop the object; register or request call still visible.",
     targets: [
-      { id: "register-end", pathIncludes: "harness-services.ts", need: "register" },
-      { id: "request-end", pathIncludes: "explore-tool.ts", need: "request" },
+      { id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER },
+      { id: "request-end", pathIncludes: "explore-tool.ts", need: NEED_REQUEST },
     ],
   },
   {
     ask: "where is explore.search registered on the host router",
     wants: "polite English locating form still shows the current register(...) call.",
-    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER }],
   },
   {
     ask: "请找一下 explore.search 的注册位置",
     wants: "Chinese locating form still shows the current register(...) call.",
-    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER }],
   },
   {
     ask: "where is this registered",
     wants: "explicit anchors must drive the same object; current register(...) call visible.",
     anchors: ["explore.search"],
-    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: "register" }],
+    targets: [{ id: "register-end", pathIncludes: "harness-services.ts", need: NEED_REGISTER }],
   },
 ];
 
@@ -183,16 +250,8 @@ const dataDirArg = flag("data-dir");
 
 const line = (char = "─"): string => char.repeat(78);
 
-const relationVisible = (
-  snippet: { path: string; text?: string; why?: string },
-  need: NonNullable<ObserveQuestion["targets"][number]["need"]>,
-): boolean => {
-  const text = `${snippet.text ?? ""} ${snippet.why ?? ""}`;
-  if (need === "register") return /register\s*\(\s*["'`]explore\.search/.test(text) || /verified register\("explore\.search"\)/.test(text);
-  if (need === "request") return /request\s*\(\s*["'`]explore\.search/.test(text) || /verified request\("explore\.search"\)/.test(text);
-  if (need === "classify") return /classifyLiteralCall|connects|associates/.test(text);
-  return text.includes("explore.search");
-};
+const needMet = (snippet: { text?: string; why?: string }, need: TargetNeed): boolean =>
+  need.match.test(`${snippet.text ?? ""} ${snippet.why ?? ""}`);
 
 const stageForTarget = (
   target: ObserveQuestion["targets"][number],
@@ -210,12 +269,11 @@ const stageForTarget = (
   const snippets = payload.snippets ?? [];
   const provenance = payload.details?.provenance ?? [];
   const unread = new Set(payload.notRequested?.paths ?? []);
-  const visibleIndex = snippets.findIndex((snippet) => {
-    if (!snippet.path.includes(target.pathIncludes)) return false;
-    return target.need ? relationVisible(snippet, target.need) : true;
-  });
-  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes))
-    || snippets.some((snippet) => snippet.path.includes(target.pathIncludes));
+  const fromPath = snippets
+    .map((snippet, index) => ({ snippet, index }))
+    .filter((item) => item.snippet.path.includes(target.pathIncludes));
+  const met = fromPath.find((item) => needMet(item.snippet, target.need));
+  const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0;
   const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
   if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
     return `${target.id}: acquired → not-requested: read budget`;
@@ -223,16 +281,16 @@ const stageForTarget = (
   if (!acquired) return `${target.id}: not acquired`;
   if (entry?.status === "not-requested") return `${target.id}: acquired → not-requested: read budget`;
   if (entry?.status && entry.status !== "ready") return `${target.id}: acquired → ${entry.status}`;
-  const readHit = snippets.find((snippet) => snippet.path.includes(target.pathIncludes));
-  if (!readHit && entry?.status === "ready") return `${target.id}: read → packed out`;
-  if (!readHit) return `${target.id}: acquired → scheduled → not visible`;
-  if (target.need && !relationVisible(readHit, target.need)) {
-    return `${target.id}: read → literal found, ${target.need} relation not verified`;
+  if (met) {
+    return `${target.id}: acquired → scheduled → read → ${target.need.label} verified → visible #${met.index + 1}`;
   }
-  if (visibleIndex >= 0) {
-    return `${target.id}: acquired → scheduled → read → relation verified → visible #${visibleIndex + 1}`;
+  // A visible window from the right file is not the evidence the question asked
+  // for. Say which window was packed instead, and never call it verified (D-151).
+  if (fromPath[0]) {
+    return `${target.id}: read → visible #${fromPath[0].index + 1}, but ${target.need.label} not in that window`;
   }
-  return `${target.id}: read → not visible`;
+  if (entry?.status === "ready") return `${target.id}: read → packed out`;
+  return `${target.id}: acquired → scheduled → not visible`;
 };
 
 const printDiagnostic = (question: ObserveQuestion, payload: {
