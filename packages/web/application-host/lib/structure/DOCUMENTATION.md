@@ -67,7 +67,11 @@ the unit. A hit on `const needle = 1` inside `function big` selects `big`.
 tree-sitter provider emits them as `function` / `class` after inspecting the
 initializer.
 
-`sliceStructureWindows` turns an outline plus hit lines into explore windows:
+`sliceStructureWindows` turns an outline plus `focusRanges` into explore windows.
+A lexical hit line is one origin (`lexical-hit`); a semantic or graph range is
+another. Empty only when there are no focus ranges. `proposeSymbolSliceSchemes`
+lists presentations and UTF-8 costs; `renderSymbolSliceScheme` emits one. This
+delivery ships a single scheme (signature + focus blocks + omission marks).
 
 - Inclusive span ≤ `SMALL_STRUCTURE_SPAN_LINES` (24; one typical editor
   viewport, D-093) → the whole unit.

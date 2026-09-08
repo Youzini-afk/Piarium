@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
-import { sliceStructureWindows } from "./slice.js";
+import { proposeSymbolSliceSchemes, sliceStructureWindows, type StructureFocusRange } from "./slice.js";
 import type { StructureOutlineResult, StructureSymbol } from "./types.js";
+
+const lexical = (line: number): StructureFocusRange => ({ startLine: line, endLine: line, origin: "lexical-hit" });
 
 const linesOf = (count: number, hitLine: number): string[] => (
   Array.from({ length: count }, (_, index) => (index + 1 === hitLine ? "  const needle = 1;" : `  const pad${index + 1} = ${index + 1};`))
@@ -25,7 +27,7 @@ describe("sliceStructureWindows", () => {
       path: "small.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 2 }],
+      focusRanges: [lexical(2)],
       outline: readyOutline([{
         name: "needle",
         kind: "function",
@@ -52,7 +54,7 @@ describe("sliceStructureWindows", () => {
       path: "large.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: hitLine }],
+      focusRanges: [lexical(hitLine)],
       outline: readyOutline([{
         name: "largeTarget",
         kind: "function",
@@ -86,7 +88,7 @@ describe("sliceStructureWindows", () => {
       path: "large.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: hitLine }],
+      focusRanges: [lexical(hitLine)],
       outline: readyOutline([
         {
           name: "largeTarget",
@@ -122,7 +124,7 @@ describe("sliceStructureWindows", () => {
       path: "wide.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 10 }],
+      focusRanges: [lexical(10)],
       outline: readyOutline([
         {
           name: "Wide",
@@ -162,7 +164,7 @@ describe("sliceStructureWindows", () => {
       path: "body.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 3 }],
+      focusRanges: [lexical(3)],
       outline: readyOutline([{
         name: "needle",
         kind: "function",
@@ -185,7 +187,7 @@ describe("sliceStructureWindows", () => {
       path: "box.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 2 }],
+      focusRanges: [lexical(2)],
       outline: readyOutline([
         {
           name: "Box",
@@ -223,7 +225,7 @@ describe("sliceStructureWindows", () => {
       path: "bind.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 3 }],
+      focusRanges: [lexical(3)],
       outline: readyOutline([
         {
           name: "wrap",
@@ -249,7 +251,7 @@ describe("sliceStructureWindows", () => {
       path: "a.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 7 }],
+      focusRanges: [lexical(7)],
       outline: { status: "unavailable", provider: "lsp", revision: "rev-1", symbols: [] },
     });
     expect(windows).toEqual([{
@@ -257,6 +259,7 @@ describe("sliceStructureWindows", () => {
       end: 10,
       text: "line 4\nline 5\nline 6\nneedle\nline 8\nline 9\nline 10",
       hitLines: [7],
+      focusRanges: [lexical(7)],
       fallback: true,
     }]);
   });
@@ -267,7 +270,7 @@ describe("sliceStructureWindows", () => {
       path: "a.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 7 }],
+      focusRanges: [lexical(7)],
       outline: readyOutline([{
         name: "oldNeedle",
         kind: "function",
@@ -297,7 +300,7 @@ describe("sliceStructureWindows", () => {
       path: "big.json",
       lines,
       revision: "rev-1",
-      hits: [{ line: hitLine }],
+      focusRanges: [lexical(hitLine)],
       outline: readyOutline([
         {
           name: "$",
@@ -339,7 +342,7 @@ describe("sliceStructureWindows", () => {
       path: "sample.ts",
       lines,
       revision: "rev-1",
-      hits: [{ line: 2 }],
+      focusRanges: [lexical(2)],
       outline: readyOutline([
         {
           name: "wrap",
@@ -356,5 +359,53 @@ describe("sliceStructureWindows", () => {
       ]),
     });
     expect(windows[0]?.unit).toMatchObject({ name: "wrap", kind: "function" });
+  });
+
+  it("returns no windows only when focusRanges is empty", () => {
+    const lines = ["export function target() {", "  return 1;", "}"];
+    expect(sliceStructureWindows({
+      path: "empty.ts",
+      lines,
+      revision: "rev-1",
+      focusRanges: [],
+      outline: readyOutline([{
+        name: "target",
+        kind: "function",
+        range: { startLine: 1, endLine: 3 },
+        signature: { startLine: 1, endLine: 1 },
+      }]),
+    })).toEqual([]);
+  });
+
+  it("slices a semantic-block focus that is not a lexical hit line", () => {
+    const lines = [
+      "export function target() {",
+      "  const a = 1;",
+      "  const b = 2;",
+      "  return a + b;",
+      "}",
+    ];
+    const outline = readyOutline([{
+      name: "target",
+      kind: "function",
+      range: { startLine: 1, endLine: 5 },
+      signature: { startLine: 1, endLine: 1 },
+    }]);
+    const windows = sliceStructureWindows({
+      path: "semantic.ts",
+      lines,
+      revision: "rev-1",
+      focusRanges: [{ startLine: 2, endLine: 4, origin: "semantic-block" }],
+      outline,
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.text).toBe(lines.join("\n"));
+    expect(windows[0]?.focusRanges).toEqual([{ startLine: 2, endLine: 4, origin: "semantic-block" }]);
+    const schemes = proposeSymbolSliceSchemes("semantic.ts", lines, outline.symbols[0]!, [
+      { startLine: 2, endLine: 4, origin: "semantic-block" },
+    ]);
+    expect(schemes).toHaveLength(1);
+    expect(schemes[0]?.kind).toBe("signature-focus-omit");
+    expect(schemes[0]?.byteCost).toBeGreaterThan(0);
   });
 });

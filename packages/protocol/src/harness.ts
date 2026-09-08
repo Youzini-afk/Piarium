@@ -496,13 +496,32 @@ export interface ExploreDistinctivenessDetails {
   terms: ExploreTermWeight[];
 }
 
-export type ExploreEvidenceGrade =
-  | "verified-relation"
-  | "connects-clue"
-  | "exact-definition"
-  | "full-object"
-  | "support"
-  | "lexical";
+export type ExploreArrivalKind = "lexical" | "graph" | "semantic";
+export type ExploreGraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
+
+export interface ExploreLexicalArrival {
+  kind: "lexical";
+  groups: string[];
+  hits: string[];
+}
+
+export interface ExploreGraphArrival {
+  kind: "graph";
+  edgeKind?: "connects" | "associates" | "definition" | "import";
+  arrivalReason: ExploreGraphArrivalReason;
+}
+
+export interface ExploreSemanticArrival {
+  kind: "semantic";
+  queryVariant?: string;
+  blockId?: string;
+  rank?: number;
+  similarity?: number;
+}
+
+export type ExploreArrival = ExploreLexicalArrival | ExploreGraphArrival | ExploreSemanticArrival;
+export type ExploreAssessment = "verified-relation" | "object-present" | "name-only" | "unverified";
+export type ExplorePurpose = "primary" | "support" | "candidate";
 
 /** Generated windows for this call, packed or not. Used by observation meters. */
 export interface ExploreWindowTrace {
@@ -512,7 +531,9 @@ export interface ExploreWindowTrace {
   why: string;
   packed: boolean;
   hits: string[];
-  grade: ExploreEvidenceGrade;
+  arrivals: ExploreArrival[];
+  assessment: ExploreAssessment;
+  purpose: ExplorePurpose;
   unit?: ExploreStructureUnit;
 }
 

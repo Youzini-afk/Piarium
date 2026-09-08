@@ -5,7 +5,15 @@ export { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
 export type { TreeSitterLanguageSpec } from "./languages.js";
 export { createStructureSource } from "./source.js";
 export { classifyLiteralCall, CONFIRMED_CONNECTION_CALLEES } from "./connections.js";
-export { enclosingSliceSymbol, outlineCoversHitLines, outlineUsableForText, sliceStructureWindows } from "./slice.js";
+export {
+  enclosingSliceSymbol,
+  outlineCoversHitLines,
+  outlineUsableForText,
+  proposeSymbolSliceSchemes,
+  renderSymbolSliceScheme,
+  sliceStructureWindows,
+} from "./slice.js";
+export type { StructureFocusOrigin, StructureFocusRange, StructureSliceScheme } from "./slice.js";
 export { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
 export type { LiteralCallClass } from "./connections.js";
 export type {

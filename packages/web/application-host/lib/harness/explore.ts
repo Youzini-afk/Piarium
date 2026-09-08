@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreDistinctivenessDetails, type ExploreEvidenceGrade, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExplorePurpose, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -160,7 +160,6 @@ const searchVariantsOf = (group: TermGroup): string[] => {
 };
 
 type GraphCandidateSource = "definition" | "connection" | "association" | "import";
-type EvidenceGrade = ExploreEvidenceGrade;
 /** Why this graph edge was walked (D-163). Same-container is ordinary supplement. */
 export type GraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
 
@@ -217,8 +216,11 @@ interface PreparedWindow {
   structure?: ExploreSnippet["structure"];
   hitLines: number[];
   hitClass?: StructureHitClass;
-  grade: EvidenceGrade;
+  arrivals: ExploreArrival[];
+  assessment: ExploreAssessment;
+  purpose: ExplorePurpose;
   verifiedCallees: string[];
+  verifiedRelations: Array<{ callee: string; literal: string }>;
   factKey: string;
   roleFit: number;
 }
@@ -233,13 +235,11 @@ const emptyEvidence = (): FileEvidence => ({
   verifiedCallees: new Set(),
 });
 
-const GRADE_RANK: Record<EvidenceGrade, number> = {
-  "verified-relation": 5,
-  "connects-clue": 4,
-  "exact-definition": 3,
-  "full-object": 2,
-  support: 1,
-  lexical: 0,
+const ASSESSMENT_RANK: Record<ExploreAssessment, number> = {
+  "verified-relation": 3,
+  "object-present": 2,
+  "name-only": 1,
+  unverified: 0,
 };
 
 const ARRIVAL_RANK: Record<GraphArrivalReason, number> = {
@@ -530,17 +530,43 @@ function literalOffTopic(literal: string, parsed: ExploreQueryParse): boolean {
   ));
 }
 
-function windowGrade(windowClues: GraphClue[], hasDistinctiveObject: boolean, hasAnchor: boolean, verified: boolean): EvidenceGrade {
+function windowAssessment(
+  windowClues: GraphClue[],
+  hasDistinctiveObject: boolean,
+  hasAnchor: boolean,
+  verified: boolean,
+  hasCoveredNames: boolean,
+): ExploreAssessment {
   if (verified) return "verified-relation";
-  if (windowClues.some(isDirectConnectionClue)) return "connects-clue";
-  if (windowClues.some((clue) => clue.source === "definition" && clue.match === "exact")) return "exact-definition";
-  if (hasAnchor || hasDistinctiveObject) return "full-object";
-  if (windowClues.some((clue) => (
-    clue.source === "association" || clue.source === "import" || clue.match === "name-contains" || clue.offTopic
-  ))) {
-    return "support";
+  if (hasAnchor || hasDistinctiveObject) return "object-present";
+  if (windowClues.some(isDirectConnectionClue) || hasCoveredNames) return "name-only";
+  return "unverified";
+}
+
+function arrivalsForWindow(
+  covered: ReadonlySet<string>,
+  names: readonly string[],
+  windowClues: readonly GraphClue[],
+): ExploreArrival[] {
+  const arrivals: ExploreArrival[] = [];
+  if (covered.size > 0) {
+    arrivals.push({ kind: "lexical", groups: [...covered], hits: [...names] });
   }
-  return "lexical";
+  for (const clue of windowClues) {
+    if (arrivals.some((item) => (
+      item.kind === "graph"
+      && item.arrivalReason === clue.arrivalReason
+      && item.edgeKind === (clue.edgeKind ?? clue.source)
+    ))) continue;
+    arrivals.push({
+      kind: "graph",
+      arrivalReason: clue.arrivalReason,
+      ...(clue.edgeKind || clue.source === "definition" || clue.source === "import" || clue.source === "association" || clue.source === "connection"
+        ? { edgeKind: clue.edgeKind ?? (clue.source === "definition" ? "definition" : clue.source === "import" ? "import" : clue.source === "association" ? "associates" : "connects") }
+        : {}),
+    });
+  }
+  return arrivals;
 }
 
 function windowsFor(
@@ -574,7 +600,7 @@ function windowsFor(
     path,
     lines,
     revision: snapshot.revision,
-    hits: matches.map((line) => ({ line })),
+    focusRanges: matches.map((line) => ({ startLine: line, endLine: line, origin: "lexical-hit" as const })),
     outline: usable,
   });
   const nameById = new Map(groups.map((group) => [group.id, group.distinctive]));
@@ -584,7 +610,11 @@ function windowsFor(
     const distinctive = new Set<string>();
     const windowClues: GraphClue[] = [];
     let hasAnchor = false;
-    for (const line of slice.hitLines) {
+    const focusLines = new Set<number>(slice.hitLines);
+    for (const focus of slice.focusRanges) {
+      for (let line = focus.startLine; line <= focus.endLine; line += 1) focusLines.add(line);
+    }
+    for (const line of focusLines) {
       const hit = evidence.hits.get(line);
       if (!hit) continue;
       for (const groupId of hit.groups) covered.add(groupId);
@@ -611,9 +641,16 @@ function windowsFor(
     const hasDistinctiveObject = [...covered].some((id) => objectIds.has(id) && distinctive.has(id));
     const verified = evidence.verifiedRelation && windowClues.some((clue) => clue.source === "connection" || clue.why.startsWith("verified "));
     const looksLikeRegister = parsed.objects.some((object) => windowLooksLikeCallee(slice.text, "register", object));
-    const grade = looksLikeRegister && parsed.relation === "register"
-      ? (verified ? "verified-relation" : "connects-clue")
-      : windowGrade(windowClues, hasDistinctiveObject, hasAnchor, verified || evidence.verifiedRelation && hasDistinctiveObject);
+    const assessment = looksLikeRegister && parsed.relation === "register"
+      ? (verified ? "verified-relation" : (hasDistinctiveObject ? "object-present" : "name-only"))
+      : windowAssessment(
+        windowClues,
+        hasDistinctiveObject,
+        hasAnchor,
+        verified || evidence.verifiedRelation && hasDistinctiveObject,
+        covered.size > 0,
+      );
+    const arrivals = arrivalsForWindow(covered, names, windowClues);
     const offTopic = windowClues.some((clue) => clue.offTopic)
       && !hasDistinctiveObject
       && !verified
@@ -645,8 +682,11 @@ function windowsFor(
       ...(slice.unit ? { unit: slice.unit } : {}),
       ...(structure ? { structure } : {}),
       hitLines: slice.hitLines,
-      grade,
+      arrivals,
+      assessment,
+      purpose: "candidate",
       verifiedCallees: [...evidence.verifiedCallees],
+      verifiedRelations: [],
       factKey,
       roleFit,
     };
@@ -708,7 +748,7 @@ async function classifyPreparedWindows(
 
 function weakenUnverifiedConnectionWhy(windows: PreparedWindow[], objects: readonly string[]): PreparedWindow[] {
   return windows.map((window) => {
-    if (window.grade === "verified-relation") return window;
+    if (window.assessment === "verified-relation") return window;
     if (!objects.some((object) => window.text.includes(object))) return window;
     if (!/graph pointed here|other end of connection|associated mention/.test(window.why)) return window;
     if (/verified register|verified request|verified connection/.test(window.why)) return window;
@@ -760,7 +800,7 @@ async function verifyMaterializedRelations(
         const why = `associated mention of "${hit.literal}" via ${hit.name}()`;
         return {
           ...window,
-          grade: window.grade === "verified-relation" ? window.grade : "support",
+          assessment: window.assessment === "verified-relation" ? window.assessment : "unverified",
           why: window.why.includes(why) ? window.why : (window.why ? `${why}; ${window.why}` : why),
         };
       }
@@ -769,8 +809,10 @@ async function verifyMaterializedRelations(
       const why = `verified ${hit.name}("${hit.literal}")`;
       return {
         ...window,
-        grade: "verified-relation",
+        assessment: "verified-relation",
         verifiedCallees: [...new Set([...window.verifiedCallees, hit.name])],
+        verifiedRelations: [...window.verifiedRelations, { callee: hit.name, literal: hit.literal }]
+          .filter((item, index, list) => list.findIndex((other) => other.callee === item.callee && other.literal === item.literal) === index),
         why: window.why.includes(why) ? window.why : (window.why ? `${why}; ${window.why}` : why),
         factKey: `${path}:verified:${hit.name}:${hit.literal}`,
       };
@@ -787,16 +829,25 @@ function questionWantsAllSites(question: string): boolean {
 
 function hasVerifiedRegister(windows: readonly PreparedWindow[]): boolean {
   return windows.some((window) => (
-    window.grade === "verified-relation"
-    && (window.verifiedCallees.includes("register") || window.why.includes("verified register(") || /register\("/.test(window.text))
+    window.assessment === "verified-relation"
+    && window.verifiedRelations.some((item) => item.callee === "register")
   ));
 }
 
 function hasBothConnectsEnds(windows: readonly PreparedWindow[]): boolean {
-  const callees = new Set(windows.flatMap((window) => window.verifiedCallees));
-  const registerEnd = callees.has("register") || windows.some((window) => /register\(["'`]/.test(window.text));
-  const requestEnd = callees.has("request") || windows.some((window) => /request\(["'`]/.test(window.text));
-  return registerEnd && requestEnd;
+  const registerLiterals = new Set<string>();
+  const requestLiterals = new Set<string>();
+  for (const window of windows) {
+    if (window.assessment !== "verified-relation") continue;
+    for (const item of window.verifiedRelations) {
+      if (item.callee === "register") registerLiterals.add(item.literal);
+      if (item.callee === "request") requestLiterals.add(item.literal);
+    }
+  }
+  for (const literal of registerLiterals) {
+    if (requestLiterals.has(literal)) return true;
+  }
+  return false;
 }
 
 function groupContribution(window: PreparedWindow, groupId: string, weights: ReadonlyMap<string, number>): number {
@@ -846,7 +897,6 @@ function windowScore(
     + addedLocal * 20
     + complement
     + unitBonus
-    + GRADE_RANK[window.grade] * 8
     + window.roleFit * 3
     + (window.hasAnchor ? 8 : 0)
     + newEnd * 20
@@ -855,9 +905,13 @@ function windowScore(
     - (sameFact ? 80 : 0);
 }
 
-/** A window whose grade came from the relation the question asked about. */
+/** A window whose assessment meets the asked object or relation. */
 function carriesAskedRelation(window: PreparedWindow): boolean {
-  return GRADE_RANK[window.grade] >= GRADE_RANK["exact-definition"];
+  return ASSESSMENT_RANK[window.assessment] >= ASSESSMENT_RANK["object-present"];
+}
+
+function definitionArrivalRank(window: PreparedWindow): number {
+  return window.arrivals.some((item) => item.kind === "graph" && item.edgeKind === "definition") ? 1 : 0;
 }
 
 /**
@@ -887,11 +941,18 @@ function packComplementary(
     let bestScore = Number.NEGATIVE_INFINITY;
     remaining.forEach((window, index) => {
       const rank = relationRoleRank(window, preferProduction);
+      const partition = selected.length === 0;
+      const assessment = partition ? ASSESSMENT_RANK[window.assessment] : 0;
+      const definition = partition ? definitionArrivalRank(window) : 0;
       const score = windowScore(window, selected, weights);
       const best = remaining[bestIndex]!;
+      const bestAssessment = partition ? ASSESSMENT_RANK[best.assessment] : 0;
+      const bestDefinition = partition ? definitionArrivalRank(best) : 0;
       const better = rank > bestRank
-        || (rank === bestRank && score > bestScore)
-        || (rank === bestRank && score === bestScore
+        || (rank === bestRank && assessment > bestAssessment)
+        || (rank === bestRank && assessment === bestAssessment && definition > bestDefinition)
+        || (rank === bestRank && assessment === bestAssessment && definition === bestDefinition && score > bestScore)
+        || (rank === bestRank && assessment === bestAssessment && definition === bestDefinition && score === bestScore
           && (comparePath(window.path, best.path) < 0 || (window.path === best.path && window.start < best.start)));
       if (better) {
         bestIndex = index;
@@ -1438,6 +1499,10 @@ export async function explore(
     parsed.preferTests === false,
   );
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
+  for (const window of prepared) {
+    const packedWindow = packedKeys.has(`${window.path}:${window.start}-${window.end}`);
+    window.purpose = packedWindow ? (window.offTopic ? "support" : "primary") : "candidate";
+  }
   const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);
   const windowTraces: ExploreWindowTrace[] = prepared.map((window) => {
     const evidence = byFile.get(window.path);
@@ -1447,7 +1512,9 @@ export async function explore(
       endLine: window.end,
       why: window.why,
       packed: packedKeys.has(`${window.path}:${window.start}-${window.end}`),
-      grade: window.grade,
+      arrivals: window.arrivals,
+      assessment: window.assessment,
+      purpose: window.purpose,
       ...(window.unit ? { unit: window.unit } : {}),
       hits: window.hitLines.flatMap((line) => {
         const text = evidence?.hits.get(line)?.text;

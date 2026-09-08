@@ -1551,7 +1551,9 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
     });
     const window = result.details.windows?.find((item) => item.path === "src/budget.ts");
     expect(window).toBeDefined();
-    expect(window?.grade).toBe("lexical");
+    expect(window?.assessment).toBe("name-only");
+    expect(window?.arrivals.some((arrival) => arrival.kind === "lexical")).toBe(true);
+    expect(window?.purpose === "primary" || window?.purpose === "support" || window?.purpose === "candidate").toBe(true);
   });
 
   it("packs two complementary blocks from one file ahead of a weak second file", async () => {
@@ -1831,6 +1833,39 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
     });
     expect(result.snippets.some((snippet) => snippet.path === "src/pipeline-core.ts")).toBe(true);
     expect(result.snippets.find((snippet) => snippet.path === "src/pipeline-core.ts")?.why).toContain("other end of connection \"rank.pipeline.core\"");
+  });
+
+  it("does not treat register and request of different connection values as both ends", async () => {
+    const request = "export function ask() { return request(\"explore.search\"); }\n";
+    const decoy = [
+      "export function boot() {",
+      "  // explore.search mentioned so rg selects this file",
+      "  register(\"other.wire\", noop);",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "how is explore.search wired on the host" }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "explore.search") {
+          return [
+            { path: "src/request.ts", line: 1, text: "export function ask() { return request(\"explore.search\"); }" },
+            { path: "src/decoy.ts", line: 2, text: "  // explore.search mentioned so rg selects this file" },
+          ];
+        }
+        return [];
+      },
+      readFile: async (path) => ready(path === "src/decoy.ts" ? decoy : request),
+      structure: createStructureSource([parsingProvider()]),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 2 }),
+        searchDefinitions: async () => [],
+        findLinks: async (value) => value === "explore.search"
+          ? [{ path: "src/request.ts", kind: "connects", value, callee: "request" }]
+          : [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+      },
+    });
+    expect(result.details.skippedQueries).toBeUndefined();
   });
 });
 

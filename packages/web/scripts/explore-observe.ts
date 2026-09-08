@@ -283,7 +283,9 @@ type ObservePayload = {
       why: string;
       packed: boolean;
       hits: string[];
-      grade?: string;
+      arrivals?: Array<{ kind: string }>;
+      assessment?: string;
+      purpose?: string;
       unit?: { name: string; kind: string; startLine: number; endLine: number };
     }>;
   };

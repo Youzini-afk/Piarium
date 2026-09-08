@@ -3378,6 +3378,38 @@ D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对�
 
 状态：已实施。
 
+### D-165 · 2026-09-08 · focusRanges 入口；arrival / assessment / purpose；同一连接值才算两端
+
+背景：3.16 语义线索没有命中行，旧 `sliceStructureWindows` 在 `hits.length === 0` 时返回空。`EvidenceGrade`
+把怎么找到的、核验到什么、在输出里当什么揉在一起。`hasBothConnectsEnds` 按 callee 集合加正文正则，
+`register("other.wire")` 加 `request("explore.search")` 就会早停并跳过内容词。
+
+决定：
+
+- `windowsFor` / `sliceStructureWindows` 入口改为 `focusRanges` `{ startLine, endLine, origin }`。词法命中是
+  `lexical-hit`。没有 focusRanges 才返回空。`proposeSymbolSliceSchemes` / `renderSymbolSliceScheme` 拆开，
+  本刀只交付 `signature-focus-omit`。
+- 证据单元三字段：`arrival`（lexical / graph / semantic，可合并）/ `assessment`
+  （`verified-relation` / `object-present` / `name-only` / `unverified`）/ `purpose`
+  （打包决定：入包且非 offTopic → primary，offTopic 入包 → support，未入包 → candidate）。
+  相似度不进 assessment。协议去掉 `ExploreEvidenceGrade`。
+- `hasVerifiedRegister` / `hasBothConnectsEnds` 只看已核验关系；两端必须是**同一连接值**的 register 与 request。
+  去掉正文 `/register\(/` `/request\(/` 回退。
+- `windowScore` 仍在，只删 `GRADE_RANK * 8`。评估作打包**首槽**分区（加目录定义到达作同等评估下的偏好），
+  后续槽位仍走 windowScore，避免硬分区挡住同文件互补块。重排接上之前两套不并存的终局仍待第二片。
+
+已验证：混合字面量两端在无修复时 `skippedQueries=direct-verified`（先红）；修复后内容词仍启动。
+`slice.test.ts` 空 focusRanges / 语义块焦点 / 原有切片；explore 74 项；内容词窗口 `assessment=name-only`。
+web tsc。
+
+未验证：十问观察；语义 arrival 尚未接线；`windowScore` 其余项未删；AnswerRequest（3.15③）未做。
+
+不改：24 KiB / 20 条 / 读预算与图预算；不建程序切片器。
+
+影响：`slice.ts`；`explore.ts` 证据单元与打包；protocol `ExploreWindowTrace`；设计 6.1；plan 3.15④；status。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3538,14 +3570,15 @@ D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对�
 | D-152 | superseded in part（已读证据重算成立；「只上报 self:、不改问题存放」被本刀排除观察脚本路径取代） | D-153 | explore.ts 物化/刷新；scripts/explore-observe.ts |
 | D-153 | implementation（查询内区分度表；截断三态；details 可见；量具区分窗口未生成/未选中；观察脚本自排除。排名未改） | — | explore-distinctiveness.ts；explore.ts details；search-service fileCoverage；explore-observe.ts |
 | D-154 | implementation（同 tier 比较加权覆盖；roleFit 退到其后作有界偏好；how 问句不因摘录包已满停读） | — | explore.ts rankCandidates / shouldStop；设计 6.1 fuse 与物化 |
-| D-155 | implementation（权重进入局部选择与打包；内容词不得拿 full-object；正文补种远距原词簇） | — | explore.ts windowsFor / packComplementary / rescanBodyGroups；protocol ExploreWindowTrace.grade |
+| D-155 | superseded in part（内容词不得拿完整对象档仍成立；`ExploreWindowTrace.grade` 已换成三字段） | D-165 | explore.ts windowsFor / packComplementary / rescanBodyGroups；protocol ExploreWindowTrace |
 | D-156 | implementation（定位题有答案后 offTopic 不展开不进包；无法判定无关 ≠ 已证明有关） | — | explore.ts expand/pack；设计 6.1 |
 | D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
 | D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |
 | D-158 | planned（语义来源排期 3.16：嵌入第三路候选 / 重排 / 查询扩展；本地默认远程可选按槽位；索引指纹；不设信任门与花费守卫） | — | 设计 6 头、6.1、8.5；plan 3.16 |
 | D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉） | D-163 | 设计 6.1 目标形态；plan 3.15 |
 | D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
-| D-161 | planned（3.15/3.16 联合设计采纳：arrival/assessment/purpose、focusRanges、文件级 RRF 限读取调度、重排替掉 windowScore、三类身份、生命周期轴、捕获时 overlay；四片串行；起点修正：embedding.ts 七家适配器已有、AFT 切块是反例、.tdb 单维度）；代际存储路径被 D-162 参数化 | D-162（路径） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
+| D-161 | superseded in part（联合设计仍有效；focusRanges 与三字段接口已由 D-165 落地，RRF/重排/身份仍待） | D-165（接口） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
 | D-162 | planned（不索引整个电脑；范围分层、语义跟注意力走；scope 是一等参数；文档身份不绑路径；3.16 第一片守两条接缝约束） | — | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
 | D-164 | implementation（explore/related 共用查询期文件角色；依据 filename-pattern / project-declaration / unknown；不入图） | — | file-role.ts；related.query roles；plan 3.15② |
+| D-165 | implementation（focusRanges 入口；arrival/assessment/purpose；同一连接值才算两端；windowScore 去掉 GRADE_RANK 项） | — | slice.ts；explore.ts；protocol ExploreWindowTrace；plan 3.15④ |

@@ -285,8 +285,9 @@ discovered after a read still expand. The graph never supplies line numbers
 for excerpts. After `readFile`, explore relocates the symbol name or literal
 in the current text and only then writes `hits`; if the name is gone, that
 window is omitted — it does not become line 1. Graph why/boost bind to the
-window that verified, not the file. `connects` and `associates` are different
-evidence grades. `details.graph` reports
+window that verified, not the file. Evidence units carry `arrival` / `assessment`
+/ `purpose` instead of a single grade; `connects` and `associates` stay different
+graph arrivals. `details.graph` reports
 `not-requested | ready | empty | unavailable | failed`, with unique-file
 `definitions` / `connections` / `associates`. An unusable graph leaves the rg
 excerpts in place. Graph `filesDropped` is a unique-path floor and is combined
