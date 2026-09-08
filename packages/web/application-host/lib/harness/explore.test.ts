@@ -1184,6 +1184,51 @@ describe("explore 3.13 ranking and verification", () => {
     expect(defined[0]?.text).toContain("createExploreFixture");
   });
 
+  it("rebuilds windows of an already-read file when the content-word pass adds hits", async () => {
+    // The object pass reads the file for `tree-sitter` and slices the mention;
+    // `parse`/`budget` arrive in the later pass, when the file is already read.
+    const content = [
+      "function ensureRuntime() {",
+      "  const runtime = \"tree-sitter\";",
+      "  return runtime.length > 0;",
+      "}",
+      ...Array.from({ length: 40 }, (_, index) => `const pad${index} = ${index};`),
+      "function parseDocument(elapsed: number, parseBudget: number) {",
+      "  if (elapsed > parseBudget) {",
+      "    throw new Error(\"parse budget exceeded\");",
+      "  }",
+      "  return true;",
+      "}",
+    ].join("\n");
+    const lines = content.split("\n");
+    const lineOf = (needle: string) => lines.findIndex((line) => line.includes(needle)) + 1;
+    const reads: string[] = [];
+    const run = (question: string) => explore({ question, limit: 4 }, {
+      rgSearch: async (pattern) => {
+        if (pattern === "tree-sitter") return [{ path: "provider.ts", line: lineOf("\"tree-sitter\""), text: lines[lineOf("\"tree-sitter\"") - 1]! }];
+        if (pattern === "parse" || pattern === "budget") {
+          return [
+            { path: "provider.ts", line: lineOf("elapsed > parseBudget"), text: lines[lineOf("elapsed > parseBudget") - 1]! },
+            { path: "provider.ts", line: lineOf("parse budget exceeded"), text: lines[lineOf("parse budget exceeded") - 1]! },
+          ];
+        }
+        return [];
+      },
+      readFile: async (path) => {
+        reads.push(path);
+        return ready(content);
+      },
+      structure: createStructureSource([parsingProvider()]),
+    });
+
+    const withObject = await run("how is the parse budget for tree-sitter enforced");
+    expect(reads).toEqual(["provider.ts"]);
+    expect(withObject.snippets.some((snippet) => snippet.text.includes("elapsed > parseBudget"))).toBe(true);
+
+    const withoutObject = await run("how is the parse budget enforced");
+    expect(withoutObject.snippets.some((snippet) => snippet.text.includes("elapsed > parseBudget"))).toBe(true);
+  });
+
   it("does not let an off-topic wire end from a registration table outrank the question's own object", async () => {
     // A container slice of a registration table holds every literal it
     // registers, so the window filter alone does not keep the other services

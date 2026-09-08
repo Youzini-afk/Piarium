@@ -3024,6 +3024,24 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施。
 
+### D-152 · 2026-09-08 · 已读文件的证据要重算；观察脚本自己在污染观察
+
+背景：设计复查指出一条与稀有度无关的控制流缺口，我在 `7740bb5c` 上独立走通了：`prepared.push(...windows)` 只在 `materializeBatch` 里发生，而调度内层 `if (readPaths.has(candidate.path)) continue` 把已读文件挑掉。于是对象词那一趟（`runRg(objectPatterns)`）先读文件、按对象命中冻结窗口，随后内容词那一趟（`runRg(contentPatterns)`）的新命中只进 `byFile`，永远不产生窗口。同一个坑还有第二处：按读发现的连线里 `alreadyRead` 的另一端不进 `connectionPaths`，其 `graphClues` 因此从不被 `applyGraphLocate` 定位。这与 D-146「在池里 ≠ 已验证」是同一类，只是那次修的是调度，没修窗口重建。
+
+有对象的问句才走两趟，所以这条缺口只可能落在十问里的 1、4、6、9 上；1 和 9 的对象本身就是所求关系的操作数，无碍；4 和 6 的对象只说明在谈哪个子系统，真答案在后来的内容词命中里，正是「文件对、窗口错」那两题。其余六题 `objectPatterns` 为空、只有一趟，没有东西可冻结——两个缺陷各管一半，互不替代。
+
+决定：把「快照已取得」与「窗口已针对当前证据算过」分成两个状态。抽出 `buildWindowsFrom(path, snapshot, evidence)`，在内容词一趟之后、以及连线展开之后各跑一次 `refreshReadEvidence()`：已读路径的证据签名变了就用缓存快照重算窗口并替换 `prepared` 里该路径的条目。不消耗新文件读取预算——`snapshots` 按路径缓存；也不重新解析——tree-sitter 的解析缓存按内容哈希命名（32 条、空闲淘汰），同一份正文的第二次 outline/classify 是缓存命中。内容词先在已有正文上核对，再决定要不要为新文件花读取预算。
+
+观察（同一目录 `--skip-scan`）：问题 1、9 与五个变体不变，无回退；问题 4 从可见 #19 升到 #6，问题 6 从 #2 到 #3，**都仍未命中所需证据**；六个无对象问句不变，与上面的划分一致。问题 6 在真实仓库里没翻转的原因不是冻结没修好，而是链条断得更早：`tree-sitter-provider.ts` 的唯一窗口理由仍是 `matched tree-sitter`，说明 `parse`/`budget` 这两个词对该文件的命中根本没回来（撞候选预算），刷新无从下手。合成探针供了这些命中，所以探针能红能绿，真实仓库还需要加权那一步。
+
+另记一项自查发现：`scripts/explore-observe.ts` 里存着十问原文与 `wants`，它因此对每道题都是轻易成立的强词法候选。实测 15 次运行里它每次都进候选，并且**恰好在问题 4 和 6 各占一个可见槽位**——正是打包成为瓶颈的那两题。D-149 只约束了「输出不写回被检索仓库」，没约束问题文本本身也在仓库里。本刀不改问题存放方式，先在阶段诊断加一行 `self:` 把占用量报出来，不藏。
+
+不改：读预算数值；候选广度分配；`limit` 与字节预算；D-151 的降等规则。
+
+影响：`explore.ts` 物化与刷新；`explore-observe.ts` 诊断；plan 3.13 验收项；status 3.13。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3181,3 +3199,4 @@ D-103 第 1、3 项；候选池排序。
 | D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
 | D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
 | D-151 | implementation（量具不得未核验就报已核验；注册表窗口的无关另一端降 support 档；文档头部与提交同批） | — | scripts/explore-observe.ts；explore.ts windowGrade |
+| D-152 | implementation（已读快照按新增证据重算窗口；观察脚本自身问题文本的占用如实上报） | — | explore.ts 物化/刷新；scripts/explore-observe.ts |

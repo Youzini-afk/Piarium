@@ -311,6 +311,13 @@ const printDiagnostic = (question: ObserveQuestion, payload: {
   process.stdout.write(
     `direct:  connects=${graph?.connections ?? 0} paths  associates=${graph?.associates ?? 0} paths  definitions=${graph?.definitions ?? 0} files  graph=${graph?.status ?? "—"}\n`,
   );
+  // This file holds the question text, so it is a trivially strong lexical
+  // candidate for every question. Measure that instead of hiding it (D-152).
+  const selfPacked = (payload.snippets ?? []).filter((snippet) => snippet.path.includes("explore-observe.ts")).length;
+  const selfUnread = (payload.notRequested?.paths ?? []).filter((path) => path.includes("explore-observe.ts")).length;
+  if (selfPacked > 0 || selfUnread > 0) {
+    process.stdout.write(`self:    question text in this script took ${selfPacked} visible slot(s), ${selfUnread} unread candidate(s)\n`);
+  }
   for (const target of question.targets) {
     process.stdout.write(`target:  ${stageForTarget(target, payload)}\n`);
   }

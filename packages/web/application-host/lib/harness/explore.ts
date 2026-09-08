@@ -402,6 +402,17 @@ function windowLooksLikeCallee(text: string, callee: string, object: string): bo
  * object and the literal is neither that object nor part of it. With no object
  * every wire in the body is equally on topic.
  */
+/**
+ * Cheap identity of "what this file's evidence says right now". Windows are
+ * rebuilt when it moves, so a hit or clue that arrived after the read still
+ * reaches the model.
+ */
+function evidenceSignature(evidence: FileEvidence): string {
+  const lines = [...evidence.hits.keys()].sort((left, right) => left - right).join(",");
+  const groups = [...evidence.groups].sort().join(",");
+  return `${lines}|${groups}|${evidence.graphClues.length}|${evidence.verifiedRelation ? 1 : 0}`;
+}
+
 function literalOffTopic(literal: string, parsed: ExploreQueryParse): boolean {
   if (parsed.objects.length === 0) return false;
   return !parsed.objects.some((object) => (
@@ -929,7 +940,14 @@ export async function explore(
   const prepared: PreparedWindow[] = [];
   const snapshots = new Map<string, ExploreFileSnapshot>();
   const readPaths = new Set<string>();
+  /** Evidence signature each read path's windows were last built against. */
+  const windowedEvidence = new Map<string, string>();
   let reads = 0;
+
+  const replacePrepared = (path: string, windows: readonly PreparedWindow[]): void => {
+    const kept = prepared.filter((window) => window.path !== path);
+    prepared.splice(0, prepared.length, ...kept, ...windows);
+  };
 
   const markProvenance = (path: string, status: ExploreProvenance["status"], snapshot?: ExploreFileSnapshot): void => {
     const evidence = byFile.get(path);
@@ -967,45 +985,79 @@ export async function explore(
         markProvenance(candidate.path, snapshot.status, snapshot);
         continue;
       }
-      const lines = snapshot.content.split(/\r\n|\n|\r/);
-      applyGraphLocate(lines, candidate.evidence);
-      for (const object of parsed.objects) {
-        if (!looksLikePathObject(candidate.path) && candidate.path !== object) continue;
-        for (const line of locateLiteralLines(lines, object)) {
-          if (candidate.evidence.hits.has(line)) continue;
-          candidate.evidence.hits.set(line, {
-            text: lines[line - 1]!,
-            groups: new Set(),
-            distinctive: new Set(),
-            clues: [],
-          });
-        }
-      }
-      const hitLines = [...candidate.evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
-      const outline = await outlineForSnapshot(candidate.path, snapshot, deps, signal, hitLines);
-      if (outline.status !== "not-requested") {
-        structureFiles.set(candidate.path, {
-          path: candidate.path,
-          provider: outline.provider,
-          status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
+      await buildWindowsFrom(candidate.path, snapshot, candidate.evidence);
+    }
+  };
+
+  /**
+   * Turn one already-acquired snapshot into windows against the evidence this
+   * file carries *now*. Safe to run again on the same snapshot: the snapshot
+   * cache means no disk read, and the structure providers key their parse cache
+   * on the content hash, so a second pass over the same text is a cache hit.
+   */
+  const buildWindowsFrom = async (
+    path: string,
+    snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
+    evidence: FileEvidence,
+  ): Promise<void> => {
+    const lines = snapshot.content.split(/\r\n|\n|\r/);
+    applyGraphLocate(lines, evidence);
+    for (const object of parsed.objects) {
+      if (!looksLikePathObject(path) && path !== object) continue;
+      for (const line of locateLiteralLines(lines, object)) {
+        if (evidence.hits.has(line)) continue;
+        evidence.hits.set(line, {
+          text: lines[line - 1]!,
+          groups: new Set(),
+          distinctive: new Set(),
+          clues: [],
         });
       }
-      const sliced = windowsFor(candidate.path, lines, candidate.evidence, snapshot, groups, outline, parsed);
-      const classified = await classifyPreparedWindows(candidate.path, snapshot, sliced.windows, deps, signal);
-      const windows = await verifyMaterializedRelations(candidate.path, snapshot, candidate.evidence, classified, parsed, deps, signal);
-      if (sliced.stale) {
-        issues.push({
-          path: candidate.path,
-          status: "stale",
-          message: "Some search hits no longer match this document revision; those hits were omitted.",
-        });
-      }
-      if (windows.length === 0) {
-        markProvenance(candidate.path, sliced.stale ? "stale" : "empty", snapshot);
-        continue;
-      }
-      markProvenance(candidate.path, "ready", snapshot);
-      prepared.push(...windows);
+    }
+    const hitLines = [...evidence.hits.keys()].filter((line) => Number.isSafeInteger(line) && line >= 1);
+    const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines);
+    if (outline.status !== "not-requested") {
+      structureFiles.set(path, {
+        path,
+        provider: outline.provider,
+        status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
+      });
+    }
+    const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed);
+    const classified = await classifyPreparedWindows(path, snapshot, sliced.windows, deps, signal);
+    const windows = await verifyMaterializedRelations(path, snapshot, evidence, classified, parsed, deps, signal);
+    if (sliced.stale && !issues.some((issue) => issue.path === path && issue.status === "stale")) {
+      issues.push({
+        path,
+        status: "stale",
+        message: "Some search hits no longer match this document revision; those hits were omitted.",
+      });
+    }
+    replacePrepared(path, windows);
+    if (windows.length === 0) {
+      markProvenance(path, sliced.stale ? "stale" : "empty", snapshot);
+      windowedEvidence.set(path, evidenceSignature(evidence));
+      return;
+    }
+    markProvenance(path, "ready", snapshot);
+    windowedEvidence.set(path, evidenceSignature(evidence));
+  };
+
+  /**
+   * New hits arriving after a file was read do not reach the model unless its
+   * windows are rebuilt: the object pass freezes a window around the object
+   * mention, and the later content-word pass skips the file because it is
+   * already read. Reuse the snapshot and recompute (D-152).
+   */
+  const refreshReadEvidence = async (): Promise<void> => {
+    for (const path of readPaths) {
+      signal.throwIfAborted();
+      const snapshot = snapshots.get(path);
+      if (!snapshot || snapshot.status !== "ready") continue;
+      const evidence = byFile.get(path);
+      if (!evidence) continue;
+      if (windowedEvidence.get(path) === evidenceSignature(evidence)) continue;
+      await buildWindowsFrom(path, snapshot, evidence);
     }
   };
 
@@ -1056,6 +1108,9 @@ export async function explore(
     skippedContent.push(...contentPatterns.keys());
   } else if (contentPatterns.size > 0) {
     await runRg(contentPatterns);
+    // Check the content words against text already in hand before spending a
+    // read on a new file: the answer may be in a file the object pass read.
+    await refreshReadEvidence();
     ranked = rankCandidates(byFile, groups, parsed);
     scheduled = scheduleReads(ranked, groups, parsed);
     await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
@@ -1148,6 +1203,9 @@ export async function explore(
         graphFilesDropped = Math.max(graphFilesDropped, connectionDropped, importDropped);
         graphPartial = true;
       }
+      // A graph clue landing on an already-read file is otherwise never located
+      // in its text, because that path is not a newcomer to materialize.
+      await refreshReadEvidence();
       ranked = rankCandidates(byFile, groups, parsed);
       const newcomers = rankCandidates(byFile, groups, parsed).filter((candidate) => (
         (connectionPaths.includes(candidate.path) || importPaths.includes(candidate.path))
