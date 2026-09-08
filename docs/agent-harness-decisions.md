@@ -2871,6 +2871,52 @@ D-103 第 1、3 项；候选池排序。
 
 状态：已实施。
 
+### D-143 · 2026-09-07 · 确认连接得先是真的：首参约束、awaited 泛型、提取器版本
+
+类型：implementation
+
+背景：D-142 的观察回路读完 10 问后直接查图：`findLinks("explore.search")` 里有 `harness-services.ts:585 connects register`——
+问题 1 和 9 的精确答案。但请求端 `explore-tool.ts:31` 的 `await bridge.request<"explore.search">("explore.search", …)` **不在图里**。
+外部设计评审（本轮由维护者委托的设计 agent）核实了两处提取缺陷并给出实验：`router.register(handler, "not-first")` 被提取成连接、
+`register("a", "b")` 提取两条；完整 `explore-tool.ts` 提取不到请求端，去掉泛型参数就能。它的结论是「不能直接定为没写泛型查询」，
+我的复现进一步定位到：**单独的泛型调用能提取，`await` + 泛型不能**。解析树给出了原因——tree-sitter-typescript 在 `await x.request<T>(…)`
+处把 `await` 挂到被调用者上：`(call_expression function: (await_expression …) type_arguments: … arguments: …)`，
+我们的查询要求 `function:` 是 `identifier` 或 `member_expression`，于是不匹配。本仓库所有 awaited 泛型 bridge 请求都是这个形状。
+
+决定：
+
+1. **查询加首参锚点。** `(arguments . (string) @literal)`——字符串必须是第一个命名参数。这是 D-106「字符串首参调用」本来就声明的语义，
+   查询从未落实。修后 `register(handler, "not-first")` 不再是连接，`register("a", "b")` 只出 `"a"`。
+2. **查询接受 `await_expression` 包裹的被调用者。** 不新写"泛型查询"——泛型参数本身可以省略匹配（tree-sitter 查询允许不写出其他子节点），
+   问题只在 `await` 改变了树形。查询里的注释写明了这个树形，免得下次有人又去找泛型的原因。
+3. **目录记提取器版本。** 目录是（文件内容 × 提取器）的函数，扫描的跳过条件却只看 `documentRevision`——修好的查询永远到不了内容没变的文件。
+   `CATALOG_EXTRACTOR_VERSION`（`knowledge/symbols.ts`，现为 2）随每次 `replaceFileSymbols` 写进文件节点，扫描要求修订**和**版本都相同才跳过。
+   这是缓存键不是 schema 版本：旧行不被读取或转换，而是从源码重算；D-105「无 schema version / 无 migration」不受影响。
+   `touchFile` 保留该字段，测量脚本同样打版本号（D-140 的纪律）。
+
+复验：新查询在六种形状上全部正确（非首参不提取、双字符串取一、awaited 泛型成员/标识符调用都提取、模板字面量不提取、
+`explore-tool.ts` 提取出 `request("explore.search") L31`、`harness-services.ts` 仍是 37 条 register）。全库重扫 312.6 s，
+2360 文件全部重采（旧行 extractor 为 null），**边数 14040 → 13459**——少的 581 条就是原来不合首参规则的假连接和假关联。
+重问问题 9：连线补全**第一次触发**（`other end of connection "explore.search"` 出现在输出里）。
+
+**但正确答案仍然没出现。** 连线另一端指向了 `symbol-graph-query.ts`——那是一条 `associates`（脚本里的 `findLinks("explore.search")`
+调用），不是 `connects`：`explore.ts:771` 的循环不看 `end.kind`。真正的 `connects` 端 `harness-services.ts` 按代码路径已在 rg 候选池里，
+被 `explore.ts:782` 的 `already` 跳过，进不了 `connectionPaths`，也就进不了补充物化。这两处加上词组内按路径字母序当 RRF 名次
+（`explore.ts:310–316`，`bun.lock` 的 `b` 排在一切源码前面）是设计评审指出的三个排名/打包缺陷，属于 §3.13，本条不动。
+
+原因：在让「确认连接」获得更大权重之前，先保证确认连接本身是对的——否则是在放大错误数据。评审把这一条放在报告末尾，
+我把它排第一，理由是依赖顺序而不是难度。
+
+不改：`classifyLiteralCall` 的允许名单（D-106）；D-109 闸门；`explore.ts` 的排名、物化、打包（§3.13）。
+
+未验证：其他语言的 tags 适配器不受影响（它们没有 literal-call 查询）；JS/JSX 与 TS 共用同一份查询，测试只覆盖了 TS 形状。
+
+影响：`structure/queries.ts`；`knowledge/symbols.ts`（`CATALOG_EXTRACTOR_VERSION`）；`knowledge/store.ts`（`extractor` 字段与
+`SymbolGraphFileRelations.extractor`）；`knowledge/symbol-runtime.ts`（跳过条件）；`scripts/symbol-graph-query.ts`；
+`tree-sitter-provider.test.ts`（+1）；`catalog-scan.test.ts`（+1）。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3019,3 +3065,4 @@ D-103 第 1、3 项；候选池排序。
 | D-140 | implementation（目录前置条件：枚举一次 `git ls-files` 而非每目录 `check-ignore`；派生图写入尾随去抖 flush；测量脚本改成生产的成批形状。枚举 74 s → 199 ms，建目录 18.4 → 4.8 分钟） | — | lib/fs/search.ts + search.test.ts；knowledge/store.ts；symbol-runtime.ts；scripts/symbol-graph-query.ts；status 3.1/3.12 |
 | D-141 | implementation + 实验结果（TriviumDB 0.8.5 → 0.8.6；`payloadCacheMb: 0` 绕开其 O(N) payload 缓存；符号图八张内存表换原生索引，剩计数器 + 形状缓存；短词只精确匹配；建目录 290 → 257 s，`searchSymbols` 17 → 11.5 ms） | — | packages/web/package.json；knowledge/store.ts + store.test.ts；设计 7.5 |
 | D-142 | implementation（观察回路 `explore:observe` 走真实服务；rg exit 2 有命中时按部分覆盖保留并标 `incomplete`、零命中仍 fail-closed；保留 stderr 首行。改前 10 问 9 抛错 → 改后 0 失败） | — | lib/search/content.ts + content.test.ts；harness/search-service.ts；scripts/explore-observe.ts；status 3.2/3.12 |
+| D-143 | implementation（literal-call 查询加首参锚点并接受 awaited 泛型；`CATALOG_EXTRACTOR_VERSION` 进跳过条件，重扫 2360 文件、边 14040 → 13459；连线补全首次触发，正确端仍被 §3.13 的三处排名/打包缺陷挡住） | — | structure/queries.ts；knowledge/symbols.ts + store.ts + symbol-runtime.ts；tree-sitter-provider.test.ts；catalog-scan.test.ts；status 3.1/3.11 |
