@@ -29,6 +29,7 @@
  * the fixed-draft branches are simply not exercised.
  */
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -253,6 +254,16 @@ const line = (char = "─"): string => char.repeat(78);
 const needMet = (snippet: { text?: string; why?: string }, need: TargetNeed): boolean =>
   need.match.test(`${snippet.text ?? ""} ${snippet.why ?? ""}`);
 
+/** Lines of the workspace file that satisfy the requirement. */
+const needLinesIn = (relativePath: string, need: TargetNeed): number[] => {
+  try {
+    const lines = readFileSync(path.join(repoRoot, relativePath), "utf8").split(/\r\n|\n|\r/);
+    return lines.flatMap((line, index) => need.match.test(line) ? [index + 1] : []);
+  } catch {
+    return [];
+  }
+};
+
 type ObservePayload = {
   snippets?: Array<{ path: string; text?: string; why?: string }>;
   details?: {
@@ -273,7 +284,7 @@ type ObservePayload = {
       packed: boolean;
       hits: string[];
       grade?: string;
-      unit?: { name: string; kind: string };
+      unit?: { name: string; kind: string; startLine: number; endLine: number };
     }>;
   };
   notRequested?: { paths?: string[] };
@@ -295,6 +306,17 @@ const stageForTarget = (
     text: [window.hits.join("\n"), window.unit?.name ?? ""].filter(Boolean).join("\n"),
     why: window.why,
   }, target.need));
+  // A large unit is packed as signature plus hit blocks, so the required line
+  // can sit inside the unit the engine chose and still be cut from the body.
+  // That is neither "never generated" nor "not selected" (D-157).
+  const omittedFromBody = generated.find((window) => {
+    if (!window.unit?.omitted?.length || !window.packed) return false;
+    return needLinesIn(window.path, target.need).some((line) => (
+      line >= window.unit!.startLine
+      && line <= window.unit!.endLine
+      && window.unit!.omitted!.some((gap) => line >= gap.startLine && line <= gap.endLine)
+    ));
+  });
   const acquired = provenance.some((entry) => entry.path.includes(target.pathIncludes)) || fromPath.length > 0 || generated.length > 0;
   const entry = provenance.find((item) => item.path.includes(target.pathIncludes));
   if (!acquired && unread.size > 0 && [...unread].some((path) => path.includes(target.pathIncludes))) {
@@ -311,6 +333,10 @@ const stageForTarget = (
   // was sliced and then packed out.
   if (generatedMet && !generatedMet.packed) {
     return `${target.id}: matching window generated ${generatedMet.startLine}-${generatedMet.endLine}, not selected`;
+  }
+  if (omittedFromBody?.unit) {
+    return `${target.id}: unit ${omittedFromBody.unit.name} ${omittedFromBody.unit.startLine}-${omittedFromBody.unit.endLine}`
+      + ` selected, but ${target.need.label} sits outside the packed body ${omittedFromBody.startLine}-${omittedFromBody.endLine}`;
   }
   if (fromPath[0] && !generatedMet) {
     return `${target.id}: read → visible #${fromPath[0].index + 1}, but matching window was never generated (${target.need.label})`;
@@ -508,7 +534,7 @@ const main = async (): Promise<void> => {
     process.stderr.write(`inspectWorkspace THREW: ${error instanceof Error ? error.message : String(error)}\n`);
   }
 
-  const explore = createExploreSearchService(host);
+  const explore = createExploreSearchService(host, { traceWindows: true });
   const ctx = {
     actor: { hostId: "explore-observe", sessionId: "observe", workspaceId },
     sessionId: "observe",

@@ -87,6 +87,13 @@ async function loadSnippetRelations(
 
 export function createExploreSearchService(
   host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall">,
+  /**
+   * Window traces are an observation meter, not a product field: one entry per
+   * generated window with its hit text, measured at 482 windows / 185 KB for a
+   * content-word question, against a 24 KiB visible budget. Off unless a meter
+   * asks for them (D-157).
+   */
+  options?: { traceWindows?: boolean },
 ): HarnessService<"explore.search"> {
   return {
     handle: async (params, ctx) => {
@@ -232,7 +239,7 @@ export function createExploreSearchService(
           ...(result.details.query ? { query: result.details.query } : {}),
           ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
           ...(result.details.distinctiveness ? { distinctiveness: result.details.distinctiveness } : {}),
-          ...(result.details.windows ? { windows: result.details.windows } : {}),
+          ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
         },
       };
     },

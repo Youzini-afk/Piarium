@@ -3128,6 +3128,30 @@ how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读�
 
 状态：已实施。
 
+### D-157 · 2026-09-08 · 关系相当时优先生产路径；窗口追踪不进生产载荷；正文省略是第三种失败
+
+背景：3.14 验收在 `4b3ae079` 上核出三处，报告未记。
+
+一，**测试夹具压过了生产注册**。问题 1 的可见顺序变成夹具 `explore-service.test.ts:19-51` #1、请求端 #2、生产注册 `harness-services.ts:501-588` #3；`6f92b49c` 上是请求端、生产注册、夹具。机制：夹具正文里也写着 `register("explore.search", ...)`，`looksLikeRegister && relation === "register"` 让它拿到同一档；D-154 把 `roleFit` 从第二比较键降到第三，D-155 又只给它 `roleFit * 3`，即 source 2 对 test 0 相差 6 分，对上 `windowWeight * 10` 里几十分的差距完全不够。D-148 那条「查生产实现/注册时，对象与关系匹配相当则优先非测试」因此失效。这是上一轮「角色退回有界偏好」的过度纠正——6 分不是偏好。
+
+二，**`details.windows` 是没有门控、没有上限的观察字段，却进了每一次生产调用的协议载荷**。真实仓库实测：问题 1 为 52 个窗口 / 18.8 KB，问题 6 为 120 / 44 KB，问题 2 为 **482 个窗口 / 185 KB，`details` 总计 295 KB**，而模型可见字节预算是 24 KiB。`hits` 还重复了片段正文已有的文本。它既不进 `visibleText` 也不进 `storedBody`，唯一消费者是观察脚本。
+
+三，**量具的两分法漏了第三种失败**。`stageForTarget` 判「窗口已生成」只比对命中行文本与单元名，不看窗口正文。问题 5 的 `write` 被报成「窗口从未生成」，实际是 `symbol-runtime.ts:147-219 unit loadGraphFacts` 已被选中、容器范围 147-238，而 `links.push({ kind: classified, ... })` 在第 220 行，落在大单元正文组装（D-098 签名 + 命中块 + 省略标记）省略掉的 220-238 区间里。这既不是「未生成」也不是「未选中」，而是**选中了、关键行被正文组装省掉**；省略标记本身已经把含答案的行号范围打印出来了。
+
+决定：
+
+- 关系证据相当时优先生产路径，用**比较**而不是加分表达：`relationRoleRank` 只在问句明确要生产实现（`preferTests === false`）且窗口的等级来自所问关系（`GRADE_RANK >= exact-definition`）时生效，取 `max(0, roleFit)` 作为打包的首键，其余一切不变。权重永远修不了这件事——夹具总能在加权覆盖上赢。
+- 窗口追踪改为按需：`createExploreSearchService(host, { traceWindows: true })`，只有观察脚本开。生产调用不再携带。
+- 量具补第三态：读目标文件定位所需证据的行号，若它落在被选中单元的范围内、且命中 `unit.omitted` 的任一区间，就报「单元已选中，但所需证据在打包正文之外」。判据取自已有的 `omitted` 标记，不新增遥测。
+
+观察（同一目录 `--skip-scan`）：问题 1 恢复为请求端、生产注册、夹具，`register` 回到可见 #2；问题 5 的 `write` 改报 `unit loadGraphFacts 147-238 selected, but link write with the classified kind sits outside the packed body 147-219`；其余各题与 `4b3ae079` 一致，五个变体仍满足。
+
+未验证：大单元正文组装是命中驱动的，一条没有任何查询词匹配的行永远进不了正文——**加权修不了这类缺口**，这是下一轮的独立材料，本刀不动 D-098。尾部噪声、无对象 how 问句的读预算、Q10 的截断池都未改。
+
+影响：`explore.ts` packComplementary；`explore-service.ts` traceWindows；`scripts/explore-observe.ts`；plan 3.14 验收项；status 3.13/3.14。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3290,3 +3314,5 @@ how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读�
 | D-154 | implementation（同 tier 比较加权覆盖；roleFit 退到其后作有界偏好；how 问句不因摘录包已满停读） | — | explore.ts rankCandidates / shouldStop；设计 6.1 fuse 与物化 |
 | D-155 | implementation（权重进入局部选择与打包；内容词不得拿 full-object；正文补种远距原词簇） | — | explore.ts windowsFor / packComplementary / rescanBodyGroups；protocol ExploreWindowTrace.grade |
 | D-156 | implementation（定位题有答案后 offTopic 不展开不进包；无法判定无关 ≠ 已证明有关） | — | explore.ts expand/pack；设计 6.1 |
+| D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
+| D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |

@@ -1184,6 +1184,44 @@ describe("explore 3.13 ranking and verification", () => {
     expect(defined[0]?.text).toContain("createExploreFixture");
   });
 
+  it("packs the production registration ahead of a test fixture that registers the same value", async () => {
+    // Both bodies carry register("explore.search"), so relation evidence is
+    // comparable and only the file role separates them. D-148 asks for the
+    // production entry when the question is about the host implementation.
+    const production = [
+      "export function registerHarnessServices(router: Router) {",
+      "  register(\"explore.search\", createExploreSearchService);",
+      "  return router;",
+      "}",
+    ].join("\n");
+    const fixture = [
+      "export function fixture() {",
+      "  const host = createServiceHost();",
+      "  const router = createRouter();",
+      "  register(\"explore.search\", createExploreSearchService);",
+      "  return { host, router, registered: true };",
+      "}",
+    ].join("\n");
+    const result = await explore({ question: "where is the explore.search service registered on the host router", limit: 3 }, {
+      rgSearch: async (pattern) => {
+        const hits = [];
+        if (pattern === "explore.search") {
+          hits.push({ path: "src/harness-services.ts", line: 2, text: "  register(\"explore.search\", createExploreSearchService);" });
+          hits.push({ path: "src/explore-service.test.ts", line: 4, text: "  register(\"explore.search\", createExploreSearchService);" });
+        }
+        if (pattern === "host" || pattern === "router" || pattern === "registered") {
+          hits.push({ path: "src/explore-service.test.ts", line: 2, text: "  const host = createServiceHost();" });
+        }
+        return hits;
+      },
+      readFile: async (path) => ready(path === "src/harness-services.ts" ? production : fixture),
+      structure: createStructureSource([parsingProvider()]),
+    });
+    const paths = result.snippets.map((snippet) => snippet.path);
+    expect(paths).toContain("src/harness-services.ts");
+    expect(paths.indexOf("src/harness-services.ts")).toBeLessThan(paths.indexOf("src/explore-service.test.ts"));
+  });
+
   it("rebuilds windows of an already-read file when the content-word pass adds hits", async () => {
     // The object pass reads the file for `tree-sitter` and slices the mention;
     // `parse`/`budget` arrive in the later pass, when the file is already read.

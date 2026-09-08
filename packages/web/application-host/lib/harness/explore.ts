@@ -797,24 +797,47 @@ function windowScore(
     - (sameFact ? 80 : 0);
 }
 
+/** A window whose grade came from the relation the question asked about. */
+function carriesAskedRelation(window: PreparedWindow): boolean {
+  return GRADE_RANK[window.grade] >= GRADE_RANK["exact-definition"];
+}
+
+/**
+ * D-148 asks for the production entry when relation evidence is comparable,
+ * and a test fixture that registers the same value is comparable: both bodies
+ * hold the call. A weight cannot express that — the fixture can always win on
+ * weighted coverage — so it is a rank above the score, and only for a question
+ * that explicitly wants production (D-157).
+ */
+function relationRoleRank(window: PreparedWindow, preferProduction: boolean): number {
+  if (!preferProduction || !carriesAskedRelation(window)) return 0;
+  return Math.max(0, window.roleFit);
+}
+
 function packComplementary(
   windows: PreparedWindow[],
   limit: number,
   weights: ReadonlyMap<string, number>,
   locatingDone: boolean,
+  preferProduction: boolean,
 ): PreparedWindow[] {
   const selected: PreparedWindow[] = [];
   const remaining = locatingDone ? windows.filter((window) => !window.offTopic) : [...windows];
   while (selected.length < limit && remaining.length > 0) {
     let bestIndex = 0;
+    let bestRank = Number.NEGATIVE_INFINITY;
     let bestScore = Number.NEGATIVE_INFINITY;
     remaining.forEach((window, index) => {
+      const rank = relationRoleRank(window, preferProduction);
       const score = windowScore(window, selected, weights);
       const best = remaining[bestIndex]!;
-      const better = score > bestScore
-        || (score === bestScore && (comparePath(window.path, best.path) < 0 || (window.path === best.path && window.start < best.start)));
+      const better = rank > bestRank
+        || (rank === bestRank && score > bestScore)
+        || (rank === bestRank && score === bestScore
+          && (comparePath(window.path, best.path) < 0 || (window.path === best.path && window.start < best.start)));
       if (better) {
         bestIndex = index;
+        bestRank = rank;
         bestScore = score;
       }
     });
@@ -1343,7 +1366,13 @@ export async function explore(
   const packWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
   const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
   const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
-  const packed = packComplementary(prepared, excerptLimit, packWeights, locatingDone || bothEndsDone);
+  const packed = packComplementary(
+    prepared,
+    excerptLimit,
+    packWeights,
+    locatingDone || bothEndsDone,
+    parsed.preferTests === false,
+  );
   const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
   const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);
   const windowTraces: ExploreWindowTrace[] = prepared.map((window) => {
