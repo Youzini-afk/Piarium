@@ -43,6 +43,14 @@ export interface OutputRef {
   handle: string;
 }
 
+export type ShellOutputKind = "vitest" | "tsc" | "eslint" | "git" | "generic";
+
+export interface ShellOutputOrganization {
+  kind: ShellOutputKind;
+  omitted: boolean;
+  partial: boolean;
+}
+
 export interface ShellExecResultCompleted {
   kind: "completed";
   exitCode: number;
@@ -52,6 +60,8 @@ export interface ShellExecResultCompleted {
   stderr: string;
   handle: string | null;
   shown: { head: number; tail: number; total: number } | null;
+  display?: string;
+  organized?: ShellOutputOrganization;
 }
 
 export interface ShellExecResultBackground {
@@ -60,6 +70,9 @@ export interface ShellExecResultBackground {
   waitedMs: number;
   cwd: string;
   outputSoFar: string;
+  command?: string;
+  display?: string;
+  organized?: ShellOutputOrganization;
 }
 
 export interface ShellExecResultSpawnFailed {
@@ -77,6 +90,9 @@ export type ShellExecResult =
 export interface ShellReadResult extends OutputSlice {
   running: boolean;
   exitCode?: number;
+  command?: string;
+  display?: string;
+  organized?: ShellOutputOrganization;
   observation?: {
     mode: "incremental";
     first: boolean;

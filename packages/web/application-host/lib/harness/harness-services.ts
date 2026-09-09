@@ -37,6 +37,8 @@ import {
 } from "./explore-query-services.js";
 import { createRelatedQueryService } from "./related-service.js";
 import { compileFindGlob, normalizeGlobPath } from "./glob-matcher.js";
+import { presentOrganizedOutput } from "./output-organize/present.js";
+import { utf8Bytes } from "./output-organize/index.js";
 export { createExploreSearchService } from "./explore-service.js";
 
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
@@ -53,10 +55,41 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
         waitMs: params.waitMs ?? 60_000,
       });
+      if (result.kind === "completed") {
+        const presented = presentOrganizedOutput({
+          command: params.command,
+          output: result.stdout,
+          complete: true,
+          exitCode: result.exitCode,
+          existingHandle: result.handle,
+          store: host.outputStore,
+          sessionId: ctx.sessionId,
+        });
+        return {
+          ...result,
+          handle: presented.handle,
+          display: presented.display,
+          organized: presented.organized,
+          shown: presented.organized.omitted
+            ? { head: utf8Bytes(presented.display), tail: 0, total: utf8Bytes(result.stdout) }
+            : result.shown,
+        };
+      }
       if (result.kind === "background") {
+        const presented = presentOrganizedOutput({
+          command: params.command,
+          output: result.outputSoFar,
+          complete: false,
+        });
         host.observationCursors.set(ctx.sessionId, "shell", result.id, {
           offset: Buffer.byteLength(result.outputSoFar, "utf8"),
         });
+        return {
+          ...result,
+          command: params.command,
+          display: presented.display,
+          organized: presented.organized,
+        };
       }
       return result;
     },
@@ -73,13 +106,25 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
 
       const pending = await host.observationCursors.prepare<{ offset: number }, Awaited<ReturnType<typeof supervisor.read>> & {
         observation: NonNullable<import("@piarium/protocol").ShellReadResult["observation"]>;
+        display?: string;
+        organized?: import("@piarium/protocol").ShellOutputOrganization;
+        command?: string;
       }>(ctx.sessionId, "shell", params.id, async (previous) => {
-        const result = await supervisor.read(params.id, previous?.value.offset ?? 0);
+        const result = await supervisor.read(params.id, previous?.value.offset ?? 0, Number.MAX_SAFE_INTEGER);
         const now = host.observationCursors.now();
+        const presented = presentOrganizedOutput({
+          command: result.command ?? "",
+          output: result.text,
+          complete: !result.running,
+          ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+        });
         return {
           cursor: { offset: result.nextOffset },
           result: {
             ...result,
+            display: presented.display,
+            organized: presented.organized,
+            ...(result.command === undefined ? {} : { command: result.command }),
             observation: {
               mode: "incremental",
               first: previous === null,

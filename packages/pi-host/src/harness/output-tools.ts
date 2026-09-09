@@ -35,7 +35,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
         // Try output.read first (for out_ handles), fall back to shell.read (for sh_ IDs)
-        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "observation">>;
+        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "observation" | "display" | "organized">>;
         if (params.handle.startsWith("out_")) {
           const slice = await bridge.request("output.read", {
             handle: params.handle,
@@ -69,14 +69,18 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             ? `initial read · ${result.length} bytes`
             : `+${result.length} bytes since last read (${formatElapsed(observation.sinceMs)} ago)`;
           const lines = [`[shell ${params.handle} · ${change} · ${state}]`];
-          if (result.text) lines.push(result.text);
+          if (result.organized?.partial && result.running) {
+            lines.push("[current observation — output still growing; not a final summary]");
+          }
+          const body = result.display ?? result.text;
+          if (body) lines.push(body);
           lines.push(`[${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}]`);
           return {
             content: [{ type: "text", text: lines.join("\n") }],
             details: { handle: params.handle, ...result },
           };
         }
-        const lines: string[] = [result.text];
+        const lines: string[] = [result.display ?? result.text];
         if (result.running) lines.push("\n[still running]");
         if (result.exitCode !== undefined) lines.push(`\n[exit ${result.exitCode}]`);
         const shown = `${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}`;

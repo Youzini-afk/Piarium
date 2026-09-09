@@ -31,6 +31,32 @@ describe("get_output tool", () => {
     assert.match(text, /14\/14 bytes/);
   });
 
+  it("shows organized display on incremental shell reads", async () => {
+    const bridge = createFakeBridge((method) => {
+      if (method === "shell.read") {
+        return {
+          text: "RERUN src/mid.test.ts\nFAIL src/mid.test.ts\n",
+          display: "FAIL src/mid.test.ts\n      Tests  1 failed (1)",
+          organized: { kind: "vitest", omitted: false, partial: true },
+          offset: 0,
+          length: 40,
+          nextOffset: 40,
+          total: 40,
+          eof: true,
+          running: true,
+          observation: { mode: "incremental", first: true },
+        };
+      }
+      throw new Error(`unexpected: ${method}`);
+    });
+    const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
+    const text = await executeTool(tool, { handle: "sh_1" });
+    assert.match(text, /FAIL src\/mid\.test\.ts/);
+    assert.doesNotMatch(text, /RERUN/);
+    assert.match(text, /still running/);
+    assert.match(text, /current observation/);
+  });
+
   it("reads background shell via shell.read for sh_ IDs", async () => {
     const bridge = createFakeBridge((method) => {
       if (method === "shell.read") return { text: "shell output", offset: 0, length: 12, nextOffset: 12, total: 100, eof: false, running: true };

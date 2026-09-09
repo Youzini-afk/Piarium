@@ -14,7 +14,11 @@ function formatShellResult(result: ShellExecResult): string {
   switch (result.kind) {
     case "completed": {
       const lines: string[] = [];
-      if (result.stdout) lines.push(result.stdout);
+      if (result.organized?.partial) {
+        lines.push("[current observation — output may still be incomplete; not a final summary]");
+      }
+      const body = result.display ?? result.stdout;
+      if (body) lines.push(body);
       if (result.stderr) lines.push(`[stderr]\n${result.stderr}`);
       lines.push(`\n[exit ${result.exitCode}]`);
       if (result.handle) {
@@ -23,7 +27,11 @@ function formatShellResult(result: ShellExecResult): string {
       return lines.join("\n");
     }
     case "background": {
-      return `[Command is still running. waited ${result.waitedMs}ms]\n${result.outputSoFar}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
+      const body = result.display ?? result.outputSoFar;
+      const observation = result.organized?.partial
+        ? `[Command is still running. waited ${result.waitedMs}ms — current observation, not a final summary]`
+        : `[Command is still running. waited ${result.waitedMs}ms]`;
+      return `${observation}\n${body}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
     }
     case "spawn-failed": {
       return `[spawn failed: ${result.reason}]\n${result.hint ?? ""}`;

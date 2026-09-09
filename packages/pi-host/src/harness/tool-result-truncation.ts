@@ -4,7 +4,6 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const DEFAULT_VISIBLE_BYTES = 32768;
 const DEFAULT_HEAD_RATIO = 0.5;
-const BASH_HEAD_RATIO = 0.375;
 const MAX_NEWLINE_BACKTRACK = 512;
 
 function findNearestNewlineBefore(text: string, position: number): number {
@@ -31,7 +30,8 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
       if (!content) return undefined;
 
       const toolName = event.toolName;
-      const headRatio = toolName === "bash" ? BASH_HEAD_RATIO : DEFAULT_HEAD_RATIO;
+      if (toolName === "bash" || toolName === "get_output") return undefined;
+      const headRatio = DEFAULT_HEAD_RATIO;
 
       // Concatenate all TextContent
       const textParts: string[] = [];

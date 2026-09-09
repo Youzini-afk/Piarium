@@ -47,8 +47,9 @@ const customTools = selectHarnessTools(settings, {
 
 ## Extensions
 
-- `createToolResultTruncationExtension` — truncates large tool results,
-  stores full text via `output.store`, adds `[output: N bytes]` marker.
+- `createToolResultTruncationExtension` — truncates large non-shell tool results,
+  stores full text via `output.store`, adds `[output: N bytes]` marker. `bash`
+  and `get_output` keep Host-organized display and are not head/tail cut again.
 - `createHarnessCounterTracker` — tracks `toolErrors`, `toolRetries`,
   `outputBytes`, `observationCalls`, and `cacheHitRatio`. Auxiliary per-model usage
   aggregation was removed in D-080; ordinary Pi session cost and token statistics remain unchanged.

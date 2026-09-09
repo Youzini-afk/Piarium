@@ -4021,6 +4021,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-197 · 2026-09-10 · 按命令整理 bash / get_output 默认展示（3.17）
+
+背景：默认展示仍是字节头尾切。失败块在长输出中段时会被切掉；`tool_result` 再切一次会抵消任何命令整理。D-160 已定规则解析，不用模型总结替代。
+
+决定：
+
+1. 整理只改默认展示。`stdout` / incremental `text` 仍是原始 UTF-8；游标按原始 `nextOffset` 推进。显式 `offset`/`length` 与 `out_` 句柄继续读原文。
+2. 用命令 token（含 `bunx` / `npx` / `bun run` 与 `&&` 分段）识别 vitest、tsc、eslint、git；无法从命令判断时只认窄输出形状。不执行命令，不调用模型。git 按子命令：status 保留文件状态，diff/show 保留 hunk 与请求正文，log 保留 commit；其余 git 走通用展示。
+3. 可见预算仍是既有 32 KiB。超预算时说明省略并指向全文句柄，不新加 per-file/per-hunk 硬上限。退出码只来自进程。
+4. 公开 `bash` 与增量 `get_output` 使用 `display`。`tool_result` 不再对这两项做头尾切。未完成或分片输出标明当前观察，不当最终结果。交互提示保留。
+5. 本阶段不接 jest 专名、包管理器通配、TOML 规则层或附加模型总结。
+
+验证：真实样本覆盖成功/失败/无法识别、中段失败块、ANSI/CRLF/分片、超预算省略；`createShellExecService` / `createShellReadService` 与公开 bash、get_output 格式化。未做完整 shell 解释器。
+
+影响：`output-organize/`、`harness-services.ts`、`shell-supervisor.ts`、`bash-tool.ts`、`output-tools.ts`、`tool-result-truncation.ts`；设计 5.2；plan/status 3.17。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4187,7 +4205,7 @@ ModelRuntime 纵切继续通过。
 | D-157 | superseded in part（追踪按需与原文省略事实保持；D-173 重定当前单元相关性、角色偏好与一次呈现） | D-173 | 设计 6.1；plan 3.15B；explore-service traceWindows |
 | D-158 | superseded in part（无额外信任门/费用守卫保持；远程嵌入独立交付；D-174 恢复当前 LLM 查询表达与候选判断，未知本地 reranker 默认承诺不恢复） | D-166–D-170；D-173；D-174 | 设计 6.1/8.5；plan 3.15D/3.16 |
 | D-159 | superseded in part（呈现记录与原文一致性保持；D-173 收窄 AnswerRequest，不建通用答案充分性解释器） | D-163；D-171；D-173 | 设计 6.1；plan 3.15 |
-| D-160 | planned（命令输出解析与附加模型总结保持；“天然跨语言”已纠正；零样本检索路由移出当前工作项） | D-161；D-173（路由排期） | 设计 5.2；plan 3.17 |
+| D-160 | superseded in part（不用模型总结替代、句柄语义与 32 KiB 预算保持；vitest/tsc/eslint/git 默认展示由 D-197 接线） | D-197 | 设计 5.2；plan 3.17 |
 | D-161 | superseded in part（身份/focusRanges/来源规则保持；D-173 扩展单元排名融合、解耦远程与重排，删除 windowScore 不等重排，撤销四片全部串行） | D-165；D-166；D-170；D-173 | 设计 6.1/7.1/8.5；plan 3.15/3.16 |
 | D-162 | superseded in part（范围键与不透明文档身份保持；D-173 明确工作区包含陌生文件，注意力只决定建设顺序） | D-167；D-173 | 设计 6/7.1/10.4；plan 3.16 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
@@ -4222,3 +4240,4 @@ ModelRuntime 纵切继续通过。
 | D-194 | implementation（workspace-keyed inference；user/operator provider authority；final space/currentness/internal cancel；active-child Documents scope；exact rerank） | — | plan/status 3.16B–E；architecture 4.4 |
 | D-195 | implementation（异步发布 token、增量文件筛选、空目录重启对账、草稿后台建设、初始化/取消/finish 生命周期） | — | plan/status 3.16B–E；设计 6.1 |
 | D-196 | implementation（知识向量为派生代际库；复用 harness.embed；RRF；scoped Top-K；删除 HTTP adapter） | — | 设计 7.5/8.5；plan/status 2.8 |
+| D-197 | implementation（命令整理只改默认展示；公开 bash/get_output；跳过头尾再切） | — | 设计 5.2；plan/status 3.17 |

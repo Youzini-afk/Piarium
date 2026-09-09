@@ -79,26 +79,23 @@ describe("tool-result-truncation", () => {
     assert.equal(stored.get(result.details.truncated.ref.handle), longText);
   });
 
-  it("uses 0.375 head ratio for bash", async () => {
+  it("does not re-trim organized bash or get_output results", async () => {
     const stored = new Map<string, string>();
     const bridge = createFakeBridge(stored);
     const { pi, getHandler } = createFakePi();
-    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 80, sessionId: "s1" })(pi as never);
-
-    // Text with newlines to test backtracking
-    const longText = "line1\n" + "b".repeat(100) + "\nline3\n" + "c".repeat(100);
-    const event = {
-      type: "tool_result",
-      toolName: "bash",
-      content: [{ type: "text", text: longText }],
-      details: undefined,
-      isError: false,
-    };
-    const result = await getHandler()!(event) as { content: Array<{ type: string; text: string }>; details: { truncated: { head: number; tail: number } } };
-    assert.ok(result);
-    // head should be roughly 0.375 * 80 = 30 chars (before newline backtracking)
-    // tail should be roughly 0.625 * 80 = 50 chars
-    assert.ok(result.details.truncated.head < result.details.truncated.tail, "bash head should be smaller than tail");
+    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 20, sessionId: "s1" })(pi as never);
+    const longText = "FAIL src/mid.test.ts\n" + "x".repeat(200);
+    for (const toolName of ["bash", "get_output"]) {
+      const result = await getHandler()!({
+        type: "tool_result",
+        toolName,
+        content: [{ type: "text", text: longText }],
+        details: undefined,
+        isError: false,
+      });
+      assert.equal(result, undefined, `${toolName} should keep Host organization`);
+    }
+    assert.equal(stored.size, 0);
   });
 
   it("counts the visible Unicode head and tail in bytes without broken characters", async () => {

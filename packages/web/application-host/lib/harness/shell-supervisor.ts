@@ -142,6 +142,7 @@ export interface ShellSupervisorOptions {
 interface BackgroundShell {
   id: string;
   token: string;
+  command: string;
   output: string;
   cwd: string;
   exited: boolean;
@@ -385,6 +386,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         const bgShell: BackgroundShell = {
           id,
           token,
+          command,
           output: outputBuffer,
           cwd: pendingCommand?.cwd ?? cwd,
           exited: false,
@@ -404,6 +406,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           waitedMs: options.waitMs,
           cwd: bgShell.cwd,
           outputSoFar: cleanedOutput,
+          command,
         });
       }, options.waitMs);
 
@@ -431,7 +434,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     });
   };
 
-  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number; lastOutputAt?: number }> => {
+  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number; lastOutputAt?: number; command?: string }> => {
     // Check background shells
     const bg = backgroundShells.get(id);
     if (bg) {
@@ -439,6 +442,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       return {
         ...slice,
         running: !bg.exited,
+        command: bg.command,
         ...(bg.exitCode !== null ? { exitCode: bg.exitCode } : {}),
         ...(bg.lastOutputAt !== null ? { lastOutputAt: bg.lastOutputAt } : {}),
       };

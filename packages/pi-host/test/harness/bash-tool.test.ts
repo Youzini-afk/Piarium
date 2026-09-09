@@ -74,6 +74,26 @@ describe("bash tool", () => {
     assert.match(text, /no-shell/);
   });
 
+  it("prefers organized display over raw stdout", async () => {
+    const bridge = createFakeBridge({
+      kind: "completed",
+      exitCode: 1,
+      durationMs: 100,
+      cwd: "/workspace",
+      stdout: "RERUN src/mid.test.ts\nFAIL src/mid.test.ts\n",
+      stderr: "",
+      handle: "out_full",
+      shown: null,
+      display: "FAIL src/mid.test.ts\n      Tests  1 failed (1)",
+      organized: { kind: "vitest", omitted: false, partial: false },
+    }) as HostServicesBridge;
+    const text = await executeBash(bridge, "bunx vitest run");
+    assert.match(text, /FAIL src\/mid\.test\.ts/);
+    assert.doesNotMatch(text, /RERUN/);
+    assert.match(text, /\[exit 1\]/);
+    assert.match(text, /get_output\("out_full"\)/);
+  });
+
   it("formats stderr in completed result", async () => {
     const bridge = createFakeBridge({
       kind: "completed",

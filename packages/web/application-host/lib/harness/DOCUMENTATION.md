@@ -64,6 +64,13 @@ Stores large tool outputs (default 256 MiB per session) with handle-based
 retrieval. Handles are `out_XXX` format.
 These are authenticated session-local ephemeral references, not durable files or knowledge records.
 
+### Shell output organization (`output-organize/`)
+
+Default `bash` / incremental `get_output` display for vitest, tsc, eslint, and
+git (D-197). Full UTF-8 bytes stay in the supervisor buffer or OutputStore.
+Explicit `offset`/`length` remains raw. The generic `tool_result` head/tail cut
+does not run on `bash` or `get_output`.
+
 ### PathLockService (`path-lock.ts`)
 
 The Host first resolves every input through Documents identity, deduplicates
