@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-06
+Last updated: 2026-09-09
 
 ## 1. Context
 
@@ -246,6 +246,25 @@ handing the worker host credentials. The harness contract, its cache rules, and 
 are specified in [agent-harness.md](agent-harness.md); which of its capabilities are implemented,
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
+
+Retrieval design D-173–D-175 keeps fast `explore` separate from the longer-running `retrieval` role. The
+application host owns search, current document reads, local embedding instances, and derived indexes;
+semantic relevance never replaces document identity or path authorization. The planned query workflow
+uses a short-lived Host-owned context with a fixed input-source reference, actor/scope, candidate
+producers, read snapshots, candidate views, and shared cancellation/deadline state. The pi-host session
+ModelRuntime uses `models.explore` to submit grouped search plans and complementary source selections
+with required spans. Internal phases update that same query; public `explore` remains one tool call.
+Candidate model input precedes final selection/formatting and has a separate input budget. The Host
+can execute grounded local follow-ups and must retain required source spans; validating their identity
+does not validate the model's semantic judgment. This adds no durable conversation or generic workflow
+framework. These consumers are planned current work, independent of future diffusion model training
+and the background remote embedding binding. Remote embedding is a
+planned extension of the existing Pi provider and credential authority: a Pi runtime execution context
+independent of chat lifetime will resolve configuration and make remote calls, while the application
+host holds a credential-free binding and owns index publication. It must not borrow an arbitrary active
+chat's model or receive its credentials. The current production semantic path is local MiniLM; the
+background remote binding and its protocol are not yet implemented. See harness sections 6.1 and 8.5
+and plan 3.16B for the target contract.
 
 Session memory blocks remain in the Host store. The renderer reads and edits them only through
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block

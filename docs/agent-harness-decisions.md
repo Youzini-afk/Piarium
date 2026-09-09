@@ -3550,6 +3550,134 @@ web tsc。
 
 状态：已实施。
 
+### D-173 · 2026-09-09 · 快速检索职责与现行路线收敛（3.15 / 3.16）
+
+类型：设计修订；本条更新设计与实施顺序，不宣称运行时已按新设计交付。
+
+背景：维护者要求重新讨论自然语言快速检索。现行目标是帮助主 agent 找到陌生实现并取得可读原文，实施却把越来越多语义判断交给
+词表、来源等级和证据打分；计划又把远程嵌入与重排捆在后一片，使本地 MiniLM 先承担全仓建设。当前代码中
+`candidateTier` 把纯语义候选放在 tier 4、普通 import/association 放在 tier 3，RRF 只在 tier 内生效；`windowScore` 继续主要
+按词法覆盖选择正文；第一次读取前仍等待三路召回的 `Promise.all`。这些是实际结构问题，不能靠扩大索引或更换模型自行解决。
+
+维护者说明：普通低成本 LLM 循环与已有 retrieval 子 agent 重叠，也没有专训快速检索模型的速度条件。扩散模型的后续方向是
+开源基座加后训练，本轮先优化现行设计，不接商用扩散 API、不安排训练项目。此前提出的“全局 sketch + 仅热点正文”并未被采纳：
+截取或拼接摘要仍可能丢掉陌生实现；先被其他方法发现才能获得正文向量，会重新留下词汇缺口。当前 CPU 扫描耗时也不足以证明
+全仓正文索引或所有本地后端不可行。全仓扫描曾人工中断，不能把 1–2 小时推算记为完整构建实测。
+
+决定：
+
+1. **职责按交付物分开。** `grep` 提供精确匹配；`explore` 用词法、路径、符号和向量快速取得当前代码入口、范围与原文；
+   `retrieval` 子 agent 处理需要较长阅读与判断的开放事实问题。复用底层工具，不把普通 LLM 多轮循环藏进 explore，也不合并两种产品职责。
+2. **请求保留事实，核验只说明事实。** 沿用 question / anchors / paths，记录用户明确要求与系统推断的区别；收窄 D-159/D-161 的
+   `AnswerRequest`，不另建把任意自然语言编译成答案充分性谓词的解释器。已确认同一连接值的 register/request 仍是有用事实，
+   不自动等同于“已解释机制”。生产/测试等推断只作偏好，不升级为用户未要求的硬过滤。
+3. **语义参与真实竞争。** 明确要求的精确导航有直接读取路径；开放候选取消按来源划定的永久 tier。各来源内先去重并形成真实排名，
+   词法与语义再融合；多个改写、多个块不增加同一来源的票数。同分保留并列，路径只稳定展示，不用字母序制造相关性。
+   普通图关联没有天然优先权；图提供明确目标时按导航处理，否则保留线索身份，不伪造词法/向量名次。
+4. **文件调度与单元选择各用自己的材料。** 文件级融合只决定先读什么；当前代码单元使用落在该单元上的词法/语义证据形成来源排名，
+   无重排器时复用排名融合，不能继承整文件的得分或名次。这扩展了 D-161/D-170 的“RRF 只在文件级”限制，而非把文件分数广播到窗口。
+   重排器成功评估同一批当前正文时提供该批相关性顺序。`windowScore` 的相关性、角色、重复、关系与字节成本拼盘直接拆除，
+   不等待重排器接线；显式范围、重复片段和呈现预算分别处理。最终呈现只决定一次，原文省略不得继续继承已被删掉的选择依据。
+5. **查询按来源完成推进。** 可用候选到达后即可安排读取；后续来源可替换尚未执行的候选，已读快照复用。先到的弱候选不能耗尽
+   全部读取机会，词法有命中不等同自然语言问题已解决。精确导航完成、来源结束、取消和可配置工作预算是停止依据；超时或迟到
+   只影响本次请求，不能改写已经返回的结果。预算按实际资源行为调整，不新猜固定轮数、文件数或秒数。
+6. **范围与建设顺序分开。** 工作区仍覆盖其中尚未接触的实现；活动文件、变更和显式范围可影响优先级，不把工作集变成隐式白名单。
+   保留正文区域的编码覆盖目标；切块必须逐块适配真实 tokenizer，单条长行继续按 token/字符位置切分，不能用行号已覆盖掩盖正文截断。
+   模型最大输入长度是边界，不是每块必须填满的目标。摘要是可另选的导航表示，不替代正文覆盖。
+7. **索引作为独立的后台服务。** 按范围合并扫描与变更、批量读取与嵌入、逐批持久发布、从已发布结果恢复。向量按实际编码文本、
+   向量空间与 query/document 用途复用，行号移动或同文件其他块变化不要求重算未变文本。计数、检查点和 flush 不逐文档扫描或重写整库。
+   前台查询在后台推理批次之间优先取得执行机会；模型初始化合并在飞请求，取消查询不取消共享建设。分别记录冷库首个有用结果、
+   热查询、编辑后可查和完整构建成本，不以“后台运行”或 `coverage=complete` 证明交互足够快或召回完整。
+8. **远程嵌入独立交付。** 从 D-161 的“重排 + 远程”第二片中拆出配置与远程嵌入，复用已有 provider/credential authority；
+   query/document 用途、取消、输入长度、批次对应与实际维度属于后端契约。当前本地 MiniLM 是已接后端，不能从权重大小推断中文
+   质量与全仓速度；Node 推理线程配置要落在实际 ONNX session，WASM numThreads 不是 Node CPU 线程数的证据。
+   重排独立选后端并随接线按有效绑定启用，不再提前承诺尚未选定的本地 CPU 交叉编码器可作为默认。模型不可用时已有检索继续正常提供。
+   当前 SettingsManager/provider/auth 读取依赖 Pi session；后台远程绑定要复用同一 Pi runtime authority 并与聊天寿命分离，
+   不创建用户对话或检索 Thread，也不把凭据传给 Host。配置、后台执行上下文与发布失效是同一条接线，不借任意活动会话补洞。
+9. **来源一致性保持。** 旧索引可给导航线索，返回代码必须取当前请求来源；实质改写后的正文不继承旧向量相关性。草稿/线程正文
+   捕获不等待向量计算，新覆盖层尚未就绪时遮蔽被替代路径的旧磁盘向量并标明缺口。权限、固定草稿和分支身份不交给模型判断。
+
+实施顺序：先收口已有性能与发行修复；3.15 处理平等召回、当前单元排序与一次呈现、来源完成调度；3.16 先接嵌入配置/远程，再完成
+向量复用与前台优先、草稿/线程覆盖，重排独立接入。算法与远程接线可以按代码责任独立推进，不再要求四片全部串行。
+扩散模型、后训练、生成式摘要、查询改写和零样本路由不作为本轮依赖，也不另建统一评测门。使用具体失败与已有观察工具做定向验证。
+
+证据边界：此前本会话的性能/发行工作仍在未提交工作树，实测与未完成项记录到 status。本文档修改不改变运行默认，也不把
+未接配置、查询缓存、前台优先或新的排序方式写成已实现。D-158 的无额外信任门/费用守卫、D-162 的范围键、D-167 的不透明文档身份、
+D-169 的独立代际库与部分可查，以及 Documents 来源边界保持。
+
+影响：`agent-harness.md` §2/§5.7/§6/§6.1/§6.2/§7.5/§8.5；plan 0.7/2.8/2.9/3.2/3.15/3.16；
+`architecture.md` §4.4 的检索/后台模型目标归属；status 当前顺序与未提交工作树事实；本日志索引。
+
+状态：设计已回写；新的运行行为待按更新后的 plan 实施。
+
+### D-174 · 2026-09-09 · 纠正 LLM 范围：当前快速检索接入局部语义决策
+
+类型：设计纠错；修订 D-173 对当前 LLM 工作范围的误读。
+
+背景：维护者要求扩散模型以后采用开源基座并后训练，“先不考虑”指这个研究方向。主代理在 D-173 中将其扩大成当前 explore
+只做算法与向量，把查询理解/表达和候选语义判断也移出实施计划。维护者再次明确：部分语义工作现在就需要引入 LLM。
+排除普通低成本模型执行完整自主检索子 agent，不等于排除它承担一次局部语义判断。这是主代理解释错误，不是用户撤回 LLM 方向。
+
+决定：
+
+1. **当前接 LLM 两处消费者。** 查询理解/搜索表达将原问题、锚点和少量仓库概况转为实际可执行的批量搜索输入；候选判断
+   使用已读当前原文与呈现方案，返回相关候选 ID、范围和简短依据。Host 执行搜索、验证身份/范围并提取源码，不让模型抄写
+   原文或生成替代主 agent 的完整分析。新表达是搜索假设，保留原问题与显式范围，不升级成硬过滤或词项重复票。
+2. **消费已有 models.explore。** 复用 pi-host 当前会话的 ModelRuntime、provider/凭据和取消路径，不新建长期子会话/Thread。
+   自然语言需要桥接时在召回前使用，已有明确地址时可省略；候选批量判断，材料明确时不强制再调一次。每处围绕明确决策，
+   不机械串跑 intent/judge/repair，也不让内部模型自主循环搜索。较长开放追踪继续由 retrieval 承担。
+3. **相关性判断只选一份。** LLM 选段与专用 reranker 是同一批候选的执行选择，不默认串跑两者；采用其有效结果后不叠加旧
+   规则奖金。模型未参与或失败时仍提供已有算法/向量材料并说明状态，槽位配置后的实际消费者不等待后训练或独立评测启用门。
+4. **当前排期是 3.15D。** 查询理解可以先接，与 3.15A 的召回整理共同推进；候选判断消费 3.15B 的当前单元与一次呈现。
+   不等待 3.16B 的后台远程嵌入、新模型或全仓索引。验证真实模型请求的输出确实驱动了搜索/选择，并核对修订、取消与最终原文。
+5. **D-173 其余取舍保持。** 来源平等、正文范围、索引复用、查询优先、远程嵌入独立交付，以及普通检索子 agent 的职责边界
+   不变。扩散基座/后训练、全仓生成式摘要和零样本原型路由留后续；当前 LLM 接线不属于这些研究项。
+
+影响：agent-harness.md §2/§5.7/§5.10/§6.1/§8.5；plan 0.7/3.2/3.15D/3.16E；status 的当前缺口与顺序；architecture §4.4。
+
+状态：设计/计划已纠正；模型消费者尚未实现，没有以改文档冒充运行时已调用 LLM。
+
+### D-175 · 2026-09-09 · 快速检索接线：同一次查询、分组搜索、成组选段与局部补查
+
+背景：D-174 的外部设计复查指出，两个模型步骤如果仅接在现有 explore.search 前后，仍会继承旧候选筛选与呈现丢失，
+也无法在正在执行的检索中加入搜索表达。主代理完整阅读评审并核对当前代码：explore-tool 直接调用 Host；explore.ts 在首次
+读取前等待三路 Promise.all；explore-service 返回前已选窗口并按 24 KiB 排版；bridge 每次 RPC 重取 inputContext，取消
+只清理本地 pending；router 自己的超时驱动 AbortSignal。这些是接线事实，不是新方案收益已得到证明。
+
+决定：
+
+1. **当前 LLM 主线保持。** 先打通 models.explore 实际改变搜索与最终原文的路径，不等待词法/向量全部调优、扩散模型、
+   远程嵌入或独立评测工程。工作流按局部决策和交付材料分工，不按固定模型调用次数定义 explore/retrieval 边界。
+2. **Host 持有同一次查询。** 短生命周期上下文保存 actor/范围、原问题、输入来源、生产任务、已读快照、候选视图及预算/
+   结束状态；pi-host 沿现有 ModelRuntime 发模型请求，交回计划/选择。阶段延续开始来源，已知写入仍终结对应旧草稿；
+   取消实传到 Host/模型，阶段共享截止条件，调用方离开时清理，迟到结果不复活。公开仍为一次 explore，无新持久会话、
+   Thread 或通用工作流框架，也不把查询 ID 当路径授权。
+3. **查询输出可执行的分组计划。** 行为目标、概念分组表达、预期材料保留语义关系，组内变体不重复投票，跨组支持不变成
+   强制 AND。模型猜测不改原要求；使用已有目录/入口和已返回锚点正文提供仓库词汇，不等待全仓摘要。原问题检索和明确
+   导航与查询模型并行。候选模型重新看原问题/当前源码，能够否定前一阶段假设，不继承不断强化猜测的推理历史。
+4. **候选选择交付互补材料与必需范围。** 输入是最终挑选/排版前的当前单元，模型输入容量和输出预算分开，先去重再组织
+   有竞争力的候选。输出材料组、候选/视图/范围 ID、必需/辅助范围、用途与缺口；不用全池数值分或固定机制模板。Host
+   核验模型看过的正文及身份，不据此宣称语义判断已验证。呈现保留必需范围，装不下时换合法视图、放弃材料组或明确缺口。
+5. **允许有依据的局部补查。** 明确符号/连接/路径机械定位；模型可根据当前候选/范围提出具体缺口和保持原问题的补充表达，
+   批量执行并去重。明确短结果直接补充，其余仅对已选与新增材料增量判断。首版提供可选补查阶段，“一次”不成为永久
+   硬上限；无新材料、预算用尽或需要重构任务、试验和持续开放调查时交回主 agent/retrieval。缺口只描述所见材料范围。
+6. **来源机会与模型批次分开。** 调度登记实际候选生产任务，包括在飞查询计划及其后续搜索；多个变体没有多份保留额。
+   既有读取预算内保留常规首批机会，其余先读，参与/空/失败/取消/截止后释放；全是已读文件时复用，不补读弱材料凑配额。
+   首批处理可触发候选视图冻结，本轮预算也可提前结束等待并保留判断/呈现时间，不建立必须等齐的屏障。迟到材料是未评估，
+   必要时增量比较；不每批到达就调模型，也不从模型说“够了”推导全仓充分性。
+7. **LLM 与重排共享输入、区分输出。** 普通 reranker 排确定的可展示视图，不假装输出支撑行、材料互补或缺口。视图须符合
+   后端实际输入长度；评分后保留被评估内容，不用完整函数的分数代表任意短签名。同批不默认串跑 LLM 与 reranker。
+8. **冷库与推理调度补齐实际执行。** 首个兼容发布在本轮来源接收阶段到达时可以启动语义查询，不逐批重查、延长截止或
+   唤醒已返回请求。前台优先发生在模型实例队列，当前批之后先服务等待查询，后台保留进展；扫描循环 yield 不能替代它。
+
+验证：既有 faux provider 验证表达实际执行、呈现前候选可选、必需原文可见、局部补查、来源固定及取消/迟到；定向慢来源
+验证机会释放与候选视图。真实问题观察首轮原文、后续定位往返、整体等待，必要时比较局部阶段，不强制全组合或新评测系统。
+工具描述随消费者同步。来源、范围校验和机制测试不能替代语义效果，也不能把本次改文档记成运行时已交付。
+
+影响：agent-harness.md §2/§5.7/§6.1；plan 0.7/3.2/3.15/3.16C/E；status 当前缺口与顺序；architecture §4.4。
+
+状态：设计/计划已回写；运行时查询上下文、LLM 消费者与局部补查待实施。此前决策正文保留，D-174 的局部范围由本条扩展。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3700,10 +3828,10 @@ web tsc。
 | D-142 | implementation（观察回路 `explore:observe` 走真实服务；rg exit 2 有命中时按部分覆盖保留并标 `incomplete`、零命中仍 fail-closed；保留 stderr 首行。改前 10 问 9 抛错 → 改后 0 失败） | — | lib/search/content.ts + content.test.ts；harness/search-service.ts；scripts/explore-observe.ts；status 3.2/3.12 |
 | D-143 | implementation（literal-call 查询加首参锚点并接受 awaited 泛型；`CATALOG_EXTRACTOR_VERSION` 进跳过条件，重扫 2360 文件、边 14040 → 13459；连线补全首次触发，正确端的排名/打包缺陷由 3.13 接） | D-144–D-149 | structure/queries.ts；knowledge/symbols.ts + store.ts + symbol-runtime.ts；tree-sitter-provider.test.ts；catalog-scan.test.ts；status 3.1/3.11 |
 | D-144 | implementation（对象优先于问句；关系闭表；只有对象查图） | — | explore-query.ts；设计 6.1 seed；plan 3.13 |
-| D-145 | implementation（任务匹配分层；路径只作 tie-break；不再混加 GROUP_WEIGHT 与 RRF） | — | explore.ts；设计 6.1 fuse |
+| D-145 | superseded in part（历史分层已实施；D-173 取消开放候选来源 tier，保留真实来源排名与稳定 tie-break） | D-173 | explore.ts；设计 6.1；plan 3.15A |
 | D-146 | implementation（问题对象先查；在池里 ≠ 已验证；修订 D-137） | — | explore.ts；设计 6.1 fan-out |
 | D-147 | implementation（理由绑窗口；connects/associates 分等；limit 是上限；direct-verified 与读预算分开）。how 问句「摘录包已满仍停读」由 D-154 拿掉，定位早停仍成立 | — | explore.ts；protocol details.query/skippedQueries |
-| D-148 | superseded in part（角色表与条件式测试优先仍成立；`roleFit` 先于内容证据的比较位置由 D-154 取代） | D-154 | explore-query.ts；explore.ts |
+| D-148 | superseded in part（角色事实保留；D-173 将系统推断收窄为偏好，明确范围才作约束） | D-154；D-173 | explore-query.ts；设计 6.1；plan 3.15 |
 | D-149 | superseded in part（wants 与五个变体保留；阶段诊断的所需证据由可选改为必填） | D-151 | scripts/explore-observe.ts；status 3.13 |
 | D-150 | superseded in part（问题 1/9 与无对象 how 问句的记录成立；第三条「收窄到窗口即够」在容器切片下不成立） | D-151 | status 3.13；explore.ts 窗口内展开 |
 | D-151 | superseded in part（降等与量具必填证据仍成立；定位题已有答案后仍用 offTopic 填满 limit 由 D-156 拿掉） | D-156 | scripts/explore-observe.ts；explore.ts windowGrade |
@@ -3713,19 +3841,22 @@ web tsc。
 | D-155 | superseded in part（内容词不得拿完整对象档仍成立；`ExploreWindowTrace.grade` 已换成三字段） | D-165 | explore.ts windowsFor / packComplementary / rescanBodyGroups；protocol ExploreWindowTrace |
 | D-156 | implementation（定位题有答案后 offTopic 不展开不进包；无法判定无关 ≠ 已证明有关） | — | explore.ts expand/pack；设计 6.1 |
 | D-154 | superseded in part（加权覆盖进主比较成立；roleFit 降为第三键在关系相当时过度纠正） | D-157 | explore.ts rankCandidates / packComplementary |
-| D-157 | implementation（关系相当时生产路径优先用比较表达；窗口追踪按需开启；量具补「正文省略」第三态） | — | explore.ts packComplementary；explore-service traceWindows；explore-observe.ts |
-| D-158 | superseded in part（排期与「不设信任门」仍有效；本地召回已由 D-166–D-170 落地，重排 / 远程 / 查询扩展仍待） | D-166–D-170 | 设计 6 头、6.1、8.5；plan 3.16 |
-| D-159 | superseded in part（三缺口框架仍是 3.15 组织原则；「任何 connection → tier 1」已按到达理由改掉；量具改读 text 已由 D-171 落地） | D-163；D-171（量具） | 设计 6.1 目标形态；plan 3.15 |
-| D-160 | planned（bash 输出压缩按命令分派规则；模型总结只作附加；路由先用嵌入零样本分类不训练）；"天然跨语言"一句被 D-161 纠正 | D-161（部分） | 设计 5.2；plan 3.17 |
-| D-161 | superseded in part（联合设计仍有效；focusRanges / 三字段已由 D-165 落地；空间/配方身份已由 D-166 落地；文件级 RRF 调度已由 D-170 落地；重排删 windowScore 仍待第二片） | D-165（接口）；D-166（身份）；D-170（RRF 调度） | 设计 6.1 / 7.1 / 8.5；plan 3.15④ / 3.16 |
-| D-162 | superseded in part（范围分层原则仍在；范围键与 documentId 接缝已由 D-167 落地，用户级/工作集/集合范围仍不实现） | D-167 | 设计 §6 头 / 7.1 / 10.4；plan 3.16 第一片 |
+| D-157 | superseded in part（追踪按需与原文省略事实保持；D-173 重定当前单元相关性、角色偏好与一次呈现） | D-173 | 设计 6.1；plan 3.15B；explore-service traceWindows |
+| D-158 | superseded in part（无额外信任门/费用守卫保持；远程嵌入独立交付；D-174 恢复当前 LLM 查询表达与候选判断，未知本地 reranker 默认承诺不恢复） | D-166–D-170；D-173；D-174 | 设计 6.1/8.5；plan 3.15D/3.16 |
+| D-159 | superseded in part（呈现记录与原文一致性保持；D-173 收窄 AnswerRequest，不建通用答案充分性解释器） | D-163；D-171；D-173 | 设计 6.1；plan 3.15 |
+| D-160 | planned（命令输出解析与附加模型总结保持；“天然跨语言”已纠正；零样本检索路由移出当前工作项） | D-161；D-173（路由排期） | 设计 5.2；plan 3.17 |
+| D-161 | superseded in part（身份/focusRanges/来源规则保持；D-173 扩展单元排名融合、解耦远程与重排，删除 windowScore 不等重排，撤销四片全部串行） | D-165；D-166；D-170；D-173 | 设计 6.1/7.1/8.5；plan 3.15/3.16 |
+| D-162 | superseded in part（范围键与不透明文档身份保持；D-173 明确工作区包含陌生文件，注意力只决定建设顺序） | D-167；D-173 | 设计 6/7.1/10.4；plan 3.16 |
 | D-163 | implementation（图线索到达理由；same-container 不拿 tier 1 / 直接线索 / 图补充物化；预算数值未改） | — | explore.ts GraphClue；设计 6.1 fan-out；plan 3.15① |
 | D-164 | implementation（explore/related 共用查询期文件角色；依据 filename-pattern / project-declaration / unknown；不入图） | — | file-role.ts；related.query roles；plan 3.15② |
 | D-165 | implementation（focusRanges 入口；arrival/assessment/purpose；同一连接值才算两端；windowScore 去掉 GRADE_RANK 项） | — | slice.ts；explore.ts；protocol ExploreWindowTrace；plan 3.15④ |
 | D-166 | implementation（MiniLM 有效长度 512 写入空间身份；切块按 tokenizer 计数） | — | semantic/identity.ts；设计 6.1 |
 | D-167 | implementation（范围键路径与查询；documentId 不透明；workspaceScope 是唯一焊点） | — | semantic/identity.ts store.ts runtime.ts；设计 7.1 |
-| D-168 | implementation（结构递归切块；正文优先装饰；缺结构走重叠 fallback） | — | semantic/chunker.ts embed-text.ts |
-| D-169 | superseded in part（代际库、扫描、缺包 unavailable 成立；「transformers 动态加载」当时无依赖声明、无测试、任何环境都跑不起来，被 D-172 补齐并首次真跑） | D-172 | semantic/store.ts runtime.ts minilm.ts；application-host/index.ts |
-| D-170 | implementation（语义线索进 focusRanges / 读取调度 / 打包；文件级 RRF k=60；details.semantic；无语义线索保持 3.14 顺序） | — | explore.ts explore-rrf.ts explore-service.ts；protocol ExploreSemanticDetails |
-| D-171 | implementation（观察量具读 text；semantic 诊断行；观察 host 绑 semanticRecall 但不冷扫 MiniLM）；换了标尺，位次不可与 3.14/D-157 的 snippets 下标直接相减（D-172） | — | scripts/explore-observe.ts explore-observe-stage.ts |
+| D-168 | superseded in part（正文覆盖目标保持；D-173 要求逐块实际编码覆盖与长行续切，当前截断缺口待修） | D-173 | semantic/chunker.ts embed-text.ts；plan 3.16C |
+| D-169 | superseded in part（独立代际库与部分可查保持；D-172 补真实运行；D-173 明确前台优先、编码文本复用、Node 线程与覆盖对账） | D-172；D-173 | semantic/store.ts runtime.ts minilm.ts；plan 3.16 |
+| D-170 | superseded in part（召回/focusRanges/身份接线保持；D-173 取消开放来源 tier 并重定单元选择，现代码尚待修改） | D-173 | 设计 6.1；plan 3.15；protocol ExploreSemanticDetails |
+| D-171 | superseded in part（量具读 text 与换标尺说明保持；语义真扫描已补在未提交工作树，不能把局部扫描外推全仓） | D-172；D-173（工作树事实） | scripts/explore-observe.ts explore-observe-stage.ts；status |
 | D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |
+| D-173 | superseded in part（职责、来源平等、当前原文/呈现和索引设计保持；将局部 LLM 判断移出当前工作项是误读，由 D-174 纠正） | D-174 | 设计 2/5.7/6/6.1/6.2/7.5/8.5；plan 0.7/2.8/2.9/3.2/3.15/3.16；status；architecture 4.4 |
+| D-174 | superseded in part（当前 LLM 主线保持；D-175 扩展分组计划、成组选段、局部补查及查询所有者，区分重排契约） | D-175 | 设计 2/5.7/5.10/6.1/8.5；plan 0.7/3.2/3.15D/3.16E；status；architecture 4.4 |
+| D-175 | active-design（短生命周期查询、分组计划、成组必需范围、局部补查、来源机会与实际取消；消费者待实施） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
