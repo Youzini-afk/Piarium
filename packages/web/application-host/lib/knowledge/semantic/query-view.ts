@@ -1,0 +1,77 @@
+/**
+ * Pins the semantic document view for one Host query: surface drafts and
+ * WorkingState baseline+delta. Disk vectors for those paths are masked
+ * immediately.
+ */
+
+import type { AgentInputContext } from "@piarium/protocol";
+import type { SemanticQueryOverlay } from "./runtime.js";
+
+export type SemanticQueryView = {
+  overlays: SemanticQueryOverlay[];
+  view: "disk" | "working-state";
+};
+
+export async function pinSemanticQueryView(input: {
+  inputContext: AgentInputContext;
+  draftPaths?: readonly string[];
+  readDraft?: (path: string) => (
+    | { status: "ready"; content: string; revision: string }
+    | { status: "unavailable" }
+    | { status: "disk"; superseded?: true }
+    | { status: "deleted" }
+  );
+  threadDocuments?: Array<{
+    path: string;
+    content: string | null;
+    revision: string;
+    gap?: SemanticQueryOverlay["gap"];
+  }>;
+}): Promise<SemanticQueryView> {
+  const overlays: SemanticQueryOverlay[] = [];
+  if (input.threadDocuments) {
+    for (const document of input.threadDocuments) {
+      overlays.push({
+        path: document.path,
+        content: document.content,
+        revision: document.revision,
+        origin: "thread",
+        ...(document.gap ? { gap: document.gap } : {}),
+      });
+    }
+    return { overlays, view: "working-state" };
+  }
+  if (input.inputContext.source !== "surface") {
+    return { overlays, view: "disk" };
+  }
+  for (const path of input.draftPaths ?? input.inputContext.dirtyPaths) {
+    const draft = input.readDraft?.(path);
+    if (draft?.status === "disk" && draft.superseded) continue;
+    if (draft?.status === "ready") {
+      overlays.push({
+        path,
+        content: draft.content,
+        revision: draft.revision,
+        origin: "surface-draft",
+      });
+      continue;
+    }
+    if (draft?.status === "unavailable") {
+      overlays.push({
+        path,
+        content: null,
+        revision: `surface-unavailable:${path}`,
+        origin: "surface-draft",
+        gap: "draft-unavailable",
+      });
+      continue;
+    }
+    overlays.push({
+      path,
+      content: null,
+      revision: `surface-deleted:${path}`,
+      origin: "surface-draft",
+    });
+  }
+  return { overlays, view: "disk" };
+}

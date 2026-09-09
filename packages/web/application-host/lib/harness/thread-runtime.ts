@@ -1571,6 +1571,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const isThreadSession = (sessionId: string): boolean => bindingsBySession.has(sessionId);
 
+  const getSessionBinding = (sessionId: string): { workspaceId: string; parent: ThreadParent; threadId: string } | null => {
+    const binding = bindingsBySession.get(sessionId);
+    return binding
+      ? { workspaceId: binding.workspaceId, parent: binding.parent, threadId: binding.threadId }
+      : null;
+  };
+
   const dispose = async (): Promise<void> => {
     abortController.abort();
     await drain();
@@ -1599,6 +1606,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     merge,
     drain,
     isThreadSession,
+    getSessionBinding,
     dispose,
   };
 }
