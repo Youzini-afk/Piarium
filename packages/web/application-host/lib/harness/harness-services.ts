@@ -115,7 +115,11 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
         const presented = presentOrganizedOutput({
           command: result.command ?? "",
           output: result.text,
-          complete: !result.running,
+          // An incremental read is only the newly observed slice. Even after
+          // the process exits, it may be the final fragment of a larger
+          // transcript already consumed by an earlier read, so do not let
+          // `running === false` turn this slice into a final summary.
+          complete: false,
           ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
         });
         return {
@@ -371,6 +375,7 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
       }
       const result = await host.zone2Provider({
         sessionId: ctx.sessionId,
+        signal: ctx.signal,
         sinceTurn: params.sinceTurn,
         ...(params.afterEventId === undefined ? {} : { afterEventId: params.afterEventId }),
         ...(params.query === undefined ? {} : { query: params.query }),
@@ -534,9 +539,9 @@ export function createRecallSearchService(host: HarnessServiceHost): HarnessServ
       if (!host.recallDepsProvider) {
         throw new HarnessServiceError("unavailable", "Recall deps not configured");
       }
-      const deps = await host.recallDepsProvider(ctx.sessionId);
+      const deps = await host.recallDepsProvider(ctx.sessionId, ctx.workspaceId);
       const k = params.k ?? 5;
-      const result = await executeRecall(params.query, k, deps);
+      const result = await executeRecall(params.query, k, deps, ctx.signal);
       return {
         text: result.text,
         results: result.results.map((r) => {

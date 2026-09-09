@@ -15,7 +15,7 @@ interface SessionBinding {
 
 export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
-  recall?: (workspaceId: string, store: KnowledgeStore, query: string) => Promise<RecallResult[]>;
+  recall?: (workspaceId: string, store: KnowledgeStore, query: string, signal?: AbortSignal) => Promise<RecallResult[]>;
   onError?: (error: unknown) => void;
 }
 
@@ -23,6 +23,7 @@ export interface Zone2MaterialRequest {
   afterEventId?: number;
   contextUsage: Zone2ContextUsage | null;
   query?: string;
+  signal?: AbortSignal;
   sessionId: string;
   sinceTurn: number;
   /** Branch entry IDs for ancestor-resolution block filtering. */
@@ -153,6 +154,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
   };
 
   const zone2Material = async (request: Zone2MaterialRequest): Promise<Zone2MaterialResult> => {
+    request.signal?.throwIfAborted();
     const binding = sessions.get(request.sessionId);
     if (!binding) {
       return { eventCursor: request.afterEventId ?? 0, material: emptyMaterial(request.contextUsage) };
@@ -213,8 +215,9 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     }));
     if (request.query?.trim()) {
       const recalled = options.recall
-        ? await options.recall(binding.workspaceId, store, request.query)
+        ? await options.recall(binding.workspaceId, store, request.query, request.signal)
         : await store.recall(request.query, 5);
+      request.signal?.throwIfAborted();
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
         const content = result.node.payload.content;

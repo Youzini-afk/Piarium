@@ -5,7 +5,7 @@ import { createShellExecService, createShellReadService } from "../harness-servi
 import type { HarnessServiceHost } from "../service-host.js";
 import type { HarnessServiceContext } from "../router.js";
 import { identifyFromCommand, organizeShellOutput, utf8Bytes } from "./index.js";
-import { SHELL_DISPLAY_BUDGET } from "./text.js";
+import { fitBlocks, normalizeShellText, SHELL_DISPLAY_BUDGET } from "./text.js";
 
 const VITEST_FAIL = [
   " RUN  v4.1.11",
@@ -77,9 +77,27 @@ describe("command identification", () => {
   it("recognizes wrappers and combinations without executing them", () => {
     expect(identifyFromCommand("bunx vitest run")?.kind).toBe("vitest");
     expect(identifyFromCommand("npx tsc --noEmit")?.kind).toBe("tsc");
-    expect(identifyFromCommand("bun run lint && npx eslint src")?.kind).toBe("eslint");
+    expect(identifyFromCommand("bun run lint && npx eslint src")?.kind).toBe("generic");
     expect(identifyFromCommand("git -C repo status")?.gitSubcommand).toBe("status");
     expect(identifyFromCommand("bun run test")?.kind).toBeUndefined();
+  });
+
+  it("does not infer a tool from arguments or mix incompatible command segments", () => {
+    expect(identifyFromCommand("echo vitest run")?.kind).toBe("generic");
+    expect(identifyFromCommand("cd packages && bunx vitest run")?.kind).toBe("vitest");
+    expect(identifyFromCommand("git status && git diff")?.kind).toBe("generic");
+    expect(identifyFromCommand("npx tsc; npx eslint")?.kind).toBe("generic");
+  });
+
+  it("does not classify vitest-shaped text printed by echo as a test run", () => {
+    const organized = organizeShellOutput({
+      command: "printf 'vitest output'",
+      output: " Test Files  1 passed (1)\n   Duration  1s",
+      complete: true,
+      exitCode: 0,
+    });
+    expect(organized.kind).toBe("generic");
+    expect(organized.text).toContain("Test Files  1 passed");
   });
 });
 
@@ -112,6 +130,26 @@ describe("vitest organizer", () => {
     expect(organized.kind).toBe("generic");
     expect(organized.text).toContain("downloading browser binaries");
   });
+
+  it("keeps failed test names, locations, and watch instructions", () => {
+    const organized = organizeShellOutput({
+      command: "vitest run --watch",
+      output: [
+        "FAIL src/mid.test.ts",
+        "  × math > adds",
+        "    AssertionError: expected 2 to be 1",
+        "    ❯ src/mid.test.ts:4:10",
+        "press h to show help, press q to quit",
+        " Test Files  1 failed (1)",
+        "   Duration  3s",
+      ].join("\n"),
+      complete: true,
+      exitCode: 1,
+    });
+    expect(organized.text).toContain("× math > adds");
+    expect(organized.text).toContain("❯ src/mid.test.ts:4:10");
+    expect(organized.text).toContain("press h to show help");
+  });
 });
 
 describe("tsc organizer", () => {
@@ -120,6 +158,23 @@ describe("tsc organizer", () => {
     expect(organized.kind).toBe("tsc");
     expect(organized.text).toContain("src/a.ts(12,5): error TS2322");
     expect(organized.text).toContain("Found 2 errors in 2 files.");
+  });
+
+  it("keeps pretty diagnostics, code frames, and unrecognized context", () => {
+    const output = [
+      "src/a.ts:1:1 - error TS2322: bad",
+      "",
+      "> 1 | const value: number = 'bad'",
+      "    |       ~~~~~",
+      "plugin context: compiler wrapper emitted this line",
+      "Found 1 error in src/a.ts:1",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npx tsc --pretty", output, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("tsc");
+    expect(organized.text).toContain("src/a.ts:1:1 - error TS2322: bad");
+    expect(organized.text).toContain("> 1 | const value");
+    expect(organized.text).toContain("plugin context");
+    expect(organized.text).toContain("Found 1 error in src/a.ts:1");
   });
 
   it("does not claim success when exit is non-zero and no errors parsed", () => {
@@ -158,6 +213,28 @@ describe("git organizer", () => {
 });
 
 describe("normalization and budget", () => {
+  it("retains the current text before a trailing carriage return", () => {
+    expect(normalizeShellText("working\rError: failed\r")).toBe("Error: failed");
+  });
+
+  it("bounds a long prompt stream and preserves its first and last text", () => {
+    const output = Array.from({ length: 4_000 }, (_, i) => `? prompt ${i} ${"你".repeat(12)}`).join("\n");
+    const result = organizeShellOutput({ command: "unknown", output, complete: false });
+    expect(result.text).toContain("? prompt 0");
+    expect(result.text).toContain("? prompt 3999");
+    expect(result.text).not.toContain("\uFFFD");
+    expect(utf8Bytes(result.text)).toBeLessThanOrEqual(SHELL_DISPLAY_BUDGET);
+  });
+
+  it("keeps text when block separators alone exceed the available budget", () => {
+    const required = Array.from({ length: 4_000 }, (_, i) => `error ${i}`);
+    const result = fitBlocks({ required, budget: 1_000 });
+    expect(result.text).toContain("error 0");
+    expect(result.text).toContain("error 3999");
+    expect(utf8Bytes(result.text)).toBeLessThanOrEqual(1_000);
+    expect(result.omitted).toBeGreaterThan(0);
+  });
+
   it("handles ANSI, CRLF, and a dangling fragment as a current observation", () => {
     const organized = organizeShellOutput({
       command: "npx tsc --noEmit",
@@ -178,6 +255,7 @@ describe("normalization and budget", () => {
     const organized = organizeShellOutput({ command: "vitest run", output, complete: true, exitCode: 1 });
     expect(organized.omitted).toBe(true);
     expect(organized.text).toContain("FAIL src/f0.test.ts");
+    expect(organized.text).toContain("Test Files  80 failed (80)");
     expect(organized.text).toContain("omitted");
     expect(utf8Bytes(organized.text)).toBeLessThanOrEqual(SHELL_DISPLAY_BUDGET);
   });
@@ -189,6 +267,16 @@ describe("normalization and budget", () => {
     expect(utf8Bytes(organized.text)).toBeLessThan(350);
     expect(organized.text).toContain("AssertionError");
     expect(organized.text).toContain("Tests  1 failed | 10 passed (11)");
+  });
+
+  it("uses generic head and tail output for an unknown long command", () => {
+    const output = ["first line", ...Array.from({ length: 4000 }, (_, index) => `important line ${index}`), "last line"].join("\n");
+    const organized = organizeShellOutput({ command: "some-tool", output, complete: true });
+    expect(organized.kind).toBe("generic");
+    expect(organized.text).toContain("first line");
+    expect(organized.text).toContain("last line");
+    expect(organized.text).toContain("omitted");
+    expect(utf8Bytes(organized.text)).toBeLessThanOrEqual(SHELL_DISPLAY_BUDGET);
   });
 });
 
@@ -279,6 +367,44 @@ describe("public bash and get_output chain", () => {
     const rawPage = await createShellReadService(host).handle({ id: "sh_1", offset: 0, length: 20 }, context());
     expect(rawPage.text.startsWith("ok\n")).toBe(true);
     expect(rawPage.display).toBeUndefined();
+    cursors.dispose();
+  });
+
+  it("keeps an error that arrives in a later shell.read slice", async () => {
+    const cursors = createObservationCursorStore();
+    const supervisor = {
+      exec: async () => ({
+        kind: "background" as const,
+        id: "sh_2",
+        waitedMs: 10,
+        cwd: ".",
+        outputSoFar: "FAIL src/mid.test.ts\n",
+        command: "bunx vitest run",
+      }),
+      read: async (_id: string, offset = 0) => ({
+        text: offset === Buffer.byteLength("FAIL src/mid.test.ts\n", "utf8")
+          ? "Error: expected 2 to be 1\n Test Files  1 failed (1)\n   Duration  3s\n"
+          : "FAIL src/mid.test.ts\n",
+        offset,
+        length: offset === Buffer.byteLength("FAIL src/mid.test.ts\n", "utf8") ? 78 : Buffer.byteLength("FAIL src/mid.test.ts\n", "utf8"),
+        nextOffset: offset === Buffer.byteLength("FAIL src/mid.test.ts\n", "utf8") ? 100 : Buffer.byteLength("FAIL src/mid.test.ts\n", "utf8"),
+        total: 100,
+        eof: true,
+        running: false,
+        exitCode: 1,
+        command: "bunx vitest run",
+      }),
+    };
+    const host = {
+      outputStore: createOutputStore(),
+      observationCursors: cursors,
+      getInterpreter: () => ({ kind: "bash", command: "bash", args: [], env: {} }),
+      getShellSupervisor: () => supervisor,
+    } as unknown as HarnessServiceHost;
+    await createShellExecService(host).handle({ command: "bunx vitest run", waitMs: 10 }, context());
+    const result = await createShellReadService(host).handle({ id: "sh_2" }, context());
+    expect(result.display).toContain("Error: expected 2 to be 1");
+    expect(result.organized?.partial).toBe(true);
     cursors.dispose();
   });
 });

@@ -9,7 +9,7 @@ const isSummary = (line: string): boolean => (
 const isNoise = (line: string): boolean => (
   line.startsWith("RERUN")
   || /^[·.•]+$/.test(line.replace(/\s/g, ""))
-  || /^(✓|✔|×|❯)\s/.test(line)
+  || /^(✓|✔)\s/.test(line)
   || /^[.\s]+$/.test(line)
 );
 
@@ -19,6 +19,7 @@ export function organizeVitest(output: string, budget: number): { text: string; 
   const summaries: string[] = [];
   const passes: string[] = [];
   const prompts: string[] = [];
+  const context: string[] = [];
   let index = 0;
   while (index < lines.length) {
     const trimmed = lines[index]!.trimStart();
@@ -48,6 +49,7 @@ export function organizeVitest(output: string, budget: number): { text: string; 
     }
     if (isSummary(trimmed)) summaries.push(lines[index]!.trimEnd());
     else if (isPass(trimmed)) passes.push(lines[index]!.trimEnd());
+    else if (!isNoise(trimmed) && trimmed.length > 0) context.push(lines[index]!.trimEnd());
     index += 1;
   }
 
@@ -57,7 +59,7 @@ export function organizeVitest(output: string, budget: number): { text: string; 
 
   const packed = fitBlocks({
     required: [...prompts, ...failures, ...summaries],
-    optional: summaries.length > 0 ? [] : passes,
+    optional: summaries.length > 0 ? context : [...context, ...passes],
     budget,
   });
   const note = omissionNote(packed.omitted, packed.omittedBytes);

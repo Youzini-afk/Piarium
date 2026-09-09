@@ -57,6 +57,7 @@ export function organizeEslint(output: string, budget: number): { text: string; 
   const issues: Issue[] = json?.issues ?? [];
   const prompts: string[] = [];
   const summaries: string[] = json?.summary ? [json.summary] : [];
+  const context: string[] = [];
   if (!json) {
     let currentFile: string | undefined;
     for (const line of output.split("\n")) {
@@ -95,6 +96,10 @@ export function organizeEslint(output: string, budget: number): { text: string; 
       }
       if (trimmed && !trimmed.startsWith("✖") && !/^\d+:\d+/.test(trimmed) && !trimmed.startsWith("[")) {
         currentFile = trimmed;
+        if (!trimmed.includes(":") && (trimmed.includes("/") || trimmed.includes("\\") || /\.[A-Za-z0-9_-]+$/.test(trimmed))) {
+          continue;
+        }
+        context.push(line.trimEnd());
       }
     }
   }
@@ -105,6 +110,7 @@ export function organizeEslint(output: string, budget: number): { text: string; 
 
   const packed = fitBlocks({
     required: [...prompts, ...issues.map(formatIssue), ...summaries],
+    optional: context.length > 0 ? [context.join("\n")] : [],
     budget,
   });
   const note = omissionNote(packed.omitted, packed.omittedBytes);

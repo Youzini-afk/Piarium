@@ -29,7 +29,7 @@ const tempDir = (): string => {
   return dir;
 };
 
-type MappedEmbedder = SemanticEmbedder & { map(text: string, vector: number[]): void };
+type MappedEmbedder = SemanticEmbedder & { map(text: string, vector: number[]): void; submitted: string[] };
 
 const mappedEmbedder = (space = createHashEmbedder().space): MappedEmbedder => {
   const vectors = new Map<string, number[]>();
@@ -38,7 +38,10 @@ const mappedEmbedder = (space = createHashEmbedder().space): MappedEmbedder => {
     space: { ...space, dim: 2, modelRevision: "mapped" },
     prepare: async () => undefined,
     countTokens: (text) => Math.max(1, text.length),
-    embed: async (texts) => texts.map((text) => vectors.get(text) ?? [0, 1]),
+    embed: async (texts) => {
+      embedder.submitted.push(...texts);
+      return texts.map((text) => vectors.get(text) ?? [0, 1]);
+    },
     embedBatch: async (request) => {
       request.signal?.throwIfAborted();
       const items = request.items.map((item, index) => ({
@@ -49,6 +52,7 @@ const mappedEmbedder = (space = createHashEmbedder().space): MappedEmbedder => {
       return { batchId: request.batchId, space: embedder.space, items };
     },
     map(text, vector) { vectors.set(text, vector); },
+    submitted: [],
   };
   return embedder;
 };
@@ -99,6 +103,33 @@ describe("knowledge semantic recall", () => {
     expect(recalled.results[0]?.via).toBe("vector");
     expect(recalled.results[0]?.node.payload.content).toBe("Always prefer bun for installs");
     expect(recalled.details.vector).toBe("used");
+  });
+
+  it("encodes a long knowledge entry in complete backend-sized chunks", async () => {
+    const dir = tempDir();
+    const store = await openAuthority(dir, "ws");
+    const embedder = mappedEmbedder();
+    const content = `long-entry-start ${"semantic-body ".repeat(120)} long-entry-end`;
+    await store.putKnowledge({
+      scope: "workspace",
+      status: "accepted",
+      content,
+      trigger: "long-entry-trigger",
+    });
+    const runtime = createKnowledgeVectorRuntime({
+      dataDir: dir,
+      hostId: "host",
+      scheduler: createEmbedScheduler(),
+      cache: createVectorCache(),
+      resolveEmbedder: async () => ({ status: "ready", embedder }),
+    });
+    cleanup.push(() => runtime.close());
+    runtime.scheduleReconcile(store, "workspace", "ws", "ws");
+    await runtime.waitForBuild("workspace", "ws", "ws");
+    expect(embedder.submitted.length).toBeGreaterThan(1);
+    expect(embedder.submitted.every((text) => embedder.countTokens(text) <= embedder.space.maxTokens)).toBe(true);
+    expect(embedder.submitted.some((text) => text.includes("long-entry-start"))).toBe(true);
+    expect(embedder.submitted.some((text) => text.includes("long-entry-end"))).toBe(true);
   });
 
   it("keeps suggested, invalid, and other-workspace entries out of Top-K", async () => {
@@ -285,6 +316,16 @@ describe("knowledge semantic recall", () => {
     });
     expect(switched.spaceId).not.toBe(restored.details.spaceId);
     expect(switched.hits).toEqual([]);
+    await runtimeC.waitForBuild("workspace", "ws", "ws");
+    const rebuilt = await runtimeC.search({
+      authority: store,
+      scope: "workspace",
+      scopeId: "ws",
+      workspaceId: "ws",
+      query: "stable knowledge body",
+      limit: 5,
+    });
+    expect(rebuilt.hits[0]?.contentRevision).toBeDefined();
   });
 });
 

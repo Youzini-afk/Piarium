@@ -39,15 +39,18 @@ export async function executeRecall(
   query: string,
   k: number,
   deps: RecallToolDeps,
+  signal?: AbortSignal,
 ): Promise<RecallToolResult> {
+  signal?.throwIfAborted();
   const { workspaceStore, userStore } = deps;
   const recalled = await recallWorkspaceAndUser({
     workspaceStore,
     userStore,
-    workspaceId: deps.workspaceId ?? "local",
+    ...(deps.workspaceId === undefined ? {} : { workspaceId: deps.workspaceId }),
     query,
     k,
     ...(deps.vectors ? { vectors: deps.vectors } : {}),
+    ...(signal ? { signal } : {}),
   });
   const all = recalled.results;
 

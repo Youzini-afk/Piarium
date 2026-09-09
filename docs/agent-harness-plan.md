@@ -203,9 +203,10 @@ provider 原生上下文编辑按实际 API 使用，缺能力不阻塞本地压
 
 ### 2.8 embedding
 
-已接线（D-196）。权威 workspace/user `.tdb` 仍以 placeholder 维度打开，知识向量在独立代际目录。有效 `harness.embedding`
+生产路径按 D-196 / D-198 接线与收口，交付以 status 为准。权威 workspace/user `.tdb` 仍以 placeholder 维度打开，知识向量复用共享代际存储的独立 scope。有效 `harness.embedding`
 时，召回与 Zone 2 注入走同一 `harness.embed` 绑定；未配置保持文本/图。旧 `knowledge/embedding.ts` HTTP adapter 已删除。
-知识库不使用本地 MiniLM。真实远程质量未观察。
+知识库不使用本地 MiniLM。建设必须覆盖自动维度、空间切换、正常变更的增量合并、迟到发布与关闭；有效状态/修订在 Top-K 前约束，长条目的多个块按知识身份合并。
+公开 recall 与 Zone 2 使用同一绑定、取消和两种范围的融合逻辑，绑定解析异常仍交付文本。验证包含未指定维度的真实 remote adapter 与公开服务消费，faux 证据不外推真实远程质量。
 
 ### 2.9 模型槽位与执行配置
 
@@ -582,10 +583,12 @@ Documents workspace。rerank 超预算 view 不截断冒充原 ID，finish 冻�
 工作区仍是包含陌生文件的范围，注意力只改变建设顺序。真实 provider 延迟、质量、成本和完整冷扫时间未观察。扩散模型/
 后训练、全仓生成式摘要与零样本路由仍留后续。知识库语义召回已按 2.8 / D-196 单独接线，不与代码语义 MiniLM 回退混写。
 
-### 3.17 bash 输出压缩：按命令分派（D-160 / D-197）
+### 3.17 bash 输出压缩：按命令分派（D-160 / D-197 / D-199）
 
 已接线前四类：vitest、tsc、eslint、git。Host 在 `shell.exec` 与增量 `shell.read` 上整理默认 `display`，原文仍进
-OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 不再对 `bash` / `get_output` 头尾再切。其余三层
+OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对实际取得 Host 整理结果的默认展示免于再次头尾切；旧 Host 未整理结果保留通用截断。
+解析器只收起明确的成功/重复噪声，未知正文、pretty 诊断、失败位置、分片续文与提示保留。混合输出不能可靠归属时用通用展示；超预算保留可读首尾与省略事实，不能只剩提示。
+其余三层
 （包管理器通配、声明式规则、附加模型总结）未做。**不用小模型总结替代**（漏一个失败是静默的）；模型总结只作非结构化输出上的附加，
 且要明确标注"这是模型挑的行，不是全部"。
 

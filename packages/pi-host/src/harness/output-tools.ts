@@ -69,8 +69,10 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             ? `initial read · ${result.length} bytes`
             : `+${result.length} bytes since last read (${formatElapsed(observation.sinceMs)} ago)`;
           const lines = [`[shell ${params.handle} · ${change} · ${state}]`];
-          if (result.organized?.partial && result.running) {
-            lines.push("[current observation — output still growing; not a final summary]");
+          if (result.organized?.partial) {
+            lines.push(result.running
+              ? "[current observation — output still growing; not a final summary]"
+              : "[current observation — this is an incremental slice; not a final summary]");
           }
           const body = result.display ?? result.text;
           if (body) lines.push(body);

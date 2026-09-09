@@ -6,6 +6,16 @@ const DEFAULT_VISIBLE_BYTES = 32768;
 const DEFAULT_HEAD_RATIO = 0.5;
 const MAX_NEWLINE_BACKTRACK = 512;
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function hasHostOrganizedDisplay(value: unknown): boolean {
+  const details = asRecord(value);
+  const organized = asRecord(details?.organized);
+  return typeof details?.display === "string" && typeof organized?.kind === "string";
+}
+
 function findNearestNewlineBefore(text: string, position: number): number {
   for (let i = position; i > Math.max(0, position - MAX_NEWLINE_BACKTRACK); i--) {
     if (text[i] === "\n") return i;
@@ -30,7 +40,15 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
       if (!content) return undefined;
 
       const toolName = event.toolName;
-      if (toolName === "bash" || toolName === "get_output") return undefined;
+      const input = asRecord(event.input);
+      const explicitOutputRead = toolName === "get_output" && (
+        input?.offset !== undefined
+        || input?.length !== undefined
+        || (typeof input?.handle === "string" && input.handle.startsWith("out_"))
+      );
+      const organizedShellResult = (toolName === "bash" || toolName === "get_output")
+        && hasHostOrganizedDisplay(event.details);
+      if (explicitOutputRead || organizedShellResult) return undefined;
       const headRatio = DEFAULT_HEAD_RATIO;
 
       // Concatenate all TextContent

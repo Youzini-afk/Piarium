@@ -35,6 +35,7 @@ function organizeStatus(output: string, budget: number): { text: string; omitted
   const headers: string[] = [];
   const paths: string[] = [];
   const prompts: string[] = [];
+  const context: string[] = [];
   let untracked = false;
   for (const line of output.split("\n")) {
     if (/^Untracked files:/i.test(line.trim())) untracked = true;
@@ -43,12 +44,14 @@ function organizeStatus(output: string, budget: number): { text: string; omitted
     else if (isStatusPath(line)) paths.push(line.trimEnd());
     else if (untracked && /^\s+\S/.test(line) && !/^\s+\(use /i.test(line)) paths.push(line.trimEnd());
     else if (isStatusHeader(line)) headers.push(line.trimEnd());
+    else if (line.trim()) context.push(line.trimEnd());
   }
   if (headers.length === 0 && paths.length === 0) {
     return { ...organizeGeneric(output, budget), recognized: false };
   }
   const packed = fitBlocks({
     required: [...prompts, ...headers, ...paths],
+    optional: context.length > 0 ? [context.join("\n")] : [],
     budget,
   });
   const note = omissionNote(packed.omitted, packed.omittedBytes);
@@ -115,6 +118,7 @@ function organizeDiff(output: string, budget: number): { text: string; omitted: 
 function organizeLog(output: string, budget: number): { text: string; omitted: boolean; recognized: boolean } {
   const commits: string[] = [];
   const prompts: string[] = [];
+  const context: string[] = [];
   let current: string[] = [];
   const flush = (): void => {
     if (current.length > 0) commits.push(current.join("\n"));
@@ -131,10 +135,15 @@ function organizeLog(output: string, budget: number): { text: string; omitted: b
       continue;
     }
     if (current.length > 0) current.push(line.trimEnd());
+    else if (line.trim()) context.push(line.trimEnd());
   }
   flush();
   if (commits.length === 0) return { ...organizeGeneric(output, budget), recognized: false };
-  const packed = fitBlocks({ required: [...prompts, ...commits], budget });
+  const packed = fitBlocks({
+    required: [...prompts, ...commits],
+    optional: context.length > 0 ? [context.join("\n")] : [],
+    budget,
+  });
   const note = omissionNote(packed.omitted, packed.omittedBytes);
   return {
     text: joinBlocks(note ? [packed.text, note] : [packed.text]),

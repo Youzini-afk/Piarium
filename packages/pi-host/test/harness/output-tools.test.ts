@@ -57,6 +57,31 @@ describe("get_output tool", () => {
     assert.match(text, /current observation/);
   });
 
+  it("marks an exited incremental slice as a current observation", async () => {
+    const bridge = createFakeBridge((method) => {
+      if (method === "shell.read") {
+        return {
+          text: "Error: expected 2 to be 1",
+          display: "Error: expected 2 to be 1",
+          organized: { kind: "vitest", omitted: false, partial: true },
+          offset: 40,
+          length: 24,
+          nextOffset: 64,
+          total: 64,
+          eof: true,
+          running: false,
+          exitCode: 1,
+          observation: { mode: "incremental", first: false, sinceMs: 1000 },
+        };
+      }
+      throw new Error(`unexpected: ${method}`);
+    });
+    const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
+    const text = await executeTool(tool, { handle: "sh_1" });
+    assert.match(text, /incremental slice; not a final summary/);
+    assert.match(text, /exited 1/);
+  });
+
   it("reads background shell via shell.read for sh_ IDs", async () => {
     const bridge = createFakeBridge((method) => {
       if (method === "shell.read") return { text: "shell output", offset: 0, length: 12, nextOffset: 12, total: 100, eof: false, running: true };

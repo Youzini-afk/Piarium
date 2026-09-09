@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createToolResultTruncationExtension } from "../../src/harness/tool-result-truncation.js";
+import { createBashTool } from "../../src/harness/bash-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 
 function createFakeBridge(stored: Map<string, string>): Pick<HostServicesBridge, "request"> {
@@ -89,12 +90,92 @@ describe("tool-result-truncation", () => {
       const result = await getHandler()!({
         type: "tool_result",
         toolName,
+        input: toolName === "bash" ? { command: "vitest run" } : { handle: "sh_1" },
         content: [{ type: "text", text: longText }],
-        details: undefined,
+        details: { display: longText, organized: { kind: "vitest", omitted: false, partial: true } },
         isError: false,
       });
       assert.equal(result, undefined, `${toolName} should keep Host organization`);
     }
+    assert.equal(stored.size, 0);
+  });
+
+  it("truncates a legacy shell result when Host organization is absent", async () => {
+    const stored = new Map<string, string>();
+    const bridge = createFakeBridge(stored);
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 20, sessionId: "s1" })(pi as never);
+    const result = await getHandler()!({
+      type: "tool_result",
+      toolName: "bash",
+      input: { command: "cat big.txt" },
+      content: [{ type: "text", text: "legacy output\n" + "x".repeat(200) }],
+      details: undefined,
+      isError: false,
+    }) as { details: { truncated: { ref: { handle: string } } } };
+    assert.ok(result.details.truncated.ref.handle.startsWith("out_"));
+    assert.equal(stored.size, 1);
+  });
+
+  it("recognizes the display returned by the public bash tool", async () => {
+    const stored = new Map<string, string>();
+    const bridge = {
+      request: async () => ({
+        kind: "completed" as const,
+        exitCode: 1,
+        durationMs: 1,
+        cwd: "/workspace",
+        stdout: "FAIL src/a.test.ts\n" + "x".repeat(200),
+        stderr: "",
+        handle: "out_full",
+        shown: null,
+        display: "FAIL src/a.test.ts\n" + "x".repeat(200),
+        organized: { kind: "vitest" as const, omitted: false, partial: false },
+      }),
+    } as unknown as HostServicesBridge;
+    const bashResult = await createBashTool(bridge, "s1", "/workspace").execute(
+      "call-1",
+      { command: "bunx vitest run" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: {
+      request: async (method: string, params: Record<string, unknown>) => {
+        if (method === "output.store") {
+          stored.set("unexpected", String(params.text));
+          return { ref: { durability: "ephemeral", generation: "test", handle: "out_unexpected" }, total: 1 };
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge, visibleBytes: 20, sessionId: "s1" })(pi as never);
+    const result = await getHandler()!({
+      type: "tool_result",
+      toolName: "bash",
+      input: { command: "bunx vitest run" },
+      content: bashResult.content,
+      details: bashResult.details,
+      isError: false,
+    });
+    assert.equal(result, undefined);
+    assert.equal(stored.size, 0);
+  });
+
+  it("keeps explicit get_output paging from being re-trimmed", async () => {
+    const stored = new Map<string, string>();
+    const bridge = createFakeBridge(stored);
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: bridge as HostServicesBridge, visibleBytes: 20, sessionId: "s1" })(pi as never);
+    const result = await getHandler()!({
+      type: "tool_result",
+      toolName: "get_output",
+      input: { handle: "sh_1", offset: 0, length: 100 },
+      content: [{ type: "text", text: "explicit page\n" + "x".repeat(200) }],
+      details: undefined,
+      isError: false,
+    });
+    assert.equal(result, undefined);
     assert.equal(stored.size, 0);
   });
 
@@ -174,5 +255,4 @@ describe("tool-result-truncation", () => {
     assert.ok(text.includes("generation"), `text should include 'generation': ${text}`);
   });
 });
-
 

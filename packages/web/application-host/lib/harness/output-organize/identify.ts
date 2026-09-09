@@ -8,8 +8,8 @@ export type IdentifiedCommand = {
 
 const WRAPPERS = new Set(["npx", "bunx", "pnpm", "yarn", "npm", "bun", "deno", "node"]);
 const WRAPPER_SUB = new Set(["run", "exec", "x", "dlx"]);
-const SPECIFIC = new Set(["vitest", "tsc", "eslint", "git"]);
 const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+const WRAPPER_VALUE_FLAGS = new Set(["-p", "--package", "--cwd", "--config"]);
 
 export function splitCommandSegments(command: string): string[] {
   const segments: string[] = [];
@@ -54,6 +54,16 @@ export function commandTokens(segment: string): string[] {
     .map((token) => token.replace(/\.(cmd|exe)$/i, ""));
 }
 
+type SegmentClassification = IdentifiedCommand | "context" | "output-only" | "unknown";
+
+function isAssignment(token: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+}
+
+function tokenAt(tokens: string[], index: number): string | undefined {
+  return tokens[index];
+}
+
 const specificKind = (token: string): OrganizedCommandKind | undefined => {
   if (token === "vitest") return "vitest";
   if (token === "tsc") return "tsc";
@@ -63,46 +73,109 @@ const specificKind = (token: string): OrganizedCommandKind | undefined => {
 };
 
 export function gitSubcommand(command: string): string | undefined {
+  const subcommands: string[] = [];
   for (const segment of splitCommandSegments(command)) {
     const tokens = commandTokens(segment);
-    let seenGit = false;
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = tokens[index]!;
-      if (!seenGit) {
-        if (token === "git") seenGit = true;
-        continue;
-      }
-      if (GIT_VALUE_FLAGS.has(token)) {
-        index += 1;
-        continue;
-      }
-      if (token.startsWith("-")) continue;
-      return token;
+    const classification = classifySegment(tokens);
+    if (classification === "context") continue;
+    if (classification === "unknown" || classification === "output-only" || !classification || classification.kind !== "git") return undefined;
+    if (classification.gitSubcommand) subcommands.push(classification.gitSubcommand);
+  }
+  const unique = [...new Set(subcommands)];
+  if (unique.length === 1) return unique[0];
+  return undefined;
+}
+
+function gitSubcommandFromTokens(tokens: string[], gitIndex: number): string | undefined {
+  for (let index = gitIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (GIT_VALUE_FLAGS.has(token)) {
+      index += 1;
+      continue;
     }
+    if (token.startsWith("-")) continue;
+    return token;
   }
   return undefined;
 }
 
+function classifySegment(tokens: string[]): SegmentClassification {
+  let index = 0;
+  while (index < tokens.length && isAssignment(tokens[index]!)) index += 1;
+  if (index >= tokens.length) return "unknown";
+
+  const first = tokens[index]!;
+  if (first === "cd" || first === "pushd" || first === "popd") return "context";
+  if (first === "echo" || first === "printf") return "output-only";
+  if (first === "command" || first === "exec") {
+    index += 1;
+    while (tokens[index]?.startsWith("-")) index += 1;
+  }
+  const executable = tokenAt(tokens, index);
+  if (!executable) return "unknown";
+  const direct = specificKind(executable);
+  if (direct) {
+    const subcommand = direct === "git" ? gitSubcommandFromTokens(tokens, index) : undefined;
+    return {
+      kind: direct,
+      source: "command",
+      ...(subcommand ? { gitSubcommand: subcommand } : {}),
+    };
+  }
+
+  if (!WRAPPERS.has(executable)) return "unknown";
+  index += 1;
+  while (index < tokens.length && tokens[index]!.startsWith("-")) {
+    if (WRAPPER_VALUE_FLAGS.has(tokens[index]!)) index += 1;
+    index += 1;
+  }
+  if (WRAPPER_SUB.has(tokens[index] ?? "")) {
+    index += 1;
+    while (index < tokens.length && tokens[index]!.startsWith("-")) {
+      if (WRAPPER_VALUE_FLAGS.has(tokens[index]!)) index += 1;
+      index += 1;
+    }
+  } else if (executable === "bun" || executable === "pnpm" || executable === "npm" || executable === "deno") {
+    // These wrappers execute an arbitrary package script unless an explicit
+    // binary subcommand was provided. `bun run test`, for example, gives no
+    // evidence that the script invokes vitest.
+    if (executable !== "deno") return "unknown";
+  }
+  const wrapped = tokenAt(tokens, index);
+  const kind = wrapped ? specificKind(wrapped) : undefined;
+  if (!kind) return "unknown";
+  const subcommand = kind === "git" ? gitSubcommandFromTokens(tokens, index) : undefined;
+  return {
+    kind,
+    source: "command",
+    ...(subcommand ? { gitSubcommand: subcommand } : {}),
+  };
+}
+
 export function identifyFromCommand(command: string): IdentifiedCommand | undefined {
   const found: IdentifiedCommand[] = [];
+  let hasUnknown = false;
+  let hasOutputOnly = false;
   for (const segment of splitCommandSegments(command)) {
-    const tokens = commandTokens(segment).filter((token) => (
-      !WRAPPERS.has(token) && !WRAPPER_SUB.has(token) && !token.startsWith("-")
-    ));
-    for (const token of tokens) {
-      const kind = specificKind(token);
-      if (!kind || !SPECIFIC.has(token)) continue;
-      if (kind === "git") {
-        const subcommand = gitSubcommand(command);
-        found.push(subcommand ? { kind, source: "command", gitSubcommand: subcommand } : { kind, source: "command" });
-      } else {
-        found.push({ kind, source: "command" });
-      }
+    const classification = classifySegment(commandTokens(segment));
+    if (classification === "context") continue;
+    if (classification === "output-only") {
+      hasOutputOnly = true;
+      continue;
     }
+    if (classification === "unknown") {
+      hasUnknown = true;
+      continue;
+    }
+    found.push(classification);
   }
-  if (found.length === 1) return found[0];
-  if (found.length > 1) return found[found.length - 1];
-  return undefined;
+  if (found.length === 0) return hasOutputOnly ? { kind: "generic", source: "command" } : undefined;
+  const kinds = new Set(found.map((entry) => entry.kind));
+  const gitSubcommands = new Set(found.filter((entry) => entry.kind === "git").map((entry) => entry.gitSubcommand));
+  if (hasUnknown || hasOutputOnly || kinds.size > 1 || (kinds.has("git") && gitSubcommands.size > 1)) {
+    return { kind: "generic", source: "command" };
+  }
+  return found[0];
 }
 
 export function looksLikeVitest(output: string): boolean {
@@ -118,7 +191,11 @@ export function looksLikeVitest(output: string): boolean {
 
 export function looksLikeTsc(output: string): boolean {
   return output.split("\n").some((line) => (
-    /\):\s+error TS\d+/.test(line) || /^\s*error TS\d+/.test(line) || /^\s*Found \d+ error/.test(line.trim())
+    /\):\s+error TS\d+/.test(line)
+    || /:\d+:\d+\s+-\s+error TS\d+/.test(line)
+    || /:\d+:\d+:\s+error TS\d+/.test(line)
+    || /^\s*error TS\d+/.test(line)
+    || /^\s*Found\s+\d+\s+errors?\b/.test(line)
   ));
 }
 

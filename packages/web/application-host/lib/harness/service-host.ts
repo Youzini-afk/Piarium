@@ -7,7 +7,7 @@ import type { ExploreFileReader } from "./explore-file-reader.js";
 import { createExploreQueryStore, type ExploreQueryStore } from "./explore-query-store.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
 import type { MemoryAgentSettings } from "@piarium/protocol";
-import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
+import type { Zone2MaterialRequest, Zone2MaterialResult } from "../knowledge/context-runtime.js";
 import type { CompactionHandlerDeps, CompactionSettings, KeeperCoverageStore } from "./compaction.js";
 import { createKeeperCoverageStore } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
@@ -144,13 +144,13 @@ export interface HarnessServiceHost {
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
   memoryDepsProvider: ((sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>) | null;
-  zone2Provider: ((request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>) | null;
+  zone2Provider: ((request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>) | null;
   onSessionCompacted: ((sessionId: string) => void) | null;
   compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
   compactionSettings: CompactionSettings;
   keeperCoverageStore: KeeperCoverageStore;
   todoSettings: TodoToolSettings;
-  recallDepsProvider: ((sessionId: string) => Promise<RecallToolDeps>) | null;
+  recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
@@ -226,14 +226,14 @@ export interface HarnessServiceHostOptions {
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
   memoryDepsProvider?: (sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>;
-  zone2Provider?: (request: { afterEventId?: number; contextUsage: Zone2ContextUsage | null; query?: string; sessionId: string; sinceTurn: number }) => Promise<{ eventCursor: number; material: Zone2Material }>;
+  zone2Provider?: (request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>;
   onSessionCompacted?: (sessionId: string) => void;
   compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
   compactionSettings?: CompactionSettings;
   /** External keeper coverage store; if omitted, the host creates one. */
   keeperCoverageStore?: KeeperCoverageStore;
   todoSettings?: TodoToolSettings;
-  recallDepsProvider?: (sessionId: string) => Promise<RecallToolDeps>;
+  recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;

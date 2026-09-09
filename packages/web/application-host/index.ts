@@ -1150,7 +1150,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let userKnowledgeStore: KnowledgeStore | null = null;
   let userKnowledgeStoreLoad: Promise<KnowledgeStore> | null = null;
   let knowledgeVectors: KnowledgeVectorRuntime | null = null;
-  const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
   const threadRegistry = createThreadRegistry({
@@ -1399,6 +1398,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       knowledgeStores.set(workspaceId, store);
       catalogScan.start(workspaceId);
       knowledgeVectors?.scheduleReconcile(store, 'workspace', workspaceId, workspaceId);
+      if (userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', workspaceId);
       return store;
     });
     knowledgeStoreLoads.set(workspaceId, loading);
@@ -1409,17 +1409,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
+  function knowledgeWorkspaceIdForSession(sessionId: string): string | null {
+    const workspace = recordOf(sessionSnapshots.get(sessionId)?.workspace);
+    if (workspace.kind !== 'workspace') return null;
+    if (typeof workspace.authorityId === 'string') return workspace.authorityId;
+    return typeof workspace.id === 'string' ? workspace.id : null;
+  }
+
   async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
-    const existing = sessionStores.get(sessionId);
-    if (existing) return existing;
-    const snapshot = sessionSnapshots.get(sessionId);
-    const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
-    if (workspace?.kind === 'workspace' && typeof workspace.id === 'string') {
-      const store = await getKnowledgeStoreForWorkspace(workspace.id);
-      sessionStores.set(sessionId, store);
-      return store;
-    }
-    return null;
+    const workspaceId = knowledgeWorkspaceIdForSession(sessionId);
+    return workspaceId ? getKnowledgeStoreForWorkspace(workspaceId) : null;
   }
 
   async function getUserKnowledgeStore(): Promise<KnowledgeStore> {
@@ -1431,14 +1430,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         embedding: null,
         onKnowledgeChanged: (ids) => {
           if (!userKnowledgeStore || !knowledgeVectors) return;
-          const workspaceId = knowledgeStores.keys().next().value;
-          if (!workspaceId) return;
-          knowledgeVectors.notify(userKnowledgeStore, 'user', 'user', workspaceId, ids);
+          knowledgeVectors.notify(userKnowledgeStore, 'user', 'user', undefined, ids);
         },
       }).then((store) => {
         userKnowledgeStore = store;
-        const workspaceId = knowledgeStores.keys().next().value;
-        if (workspaceId) knowledgeVectors?.scheduleReconcile(store, 'user', 'user', workspaceId);
+        for (const workspaceId of knowledgeStores.keys()) {
+          knowledgeVectors?.scheduleReconcile(store, 'user', 'user', workspaceId);
+        }
         return store;
       });
     }
@@ -1451,7 +1449,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForWorkspace,
-    recall: async (workspaceId, store, query) => {
+    recall: async (workspaceId, store, query, signal) => {
       if (!knowledgeVectors) return store.recall(query, 5);
       const { results } = await recallWorkspaceAndUser({
         workspaceStore: store,
@@ -1460,6 +1458,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         query,
         k: 5,
         vectors: knowledgeVectors,
+        ...(signal ? { signal } : {}),
       });
       return results;
     },
@@ -1576,6 +1575,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (nextBinding.embedding.status === 'ready') state.backend.bind(nextBinding.embedding.binding);
     else if (nextBinding.embedding.status === 'unconfigured') state.backend.bind(undefined);
     else state.backend.unavailable(new Error(nextBinding.embedding.message ?? 'Embedding binding is unavailable'));
+    if (changed) queueMicrotask(() => knowledgeVectors?.refreshWorkspace(state.workspaceId));
     if (scanWhenChanged && (changed || retrying)) {
       queueMicrotask(() => void state.runtime.scanWorkspace(state.workspaceId));
     }
@@ -1718,7 +1718,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         });
     });
   };
-  for (const workspaceId of knowledgeStores.keys()) catalogScan.start(workspaceId);
+  for (const [workspaceId, store] of knowledgeStores) {
+    catalogScan.start(workspaceId);
+    knowledgeVectors.scheduleReconcile(store, 'workspace', workspaceId, workspaceId);
+    if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', workspaceId);
+  }
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -1799,14 +1803,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   // Recall deps provider
-  async function recallDepsProvider(sessionId: string): Promise<RecallToolDeps> {
-    const workspaceStore = await getKnowledgeStoreForSession(sessionId);
-    if (!workspaceStore) throw new Error('No knowledge store for session');
-    const snapshot = sessionSnapshots.get(sessionId);
-    const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
-    const workspaceId = workspace?.kind === 'workspace' && typeof workspace.id === 'string'
-      ? workspace.id
-      : 'local';
+  async function recallDepsProvider(_sessionId: string, workspaceId: string | null): Promise<RecallToolDeps> {
+    if (!workspaceId) throw new Error('No knowledge workspace for session');
+    const workspaceStore = await getKnowledgeStoreForWorkspace(workspaceId);
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
@@ -2192,7 +2191,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (ownsRegisteredSession) {
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
-          sessionStores.delete(event.sessionId);
           knowledgeContextRuntime.dropSession(event.sessionId);
         }
       }
@@ -2204,7 +2202,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const sessionId = event.sessionId ?? '';
     if (envelope.event === 'session.closed' && sessionId) {
       harnessServiceHost.dropSession(sessionId, event.actor);
-      sessionStores.delete(sessionId);
       knowledgeContextRuntime.dropSession(sessionId);
       return;
     }
@@ -2452,6 +2449,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         piRuntimeBroker.unwatchConfig(watchId)
       )));
       inferenceWatchWorkspaces.clear();
+      await knowledgeVectors?.close();
       await Promise.allSettled([...semanticWorkspaceStates.values()].map((state) => state.runtime.dispose()));
       semanticWorkspaceStates.clear();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
@@ -2462,6 +2460,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await symbolGraphRuntime.dispose();
       await decisionSuggestionRuntime.dispose();
       await knowledgeContextRuntime.dispose();
+      await Promise.allSettled([...knowledgeStoreLoads.values()]);
       await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));
       knowledgeStores.clear();
       if (userKnowledgeStoreLoad) await userKnowledgeStoreLoad.catch(() => null);
