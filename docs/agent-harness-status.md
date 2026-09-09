@@ -95,6 +95,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.9** 普通模型槽位 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-model-slots.test.ts`、`roles.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（reader / permissionJudge 实际功能调用）；Harness Settings 生产入口 | ✓（依赖能力各自按配置启用） | 未配置辅助槽位不注册或走无 LLM 路径；仅 hardImplement / review 明示回退主模型 | 当前十个普通槽位不含 embedding/rerank；模型列表与凭据读取依赖 Pi session。后台嵌入绑定待 3.16B。三套预设只填空槽位；D-080 的普通会话统计与 ThreadRun 记录保持 |
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；显式审阅/写入已接，Settings 全量知识管理仍待 2.7 |
 | **3.1** 符号图采集器与查询 | host knowledge | ✓ | ✓（defines + imports/connects/associates；explore 路径候选 + 摘录注解 + `related`） | `knowledge/store.test.ts`（节点/边、代际、match 分档、反向 import 查询期解析、`.js`→`.ts` 孪生、非相对未解析）；`import-resolve.test.ts`；`symbol-runtime.test.ts`；`catalog-scan.test.ts` | ✓（随 Documents mutation + 打开后火忘冷扫描） | 未知语言只 touch file；LSP/结构 unavailable 保留最后图，ready 空结果才清空；范围只从磁盘正文采集并逐文件记 document revision，脏缓冲不入图（D-087）。读路径只用已打开的 store | 冷扫描是火忘，不挡启动（D-107）；`references`/解析后 `calls` 仍未接（D-059）。目录只覆盖带 `importQuery` 的语言（TS/TSX/JS/JSX，D-115）。查询走 TriviumDB 0.8.6 原生索引（`indexedLookup` / n-gram `substringLookup`），八张 JS 内存表与打开时的全节点遍历已删，留三个懒计数器和一个写入即丢的形状缓存（D-141，取代 D-134 的行缓存与 D-139 的反向索引存放方式；反向 import 解析规则不变）。短词（<3 字符）只精确匹配。旧行的 `documentRevision` 可为 `null`。**建目录的成本是 3.12 的前置条件，已从不可用降到可用但仍未在真实桌面路径上验证**（D-140）：枚举原先每目录 spawn `git check-ignore`（本仓库 4363 次，投影 74 s，曾观测挂 11+ 分钟），现在一次 `git ls-files` 199 ms；建目录原先每文件 flush 整库，2358 文件 18.4 分钟，现在派生写入按安静期去抖、4.8 分钟。剩余三成是同名闸门再访重新解析 1785 个文件——解析缓存只有 32 条，D-109 正文「这一遍便宜」在这个规模上不成立，未修 |
+| **3.15** 快速 explore：查询上下文、分组计划、成组选段与局部补查（D-175–D-179） | protocol / host / pi-host | ✓ | ✓ | `explore-query-run.test.ts`（计划表达真实搜索、零词汇重合单元、非法视图/未见范围拒绝、补查去重、取消后 finish 抛错、慢来源截止仍冻结已到词法、必需范围不被文件分广播）；`explore-query-services.test.ts`（后续 RPC 换窗口不改 start 来源）；`router.test.ts`（`harness.cancel` 中止 inflight 并 `cancelExploreQuery`）；`explore-model.test.ts`；`explore-tool.test.ts`；`host-services-bridge.test.ts`（abort 发 `harness.cancel`、已 aborted 不再发 request）；`session-e2e.test.ts`「runs plan expressions through ModelRuntime…」（公开 `explore` → `completeSimple` 计划/选择 → Host 搜索 → 最终原文含 `reclaimLease` / `reclaim.ts` / `"plan":"used"` / `"select":"used"`） | ✓（有 `models.explore` 时走消费者；无槽位走算法/向量并记未参与） | 未配置或调用失败保留已取得材料，不回退主模型；取消/失败/未覆盖/无命中分列 | 真实 `models.explore` 质量与墙钟未观察。专用 reranker、远程嵌入、向量缓存、语义草稿覆盖不在本行。router 取消与超时目前同为 `timeout` 码。`harness-e2e` #3 后台 `get_output` 抖动是既有 D-103，不是本行引入 |
 | **3.2** `explore` + `grep` + `read` + `find`/`ls` 的磁盘/发起窗口草稿纵切 | pi-host tool / host Engine / Documents / ui | ✓ | ✓ | `explore.test.ts`；`explore-service.test.ts`；`search-service.test.ts` / `search/content.test.ts`（dirty 排除先于有界 cap、regex/fixed/case/glob/context、写入后该路径改按磁盘搜索）；`document-read-source.test.ts`（固定字节、BOM、dirty-only、过期、写后读回自己的写）/ `pi-host/test/harness/read-tool.test.ts`（原生分页与图片）；`documents/authority.test.ts`（写入失效：原生写、Documents 写、根外路径不失效、过期仍不回退磁盘、overlay 与 clone 同步）；`recovery/turn-coordinator.test.ts`（确认工具前 await，before/失败不失效）；`document-path-overlay.test.ts`；`find-ls-tool.test.ts`；`session-e2e.test.ts` 固定 surface find/ls E2E | ✓ | 已知 dirty capture 不可用时相关 read/search/find/ls/LSP 导航都不读磁盘；其余路径继续 disk；Host 未声明对应 capability 时保留 Pi built-in | D-090 第一组已验证：`limit` 只管输出条数（`explore.test.ts` T1）；search-service 收 actor/inputContext，explore 不再自带草稿匹配（`explore-service.test.ts` T2）；词项分组与 anchors 字面优先、非硬过滤（T3/T4）；测试路径不默认降权（T5）；按需物化记 `not-requested`（T6）；互补打包（T7）；自身字节预算与句柄（T8）；工具接受并转发 `anchors`（`explore-tool.test.ts` / `session-e2e.test.ts` T9）。D-092 已验证：候选模式 30 个匹配文件×每文件 12 命中、预算 200 时 30 个文件都进候选且总命中 ≤ 200，路径序最后的文件仍在（`search-service.test.ts` breadth-first）；文件数超过预算时报 `filesDropped` 且与命中裁剪分列；grep 同输入仍是默认 limit 100 的深度优先截断。六个小项已收：`showHandle` 为真时 `result.text` ≤ `byteBudget`（`explore.test.ts` / `explore-service.test.ts` T8）；返回对象不含 `searchIncomplete`；空白 anchor 过滤后 `supplied` 保留原样（`explore-service.test.ts`）；每路 `rgSearch` 用局部 partial；`fileScore` 每文件一次；一个 anchor 文件排在只匹配 3 个拆词组的文件之前。验收复验补的两项已修并有断言：`filesDropped` 取单次查询最大值作下界（`explore.test.ts` 跨词项不求和、`explore-service.test.ts` 250 文件 × 两个重叠根仍报 50 而非 100，正文"at least"）；工具 schema 接受空白 anchor 交由 Host 过滤（`explore-tool.test.ts` 对 `tool.parameters` 直接 `Value.Check`，非字符串仍拒）。复验实测：web 三文件 66 项、pi-host 整套 315 项 314 通过 1 跳过（`harness-e2e` #3 `background command + get_output` 在 D-092 之前的 `53350ec2` 上同样失败、之后又自行通过，是既有时序抖动而非本刀引入，已立项为 D-103）、protocol 75 项、web type-check + lint 通过。之后：结构切片消费 6.4 带修订范围、上下文覆盖、模型增强 |
 | **3.3** `related` | host / pi-host / protocol | ✓ | ✓ | `related-tool.test.ts`（Host：没有 vs 不完整、反向 import、空目录 vs 未收录、未解析 specifier）；`pi-host/test/harness/related-tool.test.ts`（默认注册、`tools.related: false` 省略）；`session-e2e.test.ts`「session e2e — related」（真 Pi：`activeTools` 含 `related`，已打开 store 返回定义/Imported by，正文含 `lsp.references` 分工、不含 rank） | ✓ | store 未打开 → `unavailable`（不开库）；空目录 / 未收录路径 / 名字未命中 → `empty`；查询抛错 → `failed`。不是 `lsp.references` | 不做 PageRank / 多跳 / references 边。目录未扫到的语言是不完整或 empty，不是失败 |
 | **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`；`thread-worktree.test.ts`（Git/non-Git、fixed/live 结果、回收重建）；`thread-runtime.test.ts`（持久草稿基线/queued/lost）；`thread-registry.test.ts`（schema 7）；`phase3-e2e.test.ts`；`worktree-reclaim-guard.test.ts`；`thread-worktree-settings.test.ts` | ✓（Web/Application Host） | Host 未声明 harnessThreads 时不注册 | 内部目录仍在 Run 启动时物化，父 blocks 也在 Run 启动时读取；空间总预算、完整结果验证记录、虚拟工具、surface 写回与归档 UI 待接；scope 非 OS 沙箱 |
@@ -113,25 +114,34 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 当前缺口与后续顺序
 
-**当前设计按 D-173–D-175 更新，尚未改变运行行为。** explore 的目标包含 LLM 分组搜索计划、成组选段与有依据的局部补查，
-算法和向量负责批量召回、读取与呈现；retrieval 处理较长开放调查。D-174 恢复当前 LLM 接线，D-175 补齐短生命周期查询所有者、
-来源机会、必需原文与 LLM/重排不同输出契约。开源扩散基座和后训练留后续。本轮只改设计/计划/状态与决策日志，
-下面将已提交能力、此前未提交工作树验证与仍待实现的行为分开。
+**3.15 A–D 已接入生产调用链（D-176–D-179）。** 公开入口仍是 pi-host `explore`。Host 持有短生命周期查询：开始时固定问题、
+范围与 `inputContext`，原问题词法/图/语义与计划模型并行；新表达真正执行搜索；候选模型看到最终挑选前的当前单元；Host
+校验后提取原文。未配置或模型失败保留算法/向量材料并标明未参与，不回退主模型。retrieval、远程嵌入、完整向量缓存、
+语义草稿覆盖、专用 reranker 与扩散模型仍按 3.16B–E / 后续项，不是本行前置。
+
+**本轮接线证据与未验证项。**
+
+- 实现：protocol `explore.query.*` + `harness.cancel`；Host `createExploreQueryRun` / `ExploreQueryStore`；pi-host
+  `explore-tool` + `explore-model` + 当前会话 `ModelRuntime.completeSimple`。
+- 生产接线：主 agent 的 `explore` 工具。`explore.search` 是同一引擎的算法门面，观察脚本若只调 Host 只能证明 Host。
+- faux 证据：`session-e2e.test.ts` 从 Pi 工具进入，计划表达 `reclaimLease` 被搜索并出现在最终原文；Host 定向测试覆盖
+  非法 ID、补查去重、取消不复活、慢来源截止、固定来源、`harness.cancel`。
+- 未验证：本轮未观察到真实 `models.explore` 槽位上的自然语言墙钟或质量，不能编造性能结论。3.16B–E 未做。
+- 3.16A 已在此前提交：`37b12e8e`（本地 embedder 运行时）、`8752e039`（语义索引/打包）。那些改动不是本轮新实现。
+  D-175 设计正文提交为 `88ca06e5`，当时尚未改变运行行为。
 
 **已交付的基础。** D-082–D-089 的窗口来源、草稿失效/写入边界和语言视图，3.11 的结构来源，3.12 的图读者，以及 3.13/3.14
 的查询与呈现修复保持。旧 3.15①②④ 的到达理由、文件角色和 focusRanges/三字段接口已由 D-163–D-165 接线；D-166–D-172
 已接本地 MiniLM、独立语义代际库、部分可查与 explore 消费者，并首次验证真实模型的局部词汇缺口。十问的旧观察保留在下表，
 不是全仓语义质量证据；D-171 起位次来自渲染正文，不能与更早的 snippets 数组下标直接比较。
 
-**此前工作树已有的修复与证据（尚未提交，3.16A）。**
+**3.16A 已提交的性能/发行证据（`37b12e8e` + `8752e039`，不是本轮）。**
 
 - 真实数组批推理；切块尺寸查找避免逐行/逐字符重复缩短；语义存储使用增量计数、批量发布与合并检查点，恢复中断留下的 WAL。
   这些改动在 `semantic/{minilm,chunker,runtime,store}.ts`；它们尚未完成按实际编码文本复用向量或前台优先。
 - 模型 recipe 固定上游修订，构建自动准备发行包，after-pack 校验模型/运行时文件；Windows unpacked smoke 从实际
   `app.asar.unpacked` 模块加载 Host、MiniLM、ONNX，零词汇重合夹具命中排名 1，status/coverage/lifecycle 为 ready/complete/ready。
   入口：[Windows smoke](../packages/electron/scripts/smoke-windows-unpacked.mjs)。这是该夹具与打包链的证据，不是全仓召回结果。
-- 本会话已运行 semantic 测试：Bun 29 通过，Vitest 29 通过；Host 源类型检查与改动文件 ESLint 通过。本文档调整没有重新运行
-  这些代码套件；此前已验结果不写成新设计已经通过。
 - [存储探针](../packages/web/scripts/semantic-store-perf.ts)：3000 文档、真实 TriviumDB、假 embedder，旧实现总计 11.26 s，
   改后逐文档 6.56 s、8 文档一批 1.15 s。仅说明存储路径，不包含真实推理速度。
   [局部扫描探针](../packages/web/scripts/semantic-scan-perf.ts)：40 个 knowledge 文件、真实 MiniLM、621 块，首批发布 6.06 s，
@@ -141,22 +151,21 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 | 范围 | 当前代码事实 | 对应实施 |
 | --- | --- | --- |
-| LLM 局部语义决策 | models.explore 槽位已有；explore-tool 仍直接转发 Host，描述仍强调字面匹配，没有局部模型调用 | 3.15D：分组搜索计划、成组选段/局部补查与真实工具消费者，当前未实施 |
-| 多阶段查询 | explore.search 一次完成搜索与打包；bridge 每次 request 重取 inputContext，取消只清本地 pending；router 由本地超时触发信号 | 3.15 共同上下文：固定来源、呈现前候选视图、实际取消、共享截止条件与结束清理，当前未实施 |
-| 开放候选排序 | `candidateTier` 让纯语义命中处在弱 import/association 后，RRF 只在 tier 内比较 | 3.15A：明确导航与开放候选分开，取消来源等级 |
-| 当前单元与呈现 | `windowScore` 仍是词法/角色/关系/成本拼盘；返回 pi-host 前已筛选窗口并按 24 KiB 排版 | 3.15B：模型输入与输出预算分离、成组必需范围、去重与一次呈现 |
-| 查询调度 | 第一次读取前等待三路召回 Promise.all，取消/迟到与读取机会尚未按新设计收口 | 3.15C：生产任务首批机会、等待收口、批量判断与候选视图冻结 |
+| LLM 局部语义决策 | 公开 `explore` 经 `models.explore` 调用计划/选段/可选补查；描述已写概念与标识映射 | 3.15D 已接线；真实模型效果未观察 |
+| 多阶段查询 | Host 查询上下文 + `explore.query.*`；后续阶段沿用 start 来源；`harness.cancel` 传到查询与模型 | 3.15 共同上下文已接线 |
+| 开放候选排序 | 已取消 `candidateTier`；开放候选按真实来源名次 RRF | 3.15A 已接线 |
+| 当前单元与呈现 | 模型看挑选前视图；已删 `windowScore`；必需范围原子保留 | 3.15B 已接线 |
+| 查询调度 | 到达即读；在飞主任务保留首批机会；共享截止可提前冻结 | 3.15C 已接线 |
 | embedding/rerank 配置 | `HarnessModelRole`、槽位表、设置页均没有两个 kind；远程 adapter 仅测试调用，Host 直接装配本地 MiniLM | 3.16B/E：实际配置与后端调用链，非任意填 model id |
 | 后台远程调用 | Pi SettingsManager、ProviderConfigurationManager 与 AuthStorage/ModelRuntime 目前依赖 session；没有与聊天寿命独立的调用绑定 | 3.16B：复用 Pi authority 提供后台执行，秘密不传给 Host |
 | 复用、切块与推理调度 | 尚无精确块向量/查询缓存；固定行窗口后的正文可能截断，长行未续切；WASM numThreads 未配置 Node ORT session | 3.16C：实际文本覆盖、复用、前台优先与发布对账 |
 | 语义草稿/线程视图 | 普通读取的固定来源已接，向量覆盖层与即时遮蔽尚未接 | 3.16D：正文捕获与嵌入完成分开，缺口不取旧向量冒充 |
 
-按 plan 0.7：收口 3.16A；当前主线由 3.15D 分组搜索计划连同短生命周期查询上下文及 A/C 必要接缝先打通，B/D 成组选段与
-局部补查随后完成，不以全部排序/索引优化作为模型启用前置。3.16B 可独立进行，随后完成 C/D；E 重排消费确定的可展示视图，
-不假装具备 LLM 的范围/互补关系输出，也不默认串跑两者。新流程的实际延迟与语义收益尚未验证。
+按 plan 0.7：3.15 A–D 已接线；3.16A 已提交。下一步是 3.16B 远程嵌入绑定（可独立），随后 C/D；E 重排消费确定的可展示视图，
+不假装具备 LLM 的范围/互补关系输出，也不默认串跑两者。真实 explore 模型的延迟与语义收益尚未验证。
 既有工作区范围和正文覆盖目标保留，活动工作集只改变建设优先级；没有采纳 sketch 替代全文或只索引热点的设计。
 
-以下保留其他能力及历史检索阶段的验证记录；当前检索取舍与顺序以上述 D-173–D-175 表为准。
+以下保留其他能力及历史检索阶段的验证记录；当前检索取舍以上述 3.15 行与 D-173–D-179 为准。
 
 | 范围 | 已确认现状 / 待做 | 验证与外部边界 |
 | --- | --- | --- |

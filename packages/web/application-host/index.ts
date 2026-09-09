@@ -1785,6 +1785,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
+    cancelExploreQuery: (sessionId, queryId) => harnessServiceHost.exploreQueryStore.cancel(sessionId, queryId),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
   interface SessionNotificationRequest extends DesktopNotificationPayload {

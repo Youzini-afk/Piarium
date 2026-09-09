@@ -1,6 +1,17 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@piarium/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
+import {
+  EXPLORE_PLAN_SYSTEM,
+  EXPLORE_SELECT_SYSTEM,
+  exploreShouldPlanWithModel,
+  exploreShouldSelectWithModel,
+  parseExplorePlan,
+  parseExploreSelection,
+  renderExplorePlanPrompt,
+  renderExploreSelectPrompt,
+} from "./explore-model.js";
 
 const ExploreParams = Type.Object({
   question: Type.String({ description: "What you want to find or understand in the codebase" }),
@@ -11,32 +22,165 @@ const ExploreParams = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of excerpts to return (default 20)" })),
 });
 
-export function createExploreTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+export const EXPLORE_PUBLIC_BUDGET_MS = 120_000;
+
+export type ExploreModelComplete = (input: {
+  systemPrompt: string;
+  user: string;
+  signal?: AbortSignal;
+}) => Promise<string>;
+
+function stageFromError(error: unknown, signal?: AbortSignal): ExploreModelStageStatus {
+  if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) return "cancelled";
+  return "failed";
+}
+
+export function createExploreTool(
+  bridge: HostServicesBridge,
+  _sessionId: string,
+  options?: { complete?: ExploreModelComplete },
+): ToolDefinition {
   return defineTool({
     name: "explore",
     label: "Explore",
-    description: "Locate relevant code and read the related context in the same call (definitions, registration sites, callers, and the excerpts needed to judge). Use grep when you only need an exact match. Put known symbols, method names, error text, and path fragments in anchors. Natural-language questions are matched as repository vocabulary literals; without anchors or an explore model, conceptual cross-language questions may find nothing.",
-    promptSnippet: "explore: locate and read related context in one call; put known symbols, method names, error text, and path fragments in anchors; use grep for exact match only",
+    description: "Locate relevant code and read the related context in the same call (definitions, registration sites, callers, and the excerpts needed to judge). Use grep when you only need an exact match. Put known symbols, method names, error text, and path fragments in anchors. Natural-language questions can be rewritten into repository search expressions when models.explore is configured; conceptual names do not have to match identifiers literally.",
+    promptSnippet: "explore: locate and read related context in one call; put known symbols, method names, error text, and path fragments in anchors; conceptual questions can be mapped to repository names; use grep for exact match only",
     promptGuidelines: [
       "Use explore to locate code and read the related context (definitions, registration sites, callers, and excerpts needed to judge) in one call.",
       "Use grep when you only need exact matches.",
       "Put known symbols, method names, error text, and path fragments in anchors.",
-      "Natural-language questions match repository vocabulary literally. Without anchors or an explore model, conceptual cross-language questions may find nothing.",
+      "Explore can bridge a conceptual question and repository identifiers when an explore model is configured. It still returns current source excerpts, not a substitute analysis.",
     ],
     parameters: ExploreParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      const pinned: AgentInputContext = structuredClone(bridge.inputContext() ?? { source: "disk" });
+      const startedAt = Date.now();
+      const remaining = (): number => Math.max(1, EXPLORE_PUBLIC_BUDGET_MS - (Date.now() - startedAt));
+      let queryId = "";
+      const request = async <M extends "explore.query.start" | "explore.query.plan" | "explore.query.views" | "explore.query.select" | "explore.query.followup" | "explore.query.finish" | "explore.query.release" | "explore.query.cancel">(
+        method: M,
+        methodParams: Parameters<HostServicesBridge["request"]>[1],
+        timeoutMs = remaining(),
+      ) => bridge.request(method, methodParams as never, {
+        ...(signal ? { signal } : {}),
+        timeoutMs,
+        inputContext: pinned,
+      });
+
+      const cancelQuery = (): void => {
+        if (!queryId) return;
+        try {
+          bridge.cancel({ queryId });
+        } catch {
+          // Cancel is best-effort; the public tool is already stopping.
+        }
+      };
+      if (signal) {
+        if (signal.aborted) cancelQuery();
+        else signal.addEventListener("abort", cancelQuery, { once: true });
+      }
+
       try {
-        const result = await bridge.request<"explore.search">(
-          "explore.search",
-          {
-            question: params.question,
-            ...(params.anchors ? { anchors: params.anchors } : {}),
-            ...(params.paths ? { paths: params.paths } : {}),
-            ...(params.limit ? { limit: params.limit } : {}),
-          },
-          ...(signal ? [{ signal }] : []),
-        );
+        const complete = options?.complete;
+        const started = await request("explore.query.start", {
+          question: params.question,
+          ...(params.anchors ? { anchors: params.anchors } : {}),
+          ...(params.paths ? { paths: params.paths } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+          budgetMs: remaining(),
+          reserveForJudge: Boolean(complete),
+        });
+        queryId = started.queryId;
+
+        const participation: ExploreModelParticipation = {
+          plan: complete ? "skipped" : "unconfigured",
+          select: complete ? "skipped" : "unconfigured",
+          followup: complete ? "skipped" : "unconfigured",
+        };
+        if (!complete) {
+          participation.note = "Explore model is not configured; excerpts are from algorithm and vector sources.";
+        }
+
+        const shouldPlan = Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
+        if (complete && shouldPlan) {
+          try {
+            const planText = await complete({
+              systemPrompt: EXPLORE_PLAN_SYSTEM,
+              user: renderExplorePlanPrompt(started),
+              ...(signal ? { signal } : {}),
+            });
+            const plan = parseExplorePlan(planText);
+            if (plan) {
+              await request("explore.query.plan", { queryId, plan });
+              participation.plan = "used";
+            } else {
+              participation.plan = "failed";
+              participation.note = "Explore model plan was unused; excerpts are from algorithm and vector sources.";
+            }
+          } catch (error) {
+            participation.plan = stageFromError(error, signal);
+            if (participation.plan === "failed") {
+              participation.note = "Explore model plan failed; excerpts are from algorithm and vector sources.";
+            }
+          }
+        }
+
+        const views = await request("explore.query.views", { queryId });
+        const shouldSelect = Boolean(complete)
+          && views.views.length > 0
+          && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === "used");
+        if (complete && shouldSelect) {
+          try {
+            const selectText = await complete({
+              systemPrompt: EXPLORE_SELECT_SYSTEM,
+              user: renderExploreSelectPrompt(params.question, views, "full"),
+              ...(signal ? { signal } : {}),
+            });
+            const selected = parseExploreSelection(selectText);
+            if (selected) {
+              await request("explore.query.select", { queryId, groups: selected.groups });
+              participation.select = "used";
+              if (selected.followup && remaining() > 2_000) {
+                const followup = await request("explore.query.followup", {
+                  queryId,
+                  ...(selected.followup.searches ? { searches: selected.followup.searches } : {}),
+                  ...(selected.followup.locates ? { locates: selected.followup.locates } : {}),
+                  ...(selected.groups.map((group) => group.gap).filter(Boolean).length
+                    ? { gaps: selected.groups.flatMap((group) => group.gap ? [group.gap] : []) }
+                    : {}),
+                });
+                participation.followup = followup.launched.length > 0 || followup.reused.length > 0 ? "used" : "skipped";
+                if (followup.newViews.length > 0) {
+                  const incrementalText = await complete({
+                    systemPrompt: EXPLORE_SELECT_SYSTEM,
+                    user: renderExploreSelectPrompt(params.question, {
+                      ...views,
+                      views: [...views.views.filter((view) => selected.groups.some((group) => group.views.some((item) => item.viewId === view.viewId))), ...followup.newViews],
+                    }, "incremental", followup.newViews),
+                    ...(signal ? { signal } : {}),
+                  });
+                  const incremental = parseExploreSelection(incrementalText);
+                  if (incremental) {
+                    await request("explore.query.select", { queryId, groups: incremental.groups });
+                  }
+                }
+              }
+            } else {
+              participation.select = "failed";
+              participation.note = participation.note
+                ?? "Explore model selection was unused; excerpts are from algorithm and vector sources.";
+            }
+          } catch (error) {
+            participation.select = stageFromError(error, signal);
+            if (participation.select === "failed") {
+              participation.note = participation.note
+                ?? "Explore model selection failed; excerpts are from algorithm and vector sources.";
+            }
+          }
+        }
+
+        const result = await request("explore.query.finish", { queryId, model: participation });
         return {
           content: [{ type: "text", text: result.text }],
           details: {
@@ -48,6 +192,7 @@ export function createExploreTool(bridge: HostServicesBridge, _sessionId: string
             notRequested: result.notRequested,
             omitted: result.omitted,
             provenance: result.details,
+            model: result.details.model ?? participation,
           },
         };
       } catch (error) {
@@ -58,6 +203,17 @@ export function createExploreTool(bridge: HostServicesBridge, _sessionId: string
           details: { error: message },
           isError: true,
         };
+      } finally {
+        if (queryId) {
+          try {
+            await bridge.request("explore.query.release", { queryId }, {
+              timeoutMs: 5_000,
+              inputContext: pinned,
+            });
+          } catch {
+            // Release is cleanup; the tool result is already decided.
+          }
+        }
       }
     },
   });

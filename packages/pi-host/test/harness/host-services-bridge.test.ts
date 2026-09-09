@@ -104,6 +104,27 @@ describe("HostServicesBridge", () => {
     bridge.dispose();
   });
 
+  it("emits harness.cancel on abort and does not start an already-aborted request", async () => {
+    const emitted: Array<{ event: string; data: unknown }> = [];
+    const bridge = new HostServicesBridge({
+      emit: (event, data) => { emitted.push({ event, data }); },
+      sessionId: "session-1",
+      defaultTimeoutMs: 10_000,
+    });
+    const controller = new AbortController();
+    const pending = bridge.request("explore.query.views", { queryId: "eq_1" }, { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending);
+    assert.ok(emitted.some((item) => item.event === "harness.cancel"));
+
+    const late = new AbortController();
+    late.abort();
+    const before = emitted.length;
+    await assert.rejects(bridge.request("explore.query.views", { queryId: "eq_1" }, { signal: late.signal }));
+    assert.equal(emitted.slice(before).some((item) => item.event === "harness.request"), false);
+    bridge.dispose();
+  });
+
   it("ignores respond for wrong sessionId", async () => {
     const bridge = new HostServicesBridge({
       emit: () => {},

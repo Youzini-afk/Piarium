@@ -5,6 +5,7 @@ import {
   type HarnessActorIdentity,
   type HarnessError,
   type HarnessMethod,
+  type HarnessCancelData,
   type HarnessRequestData,
   type HarnessServiceMap,
   buildHarnessRespondParams,
@@ -52,6 +53,7 @@ export interface HarnessRouterOptions {
     options: { allowMissing: boolean },
   ) => Promise<HarnessAuthorizedPath | null>;
   defaultTimeoutMs?: number;
+  cancelExploreQuery?: (sessionId: string, queryId: string) => boolean;
 }
 
 interface RouterHostEvent {
@@ -71,11 +73,22 @@ const requestPaths = (
   const record = params && typeof params === "object" && !Array.isArray(params)
     ? params as Record<string, unknown>
     : {};
-  if (method === "explore.search") {
+  if (method === "explore.search" || method === "explore.query.start") {
     if (record.paths === undefined) return [];
     return Array.isArray(record.paths) && record.paths.every((path) => typeof path === "string" && path.trim())
       ? record.paths.map((path) => ({ allowMissing: false, path: path as string }))
       : "invalid";
+  }
+  if (
+    method === "explore.query.plan"
+    || method === "explore.query.views"
+    || method === "explore.query.select"
+    || method === "explore.query.followup"
+    || method === "explore.query.finish"
+    || method === "explore.query.cancel"
+    || method === "explore.query.release"
+  ) {
+    return [];
   }
   if (method === "related.query") {
     if (typeof record.anchor !== "string" || !record.anchor.trim()) return "invalid";
@@ -157,15 +170,41 @@ const harnessError = (code: HarnessError["code"], message: string, retryable = f
 export const createHarnessRouter = (options: HarnessRouterOptions) => {
   const services = new Map<HarnessMethod, HarnessService<HarnessMethod>>();
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
+  const inflight = new Map<string, { controller: AbortController; sessionId: string; queryId?: string }>();
   let disposed = false;
 
   const register = <M extends HarnessMethod>(method: M, service: HarnessService<M>): void => {
     services.set(method, service as HarnessService<HarnessMethod>);
   };
 
+  const abortInflight = (requestId: string): boolean => {
+    const pending = inflight.get(requestId);
+    if (!pending) return false;
+    pending.controller.abort();
+    return true;
+  };
+
+  const processCancel = (event: RouterHostEvent): void => {
+    const data = event.envelope?.data as HarnessCancelData | undefined;
+    const sessionId = event.actor?.sessionId;
+    if (!data || !sessionId) return;
+    if (typeof data.requestId === "string" && data.requestId) abortInflight(data.requestId);
+    if (typeof data.queryId === "string" && data.queryId) {
+      for (const [requestId, pending] of inflight) {
+        if (pending.sessionId === sessionId && pending.queryId === data.queryId) abortInflight(requestId);
+      }
+      options.cancelExploreQuery?.(sessionId, data.queryId);
+    }
+  };
+
   const processEvent = async (event: RouterHostEvent): Promise<void> => {
     if (disposed) return;
-    if (event.kind !== "host" || event.envelope?.kind !== "event" || event.envelope?.event !== "harness.request") return;
+    if (event.kind !== "host" || event.envelope?.kind !== "event") return;
+    if (event.envelope.event === "harness.cancel") {
+      processCancel(event);
+      return;
+    }
+    if (event.envelope.event !== "harness.request") return;
     const data = event.envelope.data as HarnessRequestData | undefined;
     const identity = event.actor;
     if (!data || typeof data.requestId !== "string" || !identity) return;
@@ -181,6 +220,15 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     }
     const method = data.method;
     const controller = new AbortController();
+    const queryId = data.params && typeof data.params === "object" && !Array.isArray(data.params)
+      && typeof (data.params as { queryId?: unknown }).queryId === "string"
+      ? (data.params as { queryId: string }).queryId
+      : undefined;
+    inflight.set(data.requestId, {
+      controller,
+      sessionId: identity.sessionId,
+      ...(queryId ? { queryId } : {}),
+    });
     const deferredDeliveries: Array<{ commit: () => void; abort: () => void }> = [];
     let deliveriesSettled = false;
     const settleDeliveries = (outcome: "commit" | "abort"): void => {
@@ -301,11 +349,14 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       });
     } finally {
       clearTimeout(timer);
+      inflight.delete(data.requestId);
     }
   };
 
   const dispose = (): void => {
     disposed = true;
+    for (const pending of inflight.values()) pending.controller.abort();
+    inflight.clear();
     services.clear();
   };
 

@@ -431,6 +431,8 @@ export interface ExploreSearchSnippet {
   source: "disk" | "surface-draft";
   unit?: ExploreStructureUnit;
   structure?: ExploreStructureSource;
+  /** Formatter must keep this range intact or omit the whole excerpt. */
+  required?: boolean;
 }
 
 export interface ExploreSearchIssue {
@@ -600,6 +602,201 @@ export interface ExploreFileRelation {
   associations: Array<{ callee: string; literal: string; line: number }>;
 }
 
+/**
+ * Dedicated reranker output is scores only. It cannot carry complementary
+ * groups, required ranges, or gaps, and it is not run in the same batch as
+ * the explore model by default (D-174, D-176).
+ */
+export interface ExploreRerankScore {
+  viewId: string;
+  score: number;
+}
+
+export type ExploreModelStageStatus = "used" | "skipped" | "unconfigured" | "failed" | "cancelled";
+
+export interface ExploreModelParticipation {
+  plan: ExploreModelStageStatus;
+  select: ExploreModelStageStatus;
+  followup: ExploreModelStageStatus;
+  note?: string;
+}
+
+export type ExploreQueryTaskFamily = "lexical" | "graph" | "semantic" | "plan" | "followup" | "model";
+export type ExploreQueryTaskStatus =
+  | "pending"
+  | "running"
+  | "ready"
+  | "empty"
+  | "failed"
+  | "cancelled"
+  | "incomplete";
+
+export interface ExploreQuerySourceState {
+  id: string;
+  family: ExploreQueryTaskFamily;
+  status: ExploreQueryTaskStatus;
+}
+
+export interface ExploreQueryVocab {
+  objects: string[];
+  anchors: string[];
+  catalog?: { symbolCount: number; fileCount?: number };
+  packages?: string[];
+  entries?: string[];
+}
+
+export interface ExploreQueryStartParams {
+  question: string;
+  paths?: string[];
+  limit?: number;
+  anchors?: string[];
+  /** Whole public-explore remaining wait, not a fresh per-RPC budget. */
+  budgetMs?: number;
+  /** Leave judge/present time. Algorithm-only `explore.search` leaves this false. */
+  reserveForJudge?: boolean;
+}
+
+export interface ExploreQueryStartResult {
+  queryId: string;
+  question: string;
+  deadlineAt: number;
+  parsed: ExploreQueryDetails;
+  vocab: ExploreQueryVocab;
+  sources: ExploreQuerySourceState[];
+  inputSource: AgentInputContext["source"];
+}
+
+export interface ExploreGroupedSearchPlanGroup {
+  id: string;
+  concept: string;
+  expressions: string[];
+  expectedMaterials?: string[];
+}
+
+export interface ExploreGroupedSearchPlan {
+  behavior: string;
+  groups: ExploreGroupedSearchPlanGroup[];
+}
+
+export interface ExploreQueryPlanParams {
+  queryId: string;
+  plan: ExploreGroupedSearchPlan;
+}
+
+export interface ExploreQueryPlanResult {
+  queryId: string;
+  launched: string[];
+  reused: string[];
+  sources: ExploreQuerySourceState[];
+}
+
+export interface ExploreQueryRange {
+  rangeId: string;
+  startLine: number;
+  endLine: number;
+}
+
+export interface ExploreQueryView {
+  viewId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  revision: string;
+  source: "disk" | "surface-draft";
+  ranges: ExploreQueryRange[];
+  arrivals: ExploreArrival[];
+  assessment: ExploreAssessment;
+  purpose: ExplorePurpose;
+  why: string;
+  unit?: ExploreStructureUnit;
+  /** Not sent to the candidate model; selecting it is rejected as unseen. */
+  unevaluated?: boolean;
+}
+
+export interface ExploreQueryViewsParams {
+  queryId: string;
+}
+
+export interface ExploreQueryViewsResult {
+  queryId: string;
+  question: string;
+  hypotheses?: { behavior?: string; expectedMaterials?: string[] };
+  views: ExploreQueryView[];
+  unevaluated: number;
+  sources: ExploreQuerySourceState[];
+  deadlineAt: number;
+}
+
+export interface ExploreQuerySelectedRange {
+  viewId: string;
+  rangeIds?: string[];
+  startLine?: number;
+  endLine?: number;
+  required?: boolean;
+}
+
+export interface ExploreQuerySelectionGroup {
+  id: string;
+  purpose: string;
+  views: ExploreQuerySelectedRange[];
+  gap?: string;
+}
+
+export interface ExploreQuerySelectParams {
+  queryId: string;
+  groups: ExploreQuerySelectionGroup[];
+}
+
+export interface ExploreQuerySelectResult {
+  queryId: string;
+  accepted: Array<{ groupId: string; viewIds: string[] }>;
+  rejected: Array<{ groupId?: string; viewId?: string; reason: string }>;
+  gaps: string[];
+}
+
+export interface ExploreQueryFollowupLocate {
+  kind: "symbol" | "path" | "connect";
+  value: string;
+}
+
+export interface ExploreQueryFollowupSearch {
+  expression: string;
+}
+
+export interface ExploreQueryFollowupParams {
+  queryId: string;
+  searches?: ExploreQueryFollowupSearch[];
+  locates?: ExploreQueryFollowupLocate[];
+  gaps?: string[];
+}
+
+export interface ExploreQueryFollowupResult {
+  queryId: string;
+  launched: string[];
+  reused: string[];
+  newViews: ExploreQueryView[];
+  sources: ExploreQuerySourceState[];
+}
+
+export interface ExploreQueryFinishParams {
+  queryId: string;
+  model?: ExploreModelParticipation;
+}
+
+export interface ExploreQueryCancelParams {
+  queryId: string;
+}
+
+export interface ExploreQueryReleaseParams {
+  queryId: string;
+}
+
+export interface HarnessCancelData {
+  requestId?: string;
+  queryId?: string;
+}
+
 export interface ExploreSearchResult {
   text: string;
   snippets: ExploreSearchSnippet[];
@@ -643,6 +840,7 @@ export interface ExploreSearchResult {
     distinctiveness?: ExploreDistinctivenessDetails;
     windows?: ExploreWindowTrace[];
     semantic?: ExploreSemanticDetails;
+    model?: ExploreModelParticipation;
   };
 }
 
@@ -681,6 +879,38 @@ export interface HarnessServiceMap {
   "explore.search": {
     params: ExploreSearchParams;
     result: ExploreSearchResult;
+  };
+  "explore.query.start": {
+    params: ExploreQueryStartParams;
+    result: ExploreQueryStartResult;
+  };
+  "explore.query.plan": {
+    params: ExploreQueryPlanParams;
+    result: ExploreQueryPlanResult;
+  };
+  "explore.query.views": {
+    params: ExploreQueryViewsParams;
+    result: ExploreQueryViewsResult;
+  };
+  "explore.query.select": {
+    params: ExploreQuerySelectParams;
+    result: ExploreQuerySelectResult;
+  };
+  "explore.query.followup": {
+    params: ExploreQueryFollowupParams;
+    result: ExploreQueryFollowupResult;
+  };
+  "explore.query.finish": {
+    params: ExploreQueryFinishParams;
+    result: ExploreSearchResult;
+  };
+  "explore.query.cancel": {
+    params: ExploreQueryCancelParams;
+    result: { cancelled: boolean };
+  };
+  "explore.query.release": {
+    params: ExploreQueryReleaseParams;
+    result: { released: boolean };
   };
   "related.query": {
     params: RelatedQueryParams;
@@ -743,6 +973,14 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.merge": "control.thread",
   "thread.kill": "control.thread",
   "explore.search": "read.search",
+  "explore.query.start": "read.search",
+  "explore.query.plan": "read.search",
+  "explore.query.views": "read.search",
+  "explore.query.select": "read.search",
+  "explore.query.followup": "read.search",
+  "explore.query.finish": "read.search",
+  "explore.query.cancel": "read.search",
+  "explore.query.release": "read.search",
   "related.query": "read.search",
   "document.readSource": "read.document",
   "document.pathOverlay": "read.document",
@@ -801,6 +1039,14 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.merge",
   "thread.kill",
   "explore.search",
+  "explore.query.start",
+  "explore.query.plan",
+  "explore.query.views",
+  "explore.query.select",
+  "explore.query.followup",
+  "explore.query.finish",
+  "explore.query.cancel",
+  "explore.query.release",
   "related.query",
   "document.readSource",
   "document.pathOverlay",

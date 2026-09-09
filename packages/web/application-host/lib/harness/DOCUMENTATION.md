@@ -17,7 +17,8 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── search.content → HarnessSearchService
                            ├── document.readSource → fixed surface bytes or disk sentinel
                            ├── document.pathOverlay → fixed relative paths or disk sentinel
-                           ├── explore.search → ExploreEngine + Documents snapshots + OutputStore + optional graph path recall
+                           ├── explore.search → same query engine, algorithm-only facade
+                           ├── explore.query.* → Host-owned short-lived query (start/plan/views/select/followup/finish/cancel/release)
                            ├── related.query → already-open KnowledgeStore (file-level topology; not lsp.references)
                            ├── fs.lock      → PathLockService + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
@@ -265,8 +266,8 @@ is `warmOnly` and will not start a cold language server (D-099). When the source
 is missing, cold, unsupported, stale, or failed, explore falls back to the ±3
 line window and records that status on the snippet and in `details.structure`.
 After materialize, tree-sitter may classify hit lines so declaration names
-outrank comments and strings in `windowScore`; unread candidates are not
-parsed. It does not call `documentSymbols` itself.
+outrank comments and strings in unit-local ranking; unread candidates are not
+parsed. It does not call `documentSymbols` itself. `windowScore` is gone.
 
 After excerpts are chosen, an optional `fileRelations` callback may attach
 outbound graph facts for those paths only (`details.relations` and a compact

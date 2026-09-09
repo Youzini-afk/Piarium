@@ -20,6 +20,11 @@ describe("harness protocol", () => {
     assert.ok(isHostEvent("harness.request"));
   });
 
+  it("includes harness.cancel in HOST_EVENTS", () => {
+    assert.ok(HOST_EVENTS.includes("harness.cancel" as never));
+    assert.ok(isHostEvent("harness.cancel"));
+  });
+
   it("isHarnessMethod recognizes all defined methods", () => {
     const expected = Object.keys(HARNESS_METHOD_CAPABILITY) as HarnessMethod[];
     for (const method of expected) {

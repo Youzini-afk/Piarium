@@ -16,7 +16,7 @@ import type {
 } from "./auth.js";
 import type { PiAgentEvent } from "./session.js";
 import type { ProviderConfigDeleteScope } from "./provider.js";
-import type { HarnessRequestData } from "./harness.js";
+import type { HarnessCancelData, HarnessRequestData } from "./harness.js";
 import type { Thread, ThreadReport, ThreadRun } from "./harness-threads.js";
 
 interface WorkspaceMutationRequestBase {
@@ -98,6 +98,8 @@ export interface HostEventMap {
   };
   "workspace.mutation.request": WorkspaceMutationRequest;
   "harness.request": HarnessRequestData;
+  /** Abort an in-flight harness request and/or the explore query it belongs to. */
+  "harness.cancel": HarnessCancelData;
   "harness.thread.changed": {
     workspaceId: string;
     parent: import("./harness-threads.js").ThreadParent;
@@ -119,6 +121,7 @@ export const HOST_EVENTS = [
   "extension.ui.request",
   "extension.state",
   "harness.request",
+  "harness.cancel",
   "harness.thread.changed",
   "harness.thread.done",
   "host.error",

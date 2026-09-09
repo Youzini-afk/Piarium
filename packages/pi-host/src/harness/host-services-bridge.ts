@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  HarnessCancelData,
   HarnessError,
   HarnessMethod,
   HarnessRequestData,
@@ -33,7 +34,7 @@ export class HarnessRequestError extends Error {
 }
 
 export class HostServicesBridge {
-  readonly #emit: HostServicesBridgeOptions["emit"];
+  readonly #emit: (event: "harness.request" | "harness.cancel", data: HarnessRequestData | HarnessCancelData) => void;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #sessionId: string;
   readonly #defaultTimeoutMs: number;
@@ -41,7 +42,7 @@ export class HostServicesBridge {
   #disposed = false;
 
   constructor(options: HostServicesBridgeOptions) {
-    this.#emit = options.emit;
+    this.#emit = options.emit as (event: "harness.request" | "harness.cancel", data: HarnessRequestData | HarnessCancelData) => void;
     this.#sessionId = options.sessionId;
     this.#defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
     this.#getInputContext = options.getInputContext;
@@ -56,10 +57,15 @@ export class HostServicesBridge {
     return this.#getInputContext?.();
   }
 
+  cancel(data: HarnessCancelData): void {
+    if (this.#disposed) return;
+    this.#emit("harness.cancel", data);
+  }
+
   request<M extends HarnessMethod>(
     method: M,
     params: HarnessServiceMap[M]["params"],
-    options?: { timeoutMs?: number; signal?: AbortSignal },
+    options?: { timeoutMs?: number; signal?: AbortSignal; inputContext?: AgentInputContext },
   ): Promise<HarnessServiceMap[M]["result"]> {
     if (this.#disposed) {
       return Promise.reject(new HarnessRequestError("failed", "disposed"));
@@ -84,21 +90,24 @@ export class HostServicesBridge {
       sessionId: this.#sessionId,
       timer,
     });
+    if (options?.signal?.aborted) {
+      this.#emit("harness.cancel", { requestId });
+      this.#cancel(requestId, new HarnessRequestError("failed", "aborted"));
+      return response as Promise<HarnessServiceMap[M]["result"]>;
+    }
     if (options?.signal) {
-      if (options.signal.aborted) {
+      options.signal.addEventListener("abort", () => {
+        this.#emit("harness.cancel", { requestId });
         this.#cancel(requestId, new HarnessRequestError("failed", "aborted"));
-      } else {
-        options.signal.addEventListener("abort", () => {
-          this.#cancel(requestId, new HarnessRequestError("failed", "aborted"));
-        }, { once: true });
-      }
+      }, { once: true });
     }
     try {
+      const inputContext = options?.inputContext ?? this.#getInputContext?.();
       this.#emit("harness.request", {
         method,
         params,
         requestId,
-        ...(this.#getInputContext ? { inputContext: structuredClone(this.#getInputContext()) } : {}),
+        ...(inputContext ? { inputContext: structuredClone(inputContext) } : {}),
         // Carry the bridge timeout to the router so the service handler
         // can run for the same duration (e.g. thread.wait blocks up to
         // 240s — the router must not abort at its default 30s).

@@ -4,6 +4,7 @@ import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type S
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
+import { createExploreQueryStore, type ExploreQueryStore } from "./explore-query-store.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
 import type { MemoryAgentSettings } from "@piarium/protocol";
 import type { Zone2ContextUsage, Zone2Material } from "./zone2.js";
@@ -98,6 +99,7 @@ export interface HarnessServiceHost {
   observationCursors: ObservationCursorStore;
   pathLockService: PathLockService;
   searchService: HarnessSearchService;
+  exploreQueryStore: ExploreQueryStore;
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
   structureSource: StructureSource | null;
@@ -230,6 +232,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const outputStore = createOutputStore();
   const observationCursors = createObservationCursorStore();
   const pathLockService = createPathLockService();
+  const exploreQueryStore = createExploreQueryStore();
   const searchService = createHarnessSearchService({
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
@@ -332,6 +335,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       sessions.delete(sessionId);
     }
     outputStore.dropSession(sessionId);
+    exploreQueryStore.dropSession(sessionId);
     observationCursors.clearObserver(sessionId);
     threadRegistry?.clearCursorsForSession(sessionId);
     pathLockService.dropSession(sessionId);
@@ -375,6 +379,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     }
     sessions.clear();
     await Promise.all(disposes);
+    exploreQueryStore.dispose();
     outputStore.dispose();
     observationCursors.dispose();
     pathLockService.dispose();
@@ -385,6 +390,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   return {
     outputStore,
+    exploreQueryStore,
     observationCursors,
     pathLockService,
     searchService,

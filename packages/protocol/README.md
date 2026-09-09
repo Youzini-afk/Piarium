@@ -9,6 +9,7 @@ Piarium protocol types, schemas, and event/method definitions.
 | Event | Direction | Description |
 |-------|-----------|-------------|
 | `harness.request` | pi-host → host | Request a harness service; session identity comes from the broker actor, never this payload |
+| `harness.cancel` | pi-host → host | Abort an in-flight request and/or the explore query it belongs to |
 | `harness.respond` | host → pi-host | Response to a harness request |
 | `workspace.mutation.request` | pi-host → host | Request a file mutation (before/after) |
 | `workspace.mutation.respond` | host → pi-host | Accept/reject a mutation request |
@@ -46,7 +47,15 @@ language server read itself, which LSP cannot attribute to a version.
 | `recall.search` | `{ query, k? }` | `{ text, results[] }` | Recall search |
 | `memory.blocks.get` | `{ branchEntryIds }` | `{ blocks[] }` | Resolve the closest visible block revision on the active branch |
 | `memory.blocks.apply` | `{ cursorTurn, branchEntryIds, coveredEntryIds, ops[] }` | `MemoryApplyResult` | Atomically validate branch-local keeper operations and update coverage after full acceptance |
-| `explore.search` | `{ question, anchors?, paths?, limit? }` | versioned snippets (optional `unit` / `structure`) + source issues + not-requested candidates + OutputRef | Search disk and the current fixed surface draft; anchors are literal priority seeds; structure slices name the syntax unit and source status when a provider answered |
+| `explore.search` | `{ question, anchors?, paths?, limit? }` | versioned snippets (optional `unit` / `structure`) + source issues + not-requested candidates + OutputRef | Algorithm-only facade over the same query engine: start original sources, freeze views, finish |
+| `explore.query.start` | `{ question, anchors?, paths?, limit?, budgetMs?, reserveForJudge? }` | `{ queryId, vocab, deadlineAt, sources }` | Pin actor/scope/input source and start original lexical, graph, and semantic work |
+| `explore.query.plan` | `{ queryId, plan }` | `{ launched, reused, sources }` | Submit grouped search expressions; they launch real searches on this query |
+| `explore.query.views` | `{ queryId }` | candidate views before pack | First-wave wait, then freeze pre-present units for the candidate model |
+| `explore.query.select` | `{ queryId, groups }` | accepted/rejected/gaps | Validate view/range identity and extract current source |
+| `explore.query.followup` | `{ queryId, searches?, locates?, gaps? }` | new views + reused queries | Optional gap searches and mechanical locates; dedupes launched queries and reads |
+| `explore.query.finish` | `{ queryId }` | same as `explore.search` | One presentation of already-decided excerpts |
+| `explore.query.cancel` | `{ queryId }` | `{ cancelled }` | Abort query work; late results cannot revive it |
+| `explore.query.release` | `{ queryId }` | `{ released }` | Drop the short-lived query after the public explore tool ends |
 | `related.query` | `{ anchor }` | file-level defines / imports / importers / connection endpoints + query-time `roles` + source status | Symbol-graph topology for a path or name; not `lsp.references`. File roles are a query decoration, not graph facts |
 | `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
 | `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |

@@ -3678,6 +3678,71 @@ D-169 的独立代际库与部分可查，以及 Documents 来源边界保持。
 
 状态：设计/计划已回写；运行时查询上下文、LLM 消费者与局部补查待实施。此前决策正文保留，D-174 的局部范围由本条扩展。
 
+### D-176 · 2026-09-09 · 快速检索接线：查询协议与同一引擎
+
+背景：D-175 要求 Host 持有同一次查询、公开仍为一次 explore。若把模型步骤接在现有 `explore.search` 返回之后，候选已按 24 KiB 筛过；若再建第二套检索，会绕开已有读取/授权。
+
+决定：
+
+1. 协议增加 `explore.query.start|plan|views|select|followup|finish|cancel|release`，均属 `read.search`。`explore.search` 保留为同一 `createExploreQueryRun` 的算法门面：`start → waitForViews → finish`，不走模型。
+2. Host `ExploreQueryStore` 按 `sessionId:queryId` 保存短生命周期上下文：原问题、actor/工作区、开始时 `inputContext`、生产任务、已读快照、候选视图、截止与结束状态。查询 ID 不是路径授权。
+3. 公开工具仍是 pi-host 的一次 `explore`。阶段 RPC 返回不释放整次查询；`release`、公开工具 `finally`、session drop 与 Host dispose 才清理。
+4. 不建持久查询库、新 Thread 或通用 workflow。模型 JSON 与选择校验在 pi-host / Host 边界完成，不复制密钥或模型配置权威。
+
+影响：`packages/protocol/src/harness.ts`、`explore.ts`、`explore-query-store.ts`、`explore-query-services.ts`、`explore-tool.ts`；设计 6.1；plan 3.15 共同上下文。
+
+状态：已实施。
+
+### D-177 · 2026-09-09 · 快速检索接线：取消、共享截止与固定来源
+
+背景：旧 bridge 取消只清本地 pending；router 用本请求超时制造 AbortSignal；每次 RPC 重取 `getInputContext`。阶段会因此换窗口、迟到结果仍可能写入，或 start 成功后把后续检索绑到已结束的 start 信号上。
+
+决定：
+
+1. 增加 `harness.cancel`，可带 `requestId` 和/或 `queryId`。bridge 在 abort 时先发 cancel 再拒绝；信号已经 aborted 时只发 cancel、不再发 `harness.request`。
+2. router 中止对应 inflight 控制器，并调用 `cancelExploreQuery`。查询自有 `AbortController`：start 请求 abort 会链接一次；start 成功返回不得中止后续搜索/读取。
+3. 本轮 `deadlineAt` 在 start 固定，阶段 RPC 只消耗剩余时间；公开工具预算 120s，`reserveForJudge` 预留判断/呈现。迟到任务看到 `terminal !== active` 即丢弃。
+4. 后续阶段使用开始时 pin 的 `inputContext`；pi-host 也把同一份 clone 传给后续 RPC，避免活动窗口切换串入。已知写入仍按既有规则终结对应路径的旧草稿。
+5. AbortError 在 router 仍映射为既有 `timeout` 码（取消与超时目前同码）；查询状态与工具结果须另行表达 cancelled，不能把取消写成成功材料。
+
+影响：`events.ts`、`host-services-bridge.ts`、`router.ts`、`explore-query-store.ts`、`application-host/index.ts`；设计 6.1 取消/来源。
+
+状态：已实施。
+
+### D-178 · 2026-09-09 · 快速检索接线：models.explore 消费者
+
+背景：槽位已在，explore-tool 曾直接调 Host。需要真实 ModelRuntime 改变搜索与最终原文，且不得回退主模型或另建分类器。
+
+决定：
+
+1. SessionHost 只在 `harnessSettings.models.explore` 解析到当前会话 `ModelRuntime.getModel` 时注入 `completeExplore`；`completeSimple` 使用 `reasoning: "minimal"`、`toolChoice: "none"` 与查询 signal。解析失败只记诊断，不改用主模型。
+2. 纯路径/仅标识符定位且不问机制时省略计划；有锚点但问 how/why/机制，或计划已用过，仍做材料判断。启发式只看问题与已解析对象，不再加路由模型。
+3. 计划与选择走 JSON：行为、概念分组表达、材料组、视图/范围 ID、必需范围、缺口与可选 followup。解析失败记 `failed` 并保留已有算法/向量材料。
+4. 原问题检索与明确导航在 start 即启动，与计划模型重叠。计划组以 `kind: "plan"` 写入，组内变体不重复投票、不改原词区分度。Host 实际执行新表达。
+5. 首版一个可选补查阶段：批量搜索/定位，去重已执行表达与已读材料；增量选择只看已选与新增视图。不是永久一次硬上限；无新材料或剩余预算不足则交回。缺口只描述本批已读材料。
+6. 工具描述写明概念名与仓库标识不必字面相同。不新增费用/Token 看板。`ExploreRerankScore` 只占类型位，本轮不实现 reranker，也不与 LLM 默认串跑。
+
+影响：`explore-model.ts`、`explore-tool.ts`、`session-host.ts`、`select-tools.ts`；设计 5.7/6.1/8.5；plan 3.15D。
+
+状态：已实施。faux ModelRuntime 已走过公开 `explore`；真实 `models.explore` 质量未在本轮观察。
+
+### D-179 · 2026-09-09 · 快速检索接线：开放排名、当前单元与首批机会
+
+背景：`candidateTier` 压低纯语义；`windowScore` 把文件拼盘广播到窗口；首次读取前 `Promise.all` 三路；模型若只看旧 24 KiB 输出会丢无查询词机制。
+
+决定：
+
+1. 开放候选取消永久来源等级。词法/语义用真实来源名次做 RRF；无相关性顺序的图路径不按字母序伪造排名。明确导航仍走直接线索读取，不再是永久 tier。
+2. 删除 `windowScore`。无模型时用单元自身词法/语义/核验依据；`hasAnchor` 只给该单元有界加分，不恢复来源墙。同源多块与多改写先归并。
+3. 呈现前冻结候选视图：去重共享正文，赋予 `vN` / `vN:full` / 命中范围，按模型输入预算（48 KiB）装入，其余 `unevaluated`。选择校验视图、修订与可见范围；自选行号必须落在模型看过的正文。Host 提取原文，不把校验写成语义 verified。
+4. formatter 只渲染已决定内容。带 `required` 的范围不中途裁句；装不下则换仍含必需范围的视图、放弃该组或记缺口。
+5. 调度区分评分家族与生产任务。在飞主要任务各保留常规首批读取机会，其余共享；参与/空/失败/取消/截止后释放。已有正文复用。首批不是必须等齐屏障：剩余截止可提前冻结并标明 incomplete。
+6. 原问题词法若致命失败且候选为空，重新抛出 `HarnessServiceError`，不得吞成空成功。
+
+影响：`explore.ts`、`explore-query.ts`、`explore-distinctiveness.ts`；设计 6.1 召回/单元/呈现；plan 3.15A–C。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3859,4 +3924,8 @@ D-169 的独立代际库与部分可查，以及 Documents 来源边界保持。
 | D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |
 | D-173 | superseded in part（职责、来源平等、当前原文/呈现和索引设计保持；将局部 LLM 判断移出当前工作项是误读，由 D-174 纠正） | D-174 | 设计 2/5.7/6/6.1/6.2/7.5/8.5；plan 0.7/2.8/2.9/3.2/3.15/3.16；status；architecture 4.4 |
 | D-174 | superseded in part（当前 LLM 主线保持；D-175 扩展分组计划、成组选段、局部补查及查询所有者，区分重排契约） | D-175 | 设计 2/5.7/5.10/6.1/8.5；plan 0.7/3.2/3.15D/3.16E；status；architecture 4.4 |
-| D-175 | active-design（短生命周期查询、分组计划、成组必需范围、局部补查、来源机会与实际取消；消费者待实施） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
+| D-175 | implementation（契约保持；运行时由 D-176–D-179 接线） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
+| D-176 | implementation（查询方法 + Host 短生命周期上下文；`explore.search` 同一引擎门面） | — | protocol harness；explore-query-store/services；explore-tool |
+| D-177 | implementation（`harness.cancel`、共享截止、pin 的 inputContext、release/worker 清理） | — | events；bridge；router；explore-query-store |
+| D-178 | implementation（models.explore → completeSimple；分组计划/成组选段/可选补查；不回退主模型） | — | explore-model；explore-tool；session-host |
+| D-179 | implementation（取消来源 tier、删除 windowScore、呈现前视图、首批机会、致命空词法重抛） | — | explore.ts |

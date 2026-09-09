@@ -24,7 +24,7 @@ export interface FileGroupPresence {
 
 const kindOf = (kind: TermGroupKind): ExploreTermWeight["kind"] => {
   if (kind === "anchor") return "anchor";
-  if (kind === "question") return "content";
+  if (kind === "question" || kind === "plan") return "content";
   return "object";
 };
 

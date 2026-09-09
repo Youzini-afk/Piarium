@@ -3107,6 +3107,33 @@ export class SessionHost {
           message: `Reader model is unavailable: ${readerSelection.providerId}/${readerSelection.modelId}`,
         });
       }
+      const exploreSelection = harnessSettings.models.explore;
+      const exploreModel = exploreSelection
+        ? services.modelRuntime.getModel(exploreSelection.providerId, exploreSelection.modelId)
+        : undefined;
+      if (exploreSelection && !exploreModel) {
+        services.diagnostics.push({
+          type: "warning",
+          message: `Explore model is unavailable: ${exploreSelection.providerId}/${exploreSelection.modelId}`,
+        });
+      }
+      const completeExplore = exploreModel
+        ? async (input: { systemPrompt: string; user: string; signal?: AbortSignal }) => {
+            const response = await services.modelRuntime.completeSimple(exploreModel, {
+              systemPrompt: input.systemPrompt,
+              messages: [{
+                role: "user",
+                content: input.user,
+                timestamp: Date.now(),
+              }],
+            }, { reasoning: "minimal", ...(input.signal ? { signal: input.signal } : {}), toolChoice: "none" });
+            return response.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("\n")
+              .trim();
+          }
+        : undefined;
       const readPage = readerModel
         ? async (input: { finalUrl: string; markdown: string; prompt: string; signal: AbortSignal | undefined }) => {
             const response = await services.modelRuntime.completeSimple(readerModel, {
@@ -3193,6 +3220,7 @@ export class SessionHost {
         autoResizeImages: settingsManager.getImageAutoResize(),
         yieldedTools,
         ...(readPage ? { readPage } : {}),
+        ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         resolvedRoles,

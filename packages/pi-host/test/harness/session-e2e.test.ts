@@ -93,11 +93,27 @@ async function setupSession(options: {
       host.respondHarness(sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    cancelExploreQuery: (sessionId, queryId) => harnessServiceHost.exploreQueryStore.cancel(sessionId, queryId),
     ...(options.authorizeWorkspacePath ? { authorizeWorkspacePath: options.authorizeWorkspacePath } : {}),
   });
   registerHarnessServices(router, harnessServiceHost);
 
   const emit = (<E extends HostEvent>(event: E, data: HostEventData<E>): void => {
+    if (event === "harness.cancel") {
+      const payload = data as HostEventData<"harness.cancel">;
+      const actor = {
+        authorityInstanceId: "session-e2e-authority",
+        sessionId: host.session.sessionManager.getSessionId(),
+        workerId: "session-e2e-worker",
+        workerGeneration: 1,
+      } as const;
+      void router.processEvent({
+        actor,
+        kind: "host",
+        envelope: { kind: "event", event: "harness.cancel", data: payload },
+      });
+      return;
+    }
     if (event === "harness.request") {
       const payload = data as HostEventData<"harness.request">;
       const actor = {
@@ -1171,6 +1187,78 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /exact\.ts/);
         assert.match(exploreResult, /uniqueAnchor/);
         assert.match(exploreResult, /"anchors":\["uniqueAnchor"\]|"supplied":\["uniqueAnchor"\]/);
+      } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("runs plan expressions through ModelRuntime and keeps a zero-overlap excerpt in the final source", async () => {
+    await withTempRoot("piarium-s-explore-model-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "reclaim.ts"), [
+        "export function reclaimLease(handle: string) {",
+        "  parkedHandles.delete(handle);",
+        "  return handle;",
+        "}",
+        "",
+      ].join("\n"), "utf8");
+      const faux = registerFauxProvider();
+      const model = faux.getModel();
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: { models: { explore: { providerId: model.provider, modelId: model.id } } },
+      }), "utf8");
+      const planPrompts: string[] = [];
+      let exploreResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "how does the runtime discard idle tokens" })]),
+        (context) => {
+          planPrompts.push(JSON.stringify(context));
+          return fauxAssistantMessage(JSON.stringify({
+            behavior: "discard idle tokens",
+            groups: [{ id: "g1", concept: "reclaim", expressions: ["reclaimLease"] }],
+          }));
+        },
+        (context) => {
+          const blob = JSON.stringify(context);
+          const viewId = blob.match(/view (v\d+)/)?.[1] ?? "v1";
+          return fauxAssistantMessage(JSON.stringify({
+            groups: [{
+              id: "sel1",
+              purpose: "reclaim implementation",
+              views: [{ viewId, rangeIds: [`${viewId}:full`], required: true }],
+            }],
+          }));
+        },
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("The reclaim implementation is in reclaimLease.");
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        serviceHostOptions: {
+          search: (request, options) => fixture.search.searchContent(request, options),
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "how idle tokens are discarded");
+        await session.host.session.waitForIdle();
+        assert.match(planPrompts.join("\n"), /discard idle tokens|reclaimLease|how does the runtime/);
+        assert.match(exploreResult, /reclaimLease/);
+        assert.match(exploreResult, /reclaim\.ts/);
+        assert.match(exploreResult, /"plan":"used"/);
+        assert.match(exploreResult, /"select":"used"/);
       } finally {
         await session.dispose();
         await fixture.documents.dispose();

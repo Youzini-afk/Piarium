@@ -49,6 +49,8 @@ export interface SelectHarnessToolsDeps {
   yieldedTools?: ReadonlySet<string>;
   /** Session-local reader model path; absent keeps webfetch extraction-only. */
   readPage?: NonNullable<Parameters<typeof createWebFetchTool>[2]>["readPage"];
+  /** Session-local explore model path; absent keeps algorithm/vector explore. */
+  completeExplore?: NonNullable<Parameters<typeof createExploreTool>[2]>["complete"];
   /** Whether the host registered a real web.search service. */
   webSearchAvailable?: boolean;
   /** Whether the host provides a thread runtime (thread registry + spawn).
@@ -154,7 +156,7 @@ export function selectHarnessTools(
     result.push(createRecallTool(bridge, sessionId));
   }
   if (tools.explore !== false) {
-    result.push(createExploreTool(bridge, sessionId));
+    result.push(createExploreTool(bridge, sessionId, deps.completeExplore ? { complete: deps.completeExplore } : undefined));
   }
   if (tools.related !== false) {
     result.push(createRelatedTool(bridge, sessionId));

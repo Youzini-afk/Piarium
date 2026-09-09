@@ -23,7 +23,7 @@ export { classifyFileRole, classifyFileRoleDecision, fileRoleFit };
 export type ExploreQueryRelation = "register" | "import" | "define" | "unknown";
 export type ExploreQueryDomain = "implementation" | "design" | "dependency" | "unknown";
 
-export type TermGroupKind = "anchor" | "literal" | "identifier" | "question";
+export type TermGroupKind = "anchor" | "literal" | "identifier" | "question" | "plan";
 
 export interface TermGroup {
   id: string;

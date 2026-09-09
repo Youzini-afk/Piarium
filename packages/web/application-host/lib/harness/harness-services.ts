@@ -25,6 +25,16 @@ import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
+import {
+  createExploreQueryCancelService,
+  createExploreQueryFinishService,
+  createExploreQueryFollowupService,
+  createExploreQueryPlanService,
+  createExploreQueryReleaseService,
+  createExploreQuerySelectService,
+  createExploreQueryStartService,
+  createExploreQueryViewsService,
+} from "./explore-query-services.js";
 import { createRelatedQueryService } from "./related-service.js";
 import { compileFindGlob, normalizeGlobPath } from "./glob-matcher.js";
 export { createExploreSearchService } from "./explore-service.js";
@@ -583,6 +593,14 @@ export function registerHarnessServices(
     router.register("thread.merge", createThreadMergeService(host));
   }
   router.register("explore.search", createExploreSearchService(host));
+  router.register("explore.query.start", createExploreQueryStartService(host));
+  router.register("explore.query.plan", createExploreQueryPlanService(host));
+  router.register("explore.query.views", createExploreQueryViewsService(host));
+  router.register("explore.query.select", createExploreQuerySelectService(host));
+  router.register("explore.query.followup", createExploreQueryFollowupService(host));
+  router.register("explore.query.finish", createExploreQueryFinishService(host));
+  router.register("explore.query.cancel", createExploreQueryCancelService(host));
+  router.register("explore.query.release", createExploreQueryReleaseService(host));
   router.register("related.query", createRelatedQueryService(host));
   router.register("surface.snapshot.commit", {
     handle: async (params, ctx) => host.commitAgentInputContext(ctx.sessionId, params.context),
