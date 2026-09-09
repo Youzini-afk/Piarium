@@ -1,14 +1,13 @@
 /**
  * Chat-independent Pi runtime binding for embedding and rerank.
- * Uses the same SettingsManager, AuthStorage (via ModelRuntime), and
- * ProviderConfigurationManager as sessions. It does not borrow a chat session.
+ * Provider/model definitions come from user + operator authority only. A
+ * trusted project's provider layer never participates in background inference.
  */
-
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { ModelRuntime, ProjectTrustStore, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
-  mergeHarnessSettings,
+  HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
   parseHarnessRerankSettings,
   remoteEmbeddingSpaceParts,
@@ -16,6 +15,7 @@ import {
   type HarnessEmbedParams,
   type HarnessEmbedResult,
   type HarnessEmbeddingSettings,
+  type HarnessInferenceBindingSnapshot,
   type HarnessRerankParams,
   type HarnessRerankResult,
   type HarnessRerankSettings,
@@ -33,55 +33,79 @@ export interface BackgroundInferenceOptions {
   agentDir: string;
   cwd: string;
   fetchImpl?: typeof fetch;
-  projectTrustOverride?: boolean;
-  /**
-   * Workspace-worker ModelRuntime. Shares AuthStorage and in-process API-key
-   * overlays. When omitted, a runtime is created from the same auth.json.
-   */
+  /** Used only for the user's in-process AuthStorage overlay. */
   modelRuntime?: ModelRuntime;
 }
+
+type ResolvedProviderBinding = {
+  apiKey?: string;
+  baseUrl: string;
+  configurationId: string;
+  headers?: Record<string, string>;
+};
+
+const digest = (value: unknown): string => createHash("sha256")
+  .update(JSON.stringify(value)).digest("hex").slice(0, 16);
+
+const credentialFreeUrl = (value: string): string => {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    return url.toString().replace(/\/$/u, "");
+  } catch {
+    return value.replace(/\/$/u, "");
+  }
+};
 
 const spaceIdOf = (input: {
   protocol: string;
   providerId: string;
   modelId: string;
+  configurationId: string;
   maxTokens: number;
-  dimensions?: number;
-}): string => createHash("sha256").update(JSON.stringify(remoteEmbeddingSpaceParts(input))).digest("hex").slice(0, 16);
+  dimensions: number;
+}): string => digest(remoteEmbeddingSpaceParts(input));
 
 const stringHeaders = (headers: Record<string, string | null> | undefined): Record<string, string> | undefined => {
   if (!headers) return undefined;
   const cleaned: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (typeof value === "string") cleaned[key] = value;
-  }
+  for (const [key, value] of Object.entries(headers)) if (typeof value === "string") cleaned[key] = value;
   return Object.keys(cleaned).length > 0 ? cleaned : undefined;
 };
 
-const harnessFromSettings = (manager: SettingsManager): HarnessSettingsInput => (
-  ((manager.getGlobalSettings() as { harness?: HarnessSettingsInput }).harness ?? {})
-);
+const harnessFromSettings = (manager: SettingsManager): HarnessSettingsInput => {
+  const harness = (manager.getGlobalSettings() as { harness?: unknown }).harness;
+  if (harness === undefined) return {};
+  if (!harness || typeof harness !== "object" || Array.isArray(harness)) {
+    throw new HarnessInferenceSettingsValidationError("harness must be an object");
+  }
+  return harness as HarnessSettingsInput;
+};
 
 export class BackgroundInferenceRuntime {
   readonly #agentDir: string;
   readonly #cwd: string;
   readonly #fetchImpl: typeof fetch | undefined;
-  readonly #projectTrusted: boolean;
   readonly #settings: SettingsManager;
   readonly #providers: ProviderConfigurationManager;
-  readonly #sharedRuntime: ModelRuntime | undefined;
-  #modelRuntime: ModelRuntime | undefined;
+  readonly #authRuntime: ModelRuntime | undefined;
+  readonly #active = new Map<string, { controller: AbortController; requestId?: string }>();
+  readonly #reservations = new Map<string, {
+    batchId: string;
+    state: "reserved" | "cancelled" | "rejected";
+  }>();
+  readonly #reservedByBatch = new Map<string, string>();
+  #configRuntime: ModelRuntime | undefined;
+  #configRuntimePromise: Promise<ModelRuntime> | undefined;
+  #disposed = false;
 
   constructor(options: BackgroundInferenceOptions) {
     this.#agentDir = options.agentDir;
     this.#cwd = options.cwd;
     this.#fetchImpl = options.fetchImpl;
-    this.#sharedRuntime = options.modelRuntime;
-    this.#projectTrusted = options.projectTrustOverride === true
-      || new ProjectTrustStore(options.agentDir).get(options.cwd) === true;
-    this.#settings = SettingsManager.create(options.cwd, options.agentDir, {
-      projectTrusted: this.#projectTrusted,
-    });
+    this.#authRuntime = options.modelRuntime;
+    this.#settings = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: false });
     this.#providers = new ProviderConfigurationManager({ agentDir: options.agentDir });
   }
 
@@ -93,148 +117,267 @@ export class BackgroundInferenceRuntime {
     return parseHarnessRerankSettings(harnessFromSettings(this.#settings).rerank);
   }
 
-  mergedHarness() {
-    const user = harnessFromSettings(this.#settings);
-    const project = this.#settings.isProjectTrusted()
-      ? ((this.#settings.getProjectSettings() as { harness?: HarnessSettingsInput }).harness ?? {})
-      : {};
-    return mergeHarnessSettings(user, project);
+  async describe(): Promise<HarnessInferenceBindingSnapshot> {
+    try {
+      await this.reload();
+    } catch {
+      return {
+        embedding: { status: "unavailable", message: "Harness settings could not be read" },
+        rerank: { status: "unavailable", message: "Harness settings could not be read" },
+      };
+    }
+    const embedding = await (async (): Promise<HarnessInferenceBindingSnapshot["embedding"]> => {
+      let settings: HarnessEmbeddingSettings | undefined;
+      try { settings = this.embeddingSettings(); }
+      catch { return { status: "invalid", message: "Embedding settings are malformed" }; }
+      if (!settings) return { status: "unconfigured" };
+      try {
+        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false);
+        return { status: "ready", binding: { ...settings, configurationId: provider.configurationId } };
+      } catch {
+        return { status: "unavailable", message: "Embedding provider binding is unavailable" };
+      }
+    })();
+    const rerank = await (async (): Promise<HarnessInferenceBindingSnapshot["rerank"]> => {
+      let settings: HarnessRerankSettings | undefined;
+      try { settings = this.rerankSettings(); }
+      catch { return { status: "invalid", message: "Rerank settings are malformed" }; }
+      if (!settings) return { status: "unconfigured" };
+      try {
+        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false);
+        return { status: "ready", binding: { ...settings, configurationId: provider.configurationId } };
+      } catch {
+        return { status: "unavailable", message: "Rerank provider binding is unavailable" };
+      }
+    })();
+    return { embedding, rerank };
   }
 
   async reload(): Promise<void> {
     await this.#settings.reload();
-    if (!this.#sharedRuntime) this.#modelRuntime = undefined;
+    const errors = this.#settings.drainErrors();
+    if (errors.length > 0) {
+      throw new HostError(
+        "settings_read_failed",
+        errors.map((entry) => entry.error.message).join("; "),
+      );
+    }
   }
 
-  async embed(params: HarnessEmbedParams & { signal?: AbortSignal }): Promise<HarnessEmbedResult> {
-    await this.#settings.reload();
-    const configured = this.embeddingSettings();
-    if (!configured) {
-      throw new HostError("embedding_unconfigured", "Remote embedding is not configured");
-    }
-    if (
-      configured.protocol !== params.protocol
-      || configured.providerId !== params.providerId
-      || configured.modelId !== params.modelId
-    ) {
-      throw new HostError("embedding_binding_mismatch", "Embed request does not match the configured binding");
-    }
-    const endpoint = await this.#resolveEndpoint(params.providerId);
-    const result = await requestOpenAICompatibleEmbeddings({
-      baseUrl: endpoint.baseUrl,
-      apiKey: endpoint.apiKey,
-      ...(endpoint.headers ? { headers: endpoint.headers } : {}),
-      model: params.modelId,
-      input: params.items.map((item) => item.text),
-      ...(configured.dimensions === undefined && params.dimensions === undefined
-        ? {}
-        : { dimensions: params.dimensions ?? configured.dimensions }),
-      ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
-      ...(params.signal ? { signal: params.signal } : {}),
-    });
-    const maxTokens = configured.maxTokens ?? params.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
-    const space: HarnessVectorSpaceBinding = {
-      providerId: configured.providerId,
-      modelId: configured.modelId,
-      protocol: "openai-compatible",
-      dim: result.dim,
-      maxTokens,
-      spaceId: spaceIdOf({
-        protocol: "openai-compatible",
+  async embed(
+    params: HarnessEmbedParams & { signal?: AbortSignal },
+    requestId?: string,
+  ): Promise<HarnessEmbedResult> {
+    const signal = this.#begin(params.batchId, params.signal, requestId);
+    try {
+      await this.reload();
+      signal.throwIfAborted();
+      const configured = this.embeddingSettings();
+      if (!configured) throw new HostError("embedding_unconfigured", "Remote embedding is not configured");
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      const maxTokens = configured.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
+      if (
+        configured.protocol !== params.protocol
+        || configured.providerId !== params.providerId
+        || configured.modelId !== params.modelId
+        || endpoint.configurationId !== params.configurationId
+        || configured.dimensions !== params.dimensions
+        || params.maxTokens !== maxTokens
+      ) throw new HostError(
+        "embedding_binding_mismatch",
+        `Embed request does not match the current frozen binding (${[
+          configured.protocol !== params.protocol ? "protocol" : "",
+          configured.providerId !== params.providerId ? "provider" : "",
+          configured.modelId !== params.modelId ? "model" : "",
+          endpoint.configurationId !== params.configurationId ? "configuration" : "",
+          configured.dimensions !== params.dimensions ? "dimensions" : "",
+          params.maxTokens !== maxTokens ? "maxTokens" : "",
+        ].filter(Boolean).join(",")})`,
+      );
+      signal.throwIfAborted();
+      const result = await requestOpenAICompatibleEmbeddings({
+        baseUrl: endpoint.baseUrl,
+        apiKey: endpoint.apiKey!,
+        ...(endpoint.headers ? { headers: endpoint.headers } : {}),
+        model: configured.modelId,
+        input: params.items.map((item) => item.text),
+        ...(configured.dimensions === undefined ? {} : { dimensions: configured.dimensions }),
+        ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
+        signal,
+      });
+      signal.throwIfAborted();
+      const space: HarnessVectorSpaceBinding = {
         providerId: configured.providerId,
         modelId: configured.modelId,
+        protocol: "openai-compatible",
+        configurationId: endpoint.configurationId,
+        dim: result.dim,
         maxTokens,
-        ...(configured.dimensions === undefined ? {} : { dimensions: configured.dimensions }),
-      }),
-    };
-    return {
-      batchId: params.batchId,
-      space,
-      items: result.vectors.map((vector, index) => ({
-        id: params.items[index]!.id,
-        index,
-        vector,
-      })),
-    };
+        spaceId: spaceIdOf({
+          protocol: "openai-compatible",
+          providerId: configured.providerId,
+          modelId: configured.modelId,
+          configurationId: endpoint.configurationId,
+          maxTokens,
+          dimensions: result.dim,
+        }),
+      };
+      return {
+        batchId: params.batchId,
+        space,
+        items: result.vectors.map((vector, index) => ({ id: params.items[index]!.id, index, vector })),
+      };
+    } finally {
+      this.#finish(params.batchId, requestId);
+    }
   }
 
-  async rerank(params: HarnessRerankParams & { signal?: AbortSignal }): Promise<HarnessRerankResult> {
-    await this.#settings.reload();
-    const configured = this.rerankSettings();
-    if (!configured) {
-      throw new HostError("rerank_unconfigured", "Rerank is not configured");
+  async rerank(
+    params: HarnessRerankParams & { signal?: AbortSignal },
+    requestId?: string,
+  ): Promise<HarnessRerankResult> {
+    const signal = this.#begin(params.batchId, params.signal, requestId);
+    try {
+      await this.reload();
+      signal.throwIfAborted();
+      const configured = this.rerankSettings();
+      if (!configured) throw new HostError("rerank_unconfigured", "Rerank is not configured");
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      if (
+        configured.protocol !== params.protocol
+        || configured.providerId !== params.providerId
+        || configured.modelId !== params.modelId
+        || endpoint.configurationId !== params.configurationId
+        || configured.endpoint !== params.endpoint
+        || configured.maxDocumentTokens !== params.maxDocumentTokens
+      ) throw new HostError("rerank_binding_mismatch", "Rerank request does not match the current frozen binding");
+      signal.throwIfAborted();
+      const scores = await requestHttpRerank({
+        baseUrl: endpoint.baseUrl,
+        apiKey: endpoint.apiKey!,
+        ...(endpoint.headers ? { headers: endpoint.headers } : {}),
+        model: configured.modelId,
+        query: params.query,
+        documents: params.documents,
+        ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+        ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
+        signal,
+      });
+      signal.throwIfAborted();
+      return { batchId: params.batchId, providerId: configured.providerId, modelId: configured.modelId, scores };
+    } finally {
+      this.#finish(params.batchId, requestId);
     }
-    if (
-      configured.protocol !== params.protocol
-      || configured.providerId !== params.providerId
-      || configured.modelId !== params.modelId
-    ) {
-      throw new HostError("rerank_binding_mismatch", "Rerank request does not match the configured binding");
+  }
+
+  cancel(batchId: string): boolean {
+    const active = this.#active.get(batchId);
+    if (active) {
+      active.controller.abort();
+      return true;
     }
-    const endpoint = await this.#resolveEndpoint(params.providerId);
-    const scores = await requestHttpRerank({
-      baseUrl: endpoint.baseUrl,
-      apiKey: endpoint.apiKey,
-      ...(endpoint.headers ? { headers: endpoint.headers } : {}),
-      model: params.modelId,
-      query: params.query,
-      documents: params.documents,
-      ...(configured.endpoint ?? params.endpoint ? { endpoint: params.endpoint ?? configured.endpoint } : {}),
-      ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
-      ...(params.signal ? { signal: params.signal } : {}),
-    });
-    return {
-      batchId: params.batchId,
-      providerId: configured.providerId,
-      modelId: configured.modelId,
-      scores,
-    };
+    const requestId = this.#reservedByBatch.get(batchId);
+    const reservation = requestId ? this.#reservations.get(requestId) : undefined;
+    if (reservation?.state === "reserved") {
+      reservation.state = "cancelled";
+      return true;
+    }
+    return false;
+  }
+
+  reserve(requestId: string, batchId: string): boolean {
+    if (this.#disposed || this.#reservations.has(requestId)) return false;
+    const rejected = this.#active.has(batchId) || this.#reservedByBatch.has(batchId);
+    this.#reservations.set(requestId, { batchId, state: rejected ? "rejected" : "reserved" });
+    if (!rejected) this.#reservedByBatch.set(batchId, requestId);
+    return !rejected;
+  }
+
+  releaseReservation(requestId: string): void {
+    const reservation = this.#reservations.get(requestId);
+    if (!reservation) return;
+    this.#reservations.delete(requestId);
+    if (this.#reservedByBatch.get(reservation.batchId) === requestId) {
+      this.#reservedByBatch.delete(reservation.batchId);
+    }
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    for (const active of this.#active.values()) active.controller.abort();
+    this.#active.clear();
+    this.#reservations.clear();
+    this.#reservedByBatch.clear();
+  }
+
+  #begin(batchId: string, callerSignal?: AbortSignal, requestId?: string): AbortSignal {
+    if (this.#disposed) throw new HostError("host_disposed", "Background inference is disposed");
+    const reservation = requestId ? this.#reservations.get(requestId) : undefined;
+    if (requestId) {
+      if (!reservation || reservation.batchId !== batchId) {
+        throw new HostError("inference_batch_unreserved", "Inference request reservation is missing or mismatched");
+      }
+      this.releaseReservation(requestId);
+      if (reservation.state === "rejected") {
+        throw new HostError("inference_batch_conflict", `Inference batch is already active or queued: ${batchId}`);
+      }
+    }
+    if (this.#active.has(batchId)) {
+      throw new HostError("inference_batch_conflict", `Inference batch is already active: ${batchId}`);
+    }
+    const controller = new AbortController();
+    this.#active.set(batchId, { controller, ...(requestId ? { requestId } : {}) });
+    if (reservation?.state === "cancelled") controller.abort();
+    return callerSignal ? AbortSignal.any([controller.signal, callerSignal]) : controller.signal;
+  }
+
+  #finish(batchId: string, requestId?: string): void {
+    const active = this.#active.get(batchId);
+    if (active && active.requestId === requestId) this.#active.delete(batchId);
+    if (requestId) this.releaseReservation(requestId);
   }
 
   async #runtime(): Promise<ModelRuntime> {
-    if (this.#sharedRuntime) {
-      await this.#providers.apply(this.#sharedRuntime, this.#cwd, this.#projectTrusted);
-      return this.#sharedRuntime;
+    if (this.#configRuntime) {
+      await this.#providers.apply(this.#configRuntime, this.#cwd, false);
+      return this.#configRuntime;
     }
-    if (this.#modelRuntime) return this.#modelRuntime;
-    this.#modelRuntime = await ModelRuntime.create({
-      allowModelNetwork: true,
-      authPath: join(this.#agentDir, "auth.json"),
-      modelsPath: join(this.#agentDir, "models.json"),
-    });
-    await this.#providers.apply(this.#modelRuntime, this.#cwd, this.#projectTrusted);
-    return this.#modelRuntime;
+    this.#configRuntimePromise ??= (async () => {
+      const runtime = await ModelRuntime.create({
+        allowModelNetwork: false,
+        authPath: join(this.#agentDir, "auth.json"),
+        modelsPath: join(this.#agentDir, "models.json"),
+      });
+      // ModelRuntime loaded the user layer; projectTrusted=false adds only operator config.
+      await this.#providers.apply(runtime, this.#cwd, false);
+      this.#configRuntime = runtime;
+      return runtime;
+    })();
+    try { return await this.#configRuntimePromise; }
+    finally { this.#configRuntimePromise = undefined; }
   }
 
-  async #resolveEndpoint(providerId: string): Promise<{
-    baseUrl: string;
-    apiKey: string;
-    headers?: Record<string, string>;
-  }> {
+  async #resolveProviderBinding(providerId: string, modelId: string, withAuth: boolean): Promise<ResolvedProviderBinding> {
     const runtime = await this.#runtime();
-    await this.#providers.apply(runtime, this.#cwd, this.#projectTrusted);
     const provider = runtime.getProvider(providerId);
-    let baseUrl = provider?.baseUrl;
-    try {
-      const config = await this.#providers.effectiveConfig(this.#cwd, providerId, this.#projectTrusted);
-      baseUrl = config.baseUrl ?? baseUrl;
-    } catch {
-      // Native-only providers still resolve from the runtime catalog.
-    }
-    if (!baseUrl) {
-      throw new HostError("provider_endpoint_missing", `Provider ${providerId} does not define a base URL`);
-    }
-    const auth = await runtime.getAuth(providerId);
+    const model = runtime.getModel(providerId, modelId);
+    let editable: Awaited<ReturnType<ProviderConfigurationManager["effectiveConfig"]>> | undefined;
+    try { editable = await this.#providers.effectiveConfig(this.#cwd, providerId, false); } catch { /* built-in */ }
+    const baseUrl = model?.baseUrl ?? editable?.baseUrl ?? provider?.baseUrl;
+    if (!baseUrl) throw new HostError("provider_endpoint_missing", `Provider ${providerId} does not define a base URL`);
+    const configurationId = digest({
+      providerId,
+      modelId,
+      baseUrl: credentialFreeUrl(baseUrl),
+      api: model?.api ?? editable?.api,
+    });
+    if (!withAuth) return { baseUrl, configurationId };
+    const auth = await (this.#authRuntime ?? runtime).getAuth(providerId);
     const apiKey = auth?.auth.apiKey;
-    if (!apiKey) {
-      throw new HostError("provider_auth_missing", `Provider ${providerId} has no credential`);
-    }
+    if (!apiKey) throw new HostError("provider_auth_missing", `Provider ${providerId} has no credential`);
     const headers = stringHeaders(auth.auth.headers);
-    return {
-      baseUrl,
-      apiKey,
-      ...(headers ? { headers } : {}),
-    };
+    return { baseUrl, configurationId, apiKey, ...(headers ? { headers } : {}) };
   }
 }
 

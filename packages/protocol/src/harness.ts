@@ -634,7 +634,11 @@ export interface ExploreModelParticipation {
   note?: string;
 }
 
-export type ExploreSemanticGapReason = "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending";
+export type ExploreSemanticGapReason =
+  | "draft-vector-pending"
+  | "draft-unavailable"
+  | "thread-vector-pending"
+  | "index-read-failed";
 
 export interface ExploreSemanticGap {
   path: string;

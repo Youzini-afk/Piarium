@@ -255,7 +255,7 @@ export async function packExploreSearchResult(
 }
 
 export function createExploreQueryStartService(
-  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore">,
+  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings">,
 ): HarnessService<"explore.query.start"> {
   return {
     handle: async (params: ExploreQueryStartParams, ctx) => {
@@ -289,6 +289,7 @@ export function createExploreQueryStartService(
       const budgetMs = typeof params.budgetMs === "number"
         ? params.budgetMs
         : DEFAULT_EXPLORE_QUERY_BUDGET_MS;
+      const deadlineAt = Date.now() + budgetMs;
       const queryController = new AbortController();
       let stored: StoredExploreQuery | undefined;
       const onStartAbort = (): void => {
@@ -306,6 +307,16 @@ export function createExploreQueryStartService(
           : ctx.actor.workspaceScope?.length
             ? [...ctx.actor.workspaceScope]
             : undefined;
+        let rerankConfigured = false;
+        if (ctx.workspaceId) {
+          try {
+            rerankConfigured = rerankSettingsFromSnapshot(
+              await host.harnessSettings?.(ctx.workspaceId) ?? null,
+            ) !== undefined;
+          } catch {
+            rerankConfigured = false;
+          }
+        }
         stored = host.exploreQueryStore.start({
           actor: actorFromHarness(ctx.actor),
           inputContext,
@@ -316,8 +327,8 @@ export function createExploreQueryStartService(
             ...(params.limit ? { limit: params.limit } : {}),
           },
           deps: createExploreDeps(host, ctx, inputContext, queryController.signal, effectivePaths),
-          deadlineAt: Date.now() + budgetMs,
-          reserveForJudgeMs: params.reserveForJudge ? DEFAULT_JUDGE_RESERVE_MS : 0,
+          deadlineAt,
+          reserveForJudgeMs: params.reserveForJudge || rerankConfigured ? DEFAULT_JUDGE_RESERVE_MS : 0,
           controller: queryController,
         });
         await stored.run.refreshVocab();
@@ -426,54 +437,76 @@ export function createExploreQueryFinishService(
     handle: async (params: ExploreQueryFinishParams & { model?: ExploreModelParticipation }, ctx) => {
       const stored = requireQuery(host, ctx, params.queryId, "finish");
       const model = params.model;
-      if (exploreShouldRerank(model) && host.rerankExploreViews) {
-        const settings = rerankSettingsFromSnapshot(host.harnessSettings?.() ?? null);
-        if (settings) {
+      const workspaceId = ctx.workspaceId;
+      if (stored.run.terminal() === "finished") {
+        return packExploreSearchResult(host, ctx, stored.run.finish(model), options);
+      }
+      stored.finishing ??= (async () => {
+        if (workspaceId && exploreShouldRerank(model) && host.rerankExploreViews) {
+          let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
+          let settingsInvalid = false;
           try {
-            const views = stored.run.viewsForModel().views;
-            const { documents, evaluated } = documentsFromViews(
-              views,
-              settings.maxDocumentTokens,
-              (text) => Math.max(1, Math.ceil(text.length / 4)),
-            );
-            if (documents.length > 0) {
-              const ranked = await host.rerankExploreViews({
-                query: stored.run.question,
-                documents,
-                settings,
-                signal: ctx.signal,
-              });
-              stored.run.applyRerank(scoresFromRerankResult(ranked, documents), {
-                status: "used",
-                providerId: settings.providerId,
-                modelId: settings.modelId,
-                batchId: ranked.batchId,
-                evaluated: evaluated.length,
-              });
-              if (model) model.rerank = "used";
-            } else if (model) {
-              model.rerank = "skipped";
-            }
-          } catch (error) {
-            const cancelled = ctx.signal.aborted || (error instanceof Error && error.name === "AbortError");
-            const settings = rerankSettingsFromSnapshot(host.harnessSettings?.() ?? null);
-            if (settings) {
+            settings = rerankSettingsFromSnapshot(await host.harnessSettings?.(workspaceId) ?? null);
+          } catch {
+            settingsInvalid = true;
+            stored.run.applyRerank([], {
+              status: "failed",
+              note: "Rerank settings are malformed; source ranking was kept.",
+            });
+            if (model) model.rerank = "failed";
+          }
+          if (settings) {
+            try {
+              const views = stored.run.viewsForModel().views;
+              const { documents } = documentsFromViews(
+                views,
+                settings.maxDocumentTokens,
+                // Character count is an estimate; the remote tokenizer may differ.
+                // Over-budget views keep their source rank without being sent.
+                (text) => Math.max(1, text.length),
+              );
+              if (documents.length > 0) {
+                const ranked = await host.rerankExploreViews({
+                  workspaceId,
+                  query: stored.run.question,
+                  documents,
+                  settings,
+                  signal: AbortSignal.any([ctx.signal, stored.cancelController.signal]),
+                });
+                const scores = scoresFromRerankResult(ranked, documents);
+                if (scores.length === 0) throw new Error("Rerank returned no valid scores");
+                stored.run.applyRerank(scores, {
+                  status: "used",
+                  providerId: settings.providerId,
+                  modelId: settings.modelId,
+                  batchId: ranked.batchId,
+                  evaluated: scores.length,
+                });
+                if (model) model.rerank = "used";
+              } else if (model) {
+                model.rerank = "skipped";
+              }
+            } catch (error) {
+              const cancelled = ctx.signal.aborted || (error instanceof Error && error.name === "AbortError");
               stored.run.applyRerank([], rerankFailureDetails(
                 settings,
                 cancelled ? "cancelled" : "failed",
                 cancelled ? "Rerank was cancelled; source ranking was kept." : "Rerank failed; source ranking was kept.",
               ));
+              if (model) model.rerank = cancelled ? "cancelled" : "failed";
             }
-            if (model) model.rerank = cancelled ? "cancelled" : "failed";
+          } else if (model && !settingsInvalid) {
+            model.rerank = "unconfigured";
           }
-        } else if (model) {
-          model.rerank = "unconfigured";
+        } else if (model && model.rerank === undefined) {
+          model.rerank = exploreShouldRerank(model) ? "unconfigured" : "skipped";
         }
-      } else if (model && model.rerank === undefined) {
-        model.rerank = exploreShouldRerank(model) ? "unconfigured" : "skipped";
-      }
-      const result = stored.run.finish(model);
-      if (!stored.controller.signal.aborted) stored.controller.abort();
+        const result = stored.run.finish(model);
+        if (!stored.controller.signal.aborted) stored.controller.abort();
+        if (!stored.cancelController.signal.aborted) stored.cancelController.abort();
+        return result;
+      })();
+      const result = await stored.finishing;
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue: ExploreIssue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }

@@ -22,9 +22,13 @@ const vectorBytes = (vector: readonly number[]): number => vector.length * 8 + 6
 
 export function createVectorCache(options?: { maxBytes?: number }) {
   const maxBytes = options?.maxBytes ?? DEFAULT_VECTOR_CACHE_BYTES;
-  const entries = new Map<string, { vector: number[]; bytes: number; touch: number }>();
+  const entries = new Map<string, { vector: number[]; bytes: number }>();
+  const inFlight = new Map<string, {
+    promise: Promise<number[]>;
+    resolve(vector: number[]): void;
+    reject(error: unknown): void;
+  }>();
   let usedBytes = 0;
-  let clock = 0;
 
   const evict = (needed: number): void => {
     if (maxBytes <= 0) {
@@ -33,14 +37,7 @@ export function createVectorCache(options?: { maxBytes?: number }) {
       return;
     }
     while (usedBytes + needed > maxBytes && entries.size > 0) {
-      let oldestKey: string | undefined;
-      let oldestTouch = Number.POSITIVE_INFINITY;
-      for (const [key, entry] of entries) {
-        if (entry.touch < oldestTouch) {
-          oldestTouch = entry.touch;
-          oldestKey = key;
-        }
-      }
+      const oldestKey = entries.keys().next().value as string | undefined;
       if (!oldestKey) break;
       const removed = entries.get(oldestKey);
       entries.delete(oldestKey);
@@ -54,7 +51,9 @@ export function createVectorCache(options?: { maxBytes?: number }) {
     get(input: VectorCacheKey): number[] | undefined {
       const entry = entries.get(keyOf(input));
       if (!entry) return undefined;
-      entry.touch = ++clock;
+      const key = keyOf(input);
+      entries.delete(key);
+      entries.set(key, entry);
       return entry.vector;
     },
     set(input: VectorCacheKey, vector: readonly number[]): void {
@@ -62,13 +61,60 @@ export function createVectorCache(options?: { maxBytes?: number }) {
       const bytes = vectorBytes(vector);
       const previous = entries.get(key);
       if (previous) usedBytes = Math.max(0, usedBytes - previous.bytes);
+      entries.delete(key);
       if (bytes > maxBytes) {
         entries.delete(key);
         return;
       }
       evict(bytes);
-      entries.set(key, { vector: [...vector], bytes, touch: ++clock });
+      entries.delete(key);
+      entries.set(key, { vector: [...vector], bytes });
       usedBytes += bytes;
+    },
+    claim(input: VectorCacheKey): {
+      owner: boolean;
+      promise: Promise<number[]>;
+      resolve(vector: readonly number[]): void;
+      reject(error: unknown): void;
+    } {
+      const key = keyOf(input);
+      const cached = entries.get(key);
+      if (cached) {
+        entries.delete(key);
+        entries.set(key, cached);
+        return {
+          owner: false,
+          promise: Promise.resolve(cached.vector),
+          resolve: () => undefined,
+          reject: () => undefined,
+        };
+      }
+      const existing = inFlight.get(key);
+      if (existing) return { owner: false, ...existing };
+      let resolvePromise!: (vector: number[]) => void;
+      let rejectPromise!: (error: unknown) => void;
+      const promise = new Promise<number[]>((resolve, reject) => {
+        resolvePromise = resolve;
+        rejectPromise = reject;
+      });
+      // A different batch can own this claim while its consumers are still
+      // preparing their own vectors. Keep rejection handled until they await it.
+      void promise.catch(() => undefined);
+      const created = {
+        promise,
+        resolve: (vector: readonly number[]) => {
+          if (inFlight.get(key) !== created) return;
+          inFlight.delete(key);
+          resolvePromise([...vector]);
+        },
+        reject: (error: unknown) => {
+          if (inFlight.get(key) !== created) return;
+          inFlight.delete(key);
+          rejectPromise(error);
+        },
+      };
+      inFlight.set(key, created);
+      return { owner: true, ...created };
     },
     clear(): void {
       entries.clear();

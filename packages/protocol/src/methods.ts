@@ -52,7 +52,13 @@ import type {
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
 import type { HarnessRespondParams } from "./harness.js";
-import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "./harness-inference.js";
+import type {
+  HarnessEmbedParams,
+  HarnessEmbedResult,
+  HarnessInferenceBindingSnapshot,
+  HarnessRerankParams,
+  HarnessRerankResult,
+} from "./harness-inference.js";
 import type { ModelSelection } from "./harness-settings.js";
 
 export interface HostMethodMap {
@@ -448,6 +454,16 @@ export interface HostMethodMap {
   "harness.rerank": {
     params: HarnessRerankParams;
     result: HarnessRerankResult;
+  };
+  /** Internal Application Host -> Pi workspace-worker inference authority. */
+  "harness.inference.describe": {
+    params: Record<string, never>;
+    result: HarnessInferenceBindingSnapshot;
+  };
+  /** Out-of-band cancellation for an internal embedding/rerank batch. */
+  "harness.inference.cancel": {
+    params: { batchId: string };
+    result: { cancelled: boolean };
   };
   "settings.get": {
     params: Record<string, never>;

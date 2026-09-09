@@ -81,6 +81,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "config.unwatch",
   "extension.ui.respond",
   "harness.respond",
+  "harness.inference.cancel",
   "provider.auth.respond",
   "project.trust.respond",
   "workspace.mutation.respond",
@@ -163,6 +164,7 @@ async function loadSessionEntries(
 
 export interface HostControllerOptions {
   agentDir?: string;
+  inferenceFetch?: typeof fetch;
   packageRoot?: string;
   projectTrustOverride?: boolean;
   runtimeSource?: RuntimeSourceKind;
@@ -282,6 +284,7 @@ function readEmbedParams(params: Record<string, unknown>): HarnessEmbedParams {
   }
   return {
     purpose,
+    configurationId: readString(params, "configurationId"),
     providerId: readString(params, "providerId"),
     modelId: readString(params, "modelId"),
     protocol: "openai-compatible",
@@ -310,7 +313,14 @@ function readRerankParams(params: Record<string, unknown>): HarnessRerankParams 
     };
   });
   const endpoint = optionalString(params, "endpoint");
+  const maxDocumentTokens = params.maxDocumentTokens === undefined
+    ? undefined
+    : Number(params.maxDocumentTokens);
+  if (maxDocumentTokens !== undefined && (!Number.isInteger(maxDocumentTokens) || maxDocumentTokens <= 0)) {
+    throw new HostError("invalid_params", "maxDocumentTokens must be a positive integer");
+  }
   return {
+    configurationId: readString(params, "configurationId"),
     providerId: readString(params, "providerId"),
     modelId: readString(params, "modelId"),
     protocol: "http-rerank",
@@ -318,6 +328,7 @@ function readRerankParams(params: Record<string, unknown>): HarnessRerankParams 
     documents,
     batchId: readString(params, "batchId"),
     ...(endpoint === undefined ? {} : { endpoint }),
+    ...(maxDocumentTokens === undefined ? {} : { maxDocumentTokens }),
   };
 }
 
@@ -433,6 +444,7 @@ export class HostController {
     this.#sessionHost = new SessionHost({
       agentDir: this.#agentDir,
       emit: (event, data) => this.emit(event, data),
+      ...(options.inferenceFetch ? { inferenceFetch: options.inferenceFetch } : {}),
       ...(options.projectTrustOverride === undefined
         ? {}
         : { projectTrustOverride: options.projectTrustOverride }),
@@ -456,6 +468,23 @@ export class HostController {
     this.#started = true;
     this.#transport.start(
       (envelope) => {
+        if (
+          envelope.kind === "request"
+          && (envelope.method === "harness.embed" || envelope.method === "harness.rerank")
+          && envelope.params
+          && typeof envelope.params === "object"
+          && !Array.isArray(envelope.params)
+          && typeof (envelope.params as unknown as Record<string, unknown>).batchId === "string"
+        ) {
+          try {
+            this.#sessionHost.reserveInference(
+              envelope.id,
+              (envelope.params as unknown as Record<string, unknown>).batchId as string,
+            );
+          } catch {
+            // The queued dispatcher remains authoritative for readiness and params.
+          }
+        }
         if (envelope.kind === "request" && OUT_OF_BAND_METHODS.has(envelope.method)) {
           void this.#handleEnvelope(envelope).catch((error) => this.#handleFatalError(error));
           return;
@@ -511,6 +540,7 @@ export class HostController {
         code: "worker_role_violation",
         message: `Pi ${this.#workerRole} worker cannot handle ${envelope.method}`,
       }));
+      this.#sessionHost.releaseInferenceReservation(envelope.id);
       return;
     }
     let shutdownAfterResponse = false;
@@ -526,6 +556,8 @@ export class HostController {
       shutdownAfterResponse = envelope.method === "host.shutdown";
     } catch (error) {
       this.#transport.send(createErrorResponse(envelope.id, toProtocolError(error)));
+    } finally {
+      this.#sessionHost.releaseInferenceReservation(envelope.id);
     }
     if (shutdownAfterResponse) await this.dispose();
   }
@@ -1050,9 +1082,13 @@ export class HostController {
       case "config.unwatch":
         return { unwatched: this.#sessionHost.unwatchConfig(readString(params, "watchId")) };
       case "harness.embed":
-        return this.#sessionHost.embed(readEmbedParams(params));
+        return this.#sessionHost.embed(readEmbedParams(params), request.id);
       case "harness.rerank":
-        return this.#sessionHost.rerank(readRerankParams(params));
+        return this.#sessionHost.rerank(readRerankParams(params), request.id);
+      case "harness.inference.describe":
+        return this.#sessionHost.describeInference();
+      case "harness.inference.cancel":
+        return { cancelled: this.#sessionHost.cancelInference(readString(params, "batchId")) };
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update": {

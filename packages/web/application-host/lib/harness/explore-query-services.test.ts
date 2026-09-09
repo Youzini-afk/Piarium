@@ -287,6 +287,9 @@ describe("explore query services", () => {
 
   it("calls the reranker only when model select did not already judge the views", async () => {
     const store = createExploreQueryStore();
+    let reserveMs = 0;
+    const start = store.start;
+    store.start = (request) => { reserveMs = request.reserveForJudgeMs ?? 0; return start(request); };
     const outputStore = createOutputStore();
     const rerankCalls: string[] = [];
     const host = {
@@ -300,7 +303,7 @@ describe("explore query services", () => {
         }),
       },
       readExploreFile: async () => ({ status: "ready" as const, content: "needle\n", revision: "rev-1", source: "disk" as const }),
-      harnessSettings: () => ({
+      harnessSettings: async () => ({
         global: {
           harness: { rerank: { protocol: "http-rerank", providerId: "rerank-provider", modelId: "rerank-1" } },
         },
@@ -324,6 +327,7 @@ describe("explore query services", () => {
     >;
     const finish = createExploreQueryFinishService(host);
     const started = await createExploreQueryStartService(host).handle({ question: "needle" }, context({ source: "disk" }));
+    expect(reserveMs).toBeGreaterThan(0);
     await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, context({ source: "disk" }));
     const selected = await finish.handle({
       queryId: started.queryId,
@@ -334,13 +338,39 @@ describe("explore query services", () => {
 
     const ranking = await createExploreQueryStartService(host).handle({ question: "needle again" }, context({ source: "disk" }));
     await createExploreQueryViewsService(host).handle({ queryId: ranking.queryId }, context({ source: "disk" }));
-    const ranked = await finish.handle({
+    const finishRequest = {
+      queryId: ranking.queryId,
+      model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" } as const,
+    };
+    const [ranked, concurrent] = await Promise.all([
+      finish.handle(finishRequest, context({ source: "disk" })),
+      finish.handle(finishRequest, context({ source: "disk" })),
+    ]);
+    expect(concurrent.text).toBe(ranked.text);
+    expect(rerankCalls).toEqual(["needle again"]);
+    expect(ranked.details.model?.rerank).toBe("used");
+    expect(ranked.details.rerank?.status).toBe("used");
+    const repeated = await finish.handle({
       queryId: ranking.queryId,
       model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" },
     }, context({ source: "disk" }));
     expect(rerankCalls).toEqual(["needle again"]);
-    expect(ranked.details.model?.rerank).toBe("used");
-    expect(ranked.details.rerank?.status).toBe("used");
+    expect(repeated.text).toBe(ranked.text);
+
+    host.harnessSettings = () => ({
+      global: { harness: { rerank: { protocol: "http-rerank", providerId: "missing-model" } } },
+      globalRevision: "2", project: {}, projectRevision: "1", projectTrusted: true,
+    }) as never;
+    const malformed = await createExploreQueryStartService(host).handle({ question: "still readable" }, context({ source: "disk" }));
+    await createExploreQueryViewsService(host).handle({ queryId: malformed.queryId }, context({ source: "disk" }));
+    const fallback = await finish.handle({
+      queryId: malformed.queryId,
+      model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" },
+    }, context({ source: "disk" }));
+    expect(fallback.text).toContain("needle");
+    expect(fallback.details.model?.rerank).toBe("failed");
+    expect(fallback.details.rerank?.status).toBe("failed");
+    expect(rerankCalls).toEqual(["needle again"]);
     store.dispose();
   });
 });

@@ -158,7 +158,10 @@ import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   HarnessSettingsValidationError,
+  HarnessInferenceSettingsValidationError,
   mergeHarnessSettings,
+  parseHarnessEmbeddingSettings,
+  parseHarnessRerankSettings,
   parseMemoryEditOps,
   resolveHarnessMemoryMode,
   resolveRoles,
@@ -2221,19 +2224,34 @@ export class SessionHost {
         cwd,
         modelRuntime: this.runtime.services.modelRuntime,
         ...(this.#inferenceFetch ? { fetchImpl: this.#inferenceFetch } : {}),
-        ...(this.#projectTrustOverride === undefined ? {} : { projectTrustOverride: this.#projectTrustOverride }),
       });
       this.#inferenceCwd = cwd;
     }
     return this.#backgroundInference;
   }
 
-  async embed(params: HarnessEmbedParams): Promise<HarnessEmbedResult> {
-    return this.#inferenceRuntime().embed(params);
+  async embed(params: HarnessEmbedParams, requestId?: string): Promise<HarnessEmbedResult> {
+    return this.#inferenceRuntime().embed(params, requestId);
   }
 
-  async rerank(params: HarnessRerankParams): Promise<HarnessRerankResult> {
-    return this.#inferenceRuntime().rerank(params);
+  async rerank(params: HarnessRerankParams, requestId?: string): Promise<HarnessRerankResult> {
+    return this.#inferenceRuntime().rerank(params, requestId);
+  }
+
+  async describeInference() {
+    return this.#inferenceRuntime().describe();
+  }
+
+  cancelInference(batchId: string): boolean {
+    return this.#inferenceRuntime().cancel(batchId);
+  }
+
+  reserveInference(requestId: string, batchId: string): boolean {
+    return this.#inferenceRuntime().reserve(requestId, batchId);
+  }
+
+  releaseInferenceReservation(requestId: string): void {
+    this.#backgroundInference?.releaseReservation(requestId);
   }
 
   async getSettings(): Promise<PiSettingsSnapshot> {
@@ -2614,11 +2632,19 @@ export class SessionHost {
         const memory = typeof harness === "object" && harness !== null && !Array.isArray(harness)
           ? (harness as Record<string, unknown>).memory
           : undefined;
+        const harnessRecord = typeof harness === "object" && harness !== null && !Array.isArray(harness)
+          ? harness as Record<string, unknown>
+          : {};
+        parseHarnessEmbeddingSettings(harnessRecord.embedding);
+        parseHarnessRerankSettings(harnessRecord.rerank);
         const candidateMemoryMode = resolveHarnessMemoryMode(memory);
         globalMemorySettingChanged = currentMemoryMode === undefined
           || currentMemoryMode !== candidateMemoryMode;
       } catch (error) {
-        if (error instanceof HarnessSettingsValidationError) {
+        if (
+          error instanceof HarnessSettingsValidationError
+          || error instanceof HarnessInferenceSettingsValidationError
+        ) {
           throw new HostError("invalid_settings", error.message);
         }
         throw error;
@@ -3429,6 +3455,9 @@ export class SessionHost {
   }
 
   async #disposeRuntime(): Promise<void> {
+    this.#backgroundInference?.dispose();
+    this.#backgroundInference = undefined;
+    this.#inferenceCwd = undefined;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     this.ui.cancelAll();

@@ -128,7 +128,18 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
       }],
     });
     expect(masked.hits.some((hit) => hit.body.includes("old pineapple"))).toBe(false);
-    expect(masked.hits.some((hit) => hit.documentId === "draft.ts")).toBe(true);
+    expect(masked.hits.some((hit) => hit.documentId === "draft.ts")).toBe(false);
+    expect(masked.gaps).toContainEqual({ path: "draft.ts", reason: "draft-vector-pending" });
+    await runtime.drain();
+    const readyDraft = await runtime.search(scope, "new coconut", 4, {
+      overlays: [{
+        path: "draft.ts",
+        content: "export const freshDraft = \"new coconut\";\n",
+        revision: "surface-draft:1",
+        origin: "surface-draft",
+      }],
+    });
+    expect(readyDraft.hits.some((hit) => hit.body.includes("new coconut"))).toBe(true);
 
     const view = await pinSemanticQueryView({
       inputContext: {
@@ -208,13 +219,45 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     const hits = await store.search(hashEmbed("newer coconut", 384), 4);
     expect(hits[0]?.revision).toBe("r2");
     expect(hits.some((hit) => hit.body.includes("older pineapple"))).toBe(false);
+    await store.removeDocument("src/a.ts", 1);
+    expect((await store.search(hashEmbed("newer coconut", 384), 4))[0]?.revision).toBe("r2");
+  });
+
+  it("does not let an embedding already in flight resurrect a later deletion", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-delete-race-"));
+    dirs.push(dataDir);
+    const base = createHashEmbedder();
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const delayed = {
+      ...base,
+      embed: async (texts: readonly string[]) => {
+        entered();
+        await new Promise<void>((resolve) => { release = resolve; });
+        return base.embed(texts);
+      },
+    };
+    const store = createSemanticGenerationStore({
+      dataDir, hostId: "host", scope: workspaceScope("ws-delete-race"), embedder: delayed,
+    });
+    disposes.push(() => store.close());
+    const oldPublish = store.publishDocument({
+      documentId: "src/a.ts", revision: "r1", chunks: [chunk("src/a.ts", "old body")], publishToken: 1,
+    });
+    await started;
+    await store.removeDocument("src/a.ts", 2);
+    release();
+    await oldPublish;
+    expect(await store.listDocumentIds()).toEqual([]);
   });
 
   it("uses the remote space for both publish and query and does not mix local vectors", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "piarium-remote-space-"));
     dirs.push(dataDir);
+    const configurationId = "remote-config-1";
     const remote = createRemoteEmbedder({
-      binding: { protocol: "openai-compatible", providerId: "openai", modelId: "text-embedding-3-small", dimensions: 2 },
+      binding: { protocol: "openai-compatible", providerId: "openai", modelId: "text-embedding-3-small", dimensions: 2, configurationId },
       client: {
         embed: async (params) => ({
           batchId: params.batchId,
@@ -222,12 +265,14 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
             providerId: "openai",
             modelId: "text-embedding-3-small",
             protocol: "openai-compatible",
+            configurationId,
             dim: 2,
             maxTokens: 8192,
             spaceId: remoteEmbeddingSpaceId({
               protocol: "openai-compatible",
               providerId: "openai",
               modelId: "text-embedding-3-small",
+              configurationId,
               maxTokens: 8192,
               dimensions: 2,
             }),
@@ -260,6 +305,36 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     expect(remote.space.maxTokens).toBe(8192);
   });
 
+  it("freezes an automatically resolved remote dimension before an opened store can drift", async () => {
+    const configurationId = "dimension-config";
+    let call = 0;
+    const remote = createRemoteEmbedder({
+      binding: { protocol: "openai-compatible", providerId: "p", modelId: "m", configurationId },
+      client: {
+        embed: async (params) => {
+          call += 1;
+          const dim = call === 1 ? 2 : 3;
+          return {
+            batchId: params.batchId,
+            space: {
+              providerId: "p", modelId: "m", protocol: "openai-compatible", configurationId,
+              dim, maxTokens: 8192,
+              spaceId: remoteEmbeddingSpaceId({
+                protocol: "openai-compatible", providerId: "p", modelId: "m", configurationId,
+                maxTokens: 8192, dimensions: dim,
+              }),
+            },
+            items: params.items.map((item, index) => ({ id: item.id, index, vector: new Array(dim).fill(1) })),
+          };
+        },
+      },
+    });
+    await remote.embed(["first"], { purpose: "query" });
+    const frozenSpace = { dim: remote.space.dim, spaceId: remote.space.spaceId };
+    await expect(remote.embed(["second"], { purpose: "query" })).rejects.toThrow(/dimension changed/);
+    expect({ dim: remote.space.dim, spaceId: remote.space.spaceId }).toEqual(frozenSpace);
+  });
+
   it("does not fall back to the local MiniLM space when a remote binding is configured", () => {
     const local = createHashEmbedder();
     const backend = createSemanticBackend({ local });
@@ -267,6 +342,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
       protocol: "openai-compatible",
       providerId: "openai",
       modelId: "text-embedding-3-small",
+      configurationId: "unavailable-config",
     });
     expect(backend.kind).toBe("remote");
     expect(embedder.status).toBe("unavailable");

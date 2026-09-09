@@ -4,6 +4,7 @@
  */
 
 import {
+  HarnessInferenceSettingsValidationError,
   parseHarnessRerankSettings,
   type ExploreQueryView,
   type ExploreRerankDetails,
@@ -16,7 +17,10 @@ import type { ExploreModelParticipation } from "@piarium/protocol";
 
 export function rerankSettingsFromSnapshot(snapshot: PiSettingsSnapshot | null | undefined): HarnessRerankSettings | undefined {
   const harness = snapshot?.global?.harness;
-  if (!harness || typeof harness !== "object" || Array.isArray(harness)) return undefined;
+  if (harness === undefined) return undefined;
+  if (!harness || typeof harness !== "object" || Array.isArray(harness)) {
+    throw new HarnessInferenceSettingsValidationError("harness must be an object");
+  }
   return parseHarnessRerankSettings((harness as { rerank?: unknown }).rerank);
 }
 
@@ -31,26 +35,7 @@ export function shrinkViewForRerank(
   countTokens: (text: string) => number,
 ): ExploreQueryView {
   if (countTokens(view.text) <= maxTokens) return view;
-  const lines = view.text.split(/\r\n|\n|\r/);
-  let end = lines.length;
-  while (end > 1 && countTokens(lines.slice(0, end).join("\n")) > maxTokens) end -= 1;
-  let text = lines.slice(0, end).join("\n");
-  if (countTokens(text) > maxTokens) {
-    let low = 1;
-    let high = text.length;
-    while (low < high) {
-      const middle = Math.ceil((low + high) / 2);
-      if (countTokens(text.slice(0, middle)) <= maxTokens) low = middle;
-      else high = middle - 1;
-    }
-    text = text.slice(0, Math.max(1, low));
-    end = 1;
-  }
-  return {
-    ...view,
-    endLine: view.startLine + end - 1,
-    text,
-  };
+  throw new RangeError("Rerank view exceeds the configured document budget");
 }
 
 export function documentsFromViews(
@@ -62,9 +47,9 @@ export function documentsFromViews(
   const evaluated: ExploreQueryView[] = [];
   for (const view of views) {
     if (view.unevaluated) continue;
-    const prepared = maxTokens ? shrinkViewForRerank(view, maxTokens, countTokens) : view;
-    documents.push({ id: view.viewId, text: prepared.text, revision: prepared.revision });
-    evaluated.push(prepared);
+    if (maxTokens !== undefined && countTokens(view.text) > maxTokens) continue;
+    documents.push({ id: view.viewId, text: view.text, revision: view.revision });
+    evaluated.push(view);
   }
   return { documents, evaluated };
 }

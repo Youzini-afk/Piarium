@@ -698,6 +698,10 @@ index.lifecycle 与查询结果状态独立，部分索引可查，查询空结�
 捕获正文不等待嵌入完成；按内容哈希在后台计算对应向量，同路径旧磁盘块立即从该视图遮蔽。覆盖层尚未就绪时报告该路径的
 语义缺口，词法与读取仍可使用已捕获原文。向量计算可共享，路径/分支归属不能混用；隔离线程不读入 live 父目录后来出现的内容。
 
+当前物化线程直接使用自己的 Documents workspace，不遍历父 WorkingState 对象表作为语义语料。增量写入沿冷扫的文件筛选；
+`copyIgnored` 是执行与结果捕获配置，不自动将文件纳入语义索引。已捕获草稿的建设任务由 workspace runtime 持有，重复正文合并；
+查询结束只结束该查询的等待，后台建设继续，runtime 关闭时取消。待建草稿先报告 gap，后续查询使用已完成向量（D-195）。
+
 **输出与验证。** 来源结果沿已有 not-requested / ready / empty / unavailable / failed / stale 等状态，超时/取消分别表达；
 输出以原文、引用和影响下一步的缺口为主。OutputStore 是经鉴权的会话局部临时存储，保存实际打包材料和未展示候选引用；
 不暗示所有未读文件正文都已在其中。只有能证明同一 revision 的相关 span 仍在主模型实际输入中时才可用指针省略正文，未知就返回原文。
@@ -1150,11 +1154,11 @@ Handoff（把当前会话提炼为一条草稿 prompt 开新分支，Amp 的做�
 OpenAI-compatible `/embeddings` 协议；rerank 使用可配置的 HTTP `/rerank` 契约，不把 chat completion 或 embeddings 协议改名为
 rerank。不把未选定的本地交叉编码器写成现成默认。
 
-远程绑定复用 Pi provider 的 baseUrl 与凭据权威。用户与受信项目的 provider 层沿 `ProviderConfigurationManager` 解析，凭据仍留在
-Pi `AuthStorage` / `ModelRuntime` 所属进程，不通过协议交给 Host 或 renderer。后台调用走 workspace worker 上与聊天寿命独立的
-`BackgroundInferenceRuntime`，复用同一份 ModelRuntime/auth.json，不借“第一个活动聊天会话”，也不复制第二份密钥。Host 只提交
-已授权正文、查询、用途和模型绑定并接收向量/分数。关闭最后一条聊天不终止范围索引；Host 或 Pi runtime 重启后从现有 settings 与
-auth.json 恢复。provider/model/maxTokens/配置维度改变建立新 space/generation；仅凭据轮换不重嵌。新空间已发布部分可按
+远程绑定复用 Pi provider 的请求形状与用户凭据权威。后台 provider 定义只解析 user/operator 层，明确排除受信项目层；凭据仍留在
+Pi `AuthStorage` 所属进程，不通过协议交给 Host 或 renderer。workspace worker 内的 `BackgroundInferenceRuntime` 使用隔离的配置
+ModelRuntime，并仅从会话 runtime 读取同一用户的进程内 auth overlay；不借“第一个活动聊天会话”。Host 只提交已授权正文、查询、
+用途和冻结 binding 并接收向量/分数。关闭最后一条聊天不终止范围索引；Host 或 Pi runtime 重启后从现有 settings 与 auth.json
+恢复。provider/model/maxTokens/最终维度或去凭据 endpoint/API identity 改变建立新 space/generation；仅凭据轮换不重嵌。新空间已发布部分可按
 partial 查询，不混入旧空间。
 
 本地模型包包含权重、tokenizer、配置、pooling/归一化和运行配方，发行准备与 asar 路径沿已有打包流水线。Host 管理本地实例，

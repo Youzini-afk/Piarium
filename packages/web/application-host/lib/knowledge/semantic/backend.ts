@@ -5,8 +5,10 @@
  */
 
 import {
+  HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
   type HarnessEmbeddingSettings,
+  type HarnessResolvedEmbeddingBinding,
   type PiSettingsSnapshot,
 } from "@piarium/protocol";
 import type { SemanticEmbedder } from "./embedder.js";
@@ -14,13 +16,16 @@ import { createRemoteEmbedder, type RemoteEmbedClient } from "./remote-embedder.
 
 export type SemanticBackendKind = "local" | "remote";
 
-const bindingKey = (binding: HarnessEmbeddingSettings): string => (
-  `${binding.protocol}:${binding.providerId}:${binding.modelId}:${binding.dimensions ?? ""}:${binding.maxTokens ?? ""}`
+const bindingKey = (binding: HarnessResolvedEmbeddingBinding): string => (
+  `${binding.protocol}:${binding.providerId}:${binding.modelId}:${binding.configurationId}:${binding.dimensions ?? ""}:${binding.maxTokens ?? ""}`
 );
 
 export function embeddingSettingsFromSnapshot(snapshot: PiSettingsSnapshot | null | undefined): HarnessEmbeddingSettings | undefined {
   const harness = snapshot?.global?.harness;
-  if (!harness || typeof harness !== "object" || Array.isArray(harness)) return undefined;
+  if (harness === undefined) return undefined;
+  if (!harness || typeof harness !== "object" || Array.isArray(harness)) {
+    throw new HarnessInferenceSettingsValidationError("harness must be an object");
+  }
   return parseHarnessEmbeddingSettings((harness as { embedding?: unknown }).embedding);
 }
 
@@ -33,7 +38,7 @@ export function createSemanticBackend(options: {
   let currentKey = "local";
   let lastError: unknown;
 
-  const bind = (settings: HarnessEmbeddingSettings | undefined): SemanticEmbedder => {
+  const bind = (settings: HarnessResolvedEmbeddingBinding | undefined): SemanticEmbedder => {
     lastError = undefined;
     if (!settings) {
       kind = "local";
@@ -59,11 +64,20 @@ export function createSemanticBackend(options: {
     return current;
   };
 
+  const unavailable = (error: unknown): SemanticEmbedder => {
+    lastError = error;
+    kind = "remote";
+    currentKey = "invalid";
+    current = { ...options.local, status: "unavailable" };
+    return current;
+  };
+
   return {
     get kind() { return kind; },
     get embedder() { return current; },
     get lastError() { return lastError; },
     bind,
+    unavailable,
     local: options.local,
   };
 }

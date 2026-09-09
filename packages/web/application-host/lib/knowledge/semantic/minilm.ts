@@ -78,6 +78,7 @@ export function createLocalMinilmEmbedder(options: {
   const status: SemanticEmbedderStatus = pack?.onnxPath ? "ready" : "unavailable";
   let encode: ((text: string) => number) | null = null;
   let prepared = false;
+  let preparePromise: Promise<void> | null = null;
   let extractor: ((texts: readonly string[]) => Promise<number[][]>) | null = null;
 
   const threadCount = (): number => intraOpThreads(options.parallelism ?? os.availableParallelism());
@@ -93,56 +94,64 @@ export function createLocalMinilmEmbedder(options: {
     space,
     prepare: async () => {
       if (prepared) return;
-      if (!pack?.root) {
-        prepared = true;
-        return;
-      }
-      const mod = await loadTransformers();
-      const threads = configureThreads(mod);
-      // transformers.js resolves a local pack as `${env.localModelPath}/${id}`
-      // and looks for `onnx/<file>` inside it. A file:// URL as the id makes it
-      // read `tokenizer_config.json` off the wrong base (D-172).
-      mod.env.allowRemoteModels = false;
-      mod.env.localModelPath = dirname(pack.root);
-      const source = basename(pack.root);
-      if (pack.tokenizerPath) {
-        const tokenizer = await mod.AutoTokenizer.from_pretrained(source, { local_files_only: true });
-        encode = (text) => {
-          const ids = tokenizer.encode(text);
-          return encodedLength(ids as Encoded);
-        };
-      }
-      if (pack.onnxPath) {
-        // `dtype` picks the weight filename: q8 resolves `onnx/model_quantized.onnx`,
-        // which is the file the pack recipe names (D-172).
-        const pipe = await mod.pipeline("feature-extraction", source, {
-          local_files_only: true,
-          dtype: "q8",
-          session_options: {
-            intraOpNumThreads: threads,
-            interOpNumThreads: 1,
-            intra_op_num_threads: threads,
-            inter_op_num_threads: 1,
-          },
-        });
-        extractor = async (texts) => {
-          const vectors: number[][] = [];
-          for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
-            const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
-            const output = await pipe(batch, { pooling: space.pooling, normalize: space.normalize });
-            const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
-              ? (output as { tolist: () => number[] | number[][] }).tolist()
-              : output as number[][];
-            const rows = Array.isArray(listed[0]) ? listed as number[][] : [listed as number[]];
-            if (rows.length !== batch.length || rows.some((row) => row.length !== space.dim)) {
-              throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${space.dim} dimensions.`);
+      if (preparePromise) return preparePromise;
+      preparePromise = (async () => {
+        if (!pack?.root) {
+          prepared = true;
+          return;
+        }
+        const mod = await loadTransformers();
+        const threads = configureThreads(mod);
+        // transformers.js resolves a local pack as `${env.localModelPath}/${id}`
+        // and looks for `onnx/<file>` inside it. A file:// URL as the id makes it
+        // read `tokenizer_config.json` off the wrong base (D-172).
+        mod.env.allowRemoteModels = false;
+        mod.env.localModelPath = dirname(pack.root);
+        const source = basename(pack.root);
+        if (pack.tokenizerPath) {
+          const tokenizer = await mod.AutoTokenizer.from_pretrained(source, { local_files_only: true });
+          encode = (text) => {
+            const ids = tokenizer.encode(text);
+            return encodedLength(ids as Encoded);
+          };
+        }
+        if (pack.onnxPath) {
+          // `dtype` picks the weight filename: q8 resolves `onnx/model_quantized.onnx`,
+          // which is the file the pack recipe names (D-172).
+          const pipe = await mod.pipeline("feature-extraction", source, {
+            local_files_only: true,
+            dtype: "q8",
+            session_options: {
+              intraOpNumThreads: threads,
+              interOpNumThreads: 1,
+              intra_op_num_threads: threads,
+              inter_op_num_threads: 1,
+            },
+          });
+          extractor = async (texts) => {
+            const vectors: number[][] = [];
+            for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
+              const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
+              const output = await pipe(batch, { pooling: space.pooling, normalize: space.normalize });
+              const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
+                ? (output as { tolist: () => number[] | number[][] }).tolist()
+                : output as number[][];
+              const rows = Array.isArray(listed[0]) ? listed as number[][] : [listed as number[]];
+              if (rows.length !== batch.length || rows.some((row) => row.length !== space.dim)) {
+                throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${space.dim} dimensions.`);
+              }
+              vectors.push(...rows);
             }
-            vectors.push(...rows);
-          }
-          return vectors;
-        };
+            return vectors;
+          };
+        }
+        prepared = true;
+      })();
+      try { await preparePromise; }
+      catch (error) {
+        preparePromise = null;
+        throw error;
       }
-      prepared = true;
     },
     countTokens: (text) => {
       if (encode) return encode(text);

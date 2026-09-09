@@ -34,6 +34,8 @@ export type VectorSpaceIdentity = {
   pooling: "mean" | "cls";
   normalize: boolean;
   maxTokens: number;
+  /** Credential-free resolved provider/model configuration identity. */
+  configurationId?: string;
   /** When set (remote bindings), this is the published space id. */
   spaceId?: string;
 };
@@ -70,6 +72,7 @@ const digest = (value: string): string => createHash("sha256").update(value).dig
 
 export const spaceIdOf = (space: VectorSpaceIdentity): string => (
   space.spaceId ?? digest(JSON.stringify([
+    ...(space.configurationId ? [space.configurationId] : []),
     space.provider,
     space.model,
     space.modelRevision,
@@ -85,7 +88,8 @@ export const remoteEmbeddingSpaceId = (input: {
   providerId: string;
   modelId: string;
   maxTokens: number;
-  dimensions?: number;
+  dimensions: number;
+  configurationId: string;
 }): string => digest(JSON.stringify(remoteEmbeddingSpaceParts(input)));
 
 export const embedTextKey = (embedText: string): string => (

@@ -3966,6 +3966,43 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-194 · 2026-09-10 · 3.16B–E 身份、配置权威、当前性与取消边界纠正
+
+背景：D-190–D-193 的首轮接线把多个 workspace 共用的 Host 可变绑定、受项目 provider 覆盖污染的 ModelRuntime、可被公开 surface 调用的内部方法、无远端取消的 Promise 等待，以及 provisional `auto` 维度空间误当成已解析身份。扫描和 rerank 还存在旧 revision/旧终态继续产生副作用的竞态。
+
+决定：
+
+1. Application Host 以 workspaceId 保存 cwd、原始 Settings 快照、Pi 解析后的 binding、backend 与 semantic runtime；跨 workspace 仅共享本地 MiniLM、调度器和按完整 space 身份复用的数值向量。每次扫描/查询固定本轮 embedder。活跃 isolated child 直接查询其物化 cwd 的 Documents workspace，不把父 WorkingState `baseState + deltas` 当语义全文，也不把 `copyIgnored` 输入外发。
+2. Pi 后台推理使用隔离的 user/operator-only provider runtime；项目 `.pi/models.json` 仍可影响普通聊天，但不能重定向 embedding/rerank 去取得用户 AuthStorage 凭据。Pi 只向 Host 暴露 credential-free `configurationId`。空间身份包含实际采用的去凭据 URL/API、provider/model、切块上限与最终实际维度；自动维度在首个真实输入解析前不打开持久库，凭据轮换不换空间。
+3. embedding/rerank parser 仅把字段缺失视为未配置；错误协议、必填项、数值或 endpoint 是 invalid。Settings mutation 在写盘前拒绝 invalid，历史畸形可选项不阻断普通会话与修复入口。UI 保存保留未显示的 dimensions/maxTokens/maxDocumentTokens；只有明确清空 provider 才删除，provider 已选但 model 不完整不解释成删除。
+4. `harness.embed`、`harness.rerank`、binding describe 与 inference cancel 是 Application Host→Broker→Pi Host 的内部 HostMethod，不在 renderer/web/mobile RuntimeMethodMap/dispatcher。每个批次使用唯一 ID；Host abort 后立即停止等待并丢弃迟到响应，同时发送显式 cancel，Pi 的 batch AbortController 中止尚未开始的工作或实际 fetch。Host/Pi 双侧核对完整冻结绑定、批次及返回身份。
+5. 扫描开始即建立 scope 当前性 gate；旧 checkpoint 在本轮核对前不参与。当前 revision 的 unchanged/published 文档才解除 mask；读失败保留具体 gap 与 partial/incomplete，删除与 mutation token 保证后发变更胜出。设置/provider identity 改变会取消旧扫描并启动该 workspace 新空间扫描，旧空间不混入。
+6. rerank 只评分身份与正文完全一致的 view；超预算 view 不截断冒充原 view。finish 已终态先返回冻结结果，malformed/失败/取消只降级 rerank，来源结果保留。来源截止与总查询/取消信号分开，partial 合法分数只重排实际评分项。
+
+验证：protocol missing/invalid 与 public RuntimeMethod 排除；Pi 后台项目 provider 重定向、binding 竞态、endpoint/credential space、显式 cancel 到 faux fetch；Host 双 workspace 交错 transport、自动维度漂移、in-flight 删除、overlay pending、rerank exact view/终态/malformed；UI 隐藏字段 round-trip。真实 provider 质量/费用、完整冷扫墙钟与活跃 child 修改后的整条公开 production-chain 仍未观察，不由手工 consumer 测试代替。
+
+影响：protocol harness inference/settings/runtime；pi-host background inference/Host dispatch；runtime-broker catalog/internal dispatch；Application Host workspace semantic wiring/runtime/store/cache/query view；explore rerank/finish；Harness Settings UI；plan/status 3.16B–E。
+
+状态：身份、配置、取消、当前性与重排边界已实施；真实 provider 与活跃 child 的完整公开纵切仍待观察。
+
+### D-195 · 2026-09-10 · 异步索引发布、文件筛选与查询终结收口
+
+背景：D-194 返工后的关键验收发现，旧发布完成仍可能解除新修改的 mask；扫描删除 token 取得过晚；自动维度在空目录重启后未对账旧库；增量 mutation 没有复用冷扫筛选；收包预登记在畸形请求失败后残留。草稿建设若与查询来源窗口同寿命，快速查询会反复取消它。
+
+决定：
+
+1. 扫描在目录枚举前取得修订 token，逐路径与之后的 mutation 比较；发布与删除完成后再次校验 token，只有当前任务能解除遮蔽。读失败保留 gap/incomplete，成功重扫可恢复。自动维度的空目录扫描不发探针请求，首个真实查询解析维度后对账旧持久库，旧内容不能复活。每次查询与扫描使用已选择的 embedder。
+2. 增量 mutation 在读正文前执行与冷扫一致的目录、隐藏文件与 Git 跟踪/忽略筛选。单路径检查不枚举全仓；Git 无法回答不视作允许。非 Git 普通文件沿已有文件范围处理。`copyIgnored` 不自动扩大语义语料；草稿也在固定 roots 内才参与向量建设。
+3. 同空间、用途与正文的在飞向量任务可复用。草稿正文在查询中捕获后移交 workspace runtime 的后台索引任务，正常查询结束不会取消建设，runtime 关闭会取消；查询自身的推理与等待仍可取消。只复用数值向量，路径、分支与草稿修订各自保留。
+4. Host 首次 workspace 初始化在解析 binding 前不对并发调用者暴露默认 backend；刷新按 workspace 串行，读失败与未配置分列。workspace worker 退出后废弃旧 watch，在下次使用时重新绑定、订阅并恢复扫描。仅配置 reranker 时，首条查询也等到配置解析后保留判断时间；异步准备算在原查询截止内。
+5. Pi reservation 按已收 requestId 管理 batch 所有权，所有终结路径释放；重复 batch 不抢占首请求，未知取消不创建记录。并发与重复 explore finish 共用一次 rerank 和冻结结果。字符长度只是远程输入估算，不能称为 tokenizer 上界。
+
+验证：`semantic/runtime.test.ts` 的发布/目录/失败/重启/固定 backend/草稿生命周期反例；真实 Git 文件筛选；HostController + MemoryHostTransport 的排队取消、重复 batch 和失败后复用；workspace inference 配置状态测试；finish 异步设置与并发幂等。真实外部 provider、完整桌面多工作区与活跃 child 公开纵切仍按 status 的未观察项记录。
+
+影响：semantic runtime/store/cache、fs search、Application Host 装配、Pi inference dispatch、explore query services/store、plan/status 3.16B–E。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4160,7 +4197,9 @@ ModelRuntime 纵切继续通过。
 | D-187 | implementation（scope 贯穿、真实来源状态、取消/迟到工作、排名与 required 组独立验收收口） | — | query/bridge/router；explore；semantic runtime；protocol；plan/status 3.15 |
 | D-188 | implementation（start 即后台物化；计划/补查复用单 pump；判断预留成为真实来源截止） | — | explore query pump/store；plan/status 3.15 |
 | D-189 | implementation（图/语义召回在固定 roots 内计算 Top-K；`.` 保留未受限快路径；scope 候选缓存按文档增量维护） | — | 设计 6.1；graph/vector recall；plan/status 3.15 |
-| D-190 | implementation（embedding/rerank 为用户所有配置种类；OpenAI 兼容 embeddings；workspace worker 后台绑定；空间身份不含凭据） | — | 设计 8.5；plan/status 3.16B；architecture 4.4 |
-| D-191 | implementation（embedText 复用、续切、前台优先、Node ORT session 线程、partial 等首发、软预算缓存） | — | 设计 6.1；plan/status 3.16C |
-| D-192 | implementation（固定草稿立即遮蔽磁盘向量；线程 baseline+delta；缺向量≠缺正文） | — | 设计 6.1；plan/status 3.16D |
-| D-193 | implementation（HTTP rerank 契约；与 models.explore select 互斥；失败保留来源排名） | — | 设计 6.1/8.5；plan/status 3.16E |
+| D-190 | superseded in part（用户所有配置与无凭据 Host 保持；provider 权威、完整 binding/space identity、internal cancel 由 D-194 收口） | D-194 | 设计 8.5；plan/status 3.16B；architecture 4.4 |
+| D-191 | superseded in part（embedText 复用/调度保持；扫描 currentness、删除竞态、final dim space 由 D-194 收口） | D-194 | 设计 6.1；plan/status 3.16C |
+| D-192 | superseded in part（草稿立即遮蔽保持；活跃 child 改用自身 Documents workspace，不再遍历父 WorkingState 全表） | D-194 | 设计 6.1；plan/status 3.16D |
+| D-193 | superseded in part（专用 HTTP/互斥/来源降级保持；exact view、终态幂等、独立取消与冻结 binding 由 D-194 收口） | D-194 | 设计 6.1/8.5；plan/status 3.16E |
+| D-194 | implementation（workspace-keyed inference；user/operator provider authority；final space/currentness/internal cancel；active-child Documents scope；exact rerank） | — | plan/status 3.16B–E；architecture 4.4 |
+| D-195 | implementation（异步发布 token、增量文件筛选、空目录重启对账、草稿后台建设、初始化/取消/finish 生命周期） | — | plan/status 3.16B–E；设计 6.1 |

@@ -96,10 +96,10 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；显式审阅/写入已接，Settings 全量知识管理仍待 2.7 |
 | **3.1** 符号图采集器与查询 | host knowledge | ✓ | ✓（defines + imports/connects/associates；explore 路径候选 + 摘录注解 + `related`） | `knowledge/store.test.ts`（节点/边、代际、match 分档、反向 import 查询期解析、`.js`→`.ts` 孪生、非相对未解析）；`import-resolve.test.ts`；`symbol-runtime.test.ts`；`catalog-scan.test.ts` | ✓（随 Documents mutation + 打开后火忘冷扫描） | 未知语言只 touch file；LSP/结构 unavailable 保留最后图，ready 空结果才清空；范围只从磁盘正文采集并逐文件记 document revision，脏缓冲不入图（D-087）。读路径只用已打开的 store | 冷扫描是火忘，不挡启动（D-107）；`references`/解析后 `calls` 仍未接（D-059）。目录只覆盖带 `importQuery` 的语言（TS/TSX/JS/JSX，D-115）。查询走 TriviumDB 0.8.6 原生索引（`indexedLookup` / n-gram `substringLookup`），八张 JS 内存表与打开时的全节点遍历已删，留三个懒计数器和一个写入即丢的形状缓存（D-141，取代 D-134 的行缓存与 D-139 的反向索引存放方式；反向 import 解析规则不变）。短词（<3 字符）只精确匹配。旧行的 `documentRevision` 可为 `null`。**建目录的成本是 3.12 的前置条件，已从不可用降到可用但仍未在真实桌面路径上验证**（D-140）：枚举原先每目录 spawn `git check-ignore`（本仓库 4363 次，投影 74 s，曾观测挂 11+ 分钟），现在一次 `git ls-files` 199 ms；建目录原先每文件 flush 整库，2358 文件 18.4 分钟，现在派生写入按安静期去抖、4.8 分钟。剩余三成是同名闸门再访重新解析 1785 个文件——解析缓存只有 32 条，D-109 正文「这一遍便宜」在这个规模上不成立，未修 |
 | **3.15** 快速 explore：查询上下文、分组计划、成组选段与局部补查（D-175–D-189） | protocol / host / pi-host | ✓ | ✓ | `explore-query-run.test.ts`（start 到达即读、原问题词法与慢语义并行、同文件晚到语义重建、稳定 viewId、required 组、单元来源排名、来源终态与冻结）；`explore-query-services.test.ts`（固定来源、完整 actor、受限 scope、取消与响应未送达、fixed roots 传递）；`router.test.ts` / `service-host.test.ts`（授权 cancel、request actor key、session 换代清理）；`semantic/runtime.test.ts`（查询取消停止等待）；`explore-model.test.ts` / `explore-tool.test.ts` / `host-services-bridge.test.ts`（模型输入、Host accepted、补查失败保留首选、timeout/dispose 实传 cancel）；`session-e2e.test.ts`「runs plan expressions through ModelRuntime…」（公开 `explore` → `completeSimple` → 新表达搜索 → 最终原文）；`knowledge/store.test.ts` / `knowledge/semantic/store.test.ts`（scope 内 Top-K、`.` 快路径、文档更新删除） | ✓（公开 `explore` 默认；配置 `models.explore` 后同一路径启用模型，未配置保留算法/向量） | 未配置或调用失败保留已取得材料，不回退主模型；取消/失败/不可用/无命中/截止未完成分列 | 真实 `models.explore` 质量与墙钟未观察，不作为启用门。120s/8s 是尚未按真实 provider 定标的工作预算，不是 SLO。D-189 已让受限 scope 的图/向量后端在有效 roots 内计算 Top-K，reverse importer 在截断前过滤；`.` / 空 roots 保留未受限语义快路径。native ONNX 当前批不能被 JS signal 硬抢占，取消会停止等待并丢弃迟到结果。远程嵌入、向量复用、语义草稿覆盖与专用 reranker 见 3.16B–E；router 取消与超时目前同为 `timeout` 码；`harness-e2e` #3 是既有 D-103 |
-| **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（共享 ModelRuntime、auth.json 恢复、换 model 换 space、凭据轮换不换 space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`「uses the remote embedding binding」（Settings → `harness.embed` → faux `/embeddings` → 发布 → 公开 explore） | ✓（未配置远程时本地 MiniLM；配置有效即走远程同一 space） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库 `embedding.ts` 适配器仍未接线（2.8）。Host 从不接收或持久化 provider secret |
+| **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（user/operator-only resolver、项目 provider 重定向隔离、binding 竞态、cancel→fetch、endpoint/credential space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`「uses the remote embedding binding」（手工注入 remote consumer 的 faux provider 链，不作为 `index.ts` 生产装配证据） | ✓（未配置远程时本地 MiniLM；配置有效即走远程同一 space） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库 `embedding.ts` 适配器仍未接线（2.8）。Host 从不接收或持久化 provider secret |
 | **3.16C** 向量复用、完整编码与前台优先（D-191） | host | ✓ | ✓ | `semantic/harness-316.test.ts`（embedText 复用、单块重嵌、并发扫描合并、前台插队、partial 首发、迟到 revision、scoped 缓存仍做授权 Top-K）；`semantic/chunker.test.ts`（超长单行续切、多块覆盖无缺口）；`semantic/minilm.test.ts`（Node ORT session 线程） | ✓（随语义索引） | 缓存满按字节软预算淘汰，不拒绝查询；后台当前批完成后前台优先 | 完整冷扫墙钟仍未量得（沿用 3.16A）。远程 Host 侧按字符长度续切，不是远程 tokenizer 精确计数 |
-| **3.16D** 固定草稿与线程分支语义覆盖（D-192） | host | ✓ | ✓ | `semantic/harness-316.test.ts`（立即遮蔽、dirty-only、删除、supersede、捕获后继续编辑、兄弟线程隔离、缺向量≠缺正文） | ✓（公开 explore 的 `semanticRecall`） | 草稿/线程向量未完成：语义 gap/partial，词法与读取继续用已固定原文 | 线程对象读取失败记具体 gap。未另建 overlay 全局召回 |
-| **3.16E** 专用 HTTP reranker（D-193） | protocol / pi-host / host / ui | ✓ | ✓ | `pi-host/test/harness/http-rerank.test.ts`（非法/缺失 ID、部分响应）；`explore-rerank.test.ts`；`explore-query-services.test.ts`（select=used 不调用、select=unconfigured 调用）；`session-e2e.test.ts`「uses the remote embedding binding」（公开 explore 实际打到 `/rerank`） | ✓（`harness.rerank` 有效且本轮未用 LLM 选择时） | 失败保留来源排名与可读材料，details 标明未参与/失败；explore 整体不失败 | 真实 rerank provider 质量与费用未观察。当前 registry 无标准 rerank 方法，使用可配置 HTTP `/rerank` 契约，不把 chat/embeddings 改名为 rerank |
+| **3.16D** 固定草稿与线程分支语义覆盖（D-192） | host | ✓ | ✓ | `semantic/harness-316.test.ts`（立即遮蔽、dirty-only、删除、supersede、捕获后继续编辑、兄弟线程隔离、缺向量≠缺正文） | ✓（公开 explore 的 `semanticRecall`） | 草稿/线程向量未完成：语义 gap/partial，词法与读取继续用已固定原文 | 活跃 isolated child 使用自身 Documents workspace；语义语料不来自父 WorkingState 全表，copyIgnored 不自动扩大范围；尚缺 child 写入后、settle 前的完整公开 production-chain 纵切 |
+| **3.16E** 专用 HTTP reranker（D-193） | protocol / pi-host / host / ui | ✓ | ✓ | `pi-host/test/harness/http-rerank.test.ts`（非法/缺失 ID、部分响应）；`explore-rerank.test.ts`；`explore-query-services.test.ts`（select=used 不调用、select=unconfigured 调用）；`session-e2e.test.ts`「uses the remote embedding binding」（手工注入 consumer 的公开 explore faux `/rerank` 链） | ✓（`harness.rerank` 有效且本轮未用 LLM 选择时） | 失败保留来源排名与可读材料，details 标明未参与/失败；explore 整体不失败 | 真实 rerank provider 质量与费用未观察。当前 registry 无标准 rerank 方法，使用可配置 HTTP `/rerank` 契约，不把 chat/embeddings 改名为 rerank |
 | **3.2** `explore` + `grep` + `read` + `find`/`ls` 的磁盘/发起窗口草稿纵切 | pi-host tool / host Engine / Documents / ui | ✓ | ✓ | `explore.test.ts`；`explore-service.test.ts`；`search-service.test.ts` / `search/content.test.ts`（dirty 排除先于有界 cap、regex/fixed/case/glob/context、写入后该路径改按磁盘搜索）；`document-read-source.test.ts`（固定字节、BOM、dirty-only、过期、写后读回自己的写）/ `pi-host/test/harness/read-tool.test.ts`（原生分页与图片）；`documents/authority.test.ts`（写入失效：原生写、Documents 写、根外路径不失效、过期仍不回退磁盘、overlay 与 clone 同步）；`recovery/turn-coordinator.test.ts`（确认工具前 await，before/失败不失效）；`document-path-overlay.test.ts`；`find-ls-tool.test.ts`；`session-e2e.test.ts` 固定 surface find/ls E2E | ✓ | 已知 dirty capture 不可用时相关 read/search/find/ls/LSP 导航都不读磁盘；其余路径继续 disk；Host 未声明对应 capability 时保留 Pi built-in | D-090 第一组已验证：`limit` 只管输出条数（`explore.test.ts` T1）；search-service 收 actor/inputContext，explore 不再自带草稿匹配（`explore-service.test.ts` T2）；词项分组与 anchors 字面优先、非硬过滤（T3/T4）；测试路径不默认降权（T5）；按需物化记 `not-requested`（T6）；互补打包（T7）；自身字节预算与句柄（T8）；工具接受并转发 `anchors`（`explore-tool.test.ts` / `session-e2e.test.ts` T9）。D-092 已验证：候选模式 30 个匹配文件×每文件 12 命中、预算 200 时 30 个文件都进候选且总命中 ≤ 200，路径序最后的文件仍在（`search-service.test.ts` breadth-first）；文件数超过预算时报 `filesDropped` 且与命中裁剪分列；grep 同输入仍是默认 limit 100 的深度优先截断。六个小项已收：`showHandle` 为真时 `result.text` ≤ `byteBudget`（`explore.test.ts` / `explore-service.test.ts` T8）；返回对象不含 `searchIncomplete`；空白 anchor 过滤后 `supplied` 保留原样（`explore-service.test.ts`）；每路 `rgSearch` 用局部 partial；`fileScore` 每文件一次；一个 anchor 文件排在只匹配 3 个拆词组的文件之前。验收复验补的两项已修并有断言：`filesDropped` 取单次查询最大值作下界（`explore.test.ts` 跨词项不求和、`explore-service.test.ts` 250 文件 × 两个重叠根仍报 50 而非 100，正文"at least"）；工具 schema 接受空白 anchor 交由 Host 过滤（`explore-tool.test.ts` 对 `tool.parameters` 直接 `Value.Check`，非字符串仍拒）。复验实测：web 三文件 66 项、pi-host 整套 315 项 314 通过 1 跳过（`harness-e2e` #3 `background command + get_output` 在 D-092 之前的 `53350ec2` 上同样失败、之后又自行通过，是既有时序抖动而非本刀引入，已立项为 D-103）、protocol 75 项、web type-check + lint 通过。之后：结构切片消费 6.4 带修订范围、上下文覆盖、模型增强 |
 | **3.3** `related` | host / pi-host / protocol | ✓ | ✓ | `related-tool.test.ts`（Host：没有 vs 不完整、反向 import、空目录 vs 未收录、未解析 specifier）；`pi-host/test/harness/related-tool.test.ts`（默认注册、`tools.related: false` 省略）；`session-e2e.test.ts`「session e2e — related」（真 Pi：`activeTools` 含 `related`，已打开 store 返回定义/Imported by，正文含 `lsp.references` 分工、不含 rank） | ✓ | store 未打开 → `unavailable`（不开库）；空目录 / 未收录路径 / 名字未命中 → `empty`；查询抛错 → `failed`。不是 `lsp.references` | 不做 PageRank / 多跳 / references 边。目录未扫到的语言是不完整或 empty，不是失败 |
 | **3.4 / 3.5** 原生线程运行时与 7 个工具 | protocol / broker / host / pi-host | ✓ | ✓ | `thread-runtime-session.e2e.test.ts`；`thread-worktree.test.ts`（Git/non-Git、fixed/live 结果、回收重建）；`thread-runtime.test.ts`（持久草稿基线/queued/lost）；`thread-registry.test.ts`（schema 7）；`phase3-e2e.test.ts`；`worktree-reclaim-guard.test.ts`；`thread-worktree-settings.test.ts` | ✓（Web/Application Host） | Host 未声明 harnessThreads 时不注册 | 内部目录仍在 Run 启动时物化，父 blocks 也在 Run 启动时读取；空间总预算、完整结果验证记录、虚拟工具、surface 写回与归档 UI 待接；scope 非 OS 沙箱 |
@@ -122,23 +122,22 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 范围与 `inputContext`，原问题词法/图/语义与计划模型并行；新表达真正执行搜索；候选模型看到最终挑选前的当前单元；Host
 校验后提取原文。未配置或模型失败保留算法/向量材料并标明未参与，不回退主模型。retrieval 与扩散模型仍按后续项，不是本行前置。
 
-**3.16B–E 已接入生产调用链（D-190–D-193）。** Settings `harness.embedding` / `harness.rerank` 是用户所有配置种类。配置远程
-embedding 后，Host 经 workspace `harness.embed` 提交已授权正文；Pi `BackgroundInferenceRuntime` 复用 workspace worker 的
-ModelRuntime 与 `auth.json`，打 OpenAI 兼容 `/embeddings`。未配置远程时本地 MiniLM 保持。配置 `harness.rerank` 且本轮
-`models.explore` select 为 skipped/unconfigured 时，公开 explore 走 HTTP `/rerank`；select 已 used/failed/cancelled 则不调用。
-失败时语义或 rerank 单独报告，explore 整体不因 rerank 失败而失败。知识库 adapter（2.8）仍未接线。
+**3.16B–E 的身份/配置/取消与异步发布边界已按 D-194–D-195 纠正，生产装配仍有明确的未观察纵切。** Settings
+`harness.embedding` / `harness.rerank` 仍是用户所有配置种类；Pi 后台 provider 定义只取 user/operator 层，项目 provider 继续只影响
+普通聊天。Application Host 按 workspace 保存 cwd/settings/backend/runtime，共享的只有本地 MiniLM、调度器和完整 space 身份下的
+数值缓存。远程方法与 cancel 只在内部 HostMethod；公开 Runtime surface 不能调用。空间身份使用去凭据的实际 endpoint/API、最终维度
+及 embedding 参数，配置变化启动该 workspace 新扫描。活跃 isolated child 改查自己的 Documents workspace，不再把父 WorkingState
+整表当语义语料。增量写入在读取正文前沿冷扫的文件筛选，`copyIgnored` 不自动扩大语义语料。rerank 使用同身份原文视图，重复及并发 finish 共用一次判断，取消可到 Pi fetch。
 
 **本轮接线证据与未验证项。**
 
-- 实现：protocol `harness.embedding` / `harness.rerank` + `harness.embed` / `harness.rerank`；pi-host embeddings/rerank
-  校验与后台绑定；Host remote embedder、vector cache、scheduler、query-view overlay、explore finish rerank；Settings
-  Embedding / Rerank 段。
-- 生产接线：公开 `explore` 与后台语义扫描。有效配置存在即生效，无 shadow / 实验开关。
-- faux 证据：`session-e2e.test.ts`「uses the remote embedding binding」从 Settings 到 faux `/embeddings` 与 `/rerank` 再到
-  公开 explore；Host `harness-316.test.ts` 覆盖空间切换、复用、前台优先、草稿/线程遮蔽；finish-service 覆盖 select 与
-  rerank 互斥。
-- 未验证：未观察真实 embedding / rerank / `models.explore` provider 的延迟、质量或成本，不能编造性能结论。完整冷扫时间
-  仍未量得。
+- 定向证据：protocol 覆盖 missing/invalid 与 public method 排除；pi-host `background-inference.test.ts` 覆盖项目 provider
+  重定向不能取得用户 key、完整 binding 竞态、endpoint/credential space 与 cancel 到 faux fetch；Host
+  `workspace-inference.test.ts` 覆盖双 workspace 交错、取消丢弃迟到结果及 missing/invalid/unavailable；`semantic/runtime.test.ts` 覆盖旧发布不解除新编辑遮蔽、读失败/恢复、旧目录清单不删新变更、空目录重启清旧向量、查询固定 backend、范围内草稿和后台建设；
+  `fs/search.test.ts` 用真实 Git 覆盖 ignored 与强制 tracked 文件的增量筛选；`host-controller.test.ts` 用真实 controller/transport 覆盖排队取消、重复批次与畸形请求清理；finish 测试覆盖异步 Settings 判断预留、并发及重复终态、partial score 和 malformed 降级；UI 测试覆盖隐藏字段 round-trip。
+- 既有 `session-e2e.test.ts` 仍是手工注入 remote consumer 的 faux 链，不能单独证明 `index.ts` 的 Settings→workspace coordinator
+  整条生产装配。尚未补活跃 child 写入后、settle 前从其真实 Documents workspace 进入公开 explore 的纵切，也未观察真实
+  embedding/rerank provider 的延迟、质量、费用或完整冷扫墙钟；因此不再把这些写成已实证。
 - 3.16A 已在此前提交：`37b12e8e`（本地 embedder 运行时）、`8752e039`（语义索引/打包）。D-175 设计正文提交为 `88ca06e5`，
   当时尚未改变运行行为。
 
@@ -169,15 +168,15 @@ ModelRuntime 与 `auth.json`，打 OpenAI 兼容 `/embeddings`。未配置远程
 | 当前单元与呈现 | 模型看挑选前视图；已删 `windowScore`；必需范围原子保留 | 3.15B 已接线 |
 | 查询调度 | 到达即读；在飞主任务保留首批机会；共享截止可提前冻结 | 3.15C 已接线 |
 | embedding/rerank 配置 | Settings 独立 Embedding / Rerank 段；workspace 不能改绑；不从 chat model id 推断能力 | 3.16B/E 已接线；知识库 adapter 仍未接线（2.8） |
-| 后台远程调用 | workspace worker 共享 ModelRuntime + auth.json；Host 只提交已授权正文与绑定 | 3.16B 已接线；真实 provider 未观察 |
+| 后台远程调用 | 隔离的 user/operator-only provider runtime + 用户 AuthStorage；Host 只提交已授权正文与冻结绑定 | D-194 已接线；真实 provider 未观察 |
 | 复用、切块与推理调度 | space+purpose+embedText 复用；续切；前台优先；Node ORT session 线程；软预算缓存 | 3.16C 已接线；完整冷扫未量得 |
-| 语义草稿/线程视图 | 查询开始 pin；有草稿立即遮蔽磁盘向量；线程 baseline+delta | 3.16D 已接线 |
+| 语义草稿/线程视图 | 查询开始 pin；草稿立即遮蔽并异步向量；活跃 child 查自身 Documents workspace | D-194 已接线；完整 child 公开纵切待补 |
 | 专用 rerank | HTTP `/rerank`；与 LLM select 互斥；失败保留来源排名 | 3.16E 已接线；真实 rerank 质量未观察 |
 
 按 plan 0.7：3.15 A–D 与 3.16B–E 已接线。下一步是知识库远程 embedding 消费者（2.8）、真实 provider 观察与后续 retrieval/
 扩散项。既有工作区范围和正文覆盖目标保留，活动工作集只改变建设优先级；没有采纳 sketch 替代全文或只索引热点的设计。
 
-以下保留其他能力及历史检索阶段的验证记录；当前检索取舍以上述 3.15 / 3.16 行与 D-173–D-193 为准。
+以下保留其他能力及历史检索阶段的验证记录；当前检索取舍以上述 3.15 / 3.16 行与 D-173–D-195 为准。
 
 | 范围 | 已确认现状 / 待做 | 验证与外部边界 |
 | --- | --- | --- |

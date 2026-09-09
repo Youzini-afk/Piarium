@@ -8,6 +8,7 @@ import type { FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
 import { TREE_SITTER_LANGUAGE_SPECS } from "../../structure/languages.js";
 import type { StructureSource } from "../../structure/types.js";
+import { pathInRoots } from "../../workspace/path-scope.js";
 import { CATALOG_SCAN_BATCH } from "../symbol-runtime.js";
 import { chunkDocument } from "./chunker.js";
 import type { SemanticEmbedder } from "./embedder.js";
@@ -21,10 +22,11 @@ import {
   type SemanticOverlayBlock,
 } from "./store.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
+import { waitWithSignal } from "./cancellation.js";
 
 export const SEMANTIC_SCAN_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 
-export type SemanticQueryStatus = "not-requested" | "ready" | "empty" | "unavailable" | "failed" | "stale";
+export type SemanticQueryStatus = "not-requested" | "ready" | "empty" | "unavailable" | "failed" | "stale" | "incomplete";
 
 export type SemanticIndexStatus = {
   status: SemanticQueryStatus;
@@ -65,29 +67,12 @@ export type SemanticSearchRequest = {
 export type SemanticSearchResult = {
   status: SemanticIndexStatus;
   hits: SemanticHit[];
-  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" }>;
+  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" }>;
 };
 
 const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
   setTimeout(resolve, 0);
 });
-
-const waitWithSignal = <T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> => {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      signal.removeEventListener("abort", onAbort);
-      try {
-        signal.throwIfAborted();
-      } catch (error) {
-        reject(error);
-      }
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    void promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
-  });
-};
 
 export interface SemanticIndexRuntimeOptions {
   dataDir: string;
@@ -98,6 +83,7 @@ export interface SemanticIndexRuntimeOptions {
     rootPath: string,
     options: { query: string; respectGitignore?: boolean; signal?: AbortSignal },
   ) => Promise<FileSearchItem[]>;
+  isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
   embedder: SemanticEmbedder;
   getEmbedder?: () => SemanticEmbedder;
   onError?: (error: unknown) => void;
@@ -110,31 +96,56 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const pending = new Set<Promise<void>>();
   const scanControllers = new Map<string, AbortController>();
   const inFlightScans = new Map<string, Promise<void>>();
-  const firstPublish = new Map<string, { promise: Promise<void>; resolve: () => void; resolved: boolean }>();
+  const activeScanGates = new Map<string, { promise: Promise<void>; resolve: () => void; resolved: boolean }>();
+  const unverifiedPaths = new Map<string, Set<string>>();
+  const mutationPending = new Map<string, Set<string>>();
+  const indexReadFailures = new Map<string, Set<string>>();
+  const scanFailures = new Set<string>();
+  const deferredDimensionScans = new WeakMap<SemanticEmbedder, Set<string>>();
   const documentTokens = new Map<string, number>();
+  let revisionClock = 0;
   const queryCache = options.vectorCache ?? createVectorCache();
   const scheduler = options.scheduler ?? createEmbedScheduler();
+  const embedderBootstraps = new WeakMap<SemanticEmbedder, Promise<void>>();
+  const lifecycleController = new AbortController();
   let disposed = false;
 
   const embedderOf = (): SemanticEmbedder => options.getEmbedder?.() ?? options.embedder;
 
-  const ensureEmbedderSpace = async (signal?: AbortSignal): Promise<SemanticEmbedder> => {
-    const embedder = embedderOf();
+  const ensureEmbedderSpace = async (
+    embedder: SemanticEmbedder,
+    signal: AbortSignal | undefined,
+    bootstrapText: string,
+    bootstrapPurpose: "document" | "query" = "document",
+  ): Promise<SemanticEmbedder> => {
     if (embedder.status !== "ready" || embedder.space.dim > 0) return embedder;
-    await waitWithSignal(embedder.prepare(), signal);
-    await waitWithSignal(scheduler.enqueue("foreground", async () => (
-      embedder.embed(["."], { purpose: "document", ...(signal ? { signal } : {}) })
-    )), signal);
-    return embedderOf();
+    let bootstrap = embedderBootstraps.get(embedder);
+    if (!bootstrap) {
+      bootstrap = (async () => {
+        await embedder.prepare();
+        const vectors = await scheduler.enqueue("foreground", async () => (
+          embedder.embed([bootstrapText], { purpose: bootstrapPurpose, ...(signal ? { signal } : {}) })
+        ));
+        const vector = vectors[0];
+        if (vector && embedder.space.dim > 0) {
+          queryCache.set({ spaceId: spaceIdOf(embedder.space), purpose: bootstrapPurpose, embedText: bootstrapText }, vector);
+        }
+      })();
+      embedderBootstraps.set(embedder, bootstrap);
+      void bootstrap.catch(() => {
+        if (embedderBootstraps.get(embedder) === bootstrap) embedderBootstraps.delete(embedder);
+      });
+    }
+    await waitWithSignal(bootstrap, signal);
+    return embedder;
   };
 
   const scopeKey = (scope: SemanticScopeKey, spaceId?: string): string => (
     `${scope.scopeKind}\0${scope.scopeId}\0${spaceId ?? spaceIdOf(embedderOf().space)}`
   );
+  const scopeIdentity = (scope: SemanticScopeKey): string => `${scope.scopeKind}\0${scope.scopeId}`;
 
-  const firstPublishGate = (key: string) => {
-    const existing = firstPublish.get(key);
-    if (existing) return existing;
+  const createScanGate = () => {
     let resolve = (): void => undefined;
     const created = {
       resolved: false,
@@ -147,16 +158,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       }),
     };
     created.resolve = resolve;
-    firstPublish.set(key, created);
     return created;
   };
 
-  const storeFor = (scope: SemanticScopeKey): SemanticGenerationStore => {
-    const embedder = embedderOf();
+  const storeFor = (scope: SemanticScopeKey, embedder: SemanticEmbedder = embedderOf()): SemanticGenerationStore => {
     if (embedder.space.dim <= 0) {
       throw new Error("Semantic store requires a known vector dimension.");
     }
-    const key = scopeKey(scope);
+    const key = scopeKey(scope, spaceIdOf(embedder.space));
     const existing = stores.get(key);
     if (existing) return existing;
     const created = createSemanticGenerationStore({
@@ -180,9 +189,15 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
 
   const nextToken = (scope: SemanticScopeKey, documentId: string): number => {
     const key = `${scopeKey(scope, "token")}\0${documentId}`;
-    const next = (documentTokens.get(key) ?? 0) + 1;
+    const next = ++revisionClock;
     documentTokens.set(key, next);
     return next;
+  };
+
+  const scanTokenFor = (scope: SemanticScopeKey, documentId: string, token: number): number => {
+    const key = `${scopeKey(scope, "token")}\0${documentId}`;
+    if ((documentTokens.get(key) ?? 0) <= token) documentTokens.set(key, token);
+    return token;
   };
 
   const isCurrentToken = (scope: SemanticScopeKey, documentId: string, token: number): boolean => {
@@ -195,18 +210,23 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     store: SemanticGenerationStore,
     documentId: string,
     token: number,
-  ): Promise<SemanticDocumentPublication | null> => {
-    if (scope.scopeKind !== "workspace") return null;
+    embedder: SemanticEmbedder = embedderOf(),
+    signal?: AbortSignal,
+  ): Promise<SemanticDocumentPublication | { kind: "unchanged-current" } | { kind: "superseded" } | { kind: "read-failed" }> => {
+    if (scope.scopeKind !== "workspace") return { kind: "read-failed" };
+    signal?.throwIfAborted();
+    if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
     let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
     try {
       snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: documentId });
     } catch {
-      return null;
+      return { kind: "read-failed" };
     }
-    if (snapshot.status !== "ready") return null;
-    if (!isCurrentToken(scope, documentId, token)) return null;
+    if (snapshot.status !== "ready") return { kind: "read-failed" };
+    if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
+    signal?.throwIfAborted();
     const published = await store.publishedRevision(documentId);
-    if (published?.revision === snapshot.revision && published.recipeId === store.recipeId) return null;
+    if (published?.revision === snapshot.revision && published.recipeId === store.recipeId) return { kind: "unchanged-current" };
     const languageId = languageIdForPath(documentId) ?? null;
     const outline = languageId
       ? await options.structureSource.outline({
@@ -216,8 +236,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         revision: snapshot.revision,
       })
       : { status: "unsupported" as const, symbols: [] };
-    if (!isCurrentToken(scope, documentId, token)) return null;
-    const embedder = embedderOf();
+    if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
+    signal?.throwIfAborted();
     const chunks = chunkDocument({
       documentId,
       text: snapshot.content,
@@ -230,19 +250,52 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   };
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
-    const embedder = await ensureEmbedderSpace();
-    if (disposed || embedder.status !== "ready") return;
-    const store = storeFor(scope);
-    if (kind === "deleted") {
-      await store.removeDocument(documentId);
+    const signal = lifecycleController.signal;
+    const token = nextToken(scope, documentId);
+    const embedder = embedderOf();
+    const excluded = kind !== "deleted" && options.isIndexablePath
+      && !await options.isIndexablePath(scope.scopeId, documentId, signal);
+    if (!isCurrentToken(scope, documentId, token)) return;
+    if (kind === "deleted" || excluded) {
+      const prefix = `${scope.scopeKind}\0${scope.scopeId}\0`;
+      await Promise.all([...stores].filter(([key]) => key.startsWith(prefix)).map(([, store]) => store.removeDocument(documentId, token)));
+      if (!isCurrentToken(scope, documentId, token)) return;
+      for (const [key, failures] of indexReadFailures) if (key.startsWith(prefix)) failures.delete(documentId);
+      for (const [key, paths] of unverifiedPaths) if (key.startsWith(prefix)) paths.delete(documentId);
+      mutationPending.get(scopeIdentity(scope))?.delete(documentId);
       return;
     }
-    const token = nextToken(scope, documentId);
+    if (embedder.status === "ready" && embedder.space.dim <= 0) {
+      const snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: documentId });
+      if (snapshot.status !== "ready") return;
+      await embedder.prepare();
+      const first = chunkDocument({
+        documentId, text: snapshot.content, languageId: languageIdForPath(documentId) ?? null,
+        outline: { status: "unsupported", symbols: [] },
+        maxTokens: embedder.space.maxTokens, countTokens: (text) => embedder.countTokens(text),
+      })[0];
+      if (!first) return;
+      await ensureEmbedderSpace(embedder, signal, first.embedText);
+    }
+    if (disposed || embedder.status !== "ready") return;
+    const store = storeFor(scope, embedder);
     await embedder.prepare();
-    const publication = await prepareDocument(scope, store, documentId, token);
-    if (publication && isCurrentToken(scope, documentId, token)) {
-      await store.publishDocument(publication);
-      firstPublishGate(scopeKey(scope)).resolve();
+    const publication = await prepareDocument(scope, store, documentId, token, embedder, signal);
+    const resolvedKey = scopeKey(scope, spaceIdOf(embedder.space));
+    if (!("kind" in publication) && isCurrentToken(scope, documentId, token)) {
+      await store.publishDocument(publication, signal);
+      if (!isCurrentToken(scope, documentId, token)) return;
+      mutationPending.get(scopeIdentity(scope))?.delete(documentId);
+      indexReadFailures.get(resolvedKey)?.delete(documentId);
+      unverifiedPaths.get(resolvedKey)?.delete(documentId);
+    } else if ("kind" in publication && publication.kind === "unchanged-current" && isCurrentToken(scope, documentId, token)) {
+      mutationPending.get(scopeIdentity(scope))?.delete(documentId);
+      indexReadFailures.get(resolvedKey)?.delete(documentId);
+      unverifiedPaths.get(resolvedKey)?.delete(documentId);
+    } else if ("kind" in publication && publication.kind === "read-failed" && isCurrentToken(scope, documentId, token)) {
+      const failures = indexReadFailures.get(resolvedKey) ?? new Set<string>();
+      failures.add(documentId);
+      indexReadFailures.set(resolvedKey, failures);
     }
   };
 
@@ -250,87 +303,169 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     if (disposed) return;
     const languageId = languageIdForPath(event.resourceId);
     if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) return;
+    const pendingForScope = mutationPending.get(scopeIdentity(workspaceScope(event.workspaceId))) ?? new Set<string>();
+    pendingForScope.add(event.resourceId);
+    mutationPending.set(scopeIdentity(workspaceScope(event.workspaceId)), pendingForScope);
     track(indexDocument(workspaceScope(event.workspaceId), event.resourceId, event.kind === "deleted" ? "deleted" : "modified"));
   };
 
   const scanScope = async (scope: SemanticScopeKey, optionsForScan?: SemanticScanOptions): Promise<void> => {
-    if (disposed || !options.searchFilesystemFiles || embedderOf().status !== "ready") return;
+    const initialEmbedder = embedderOf();
+    if (disposed || !options.searchFilesystemFiles || initialEmbedder.status !== "ready") return;
     if (scope.scopeKind !== "workspace") return;
-    const key = scopeKey(scope);
+    const key = scopeKey(scope, spaceIdOf(initialEmbedder.space));
     const existing = inFlightScans.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (!scanControllers.get(key)?.signal.aborted) return existing;
+      await existing;
+      return scanScope(scope, optionsForScan);
+    }
+    const scopeScanKey = `${scope.scopeKind}\0${scope.scopeId}`;
+    scanFailures.add(scopeScanKey);
+    for (const [activeKey, activeController] of scanControllers) {
+      if (activeKey.startsWith(`${scopeScanKey}\0`)) activeController.abort();
+    }
+    const controller = new AbortController();
+    scanControllers.set(key, controller);
+    const signal = optionsForScan?.signal
+      ? AbortSignal.any([controller.signal, optionsForScan.signal, lifecycleController.signal])
+      : AbortSignal.any([controller.signal, lifecycleController.signal]);
+    const gate = createScanGate();
+    activeScanGates.set(scopeScanKey, gate);
+    let resolvedKey = key;
+    const runHolder: { promise?: Promise<void> } = {};
     const run = (async () => {
-      await ensureEmbedderSpace(optionsForScan?.signal);
-      scanControllers.get(key)?.abort();
-      const controller = new AbortController();
-      scanControllers.set(key, controller);
-      const signal = optionsForScan?.signal
-        ? AbortSignal.any([controller.signal, optionsForScan.signal])
-        : controller.signal;
-      const store = storeFor(scope);
-      store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
+      let store: SemanticGenerationStore | undefined;
+      let scanComplete = true;
       try {
-        await embedderOf().prepare();
-        let root: string;
-        try {
-          root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
-        } catch {
-          return;
-        }
+        const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
+        const scanToken = ++revisionClock;
         const files = await options.searchFilesystemFiles!(root, {
           query: "",
           respectGitignore: true,
           signal,
         });
-        if (signal.aborted) return;
+        signal.throwIfAborted();
         const catalog = files.filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
+        if (catalog.length === 0 && initialEmbedder.space.dim <= 0) {
+          // There is no document body with which to resolve an automatic remote
+          // dimension. Remember the successful empty catalog. The first real
+          // query can resolve the dimension and then reconcile any persisted
+          // generation before it is searched.
+          const deferred = deferredDimensionScans.get(initialEmbedder) ?? new Set<string>();
+          deferred.add(scopeScanKey);
+          deferredDimensionScans.set(initialEmbedder, deferred);
+          scanFailures.delete(scopeScanKey);
+          return;
+        }
+        let bootstrapText = catalog[0]?.relativePath ?? ".";
+        if (initialEmbedder.space.dim <= 0 && catalog[0]) {
+          try {
+            const first = await options.documents.read({ workspaceId: scope.scopeId, resourceId: catalog[0].relativePath });
+            if (first.status === "ready") {
+              const languageId = languageIdForPath(catalog[0].relativePath) ?? null;
+              const outline = languageId
+                ? await options.structureSource.outline({
+                    path: catalog[0].relativePath,
+                    languageId,
+                    text: first.content,
+                    revision: first.revision,
+                  })
+                : { status: "unsupported" as const, symbols: [] };
+              bootstrapText = chunkDocument({
+                documentId: catalog[0].relativePath,
+                text: first.content,
+                languageId,
+                outline,
+                maxTokens: initialEmbedder.space.maxTokens,
+                countTokens: (text) => initialEmbedder.countTokens(text),
+              })[0]?.embedText ?? bootstrapText;
+            }
+          } catch { /* prepareDocument below records the read failure */ }
+        }
+        const embedder = await ensureEmbedderSpace(initialEmbedder, signal, bootstrapText);
+        signal.throwIfAborted();
+        resolvedKey = scopeKey(scope, spaceIdOf(embedder.space));
+        if (resolvedKey !== key) {
+          inFlightScans.set(resolvedKey, runHolder.promise!);
+          scanControllers.set(resolvedKey, controller);
+        }
+        store = storeFor(scope, embedder);
+        store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
+        const publishedBefore = await store.listDocumentIds();
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
+        const removed = publishedBefore.filter((documentId) => !catalogIds.has(documentId));
+        const removalTokens = new Map(removed.map((documentId) => [documentId, scanTokenFor(scope, documentId, scanToken)]));
+        const unverified = new Set([...publishedBefore, ...catalog.map((file) => file.relativePath)].filter((documentId) => (
+          (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
+        )));
+        unverifiedPaths.set(resolvedKey, unverified);
+        scanFailures.delete(scopeScanKey);
+        const readFailures = indexReadFailures.get(resolvedKey) ?? new Set<string>();
+        indexReadFailures.set(resolvedKey, readFailures);
+        for (const failedPath of readFailures) if (!catalogIds.has(failedPath)) readFailures.delete(failedPath);
+        await embedder.prepare();
         for (let offset = 0; offset < catalog.length; offset += CATALOG_SCAN_BATCH) {
-          if (disposed || signal.aborted) return;
+          signal.throwIfAborted();
           const batch = catalog.slice(offset, offset + CATALOG_SCAN_BATCH);
-          const publications = await Promise.all(batch.map((file) => (
-            prepareDocument(scope, store, file.relativePath, nextToken(scope, file.relativePath))
+          const prepared = await Promise.all(batch.map((file) => (
+            prepareDocument(scope, store!, file.relativePath, scanTokenFor(scope, file.relativePath, scanToken), embedder, signal)
           )));
-          if (disposed || signal.aborted) return;
-          const accepted = publications.filter((publication): publication is SemanticDocumentPublication => publication !== null);
-          if (accepted.length > 0) {
-            await store.publishDocuments(accepted);
-            firstPublishGate(key).resolve();
+          signal.throwIfAborted();
+          const accepted = prepared.filter((publication): publication is SemanticDocumentPublication => !("kind" in publication));
+          if (accepted.length > 0) await store.publishDocuments(accepted, signal);
+          for (const [index, publication] of prepared.entries()) {
+            const path = batch[index]!.relativePath;
+            if (!isCurrentToken(scope, path, scanToken)) continue;
+            if ("kind" in publication && publication.kind === "read-failed") {
+              scanComplete = false;
+              readFailures.add(path);
+            } else if (!("kind" in publication) || publication.kind === "unchanged-current") {
+              unverified.delete(path);
+              readFailures.delete(path);
+              mutationPending.get(scopeIdentity(scope))?.delete(path);
+            }
           }
+          if (prepared.some((publication) => !("kind" in publication) || publication.kind === "unchanged-current")) gate.resolve();
           try {
             optionsForScan?.onBatchComplete?.({
               processedFiles: offset + batch.length,
               totalFiles: catalog.length,
               publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0,
             });
-          } catch {
-            // Performance/diagnostic observers cannot break indexing.
-          }
+          } catch { /* observers do not own indexing */ }
           await yieldToEventLoop();
         }
-        if (!disposed && !signal.aborted) {
-          const published = await store.listDocumentIds();
-          await Promise.all(published
-            .filter((documentId) => !catalogIds.has(documentId))
-            .map((documentId) => store.removeDocument(documentId)));
-          store.markReady(true);
-        }
+        signal.throwIfAborted();
+        const currentRemovals = removed.filter((documentId) => isCurrentToken(scope, documentId, removalTokens.get(documentId)!));
+        await Promise.all(currentRemovals.map((documentId) => store!.removeDocument(documentId, removalTokens.get(documentId)!)));
+        for (const documentId of currentRemovals) unverified.delete(documentId);
+        store.markReady(scanComplete && unverified.size === 0);
+        deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
-        if (signal.aborted || disposed) return;
-        try { options.onError?.(error); } catch { /* catalog failures stay observational */ }
+        if (!signal.aborted && !disposed) {
+          store?.markReady(false);
+          try { options.onError?.(error); } catch { /* observational */ }
+        }
       } finally {
+        gate.resolve();
+        if (activeScanGates.get(scopeScanKey) === gate) activeScanGates.delete(scopeScanKey);
         if (scanControllers.get(key) === controller) scanControllers.delete(key);
+        if (scanControllers.get(resolvedKey) === controller) scanControllers.delete(resolvedKey);
+        if (inFlightScans.get(key) === runHolder.promise) inFlightScans.delete(key);
+        if (inFlightScans.get(resolvedKey) === runHolder.promise) inFlightScans.delete(resolvedKey);
       }
     })();
+    runHolder.promise = run;
     inFlightScans.set(key, run);
-    void run.finally(() => {
-      if (inFlightScans.get(key) === run) inFlightScans.delete(key);
-    });
     return run;
   };
 
-  const statusFor = (scope: SemanticScopeKey): SemanticIndexStatus => {
-    if (embedderOf().status !== "ready") {
+  const statusForEmbedder = (
+    scope: SemanticScopeKey,
+    embedder: SemanticEmbedder,
+  ): SemanticIndexStatus => {
+    if (embedder.status !== "ready") {
       return {
         status: "unavailable",
         coverage: "empty",
@@ -340,17 +475,17 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         scope,
       };
     }
-    if (embedderOf().space.dim <= 0) {
+    if (embedder.space.dim <= 0) {
       return {
         status: "empty",
         coverage: "empty",
         lifecycle: "idle",
         generation: null,
-        spaceId: spaceIdOf(embedderOf().space),
+        spaceId: spaceIdOf(embedder.space),
         scope,
       };
     }
-    const store = stores.get(scopeKey(scope)) ?? storeFor(scope);
+    const store = stores.get(scopeKey(scope, spaceIdOf(embedder.space))) ?? storeFor(scope, embedder);
     const checkpoint = store.checkpoint();
     const coverage = checkpoint?.coverage ?? store.coverage;
     return {
@@ -363,11 +498,15 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     };
   };
 
+  const statusFor = (scope: SemanticScopeKey): SemanticIndexStatus => (
+    statusForEmbedder(scope, embedderOf())
+  );
+
   const overlayBlocks = async (
     overlays: readonly SemanticQueryOverlay[],
     signal?: AbortSignal,
+    embedder: SemanticEmbedder = embedderOf(),
   ): Promise<{ extras: SemanticOverlayBlock[]; gaps: SemanticSearchResult["gaps"] }> => {
-    const embedder = embedderOf();
     const extras: SemanticOverlayBlock[] = [];
     const gaps: SemanticSearchResult["gaps"] = [];
     for (const overlay of overlays) {
@@ -400,29 +539,42 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         else missing.push({ chunk, index });
       }
       if (missing.length > 0) {
-        try {
-          signal?.throwIfAborted();
-          const fresh = await waitWithSignal(scheduler.enqueue("foreground", async () => {
-            await embedder.prepare();
-            return embedder.embed(missing.map((item) => item.chunk.embedText), { purpose: "document", ...(signal ? { signal } : {}) });
-          }), signal);
-          for (const [offset, item] of missing.entries()) {
-            const vector = fresh[offset]!;
-            vectors[item.index] = vector;
-            queryCache.set({
-              spaceId: spaceIdOf(embedder.space),
-              purpose: "document",
-              embedText: item.chunk.embedText,
-            }, vector);
-          }
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") throw error;
-          gaps.push({
-            path: overlay.path,
-            reason: overlay.origin === "thread" ? "thread-vector-pending" : "draft-unavailable",
+        signal?.throwIfAborted();
+        const owners = missing.map((item) => ({
+          text: item.chunk.embedText,
+          claim: queryCache.claim({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.chunk.embedText }),
+        })).filter((item) => item.claim.owner);
+        if (owners.length > 0) {
+          // Captured draft text becomes workspace-owned background index work,
+          // like the disk scan. Returning/finishing a query does not cancel it.
+          const backgroundSignal = lifecycleController.signal;
+          const work = scheduler.enqueue("background", async () => {
+            try {
+              backgroundSignal.throwIfAborted();
+              await embedder.prepare();
+              backgroundSignal.throwIfAborted();
+              const fresh = await embedder.embed(owners.map((item) => item.text), { purpose: "document", signal: backgroundSignal });
+              backgroundSignal.throwIfAborted();
+              if (fresh.length !== owners.length || fresh.some((vector) => vector.length !== embedder.space.dim)) {
+                throw new Error("Draft embedding returned an incomplete batch");
+              }
+              for (const [offset, item] of owners.entries()) {
+                const vector = fresh[offset]!;
+                queryCache.set({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.text }, vector);
+                item.claim.resolve(vector);
+              }
+            } catch (error) {
+              for (const item of owners) item.claim.reject(error);
+              throw error;
+            }
           });
-          continue;
+          track(waitWithSignal(work, backgroundSignal));
         }
+        gaps.push({
+          path: overlay.path,
+          reason: overlay.origin === "thread" ? "thread-vector-pending" : "draft-vector-pending",
+        });
+        continue;
       }
       if (vectors.some((vector) => !vector)) {
         gaps.push({
@@ -457,19 +609,28 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     limit: number,
     searchOptions?: SemanticSearchRequest,
   ): Promise<SemanticSearchResult> => {
-    const signal = searchOptions?.signal;
+    const signal = searchOptions?.signal
+      ? AbortSignal.any([searchOptions.signal, lifecycleController.signal])
+      : lifecycleController.signal;
     signal?.throwIfAborted();
-    const embedder = await ensureEmbedderSpace(signal);
-    const status = statusFor(scope);
+    const embedder = embedderOf();
+    let status = statusForEmbedder(scope, embedder);
     if (status.status === "unavailable") return { status, hits: [], gaps: [] };
-    const key = scopeKey(scope);
+    const scopeId = scopeIdentity(scope);
     try {
-      if (
-        searchOptions?.waitForFirstPublish !== false
-        && inFlightScans.has(key)
-        && !firstPublishGate(key).resolved
-      ) {
-        await waitWithSignal(firstPublishGate(key).promise, signal);
+      await ensureEmbedderSpace(embedder, signal, question, "query");
+      if (deferredDimensionScans.get(embedder)?.has(scopeId)) {
+        if (embedder !== embedderOf()) return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
+        await scanScope(scope, { signal });
+      }
+      status = statusForEmbedder(scope, embedder);
+      const key = scopeKey(scope, spaceIdOf(embedder.space));
+      const activeScan = activeScanGates.get(scopeId);
+      if (searchOptions?.waitForFirstPublish !== false && activeScan && !activeScan.resolved) {
+        await waitWithSignal(activeScan.promise, signal);
+      }
+      if (scanFailures.has(scopeId)) {
+        return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
       }
       signal?.throwIfAborted();
       await waitWithSignal(embedder.prepare(), signal);
@@ -486,12 +647,19 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           queryCache.set({ spaceId, purpose: "query", embedText: question }, vector);
         }
       }
-      const overlays = searchOptions?.overlays ?? [];
-      const maskPaths = overlays.map((overlay) => overlay.path);
+      const overlays = (searchOptions?.overlays ?? []).filter((overlay) => pathInRoots(overlay.path, searchOptions?.roots));
       const overlay = overlays.length > 0
-        ? await overlayBlocks(overlays, signal)
+        ? await overlayBlocks(overlays, signal, embedder)
         : { extras: [] as SemanticOverlayBlock[], gaps: [] as SemanticSearchResult["gaps"] };
-      const store = storeFor(scope);
+      const indexGaps: SemanticSearchResult["gaps"] = [...(indexReadFailures.get(key) ?? [])]
+        .filter((path) => pathInRoots(path, searchOptions?.roots))
+        .map((path) => ({ path, reason: "index-read-failed" as const }));
+      const store = storeFor(scope, embedder);
+      const maskPaths = [
+        ...overlays.map((overlay) => overlay.path),
+        ...(unverifiedPaths.get(key) ?? []),
+        ...(mutationPending.get(scopeId) ?? []),
+      ];
       const hits = queryVector
         ? await waitWithSignal(store.search(queryVector, limit, {
           maskPaths,
@@ -501,17 +669,23 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         }), signal)
         : [];
       signal?.throwIfAborted();
+      const incomplete = store.coverage === "partial"
+        || overlay.gaps.length > 0 || indexGaps.length > 0
+        || store.lifecycle === "building"
+        || store.lifecycle === "rebuilding"
+        || (unverifiedPaths.get(key)?.size ?? 0) > 0
+        || (mutationPending.get(scopeId)?.size ?? 0) > 0;
       return {
         status: {
           ...status,
-          status: hits.length === 0 && overlay.gaps.length === 0 ? "empty" : hits.length === 0 && overlay.gaps.length > 0 ? "empty" : "ready",
+          status: incomplete ? "incomplete" : hits.length === 0 ? "empty" : "ready",
           coverage: store.coverage,
           lifecycle: store.lifecycle,
           generation: store.generation,
           spaceId: store.spaceId,
         },
         hits,
-        gaps: overlay.gaps,
+        gaps: [...overlay.gaps, ...indexGaps],
       };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
@@ -528,6 +702,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
 
   const dispose = async (): Promise<void> => {
     disposed = true;
+    lifecycleController.abort();
     for (const controller of scanControllers.values()) controller.abort();
     scanControllers.clear();
     await drain();
@@ -536,6 +711,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   };
 
   return {
+    cancelScans: (): void => {
+      for (const controller of scanControllers.values()) controller.abort();
+    },
     observeDocumentMutation,
     scanScope,
     scanWorkspace: (workspaceId: string, scanOptions?: SemanticScanOptions) => (

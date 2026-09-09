@@ -111,6 +111,9 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("config.unwatch"), true);
     assert.equal(isRuntimeMethod("config.watch"), true);
     assert.equal(isRuntimeMethod("mcp.config.snapshot"), true);
+    assert.equal(isRuntimeMethod("harness.embed"), false);
+    assert.equal(isRuntimeMethod("harness.rerank"), false);
+    assert.equal(isRuntimeMethod("harness.inference.cancel"), false);
     assert.equal(isRuntimeMethod("package.setEnabled"), true);
     assert.equal(isRuntimeMethod("package.foundation.status"), true);
     assert.equal(isRuntimeMethod("package.foundation.restore"), true);

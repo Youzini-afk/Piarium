@@ -213,8 +213,14 @@ export function mergeHarnessSettings(
     // Embedding and rerank bindings are user-owned. A repository cannot
     // redirect remote inference or select another provider credential.
     ...((() => {
-      const embedding = parseHarnessEmbeddingSettings(userEmbedding);
-      const rerank = parseHarnessRerankSettings(userRerank);
+      // Optional background inference cannot make ordinary chat unusable when
+      // an older/external file is malformed. Its direct consumers parse the
+      // raw global value and report invalid/unavailable; settings.update still
+      // rejects writing a malformed candidate.
+      let embedding: HarnessEmbeddingSettings | undefined;
+      let rerank: HarnessRerankSettings | undefined;
+      try { embedding = parseHarnessEmbeddingSettings(userEmbedding); } catch { embedding = undefined; }
+      try { rerank = parseHarnessRerankSettings(userRerank); } catch { rerank = undefined; }
       return {
         ...(embedding ? { embedding } : {}),
         ...(rerank ? { rerank } : {}),

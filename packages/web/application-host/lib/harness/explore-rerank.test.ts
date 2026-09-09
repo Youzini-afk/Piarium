@@ -23,21 +23,22 @@ const view = (viewId: string, text: string): ExploreQueryView => ({
 });
 
 describe("explore rerank helpers", () => {
-  it("skips rerank after model selection and shrinks views before send", () => {
+  it("skips rerank after model selection and never truncates a scored view identity", () => {
     expect(exploreShouldRerank({ plan: "used", select: "used", followup: "skipped" })).toBe(false);
     expect(exploreShouldRerank({ plan: "skipped", select: "skipped", followup: "skipped" })).toBe(true);
     expect(exploreShouldRerank({ plan: "unconfigured", select: "unconfigured", followup: "unconfigured" })).toBe(true);
     expect(exploreShouldRerank({ plan: "used", select: "failed", followup: "skipped" })).toBe(false);
 
     const long = view("v1", Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
-    const shrunk = shrinkViewForRerank(long, 8, (text) => text.split(/\s+/).length);
-    expect(shrunk.text.split("\n").length).toBeLessThan(long.text.split("\n").length);
-    expect(shrunk.viewId).toBe("v1");
-    expect(shrunk.startLine).toBe(1);
+    expect(() => shrinkViewForRerank(long, 8, (text) => text.split(/\s+/).length)).toThrow(/exceeds/);
 
-    const prepared = documentsFromViews([long, { ...view("v2", "short"), unevaluated: true }], 8, (text) => text.split(/\s+/).length);
-    expect(prepared.documents.map((item) => item.id)).toEqual(["v1"]);
-    expect(prepared.evaluated[0]?.text).toBe(shrunk.text);
+    const prepared = documentsFromViews([
+      long,
+      { ...view("v2", "short"), unevaluated: true },
+      view("v3", "exact body"),
+    ], 8, (text) => text.split(/\s+/).length);
+    expect(prepared.documents).toEqual([{ id: "v3", text: "exact body", revision: "r1" }]);
+    expect(prepared.evaluated[0]?.text).toBe("exact body");
   });
 
   it("does not invent scores for missing or illegal ids", () => {

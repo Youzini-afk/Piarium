@@ -21,7 +21,10 @@ export interface StoredExploreQuery {
   startedAt: number;
   deadlineAt: number;
   controller: AbortController;
+  /** User/request cancellation and the total query deadline; sources have their own controller. */
+  cancelController: AbortController;
   run: ExploreQueryRun;
+  finishing?: Promise<ReturnType<ExploreQueryRun["finish"]>>;
 }
 
 export interface ExploreQueryStoreStart {
@@ -52,6 +55,10 @@ export function createExploreQueryStore(): ExploreQueryStore {
   const start = (request: ExploreQueryStoreStart): StoredExploreQuery => {
     const id = `eq_${randomUUID()}`;
     const controller = request.controller;
+    const cancelController = new AbortController();
+    cancelController.signal.addEventListener("abort", () => {
+      if (!controller.signal.aborted) controller.abort(cancelController.signal.reason);
+    }, { once: true });
     const run = createExploreQueryRun(request.input, request.deps, {
       deadlineAt: request.deadlineAt,
       ...(request.reserveForJudgeMs !== undefined ? { reserveForJudgeMs: request.reserveForJudgeMs } : {}),
@@ -67,6 +74,7 @@ export function createExploreQueryStore(): ExploreQueryStore {
       startedAt: Date.now(),
       deadlineAt: request.deadlineAt,
       controller,
+      cancelController,
       run,
     };
     queries.set(keyOf(request.actor.sessionId, id), stored);
@@ -75,6 +83,10 @@ export function createExploreQueryStore(): ExploreQueryStore {
       if (!controller.signal.aborted) controller.abort();
     }, Math.max(0, sourceDeadlineAt - Date.now()));
     controller.signal.addEventListener("abort", () => clearTimeout(deadlineTimer), { once: true });
+    const totalDeadlineTimer = setTimeout(() => {
+      if (!cancelController.signal.aborted) cancelController.abort();
+    }, Math.max(0, request.deadlineAt - Date.now()));
+    cancelController.signal.addEventListener("abort", () => clearTimeout(totalDeadlineTimer), { once: true });
     run.start();
     return stored;
   };
@@ -97,6 +109,7 @@ export function createExploreQueryStore(): ExploreQueryStore {
     if (!stored) return false;
     stored.run.cancel();
     if (!stored.controller.signal.aborted) stored.controller.abort();
+    if (!stored.cancelController.signal.aborted) stored.cancelController.abort();
     return true;
   };
 
@@ -105,6 +118,7 @@ export function createExploreQueryStore(): ExploreQueryStore {
     if (!stored) return false;
     if (stored.run.terminal() === "active") stored.run.cancel();
     if (!stored.controller.signal.aborted) stored.controller.abort();
+    if (!stored.cancelController.signal.aborted) stored.cancelController.abort();
     queries.delete(keyOf(actor.sessionId, queryId));
     return true;
   };
@@ -114,6 +128,7 @@ export function createExploreQueryStore(): ExploreQueryStore {
       if (stored.sessionId !== sessionId) continue;
       stored.run.cancel();
       if (!stored.controller.signal.aborted) stored.controller.abort();
+      if (!stored.cancelController.signal.aborted) stored.cancelController.abort();
       queries.delete(key);
     }
   };
@@ -122,6 +137,7 @@ export function createExploreQueryStore(): ExploreQueryStore {
     for (const stored of queries.values()) {
       stored.run.cancel();
       if (!stored.controller.signal.aborted) stored.controller.abort();
+      if (!stored.cancelController.signal.aborted) stored.cancelController.abort();
     }
     queries.clear();
   };

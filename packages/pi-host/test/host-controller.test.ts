@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   createRequest,
   type EventEnvelope,
+  type HarnessInferenceBindingSnapshot,
   PIARIUM_PROTOCOL_VERSION,
   ProtocolDecodeError,
   type ResponseEnvelope,
@@ -727,6 +728,143 @@ describe("HostController", () => {
       const createdB = await transport.waitFor((entry) => isResponse(entry, "create-b"));
       assert.ok(createdB.kind === "response" && createdB.ok);
       assert.equal((createdB.result as SessionSnapshot).cwd, workspaceB);
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("cancels queued inference and releases rejected or invalid batch reservations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-host-inference-queue-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([
+      mkdir(agentDir, { recursive: true }),
+      mkdir(cwd, { recursive: true }),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: {
+        embedding: {
+          protocol: "openai-compatible",
+          providerId: "embed-provider",
+          modelId: "embed-1",
+          dimensions: 2,
+        },
+      },
+    }));
+    await writeFile(join(agentDir, "models.json"), JSON.stringify({
+      providers: {
+        "embed-provider": {
+          name: "Embed",
+          baseUrl: "https://models.example/v1",
+          api: "openai-completions",
+          models: [],
+        },
+      },
+    }));
+
+    let fetchCalls = 0;
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir,
+      inferenceFetch: async () => {
+        fetchCalls += 1;
+        return new Response(JSON.stringify({
+          data: [{ index: 0, embedding: [1, 0] }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+      projectTrustOverride: true,
+      transport,
+    });
+    controller.start();
+    try {
+      transport.receive(createRequest("create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create"), 15_000);
+      assert.ok(created.kind === "response" && created.ok);
+
+      transport.receive(createRequest("describe-inference", "harness.inference.describe", {}));
+      const described = await transport.waitFor(
+        (entry) => isResponse(entry, "describe-inference"),
+        15_000,
+      );
+      assert.ok(described.kind === "response" && described.ok);
+      const snapshot = described.result as HarnessInferenceBindingSnapshot;
+      assert.equal(snapshot.embedding.status, "ready");
+      if (snapshot.embedding.status !== "ready") throw new Error("embedding binding unavailable");
+      const binding = snapshot.embedding.binding;
+      const embedParams = (batchId: string) => ({
+        batchId,
+        configurationId: binding.configurationId,
+        ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
+        items: [{ id: "q", text: "queued text" }],
+        maxTokens: binding.maxTokens ?? 8192,
+        modelId: binding.modelId,
+        protocol: "openai-compatible" as const,
+        providerId: binding.providerId,
+        purpose: "query" as const,
+      });
+
+      transport.receive(createRequest("provider-login", "provider.login", {
+        providerId: "embed-provider",
+        type: "api_key",
+      }));
+      const authPrompt = await transport.waitFor(
+        (entry) => isEvent(entry, "provider.auth.prompt"),
+        15_000,
+      );
+      assert.ok(authPrompt.kind === "event" && authPrompt.event === "provider.auth.prompt");
+
+      transport.receive(createRequest("queued-embed", "harness.embed", embedParams("same-batch")));
+      transport.receive(createRequest(
+        "duplicate-embed",
+        "harness.embed",
+        embedParams("same-batch"),
+      ));
+      transport.receive(createRequest("cancel-queued", "harness.inference.cancel", {
+        batchId: "same-batch",
+      }));
+      const cancelled = await transport.waitFor((entry) => isResponse(entry, "cancel-queued"));
+      assert.ok(cancelled.kind === "response" && cancelled.ok);
+      assert.deepEqual(cancelled.result, { cancelled: true });
+
+      transport.receive(createRequest("provider-auth-response", "provider.auth.respond", {
+        requestId: authPrompt.data.prompt.requestId,
+        value: "test-api-key",
+      }));
+      const [loggedIn, authResponse] = await Promise.all([
+        transport.waitFor((entry) => isResponse(entry, "provider-login"), 15_000),
+        transport.waitFor((entry) => isResponse(entry, "provider-auth-response"), 15_000),
+      ]);
+      assert.ok(loggedIn.kind === "response" && loggedIn.ok);
+      assert.ok(authResponse.kind === "response" && authResponse.ok);
+
+      const [queued, duplicate] = await Promise.all([
+        transport.waitFor((entry) => isResponse(entry, "queued-embed"), 15_000),
+        transport.waitFor((entry) => isResponse(entry, "duplicate-embed"), 15_000),
+      ]);
+      assert.ok(queued.kind === "response" && !queued.ok);
+      assert.ok(duplicate.kind === "response" && !duplicate.ok);
+      assert.equal(duplicate.error.code, "inference_batch_conflict");
+      assert.equal(fetchCalls, 0);
+
+      transport.receive(createRequest("invalid-embed", "harness.embed", {
+        batchId: "reusable-batch",
+      } as never));
+      const invalid = await transport.waitFor((entry) => isResponse(entry, "invalid-embed"));
+      assert.ok(invalid.kind === "response" && !invalid.ok);
+      assert.equal(invalid.error.code, "invalid_params");
+
+      transport.receive(createRequest(
+        "valid-after-invalid",
+        "harness.embed",
+        embedParams("reusable-batch"),
+      ));
+      const valid = await transport.waitFor(
+        (entry) => isResponse(entry, "valid-after-invalid"),
+        15_000,
+      );
+      assert.ok(valid.kind === "response" && valid.ok);
+      assert.equal(fetchCalls, 1);
     } finally {
       await controller.dispose();
       await rm(root, { force: true, recursive: true });

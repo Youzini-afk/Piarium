@@ -40,6 +40,7 @@ import {
   resolveHarnessMemoryModeForUi,
   withHarnessMemoryMode,
 } from './harnessMemoryPresentation';
+import { embeddingFromDraft, rerankFromDraft } from './harnessInferencePresentation';
 
 const TOOL_KEYS = [
   'bash',
@@ -54,7 +55,7 @@ const TOOL_KEYS = [
 const SHELL_OPTIONS = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 const SEARCH_PROVIDERS = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const satisfies readonly HarnessWebSearchProvider[];
 
-interface HarnessSettings {
+export interface HarnessSettings {
   tools?: Partial<Record<string, boolean>>;
   shell?: string;
   output?: { visibleBytes?: number };
@@ -285,32 +286,31 @@ export const HarnessSettingsPage: React.FC = () => {
 
   const handleEmbeddingSave = React.useCallback(() => {
     const next = { ...harness };
-    if (embeddingProviderId.trim() && embeddingModelId.trim()) {
-      next.embedding = {
-        protocol: 'openai-compatible',
-        providerId: embeddingProviderId.trim(),
-        modelId: embeddingModelId.trim(),
-      };
-    } else {
+    const draft = embeddingFromDraft(harness.embedding, embeddingProviderId, embeddingModelId);
+    if (draft.status === 'delete') {
       delete next.embedding;
+    } else if (draft.status === 'incomplete') {
+      setError(t('settings.page.harness.embedding.model.description'));
+      return;
+    } else {
+      next.embedding = draft.value;
     }
     void saveHarness(next);
-  }, [embeddingModelId, embeddingProviderId, harness, saveHarness]);
+  }, [embeddingModelId, embeddingProviderId, harness, saveHarness, t]);
 
   const handleRerankSave = React.useCallback(() => {
     const next = { ...harness };
-    if (rerankProviderId.trim() && rerankModelId.trim()) {
-      next.rerank = {
-        protocol: 'http-rerank',
-        providerId: rerankProviderId.trim(),
-        modelId: rerankModelId.trim(),
-        ...(rerankEndpoint.trim() ? { endpoint: rerankEndpoint.trim() } : {}),
-      };
-    } else {
+    const draft = rerankFromDraft(harness.rerank, rerankProviderId, rerankModelId, rerankEndpoint);
+    if (draft.status === 'delete') {
       delete next.rerank;
+    } else if (draft.status === 'incomplete') {
+      setError(t('settings.page.harness.rerank.model.description'));
+      return;
+    } else {
+      next.rerank = draft.value;
     }
     void saveHarness(next);
-  }, [harness, rerankEndpoint, rerankModelId, rerankProviderId, saveHarness]);
+  }, [harness, rerankEndpoint, rerankModelId, rerankProviderId, saveHarness, t]);
 
   const handleSearchSave = React.useCallback(async () => {
     if (searchProvider === 'none') {

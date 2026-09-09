@@ -180,6 +180,13 @@ an OpenCode schema. UI-added API keys use Pi's locked `AuthStorage` flow and are
 provider metadata. Existing literal/env/command keys in native configuration layers remain intact
 and usable but are redacted from the surface protocol.
 
+Background embedding and rerank are user-owned inference bindings. Their isolated Pi resolver applies
+the user and operator provider layers but excludes trusted project provider overrides, so a repository
+cannot redirect a user's stored credential. The Application Host receives only a credential-free hash
+of the effective endpoint/API/model binding. These methods and their explicit batch cancellation remain
+on the private Application Host-to-worker protocol and are absent from the renderer/web/mobile runtime
+method catalog.
+
 Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
 when present and also supports anonymous endpoints. HTTP, HTTPS, localhost, LAN, and URL basic
 authentication remain available for explicitly configured providers. Authentication headers are

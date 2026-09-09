@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { execFileSync, spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { createFsSearchRuntime } from "./search.js";
 
@@ -65,6 +66,30 @@ const runtimeFor = (git: FakeGit, reply: (args: readonly string[]) => { stdout: 
 const listed = (...paths: readonly string[]) => ({ stdout: `${paths.join("\0")}\0`, code: 0 });
 
 describe("searchFilesystemFiles", () => {
+  it("applies the catalog ignore policy to individual mutations, including tracked ignored files", async () => {
+    const root = workspace();
+    const runtime = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+    try {
+      execFileSync("git", ["init", "--quiet", root]);
+      writeFileSync(path.join(root, ".gitignore"), "generated/\n");
+      expect(await runtime.isSearchableFile(root, "generated/schema.ts")).toBe(false);
+      expect(await runtime.isSearchableFile(root, "src/app.ts")).toBe(true);
+      expect(await runtime.isSearchableFile(root, "build/app.js")).toBe(false);
+      expect(await runtime.isSearchableFile(root, "../outside.ts")).toBe(false);
+      execFileSync("git", ["-C", root, "add", "-f", "--", "generated/schema.ts"]);
+      expect(await runtime.isSearchableFile(root, "generated/schema.ts")).toBe(true);
+    } finally { await fsPromises.rm(root, { recursive: true, force: true }); }
+  });
+
+  it("allows ordinary files in non-Git workspaces but does not treat Git failure as permission", async () => {
+    const root = workspace();
+    try {
+      const runtime = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+      expect(await runtime.isSearchableFile(root, "src/app.ts")).toBe(true);
+      const broken = runtimeFor({ calls: [] }, () => ({ code: 128, stdout: "" }));
+      await expect(broken.isSearchableFile(root, "src/app.ts")).rejects.toThrow(/could not determine/);
+    } finally { await fsPromises.rm(root, { recursive: true, force: true }); }
+  });
   it("asks git once for the whole tree instead of once per directory", async () => {
     const root = workspace();
     const git: FakeGit = { calls: [] };

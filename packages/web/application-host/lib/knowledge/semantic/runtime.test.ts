@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import { createStructureSource } from "../../structure/source.js";
 import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
 import { createHashEmbedder } from "./embedder.js";
-import { workspaceScope } from "./identity.js";
+import { workspaceScope, remoteEmbeddingSpaceId } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
+import { createRemoteEmbedder } from "./remote-embedder.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -16,6 +17,12 @@ afterEach(async () => {
 const parsingSource = () => createStructureSource([
   createTreeSitterStructureProvider({ parseBudgetMs: 30_000 }),
 ]);
+
+const gate = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+};
 
 describe("semantic index runtime", () => {
   it("indexes a workspace on disk and stays unavailable when the model pack is missing", async () => {
@@ -173,5 +180,196 @@ describe("semantic index runtime", () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     resolveEmbedding([new Array(base.space.dim).fill(0)]);
+  });
+
+  it("does not reveal an older publication while the next edit is still being embedded", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, "edit.ts");
+    writeFileSync(file, 'export const value = "initial";');
+    const enteredOne = gate(), enteredTwo = gate(), releaseOne = gate(), releaseTwo = gate();
+    const base = createHashEmbedder();
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir, hostId: "edit-race", documents: documents.authority, structureSource: parsingSource(),
+      searchFilesystemFiles: async () => [{ name: "edit.ts", path: file, relativePath: "edit.ts" }],
+      embedder: { ...base, embed: async (texts, request) => {
+        if (request?.purpose === "document" && texts.some((text) => text.includes("version-one"))) {
+          enteredOne.resolve(); await releaseOne.promise;
+        }
+        if (request?.purpose === "document" && texts.some((text) => text.includes("version-two"))) {
+          enteredTwo.resolve(); await releaseTwo.promise;
+        }
+        return base.embed(texts, request);
+      } },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const mutate = () => runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: "edit.ts", kind: "modified", owner: { kind: "web-route", id: "editor" } });
+    try {
+      await runtime.scanScope(scope);
+      await runtime.search(scope, "value", 5); // Reuse the query vector while the document batch is held.
+      writeFileSync(file, 'export const value = "version-one";'); mutate();
+      await enteredOne.promise;
+      writeFileSync(file, 'export const value = "version-two";'); mutate();
+      releaseOne.resolve();
+      await enteredTwo.promise;
+      const during = await runtime.search(scope, "value", 5);
+      expect(during.hits).toEqual([]);
+      expect(during.status.status).toBe("incomplete");
+      releaseTwo.resolve(); await runtime.drain();
+      expect((await runtime.search(scope, "value", 5)).hits[0]?.body).toContain("version-two");
+    } finally { releaseOne.resolve(); releaseTwo.resolve(); }
+  });
+
+  it("keeps read failures explicit, masks the old body, and recovers after a successful rescan", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, "read.ts");
+    writeFileSync(file, 'export const secret = "old current body";');
+    let fail = false;
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir, hostId: "read-failure", structureSource: parsingSource(), embedder: createHashEmbedder(),
+      documents: { inspectWorkspace: documents.authority.inspectWorkspace, read: async (input) => {
+        if (fail) throw new Error("read failed");
+        return documents.authority.read(input);
+      } },
+      searchFilesystemFiles: async () => [{ name: "read.ts", path: file, relativePath: "read.ts" }],
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    fail = true; await runtime.scanScope(scope);
+    const failed = await runtime.search(scope, "body", 5);
+    expect(failed.hits).toEqual([]);
+    expect(failed.status.status).toBe("incomplete");
+    expect(failed.gaps).toEqual([{ path: "read.ts", reason: "index-read-failed" }]);
+    fail = false; await runtime.scanScope(scope);
+    const recovered = await runtime.search(scope, "body", 5);
+    expect(recovered.status.coverage).toBe("complete");
+    expect(recovered.gaps).toEqual([]);
+    expect(recovered.hits[0]?.documentId).toBe("read.ts");
+  });
+
+  it("does not delete a later mutation using an older empty catalog", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, "later.ts");
+    writeFileSync(file, 'export const value = "old";');
+    const listingEntered = gate(), releaseListing = gate();
+    let first = true;
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir, hostId: "catalog-race", documents: documents.authority, structureSource: parsingSource(), embedder: createHashEmbedder(),
+      searchFilesystemFiles: async () => {
+        if (first) { first = false; return [{ name: "later.ts", path: file, relativePath: "later.ts" }]; }
+        listingEntered.resolve(); await releaseListing.promise; return [];
+      },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    const scan = runtime.scanScope(scope);
+    try {
+      await listingEntered.promise;
+      writeFileSync(file, 'export const value = "newly-created";');
+      runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: "later.ts", kind: "modified", owner: { kind: "web-route", id: "editor" } });
+      releaseListing.resolve(); await scan; await runtime.drain();
+      expect((await runtime.search(scope, "newly-created", 5)).hits[0]?.body).toContain("newly-created");
+    } finally { releaseListing.resolve(); }
+  });
+
+  it("reconciles an empty cold catalog after a real query resolves the remote dimension", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, "gone.ts");
+    writeFileSync(file, 'export const gone = "previous process";');
+    const requests: string[][] = [];
+    const remote = () => createRemoteEmbedder({
+      binding: { protocol: "openai-compatible", providerId: "p", modelId: "m", configurationId: "c" },
+      client: { embed: async (input) => {
+        requests.push(input.items.map((item) => item.text));
+        return { batchId: input.batchId, space: { providerId: "p", modelId: "m", protocol: "openai-compatible", configurationId: "c", dim: 2, maxTokens: 8192,
+          spaceId: remoteEmbeddingSpaceId({ protocol: "openai-compatible", providerId: "p", modelId: "m", configurationId: "c", dimensions: 2, maxTokens: 8192 }) },
+        items: input.items.map((item, index) => ({ id: item.id, index, vector: [1, 0] })) };
+      } },
+    });
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const first = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "empty-restart", documents: documents.authority, structureSource: parsingSource(), embedder: remote(),
+      searchFilesystemFiles: async () => [{ name: "gone.ts", path: file, relativePath: "gone.ts" }],
+    });
+    await first.scanScope(scope); await first.dispose(); unlinkSync(file); requests.length = 0;
+    const restarted = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "empty-restart", documents: documents.authority, structureSource: parsingSource(), embedder: remote(), searchFilesystemFiles: async () => [] });
+    disposes.push(() => restarted.dispose());
+    await restarted.scanScope(scope);
+    expect(requests).toEqual([]);
+    const result = await restarted.search(scope, "real query", 5);
+    expect(requests).toEqual([["real query"]]);
+    expect(result.hits).toEqual([]);
+    expect(result.status.coverage).toBe("complete");
+  });
+
+  it("keeps the selected backend when configuration changes during a query", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const selected = createHashEmbedder();
+    let current = selected;
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "fixed-query", documents: documents.authority, structureSource: parsingSource(), embedder: selected, getEmbedder: () => current });
+    disposes.push(() => runtime.dispose());
+    const query = runtime.search(workspaceScope(documents.identity.workspaceId), "query", 5);
+    current = { ...selected, space: { ...selected.space, dim: 0 }, status: "unavailable" };
+    expect((await query).status.status).toBe("empty");
+  });
+
+  it("checks mutation eligibility before reading or sending a document and limits draft inputs to roots", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const base = createHashEmbedder();
+    const sent: string[] = [];
+    let reads = 0;
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "eligible", structureSource: parsingSource(),
+      documents: { inspectWorkspace: documents.authority.inspectWorkspace, read: async (input) => { reads++; return documents.authority.read(input); } },
+      isIndexablePath: async () => false,
+      embedder: { ...base, embed: async (texts, request) => { sent.push(...texts); return base.embed(texts, request); } },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: "ignored.ts", kind: "modified", owner: { kind: "web-route", id: "editor" } });
+    await runtime.drain();
+    expect(reads).toBe(0); expect(sent).toEqual([]);
+    await runtime.search(scope, "question", 5, { roots: ["src"], overlays: [{ path: "outside.ts", content: "do not embed", revision: "1", origin: "surface-draft" }] });
+    await runtime.drain();
+    expect(sent).toEqual(["question"]);
+  });
+
+  it("shares draft construction and finishes it after the query's source window closes", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const base = createHashEmbedder();
+    const entered = gate(), release = gate();
+    let draftCalls = 0;
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "draft-lifetime", documents: documents.authority, structureSource: parsingSource(),
+      embedder: { ...base, embed: async (texts, request) => {
+        if (request?.purpose === "document") {
+          draftCalls++; entered.resolve(); await release.promise;
+          request.signal?.throwIfAborted();
+        }
+        return base.embed(texts, request);
+      } },
+    });
+    disposes.push(() => runtime.dispose());
+    const source = new AbortController();
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const overlays = [{ path: "draft.ts", content: 'export const draft = "captured body";', revision: "fixed-1", origin: "surface-draft" as const }];
+    try {
+      const first = await runtime.search(scope, "captured body", 5, { overlays, signal: source.signal });
+      await entered.promise;
+      expect(first.gaps[0]?.reason).toBe("draft-vector-pending");
+      source.abort();
+      await runtime.search(scope, "captured body", 5, { overlays });
+      release.resolve(); await runtime.drain();
+      const next = await runtime.search(scope, "captured body", 5, { overlays });
+      expect(draftCalls).toBe(1);
+      expect(next.gaps).toEqual([]);
+      expect(next.hits[0]?.body).toContain("captured body");
+    } finally { release.resolve(); }
   });
 });

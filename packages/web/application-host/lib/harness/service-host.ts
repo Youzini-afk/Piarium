@@ -125,8 +125,11 @@ export interface HarnessServiceHost {
       inputContext?: import("@piarium/protocol").AgentInputContext;
     },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
-  harnessSettings?: () => import("@piarium/protocol").PiSettingsSnapshot | null;
+  harnessSettings?: (
+    workspaceId: string,
+  ) => import("@piarium/protocol").PiSettingsSnapshot | null | Promise<import("@piarium/protocol").PiSettingsSnapshot | null>;
   rerankExploreViews?: (input: {
+    workspaceId: string;
     query: string;
     documents: Array<{ id: string; text: string; revision?: string }>;
     settings: import("@piarium/protocol").HarnessRerankSettings;

@@ -5,6 +5,9 @@ import {
   mergeHarnessSettings,
   resolveHarnessMemoryMode,
   HarnessSettingsValidationError,
+  HarnessInferenceSettingsValidationError,
+  parseHarnessEmbeddingSettings,
+  parseHarnessRerankSettings,
 } from "../src/index.js";
 
 describe("harness settings", () => {
@@ -101,6 +104,29 @@ describe("harness settings", () => {
       embedding: { protocol: "openai-compatible", providerId: "workspace", modelId: "redirected" },
       rerank: { protocol: "http-rerank", providerId: "workspace", modelId: "redirected" },
     }).rerank, undefined);
+  });
+
+  it("distinguishes missing inference settings from malformed bindings", () => {
+    assert.equal(parseHarnessEmbeddingSettings(undefined), undefined);
+    assert.equal(parseHarnessRerankSettings(undefined), undefined);
+    for (const value of [null, false, {}, { protocol: "other", providerId: "p", modelId: "m" }]) {
+      assert.throws(() => parseHarnessEmbeddingSettings(value), HarnessInferenceSettingsValidationError);
+    }
+    assert.throws(() => parseHarnessEmbeddingSettings({
+      protocol: "openai-compatible", providerId: "p", modelId: "m", dimensions: 0,
+    }), /dimensions/);
+    assert.throws(() => parseHarnessEmbeddingSettings({
+      protocol: "openai-compatible", providerId: "p", modelId: "m", maxTokens: 1.5,
+    }), /maxTokens/);
+    assert.throws(() => parseHarnessRerankSettings({
+      protocol: "http-rerank", providerId: "p", modelId: "m", endpoint: "https://project.invalid",
+    }), /provider-relative/);
+    assert.throws(() => parseHarnessRerankSettings({
+      protocol: "http-rerank", providerId: "p", modelId: "m", maxDocumentTokens: -1,
+    }), /maxDocumentTokens/);
+    assert.equal(mergeHarnessSettings({
+      embedding: { protocol: "openai-compatible", providerId: "p", modelId: "m", dimensions: 0 },
+    } as never, {}).embedding, undefined, "a malformed optional binding must not prevent ordinary session settings from resolving");
   });
 
   it("does not let workspace settings redirect model slots", () => {

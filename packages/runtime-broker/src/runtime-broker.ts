@@ -226,6 +226,8 @@ export const PI_CATALOG_METHODS = [
   "settings.update",
   "harness.embed",
   "harness.rerank",
+  "harness.inference.describe",
+  "harness.inference.cancel",
 ] as const;
 
 export type PiCatalogMethod = (typeof PI_CATALOG_METHODS)[number];

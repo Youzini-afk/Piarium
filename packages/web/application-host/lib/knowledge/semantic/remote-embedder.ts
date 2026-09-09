@@ -3,10 +3,11 @@
  * binding and never sees provider secrets.
  */
 
+import { randomUUID } from "node:crypto";
 import {
   REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS,
   type HarnessEmbedResult,
-  type HarnessEmbeddingSettings,
+  type HarnessResolvedEmbeddingBinding,
 } from "@piarium/protocol";
 import type { SemanticEmbedder, SemanticEmbedRequest, SemanticEmbedResult } from "./embedder.js";
 import { remoteEmbeddingSpaceId, type VectorSpaceIdentity } from "./identity.js";
@@ -20,17 +21,18 @@ export interface RemoteEmbedClient {
     items: Array<{ id: string; text: string }>;
     batchId: string;
     dimensions?: number;
-    maxTokens?: number;
+    maxTokens: number;
+    configurationId: string;
     signal?: AbortSignal;
   }): Promise<HarnessEmbedResult>;
 }
 
 const spaceFromBinding = (
-  binding: HarnessEmbeddingSettings,
+  binding: HarnessResolvedEmbeddingBinding,
   dim: number,
 ): VectorSpaceIdentity => {
   const maxTokens = binding.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
-  return {
+  const identity: VectorSpaceIdentity = {
     provider: binding.providerId,
     model: binding.modelId,
     modelRevision: "openai-compatible",
@@ -38,18 +40,23 @@ const spaceFromBinding = (
     pooling: "mean",
     normalize: true,
     maxTokens,
-    spaceId: remoteEmbeddingSpaceId({
+    configurationId: binding.configurationId,
+  };
+  if (dim > 0) {
+    identity.spaceId = remoteEmbeddingSpaceId({
       protocol: binding.protocol,
       providerId: binding.providerId,
       modelId: binding.modelId,
+      configurationId: binding.configurationId,
       maxTokens,
-      ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
-    }),
-  };
+      dimensions: dim,
+    });
+  }
+  return identity;
 };
 
 export function createRemoteEmbedder(options: {
-  binding: HarnessEmbeddingSettings;
+  binding: HarnessResolvedEmbeddingBinding;
   client: RemoteEmbedClient;
 }): SemanticEmbedder {
   const maxTokens = options.binding.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
@@ -59,15 +66,15 @@ export function createRemoteEmbedder(options: {
     get space() { return space; },
     prepare: async () => undefined,
     countTokens: (text) => {
-      // Remote tokenizers stay on the provider. Character length is a conservative
-      // Host-side split so a long line is never dropped while we wait for a count.
+      // The provider tokenizer is not available here. Character length is a
+      // splitting estimate, not a guarantee about the provider's token count.
       return Math.max(1, text.length);
     },
     embed: async (texts, request) => {
       request?.signal?.throwIfAborted();
       const result = await embedder.embedBatch({
         purpose: request?.purpose ?? "document",
-        batchId: request?.batchId ?? `remote:${texts.length}`,
+        batchId: request?.batchId ?? randomUUID(),
         items: texts.map((text, index) => ({ id: `remote-${index}`, text })),
         ...(request?.signal ? { signal: request.signal } : {}),
       });
@@ -80,6 +87,7 @@ export function createRemoteEmbedder(options: {
         providerId: options.binding.providerId,
         modelId: options.binding.modelId,
         protocol: "openai-compatible",
+        configurationId: options.binding.configurationId,
         items: request.items.map((item) => ({ id: item.id, text: item.text })),
         batchId: request.batchId,
         ...(options.binding.dimensions === undefined ? {} : { dimensions: options.binding.dimensions }),
@@ -88,6 +96,18 @@ export function createRemoteEmbedder(options: {
       });
       if (result.items.length !== request.items.length) {
         throw new Error(`Remote embedder returned ${result.items.length} vectors for ${request.items.length} inputs.`);
+      }
+      if (result.batchId !== request.batchId) {
+        throw new Error("Remote embedder returned a different batch identity.");
+      }
+      if (
+        result.space.protocol !== options.binding.protocol
+        || result.space.providerId !== options.binding.providerId
+        || result.space.modelId !== options.binding.modelId
+        || result.space.configurationId !== options.binding.configurationId
+        || result.space.maxTokens !== maxTokens
+      ) {
+        throw new Error("Remote embedder returned a different configured binding.");
       }
       const ordered = [...result.items].sort((left, right) => left.index - right.index);
       for (const [index, item] of ordered.entries()) {
@@ -100,12 +120,30 @@ export function createRemoteEmbedder(options: {
         }
       }
       const dim = result.space.dim;
+      if (!Number.isSafeInteger(dim) || dim <= 0) throw new Error("Remote embedder returned an invalid dimension.");
       if (ordered.some((item) => item.vector.length !== dim)) {
         throw new Error("Remote embedder mixed vector dimensions.");
       }
-      space.dim = dim;
-      if (result.space.spaceId && result.space.spaceId !== space.spaceId) {
+      const expectedSpaceId = remoteEmbeddingSpaceId({
+        protocol: options.binding.protocol,
+        providerId: options.binding.providerId,
+        modelId: options.binding.modelId,
+        configurationId: options.binding.configurationId,
+        maxTokens,
+        dimensions: dim,
+      });
+      if (result.space.spaceId !== expectedSpaceId) {
         throw new Error("Remote embedder returned a different vector space than the configured binding.");
+      }
+      if (space.dim > 0 && space.dim !== dim) {
+        throw new Error(`Remote embedding dimension changed from ${space.dim} to ${dim}.`);
+      }
+      if (space.spaceId && space.spaceId !== expectedSpaceId) {
+        throw new Error("Remote embedding space changed after it was resolved.");
+      }
+      if (space.dim === 0) {
+        space.dim = dim;
+        space.spaceId = expectedSpaceId;
       }
       return {
         batchId: result.batchId,

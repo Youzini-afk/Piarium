@@ -56,7 +56,7 @@ export async function pinSemanticQueryView(input: {
       });
       continue;
     }
-    if (draft?.status === "unavailable") {
+    if (!draft || draft.status === "unavailable") {
       overlays.push({
         path,
         content: null,
@@ -66,6 +66,7 @@ export async function pinSemanticQueryView(input: {
       });
       continue;
     }
+    if (draft.status === "disk") continue;
     overlays.push({
       path,
       content: null,

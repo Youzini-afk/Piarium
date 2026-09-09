@@ -21,6 +21,7 @@ import type { SemanticChunk } from "./chunker.js";
 import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 import { embedTextKey } from "./identity.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
+import { waitWithSignal } from "./cancellation.js";
 import type { EmbedPriority, EmbedScheduler } from "./embed-scheduler.js";
 
 const require = createRequire(import.meta.url);
@@ -305,23 +306,33 @@ export function createSemanticGenerationStore(options: {
     const cached = vectorCache.get({ spaceId, purpose: "document", embedText });
     if (cached) return cached;
     if (!db) return undefined;
-    const ids = db.indexedLookup({ type: "block", embedKey: embedTextKey(embedText) }, 1);
-    const id = ids[0];
-    if (id === undefined) return undefined;
-    const node = db.get(id);
-    if (!node || !Array.isArray(node.vector) || node.vector.length !== space.dim) return undefined;
-    vectorCache.set({ spaceId, purpose: "document", embedText }, node.vector);
-    return node.vector;
+    const ids = db.indexedLookup(
+      { type: "block", embedKey: embedTextKey(embedText) },
+      maximumLookupResults(db),
+    );
+    for (const id of ids) {
+      const payload = db.getPayload(id) as BlockPayload | null;
+      if (payload?.type !== "block" || payload.embedText !== embedText) continue;
+      const node = db.get(id);
+      if (!node || !Array.isArray(node.vector) || node.vector.length !== space.dim) continue;
+      vectorCache.set({ spaceId, purpose: "document", embedText }, node.vector);
+      return node.vector;
+    }
+    return undefined;
   };
 
   const embedMissing = async (
     texts: readonly string[],
     purpose: SemanticEmbedPurpose,
+    signal?: AbortSignal,
   ): Promise<number[][]> => {
     if (texts.length === 0) return [];
     const run = async (): Promise<number[][]> => {
+      signal?.throwIfAborted();
       await options.embedder.prepare();
-      const vectors = await options.embedder.embed(texts, { purpose });
+      signal?.throwIfAborted();
+      const vectors = await options.embedder.embed(texts, { purpose, ...(signal ? { signal } : {}) });
+      signal?.throwIfAborted();
       if (vectors.length !== texts.length || vectors.some((vector) => vector.length !== space.dim)) {
         throw new Error(`Semantic embedder returned ${vectors.length} vectors for ${texts.length} chunks in ${space.dim} dimensions.`);
       }
@@ -332,7 +343,10 @@ export function createSemanticGenerationStore(options: {
       : run();
   };
 
-  const publishDocuments = async (inputs: readonly SemanticDocumentPublication[]): Promise<void> => {
+  const publishDocuments = async (
+    inputs: readonly SemanticDocumentPublication[],
+    signal?: AbortSignal,
+  ): Promise<void> => {
     if (options.embedder.status !== "ready" || inputs.length === 0) return;
     const publicationsByDocument = new Map<string, SemanticDocumentPublication>();
     for (const input of inputs) {
@@ -344,26 +358,39 @@ export function createSemanticGenerationStore(options: {
     }
     const publications = [...publicationsByDocument.values()];
     if (publications.length === 0) return;
+    signal?.throwIfAborted();
     await options.embedder.prepare();
+    signal?.throwIfAborted();
     const dbForReuse = writer ?? (existsSync(dbFile()) ? ensureWriter() : null);
     const chunks = publications.flatMap((input) => input.chunks);
     const reused = new Array<number[] | undefined>(chunks.length);
-    const missingIndexes: number[] = [];
-    const missingTexts: string[] = [];
+    const claims: Array<ReturnType<SemanticVectorCache["claim"]> | undefined> = new Array(chunks.length);
+    const owners: Array<{ claim: ReturnType<SemanticVectorCache["claim"]>; text: string }> = [];
     for (const [index, chunk] of chunks.entries()) {
       const existing = lookupVectorByEmbedText(dbForReuse, chunk.embedText);
       if (existing) reused[index] = existing;
       else {
-        missingIndexes.push(index);
-        missingTexts.push(chunk.embedText);
+        const claim = vectorCache.claim({ spaceId, purpose: "document", embedText: chunk.embedText });
+        claims[index] = claim;
+        if (claim.owner) owners.push({ claim, text: chunk.embedText });
       }
     }
-    const fresh = await embedMissing(missingTexts, "document");
-    for (const [offset, index] of missingIndexes.entries()) {
-      const vector = fresh[offset]!;
-      reused[index] = vector;
-      vectorCache.set({ spaceId, purpose: "document", embedText: missingTexts[offset]! }, vector);
+    try {
+      const fresh = await embedMissing(owners.map((owner) => owner.text), "document", signal);
+      for (const [index, owner] of owners.entries()) {
+        const vector = fresh[index]!;
+        vectorCache.set({ spaceId, purpose: "document", embedText: owner.text }, vector);
+        owner.claim.resolve(vector);
+      }
+    } catch (error) {
+      for (const owner of owners) owner.claim.reject(error);
+      await Promise.allSettled(owners.map((owner) => owner.claim.promise));
+      throw error;
     }
+    for (const [index, claim] of claims.entries()) {
+      if (claim) reused[index] = await waitWithSignal(claim.promise, signal);
+    }
+    signal?.throwIfAborted();
     const vectors = reused.map((vector, index) => {
       if (!vector) throw new Error(`Semantic embedder missed a vector for chunk ${index}.`);
       return vector;
@@ -372,6 +399,7 @@ export function createSemanticGenerationStore(options: {
       throw new Error(`Semantic embedder returned ${vectors.length} vectors for ${chunks.length} chunks in ${space.dim} dimensions.`);
     }
     await enqueue(() => {
+      signal?.throwIfAborted();
       const db = ensureWriter();
       const operations: import("triviumdb").TransactionOperation[] = [];
       const emptyVector = new Array(space.dim).fill(0);
@@ -470,11 +498,11 @@ export function createSemanticGenerationStore(options: {
         }
       });
     },
-    publishDocument(input: SemanticDocumentPublication): Promise<void> {
-      return publishDocuments([input]);
+    publishDocument(input: SemanticDocumentPublication, signal?: AbortSignal): Promise<void> {
+      return publishDocuments([input], signal);
     },
-    publishDocuments(inputs: readonly SemanticDocumentPublication[]): Promise<void> {
-      return publishDocuments(inputs);
+    publishDocuments(inputs: readonly SemanticDocumentPublication[], signal?: AbortSignal): Promise<void> {
+      return publishDocuments(inputs, signal);
     },
     async listDocumentIds(): Promise<string[]> {
       return enqueue(() => {
@@ -492,8 +520,11 @@ export function createSemanticGenerationStore(options: {
         }
       });
     },
-    async removeDocument(documentId: string): Promise<void> {
+    async removeDocument(documentId: string, publishToken?: number): Promise<void> {
+      const token = publishToken ?? ((latestPublish.get(documentId) ?? 0) + 1);
+      latestPublish.set(documentId, Math.max(latestPublish.get(documentId) ?? 0, token));
       await enqueue(() => {
+        if ((latestPublish.get(documentId) ?? 0) > token) return;
         if (!existsSync(dbFile()) && !writer) return;
         const db = ensureWriter();
         const operations: import("triviumdb").TransactionOperation[] = [];

@@ -164,6 +164,49 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
 }) => {
   const fsPromises = rawFsPromises as FsPromises;
   const spawn = rawSpawn as typeof nodeSpawn;
+  const isSearchableFile = async (rootPath: string, resourceId: string, signal?: AbortSignal): Promise<boolean> => {
+    signal?.throwIfAborted();
+    const absolutePath = path.resolve(rootPath, resourceId);
+    const relative = path.relative(rootPath, absolutePath).split(path.sep).join('/');
+    if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) return false;
+    const segments = relative.split('/');
+    if (segments.some((segment) => segment.startsWith('.'))
+      || segments.slice(0, -1).some((segment) => shouldSkipSearchDirectory(segment, false))) return false;
+    try {
+      if (!(await fsPromises.lstat(absolutePath)).isFile()) return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+    signal?.throwIfAborted();
+    // The cold catalog uses ls-files. For a single mutation, check-ignore has
+    // the same tracked/untracked semantics without enumerating the repository.
+    return new Promise<boolean>((resolve, reject) => {
+      const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--quiet', '--', relative], {
+        cwd: rootPath, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, LC_ALL: 'C' },
+      });
+      const errors: Buffer[] = [];
+      const onAbort = (): void => {
+        child.kill();
+        reject(signal?.reason ?? new DOMException('File eligibility check aborted', 'AbortError'));
+      };
+      child.stderr.on('data', (data: Buffer) => errors.push(data));
+      child.on('error', (error) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      });
+      child.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort);
+        if (signal?.aborted) { onAbort(); return; }
+        if (code === 0) resolve(false);
+        else if (code === 1 || (code === 128 && /not a git repository/iu.test(Buffer.concat(errors).toString('utf8')))) resolve(true);
+        else reject(new Error(`Git could not determine file eligibility (exit ${code})`));
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+  };
   const searchFilesystemFiles = async (rootPath: string, options: {
     includeHidden?: boolean;
     limit?: number;
@@ -287,6 +330,7 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
   };
 
   return {
+    isSearchableFile,
     searchFilesystemFiles,
   };
 };

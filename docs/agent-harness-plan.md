@@ -557,22 +557,28 @@ A–D 已由 D-176–D-189 接入同一引擎与公开工具。不把 3.16 的�
 **A. 收口现有性能与发行修复。** 已提交：`37b12e8e`、`8752e039`（真实批推理、切块尺寸查找、存储增量计数/批事务与中断恢复、
 模型配方固定修订、构建准备和 Electron 实际加载 smoke）。完整冷扫时间仍未量得，不能把部分语料或中断扫描外推成全仓性能。
 
-**B. 已接线（D-190）。** 调用边界：Settings `harness.embedding` → Host `settings.get`（无密钥）→ 未配置走本地 MiniLM；
+**B. 已接线（D-190 / D-194–D-195）。** 调用边界：Settings `harness.embedding` → Host `settings.get` 与 Pi binding describe（无密钥）→ 确认未配置才走本地 MiniLM；
 配置后 `createRemoteEmbedder` → workspace `harness.embed` → Pi `BackgroundInferenceRuntime`（workspace worker 的
-ModelRuntime / `auth.json`）→ OpenAI 兼容 `POST {baseUrl}/embeddings`。Host 提交已授权正文、用途、批次和绑定。空间身份
-由 protocol/provider/model/maxTokens/配置维度（未指定为 `auto`）命名，凭据不进入 space。知识库 `embedding:null` 与
+隔离的 user/operator 配置 ModelRuntime / 用户 `auth.json`）→ OpenAI 兼容 `POST {baseUrl}/embeddings`。Host 提交已授权正文、用途、批次和绑定。空间身份
+由 protocol/provider/model/maxTokens、去凭据 endpoint/API 配置身份和最终实际维度命名；自动维度由首个真实输入解析，不持久化 `auto` 空间。知识库 `embedding:null` 与
 `knowledge/embedding.ts` 适配器不是这条链。
 
 **C. 已接线（D-191）。** 复用键为 space + purpose + 实际 embedText；查询缓存不绕过 D-189。调度器一次一批，当前批结束后
 前台优先于下一批后台。冷扫等本轮第一个兼容发布后再查 partial。远程不套用 MiniLM 512；超长单行续切。Node ORT
 `intraOpNumThreads` 写到真实 session。`publishToken`、扫描结束对账、checkpoint 恢复。向量缓存按字节软预算淘汰，不拒绝查询。
 
-**D. 已接线（D-192）。** `pinSemanticQueryView` 在查询开始固定 surface/thread 视图；有固定草稿的路径立即遮蔽磁盘向量。
-缺向量报告具体 gap，不读旧磁盘、不把缺向量写成缺正文。线程用父 workspace 上该分支的 baseline + delta。仍走 scoped Top-K。
+**D. 已接线（D-192 / D-194–D-195）。** `pinSemanticQueryView` 固定发起窗口的草稿；对应路径立即遮蔽磁盘向量。
+缺向量报告具体 gap，不读旧磁盘、不把缺向量写成缺正文。已捕获草稿的向量建设由 workspace runtime 在后台完成，结束查询不反复取消建设。
+活跃隔离线程查询自身物化目录的 Documents workspace，父分支的后续变化不会进入。增量写入和冷扫使用相同的文件筛选，`copyIgnored` 不自动扩大语义语料。仍走 scoped Top-K。
 
 **E. 已接线（D-193）。** 调用边界：`explore.query.finish` 在 select 为 `skipped`/`unconfigured` 且 `harness.rerank` 有效时
 → Host `harness.rerank` → `POST {baseUrl}{endpoint||/rerank}`。select 已 used/failed/cancelled 则不调用。失败保留来源排名，
-details 标明 rerank 状态。输入是 3.15B 当前视图；超限先缩小视图。
+details 标明 rerank 状态。输入是 3.15B 当前 view；没有 provider tokenizer 时按字符长度估算，超预算 view 不参与评分；该估算不保证满足远程 tokenizer 的限制。
+
+**身份与当前性纠正（D-194）。** Host 装配改为 workspace-keyed，Pi provider 权威限于 user/operator 层，内部 inference 方法从
+公开 Runtime surface 移除并增加显式 batch cancel。远程空间在实际维度解析后才稳定命名，并包含去凭据 endpoint/API 配置身份；
+设置变化启动新空间扫描。扫描核对当前 revision 后才解除旧行 mask，读失败保持 gap/incomplete。活跃 isolated child 直接查询自身
+Documents workspace。rerank 超预算 view 不截断冒充原 ID，finish 冻结配置且终态无二次 HTTP。
 
 工作区仍是包含陌生文件的范围，注意力只改变建设顺序。真实 provider 延迟、质量、成本和完整冷扫时间未观察。扩散模型/
 后训练、全仓生成式摘要与零样本路由仍留后续。知识库远程 embedding 仍按 2.8，未与本条混写为已接线。

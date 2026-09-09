@@ -18,7 +18,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { sessionEntryToContextMessages, type AgentSessionServices } from "@earendil-works/pi-coding-agent";
@@ -453,6 +453,20 @@ describe("session e2e — memory keeper extension", () => {
           }, [], settings.globalRevision),
           /harness\.memory\.mode must be one of/,
         );
+        await assert.rejects(
+          session.host.updateSettings("global", {
+            harness: {
+              embedding: {
+                protocol: "openai-compatible",
+                providerId: "p",
+                modelId: "m",
+                dimensions: 0,
+              },
+            },
+          }, [], settings.globalRevision),
+          /harness\.embedding\.dimensions/,
+        );
+        assert.equal((await session.host.getSettings()).globalRevision, settings.globalRevision);
         await session.host.updateSettings("global", {
           harness: { memory: { mode: "assist" } },
         }, [], settings.globalRevision);
@@ -1318,8 +1332,20 @@ describe("session e2e — explore", () => {
         embed?: (params: HarnessEmbedParams) => Promise<HarnessEmbedResult>;
         rerank?: (params: HarnessRerankParams) => Promise<HarnessRerankResult>;
       } = {};
+      const inferenceConfigurationId = (modelId: string) => createHash("sha256").update(JSON.stringify({
+        providerId: "embed-provider",
+        modelId,
+        baseUrl: "https://models.example/v1",
+        api: "openai-completions",
+      })).digest("hex").slice(0, 16);
       const remote = createRemoteEmbedder({
-        binding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "text-embedding-3-small", dimensions: 2 },
+        binding: {
+          protocol: "openai-compatible",
+          providerId: "embed-provider",
+          modelId: "text-embedding-3-small",
+          dimensions: 2,
+          configurationId: inferenceConfigurationId("text-embedding-3-small"),
+        },
         client: {
           embed: async (params) => {
             if (!hostApi.embed) throw new Error("SessionHost embed is not ready");
@@ -1393,6 +1419,7 @@ describe("session e2e — explore", () => {
           rerankExploreViews: async (input) => {
             if (!hostApi.rerank) throw new Error("SessionHost rerank is not ready");
             return hostApi.rerank({
+              configurationId: inferenceConfigurationId(input.settings.modelId),
               providerId: input.settings.providerId,
               modelId: input.settings.modelId,
               protocol: "http-rerank",
