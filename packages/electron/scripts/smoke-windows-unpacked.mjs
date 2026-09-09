@@ -2,9 +2,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import fsp from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,29 @@ const smokePiPackageRoot = path.resolve(
   '@earendil-works',
   'pi-coding-agent',
 );
+const packagedResourcesRoot = path.join(path.dirname(appPath), 'resources');
+const packagedWebServerRoot = path.join(
+  packagedResourcesRoot,
+  'app.asar.unpacked',
+  'node_modules',
+  '@piarium',
+  'web',
+  'server',
+);
+const packagedTransformersRoot = path.join(
+  packagedResourcesRoot,
+  'app.asar.unpacked',
+  'node_modules',
+  '@huggingface',
+  'transformers',
+);
+const SEMANTIC_MODEL_FILES = [
+  'tokenizer.json',
+  'tokenizer_config.json',
+  'config.json',
+  'special_tokens_map.json',
+  'onnx/model_quantized.onnx',
+];
 
 if (process.platform !== 'win32') {
   throw new Error('The unpacked Windows smoke test must run on Windows.');
@@ -92,6 +115,159 @@ const postJson = async (baseUrl, route, body, label) => {
     throw new Error(`${label} failed with HTTP ${response.status}: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`);
   }
   return payload;
+};
+
+const importPackagedServerModule = (relativePath) => import(
+  pathToFileURL(path.join(packagedWebServerRoot, relativePath)).href
+);
+
+const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
+  const requiredFiles = [
+    path.join(packagedTransformersRoot, 'package.json'),
+    path.join(packagedTransformersRoot, 'dist', 'transformers.node.mjs'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'recipe.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', '.source-revision.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer_config.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'config.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'special_tokens_map.json'),
+    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'onnx', 'model_quantized.onnx'),
+  ];
+  const missing = requiredFiles.filter((file) => {
+    try {
+      const details = statSync(file);
+      return !details.isFile() || details.size === 0;
+    } catch {
+      return true;
+    }
+  });
+  if (missing.length > 0) {
+    throw new Error(`Packaged semantic runtime is incomplete: ${missing.join(', ')}`);
+  }
+  const recipePath = path.join(
+    packagedWebServerRoot,
+    'lib',
+    'knowledge',
+    'semantic',
+    'runtime',
+    'all-minilm-l6-v2',
+    'recipe.json',
+  );
+  let recipe;
+  try {
+    recipe = JSON.parse(readFileSync(recipePath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Packaged semantic recipe is unreadable at ${recipePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!/^[0-9a-f]{40}$/i.test(recipe.modelRevision || '')) {
+    throw new Error(`Packaged semantic recipe is not pinned to a full commit revision: ${recipe.modelRevision}`);
+  }
+  const markerPath = path.join(
+    packagedWebServerRoot,
+    'lib',
+    'knowledge',
+    'semantic',
+    'runtime',
+    'all-minilm-l6-v2',
+    '.source-revision.json',
+  );
+  let marker;
+  try {
+    marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Packaged semantic source marker is unreadable at ${markerPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const markerFiles = Array.isArray(marker.files) ? [...marker.files].sort() : [];
+  if (
+    marker.schemaVersion !== 1
+    || marker.revision !== recipe.modelRevision
+    || JSON.stringify(markerFiles) !== JSON.stringify([...SEMANTIC_MODEL_FILES].sort())
+  ) {
+    throw new Error(`Packaged semantic source marker does not match recipe at ${markerPath}`);
+  }
+
+  const [documentsModule, fsSearchModule, structureSourceModule, treeSitterModule, semanticModule, minilmModule, identityModule] = await Promise.all([
+    importPackagedServerModule('lib/documents/authority.js'),
+    importPackagedServerModule('lib/fs/search.js'),
+    importPackagedServerModule('lib/structure/source.js'),
+    importPackagedServerModule('lib/structure/tree-sitter-provider.js'),
+    importPackagedServerModule('lib/knowledge/semantic/runtime.js'),
+    importPackagedServerModule('lib/knowledge/semantic/minilm.js'),
+    importPackagedServerModule('lib/knowledge/semantic/identity.js'),
+  ]);
+  const documents = documentsModule.createDocumentAuthority({
+    hostId: 'packaged-semantic-smoke',
+    dataDir: semanticDataDir,
+    fsPromises: fsp,
+    pathModule: path,
+    isAllowedRoot: async () => true,
+    isTrusted: async () => true,
+  });
+  let runtime;
+  try {
+    const identity = await documents.resolveWorkspace({ path: workspaceRoot });
+    const fileSearch = fsSearchModule.createFsSearchRuntime({
+      fsPromises: fsp,
+      path,
+      spawn,
+      resolveGitBinaryForSpawn: () => 'git',
+    });
+    const structureSource = structureSourceModule.createStructureSource([
+      treeSitterModule.createTreeSitterStructureProvider(),
+    ]);
+    runtime = semanticModule.createSemanticIndexRuntime({
+      dataDir: semanticDataDir,
+      hostId: 'packaged-semantic-smoke',
+      documents,
+      structureSource,
+      searchFilesystemFiles: fileSearch.searchFilesystemFiles,
+      embedder: minilmModule.createLocalMinilmEmbedder({ dataDir: semanticDataDir }),
+    });
+    const scope = identityModule.workspaceScope(identity.workspaceId);
+    await runtime.scanScope(scope);
+    const scanStatus = runtime.statusFor(scope);
+    if (
+      scanStatus.status !== 'ready'
+      || scanStatus.coverage !== 'complete'
+      || scanStatus.lifecycle !== 'ready'
+      || typeof scanStatus.generation !== 'string'
+      || typeof scanStatus.spaceId !== 'string'
+    ) {
+      throw new Error(`Packaged semantic scan did not complete: ${JSON.stringify(scanStatus)}`);
+    }
+
+    // No word from this query occurs in the fixture body. A hit therefore
+    // proves the published MiniLM + ONNX path, rather than lexical matching.
+    const result = await runtime.search(scope, 'how does the runtime discard idle tokens', 8);
+    const hit = result.hits.find((candidate) => candidate.documentId === 'semantic-gap-smoke.ts');
+    const primaryEvidence = hit?.rank === 1 && hit.body.includes('parkedHandles.delete');
+    if (
+      result.status.status !== 'ready'
+      || result.status.coverage !== 'complete'
+      || !primaryEvidence
+    ) {
+      throw new Error(`Packaged semantic query did not return primary fixture evidence: ${JSON.stringify({ status: result.status, hits: result.hits })}`);
+    }
+    return {
+      coverage: result.status.coverage,
+      generation: result.status.generation,
+      hit: {
+        blockId: hit.blockId,
+        documentId: hit.documentId,
+        rank: hit.rank,
+        similarity: hit.similarity,
+      },
+      lifecycle: result.status.lifecycle,
+      model: path.relative(packagedWebServerRoot, path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'onnx', 'model_quantized.onnx')),
+      primaryEvidence,
+      spaceId: result.status.spaceId,
+      status: result.status.status,
+      transformers: path.relative(packagedResourcesRoot, path.join(packagedTransformersRoot, 'dist', 'transformers.node.mjs')),
+    };
+  } finally {
+    await runtime?.dispose().catch(() => {});
+    await documents.dispose?.().catch(() => {});
+  }
 };
 
 const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
@@ -554,6 +730,17 @@ try {
     'export const packagedLanguageSmoke: number = 1;\n',
     'utf8',
   );
+  await fsp.writeFile(
+    path.join(smokeWorkspaceRoot, 'semantic-gap-smoke.ts'),
+    [
+      'export function reclaimLease(handle: string) {',
+      '  parkedHandles.delete(handle);',
+      '  return handle;',
+      '}',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
   if (profileSourcePath) {
     for (const entry of ['Local State', 'Local Storage', 'Preferences', 'Session Storage', 'settings.json']) {
       const source = path.join(profileSourcePath, entry);
@@ -613,6 +800,10 @@ try {
 
   const builtinLanguage = await runPackagedBuiltinLanguageSmoke(baseUrl, smokeWorkspaceRoot);
   const builtinRecovery = await runPackagedRecoverySmoke(baseUrl);
+  const semantic = await runPackagedSemanticSmoke(
+    smokeWorkspaceRoot,
+    path.join(smokeRoot, 'semantic-data'),
+  );
 
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
@@ -696,6 +887,7 @@ try {
     appPath,
     builtinLanguage,
     builtinRecovery,
+    semantic,
     health: 'ok',
     layout,
     piVersion,

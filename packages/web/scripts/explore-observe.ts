@@ -383,6 +383,21 @@ const main = async (): Promise<void> => {
     embedder: createLocalMinilmEmbedder({ dataDir }),
     onError: (error) => process.stderr.write(`semantic: ${String(error)}\n`),
   });
+  // The semantic index is a separate generation store from the catalog, so it
+  // needs its own scan. Without one the questions run against an `empty` index
+  // and the semantic source is measured as absent rather than as unhelpful
+  // (D-173). Reuse across runs with the same `--data-dir`.
+  if (!skipScan) {
+    const semanticStarted = performance.now();
+    process.stderr.write("building semantic index (local MiniLM; expect minutes)…\n");
+    await semanticRuntime.scanScope(workspaceScope(workspaceId));
+    const status = semanticRuntime.statusFor(workspaceScope(workspaceId));
+    process.stderr.write(
+      `semantic cold scan wall-clock=${Math.round(performance.now() - semanticStarted)} ms: `
+      + `status=${status.status} coverage=${status.coverage} lifecycle=${status.lifecycle} `
+      + `generation=${status.generation ?? "—"} spaceId=${status.spaceId ?? "—"}\n`,
+    );
+  }
 
   const host = createHarnessServiceHost({
     resolveWorkspaceRoot: async () => repoRoot,

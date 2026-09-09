@@ -73,6 +73,15 @@ try {
   // cmd.exe and bun path resolution issues on Windows.
   const tscJs = path.join(repoRoot, 'node_modules', 'typescript', 'lib', 'tsc.js');
   const configPath = path.join(webRoot, 'tsconfig.application-host.json');
+  log('Ensuring the default semantic model pack is available...');
+  const copySemanticModel = spawnSync(process.execPath, [path.join(webRoot, 'scripts', 'copy-semantic-model.mjs')], {
+    cwd: webRoot,
+    stdio: 'inherit',
+    shell: false,
+  });
+  if (copySemanticModel.status !== 0) {
+    throw new Error(`copy-semantic-model exited with status ${copySemanticModel.status}`);
+  }
   log('Refreshing structure runtime wasm...');
   const copyRuntime = spawnSync(process.execPath, [path.join(webRoot, 'scripts', 'copy-structure-runtime.mjs')], {
     cwd: webRoot,

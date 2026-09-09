@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { CATALOG_EXTRACTOR_VERSION } from "../symbols.js";
 
-export const SEMANTIC_CHUNKER_VERSION = 1;
+export const SEMANTIC_CHUNKER_VERSION = 2;
 export const SEMANTIC_TEXT_DECORATION_VERSION = 1;
 
 /** Effective word-piece window written into the space id (D-166). */
@@ -18,7 +18,7 @@ export const LOCAL_MINILM_MAX_TOKENS = 512;
 export const LOCAL_MINILM_SPACE = {
   provider: "local",
   model: "all-MiniLM-L6-v2",
-  modelRevision: "xenova-quantized-1",
+  modelRevision: "751bff37182d3f1213fa05d7196b954e230abad9",
   dim: 384,
   pooling: "mean" as const,
   normalize: true,

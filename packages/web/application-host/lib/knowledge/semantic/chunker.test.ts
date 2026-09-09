@@ -96,4 +96,58 @@ describe("chunkDocument", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.embedText).toContain("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
   });
+
+  it("finds a fitting prefix of one very long line with logarithmic token probes", () => {
+    const text = "x".repeat(32_768);
+    let tokenProbes = 0;
+    const countCharacters = (value: string): number => {
+      tokenProbes += 1;
+      return value.length;
+    };
+    const chunks = chunkDocument({
+      documentId: "generated.ts",
+      text,
+      languageId: null,
+      outline: { status: "unsupported", symbols: [] },
+      maxTokens: 32,
+      countTokens: countCharacters,
+    });
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.body).toBe(text);
+    expect(chunks[0]?.startLine).toBe(1);
+    expect(chunks[0]?.endLine).toBe(1);
+    expect(chunks[0]?.embedText.length).toBeLessThanOrEqual(32);
+    expect(tokenProbes).toBeLessThan(40);
+  });
+
+  it("finds a large overlapping line window without probing each rejected size", () => {
+    const lineCount = 8_192;
+    const text = Array.from({ length: lineCount }, () => "token").join("\n");
+    let tokenProbes = 0;
+    const countLines = (value: string): number => {
+      tokenProbes += 1;
+      if (value.length === 0) return 0;
+      let count = 1;
+      for (let index = 0; index < value.length; index += 1) {
+        if (value.charCodeAt(index) === 10) count += 1;
+      }
+      return count;
+    };
+    const chunks = chunkDocument({
+      documentId: "many-lines.ts",
+      text,
+      languageId: null,
+      outline: { status: "unsupported", symbols: [] },
+      maxTokens: 4_096,
+      countTokens: countLines,
+    });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0]?.startLine).toBe(1);
+    expect(chunks.at(-1)?.endLine).toBe(lineCount);
+    expect(chunks.every((chunk) => countLines(chunk.embedText) <= 4_096)).toBe(true);
+    expect(chunks[0]!.endLine).toBeGreaterThan(chunks[1]!.startLine);
+    expect(tokenProbes).toBeLessThan(60);
+  });
 });

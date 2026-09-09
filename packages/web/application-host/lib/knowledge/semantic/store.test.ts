@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHashEmbedder } from "./embedder.js";
-import { blockIdentity, workspaceScope } from "./identity.js";
+import { blockIdentity, semanticSpaceDir, spaceIdOf, workspaceScope } from "./identity.js";
 import { createSemanticGenerationStore } from "./store.js";
 import type { SemanticChunk } from "./chunker.js";
 
@@ -114,6 +116,133 @@ describe("semantic generation store", () => {
       expect(await store.search((await createHashEmbedder().embed(["should not be stored"]))[0]!, 4)).toEqual([]);
     } finally {
       await store.close();
+    }
+  });
+
+  it("maintains published document counts across batches, replacements, removals, and reopen", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-count-"));
+    dirs.push(dataDir);
+    const embedder = createHashEmbedder();
+    const scope = workspaceScope("ws-count");
+    const open = () => createSemanticGenerationStore({ dataDir, hostId: "host", scope, embedder });
+    const store = open();
+    store.markBuilding("building");
+    await store.publishDocuments([
+      { documentId: "src/a.ts", revision: "r1", chunks: [chunk("src/a.ts", "alpha")] },
+      { documentId: "src/b.ts", revision: "r1", chunks: [chunk("src/b.ts", "beta")] },
+    ]);
+    expect(store.checkpoint()?.publishedDocuments).toBe(2);
+
+    await store.publishDocument({
+      documentId: "src/a.ts",
+      revision: "r2",
+      chunks: [chunk("src/a.ts", "alpha changed")],
+    });
+    expect(store.checkpoint()?.publishedDocuments).toBe(2);
+    await store.removeDocument("src/b.ts");
+    expect(store.checkpoint()?.publishedDocuments).toBe(1);
+    await store.close();
+
+    // Simulate a current.json left behind before its count caught up with the
+    // database transaction. Opening the store reconciles the database once.
+    const current = join(semanticSpaceDir(dataDir, "host", scope, spaceIdOf(embedder.space)), "current.json");
+    const stale = JSON.parse(readFileSync(current, "utf8")) as Record<string, unknown>;
+    writeFileSync(current, `${JSON.stringify({ ...stale, publishedDocuments: 99 })}\n`, "utf8");
+    const reopened = open();
+    try {
+      expect(reopened.checkpoint()?.publishedDocuments).toBe(1);
+      expect(reopened.coverage).toBe("partial");
+      expect(await reopened.publishedRevision("src/a.ts")).toEqual({ revision: "r2", recipeId: reopened.recipeId });
+      expect(await reopened.publishedRevision("src/b.ts")).toBeNull();
+    } finally {
+      await reopened.close();
+    }
+  });
+
+  it("rejects incomplete embedding batches without publishing zero vectors", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-vector-count-"));
+    dirs.push(dataDir);
+    const embedder = createHashEmbedder();
+    embedder.embed = async () => [];
+    const store = createSemanticGenerationStore({
+      dataDir,
+      hostId: "host",
+      scope: workspaceScope("ws-vector-count"),
+      embedder,
+    });
+    try {
+      await expect(store.publishDocument({
+        documentId: "src/a.ts",
+        revision: "r1",
+        chunks: [chunk("src/a.ts", "alpha")],
+      })).rejects.toThrow("returned 0 vectors for 1 chunks");
+      expect(await store.publishedRevision("src/a.ts")).toBeNull();
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("recovers and recounts a partial generation left by an exited writer", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-recovery-"));
+    dirs.push(dataDir);
+    const semanticDir = dirname(fileURLToPath(import.meta.url));
+    const storeUrl = pathToFileURL(join(semanticDir, "store.ts")).href;
+    const embedderUrl = pathToFileURL(join(semanticDir, "embedder.ts")).href;
+    const identityUrl = pathToFileURL(join(semanticDir, "identity.ts")).href;
+    const child = spawnSync("node", ["--import", "tsx", "--input-type=module", "-e", `
+      const { createSemanticGenerationStore } = await import(${JSON.stringify(storeUrl)});
+      const { createHashEmbedder } = await import(${JSON.stringify(embedderUrl)});
+      const { blockIdentity, workspaceScope } = await import(${JSON.stringify(identityUrl)});
+      const documentId = "src/crashed.ts";
+      const store = createSemanticGenerationStore({
+        dataDir: process.env.PIARIUM_TEST_DATA_DIR,
+        hostId: "host",
+        scope: workspaceScope("ws-recovery"),
+        embedder: createHashEmbedder(),
+      });
+      store.markBuilding("building");
+      await store.publishDocument({
+        documentId,
+        revision: "r1",
+        chunks: [{
+          blockId: blockIdentity(documentId, 1, 1),
+          parentUnitId: "unit",
+          documentId,
+          parentName: "run",
+          parentKind: "function",
+          parentSignature: "function run()",
+          startLine: 1,
+          endLine: 1,
+          contentHash: "hash",
+          body: "crash recovery token",
+          embedText: "crash recovery token",
+          fallback: false,
+        }],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      process.exit(0);
+    `], {
+      cwd: process.cwd(),
+      env: { ...process.env, PIARIUM_TEST_DATA_DIR: dataDir },
+      encoding: "utf8",
+    });
+    expect(child.status, child.stderr).toBe(0);
+
+    const reopened = createSemanticGenerationStore({
+      dataDir,
+      hostId: "host",
+      scope: workspaceScope("ws-recovery"),
+      embedder: createHashEmbedder(),
+    });
+    try {
+      expect(reopened.checkpoint()).toMatchObject({
+        lifecycle: "building",
+        coverage: "partial",
+        publishedDocuments: 1,
+      });
+      expect(await reopened.publishedRevision("src/crashed.ts")).toEqual({ revision: "r1", recipeId: reopened.recipeId });
+    } finally {
+      await reopened.close();
     }
   });
 });

@@ -96,16 +96,14 @@ const makeChunk = (
   const body = textOfLines(lines, range.startLine, range.endLine);
   let embedBody = body;
   if (countTokens(embedBody) > maxTokens) {
-    const kept: string[] = [];
-    for (const line of embedBody.split("\n")) {
-      const next = kept.length === 0 ? line : `${kept.join("\n")}\n${line}`;
-      if (countTokens(next) > maxTokens) break;
-      kept.push(line);
+    let low = 0;
+    let high = embedBody.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (countTokens(embedBody.slice(0, middle)) <= maxTokens) low = middle;
+      else high = middle - 1;
     }
-    embedBody = kept.join("\n") || embedBody.slice(0, Math.max(1, embedBody.length - 1));
-    while (embedBody.length > 0 && countTokens(embedBody) > maxTokens) {
-      embedBody = embedBody.slice(0, Math.max(0, embedBody.length - 8));
-    }
+    embedBody = embedBody.slice(0, low);
   }
   const embedText = buildEmbedText({
     documentId,
@@ -131,22 +129,16 @@ const makeChunk = (
 };
 
 const windowFits = (
-  documentId: string,
   lines: readonly string[],
   range: StructureLineRange,
-  parent: { name: string; kind: string; signature: string },
-  docs: string,
   maxTokens: number,
   countTokens: TokenCounter,
 ): boolean => {
   const body = textOfLines(lines, range.startLine, range.endLine);
-  return countTokens(buildEmbedText({
-    documentId,
-    parentName: parent.name,
-    parentSignature: parent.signature,
-    docComments: docs,
-    body,
-  }, maxTokens, countTokens)) <= maxTokens;
+  // buildEmbedText never removes body text to make room for decoration, so a
+  // window fits exactly when its body fits. Avoid rebuilding and tokenizing the
+  // decorated text several times for every size probe.
+  return countTokens(body) <= maxTokens;
 };
 
 const overlappingChunks = (
@@ -158,12 +150,16 @@ const overlappingChunks = (
   maxTokens: number,
   countTokens: TokenCounter,
 ): SemanticChunk[] => {
-  let size = range.endLine - range.startLine + 1;
-  while (size > 1) {
-    const probe = { startLine: range.startLine, endLine: range.startLine + size - 1 };
-    if (windowFits(documentId, lines, probe, parent, docs, maxTokens, countTokens)) break;
-    size -= 1;
+  const lineCount = range.endLine - range.startLine + 1;
+  let low = 1;
+  let high = lineCount;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const probe = { startLine: range.startLine, endLine: range.startLine + middle - 1 };
+    if (windowFits(lines, probe, maxTokens, countTokens)) low = middle;
+    else high = middle - 1;
   }
+  const size = low;
   const overlap = Math.min(8, Math.max(1, Math.floor(size / 4)));
   const step = Math.max(1, size - overlap);
   const chunks: SemanticChunk[] = [];
@@ -186,7 +182,7 @@ const emitRange = (
   fallback: boolean,
 ): SemanticChunk[] => {
   if (range.endLine < range.startLine) return [];
-  if (windowFits(documentId, lines, range, parent, docs, maxTokens, countTokens)) {
+  if (windowFits(lines, range, maxTokens, countTokens)) {
     return [makeChunk(documentId, lines, range, parent, docs, maxTokens, countTokens, fallback)];
   }
   return overlappingChunks(documentId, lines, range, parent, docs, maxTokens, countTokens);
@@ -206,7 +202,7 @@ const chunkSymbol = (
     signature: signatureText(lines, symbol),
   };
   const docs = docCommentsBefore(lines, symbol.range.startLine);
-  if (windowFits(documentId, lines, symbol.range, parent, docs, maxTokens, countTokens)) {
+  if (windowFits(lines, symbol.range, maxTokens, countTokens)) {
     return [makeChunk(documentId, lines, symbol.range, parent, docs, maxTokens, countTokens, false)];
   }
   const children = childContainers(symbol, isContainer);

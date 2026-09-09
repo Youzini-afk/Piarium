@@ -49,6 +49,9 @@ const encodedLength = (value: Encoded): number => (
  * never run (D-172).
  */
 const TRANSFORMERS_MODULE_ID = "@huggingface/transformers";
+// 32 is the measured CPU batch size for near-window inputs. It is only an
+// inference grain: embed() always walks every input and preserves its order.
+const INFERENCE_BATCH_SIZE = 32;
 
 const loadTransformers = async (): Promise<TransformersModule> => (
   await import(/* @vite-ignore */ TRANSFORMERS_MODULE_ID) as TransformersModule
@@ -103,12 +106,17 @@ export function createLocalMinilmEmbedder(options: {
         const pipe = await mod.pipeline("feature-extraction", source, { local_files_only: true, dtype: "q8" });
         extractor = async (texts) => {
           const vectors: number[][] = [];
-          for (const text of texts) {
-            const output = await pipe(text, { pooling: space.pooling, normalize: space.normalize });
+          for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
+            const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
+            const output = await pipe(batch, { pooling: space.pooling, normalize: space.normalize });
             const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
               ? (output as { tolist: () => number[] | number[][] }).tolist()
               : output as number[][];
-            vectors.push(Array.isArray(listed[0]) ? listed[0] as number[] : listed as number[]);
+            const rows = Array.isArray(listed[0]) ? listed as number[][] : [listed as number[]];
+            if (rows.length !== batch.length || rows.some((row) => row.length !== space.dim)) {
+              throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${space.dim} dimensions.`);
+            }
+            vectors.push(...rows);
           }
           return vectors;
         };

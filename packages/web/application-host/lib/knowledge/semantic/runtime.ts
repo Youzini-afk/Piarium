@@ -12,7 +12,12 @@ import { CATALOG_SCAN_BATCH } from "../symbol-runtime.js";
 import { chunkDocument } from "./chunker.js";
 import type { SemanticEmbedder } from "./embedder.js";
 import { workspaceScope, type SemanticScopeKey } from "./identity.js";
-import { createSemanticGenerationStore, type SemanticGenerationStore, type SemanticHit } from "./store.js";
+import {
+  createSemanticGenerationStore,
+  type SemanticDocumentPublication,
+  type SemanticGenerationStore,
+  type SemanticHit,
+} from "./store.js";
 
 export const SEMANTIC_SCAN_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 
@@ -25,6 +30,17 @@ export type SemanticIndexStatus = {
   generation: string | null;
   spaceId: string | null;
   scope: SemanticScopeKey;
+};
+
+export type SemanticScanBatchProgress = {
+  processedFiles: number;
+  totalFiles: number;
+  publishedDocuments: number;
+};
+
+export type SemanticScanOptions = {
+  signal?: AbortSignal;
+  onBatchComplete?: (progress: SemanticScanBatchProgress) => void;
 };
 
 const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
@@ -73,24 +89,21 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     }).finally(() => pending.delete(task));
   };
 
-  const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
-    if (disposed || options.embedder.status !== "ready") return;
-    const store = storeFor(scope);
-    if (kind === "deleted") {
-      await store.removeDocument(documentId);
-      return;
-    }
-    if (scope.scopeKind !== "workspace") return;
+  const prepareDocument = async (
+    scope: SemanticScopeKey,
+    store: SemanticGenerationStore,
+    documentId: string,
+  ): Promise<SemanticDocumentPublication | null> => {
+    if (scope.scopeKind !== "workspace") return null;
     let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
     try {
       snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: documentId });
     } catch {
-      return;
+      return null;
     }
-    if (snapshot.status !== "ready") return;
+    if (snapshot.status !== "ready") return null;
     const published = await store.publishedRevision(documentId);
-    if (published?.revision === snapshot.revision && published.recipeId === store.recipeId) return;
-    await options.embedder.prepare();
+    if (published?.revision === snapshot.revision && published.recipeId === store.recipeId) return null;
     const languageId = languageIdForPath(documentId) ?? null;
     const outline = languageId
       ? await options.structureSource.outline({
@@ -108,7 +121,19 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       maxTokens: options.embedder.space.maxTokens,
       countTokens: (text) => options.embedder.countTokens(text),
     });
-    await store.publishDocument({ documentId, revision: snapshot.revision, chunks });
+    return { documentId, revision: snapshot.revision, chunks };
+  };
+
+  const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
+    if (disposed || options.embedder.status !== "ready") return;
+    const store = storeFor(scope);
+    if (kind === "deleted") {
+      await store.removeDocument(documentId);
+      return;
+    }
+    await options.embedder.prepare();
+    const publication = await prepareDocument(scope, store, documentId);
+    if (publication) await store.publishDocument(publication);
   };
 
   const observeDocumentMutation = (event: DocumentMutationObservation): void => {
@@ -118,7 +143,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     track(indexDocument(workspaceScope(event.workspaceId), event.resourceId, event.kind === "deleted" ? "deleted" : "modified"));
   };
 
-  const scanScope = async (scope: SemanticScopeKey, optionsForScan?: { signal?: AbortSignal }): Promise<void> => {
+  const scanScope = async (scope: SemanticScopeKey, optionsForScan?: SemanticScanOptions): Promise<void> => {
     if (disposed || !options.searchFilesystemFiles || options.embedder.status !== "ready") return;
     if (scope.scopeKind !== "workspace") return;
     const key = scopeKey(scope);
@@ -147,9 +172,21 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const catalog = files.filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
       for (let offset = 0; offset < catalog.length; offset += CATALOG_SCAN_BATCH) {
         if (disposed || signal.aborted) return;
-        await Promise.all(catalog.slice(offset, offset + CATALOG_SCAN_BATCH).map((file) => (
-          indexDocument(scope, file.relativePath, "modified")
+        const batch = catalog.slice(offset, offset + CATALOG_SCAN_BATCH);
+        const publications = await Promise.all(batch.map((file) => (
+          prepareDocument(scope, store, file.relativePath)
         )));
+        if (disposed || signal.aborted) return;
+        await store.publishDocuments(publications.filter((publication): publication is SemanticDocumentPublication => publication !== null));
+        try {
+          optionsForScan?.onBatchComplete?.({
+            processedFiles: offset + batch.length,
+            totalFiles: catalog.length,
+            publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0,
+          });
+        } catch {
+          // Performance/diagnostic observers cannot break indexing.
+        }
         await yieldToEventLoop();
       }
       if (!disposed && !signal.aborted) store.markReady(true);
@@ -228,7 +265,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   return {
     observeDocumentMutation,
     scanScope,
-    scanWorkspace: (workspaceId: string, scanOptions?: { signal?: AbortSignal }) => (
+    scanWorkspace: (workspaceId: string, scanOptions?: SemanticScanOptions) => (
       scanScope(workspaceScope(workspaceId), scanOptions)
     ),
     statusFor,

@@ -109,4 +109,43 @@ describe("semantic index runtime", () => {
     const again = await runtime.search(workspaceScope(documents.identity.workspaceId), "alpha unique changed", 8);
     expect(again.hits[0]?.documentId).toBe("one.ts");
   });
+
+  it("prepares a filesystem batch before one embedding publication", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const files = ["one.ts", "two.ts"];
+    for (const [index, file] of files.entries()) {
+      writeFileSync(join(documents.workspaceRoot, file), `export const value_${index} = ${index};\n`, "utf8");
+    }
+    const base = createHashEmbedder();
+    const embedCalls: string[][] = [];
+    const embedder = {
+      ...base,
+      embed: async (texts: readonly string[]) => {
+        embedCalls.push([...texts]);
+        return base.embed(texts);
+      },
+    };
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "semantic-host-batch",
+      documents: documents.authority,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: async () => files.map((name) => ({
+        name,
+        path: join(documents.workspaceRoot, name),
+        relativePath: name,
+      })),
+      embedder,
+    });
+    disposes.push(() => runtime.dispose());
+
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const progress: Array<{ processedFiles: number; totalFiles: number; publishedDocuments: number }> = [];
+    await runtime.scanScope(scope, { onBatchComplete: (sample) => progress.push(sample) });
+    expect(embedCalls).toHaveLength(1);
+    expect(embedCalls[0]).toHaveLength(2);
+    expect(progress).toEqual([{ processedFiles: 2, totalFiles: 2, publishedDocuments: 2 }]);
+    expect(runtime.statusFor(scope).coverage).toBe("complete");
+  });
 });

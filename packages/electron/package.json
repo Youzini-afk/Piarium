@@ -8,6 +8,7 @@
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@piarium/application-client": "workspace:*",
     "@piarium/web": "workspace:*",
     "@piarium/pi-host": "workspace:*",
