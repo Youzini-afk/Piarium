@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
+import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@piarium/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -110,6 +110,7 @@ export type ExploreSemanticSearch = {
   scope?: { scopeKind: string; scopeId: string };
   lifecycle: ExploreIndexLifecycle;
   hits: ExploreSemanticHit[];
+  gaps?: ExploreSemanticGap[];
 };
 
 export interface ExploreDeps {
@@ -1239,6 +1240,7 @@ export interface ExploreQueryRun {
     hypotheses?: { behavior?: string; expectedMaterials?: string[] };
   };
   applySelection(groups: readonly ExploreQuerySelectionGroup[], options?: { merge?: boolean }): ExploreQuerySelectResult;
+  applyRerank(scores: readonly ExploreRerankScore[], details: ExploreRerankDetails): void;
   refreshVocab(): Promise<void>;
   followup(request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
@@ -1330,6 +1332,7 @@ export function createExploreQueryRun(
   let unevaluatedViewCount = 0;
   type ChosenGroup = { id: string; purpose: string; windows: PreparedWindow[]; requiredFlags: boolean[] };
   let chosenGroups: ChosenGroup[] = [];
+  let rerankDetails: ExploreRerankDetails | undefined;
   let selectionGaps: string[] = [];
   const uniqueGaps = (values: readonly string[]): string[] => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   let viewsFrozen = false;
@@ -1581,6 +1584,7 @@ export function createExploreQueryRun(
       ...(result.scope ? { scope: result.scope } : {}),
       index: { lifecycle: result.lifecycle },
       blocks: (semanticReport.blocks ?? 0) + result.hits.length,
+      ...(result.gaps?.length ? { gaps: [...(semanticReport.gaps ?? []), ...result.gaps] } : {}),
     };
     if (result.status === "unavailable" || result.status === "failed" || result.status === "stale") return;
     for (const hit of result.hits) {
@@ -2296,6 +2300,26 @@ export function createExploreQueryRun(
     return { queryId: "", accepted, rejected, gaps };
   };
 
+  const applyRerank = (scores: readonly ExploreRerankScore[], details: ExploreRerankDetails): void => {
+    rerankDetails = details;
+    if (!viewsFrozen) freezeViews();
+    const byView = new Map(frozenViews.map((view, index) => [view.viewId, { view, index }]));
+    const scored = scores
+      .filter((score) => byView.has(score.viewId) && Number.isFinite(score.score))
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        return byView.get(left.viewId)!.index - byView.get(right.viewId)!.index;
+      });
+    const seen = new Set(scored.map((score) => score.viewId));
+    frozenViews = [...scored.map((score) => byView.get(score.viewId)!.view), ...frozenViews.filter((view) => !seen.has(view.viewId))];
+    const order = new Map(frozenViews.map((view, index) => [`${view.path}:${view.startLine}-${view.endLine}`, index]));
+    prepared.sort((left, right) => {
+      const leftOrder = order.get(`${left.path}:${left.start}-${left.end}`) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = order.get(`${right.path}:${right.start}-${right.end}`) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+  };
+
   const submitPlan = async (plan: ExploreGroupedSearchPlan): Promise<{ launched: string[]; reused: string[] }> => {
     if (terminal !== "active" || signal.aborted) return { launched: [], reused: [] };
     planHypotheses = {
@@ -2620,6 +2644,7 @@ export function createExploreQueryRun(
           )).length,
         },
         ...(model ? { model } : {}),
+        ...(rerankDetails ? { rerank: rerankDetails } : {}),
         sources,
       },
     };
@@ -2652,6 +2677,7 @@ export function createExploreQueryRun(
     waitForViews,
     viewsForModel,
     applySelection,
+    applyRerank,
     followup,
     finish,
     cancel,

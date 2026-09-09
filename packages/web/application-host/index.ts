@@ -51,6 +51,14 @@ import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
 import { workspaceScope } from './lib/knowledge/semantic/identity.js';
 import { createSemanticIndexRuntime } from './lib/knowledge/semantic/runtime.js';
+import { createSemanticBackend, embeddingSettingsFromSnapshot } from './lib/knowledge/semantic/backend.js';
+import { pinSemanticQueryView } from './lib/knowledge/semantic/query-view.js';
+import {
+  parseHarnessRerankSettings,
+  type HarnessEmbedParams,
+  type HarnessRerankParams,
+  type PiSettingsSnapshot,
+} from '@piarium/protocol';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
@@ -1483,13 +1491,56 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
+  let harnessSettingsSnapshot: PiSettingsSnapshot | null = null;
+  let inferenceCwd = '';
+  const readHarnessSettings = async (cwd: string): Promise<PiSettingsSnapshot | null> => {
+    const broker = getReadyPiRuntimeBroker();
+    if (!broker) return harnessSettingsSnapshot;
+    try {
+      harnessSettingsSnapshot = await broker.requestForWorkspace(cwd, 'settings.get', {});
+      return harnessSettingsSnapshot;
+    } catch {
+      return harnessSettingsSnapshot;
+    }
+  };
+  const localEmbedder = createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR });
+  const semanticBackend = createSemanticBackend({
+    local: localEmbedder,
+    embedClient: {
+      embed: async (params) => {
+        const broker = getReadyPiRuntimeBroker();
+        if (!broker || !inferenceCwd) throw new Error('Pi workspace binding is unavailable');
+        const request: HarnessEmbedParams = {
+          purpose: params.purpose,
+          providerId: params.providerId,
+          modelId: params.modelId,
+          protocol: 'openai-compatible',
+          items: params.items,
+          batchId: params.batchId,
+          ...(params.dimensions === undefined ? {} : { dimensions: params.dimensions }),
+          ...(params.maxTokens === undefined ? {} : { maxTokens: params.maxTokens }),
+        };
+        return broker.requestForWorkspace(inferenceCwd, 'harness.embed', request);
+      },
+    },
+  });
+  const bindSemanticForWorkspace = async (workspaceId: string): Promise<void> => {
+    try {
+      inferenceCwd = (await documentsAuthority.inspectWorkspace(workspaceId)).root;
+    } catch {
+      inferenceCwd = '';
+    }
+    const snapshot = inferenceCwd ? await readHarnessSettings(inferenceCwd) : null;
+    semanticBackend.bind(embeddingSettingsFromSnapshot(snapshot));
+  };
   const semanticIndexRuntime = createSemanticIndexRuntime({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
     documents: documentsAuthority,
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-    embedder: createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR }),
+    embedder: localEmbedder,
+    getEmbedder: () => semanticBackend.embedder,
     onError: (error) => console.error('[HarnessKnowledge] Semantic index failed:', errorMessage(error)),
   });
   catalogScan.start = (workspaceId: string): void => {
@@ -1497,9 +1548,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
         console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
       });
-      void semanticIndexRuntime.scanWorkspace(workspaceId).catch((error) => {
-        console.error('[HarnessKnowledge] Semantic scan failed:', errorMessage(error));
-      });
+      void bindSemanticForWorkspace(workspaceId)
+        .then(() => semanticIndexRuntime.scanWorkspace(workspaceId))
+        .catch((error) => {
+          console.error('[HarnessKnowledge] Semantic scan failed:', errorMessage(error));
+        });
     });
   };
   for (const workspaceId of knowledgeStores.keys()) catalogScan.start(workspaceId);
@@ -1511,7 +1564,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   observeKnowledgeDocumentMutation = (event) => {
     knowledgeContextRuntime.observeDocumentMutation(event);
     symbolGraphRuntime.observeDocumentMutation(event);
-    semanticIndexRuntime.observeDocumentMutation(event);
+    void bindSemanticForWorkspace(event.workspaceId).then(() => {
+      semanticIndexRuntime.observeDocumentMutation(event);
+    }).catch((error) => {
+      console.error('[HarnessKnowledge] Semantic bind failed:', errorMessage(error));
+    });
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
@@ -1647,11 +1704,80 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
     semanticRecall: async (workspaceId, question, limit, searchOptions) => {
+      await bindSemanticForWorkspace(workspaceId);
+      let threadDocuments: Array<{ path: string; content: string | null; revision: string; gap?: 'thread-vector-pending' }> | undefined;
+      const sessionId = searchOptions?.sessionId;
+      const binding = sessionId ? threadRuntime?.getSessionBinding(sessionId) : null;
+      if (binding) {
+        const thread = await threadRegistry.getThread(binding.workspaceId, binding.parent, binding.threadId);
+        if (thread?.workBranchId) {
+          threadDocuments = await harnessWorkingStates.withStore(
+            binding.workspaceId,
+            'semantic-thread-view',
+            async (store) => {
+              const branch = store.getBranch(thread.workBranchId!);
+              if (!branch) return undefined;
+              const effective = { ...branch.baseState, ...branch.deltas };
+              const documents: Array<{ path: string; content: string | null; revision: string; gap?: 'thread-vector-pending' }> = [];
+              for (const [file, state] of Object.entries(effective)) {
+                if (state.kind === 'missing') {
+                  documents.push({ path: file, content: null, revision: `thread-missing:${branch.headRevision}` });
+                  continue;
+                }
+                if (state.kind !== 'regular-file') continue;
+                const bytes = await store.getObject(state.objectHash);
+                if (!bytes) {
+                  documents.push({
+                    path: file,
+                    content: null,
+                    revision: `thread-missing-object:${state.objectHash}`,
+                    gap: 'thread-vector-pending',
+                  });
+                  continue;
+                }
+                documents.push({
+                  path: file,
+                  content: bytes.toString('utf8'),
+                  revision: `thread:${branch.headRevision}:${state.objectHash.slice(7, 19)}`,
+                });
+              }
+              return documents;
+            },
+          );
+        }
+      }
+      const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
+      const draftPaths = sessionId
+        ? documentsAuthority.agentInputDraftPaths(sessionId, inputContext)
+        : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
+      const view = await pinSemanticQueryView({
+        inputContext,
+        ...(draftPaths === undefined ? {} : { draftPaths }),
+        ...(sessionId
+          ? {
+            readDraft: (resourceId: string) => {
+              const snapshot = documentsAuthority.readAgentInputSnapshot(sessionId, inputContext, resourceId);
+              if (snapshot.status === 'ready') {
+                return { status: 'ready', content: snapshot.content, revision: snapshot.revision };
+              }
+              if (snapshot.status === 'unavailable') return { status: 'unavailable' };
+              if (snapshot.status === 'disk' && snapshot.superseded) return { status: 'disk', superseded: true };
+              return { status: 'disk' };
+            },
+          }
+          : {}),
+        ...(threadDocuments ? { threadDocuments } : {}),
+      });
       const result = await semanticIndexRuntime.search(
         workspaceScope(workspaceId),
         question,
         limit,
-        searchOptions,
+        {
+          ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
+          ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
+          overlays: view.overlays,
+          view: view.view,
+        },
       );
       return {
         status: result.status.status,
@@ -1661,7 +1787,30 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         scope: result.status.scope,
         lifecycle: result.status.lifecycle,
         hits: result.hits,
+        ...(result.gaps.length > 0 ? { gaps: result.gaps } : {}),
       };
+    },
+    harnessSettings: () => harnessSettingsSnapshot,
+    rerankExploreViews: async (input) => {
+      const broker = getReadyPiRuntimeBroker();
+      if (!broker || !inferenceCwd) throw new Error('Pi workspace binding is unavailable');
+      const snapshot = await readHarnessSettings(inferenceCwd);
+      const configured = parseHarnessRerankSettings(
+        snapshot && typeof snapshot.global.harness === 'object' && snapshot.global.harness && !Array.isArray(snapshot.global.harness)
+          ? (snapshot.global.harness as { rerank?: unknown }).rerank
+          : undefined,
+      );
+      if (!configured) throw new Error('Rerank is not configured');
+      const request: HarnessRerankParams = {
+        providerId: configured.providerId,
+        modelId: configured.modelId,
+        protocol: 'http-rerank',
+        query: input.query,
+        documents: input.documents,
+        batchId: `explore-rerank:${input.documents.length}`,
+        ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+      };
+      return broker.requestForWorkspace(inferenceCwd, 'harness.rerank', request);
     },
     fileRelations: async (workspaceId, resourceId) => {
       const store = knowledgeStores.get(workspaceId);

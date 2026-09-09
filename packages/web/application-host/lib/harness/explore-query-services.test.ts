@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
 import {
   createExploreQueryCancelService,
+  createExploreQueryFinishService,
   createExploreQueryStartService,
   createExploreQueryViewsService,
 } from "./explore-query-services.js";
 import { createExploreQueryStore } from "./explore-query-store.js";
+import { createOutputStore } from "./output-store.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -280,6 +282,65 @@ describe("explore query services", () => {
     expect(graphRoots).toEqual([["packages/allowed"]]);
     expect(semanticRoots).toEqual([["packages/allowed"]]);
     expect(JSON.stringify({ started, views, result })).not.toContain("packages/secret");
+    store.dispose();
+  });
+
+  it("calls the reranker only when model select did not already judge the views", async () => {
+    const store = createExploreQueryStore();
+    const outputStore = createOutputStore();
+    const rerankCalls: string[] = [];
+    const host = {
+      exploreQueryStore: store,
+      outputStore,
+      searchService: {
+        search: async () => ({
+          status: "ready",
+          files: [{ path: "a.ts", hits: [{ line: 1, text: "needle", before: [], after: [] }] }],
+          partial: false,
+        }),
+      },
+      readExploreFile: async () => ({ status: "ready" as const, content: "needle\n", revision: "rev-1", source: "disk" as const }),
+      harnessSettings: () => ({
+        global: {
+          harness: { rerank: { protocol: "http-rerank", providerId: "rerank-provider", modelId: "rerank-1" } },
+        },
+        globalRevision: "1",
+        project: {},
+        projectRevision: "1",
+        projectTrusted: true,
+      }),
+      rerankExploreViews: async (input: { query: string; documents: Array<{ id: string }> }) => {
+        rerankCalls.push(input.query);
+        return {
+          batchId: "rerank-1",
+          providerId: "rerank-provider",
+          modelId: "rerank-1",
+          scores: input.documents.map((document, index) => ({ id: document.id, index, score: 1 - index })),
+        };
+      },
+    } as unknown as Pick<
+      HarnessServiceHost,
+      "exploreQueryStore" | "outputStore" | "fileRelations" | "rerankExploreViews" | "harnessSettings" | "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths"
+    >;
+    const finish = createExploreQueryFinishService(host);
+    const started = await createExploreQueryStartService(host).handle({ question: "needle" }, context({ source: "disk" }));
+    await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, context({ source: "disk" }));
+    const selected = await finish.handle({
+      queryId: started.queryId,
+      model: { plan: "used", select: "used", followup: "skipped" },
+    }, context({ source: "disk" }));
+    expect(rerankCalls).toEqual([]);
+    expect(selected.details.model?.rerank).toBe("skipped");
+
+    const ranking = await createExploreQueryStartService(host).handle({ question: "needle again" }, context({ source: "disk" }));
+    await createExploreQueryViewsService(host).handle({ queryId: ranking.queryId }, context({ source: "disk" }));
+    const ranked = await finish.handle({
+      queryId: ranking.queryId,
+      model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" },
+    }, context({ source: "disk" }));
+    expect(rerankCalls).toEqual(["needle again"]);
+    expect(ranked.details.model?.rerank).toBe("used");
+    expect(ranked.details.rerank?.status).toBe("used");
     store.dispose();
   });
 });

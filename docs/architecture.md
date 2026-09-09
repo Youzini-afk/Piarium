@@ -256,12 +256,13 @@ Internal phases update that same query; public `explore` remains one tool call. 
 precedes final selection/formatting and has a separate input budget. The Host can execute grounded
 local follow-ups and must retain required source spans; validating their identity does not validate the
 model's semantic judgment. This adds no durable conversation or generic workflow framework. Delivery
-state is in agent-harness-status.md. Remote embedding remains a planned extension of the existing Pi
-provider and credential authority: a Pi runtime execution context independent of chat lifetime will
-resolve configuration and make remote calls, while the application host holds a credential-free binding
-and owns index publication. It must not borrow an arbitrary active chat's model or receive its
-credentials. The current production semantic path is local MiniLM; the background remote binding and
-its protocol are not yet implemented. See harness sections 6.1 and 8.5 and plan 3.16B for that contract.
+state is in agent-harness-status.md. Remote embedding and HTTP rerank are user-owned harness bindings,
+not chat model slots. When `harness.embedding` is set, the workspace-worker Pi runtime resolves the
+provider endpoint and credential, and the application host submits authorized text through
+`harness.embed` without receiving secrets. Unconfigured workspaces keep the local MiniLM path. A
+configured remote failure reports semantic `failed`/`unavailable` and does not silently mix the local
+vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and is skipped
+when `models.explore` already selected candidates. See harness sections 6.1 and 8.5.
 
 Session memory blocks remain in the Host store. The renderer reads and edits them only through
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block

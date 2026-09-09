@@ -3892,6 +3892,80 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-190 · 2026-09-09 · 远程 embedding 配置种类、空间身份与后台绑定（3.16B）
+
+背景：代码语义索引只有本地 MiniLM。不能把任意 chat model id 当成 embedding 模型，也不能借“第一个活动聊天会话”做后台索引。Host 不能持有 provider secret。知识库 `knowledge/embedding.ts` 适配器不是这条生产链。
+
+决定：
+
+1. `harness.embedding` 与 `harness.rerank` 是用户所有的配置种类，不进入 `HarnessModelRole`。工作区设置不能改绑。Settings 使用独立入口，不是聊天模型选择器。
+2. 第一条远程协议是 OpenAI 兼容 `POST {baseUrl}/embeddings`。空间身份为 `remoteEmbeddingSpaceParts(protocol, providerId, modelId, maxTokens, dimensions|"auto")` 的 sha256 前 16 位；凭据从不进入 space id。仅凭据轮换不重嵌未变化正文。
+3. 后台绑定复用 workspace worker 的 `ModelRuntime` 与同一份 `auth.json`。Host 经 `harness.embed` 只提交已授权正文、用途、批次和绑定。关闭最后一条聊天不终止索引；Host/Pi 重启后从 settings 与 auth.json 恢复。`setRuntimeApiKey` 是进程内覆盖，持久恢复走 AuthStorage。
+4. 统一调用契约携带 document/query 用途、vector space、实际输入、取消信号、批次与结果身份。远程响应必须核对数量、唯一 `index` 0..n-1、一致维度和有限数值；错误不得发布部分错位向量。
+5. 远程配置有效时，文档索引与查询使用同一 space。失败时语义来源报告 `failed`/`unavailable`，词法与图继续；同一查询不得静默切回本地 MiniLM 或其他 space。provider/model/maxTokens/配置维度改变建立新 space/generation；新空间已发布部分可按 partial 查询，不混入旧空间。
+
+验证：protocol 设置合并（workspace 不能留下 embedding/rerank）；pi-host embeddings 乱序/缺项/维度/NaN/取消；后台绑定 Settings→faux HTTP→不回传密钥；凭据轮换保持 space、换 model 换 space；公开 explore faux-provider E2E。未配置远程时本地 MiniLM 路径保持。
+
+影响：protocol harness-inference/settings/methods；pi-host BackgroundInferenceRuntime；Host remote-embedder/backend；Settings Embedding 段；设计 §8.5；plan/status 3.16B。
+
+状态：已实施。
+
+### D-191 · 2026-09-09 · 向量复用、完整编码与前后台调度（3.16C）
+
+背景：D-173 要求按实际 embedText 复用、长行续切、前台优先和 Node ORT 真 session 线程。先前只有批推理与尺寸查找，缓存与调度未完成。
+
+决定：
+
+1. 向量复用身份是实际 vector space + 用途 + 真正发送的 embedText。路径、位置、revision 或父单元元数据变化且正文未变时复用向量；只重嵌变化块。
+2. 查询向量缓存绑定问题文本和 space，只复用向量计算；scope Top-K、路径授权和来源身份每次重做，缓存不能绕过 D-189。
+3. 同一 scope 的并发扫描合并到在飞工作。调度器一次只跑一批：已进入推理的当前批完成，随后前台优先于下一批后台，后台保留进度；不把全仓批次预先塞进队列。
+4. 冷扫描在 `markBuilding` 之后仍要等本轮第一个兼容发布事件才能查 partial；不按每个批次重查，也不延长原查询截止。迟到旧 revision 不能覆盖新 revision（`publishToken`）。
+5. 每块按所选后端的真实输入能力切分。本地 MiniLM 512 token 不套到远程；远程 Host 侧用保守字符长度续切。超长单行必须继续切分，测试从全部 chunks 证明原文范围无缺口。
+6. 本地 Node ONNX Runtime 的 `intraOpNumThreads` 写到真实 inference session，不只配 WASM。
+7. 扫描结束对账删除与读失败；重启恢复已发布批次和 generation checkpoint。coverage / lifecycle / empty / source failure 保持不同状态。内存向量缓存按向量字节软预算淘汰，满了不拒绝正常查询。
+
+验证：复用/单块重嵌、前后台顺序、scoped 缓存仍做授权 Top-K、长行覆盖、迟到 revision、并发扫描合并与 checkpoint 恢复、partial generation。未编造全仓冷扫时间。
+
+影响：semantic vector-cache/embed-scheduler/chunker/minilm/store/runtime；plan/status 3.16C。
+
+状态：已实施。
+
+### D-192 · 2026-09-09 · 固定草稿与线程分支的语义覆盖（3.16D）
+
+背景：词法/读取已固定 surface draft 与 WorkingState 分支。语义若仍读磁盘向量，会在草稿嵌入完成前泄露旧正文，或把缺向量写成缺正文。
+
+决定：
+
+1. 查询开始时固定 `inputContext`。路径存在固定草稿时立即从本轮候选遮蔽旧磁盘向量，不等草稿 embedding 完成。
+2. 草稿正文先供词法与读取；embedding 后台完成。尚未完成时语义来源报告 `draft-vector-pending` / `draft-unavailable` / partial，不读旧磁盘向量冒充草稿，也不把缺向量写成缺正文。
+3. 覆盖 dirty-only 新文件、已有文件未保存修改、`content: null`/删除、捕获后继续编辑、写入终结旧草稿后改按新磁盘 revision（`superseded` 不再遮蔽）。
+4. 线程语义视图使用父 workspace 上该分支的固定 baseline + 自身 delta，不借 live 父目录；父线程后续改动与兄弟分支的路径/向量互不可见。tombstone、文件替换和新增都生效。
+5. 可以复用相同 embedText 的数值向量，但 scope membership、路径权限、revision、surface/thread ownership 分别保存和校验。继续使用 D-189 的 scoped anchor Top-K，不另建先全局召回再过滤的 overlay 查询。
+
+验证：立即遮蔽、dirty/deleted/supersede pin、兄弟线程隔离、working-state extras。线程对象读取失败记 `thread-vector-pending`。
+
+影响：semantic/query-view.ts；runtime overlay/mask；Host `semanticRecall`；thread-runtime `getSessionBinding`；plan/status 3.16D。
+
+状态：已实施。
+
+### D-193 · 2026-09-09 · 专用 HTTP reranker 与 LLM 选择互斥（3.16E）
+
+背景：需要统一排序时不能把 chat completion 改名为 reranker，也不能在 `models.explore` 已经成组选段后再付一次判断。
+
+决定：
+
+1. `harness.rerank` 使用明确 wire contract：`POST {baseUrl}{endpoint||/rerank}`，正文为 `{ model, query, documents: [{ id, text }], return_documents: false }`，结果为 `{ results: [{ id?, index, relevance_score|score }] }`。不宣称 OpenAI chat/embeddings 天然支持 rerank。
+2. 输入直接消费 3.15B 已构造的当前候选视图（query、稳定 view ID、revision、拟展示正文）。超过后端限制时先构造仍可展示、身份明确的较小视图；不能让后端静默截断后仍声称评估了完整函数，也不能评分后再裁掉作为依据的正文。
+3. reranker 只输出同一批次内的顺序/分数。不推断成组互补、required ranges 或缺口；不把不同模型/批次分数混用；不与词法/语义来源分数相加；未评估候选不补伪造零分。
+4. `models.explore` 的 select 为 `used` / `failed` / `cancelled` 时不调用 reranker；仅当 select 为 `skipped` / `unconfigured` 且绑定有效时走 rerank。一次普通查询不无理由同时支付两次判断。
+5. 配置有效且本轮符合条件时自动进入公开 explore。失败保留已经取得的来源排名与可读材料，details 报告未参与/失败，explore 整体不失败。
+
+验证：finish-service 在 select=used 时不调用、select=unconfigured 时调用；HTTP 部分响应与非法身份；公开 explore faux-provider E2E 实际打到 `/rerank`。未观察真实 rerank 质量或费用。
+
+影响：pi-host http-rerank；explore-rerank.ts；explore-query-services finish；Settings Rerank 段；设计 §6.1/8.5；plan/status 3.16E。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4066,8 +4140,8 @@ ModelRuntime 纵切继续通过。
 | D-165 | implementation（focusRanges 入口；arrival/assessment/purpose；同一连接值才算两端；windowScore 去掉 GRADE_RANK 项） | — | slice.ts；explore.ts；protocol ExploreWindowTrace；plan 3.15④ |
 | D-166 | implementation（MiniLM 有效长度 512 写入空间身份；切块按 tokenizer 计数） | — | semantic/identity.ts；设计 6.1 |
 | D-167 | implementation（范围键路径与查询；documentId 不透明；workspaceScope 是唯一焊点） | — | semantic/identity.ts store.ts runtime.ts；设计 7.1 |
-| D-168 | superseded in part（正文覆盖目标保持；D-173 要求逐块实际编码覆盖与长行续切，当前截断缺口待修） | D-173 | semantic/chunker.ts embed-text.ts；plan 3.16C |
-| D-169 | superseded in part（独立代际库与部分可查保持；D-172 补真实运行；D-173 明确前台优先、编码文本复用、Node 线程与覆盖对账） | D-172；D-173 | semantic/store.ts runtime.ts minilm.ts；plan 3.16 |
+| D-168 | superseded in part（正文覆盖目标保持；长行续切与按后端输入能力切分由 D-191 收口） | D-173；D-191 | semantic/chunker.ts embed-text.ts；plan 3.16C |
+| D-169 | superseded in part（独立代际库与部分可查保持；前台优先、编码文本复用、Node 线程与覆盖对账由 D-191 收口） | D-172；D-173；D-191 | semantic/store.ts runtime.ts minilm.ts；plan 3.16 |
 | D-170 | superseded in part（召回/focusRanges/身份接线保持；D-173 取消开放来源 tier 并重定单元选择，现代码尚待修改） | D-173 | 设计 6.1；plan 3.15；protocol ExploreSemanticDetails |
 | D-171 | superseded in part（量具读 text 与换标尺说明保持；语义真扫描已补在未提交工作树，不能把局部扫描外推全仓） | D-172；D-173（工作树事实） | scripts/explore-observe.ts explore-observe-stage.ts；status |
 | D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |
@@ -4086,3 +4160,7 @@ ModelRuntime 纵切继续通过。
 | D-187 | implementation（scope 贯穿、真实来源状态、取消/迟到工作、排名与 required 组独立验收收口） | — | query/bridge/router；explore；semantic runtime；protocol；plan/status 3.15 |
 | D-188 | implementation（start 即后台物化；计划/补查复用单 pump；判断预留成为真实来源截止） | — | explore query pump/store；plan/status 3.15 |
 | D-189 | implementation（图/语义召回在固定 roots 内计算 Top-K；`.` 保留未受限快路径；scope 候选缓存按文档增量维护） | — | 设计 6.1；graph/vector recall；plan/status 3.15 |
+| D-190 | implementation（embedding/rerank 为用户所有配置种类；OpenAI 兼容 embeddings；workspace worker 后台绑定；空间身份不含凭据） | — | 设计 8.5；plan/status 3.16B；architecture 4.4 |
+| D-191 | implementation（embedText 复用、续切、前台优先、Node ORT session 线程、partial 等首发、软预算缓存） | — | 设计 6.1；plan/status 3.16C |
+| D-192 | implementation（固定草稿立即遮蔽磁盘向量；线程 baseline+delta；缺向量≠缺正文） | — | 设计 6.1；plan/status 3.16D |
+| D-193 | implementation（HTTP rerank 契约；与 models.explore select 互斥；失败保留来源排名） | — | 设计 6.1/8.5；plan/status 3.16E |

@@ -118,8 +118,20 @@ export interface HarnessServiceHost {
     workspaceId: string,
     question: string,
     limit: number,
-    options?: { signal?: AbortSignal; roots?: readonly string[] },
+    options?: {
+      signal?: AbortSignal;
+      roots?: readonly string[];
+      sessionId?: string;
+      inputContext?: import("@piarium/protocol").AgentInputContext;
+    },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
+  harnessSettings?: () => import("@piarium/protocol").PiSettingsSnapshot | null;
+  rerankExploreViews?: (input: {
+    query: string;
+    documents: Array<{ id: string; text: string; revision?: string }>;
+    settings: import("@piarium/protocol").HarnessRerankSettings;
+    signal?: AbortSignal;
+  }) => Promise<import("@piarium/protocol").HarnessRerankResult>;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -186,6 +198,8 @@ export interface HarnessServiceHostOptions {
   fileRelations?: HarnessServiceHost["fileRelations"];
   graphRecall?: HarnessServiceHost["graphRecall"];
   semanticRecall?: HarnessServiceHost["semanticRecall"];
+  harnessSettings?: HarnessServiceHost["harnessSettings"];
+  rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
   shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
   remote?: boolean;
@@ -246,6 +260,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const fileRelations = options.fileRelations ?? null;
   const graphRecall = options.graphRecall ?? null;
   const semanticRecall = options.semanticRecall ?? null;
+  const harnessSettings = options.harnessSettings;
+  const rerankExploreViews = options.rerankExploreViews;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -402,6 +418,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     fileRelations,
     graphRecall,
     semanticRecall,
+    ...(harnessSettings ? { harnessSettings } : {}),
+    ...(rerankExploreViews ? { rerankExploreViews } : {}),
     webFetchService,
     webSearchService,
     documentReadSource,

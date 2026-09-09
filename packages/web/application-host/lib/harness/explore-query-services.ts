@@ -12,6 +12,13 @@ import type {
   ExploreSearchResult,
   HarnessServiceMap,
 } from "@piarium/protocol";
+import {
+  documentsFromViews,
+  exploreShouldRerank,
+  rerankFailureDetails,
+  rerankSettingsFromSnapshot,
+  scoresFromRerankResult,
+} from "./explore-rerank.js";
 import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
@@ -143,6 +150,8 @@ export function createExploreDeps(
           active.throwIfAborted();
           return host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
             signal: active,
+            sessionId: ctx.sessionId,
+            inputContext,
             ...(roots ? { roots } : {}),
           });
         },
@@ -210,6 +219,7 @@ export async function packExploreSearchResult(
     ...(result.details.graph ? { graph: result.details.graph } : {}),
     ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
     ...(result.details.model ? { model: result.details.model } : {}),
+    ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
     ...(relations ? { relations } : {}),
     ...(result.details.sources ? { sources: result.details.sources } : {}),
   };
@@ -237,6 +247,7 @@ export async function packExploreSearchResult(
       ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
       ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
       ...(result.details.model ? { model: result.details.model } : {}),
+      ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
       ...(relations ? { relations } : {}),
       ...(result.details.sources ? { sources: result.details.sources } : {}),
     },
@@ -408,13 +419,60 @@ export function createExploreQueryFollowupService(
 }
 
 export function createExploreQueryFinishService(
-  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore" | "fileRelations">,
+  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore" | "fileRelations" | "rerankExploreViews" | "harnessSettings">,
   options?: { traceWindows?: boolean },
 ): HarnessService<"explore.query.finish"> {
   return {
     handle: async (params: ExploreQueryFinishParams & { model?: ExploreModelParticipation }, ctx) => {
       const stored = requireQuery(host, ctx, params.queryId, "finish");
-      const result = stored.run.finish(params.model);
+      const model = params.model;
+      if (exploreShouldRerank(model) && host.rerankExploreViews) {
+        const settings = rerankSettingsFromSnapshot(host.harnessSettings?.() ?? null);
+        if (settings) {
+          try {
+            const views = stored.run.viewsForModel().views;
+            const { documents, evaluated } = documentsFromViews(
+              views,
+              settings.maxDocumentTokens,
+              (text) => Math.max(1, Math.ceil(text.length / 4)),
+            );
+            if (documents.length > 0) {
+              const ranked = await host.rerankExploreViews({
+                query: stored.run.question,
+                documents,
+                settings,
+                signal: ctx.signal,
+              });
+              stored.run.applyRerank(scoresFromRerankResult(ranked, documents), {
+                status: "used",
+                providerId: settings.providerId,
+                modelId: settings.modelId,
+                batchId: ranked.batchId,
+                evaluated: evaluated.length,
+              });
+              if (model) model.rerank = "used";
+            } else if (model) {
+              model.rerank = "skipped";
+            }
+          } catch (error) {
+            const cancelled = ctx.signal.aborted || (error instanceof Error && error.name === "AbortError");
+            const settings = rerankSettingsFromSnapshot(host.harnessSettings?.() ?? null);
+            if (settings) {
+              stored.run.applyRerank([], rerankFailureDetails(
+                settings,
+                cancelled ? "cancelled" : "failed",
+                cancelled ? "Rerank was cancelled; source ranking was kept." : "Rerank failed; source ranking was kept.",
+              ));
+            }
+            if (model) model.rerank = cancelled ? "cancelled" : "failed";
+          }
+        } else if (model) {
+          model.rerank = "unconfigured";
+        }
+      } else if (model && model.rerank === undefined) {
+        model.rerank = exploreShouldRerank(model) ? "unconfigured" : "skipped";
+      }
+      const result = stored.run.finish(model);
       if (!stored.controller.signal.aborted) stored.controller.abort();
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue: ExploreIssue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);

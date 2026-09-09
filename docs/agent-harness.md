@@ -69,7 +69,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | worker→host 通道 | 类型化协议请求（`@piarium/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
 | 检索分层 | 精确匹配用 grep；快速发现和原文获取用 explore；开放事实追踪用 retrieval。文件/结构/索引操作归 Host，较长语义判断归 agent，持久记忆检索归知识库；三种工具不要求逐级失败后才可使用（D-173） |
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
-| embedding | 后端可替换，远程接入独立于重排。代码语义索引已有本地 MiniLM，知识库仍可无向量；二者交付状态分开。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173） |
+| embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程时代码语义走本地 MiniLM；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
@@ -387,7 +387,7 @@ confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模�
 当前路线包含 LLM 的局部语义决策：查询理解/搜索表达与候选相关性判断经 `models.explore` 接入，搜索、读取、版本与呈现归算法。
 每次模型调用围绕一个明确决策；允许保持原问题、有当前材料依据的局部补查，不在工具内开展开放自主调查。成组选段须保留
 必需源码范围，跨进程阶段延续同一次查询。扩散模型与后训练留后续，不推迟当前 LLM 接线（D-174/D-175）。
-来源、版本、草稿与输出句柄沿既有实际 authority；接线与未观察项只记在 status，不能把真实模型质量或 3.16B–E 写成已交付。
+来源、版本、草稿与输出句柄沿既有实际 authority；接线与未观察项只记在 status，不能把真实 provider 延迟、质量或完整冷扫时间写成已验证。
 
 `dispatch(role, task, { scope?: paths })` 把一个任务交给第 9.2.2 节角色目录中的一个成员：**开一条线程**（第 9.3 节），
 **异步**，立即返回线程 id；父继续工作。系统提示把角色呈现为团队成员而非工具（第 9.2.4 节）。每个角色有自己的结果
@@ -670,10 +670,10 @@ limit 是上限，不是填满目标；相同原文与重复事实不反复占�
 编码器的区域为准，行号已出现不等于整行已编码。路径、父单元名、必要签名与正文共同设计输入：容纳不下时继续切正文或压缩
 装饰，不能让大量路径/签名占满输入，也不把 512 这类有效上限当成每块必须填满的目标。
 
-嵌入接口区分 query/document 用途、有效长度、取消、批次对应与实际维度。现有本地 MiniLM 保持为已接后端；远程嵌入从重排
-阶段拆出，直接复用已有适配器和 provider 配置体系完成用户绑定→凭据解析→工作区索引→查询的生产链。模型选择不取当前聊天
-主模型；换绑定按兼容空间切换查询与后台建设，不能用旧空间向量响应新模型。第 8.5 节定义配置责任，不能把尚未进入协议/设置
-页的槽位当成已有能力。本地模型是否适合中文、代码与当前吞吐分别说明，不以“小模型跑得动”推出检索效果或速度。
+嵌入接口区分 query/document 用途、有效长度、取消、批次对应与实际维度。现有本地 MiniLM 保持为未配置远程时的后端；远程嵌入
+走 `harness.embedding` → `harness.embed` → OpenAI 兼容 `/embeddings`，复用 Pi provider 与凭据权威，不走知识库
+`knowledge/embedding.ts` 适配器。模型选择不取当前聊天主模型；换绑定按兼容空间切换查询与后台建设，不能用旧空间向量响应
+新模型。第 8.5 节定义配置责任。本地模型是否适合中文、代码与当前吞吐分别说明，不以“小模型跑得动”推出检索效果或速度。
 
 身份继续分三类：向量空间（后端/endpoint、模型修订、维度、pooling、归一化与用途约定）；索引配方（切块、结构提取、装饰与粒度）；
 查询/重排配方。相同空间与用途下的实际编码文本可复用向量，行号移动或同文件其他块变化不要求重算未变文本。换 API key 或
@@ -899,9 +899,9 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
   对 0.8.5 的 1.7 µs），Piarium 以 `payloadCacheMb: 0` 关掉它——这是数据库侧的缺陷，已向作者报告。`flush()` 仍随库大小
   线性增长（两版一致），D-140 的派生数据去抖 flush 保留。
 
-- **embedding 后端与存储分别负责**（D-173）。TriviumDB 存向量不产向量。`knowledge/embedding.ts` 已有 OpenAI、Voyage、
-  Mistral、Gemini、Jina、Cohere 与 OpenAI 兼容适配器，生产配置仍待接；explore 的本地 MiniLM 使用独立语义代际库，不能据此
-  宣称知识库 recall 已用向量。后端选择、query/document 用途、缓存身份与取消契约见第 6.1/8.5 节。
+- **embedding 后端与存储分别负责**（D-173/D-190）。TriviumDB 存向量不产向量。代码语义索引的远程路径是
+  `harness.embed` → OpenAI 兼容 `/embeddings`，与知识库 `knowledge/embedding.ts` 适配器不是同一条生产链；知识库生产
+  配置仍待接，不能据此宣称 `recall` 已用向量。后端选择、query/document 用途、缓存身份与取消契约见第 6.1/8.5 节。
   - 未绑定向量的知识库继续提供文本和图能力；当前 `recall` 的具体实现见下方历史记录与 status，不把规划中的 BM25 当成已接。
   - 维度取所选后端实际支持的配置并写入空间身份，不假定所有模型支持同一种截断。切换空间重算派生向量，不混用新查询与旧空间；
     原始知识与代码向量的所有权保持分开，不为代码模型切换重写权威知识库。
@@ -1142,18 +1142,20 @@ Handoff（把当前会话提炼为一条草稿 prompt 开新分支，Amp 的做�
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
 | `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
 | `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
-| `models.embedding`（配置待接） | explore 文档与查询嵌入（3.16） | 当前本地 `all-MiniLM-L6-v2`；配置远程后按显式绑定 | 本地后端缺失/不可用时如实返回语义来源状态 |
-| `models.rerank`（配置待接） | 对当前代码单元提供统一相关性顺序（3.16） | 随实际后端选型与接线交付 | 使用第 6.1 节的来源排名，不声明已重排 |
+| `harness.embedding` | explore 文档与查询嵌入（3.16B） | 未配置远程时本地 `all-MiniLM-L6-v2` | 远程失败/未绑定 Pi 时语义来源 `failed`/`unavailable`，词法与图继续；同一查询不静默切回另一 vector space |
+| `harness.rerank` | 对当前可展示视图提供统一顺序（3.16E） | 未配置 | 保留来源排名与可读材料，details 标明未参与/失败；不使 explore 整体失败 |
 
-**配置与实际后端分开记**（D-173）。前十个普通 Harness 槽位已有 protocol/UI，`embedding`/`rerank` 尚未进入
-`HarnessModelRole`、设置页或配置解析；现行代码是 Host 直接构造本地 MiniLM。表中两个新槽位是目标契约，不代表可配置能力已交付。
-远程嵌入先独立接入，重排随其真实后端单独交付，不把未选定的本地交叉编码器写成现成默认。
+**配置种类与聊天槽位分开**（D-190）。前十个普通 Harness 槽位仍走 `HarnessModelRole`；embedding/rerank 不在该表里，也不能
+从任意 chat model id 推断具备 embedding 或 rerank 能力。Settings 有独立的 Embedding / Rerank 入口。远程 embedding 使用明确的
+OpenAI-compatible `/embeddings` 协议；rerank 使用可配置的 HTTP `/rerank` 契约，不把 chat completion 或 embeddings 协议改名为
+rerank。不把未选定的本地交叉编码器写成现成默认。
 
-远程绑定复用 Pi provider 的 model kind、baseUrl 与凭据配置。用户与受信项目的 provider 层沿 `ProviderConfigurationManager`
-解析，凭据仍留在 Pi `AuthStorage` / `ModelRuntime` 所属进程，不通过协议交给 Host 或 renderer。当前配置/调用入口依赖活动 Pi
-session；3.16 须把同一套解析与远程调用提供给独立于聊天寿命的后台执行上下文。该上下文属于 Pi runtime，不创建用户对话或
-检索 Thread，也不引入第二份配置/密钥 authority。Host 持有不含秘密的有效绑定身份，提交已授权正文并接收向量；关闭最后一条
-聊天不终止范围索引，切换用户绑定则使旧绑定在飞发布失效。该调用链与后台寿命必须和远程嵌入一起交付，不能靠选择首个活动会话补洞。
+远程绑定复用 Pi provider 的 baseUrl 与凭据权威。用户与受信项目的 provider 层沿 `ProviderConfigurationManager` 解析，凭据仍留在
+Pi `AuthStorage` / `ModelRuntime` 所属进程，不通过协议交给 Host 或 renderer。后台调用走 workspace worker 上与聊天寿命独立的
+`BackgroundInferenceRuntime`，复用同一份 ModelRuntime/auth.json，不借“第一个活动聊天会话”，也不复制第二份密钥。Host 只提交
+已授权正文、查询、用途和模型绑定并接收向量/分数。关闭最后一条聊天不终止范围索引；Host 或 Pi runtime 重启后从现有 settings 与
+auth.json 恢复。provider/model/maxTokens/配置维度改变建立新 space/generation；仅凭据轮换不重嵌。新空间已发布部分可按
+partial 查询，不混入旧空间。
 
 本地模型包包含权重、tokenizer、配置、pooling/归一化和运行配方，发行准备与 asar 路径沿已有打包流水线。Host 管理本地实例，
 初始化合并、推理批次与前台优先按实际 backend 实现；只设 WASM numThreads 不算配置了 Node ORT session。远程批次按提供商

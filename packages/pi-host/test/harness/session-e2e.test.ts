@@ -42,6 +42,12 @@ import { createExploreFileReader } from "../../../web/application-host/lib/harne
 import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
 import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";
+import { createRemoteEmbedder } from "../../../web/application-host/lib/knowledge/semantic/remote-embedder.js";
+import { createSemanticIndexRuntime } from "../../../web/application-host/lib/knowledge/semantic/runtime.js";
+import { workspaceScope } from "../../../web/application-host/lib/knowledge/semantic/identity.js";
+import { createStructureSource } from "../../../web/application-host/lib/structure/source.js";
+import { createTreeSitterStructureProvider } from "../../../web/application-host/lib/structure/tree-sitter-provider.js";
+import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@piarium/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
 
@@ -70,6 +76,7 @@ async function setupSession(options: {
   authorizeWorkspacePath?: NonNullable<Parameters<typeof createHarnessRouter>[0]["authorizeWorkspacePath"]>;
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
   answerDialog?: (request: UiRequest, index: number) => string | undefined;
+  inferenceFetch?: typeof fetch;
 }) {
   const { root, faux } = options;
   const workspaceId = options.workspaceId ?? WORKSPACE_ID;
@@ -189,6 +196,7 @@ async function setupSession(options: {
     configureServices,
     emit,
     projectTrustOverride: true,
+    ...(options.inferenceFetch ? { inferenceFetch: options.inferenceFetch } : {}),
   });
   if (options.harnessDocumentRead) host.setHarnessDocumentReadEnabled(true);
   if (options.harnessDocumentPathOverlay) host.setHarnessDocumentPathOverlayEnabled(true);
@@ -1260,6 +1268,159 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"plan":"used"/);
         assert.match(exploreResult, /"select":"used"/);
       } finally {
+        await session.dispose();
+        await fixture.documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("uses the remote embedding binding and HTTP rerank on the public explore path", async () => {
+    await withTempRoot("piarium-s-explore-remote-", async (root) => {
+      const fixture = await createExploreFixture(root);
+      await writeFile(join(fixture.workspaceRoot, "remote.ts"), [
+        "export function remotePineapple() {",
+        "  return \"remote pineapple token\";",
+        "}",
+        "",
+      ].join("\n"), "utf8");
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: {
+          embedding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "text-embedding-3-small", dimensions: 2 },
+          rerank: { protocol: "http-rerank", providerId: "embed-provider", modelId: "rerank-test" },
+        },
+      }));
+      await writeFile(join(agentDir, "models.json"), JSON.stringify({
+        providers: {
+          "embed-provider": {
+            name: "Embed",
+            baseUrl: "https://models.example/v1",
+            api: "openai-completions",
+            models: [],
+          },
+        },
+      }));
+      const faux = registerFauxProvider();
+      const model = faux.getModel();
+      let exploreResult = "";
+      const embedBodies: string[][] = [];
+      const rerankBodies: unknown[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("explore", { question: "remote pineapple token" })]),
+        (context) => {
+          exploreResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage("Found the remote pineapple.");
+        },
+      ]);
+      const hostApi: {
+        embed?: (params: HarnessEmbedParams) => Promise<HarnessEmbedResult>;
+        rerank?: (params: HarnessRerankParams) => Promise<HarnessRerankResult>;
+      } = {};
+      const remote = createRemoteEmbedder({
+        binding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "text-embedding-3-small", dimensions: 2 },
+        client: {
+          embed: async (params) => {
+            if (!hostApi.embed) throw new Error("SessionHost embed is not ready");
+            return hostApi.embed(params);
+          },
+        },
+      });
+      const runtime = createSemanticIndexRuntime({
+        dataDir: join(root, "semantic-data"),
+        hostId: "explore-remote-e2e",
+        documents: fixture.documents,
+        structureSource: createStructureSource([createTreeSitterStructureProvider({ parseBudgetMs: 10_000 })]),
+        searchFilesystemFiles: async () => [{
+          name: "remote.ts",
+          path: join(fixture.workspaceRoot, "remote.ts"),
+          relativePath: "remote.ts",
+        }],
+        embedder: remote,
+      });
+      const session = await setupSession({
+        root,
+        faux,
+        workspaceId: fixture.identity.workspaceId,
+        inferenceFetch: async (url, init) => {
+          const parsed = JSON.parse(String(init?.body ?? "{}")) as { input?: string[]; documents?: unknown[] };
+          if (String(url).includes("/embeddings")) {
+            embedBodies.push(parsed.input ?? []);
+            return new Response(JSON.stringify({
+              data: (parsed.input ?? []).map((text, index) => ({
+                index,
+                embedding: text.includes("pineapple") ? [1, 0] : [0, 1],
+              })),
+            }), { status: 200, headers: { "Content-Type": "application/json" } });
+          }
+          rerankBodies.push(parsed.documents);
+          return new Response(JSON.stringify({
+            results: [{ index: 0, id: (parsed.documents as Array<{ id: string }>)?.[0]?.id, relevance_score: 0.91 }],
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        },
+        serviceHostOptions: {
+          search: (request, options) => fixture.search.searchContent(request, options),
+          resolveWorkspaceRoot: async () => fixture.workspaceRoot,
+          readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
+          semanticRecall: async (workspaceId, question, limit, searchOptions) => {
+            const result = await runtime.search(workspaceScope(workspaceId), question, limit, {
+              ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
+              ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
+            });
+            return {
+              status: result.status.status,
+              coverage: result.status.coverage,
+              lifecycle: result.status.lifecycle,
+              hits: result.hits,
+              ...(result.status.generation ? { generation: result.status.generation } : {}),
+              ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
+              scope: result.status.scope,
+              ...(result.gaps.length ? { gaps: result.gaps } : {}),
+            };
+          },
+          harnessSettings: () => ({
+            global: {
+              harness: {
+                rerank: { protocol: "http-rerank", providerId: "embed-provider", modelId: "rerank-test" },
+              },
+            },
+            globalRevision: "1",
+            project: {},
+            projectRevision: "1",
+            projectTrusted: true,
+          }),
+          rerankExploreViews: async (input) => {
+            if (!hostApi.rerank) throw new Error("SessionHost rerank is not ready");
+            return hostApi.rerank({
+              providerId: input.settings.providerId,
+              modelId: input.settings.modelId,
+              protocol: "http-rerank",
+              query: input.query,
+              documents: input.documents,
+              batchId: "explore-e2e-rerank",
+            });
+          },
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
+      });
+      hostApi.embed = (params) => session.host.embed(params);
+      hostApi.rerank = (params) => session.host.rerank(params);
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.runtime.services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+        await session.host.runtime.services.modelRuntime.setRuntimeApiKey("embed-provider", "embed-key");
+        await runtime.scanWorkspace(fixture.identity.workspaceId);
+        await session.host.prompt(snapshot.sessionId, "find the remote pineapple");
+        await session.host.session.waitForIdle();
+        assert.ok(embedBodies.some((batch) => batch.some((text) => text.includes("pineapple"))));
+        assert.match(exploreResult, /remote\.ts/);
+        assert.match(exploreResult, /remote pineapple/);
+        assert.match(exploreResult, /"rerank":"used"|"status":"used"/);
+        assert.ok(rerankBodies.length > 0);
+        assert.doesNotMatch(exploreResult, /embed-key|faux-key/);
+      } finally {
+        await runtime.dispose();
         await session.dispose();
         await fixture.documents.dispose();
         faux.unregister();
