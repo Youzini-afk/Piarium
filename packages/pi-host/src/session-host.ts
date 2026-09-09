@@ -87,6 +87,10 @@ import type {
   SessionTreeResult,
   ThinkingLevel,
   AgentInputContext,
+  HarnessEmbedParams,
+  HarnessEmbedResult,
+  HarnessRerankParams,
+  HarnessRerankResult,
 } from "@piarium/protocol";
 import {
   packageSourceEnabled,
@@ -122,6 +126,7 @@ import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
 import { RevisionedTextFileEditor } from "./revisioned-text-file-editor.js";
 import { discoverProviderModels } from "./provider-model-discovery.js";
+import { createBackgroundInferenceRuntime, type BackgroundInferenceRuntime } from "./harness/background-inference.js";
 import {
   projectAgentEvent,
   projectProviderAuthEvent,
@@ -232,6 +237,7 @@ export interface SessionHostOptions {
   emit: EventEmitter;
   projectTrustOverride?: boolean;
   runtimeFactory?: CreateAgentSessionRuntimeFactory;
+  inferenceFetch?: typeof fetch;
 }
 
 function getSessionDir(cwd: string, agentDir: string): string {
@@ -632,6 +638,9 @@ export class SessionHost {
   #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
+  #backgroundInference: BackgroundInferenceRuntime | undefined;
+  #inferenceCwd: string | undefined;
+  readonly #inferenceFetch: typeof fetch | undefined;
 
   constructor(options: SessionHostOptions) {
     this.#agentDir = resolve(options.agentDir);
@@ -647,6 +656,7 @@ export class SessionHost {
     this.trust = new ProjectTrustController(options.emit);
     this.ui = new ExtensionUiBridge(options.emit, () => this.sessionId ?? "host");
     this.auth = new ProviderAuthBridge(options.emit);
+    this.#inferenceFetch = options.inferenceFetch;
   }
 
   get sessionId(): string | undefined {
@@ -2198,6 +2208,32 @@ export class SessionHost {
     await manager.update(source);
     await this.session.reload();
     return this.listPackages();
+  }
+
+  #inferenceRuntime(): BackgroundInferenceRuntime {
+    const cwd = this.#runtime?.cwd;
+    if (!cwd) {
+      throw new HostError("runtime_not_ready", "Workspace context is not open for background inference");
+    }
+    if (!this.#backgroundInference || this.#inferenceCwd !== cwd) {
+      this.#backgroundInference = createBackgroundInferenceRuntime({
+        agentDir: this.#agentDir,
+        cwd,
+        modelRuntime: this.runtime.services.modelRuntime,
+        ...(this.#inferenceFetch ? { fetchImpl: this.#inferenceFetch } : {}),
+        ...(this.#projectTrustOverride === undefined ? {} : { projectTrustOverride: this.#projectTrustOverride }),
+      });
+      this.#inferenceCwd = cwd;
+    }
+    return this.#backgroundInference;
+  }
+
+  async embed(params: HarnessEmbedParams): Promise<HarnessEmbedResult> {
+    return this.#inferenceRuntime().embed(params);
+  }
+
+  async rerank(params: HarnessRerankParams): Promise<HarnessRerankResult> {
+    return this.#inferenceRuntime().rerank(params);
   }
 
   async getSettings(): Promise<PiSettingsSnapshot> {

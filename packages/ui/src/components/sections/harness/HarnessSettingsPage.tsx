@@ -8,7 +8,9 @@ import {
   type HarnessWebSearchProvider,
   type HarnessMemoryMode,
   type HarnessModelPreset,
+  type HarnessEmbeddingSettings,
   type HarnessModelRole,
+  type HarnessRerankSettings,
   type ModelSelection,
   type PermissionMode,
   type PermissionRule,
@@ -58,6 +60,8 @@ interface HarnessSettings {
   output?: { visibleBytes?: number };
   bash?: { waitMs?: number };
   models?: Partial<Record<HarnessModelRole, ModelSelection>>;
+  embedding?: HarnessEmbeddingSettings;
+  rerank?: HarnessRerankSettings;
   memory?: { mode?: HarnessMemoryMode; shadowMode?: boolean; [key: string]: unknown };
   web?: {
     maxFetchesPerTurn?: number;
@@ -93,6 +97,11 @@ export const HarnessSettingsPage: React.FC = () => {
   const [searchProvider, setSearchProvider] = React.useState<HarnessWebSearchProvider | 'none'>('none');
   const [searchEndpoint, setSearchEndpoint] = React.useState('');
   const [searchApiKey, setSearchApiKey] = React.useState('');
+  const [embeddingProviderId, setEmbeddingProviderId] = React.useState('');
+  const [embeddingModelId, setEmbeddingModelId] = React.useState('');
+  const [rerankProviderId, setRerankProviderId] = React.useState('');
+  const [rerankModelId, setRerankModelId] = React.useState('');
+  const [rerankEndpoint, setRerankEndpoint] = React.useState('');
   const [searchCredentialConfigured, setSearchCredentialConfigured] = React.useState(false);
   const [searchStatusLoading, setSearchStatusLoading] = React.useState(false);
   const providers = usePiProviderStore((state) => state.providers);
@@ -137,6 +146,14 @@ export const HarnessSettingsPage: React.FC = () => {
     setRulesDraft(JSON.stringify(harness.permissions?.rules ?? [], null, 2));
     setRulesIssue(null);
   }, [harness.permissions?.rules, snapshot?.globalRevision]);
+
+  React.useEffect(() => {
+    setEmbeddingProviderId(harness.embedding?.providerId ?? '');
+    setEmbeddingModelId(harness.embedding?.modelId ?? '');
+    setRerankProviderId(harness.rerank?.providerId ?? '');
+    setRerankModelId(harness.rerank?.modelId ?? '');
+    setRerankEndpoint(harness.rerank?.endpoint ?? '');
+  }, [harness.embedding, harness.rerank, snapshot?.globalRevision]);
 
   React.useEffect(() => {
     setSearchProvider(harness.web?.search?.provider ?? 'none');
@@ -265,6 +282,35 @@ export const HarnessSettingsPage: React.FC = () => {
     // user's authority, even when their provider has a custom id.
     void saveHarness({ ...harness, models: { ...match.slots, ...models } });
   }, [harness, models, providers, saveHarness, t]);
+
+  const handleEmbeddingSave = React.useCallback(() => {
+    const next = { ...harness };
+    if (embeddingProviderId.trim() && embeddingModelId.trim()) {
+      next.embedding = {
+        protocol: 'openai-compatible',
+        providerId: embeddingProviderId.trim(),
+        modelId: embeddingModelId.trim(),
+      };
+    } else {
+      delete next.embedding;
+    }
+    void saveHarness(next);
+  }, [embeddingModelId, embeddingProviderId, harness, saveHarness]);
+
+  const handleRerankSave = React.useCallback(() => {
+    const next = { ...harness };
+    if (rerankProviderId.trim() && rerankModelId.trim()) {
+      next.rerank = {
+        protocol: 'http-rerank',
+        providerId: rerankProviderId.trim(),
+        modelId: rerankModelId.trim(),
+        ...(rerankEndpoint.trim() ? { endpoint: rerankEndpoint.trim() } : {}),
+      };
+    } else {
+      delete next.rerank;
+    }
+    void saveHarness(next);
+  }, [harness, rerankEndpoint, rerankModelId, rerankProviderId, saveHarness]);
 
   const handleSearchSave = React.useCallback(async () => {
     if (searchProvider === 'none') {
@@ -439,6 +485,97 @@ export const HarnessSettingsPage: React.FC = () => {
               </SettingsFieldRow>
             );
           })}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.embedding')}
+        description={t('settings.page.harness.section.embedding.description')}
+      >
+        <div className="space-y-3">
+          <SettingsFieldRow
+            label={t('settings.page.harness.embedding.provider')}
+            description={t('settings.page.harness.embedding.provider.description')}
+          >
+            <Select value={embeddingProviderId || 'none'} onValueChange={(value) => setEmbeddingProviderId(value === 'none' ? '' : value)}>
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE} disabled={isSaving}>
+                <SelectValue placeholder={t('settings.page.harness.models.notConfigured')} />
+              </SelectTrigger>
+              <SelectContent className={SETTINGS_OPTION_STACK_CLASS}>
+                <SelectItem value="none">{t('settings.page.harness.models.notConfigured')}</SelectItem>
+                {providers.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>{provider.id}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+          <SettingsFieldRow
+            label={t('settings.page.harness.embedding.model')}
+            description={t('settings.page.harness.embedding.model.description')}
+          >
+            <Input
+              value={embeddingModelId}
+              onChange={(event) => setEmbeddingModelId(event.target.value)}
+              placeholder="text-embedding-3-small"
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+            />
+          </SettingsFieldRow>
+          <div className="flex justify-end">
+            <Button type="button" size="sm" disabled={isSaving} onClick={handleEmbeddingSave}>
+              {t('settings.page.harness.embedding.save')}
+            </Button>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.rerank')}
+        description={t('settings.page.harness.section.rerank.description')}
+      >
+        <div className="space-y-3">
+          <SettingsFieldRow
+            label={t('settings.page.harness.rerank.provider')}
+            description={t('settings.page.harness.rerank.provider.description')}
+          >
+            <Select value={rerankProviderId || 'none'} onValueChange={(value) => setRerankProviderId(value === 'none' ? '' : value)}>
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE} disabled={isSaving}>
+                <SelectValue placeholder={t('settings.page.harness.models.notConfigured')} />
+              </SelectTrigger>
+              <SelectContent className={SETTINGS_OPTION_STACK_CLASS}>
+                <SelectItem value="none">{t('settings.page.harness.models.notConfigured')}</SelectItem>
+                {providers.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>{provider.id}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+          <SettingsFieldRow
+            label={t('settings.page.harness.rerank.model')}
+            description={t('settings.page.harness.rerank.model.description')}
+          >
+            <Input
+              value={rerankModelId}
+              onChange={(event) => setRerankModelId(event.target.value)}
+              placeholder="rerank-v3.5"
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+            />
+          </SettingsFieldRow>
+          <SettingsFieldRow
+            label={t('settings.page.harness.rerank.endpoint')}
+            description={t('settings.page.harness.rerank.endpoint.description')}
+          >
+            <Input
+              value={rerankEndpoint}
+              onChange={(event) => setRerankEndpoint(event.target.value)}
+              placeholder="/rerank"
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+            />
+          </SettingsFieldRow>
+          <div className="flex justify-end">
+            <Button type="button" size="sm" disabled={isSaving} onClick={handleRerankSave}>
+              {t('settings.page.harness.rerank.save')}
+            </Button>
+          </div>
         </div>
       </SettingsSection>
 

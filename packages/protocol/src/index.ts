@@ -6,6 +6,7 @@ export * from "./foundational-pi-packages.js";
 export * from "./harness.js";
 export * from "./language-id.js";
 export * from "./harness-settings.js";
+export * from "./harness-inference.js";
 export * from "./harness-model-slots.js";
 export * from "./harness-roles.js";
 export * from "./harness-tools.js";

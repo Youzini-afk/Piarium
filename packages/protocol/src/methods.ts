@@ -52,6 +52,7 @@ import type {
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
 import type { HarnessRespondParams } from "./harness.js";
+import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "./harness-inference.js";
 import type { ModelSelection } from "./harness-settings.js";
 
 export interface HostMethodMap {
@@ -439,6 +440,14 @@ export interface HostMethodMap {
   "session.tree": {
     params: { sessionId: string };
     result: SessionTreeResult;
+  };
+  "harness.embed": {
+    params: HarnessEmbedParams;
+    result: HarnessEmbedResult;
+  };
+  "harness.rerank": {
+    params: HarnessRerankParams;
+    result: HarnessRerankResult;
   };
   "settings.get": {
     params: Record<string, never>;

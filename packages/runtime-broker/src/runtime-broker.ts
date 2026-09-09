@@ -224,6 +224,8 @@ export const PI_CATALOG_METHODS = [
   "session.list",
   "settings.get",
   "settings.update",
+  "harness.embed",
+  "harness.rerank",
 ] as const;
 
 export type PiCatalogMethod = (typeof PI_CATALOG_METHODS)[number];

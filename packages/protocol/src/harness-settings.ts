@@ -4,6 +4,12 @@
  * Pi owns source loading and project trust; tool assembly resolves them at session creation.
  */
 
+import {
+  parseHarnessEmbeddingSettings,
+  parseHarnessRerankSettings,
+  type HarnessEmbeddingSettings,
+  type HarnessRerankSettings,
+} from "./harness-inference.js";
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
 
 /** A provider + model pair, as stored in a model slot. */
@@ -100,6 +106,10 @@ export interface HarnessSettings {
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
   memory: HarnessMemorySettings;
+  /** Dedicated embedding backend. Not a chat model slot. */
+  embedding?: HarnessEmbeddingSettings;
+  /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
+  rerank?: HarnessRerankSettings;
   worktree?: HarnessWorktreeSettings;
   web?: {
     maxFetchesPerTurn?: number;
@@ -148,6 +158,8 @@ export function mergeHarnessSettings(
   user: HarnessSettingsInput,
   workspace: HarnessSettingsInput,
 ): HarnessSettings {
+  const { embedding: userEmbedding, rerank: userRerank, ...userRest } = user;
+  const { embedding: _workspaceEmbedding, rerank: _workspaceRerank, ...workspaceRest } = workspace;
   const askBeforeKeys = new Set([
     ...Object.keys(user.dispatch?.askBefore ?? {}),
     ...Object.keys(workspace.dispatch?.askBefore ?? {}),
@@ -168,8 +180,8 @@ export function mergeHarnessSettings(
   );
   const merged: HarnessSettings = {
     ...DEFAULT_HARNESS_SETTINGS,
-    ...user,
-    ...workspace,
+    ...userRest,
+    ...workspaceRest,
     // Deep merge (depth 1) for nested objects
     tools: { ...DEFAULT_HARNESS_SETTINGS.tools, ...user.tools, ...workspace.tools },
     output: { ...DEFAULT_HARNESS_SETTINGS.output, ...user.output, ...workspace.output },
@@ -198,6 +210,16 @@ export function mergeHarnessSettings(
     // Memory execution is user-owned. A repository cannot disable the keeper,
     // enable background model calls, or change compaction ownership.
     memory: { mode: resolveHarnessMemoryMode(user.memory) },
+    // Embedding and rerank bindings are user-owned. A repository cannot
+    // redirect remote inference or select another provider credential.
+    ...((() => {
+      const embedding = parseHarnessEmbeddingSettings(userEmbedding);
+      const rerank = parseHarnessRerankSettings(userRerank);
+      return {
+        ...(embedding ? { embedding } : {}),
+        ...(rerank ? { rerank } : {}),
+      };
+    })()),
     ...(user.web || workspace.web
       ? {
           web: {

@@ -94,6 +94,15 @@ function optionalBoolean(record: Record<string, unknown>, key: string): boolean 
   return value;
 }
 
+function optionalPositiveInt(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new RuntimeDispatchError("invalid_params", `${key} must be a positive integer`);
+  }
+  return value;
+}
+
 function requireBoolean(record: Record<string, unknown>, key: string): boolean {
   const value = optionalBoolean(record, key);
   if (value === undefined) {
@@ -884,6 +893,70 @@ async function dispatchRuntimeRequestUnchecked(
         remove: requireStringList(input, "remove"),
         scope: requireEnum(input, "scope", ["global", "project"] as const),
         set: requireRecord(input.set) as { [key: string]: JsonValue },
+      });
+    }
+    case "harness.embed": {
+      const itemsValue = input.items;
+      if (!Array.isArray(itemsValue) || itemsValue.length === 0) {
+        throw new RuntimeDispatchError("invalid_params", "items must be a non-empty array");
+      }
+      const items = itemsValue.map((item, index) => {
+        const record = requireRecord(item);
+        try {
+          return {
+            id: requireString(record, "id"),
+            text: requireString(record, "text"),
+          };
+        } catch (error) {
+          if (error instanceof RuntimeDispatchError) {
+            throw new RuntimeDispatchError(error.code, `items[${index}].${error.message}`, error.retryable);
+          }
+          throw error;
+        }
+      });
+      const dimensions = optionalPositiveInt(input, "dimensions");
+      const maxTokens = optionalPositiveInt(input, "maxTokens");
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "harness.embed", {
+        purpose: requireEnum(input, "purpose", ["document", "query"] as const),
+        providerId: requireString(input, "providerId"),
+        modelId: requireString(input, "modelId"),
+        protocol: requireEnum(input, "protocol", ["openai-compatible"] as const),
+        items,
+        batchId: requireString(input, "batchId"),
+        ...(dimensions === undefined ? {} : { dimensions }),
+        ...(maxTokens === undefined ? {} : { maxTokens }),
+      });
+    }
+    case "harness.rerank": {
+      const documentsValue = input.documents;
+      if (!Array.isArray(documentsValue) || documentsValue.length === 0) {
+        throw new RuntimeDispatchError("invalid_params", "documents must be a non-empty array");
+      }
+      const documents = documentsValue.map((item, index) => {
+        const record = requireRecord(item);
+        try {
+          const revision = optionalString(record, "revision");
+          return {
+            id: requireString(record, "id"),
+            text: requireString(record, "text"),
+            ...(revision === undefined ? {} : { revision }),
+          };
+        } catch (error) {
+          if (error instanceof RuntimeDispatchError) {
+            throw new RuntimeDispatchError(error.code, `documents[${index}].${error.message}`, error.retryable);
+          }
+          throw error;
+        }
+      });
+      const endpoint = optionalString(input, "endpoint");
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "harness.rerank", {
+        providerId: requireString(input, "providerId"),
+        modelId: requireString(input, "modelId"),
+        protocol: requireEnum(input, "protocol", ["http-rerank"] as const),
+        query: requireString(input, "query"),
+        documents,
+        batchId: requireString(input, "batchId"),
+        ...(endpoint === undefined ? {} : { endpoint }),
       });
     }
 

@@ -40,6 +40,10 @@ import {
   type WireEnvelope,
   parseAgentInputContext,
   type AgentInputContext,
+  type HarnessEmbedItem,
+  type HarnessEmbedParams,
+  type HarnessRerankDocument,
+  type HarnessRerankParams,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
@@ -249,6 +253,71 @@ function optionalModelSelection(record: Record<string, unknown>): ModelSelection
   return {
     providerId: readString(model, "providerId"),
     modelId: readString(model, "modelId"),
+  };
+}
+
+function readEmbedParams(params: Record<string, unknown>): HarnessEmbedParams {
+  const purpose = readString(params, "purpose");
+  if (purpose !== "document" && purpose !== "query") {
+    throw new HostError("invalid_params", "purpose must be document or query");
+  }
+  if (readString(params, "protocol") !== "openai-compatible") {
+    throw new HostError("invalid_params", "embedding protocol must be openai-compatible");
+  }
+  const itemsValue = params.items;
+  if (!Array.isArray(itemsValue) || itemsValue.length === 0) {
+    throw new HostError("invalid_params", "items must be a non-empty array");
+  }
+  const items: HarnessEmbedItem[] = itemsValue.map((entry, index) => {
+    const item = expectRecord(entry, `items[${index}]`);
+    return { id: readString(item, "id"), text: readString(item, "text", { allowEmpty: true }) };
+  });
+  const dimensions = params.dimensions === undefined ? undefined : Number(params.dimensions);
+  const maxTokens = params.maxTokens === undefined ? undefined : Number(params.maxTokens);
+  if (dimensions !== undefined && (!Number.isInteger(dimensions) || dimensions <= 0)) {
+    throw new HostError("invalid_params", "dimensions must be a positive integer");
+  }
+  if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens <= 0)) {
+    throw new HostError("invalid_params", "maxTokens must be a positive integer");
+  }
+  return {
+    purpose,
+    providerId: readString(params, "providerId"),
+    modelId: readString(params, "modelId"),
+    protocol: "openai-compatible",
+    items,
+    batchId: readString(params, "batchId"),
+    ...(dimensions === undefined ? {} : { dimensions }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  };
+}
+
+function readRerankParams(params: Record<string, unknown>): HarnessRerankParams {
+  if (readString(params, "protocol") !== "http-rerank") {
+    throw new HostError("invalid_params", "rerank protocol must be http-rerank");
+  }
+  const documentsValue = params.documents;
+  if (!Array.isArray(documentsValue) || documentsValue.length === 0) {
+    throw new HostError("invalid_params", "documents must be a non-empty array");
+  }
+  const documents: HarnessRerankDocument[] = documentsValue.map((entry, index) => {
+    const item = expectRecord(entry, `documents[${index}]`);
+    const revision = optionalString(item, "revision");
+    return {
+      id: readString(item, "id"),
+      text: readString(item, "text", { allowEmpty: true }),
+      ...(revision === undefined ? {} : { revision }),
+    };
+  });
+  const endpoint = optionalString(params, "endpoint");
+  return {
+    providerId: readString(params, "providerId"),
+    modelId: readString(params, "modelId"),
+    protocol: "http-rerank",
+    query: readString(params, "query", { allowEmpty: true }),
+    documents,
+    batchId: readString(params, "batchId"),
+    ...(endpoint === undefined ? {} : { endpoint }),
   };
 }
 
@@ -980,6 +1049,10 @@ export class HostController {
         return this.#sessionHost.watchConfig(readConfigWatchTarget(params.target));
       case "config.unwatch":
         return { unwatched: this.#sessionHost.unwatchConfig(readString(params, "watchId")) };
+      case "harness.embed":
+        return this.#sessionHost.embed(readEmbedParams(params));
+      case "harness.rerank":
+        return this.#sessionHost.rerank(readRerankParams(params));
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update": {

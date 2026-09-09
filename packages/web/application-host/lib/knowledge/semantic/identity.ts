@@ -7,6 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { remoteEmbeddingSpaceParts } from "@piarium/protocol";
 import { CATALOG_EXTRACTOR_VERSION } from "../symbols.js";
 
 export const SEMANTIC_CHUNKER_VERSION = 2;
@@ -33,6 +34,8 @@ export type VectorSpaceIdentity = {
   pooling: "mean" | "cls";
   normalize: boolean;
   maxTokens: number;
+  /** When set (remote bindings), this is the published space id. */
+  spaceId?: string;
 };
 
 export type IndexRecipeIdentity = {
@@ -65,15 +68,29 @@ export const defaultRecipeIdentity = (): IndexRecipeIdentity => ({
 
 const digest = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
-export const spaceIdOf = (space: VectorSpaceIdentity): string => digest(JSON.stringify([
-  space.provider,
-  space.model,
-  space.modelRevision,
-  space.dim,
-  space.pooling,
-  space.normalize,
-  space.maxTokens,
-]));
+export const spaceIdOf = (space: VectorSpaceIdentity): string => (
+  space.spaceId ?? digest(JSON.stringify([
+    space.provider,
+    space.model,
+    space.modelRevision,
+    space.dim,
+    space.pooling,
+    space.normalize,
+    space.maxTokens,
+  ]))
+);
+
+export const remoteEmbeddingSpaceId = (input: {
+  protocol: string;
+  providerId: string;
+  modelId: string;
+  maxTokens: number;
+  dimensions?: number;
+}): string => digest(JSON.stringify(remoteEmbeddingSpaceParts(input)));
+
+export const embedTextKey = (embedText: string): string => (
+  createHash("sha256").update(embedText).digest("hex")
+);
 
 export const recipeIdOf = (recipe: IndexRecipeIdentity = defaultRecipeIdentity()): string => digest(JSON.stringify([
   recipe.chunkerVersion,

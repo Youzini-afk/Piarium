@@ -5,7 +5,6 @@ import {
   mergeHarnessSettings,
   resolveHarnessMemoryMode,
   HarnessSettingsValidationError,
-  type HarnessSettings,
 } from "../src/index.js";
 
 describe("harness settings", () => {
@@ -68,6 +67,40 @@ describe("harness settings", () => {
     );
     assert.equal(merged.tools.bash, true);
     assert.equal(merged.tools.grep, true);
+  });
+
+  it("keeps embedding and rerank bindings user-owned and ignores chat model slots", () => {
+    const merged = mergeHarnessSettings({
+      models: { explore: { providerId: "openai", modelId: "gpt-4o" } },
+      embedding: { protocol: "openai-compatible", providerId: "openai", modelId: "text-embedding-3-small", dimensions: 1024 },
+      rerank: { protocol: "http-rerank", providerId: "cohere", modelId: "rerank-v3.5" },
+    }, {
+      embedding: { protocol: "openai-compatible", providerId: "workspace", modelId: "redirected" },
+      rerank: { protocol: "http-rerank", providerId: "workspace", modelId: "redirected" },
+    });
+    assert.deepEqual(merged.embedding, {
+      protocol: "openai-compatible",
+      providerId: "openai",
+      modelId: "text-embedding-3-small",
+      dimensions: 1024,
+    });
+    assert.deepEqual(merged.rerank, {
+      protocol: "http-rerank",
+      providerId: "cohere",
+      modelId: "rerank-v3.5",
+    });
+    assert.equal(merged.models.explore?.modelId, "gpt-4o");
+    assert.equal(mergeHarnessSettings({
+      models: { explore: { providerId: "openai", modelId: "gpt-4o" } },
+    }, {}).embedding, undefined);
+    assert.equal(mergeHarnessSettings({}, {
+      embedding: { protocol: "openai-compatible", providerId: "workspace", modelId: "redirected" },
+      rerank: { protocol: "http-rerank", providerId: "workspace", modelId: "redirected" },
+    }).embedding, undefined);
+    assert.equal(mergeHarnessSettings({}, {
+      embedding: { protocol: "openai-compatible", providerId: "workspace", modelId: "redirected" },
+      rerank: { protocol: "http-rerank", providerId: "workspace", modelId: "redirected" },
+    }).rerank, undefined);
   });
 
   it("does not let workspace settings redirect model slots", () => {

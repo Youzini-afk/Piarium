@@ -83,7 +83,9 @@ type SessionScopedRuntimeMethod =
   | "resource.list"
   | "resource.update"
   | "settings.get"
-  | "settings.update";
+  | "settings.update"
+  | "harness.embed"
+  | "harness.rerank";
 
 export type RuntimeContextTarget =
   | { cwd: string; sessionId?: never }
@@ -255,6 +257,8 @@ export const RUNTIME_METHODS = [
   "session.unarchive",
   "settings.get",
   "settings.update",
+  "harness.embed",
+  "harness.rerank",
 ] as const satisfies readonly (keyof RuntimeMethodMap)[];
 
 const RUNTIME_METHOD_SET = new Set<string>(RUNTIME_METHODS);

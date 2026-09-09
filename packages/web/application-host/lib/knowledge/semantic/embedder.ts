@@ -8,13 +8,58 @@ import type { VectorSpaceIdentity } from "./identity.js";
 import { LOCAL_MINILM_SPACE } from "./identity.js";
 
 export type SemanticEmbedderStatus = "ready" | "unavailable";
+export type SemanticEmbedPurpose = "document" | "query";
+
+export interface SemanticEmbedItem {
+  id: string;
+  text: string;
+}
+
+export interface SemanticEmbedRequest {
+  purpose: SemanticEmbedPurpose;
+  items: readonly SemanticEmbedItem[];
+  batchId: string;
+  signal?: AbortSignal;
+}
+
+export interface SemanticEmbedResultItem {
+  id: string;
+  index: number;
+  vector: number[];
+}
+
+export interface SemanticEmbedResult {
+  batchId: string;
+  space: VectorSpaceIdentity;
+  items: SemanticEmbedResultItem[];
+}
 
 export interface SemanticEmbedder {
   status: SemanticEmbedderStatus;
   space: VectorSpaceIdentity;
   prepare(): Promise<void>;
   countTokens(text: string): number;
-  embed(texts: readonly string[]): Promise<number[][]>;
+  embed(
+    texts: readonly string[],
+    request?: { purpose?: SemanticEmbedPurpose; signal?: AbortSignal; batchId?: string },
+  ): Promise<number[][]>;
+  embedBatch(request: SemanticEmbedRequest): Promise<SemanticEmbedResult>;
+}
+
+export function vectorsFromEmbedResult(result: SemanticEmbedResult): number[][] {
+  return [...result.items].sort((left, right) => left.index - right.index).map((item) => item.vector);
+}
+
+export function embedBatchFromTexts(
+  embedder: SemanticEmbedder,
+  texts: readonly string[],
+  purpose: SemanticEmbedPurpose,
+): Promise<SemanticEmbedResult> {
+  return embedder.embedBatch({
+    purpose,
+    batchId: `${purpose}:${texts.length}`,
+    items: texts.map((text, index) => ({ id: `${purpose}-${index}`, text })),
+  });
 }
 
 const l2normalize = (values: number[]): number[] => {
@@ -45,13 +90,27 @@ export function createHashEmbedder(space: VectorSpaceIdentity = {
   ...LOCAL_MINILM_SPACE,
   modelRevision: "test-hash",
 }): SemanticEmbedder {
-  return {
+  const embedder: SemanticEmbedder = {
     status: "ready",
     space,
     prepare: async () => undefined,
     countTokens: (text) => Math.max(1, text.split(/\s+/u).filter(Boolean).length),
     embed: async (texts) => texts.map((text) => hashEmbed(text, space.dim)),
+    embedBatch: async (request) => {
+      request.signal?.throwIfAborted();
+      const vectors = await embedder.embed(request.items.map((item) => item.text));
+      return {
+        batchId: request.batchId,
+        space,
+        items: request.items.map((item, index) => ({
+          id: item.id,
+          index,
+          vector: vectors[index]!,
+        })),
+      };
+    },
   };
+  return embedder;
 }
 
 export function cosineSimilarity(left: readonly number[], right: readonly number[]): number {

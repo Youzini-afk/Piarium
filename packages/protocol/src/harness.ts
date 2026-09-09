@@ -567,6 +567,17 @@ export interface ExploreSemanticDetails {
   blocks?: number;
   units?: number;
   primary?: number;
+  /** Paths whose body is available but whose vectors are not yet in this view. */
+  gaps?: ExploreSemanticGap[];
+}
+
+export interface ExploreRerankDetails {
+  status: ExploreModelStageStatus;
+  providerId?: string;
+  modelId?: string;
+  batchId?: string;
+  evaluated?: number;
+  note?: string;
 }
 
 export interface ExploreGraphDetails {
@@ -619,7 +630,15 @@ export interface ExploreModelParticipation {
   plan: ExploreModelStageStatus;
   select: ExploreModelStageStatus;
   followup: ExploreModelStageStatus;
+  rerank?: ExploreModelStageStatus;
   note?: string;
+}
+
+export type ExploreSemanticGapReason = "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending";
+
+export interface ExploreSemanticGap {
+  path: string;
+  reason: ExploreSemanticGapReason;
 }
 
 export type ExploreQueryTaskFamily = "lexical" | "graph" | "semantic" | "plan" | "followup" | "model";
@@ -844,6 +863,7 @@ export interface ExploreSearchResult {
     distinctiveness?: ExploreDistinctivenessDetails;
     windows?: ExploreWindowTrace[];
     semantic?: ExploreSemanticDetails;
+    rerank?: ExploreRerankDetails;
     model?: ExploreModelParticipation;
     /** Per-source production outcome. failed/empty/unavailable/incomplete/cancelled stay distinct. */
     sources?: ExploreQuerySourceState[];
