@@ -69,6 +69,63 @@ describe("semantic generation store", () => {
     }
   });
 
+  it("computes scoped vector Top-K before truncating global candidates", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-scoped-topk-"));
+    dirs.push(dataDir);
+    const embedder = {
+      status: "ready" as const,
+      space: {
+        provider: "test",
+        model: "scoped-topk",
+        modelRevision: "r1",
+        dim: 2,
+        pooling: "mean" as const,
+        normalize: true,
+        maxTokens: 32,
+      },
+      prepare: async () => undefined,
+      countTokens: (text: string) => Math.max(1, text.length),
+      embed: async (texts: readonly string[]) => texts.map((text) => (
+        text.includes("outside") ? [1, 0] : [0.8, 0.6]
+      )),
+    };
+    const store = createSemanticGenerationStore({
+      dataDir,
+      hostId: "host",
+      scope: workspaceScope("ws-scoped-topk"),
+      embedder,
+    });
+    try {
+      await store.publishDocuments([
+        ...Array.from({ length: 5 }, (_, index) => {
+          const documentId = `outside/${index}.ts`;
+          return { documentId, revision: "r1", chunks: [chunk(documentId, `outside result ${index}`)] };
+        }),
+        {
+          documentId: "allowed/z-inside.ts",
+          revision: "r1",
+          chunks: [chunk("allowed/z-inside.ts", "inside result")],
+        },
+      ]);
+
+      expect((await store.search([1, 0], 1))[0]?.documentId).toMatch(/^outside\//);
+      expect((await store.search([1, 0], 1, ["allowed"])).map((hit) => hit.documentId)).toEqual(["allowed/z-inside.ts"]);
+      expect((await store.search([1, 0], 1, ["."]))[0]?.documentId).toMatch(/^outside\//);
+      await expect(store.search([1], 1)).rejects.toThrow("dimension 1; expected 2");
+
+      await store.publishDocument({
+        documentId: "allowed/z-inside.ts",
+        revision: "r2",
+        chunks: [chunk("allowed/z-inside.ts", "inside result updated")],
+      });
+      expect((await store.search([1, 0], 1, ["allowed"]))[0]?.revision).toBe("r2");
+      await store.removeDocument("allowed/z-inside.ts");
+      expect(await store.search([1, 0], 1, ["allowed"])).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("reports partial coverage and only returns published documents while a generation is half-built", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-partial-"));
     dirs.push(dataDir);
@@ -154,6 +211,8 @@ describe("semantic generation store", () => {
       expect(reopened.coverage).toBe("partial");
       expect(await reopened.publishedRevision("src/a.ts")).toEqual({ revision: "r2", recipeId: reopened.recipeId });
       expect(await reopened.publishedRevision("src/b.ts")).toBeNull();
+      const scoped = await reopened.search((await embedder.embed(["alpha changed"]))[0]!, 1, ["src"]);
+      expect(scoped[0]?.documentId).toBe("src/a.ts");
     } finally {
       await reopened.close();
     }

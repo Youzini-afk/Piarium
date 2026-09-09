@@ -1,4 +1,7 @@
 import type { SymbolMatchTier } from "../knowledge/store.js";
+import { pathInRoots } from "../workspace/path-scope.js";
+
+export { pathInRoots };
 
 export const DEFAULT_GRAPH_DEFINITION_BUDGET = 40;
 export const DEFAULT_GRAPH_CONNECTION_BUDGET = 16;
@@ -35,20 +38,6 @@ export interface ExploreGraphRecall {
   findImporters(path: string): Promise<{ resolved: Array<{ path: string; specifier: string }> }>;
 }
 
-export function pathInRoots(candidate: string, roots: readonly string[] | undefined): boolean {
-  if (!roots || roots.length === 0) return true;
-  const comparable = (value: string): string => {
-    const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
-    const rooted = normalized === "." ? "" : normalized;
-    return process.platform === "win32" ? rooted.toLowerCase() : rooted;
-  };
-  const path = comparable(candidate);
-  return roots.some((root) => {
-    const prefix = comparable(root).replace(/\/$/, "");
-    return !prefix || path === prefix || path.startsWith(`${prefix}/`);
-  });
-}
-
 export function locateIdentifierLines(lines: readonly string[], name: string): number[] {
   if (!name) return [];
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -80,9 +69,11 @@ export function rankReverseImporters(
   seedPath: string,
   importers: ReadonlyArray<{ path: string; specifier: string }>,
   limit: number,
+  roots?: readonly string[],
 ): Array<{ path: string; specifier: string }> {
   const seedDir = dirnameOf(seedPath);
-  return [...importers]
+  return importers
+    .filter((item) => pathInRoots(item.path, roots))
     .toSorted((left, right) => {
       const leftSame = dirnameOf(left.path) === seedDir ? 0 : 1;
       const rightSame = dirnameOf(right.path) === seedDir ? 0 : 1;

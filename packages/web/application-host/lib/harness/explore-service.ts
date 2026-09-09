@@ -17,19 +17,9 @@ import {
   formatExploreOutput,
   type ExploreIssue,
 } from "./explore.js";
-import type { ExploreGraphRecall } from "./explore-graph.js";
+import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
-
-const comparable = (value: string): string => (
-  process.platform === "win32" ? value.replace(/\\/g, "/").toLowerCase() : value.replace(/\\/g, "/")
-);
-
-const within = (candidate: string, prefix: string): boolean => {
-  const path = comparable(candidate).replace(/^\.\//, "");
-  const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
-  return !root || path === root || path.startsWith(`${root}/`);
-};
 
 const ownedDirtyPathsFor = (
   inputContext: AgentInputContext,
@@ -42,7 +32,7 @@ const ownedDirtyPathsFor = (
   const owned = draftPaths ? draftPaths(actor.sessionId, inputContext) : inputContext.dirtyPaths;
   return owned.filter((dirtyPath) => (
     params.paths === undefined
-    || authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
+    || authorizedPaths.some((authorized) => pathInRoots(dirtyPath, [authorized.resourceId]))
   ));
 };
 
@@ -115,9 +105,15 @@ export function createExploreSearchService(
       if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
-      const effectiveParams: ExploreParams = params.paths?.length || !ctx.actor.workspaceScope?.length
-        ? params
-        : { ...params, paths: [...ctx.actor.workspaceScope] };
+      if (params.paths?.length && ctx.authorizedPaths.length !== params.paths.length) {
+        throw new HarnessServiceError("forbidden", "Search paths were not authorized.");
+      }
+      const effectivePaths = params.paths?.length
+        ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
+        : ctx.actor.workspaceScope?.length
+          ? [...ctx.actor.workspaceScope]
+          : undefined;
+      const effectiveParams: ExploreParams = effectivePaths ? { ...params, paths: effectivePaths } : params;
       let searchPartial = false;
       const result = await explore(effectiveParams, {
         rgSearch: async (pattern, options) => {
@@ -196,11 +192,14 @@ export function createExploreSearchService(
             }),
           },
         } : {}),
-        ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
+        ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId, effectiveParams.paths) } : {}),
         ...(host.semanticRecall ? {
           semantic: {
             search: (question: string, limit?: number, signal?: AbortSignal) => (
-              host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, signal ?? ctx.signal)
+              host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
+                signal: signal ?? ctx.signal,
+                ...(effectiveParams.paths ? { roots: effectiveParams.paths } : {}),
+              })
             ),
           },
         } : {}),
@@ -263,6 +262,7 @@ export function createExploreSearchService(
 function bindExploreGraphRecall(
   getStore: NonNullable<HarnessServiceHost["graphRecall"]>,
   workspaceId: string,
+  roots?: readonly string[],
 ): ExploreGraphRecall {
   const requireStore = (): NonNullable<ReturnType<typeof getStore>> => {
     const store = getStore(workspaceId);
@@ -271,7 +271,7 @@ function bindExploreGraphRecall(
   };
   return {
     catalogStats: async () => requireStore().catalogStats(),
-    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k),
+    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
     findLinks: (value) => requireStore().findLinks(value),
     fileRelations: async (path) => {
       const relations = await requireStore().getFileRelations(path);

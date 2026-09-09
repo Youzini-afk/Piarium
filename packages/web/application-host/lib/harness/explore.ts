@@ -2087,6 +2087,7 @@ export function createExploreQueryRun(
           seed,
           importers.resolved,
           DEFAULT_GRAPH_IMPORT_PER_SEED,
+          input.paths,
         );
         for (const importer of rankedImporters) {
           if (seedPaths.includes(importer.path) || !pathInRoots(importer.path, input.paths)) continue;

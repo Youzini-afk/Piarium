@@ -243,7 +243,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     scope: SemanticScopeKey,
     question: string,
     limit: number,
-    searchOptions?: { signal?: AbortSignal },
+    searchOptions?: { signal?: AbortSignal; roots?: readonly string[] },
   ): Promise<{
     status: SemanticIndexStatus;
     hits: SemanticHit[];
@@ -258,7 +258,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const [vector] = await waitWithSignal(options.embedder.embed([question]), signal);
       signal?.throwIfAborted();
       const store = storeFor(scope);
-      const hits = vector ? await waitWithSignal(store.search(vector, limit), signal) : [];
+      const hits = vector
+        ? await waitWithSignal(store.search(vector, limit, searchOptions?.roots), signal)
+        : [];
       signal?.throwIfAborted();
       return {
         status: {

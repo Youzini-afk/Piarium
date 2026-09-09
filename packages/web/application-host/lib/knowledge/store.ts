@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { normalizeGraphPath, resolveImportSpecifier } from "./import-resolve.js";
+import { pathInRoots } from "../workspace/path-scope.js";
 
 // triviumdb is a CJS package — use createRequire to avoid ESM named-import
 // issues when running under pure Node (outside vite-node/vitest).
@@ -320,7 +321,7 @@ export interface KnowledgeStore {
     options?: { linksIncomplete?: boolean; extractor?: number },
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
-  searchSymbols(query: string, k: number): Promise<SymbolGraphSearchResult[]>;
+  searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
   findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
@@ -1296,7 +1297,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async searchSymbols(query, k) {
+    async searchSymbols(query, k, roots) {
       const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
       if (terms.length === 0 || !Number.isSafeInteger(k) || k <= 0) return [];
       // Candidates come from the indexes; scoring is unchanged and still runs
@@ -1321,7 +1322,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const path = typeof payload["path"] === "string" ? payload["path"] : "";
         const kind = typeof payload["kind"] === "string" ? payload["kind"] : "";
         const range = payload["range"] as SymbolGraphRange | undefined;
-        if (!name || !path || !kind || !range || !validRange(range)) continue;
+        // The n-gram lookup may return candidates from outside the query's
+        // roots; discard them before scoring and the final Top-K slice.
+        if (!name || !path || !kind || !range || !validRange(range) || (roots?.length && !pathInRoots(path, roots))) continue;
         const scored = scoreSymbolMatch(name.toLowerCase(), path.toLowerCase(), terms);
         if (!scored) continue;
         results.push({

@@ -37,6 +37,36 @@ function context(inputContext: AgentInputContext, signal = new AbortController()
 }
 
 describe("explore query services", () => {
+  it("pins explicit paths to Router-authorized workspace resource IDs", async () => {
+    const store = createExploreQueryStore();
+    const host = {
+      exploreQueryStore: store,
+      searchService: {
+        search: async () => ({ status: "ready", files: [], partial: false }),
+      },
+      readExploreFile: async () => ({ status: "ready" as const, content: "", revision: "rev-1", source: "disk" as const }),
+    } as unknown as Pick<
+      HarnessServiceHost,
+      "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore"
+    >;
+    const ctx: HarnessServiceContext = {
+      ...context({ source: "disk" }),
+      authorizedPaths: [{
+        authorityId: "test-host",
+        workspaceId: "workspace-1",
+        canonicalResourceId: "C:/workspace/src",
+        inputPath: "C:/workspace/src",
+        resourceId: "src",
+      }],
+    };
+    const started = await createExploreQueryStartService(host).handle({
+      question: "needle",
+      paths: ["C:/workspace/src"],
+    }, ctx);
+    expect(store.get(actor.sessionId, started.queryId)?.paths).toEqual(["src"]);
+    store.dispose();
+  });
+
   it("keeps the start input source when a later stage RPC sends a different window", async () => {
     const seen: AgentInputContext[] = [];
     const store = createExploreQueryStore();
@@ -170,16 +200,21 @@ describe("explore query services", () => {
     const store = createExploreQueryStore();
     const scopedActor: HarnessActorContext = { ...actor, workspaceScope: ["packages/allowed"] };
     const readPaths: string[] = [];
+    const graphRoots: string[][] = [];
+    const semanticRoots: string[][] = [];
     const graph = {
       catalogStats: async () => ({
         symbolCount: 2,
         fileCount: 2,
         paths: ["packages/allowed/src/index.ts", "packages/secret/src/index.ts"],
       }),
-      searchSymbols: async () => [
-        { name: "NeedleSymbol", path: "packages/allowed/src/index.ts", kind: "function", match: "exact", score: 1 },
-        { name: "NeedleSymbol", path: "packages/secret/src/index.ts", kind: "function", match: "exact", score: 1 },
-      ],
+      searchSymbols: async (_query: string, _limit: number, roots?: readonly string[]) => {
+        graphRoots.push([...(roots ?? [])]);
+        return [
+          { name: "NeedleSymbol", path: "packages/allowed/src/index.ts", kind: "function", match: "exact", score: 1 },
+          { name: "NeedleSymbol", path: "packages/secret/src/index.ts", kind: "function", match: "exact", score: 1 },
+        ];
+      },
       findLinks: async () => [],
       getFileRelations: async () => null,
       findImporters: async () => ({ resolved: [], unresolved: [] }),
@@ -207,15 +242,23 @@ describe("explore query services", () => {
         return { status: "ready" as const, content: "export function NeedleSymbol() {}", revision: "rev-1", source: "disk" as const };
       },
       graphRecall: () => graph,
-      semanticRecall: async () => ({
-        status: "ready" as const,
-        coverage: "complete" as const,
-        lifecycle: "ready" as const,
-        hits: [
-          semanticHit("packages/allowed/src/index.ts", "allowed"),
-          semanticHit("packages/secret/src/index.ts", "secret"),
-        ],
-      }),
+      semanticRecall: async (
+        _workspaceId: string,
+        _question: string,
+        _limit: number,
+        options?: { signal?: AbortSignal; roots?: readonly string[] },
+      ) => {
+        semanticRoots.push([...(options?.roots ?? [])]);
+        return {
+          status: "ready" as const,
+          coverage: "complete" as const,
+          lifecycle: "ready" as const,
+          hits: [
+            semanticHit("packages/allowed/src/index.ts", "allowed"),
+            semanticHit("packages/secret/src/index.ts", "secret"),
+          ],
+        };
+      },
     } as unknown as Pick<
       HarnessServiceHost,
       "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore"
@@ -234,6 +277,8 @@ describe("explore query services", () => {
     const result = store.get(actor.sessionId, started.queryId)!.run.finish();
     expect(readPaths).toContain("packages/allowed/src/index.ts");
     expect(readPaths.every((path) => path.startsWith("packages/allowed/"))).toBe(true);
+    expect(graphRoots).toEqual([["packages/allowed"]]);
+    expect(semanticRoots).toEqual([["packages/allowed"]]);
     expect(JSON.stringify({ started, views, result })).not.toContain("packages/secret");
     store.dispose();
   });

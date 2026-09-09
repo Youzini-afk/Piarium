@@ -27,26 +27,17 @@ import {
   type ExploreDeps,
   type ExploreIssue,
 } from "./explore.js";
-import type { ExploreGraphRecall } from "./explore-graph.js";
+import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
 import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
 import { loadSnippetRelations } from "./explore-service.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
-const comparable = (value: string): string => (
-  process.platform === "win32" ? value.replace(/\\/g, "/").toLowerCase() : value.replace(/\\/g, "/")
-);
-
-const within = (candidate: string, prefix: string): boolean => {
-  const path = comparable(candidate).replace(/^\.\//, "");
-  const root = comparable(prefix).replace(/^\.\//, "").replace(/\/$/, "");
-  return !root || path === root || path.startsWith(`${root}/`);
-};
-
 export function bindExploreGraphRecall(
   getStore: NonNullable<HarnessServiceHost["graphRecall"]>,
   workspaceId: string,
+  roots?: readonly string[],
 ): ExploreGraphRecall {
   const requireStore = (): NonNullable<ReturnType<typeof getStore>> => {
     const store = getStore(workspaceId);
@@ -55,7 +46,7 @@ export function bindExploreGraphRecall(
   };
   return {
     catalogStats: async () => requireStore().catalogStats(),
-    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k),
+    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
     findLinks: (value) => requireStore().findLinks(value),
     fileRelations: async (path) => {
       const relations = await requireStore().getFileRelations(path);
@@ -74,14 +65,15 @@ export function createExploreDeps(
   ctx: HarnessServiceContext,
   inputContext: AgentInputContext,
   signal: AbortSignal = ctx.signal,
+  roots?: readonly string[],
 ): ExploreDeps {
   const workspaceId = ctx.actor.workspaceId;
   const readFile = host.readExploreFile;
   if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
   const deps: ExploreDeps = {
     rgSearch: async (pattern, options) => {
-      const roots: Array<string | undefined> = options.paths?.length ? [...new Set(options.paths)] : [undefined];
-      const batches = await Promise.all(roots.map(async (path) => {
+      const searchRoots: Array<string | undefined> = options.paths?.length ? [...new Set(options.paths)] : [undefined];
+      const batches = await Promise.all(searchRoots.map(async (path) => {
         signal.throwIfAborted();
         const search = await host.searchService.search({
           pattern,
@@ -143,13 +135,16 @@ export function createExploreDeps(
         }),
       },
     } : {}),
-    ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
+    ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId, roots) } : {}),
     ...(host.semanticRecall ? {
       semantic: {
         search: async (question: string, limit?: number, searchSignal?: AbortSignal) => {
           const active = searchSignal ?? signal;
           active.throwIfAborted();
-          return host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, active);
+          return host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
+            signal: active,
+            ...(roots ? { roots } : {}),
+          });
         },
       },
     } : {}),
@@ -292,8 +287,11 @@ export function createExploreQueryStartService(
       if (ctx.signal.aborted) onStartAbort();
       else ctx.signal.addEventListener("abort", onStartAbort, { once: true });
       try {
+        if (params.paths?.length && ctx.authorizedPaths.length !== params.paths.length) {
+          throw new HarnessServiceError("forbidden", "Search paths were not authorized.");
+        }
         const effectivePaths = params.paths?.length
-          ? params.paths
+          ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
           : ctx.actor.workspaceScope?.length
             ? [...ctx.actor.workspaceScope]
             : undefined;
@@ -306,7 +304,7 @@ export function createExploreQueryStartService(
             ...(effectivePaths ? { paths: effectivePaths } : {}),
             ...(params.limit ? { limit: params.limit } : {}),
           },
-          deps: createExploreDeps(host, ctx, inputContext, queryController.signal),
+          deps: createExploreDeps(host, ctx, inputContext, queryController.signal, effectivePaths),
           deadlineAt: Date.now() + budgetMs,
           reserveForJudgeMs: params.reserveForJudge ? DEFAULT_JUDGE_RESERVE_MS : 0,
           controller: queryController,
@@ -457,6 +455,6 @@ export function ownedDirtyPathsFor(
   const owned = draftPaths ? draftPaths(actor.sessionId, inputContext) : inputContext.dirtyPaths;
   return owned.filter((dirtyPath) => (
     params.paths === undefined
-    || authorizedPaths.some((authorized) => within(dirtyPath, authorized.resourceId))
+    || authorizedPaths.some((authorized) => pathInRoots(dirtyPath, [authorized.resourceId]))
   ));
 }

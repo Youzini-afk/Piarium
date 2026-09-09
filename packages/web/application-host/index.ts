@@ -1646,12 +1646,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
-    semanticRecall: async (workspaceId, question, limit, signal) => {
+    semanticRecall: async (workspaceId, question, limit, searchOptions) => {
       const result = await semanticIndexRuntime.search(
         workspaceScope(workspaceId),
         question,
         limit,
-        signal ? { signal } : undefined,
+        searchOptions,
       );
       return {
         status: result.status.status,

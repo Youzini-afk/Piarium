@@ -118,7 +118,7 @@ export interface HarnessServiceHost {
     workspaceId: string,
     question: string,
     limit: number,
-    signal?: AbortSignal,
+    options?: { signal?: AbortSignal; roots?: readonly string[] },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;

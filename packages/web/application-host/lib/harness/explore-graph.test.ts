@@ -21,6 +21,15 @@ describe("explore graph helpers", () => {
     expect(ranked.map((item) => item.path)).toEqual(["lib/other.ts", "app/boot.ts"]);
   });
 
+  it("filters reverse importers before applying the per-seed limit", () => {
+    const ranked = rankReverseImporters("src/core.ts", [
+      { path: "a-outside.ts", specifier: "./core.js" },
+      { path: "allowed/near.ts", specifier: "./core.js" },
+      { path: "allowed/far.ts", specifier: "../core.js" },
+    ], 1, ["allowed"]);
+    expect(ranked.map((item) => item.path)).toEqual(["allowed/near.ts"]);
+  });
+
   it("respects search roots for graph paths", () => {
     expect(pathInRoots("src/a.ts", ["src"])).toBe(true);
     expect(pathInRoots("lib/a.ts", ["src"])).toBe(false);

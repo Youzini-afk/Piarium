@@ -3875,6 +3875,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-189 · 2026-09-09 · 快速检索作用域内 Top-K
+
+背景：D-187 已固定查询开始时的 effective roots，但图符号召回仍在全工作区候选上截断，reverse importer 也在范围过滤前截断；语义召回仍使用全库 `searchExact`，再由 explore 过滤命中。这样范围外高排名候选可以占满 K，丢掉范围内命中。语义索引的文档更新和删除还必须使作用域候选身份保持最新。
+
+决定：
+
+1. 显式 paths 先使用 Router 已授权的 workspace-relative `resourceId`，查询 start 再固定 effective roots 并通过同一次 Host 查询闭包传给图与语义后端；路径匹配复用 `pathInRoots` 的 `.`、分隔符和 Windows 大小写语义，后续阶段不能改范围。
+2. 图 `searchSymbols` 在评分和 Top-K slice 前按 roots 丢弃候选；reverse importer 在 `rankReverseImporters` 截取每 seed 的预算前按 roots 过滤。图连接返回继续在既有预算消费前由 query engine 过滤，不扩大公共接口。
+3. 受限语义查询枚举当前 generation 的 scope 内 block IDs，使用 TriviumDB 0.8.6 `searchGraphFirst` 在完整 anchor 集合内计算精确 Top-K；`.` / 空 roots 保留 `searchExact` 快路径，不以固定 oversampling 或放大 K 模拟作用域召回。文档→block ID 映射首次按 block 索引惰性建立，已建立后由发布/删除按文档增量维护。
+4. scope 过滤发生在后端返回候选前，范围外路径、块正文和计数不进入本次查询材料；没有新增硬上限。既有未受限查询的索引和排序行为保持。
+
+验证：图与语义最小反例都构造“全局前 K 在 scope 外、scope 内仍有命中”；`.` 快路径、文档替换/删除缓存失效、reverse importer 过滤前截断、显式路径归一到已授权 resourceId，以及 start→Host→后端固定 roots 的调用链均有定向测试。未受限语义仍保留现有 `searchExact` 行为。
+
+影响：`workspace/path-scope.ts`、`knowledge/store.ts`、`knowledge/semantic/store.ts` / `runtime.ts`、`explore-query-services.ts` / `explore-service.ts`、`explore-graph.ts`、`explore.ts`、对应测试；设计 §6.1、plan/status 3.15 作用域限制更新。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4056,7 +4073,7 @@ ModelRuntime 纵切继续通过。
 | D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |
 | D-173 | superseded in part（职责、来源平等、当前原文/呈现和索引设计保持；将局部 LLM 判断移出当前工作项是误读，由 D-174 纠正） | D-174 | 设计 2/5.7/6/6.1/6.2/7.5/8.5；plan 0.7/2.8/2.9/3.2/3.15/3.16；status；architecture 4.4 |
 | D-174 | superseded in part（当前 LLM 主线保持；D-175 扩展分组计划、成组选段、局部补查及查询所有者，区分重排契约） | D-175 | 设计 2/5.7/5.10/6.1/8.5；plan 0.7/3.2/3.15D/3.16E；status；architecture 4.4 |
-| D-175 | implementation（契约保持；运行时由 D-176–D-188 接线） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
+| D-175 | implementation（契约保持；运行时由 D-176–D-189 接线） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
 | D-176 | superseded in part（查询方法 + 同一引擎门面保持；完整 actor 绑定由 D-182 收口） | D-182 | protocol harness；explore-query-store/services；explore-tool |
 | D-177 | superseded in part（`harness.cancel` / pin 来源保持；授权取消与一条 abort 链由 D-182 收口） | D-182 | events；bridge；router；explore-query-store |
 | D-178 | superseded in part（不回退主模型保持；select rejected、增量材料、deadline signal 由 D-184/D-186 收口） | D-184；D-186 | explore-model；explore-tool；session-host |
@@ -4068,3 +4085,4 @@ ModelRuntime 纵切继续通过。
 | D-186 | implementation（catalog vocab、untrusted prompt、select rejected、关系注解、去掉 2s 门槛、模型接 deadline；真实 catalog 输入由 D-187 修正） | — | explore vocab；explore-model；explore-tool；pack relations |
 | D-187 | implementation（scope 贯穿、真实来源状态、取消/迟到工作、排名与 required 组独立验收收口） | — | query/bridge/router；explore；semantic runtime；protocol；plan/status 3.15 |
 | D-188 | implementation（start 即后台物化；计划/补查复用单 pump；判断预留成为真实来源截止） | — | explore query pump/store；plan/status 3.15 |
+| D-189 | implementation（图/语义召回在固定 roots 内计算 Top-K；`.` 保留未受限快路径；scope 候选缓存按文档增量维护） | — | 设计 6.1；graph/vector recall；plan/status 3.15 |

@@ -18,6 +18,7 @@ import {
 } from "./identity.js";
 import { cosineSimilarity, type SemanticEmbedder } from "./embedder.js";
 import type { SemanticChunk } from "./chunker.js";
+import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
@@ -167,6 +168,11 @@ export function createSemanticGenerationStore(options: {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let flushDeadline = 0;
   let disposed = false;
+  // Scoped vector searches use the native graph-first exact search over block
+  // IDs. Build the document -> block ID map lazily, then update only affected
+  // document entries after publication/removal so stale candidates cannot
+  // survive an index mutation.
+  let documentBlockIdsCache: Map<string, number[]> | null = null;
 
   const enqueue = <T>(work: () => T): Promise<T> => {
     const run = writeTail.then(work, work);
@@ -233,6 +239,22 @@ export function createSemanticGenerationStore(options: {
     db.indexedLookup({ type: "block", documentId }, maximumLookupResults(db))
   );
 
+  const documentBlockIds = (db: InstanceType<typeof TriviumDB>): Map<string, number[]> => {
+    if (documentBlockIdsCache) return documentBlockIdsCache;
+    const indexed = new Map<string, number[]>();
+    // One block-index pass avoids one native lookup per document on the first
+    // scoped query. The cache is then maintained incrementally by writes.
+    for (const id of db.indexedLookup({ type: "block" }, maximumLookupResults(db))) {
+      const payload = db.getPayload(id) as BlockPayload | null;
+      if (!payload || payload.type !== "block" || typeof payload.documentId !== "string") continue;
+      const ids = indexed.get(payload.documentId);
+      if (ids) ids.push(id);
+      else indexed.set(payload.documentId, [id]);
+    }
+    documentBlockIdsCache = indexed;
+    return indexed;
+  };
+
   const publishDocuments = async (inputs: readonly SemanticDocumentPublication[]): Promise<void> => {
     if (options.embedder.status !== "ready" || inputs.length === 0) return;
     const publicationsByDocument = new Map<string, SemanticDocumentPublication>();
@@ -287,6 +309,11 @@ export function createSemanticGenerationStore(options: {
         operations.push({ type: "insert", vector: emptyVector, payload: document });
       }
       db.commitTransaction(operations);
+      if (documentBlockIdsCache) {
+        for (const input of publications) {
+          documentBlockIdsCache.set(input.documentId, lookupBlocks(db, input.documentId));
+        }
+      }
       publishedDocuments += documentDelta;
       const priorLifecycle = lifecycle;
       const priorCoverage = coverage;
@@ -351,36 +378,71 @@ export function createSemanticGenerationStore(options: {
         }
         if (operations.length === 0) return;
         db.commitTransaction(operations);
+        if (documentBlockIdsCache) documentBlockIdsCache.delete(documentId);
         publishedDocuments = Math.max(0, publishedDocuments - oldDocuments.length);
         scheduleFlush();
         if (oldDocuments.length > 0) persistCheckpoint();
       });
     },
-    async search(query: number[], limit: number): Promise<SemanticHit[]> {
+    async search(query: number[], limit: number, roots?: readonly string[]): Promise<SemanticHit[]> {
+      if (query.length !== space.dim) {
+        throw new Error(`Semantic query vector has dimension ${query.length}; expected ${space.dim}.`);
+      }
+      const restricted = rootsAreRestricted(roots);
       return enqueue(() => {
         if (!existsSync(dbFile()) && !writer) return [];
         const db = writer ?? openDb(dbFile(), space.dim, writer ? "readWrite" : "readOnly");
         try {
           let hits: Array<{ id: number; score: number; payload: BlockPayload }>;
-          try {
-            hits = db.searchExact(query, Math.max(limit * 4, limit)).map((hit) => ({
-              id: hit.id,
-              score: hit.score,
-              payload: hit.payload as BlockPayload,
-            }));
-          } catch {
-            hits = [];
-            for (const id of db.indexedLookup({ type: "block" }, maximumLookupResults(db))) {
-              const node = db.get(id);
-              if (!node) continue;
-              const payload = node.payload as BlockPayload;
-              if (payload.type !== "block") continue;
-              hits.push({ id, score: cosineSimilarity(query, node.vector), payload });
+          if (restricted) {
+            const scopedIds = [...documentBlockIds(db).entries()]
+              .filter(([documentId]) => pathInRoots(documentId, roots))
+              .flatMap(([, ids]) => ids);
+            if (scopedIds.length === 0) return [];
+            try {
+              // `searchGraphFirst` computes exact Top-K within the supplied
+              // anchors. Passing every scoped block ID avoids global
+              // oversampling and preserves the correct result when global top-K
+              // is filled by out-of-scope documents.
+              hits = db.searchGraphFirst(query, scopedIds, limit, scopedIds.length).map((hit) => ({
+                id: hit.id,
+                score: hit.score,
+                payload: hit.payload as BlockPayload,
+              }));
+            } catch {
+              // Keep the same scoped anchors if the native exact query is
+              // unavailable at runtime; this fallback does not widen scope.
+              hits = [];
+              for (const id of scopedIds) {
+                const node = db.get(id);
+                if (!node) continue;
+                const payload = node.payload as BlockPayload;
+                if (payload.type !== "block" || !pathInRoots(payload.documentId, roots)) continue;
+                hits.push({ id, score: cosineSimilarity(query, node.vector), payload });
+              }
+              hits.sort((left, right) => right.score - left.score);
             }
-            hits.sort((left, right) => right.score - left.score);
+          } else {
+            try {
+              hits = db.searchExact(query, Math.max(limit * 4, limit)).map((hit) => ({
+                id: hit.id,
+                score: hit.score,
+                payload: hit.payload as BlockPayload,
+              }));
+            } catch {
+              hits = [];
+              for (const id of db.indexedLookup({ type: "block" }, maximumLookupResults(db))) {
+                const node = db.get(id);
+                if (!node) continue;
+                const payload = node.payload as BlockPayload;
+                if (payload.type !== "block") continue;
+                hits.push({ id, score: cosineSimilarity(query, node.vector), payload });
+              }
+              hits.sort((left, right) => right.score - left.score);
+            }
           }
           const ranked = hits
-            .filter((hit) => hit.payload?.type === "block")
+            .filter((hit) => hit.payload?.type === "block" && (!restricted || pathInRoots(hit.payload.documentId, roots)))
             .slice(0, limit);
           return ranked.map((hit, index) => ({
             documentId: hit.payload.documentId,

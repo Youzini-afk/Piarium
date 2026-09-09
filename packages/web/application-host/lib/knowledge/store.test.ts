@@ -372,6 +372,19 @@ describe("KnowledgeStore", () => {
       expect(byPath.every((entry) => entry.match === "path-contains")).toBe(true);
     });
 
+    it("computes scoped symbol Top-K before truncating global candidates", async () => {
+      await store.replaceFileSymbols("a-outside.ts", "typescript", [
+        { name: "NeedleSymbol", kind: "function", range },
+      ], "disk-outside");
+      await store.replaceFileSymbols("allowed/z-inside.ts", "typescript", [
+        { name: "NeedleSymbol", kind: "function", range },
+      ], "disk-inside");
+
+      expect((await store.searchSymbols("NeedleSymbol", 1)).map((entry) => entry.path)).toEqual(["a-outside.ts"]);
+      expect((await store.searchSymbols("NeedleSymbol", 1, ["allowed"])).map((entry) => entry.path)).toEqual(["allowed/z-inside.ts"]);
+      expect((await store.searchSymbols("NeedleSymbol", 1, ["."])).map((entry) => entry.path)).toEqual(["a-outside.ts"]);
+    });
+
     it("matches case-insensitively through the lowercased n-gram fields", async () => {
       await store.replaceFileSymbols("src/LanguageSupportPage.tsx", "typescriptreact", [
         { name: "LanguageSupportPage", kind: "function", range },
