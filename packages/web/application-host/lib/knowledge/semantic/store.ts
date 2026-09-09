@@ -16,9 +16,12 @@ import {
   type SemanticScopeKey,
   type VectorSpaceIdentity,
 } from "./identity.js";
-import { cosineSimilarity, type SemanticEmbedder } from "./embedder.js";
+import { cosineSimilarity, type SemanticEmbedder, type SemanticEmbedPurpose } from "./embedder.js";
 import type { SemanticChunk } from "./chunker.js";
 import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
+import { embedTextKey } from "./identity.js";
+import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
+import type { EmbedPriority, EmbedScheduler } from "./embed-scheduler.js";
 
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
@@ -72,6 +75,7 @@ type BlockPayload = {
   fallback: boolean;
   body: string;
   embedText: string;
+  embedKey: string;
 };
 
 type DocumentPayload = {
@@ -86,6 +90,42 @@ export type SemanticDocumentPublication = {
   documentId: string;
   revision: string;
   chunks: readonly SemanticChunk[];
+  /** Monotonic per-document token. A lower token cannot overwrite a higher one. */
+  publishToken?: number;
+};
+
+export type SemanticOverlayBlock = {
+  documentId: string;
+  revision: string;
+  blockId: string;
+  parentUnitId: string;
+  parentName: string;
+  parentKind: string;
+  startLine: number;
+  endLine: number;
+  contentHash: string;
+  fallback: boolean;
+  body: string;
+  vector: number[];
+};
+
+export type SemanticSearchOptions = {
+  roots?: readonly string[];
+  maskPaths?: readonly string[];
+  extras?: readonly SemanticOverlayBlock[];
+  disk?: boolean;
+};
+
+const isRootList = (value: readonly string[] | SemanticSearchOptions): value is readonly string[] => (
+  Array.isArray(value)
+);
+
+const resolveSemanticSearchOptions = (
+  rootsOrOptions?: readonly string[] | SemanticSearchOptions,
+): SemanticSearchOptions => {
+  if (rootsOrOptions === undefined) return {};
+  if (isRootList(rootsOrOptions)) return { roots: rootsOrOptions };
+  return rootsOrOptions;
 };
 
 const checkpointPath = (spaceDir: string): string => join(spaceDir, "current.json");
@@ -121,6 +161,7 @@ const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly")
     db.createIndex("type");
     db.createIndex("documentId");
     db.createIndex("blockId");
+    db.createIndex("embedKey");
   }
   return db;
 };
@@ -131,9 +172,14 @@ export function createSemanticGenerationStore(options: {
   scope: SemanticScopeKey;
   embedder: SemanticEmbedder;
   recipe?: IndexRecipeIdentity;
+  vectorCache?: SemanticVectorCache;
+  scheduler?: EmbedScheduler;
+  embedPriority?: EmbedPriority;
 }) {
   const space = options.embedder.space;
   const spaceId = spaceIdOf(space);
+  const vectorCache = options.vectorCache ?? createVectorCache();
+  const latestPublish = new Map<string, number>();
   const recipe = options.recipe ?? defaultRecipeIdentity();
   const recipeId = recipeIdOf(recipe);
   const spaceDir = semanticSpaceDir(options.dataDir, options.hostId, options.scope, spaceId);
@@ -255,16 +301,73 @@ export function createSemanticGenerationStore(options: {
     return indexed;
   };
 
+  const lookupVectorByEmbedText = (db: InstanceType<typeof TriviumDB> | null, embedText: string): number[] | undefined => {
+    const cached = vectorCache.get({ spaceId, purpose: "document", embedText });
+    if (cached) return cached;
+    if (!db) return undefined;
+    const ids = db.indexedLookup({ type: "block", embedKey: embedTextKey(embedText) }, 1);
+    const id = ids[0];
+    if (id === undefined) return undefined;
+    const node = db.get(id);
+    if (!node || !Array.isArray(node.vector) || node.vector.length !== space.dim) return undefined;
+    vectorCache.set({ spaceId, purpose: "document", embedText }, node.vector);
+    return node.vector;
+  };
+
+  const embedMissing = async (
+    texts: readonly string[],
+    purpose: SemanticEmbedPurpose,
+  ): Promise<number[][]> => {
+    if (texts.length === 0) return [];
+    const run = async (): Promise<number[][]> => {
+      await options.embedder.prepare();
+      const vectors = await options.embedder.embed(texts, { purpose });
+      if (vectors.length !== texts.length || vectors.some((vector) => vector.length !== space.dim)) {
+        throw new Error(`Semantic embedder returned ${vectors.length} vectors for ${texts.length} chunks in ${space.dim} dimensions.`);
+      }
+      return vectors;
+    };
+    return options.scheduler
+      ? options.scheduler.enqueue(options.embedPriority ?? "background", run)
+      : run();
+  };
+
   const publishDocuments = async (inputs: readonly SemanticDocumentPublication[]): Promise<void> => {
     if (options.embedder.status !== "ready" || inputs.length === 0) return;
     const publicationsByDocument = new Map<string, SemanticDocumentPublication>();
-    for (const input of inputs) publicationsByDocument.set(input.documentId, input);
+    for (const input of inputs) {
+      const token = input.publishToken ?? 0;
+      const latest = latestPublish.get(input.documentId) ?? 0;
+      if (token < latest) continue;
+      latestPublish.set(input.documentId, token);
+      publicationsByDocument.set(input.documentId, input);
+    }
     const publications = [...publicationsByDocument.values()];
+    if (publications.length === 0) return;
     await options.embedder.prepare();
+    const dbForReuse = writer ?? (existsSync(dbFile()) ? ensureWriter() : null);
     const chunks = publications.flatMap((input) => input.chunks);
-    const vectors = chunks.length === 0
-      ? []
-      : await options.embedder.embed(chunks.map((chunk) => chunk.embedText));
+    const reused = new Array<number[] | undefined>(chunks.length);
+    const missingIndexes: number[] = [];
+    const missingTexts: string[] = [];
+    for (const [index, chunk] of chunks.entries()) {
+      const existing = lookupVectorByEmbedText(dbForReuse, chunk.embedText);
+      if (existing) reused[index] = existing;
+      else {
+        missingIndexes.push(index);
+        missingTexts.push(chunk.embedText);
+      }
+    }
+    const fresh = await embedMissing(missingTexts, "document");
+    for (const [offset, index] of missingIndexes.entries()) {
+      const vector = fresh[offset]!;
+      reused[index] = vector;
+      vectorCache.set({ spaceId, purpose: "document", embedText: missingTexts[offset]! }, vector);
+    }
+    const vectors = reused.map((vector, index) => {
+      if (!vector) throw new Error(`Semantic embedder missed a vector for chunk ${index}.`);
+      return vector;
+    });
     if (vectors.length !== chunks.length || vectors.some((vector) => vector.length !== space.dim)) {
       throw new Error(`Semantic embedder returned ${vectors.length} vectors for ${chunks.length} chunks in ${space.dim} dimensions.`);
     }
@@ -275,6 +378,11 @@ export function createSemanticGenerationStore(options: {
       let vectorIndex = 0;
       let documentDelta = 0;
       for (const input of publications) {
+        const token = input.publishToken ?? 0;
+        if ((latestPublish.get(input.documentId) ?? 0) > token) {
+          vectorIndex += input.chunks.length;
+          continue;
+        }
         const oldBlocks = lookupBlocks(db, input.documentId);
         const oldDocuments = lookupDocuments(db, input.documentId);
         documentDelta += 1 - oldDocuments.length;
@@ -295,6 +403,7 @@ export function createSemanticGenerationStore(options: {
             fallback: chunk.fallback,
             body: chunk.body,
             embedText: chunk.embedText,
+            embedKey: embedTextKey(chunk.embedText),
           };
           operations.push({ type: "insert", vector: vectors[vectorIndex]!, payload });
           vectorIndex += 1;
@@ -367,6 +476,22 @@ export function createSemanticGenerationStore(options: {
     publishDocuments(inputs: readonly SemanticDocumentPublication[]): Promise<void> {
       return publishDocuments(inputs);
     },
+    async listDocumentIds(): Promise<string[]> {
+      return enqueue(() => {
+        if (!existsSync(dbFile()) && !writer) return [];
+        const db = writer ?? openDb(dbFile(), space.dim, writer ? "readWrite" : "readOnly");
+        try {
+          const ids = new Set<string>();
+          for (const id of db.indexedLookup({ type: "document" }, maximumLookupResults(db))) {
+            const payload = db.getPayload(id) as DocumentPayload | null;
+            if (payload?.documentId) ids.add(payload.documentId);
+          }
+          return [...ids];
+        } finally {
+          if (db !== writer) db.close();
+        }
+      });
+    },
     async removeDocument(documentId: string): Promise<void> {
       await enqueue(() => {
         if (!existsSync(dbFile()) && !writer) return;
@@ -384,48 +509,88 @@ export function createSemanticGenerationStore(options: {
         if (oldDocuments.length > 0) persistCheckpoint();
       });
     },
-    async search(query: number[], limit: number, roots?: readonly string[]): Promise<SemanticHit[]> {
+    async search(query: number[], limit: number, rootsOrOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> {
       if (query.length !== space.dim) {
         throw new Error(`Semantic query vector has dimension ${query.length}; expected ${space.dim}.`);
       }
+      const searchOptions = resolveSemanticSearchOptions(rootsOrOptions);
+      const roots = searchOptions.roots;
+      const mask = new Set(searchOptions.maskPaths ?? []);
+      const includeDisk = searchOptions.disk !== false;
       const restricted = rootsAreRestricted(roots);
+      const allowedDisk = (documentId: string): boolean => (
+        !mask.has(documentId) && (!restricted || pathInRoots(documentId, roots))
+      );
+      const allowedExtra = (documentId: string): boolean => (
+        !restricted || pathInRoots(documentId, roots)
+      );
       return enqueue(() => {
-        if (!existsSync(dbFile()) && !writer) return [];
+        const extras = (searchOptions.extras ?? [])
+          .filter((extra) => extra.vector.length === space.dim && allowedExtra(extra.documentId))
+          .map((extra) => ({
+            score: cosineSimilarity(query, extra.vector),
+            payload: extra,
+          }));
+        if (!includeDisk || (!existsSync(dbFile()) && !writer)) {
+          return extras
+            .sort((left, right) => right.score - left.score)
+            .slice(0, limit)
+            .map((hit, index) => ({
+              documentId: hit.payload.documentId,
+              revision: hit.payload.revision,
+              blockId: hit.payload.blockId,
+              parentUnitId: hit.payload.parentUnitId,
+              parentName: hit.payload.parentName,
+              parentKind: hit.payload.parentKind,
+              startLine: hit.payload.startLine,
+              endLine: hit.payload.endLine,
+              contentHash: hit.payload.contentHash,
+              fallback: hit.payload.fallback,
+              body: hit.payload.body,
+              similarity: hit.score,
+              rank: index + 1,
+              scope: options.scope,
+              spaceId,
+              generation,
+            }));
+        }
         const db = writer ?? openDb(dbFile(), space.dim, writer ? "readWrite" : "readOnly");
         try {
-          let hits: Array<{ id: number; score: number; payload: BlockPayload }>;
-          if (restricted) {
+          let hits: Array<{ score: number; payload: BlockPayload | SemanticOverlayBlock }>;
+          const scoped = restricted || mask.size > 0;
+          if (scoped) {
             const scopedIds = [...documentBlockIds(db).entries()]
-              .filter(([documentId]) => pathInRoots(documentId, roots))
+              .filter(([documentId]) => allowedDisk(documentId))
               .flatMap(([, ids]) => ids);
-            if (scopedIds.length === 0) return [];
-            try {
-              // `searchGraphFirst` computes exact Top-K within the supplied
-              // anchors. Passing every scoped block ID avoids global
-              // oversampling and preserves the correct result when global top-K
-              // is filled by out-of-scope documents.
-              hits = db.searchGraphFirst(query, scopedIds, limit, scopedIds.length).map((hit) => ({
-                id: hit.id,
-                score: hit.score,
-                payload: hit.payload as BlockPayload,
-              }));
-            } catch {
-              // Keep the same scoped anchors if the native exact query is
-              // unavailable at runtime; this fallback does not widen scope.
+            if (scopedIds.length === 0) {
               hits = [];
-              for (const id of scopedIds) {
-                const node = db.get(id);
-                if (!node) continue;
-                const payload = node.payload as BlockPayload;
-                if (payload.type !== "block" || !pathInRoots(payload.documentId, roots)) continue;
-                hits.push({ id, score: cosineSimilarity(query, node.vector), payload });
+            } else {
+              try {
+                // `searchGraphFirst` computes exact Top-K within the supplied
+                // anchors. Passing every scoped block ID avoids global
+                // oversampling and preserves the correct result when global top-K
+                // is filled by out-of-scope documents.
+                hits = db.searchGraphFirst(query, scopedIds, limit, scopedIds.length).map((hit) => ({
+                  score: hit.score,
+                  payload: hit.payload as BlockPayload,
+                }));
+              } catch {
+                // Keep the same scoped anchors if the native exact query is
+                // unavailable at runtime; this fallback does not widen scope.
+                hits = [];
+                for (const id of scopedIds) {
+                  const node = db.get(id);
+                  if (!node) continue;
+                  const payload = node.payload as BlockPayload;
+                  if (payload.type !== "block" || !allowedDisk(payload.documentId)) continue;
+                  hits.push({ score: cosineSimilarity(query, node.vector), payload });
+                }
+                hits.sort((left, right) => right.score - left.score);
               }
-              hits.sort((left, right) => right.score - left.score);
             }
           } else {
             try {
               hits = db.searchExact(query, Math.max(limit * 4, limit)).map((hit) => ({
-                id: hit.id,
                 score: hit.score,
                 payload: hit.payload as BlockPayload,
               }));
@@ -436,13 +601,19 @@ export function createSemanticGenerationStore(options: {
                 if (!node) continue;
                 const payload = node.payload as BlockPayload;
                 if (payload.type !== "block") continue;
-                hits.push({ id, score: cosineSimilarity(query, node.vector), payload });
+                hits.push({ score: cosineSimilarity(query, node.vector), payload });
               }
               hits.sort((left, right) => right.score - left.score);
             }
           }
-          const ranked = hits
-            .filter((hit) => hit.payload?.type === "block" && (!restricted || pathInRoots(hit.payload.documentId, roots)))
+          const ranked = [...hits, ...extras]
+            .filter((hit) => {
+              if ("type" in hit.payload) {
+                return hit.payload.type === "block" && allowedDisk(hit.payload.documentId);
+              }
+              return allowedExtra(hit.payload.documentId);
+            })
+            .sort((left, right) => right.score - left.score)
             .slice(0, limit);
           return ranked.map((hit, index) => ({
             documentId: hit.payload.documentId,

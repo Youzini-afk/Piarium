@@ -72,22 +72,37 @@ describe("semantic generation store", () => {
   it("computes scoped vector Top-K before truncating global candidates", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-scoped-topk-"));
     dirs.push(dataDir);
+    const space = {
+      provider: "test",
+      model: "scoped-topk",
+      modelRevision: "r1",
+      dim: 2,
+      pooling: "mean" as const,
+      normalize: true,
+      maxTokens: 32,
+    };
     const embedder = {
       status: "ready" as const,
-      space: {
-        provider: "test",
-        model: "scoped-topk",
-        modelRevision: "r1",
-        dim: 2,
-        pooling: "mean" as const,
-        normalize: true,
-        maxTokens: 32,
-      },
+      space,
       prepare: async () => undefined,
       countTokens: (text: string) => Math.max(1, text.length),
       embed: async (texts: readonly string[]) => texts.map((text) => (
         text.includes("outside") ? [1, 0] : [0.8, 0.6]
       )),
+      embedBatch: async (request: { batchId: string; items: ReadonlyArray<{ id: string; text: string }> }) => {
+        const vectors = request.items.map((item) => (
+          item.text.includes("outside") ? [1, 0] : [0.8, 0.6]
+        ));
+        return {
+          batchId: request.batchId,
+          space,
+          items: request.items.map((item, index) => ({
+            id: item.id,
+            index,
+            vector: vectors[index]!,
+          })),
+        };
+      },
     };
     const store = createSemanticGenerationStore({
       dataDir,

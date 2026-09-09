@@ -5,11 +5,12 @@ import type { ResolvedModelPack } from "./model-store.js";
 type TransformerTestState = {
   batches: string[][];
   options: Array<{ pooling?: string; normalize?: boolean }>;
+  sessionOptions: Array<unknown>;
 };
 
 const transformerState = (): TransformerTestState => {
   const target = globalThis as typeof globalThis & { __piariumMinilmTestState?: TransformerTestState };
-  target.__piariumMinilmTestState ??= { batches: [], options: [] };
+  target.__piariumMinilmTestState ??= { batches: [], options: [], sessionOptions: [] };
   return target.__piariumMinilmTestState;
 };
 
@@ -18,7 +19,9 @@ vi.mock("@huggingface/transformers", () => ({
   AutoTokenizer: {
     from_pretrained: vi.fn(async () => ({ encode: (text: string) => ({ length: text.length }) })),
   },
-  pipeline: vi.fn(async () => async (
+  pipeline: vi.fn(async (_task: string, _model: string, pipelineOptions?: { session_options?: unknown }) => {
+    transformerState().sessionOptions.push(pipelineOptions?.session_options);
+    return async (
     texts: string[],
     options: { pooling?: string; normalize?: boolean },
   ) => {
@@ -31,6 +34,7 @@ vi.mock("@huggingface/transformers", () => ({
         return vector;
       }),
     };
+  };
   }),
 }));
 
@@ -62,6 +66,7 @@ describe("local MiniLM batching", () => {
     const transformer = transformerState();
     transformer.batches.length = 0;
     transformer.options.length = 0;
+    transformer.sessionOptions.length = 0;
   });
 
   it("embeds every input as ordered array batches and keeps single queries array-shaped", async () => {
@@ -81,5 +86,9 @@ describe("local MiniLM batching", () => {
     expect(transformer.batches.at(-1)).toEqual(["v7"]);
     expect(query).toHaveLength(LOCAL_MINILM_SPACE.dim);
     expect(query?.[7]).toBe(1);
+    expect(transformer.sessionOptions[0]).toMatchObject({
+      intraOpNumThreads: expect.any(Number),
+      intra_op_num_threads: expect.any(Number),
+    });
   });
 });

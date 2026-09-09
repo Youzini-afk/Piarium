@@ -30,7 +30,16 @@ type TransformersModule = {
   pipeline: (
     task: "feature-extraction",
     model: string,
-    options?: { local_files_only?: boolean; dtype?: string },
+    options?: {
+      local_files_only?: boolean;
+      dtype?: string;
+      session_options?: {
+        intraOpNumThreads?: number;
+        interOpNumThreads?: number;
+        intra_op_num_threads?: number;
+        inter_op_num_threads?: number;
+      };
+    },
   ) => Promise<(
     texts: string | string[],
     options?: { pooling?: string; normalize?: boolean },
@@ -71,12 +80,15 @@ export function createLocalMinilmEmbedder(options: {
   let prepared = false;
   let extractor: ((texts: readonly string[]) => Promise<number[][]>) | null = null;
 
-  const configureThreads = (mod: TransformersModule): void => {
-    const threads = intraOpThreads(options.parallelism ?? os.availableParallelism());
+  const threadCount = (): number => intraOpThreads(options.parallelism ?? os.availableParallelism());
+
+  const configureThreads = (mod: TransformersModule): number => {
+    const threads = threadCount();
     if (mod.env.backends?.onnx?.wasm) mod.env.backends.onnx.wasm.numThreads = threads;
+    return threads;
   };
 
-  return {
+  const embedder: SemanticEmbedder = {
     status,
     space,
     prepare: async () => {
@@ -86,7 +98,7 @@ export function createLocalMinilmEmbedder(options: {
         return;
       }
       const mod = await loadTransformers();
-      configureThreads(mod);
+      const threads = configureThreads(mod);
       // transformers.js resolves a local pack as `${env.localModelPath}/${id}`
       // and looks for `onnx/<file>` inside it. A file:// URL as the id makes it
       // read `tokenizer_config.json` off the wrong base (D-172).
@@ -103,7 +115,16 @@ export function createLocalMinilmEmbedder(options: {
       if (pack.onnxPath) {
         // `dtype` picks the weight filename: q8 resolves `onnx/model_quantized.onnx`,
         // which is the file the pack recipe names (D-172).
-        const pipe = await mod.pipeline("feature-extraction", source, { local_files_only: true, dtype: "q8" });
+        const pipe = await mod.pipeline("feature-extraction", source, {
+          local_files_only: true,
+          dtype: "q8",
+          session_options: {
+            intraOpNumThreads: threads,
+            interOpNumThreads: 1,
+            intra_op_num_threads: threads,
+            inter_op_num_threads: 1,
+          },
+        });
         extractor = async (texts) => {
           const vectors: number[][] = [];
           for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
@@ -131,5 +152,23 @@ export function createLocalMinilmEmbedder(options: {
       if (status !== "ready" || !extractor) throw new Error("MiniLM model pack is unavailable.");
       return extractor(texts);
     },
+    embedBatch: async (request) => {
+      request.signal?.throwIfAborted();
+      const vectors = await embedder.embed(request.items.map((item) => item.text));
+      request.signal?.throwIfAborted();
+      if (vectors.length !== request.items.length || vectors.some((vector) => vector.length !== space.dim)) {
+        throw new Error(`MiniLM returned ${vectors.length} vectors for ${request.items.length} inputs in ${space.dim} dimensions.`);
+      }
+      return {
+        batchId: request.batchId,
+        space,
+        items: request.items.map((item, index) => ({
+          id: item.id,
+          index,
+          vector: vectors[index]!,
+        })),
+      };
+    },
   };
+  return embedder;
 }

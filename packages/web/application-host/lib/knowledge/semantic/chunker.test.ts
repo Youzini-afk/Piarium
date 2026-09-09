@@ -97,13 +97,9 @@ describe("chunkDocument", () => {
     expect(chunks[0]?.embedText).toContain("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
   });
 
-  it("finds a fitting prefix of one very long line with logarithmic token probes", () => {
-    const text = "x".repeat(32_768);
-    let tokenProbes = 0;
-    const countCharacters = (value: string): number => {
-      tokenProbes += 1;
-      return value.length;
-    };
+  it("continue-splits an oversize single line so the original body has no gap", () => {
+    const text = "abcdefghijklmnopqrstuvwxyz".repeat(8);
+    const countCharacters = (value: string): number => value.length;
     const chunks = chunkDocument({
       documentId: "generated.ts",
       text,
@@ -113,12 +109,14 @@ describe("chunkDocument", () => {
       countTokens: countCharacters,
     });
 
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]?.body).toBe(text);
-    expect(chunks[0]?.startLine).toBe(1);
-    expect(chunks[0]?.endLine).toBe(1);
-    expect(chunks[0]?.embedText.length).toBeLessThanOrEqual(32);
-    expect(tokenProbes).toBeLessThan(40);
+    expect(chunks.length).toBeGreaterThan(1);
+    const reconstructed = [...chunks]
+      .sort((left, right) => (left.bodyOffset ?? 0) - (right.bodyOffset ?? 0))
+      .map((chunk) => chunk.body)
+      .join("");
+    expect(reconstructed).toBe(text);
+    expect(chunks.every((chunk) => chunk.startLine === 1 && chunk.endLine === 1)).toBe(true);
+    expect(chunks.every((chunk) => countCharacters(chunk.body) <= 32)).toBe(true);
   });
 
   it("finds a large overlapping line window without probing each rejected size", () => {
