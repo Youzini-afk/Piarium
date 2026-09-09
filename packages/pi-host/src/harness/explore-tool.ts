@@ -22,7 +22,14 @@ const ExploreParams = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of excerpts to return (default 20)" })),
 });
 
+/** Public remaining wait shared across stages. Not a calibrated SLO. */
 export const EXPLORE_PUBLIC_BUDGET_MS = 120_000;
+
+function boundByDeadline(signal: AbortSignal | undefined, deadlineAt: number): AbortSignal {
+  const remaining = Math.max(1, deadlineAt - Date.now());
+  const timeout = AbortSignal.timeout(remaining);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
 
 export type ExploreModelComplete = (input: {
   systemPrompt: string;
@@ -92,6 +99,8 @@ export function createExploreTool(
           reserveForJudge: Boolean(complete),
         });
         queryId = started.queryId;
+        const deadlineAt = started.deadlineAt;
+        const modelSignal = () => boundByDeadline(signal, deadlineAt);
 
         const participation: ExploreModelParticipation = {
           plan: complete ? "skipped" : "unconfigured",
@@ -108,12 +117,12 @@ export function createExploreTool(
             const planText = await complete({
               systemPrompt: EXPLORE_PLAN_SYSTEM,
               user: renderExplorePlanPrompt(started),
-              ...(signal ? { signal } : {}),
+              signal: modelSignal(),
             });
             const plan = parseExplorePlan(planText);
             if (plan) {
-              await request("explore.query.plan", { queryId, plan });
-              participation.plan = "used";
+              const submitted = await request("explore.query.plan", { queryId, plan });
+              participation.plan = submitted.launched.length > 0 ? "used" : "skipped";
             } else {
               participation.plan = "failed";
               participation.note = "Explore model plan was unused; excerpts are from algorithm and vector sources.";
@@ -131,17 +140,26 @@ export function createExploreTool(
           && views.views.length > 0
           && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === "used");
         if (complete && shouldSelect) {
+          let activeStage: "select" | "followup" = "select";
           try {
             const selectText = await complete({
               systemPrompt: EXPLORE_SELECT_SYSTEM,
               user: renderExploreSelectPrompt(params.question, views, "full"),
-              ...(signal ? { signal } : {}),
+              signal: modelSignal(),
             });
             const selected = parseExploreSelection(selectText);
             if (selected) {
-              await request("explore.query.select", { queryId, groups: selected.groups });
-              participation.select = "used";
-              if (selected.followup && remaining() > 2_000) {
+              const applied = await request("explore.query.select", { queryId, groups: selected.groups });
+              participation.select = applied.accepted.length > 0 ? "used" : "skipped";
+              if (participation.select === "used" && (participation.plan === "failed" || participation.plan === "cancelled")) {
+                participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
+              }
+              if (applied.accepted.length === 0 && applied.rejected.length > 0) {
+                participation.note = participation.note
+                  ?? "Explore model selection was rejected; excerpts are from algorithm and vector sources.";
+              }
+              if (selected.followup && Date.now() < deadlineAt) {
+                activeStage = "followup";
                 const followup = await request("explore.query.followup", {
                   queryId,
                   ...(selected.followup.searches ? { searches: selected.followup.searches } : {}),
@@ -150,19 +168,29 @@ export function createExploreTool(
                     ? { gaps: selected.groups.flatMap((group) => group.gap ? [group.gap] : []) }
                     : {}),
                 });
-                participation.followup = followup.launched.length > 0 || followup.reused.length > 0 ? "used" : "skipped";
+                participation.followup = followup.launched.length > 0 ? "used" : "skipped";
                 if (followup.newViews.length > 0) {
+                  const acceptedViewIds = new Set(applied.accepted.flatMap((group) => group.viewIds));
+                  const selectedViews = views.views.filter((view) => (
+                    acceptedViewIds.has(view.viewId)
+                  ));
                   const incrementalText = await complete({
                     systemPrompt: EXPLORE_SELECT_SYSTEM,
-                    user: renderExploreSelectPrompt(params.question, {
-                      ...views,
-                      views: [...views.views.filter((view) => selected.groups.some((group) => group.views.some((item) => item.viewId === view.viewId))), ...followup.newViews],
-                    }, "incremental", followup.newViews),
-                    ...(signal ? { signal } : {}),
+                    user: renderExploreSelectPrompt(params.question, views, "incremental", {
+                      selectedViews,
+                      newViews: followup.newViews,
+                    }),
+                    signal: modelSignal(),
                   });
                   const incremental = parseExploreSelection(incrementalText);
                   if (incremental) {
-                    await request("explore.query.select", { queryId, groups: incremental.groups });
+                    const incrementallyApplied = await request("explore.query.select", { queryId, groups: incremental.groups, merge: true });
+                    if (incrementallyApplied.accepted.length > 0) {
+                      participation.select = "used";
+                      if (participation.plan === "failed" || participation.plan === "cancelled") {
+                        participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
+                      }
+                    }
                   }
                 }
               }
@@ -172,10 +200,21 @@ export function createExploreTool(
                 ?? "Explore model selection was unused; excerpts are from algorithm and vector sources.";
             }
           } catch (error) {
-            participation.select = stageFromError(error, signal);
-            if (participation.select === "failed") {
-              participation.note = participation.note
-                ?? "Explore model selection failed; excerpts are from algorithm and vector sources.";
+            const status = stageFromError(error, signal);
+            if (activeStage === "select") {
+              participation.select = status;
+              if (status === "failed") {
+                participation.note = participation.note
+                  ?? "Explore model selection failed; excerpts are from algorithm and vector sources.";
+              }
+            } else {
+              participation.followup = status;
+              if (status === "failed") {
+                participation.note = participation.note
+                  ?? (participation.select === "used"
+                    ? "Explore follow-up failed; the earlier accepted material was kept."
+                    : "Explore follow-up failed; excerpts are from algorithm and vector sources.");
+              }
             }
           }
         }

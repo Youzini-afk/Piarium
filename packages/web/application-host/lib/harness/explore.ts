@@ -9,6 +9,7 @@ import {
   buildRgPatterns,
   buildTermGroups,
   classifyFileRole,
+  exploreIsExplicitNavigation,
   extractIdentifierGroups,
   extractIdentifiers,
   extractQuotedLiterals,
@@ -117,7 +118,7 @@ export interface ExploreDeps {
   structure?: Pick<StructureSource, "outline" | "classifyHits"> & Partial<Pick<StructureSource, "literalCalls">>;
   graph?: ExploreGraphRecall;
   semantic?: {
-    search(question: string, limit?: number): Promise<ExploreSemanticSearch>;
+    search(question: string, limit?: number, signal?: AbortSignal): Promise<ExploreSemanticSearch>;
   };
 }
 
@@ -148,13 +149,47 @@ export const DEFAULT_BYTE_BUDGET = 24 * 1024;
 export const DEFAULT_SEMANTIC_RECALL = 24;
 /** Candidate-model input budget, separate from the 24 KiB agent-visible pack. */
 export const DEFAULT_MODEL_INPUT_BYTES = 48 * 1024;
-/** Time left for judge and present. Not a product hard reject. */
+/** Reserved from the public remaining wait for judge/present. Not a calibrated SLO. */
 export const DEFAULT_JUDGE_RESERVE_MS = 8_000;
-/** Default remaining wait for a public guided explore. */
+/** Public explore remaining wait shared across stages. Not a calibrated SLO. */
 export const DEFAULT_EXPLORE_QUERY_BUDGET_MS = 120_000;
 
 export function exploreHandleHint(handle: string): string {
   return `\nMore: get_output("${handle}") for the full pack and unread candidate list (session-local, ephemeral).`;
+}
+
+const VOCAB_PACKAGE_LIMIT = 12;
+const VOCAB_ENTRY_LIMIT = 12;
+
+export function vocabFromCatalog(stats: { symbolCount: number; fileCount?: number; paths?: string[] }): {
+  catalog: { symbolCount: number; fileCount?: number };
+  packages?: string[];
+  entries?: string[];
+} {
+  const catalog = {
+    symbolCount: stats.symbolCount,
+    ...(stats.fileCount !== undefined ? { fileCount: stats.fileCount } : {}),
+  };
+  const normalized = (stats.paths ?? []).map((path) => path.replace(/\\/g, "/"));
+  const packages = [...new Set(normalized.flatMap((path) => {
+    if (/(^|\/)package\.json$/i.test(path)) {
+      const slash = path.lastIndexOf("/");
+      return [slash <= 0 ? "." : path.slice(0, slash)];
+    }
+    // The symbol catalog intentionally does not index package.json. Derive the
+    // package root from catalogued source paths in the monorepo layout instead
+    // of testing a path shape production can never provide.
+    const workspacePackage = /^(packages|apps)\/[^/]+(?=\/|$)/u.exec(path)?.[0];
+    return workspacePackage ? [workspacePackage] : [];
+  }))].slice(0, VOCAB_PACKAGE_LIMIT);
+  const entries = normalized
+    .filter((path) => /(^|\/)(index|main|cli)\.[cm]?[jt]sx?$/i.test(path))
+    .slice(0, VOCAB_ENTRY_LIMIT);
+  return {
+    catalog,
+    ...(packages.length > 0 ? { packages } : {}),
+    ...(entries.length > 0 ? { entries } : {}),
+  };
 }
 
 const comparePath = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
@@ -247,7 +282,6 @@ interface RankedCandidate {
   path: string;
   evidence: FileEvidence;
   roleFit: number;
-  weightedCoverage: number;
   rrf: number;
   hasRankedSource: boolean;
 }
@@ -481,11 +515,19 @@ function lexicalFileRanks(
 ): Map<string, number> {
   const ordered = [...byFile.entries()]
     .filter(([, evidence]) => evidence.hits.size > 0 || evidence.groups.size > 0)
-    .sort((left, right) => (
-      weightedCoverage(right[1], groups, weights) - weightedCoverage(left[1], groups, weights)
-      || comparePath(left[0], right[0])
-    ));
-  return new Map(ordered.map(([path], index) => [path, index + 1]));
+    .map(([path, evidence]) => ({ path, score: weightedCoverage(evidence, groups, weights) }))
+    .sort((left, right) => right.score - left.score || comparePath(left.path, right.path));
+  const ranks = new Map<string, number>();
+  let rank = 0;
+  let previousScore: number | undefined;
+  ordered.forEach((item, index) => {
+    if (item.score !== previousScore) {
+      rank = index + 1;
+      previousScore = item.score;
+    }
+    ranks.set(item.path, rank);
+  });
+  return ranks;
 }
 
 /** Same-tier order: file-level RRF when a semantic source is present, else weighted coverage (D-170). */
@@ -514,7 +556,6 @@ function rankCandidates(
         path,
         evidence,
         roleFit: fit,
-        weightedCoverage: weightedCoverage(evidence, groups, weights),
         rrf,
         hasRankedSource,
       };
@@ -522,7 +563,6 @@ function rankCandidates(
     .sort((left, right) => (
       Number(right.hasRankedSource) - Number(left.hasRankedSource)
       || right.rrf - left.rrf
-      || right.weightedCoverage - left.weightedCoverage
       || right.roleFit - left.roleFit
       || comparePath(left.path, right.path)
     ));
@@ -585,7 +625,11 @@ function windowLooksLikeCallee(text: string, callee: string, object: string): bo
 function evidenceSignature(evidence: FileEvidence): string {
   const lines = [...evidence.hits.keys()].sort((left, right) => left - right).join(",");
   const groups = [...evidence.groups].sort().join(",");
-  return `${lines}|${groups}|${evidence.graphClues.length}|${evidence.verifiedRelation ? 1 : 0}`;
+  const semantic = evidence.semanticClues
+    .map((clue) => `${clue.blockId}:${clue.contentHash}:${clue.startLine}-${clue.endLine}:${clue.rank}`)
+    .sort()
+    .join(",");
+  return `${lines}|${groups}|${evidence.graphClues.length}|${semantic}|${evidence.verifiedRelation ? 1 : 0}`;
 }
 
 /**
@@ -835,6 +879,7 @@ async function classifyPreparedWindows(
       lines,
       signal,
     });
+    signal.throwIfAborted();
     if (classified.status !== "ready") return windows;
     const byLine = new Map(classified.hits.map((hit) => [hit.line, hit.class]));
     return windows.map((window) => {
@@ -890,6 +935,7 @@ async function verifyMaterializedRelations(
       revision: snapshot.revision,
       signal,
     });
+    signal.throwIfAborted();
     if (calls.status !== "ready") return weakenUnverifiedConnectionWhy(windows, objects);
     const verified: Array<{ line: number; name: string; literal: string; kind: "connects" | "associates" }> = [];
     for (const call of calls.calls) {
@@ -956,71 +1002,93 @@ function hasBothConnectsEnds(windows: readonly PreparedWindow[]): boolean {
   return false;
 }
 
-function groupContribution(window: PreparedWindow, groupId: string, weights: ReadonlyMap<string, number>): number {
-  const match = window.distinctive.has(groupId) ? 1 : window.groups.has(groupId) ? 0.5 : 0;
-  if (match === 0) return 0;
-  return (weights.get(groupId) ?? 1) * match;
+function windowIdentityKey(window: { path: string; revision: string; start: number; end: number }): string {
+  return `${window.path}@${window.revision}:${window.start}-${window.end}`;
 }
 
-/**
- * Own relevance, added evidence, and body cost. Same-file complements keep
- * their added-local value; switching files is not a bonus (D-155).
- */
+function windowRankKey(window: PreparedWindow): string {
+  return `${window.path}:${window.start}-${window.end}`;
+}
+
+function unitSemanticRank(window: PreparedWindow): number | undefined {
+  let best: number | undefined;
+  for (const arrival of window.arrivals) {
+    if (arrival.kind !== "semantic" || arrival.rank === undefined) continue;
+    best = best === undefined ? arrival.rank : Math.min(best, arrival.rank);
+  }
+  return best;
+}
+
+/** Direct locate / verified relation — a partition, not a score bonus. */
+function isDirectNavigationWindow(window: PreparedWindow, explicitNavigation: boolean): boolean {
+  return window.assessment === "verified-relation"
+    || (explicitNavigation && window.hasAnchor)
+    || window.arrivals.some((arrival) => (
+      arrival.kind === "graph"
+      && (arrival.edgeKind === "definition" || arrival.edgeKind === "connects")
+      && arrival.arrivalReason === "object-triggered"
+    ));
+}
+
+/** Unit-own lexical rank from this window's weight and distinctive coverage. */
+function assignUnitLexicalRanks(windows: readonly PreparedWindow[]): Map<string, number> {
+  const sorted = windows.filter((window) => (
+    window.arrivals.some((arrival) => arrival.kind === "lexical")
+  )).toSorted((left, right) => (
+    right.windowWeight - left.windowWeight
+    || Number(right.hasAnchor) - Number(left.hasAnchor)
+    || right.distinctive.size - left.distinctive.size
+    || comparePath(left.path, right.path)
+    || left.start - right.start
+  ));
+  const ranks = new Map<string, number>();
+  let rank = 0;
+  let previousWeight: number | undefined;
+  let previousAnchor: boolean | undefined;
+  let previousDistinctive: number | undefined;
+  sorted.forEach((window, index) => {
+    if (window.windowWeight !== previousWeight || window.hasAnchor !== previousAnchor || window.distinctive.size !== previousDistinctive) {
+      rank = index + 1;
+      previousWeight = window.windowWeight;
+      previousAnchor = window.hasAnchor;
+      previousDistinctive = window.distinctive.size;
+    }
+    ranks.set(windowRankKey(window), rank);
+  });
+  return ranks;
+}
+
+function unitFusion(window: PreparedWindow, lexicalRank: number | undefined): number {
+  const semantic = unitSemanticRank(window);
+  return fuseFileRanks({
+    ...(lexicalRank !== undefined ? { lexical: lexicalRank } : {}),
+    ...(semantic !== undefined ? { semantic } : {}),
+  });
+}
+
+/** Role, hit class, deduplication, and complementarity stay outside RRF (D-185). */
 function isImplementationUnit(window: PreparedWindow): boolean {
   return window.unit?.kind === "function" || window.unit?.kind === "method";
 }
 
-function unitOwnRelevance(window: PreparedWindow): number {
-  const distinctive = window.distinctive.size;
-  const groups = window.groups.size;
-  let semantic = 0;
-  for (const arrival of window.arrivals) {
-    if (arrival.kind !== "semantic" || arrival.rank === undefined) continue;
-    semantic = Math.max(semantic, 1 / (60 + arrival.rank));
-  }
-  const hitClassScore = window.hitClass === "name" ? 6 : window.hitClass === "body" ? 2 : window.hitClass === "comment" ? -2 : 0;
-  return distinctive * 8
-    + groups * 3
-    + semantic * 24
-    + hitClassScore
-    + (isImplementationUnit(window) ? 8 : 0)
-    + (window.hasAnchor ? 40 : 0);
+function hitClassRank(window: PreparedWindow): number {
+  return window.hitClass === "name" ? 2 : window.hitClass === "body" ? 1 : window.hitClass === "comment" ? -1 : 0;
 }
 
-function complementaryScore(
-  window: PreparedWindow,
-  selected: PreparedWindow[],
-  weights: ReadonlyMap<string, number>,
-): number {
-  const sameFact = selected.some((item) => item.factKey === window.factKey);
-  const coveredEnds = new Set(selected.flatMap((item) => item.verifiedCallees));
-  const coveredGroups = new Set(selected.flatMap((item) => [...item.groups]));
+/** Same-file implementation that covers a group the already-packed units of that file do not. */
+function addsLocalImplementation(window: PreparedWindow, selected: PreparedWindow[]): boolean {
+  if (!isImplementationUnit(window)) return false;
   const sameFile = selected.filter((item) => item.path === window.path);
-  const implementation = isImplementationUnit(window);
-  const localImplGroups = new Set(
-    sameFile.filter(isImplementationUnit).flatMap((item) => [...item.groups]),
-  );
-  let newEnd = 0;
-  for (const callee of window.verifiedCallees) {
-    if (!coveredEnds.has(callee)) newEnd += 1;
-  }
-  let addedGlobal = 0;
-  let addedLocal = 0;
-  for (const groupId of window.groups) {
-    const value = groupContribution(window, groupId, weights);
-    if (!coveredGroups.has(groupId)) addedGlobal += value;
-    else if (implementation && sameFile.length > 0 && !localImplGroups.has(groupId)) addedLocal += value;
-  }
-  const complement = addedLocal > 0 ? 36 : 0;
-  const cost = Math.log(1 + utf8Bytes(window.text) / 200);
-  return unitOwnRelevance(window)
-    + addedGlobal * 12
-    + addedLocal * 20
-    + complement
-    + window.roleFit * 3
-    + newEnd * 20
-    - cost
-    - (sameFact ? 80 : 0);
+  if (sameFile.length === 0) return false;
+  const localImplGroups = new Set(sameFile.filter(isImplementationUnit).flatMap((item) => [...item.groups]));
+  const coveredGroups = new Set(selected.flatMap((item) => [...item.groups]));
+  return [...window.groups].some((groupId) => coveredGroups.has(groupId) && !localImplGroups.has(groupId));
+}
+
+function sameFileUncovered(window: PreparedWindow, selected: PreparedWindow[], weights: ReadonlyMap<string, number>): boolean {
+  if (!selected.some((item) => item.path === window.path)) return false;
+  const coveredGroups = new Set(selected.flatMap((item) => [...item.groups]));
+  return [...window.groups].some((groupId) => !coveredGroups.has(groupId) && (weights.get(groupId) ?? 1) > 0);
 }
 
 /** A window whose assessment meets the asked object or relation. */
@@ -1050,46 +1118,41 @@ function packComplementary(
   weights: ReadonlyMap<string, number>,
   locatingDone: boolean,
   preferProduction: boolean,
+  explicitNavigation: boolean,
 ): PreparedWindow[] {
   const selected: PreparedWindow[] = [];
   const remaining = locatingDone ? windows.filter((window) => !window.offTopic) : [...windows];
-  // Main evidence is a partition, not a first pick: every window that meets the
-  // asked object or relation is placed before support. Gating this on
-  // `selected.length === 0` left verified evidence with no advantage from the
-  // second slot on, because `GRADE_RANK` had already left windowScore — a
-  // connection's second end landed near the tail (D-172).
-  // Only a verified relation is main evidence. Merely containing the object is
-  // not: D-155 keeps a same-file mechanism block that does not repeat the
-  // object competing on its own added value.
-  const mainEvidence = new Set(
-    remaining.filter((window) => window.assessment === "verified-relation" && !window.offTopic),
-  );
+  const ranks = assignUnitLexicalRanks(remaining);
   while (selected.length < limit && remaining.length > 0) {
     let bestIndex = 0;
-    let bestRank = Number.NEGATIVE_INFINITY;
-    let bestScore = Number.NEGATIVE_INFINITY;
     remaining.forEach((window, index) => {
-      const rank = relationRoleRank(window, preferProduction);
-      // The partition holds for every pick; the definition preference stays a
-      // first-pick tie-break, which is what "which one window defines X"
-      // needs (D-172).
       const firstPick = selected.length === 0;
-      const assessment = mainEvidence.has(window) ? ASSESSMENT_RANK[window.assessment] : 0;
+      const navigation = isDirectNavigationWindow(window, explicitNavigation) ? 1 : 0;
+      const role = relationRoleRank(window, preferProduction);
       const definition = firstPick ? definitionArrivalRank(window) : 0;
-      const score = complementaryScore(window, selected, weights);
+      const localImpl = addsLocalImplementation(window, selected) || sameFileUncovered(window, selected, weights) ? 1 : 0;
+      const distinctFact = selected.some((item) => item.factKey === window.factKey) ? 0 : 1;
+      const relevance = unitFusion(window, ranks.get(windowRankKey(window)));
+      const hit = hitClassRank(window);
       const best = remaining[bestIndex]!;
-      const bestAssessment = mainEvidence.has(best) ? ASSESSMENT_RANK[best.assessment] : 0;
+      const bestNavigation = isDirectNavigationWindow(best, explicitNavigation) ? 1 : 0;
+      const bestRole = relationRoleRank(best, preferProduction);
       const bestDefinition = firstPick ? definitionArrivalRank(best) : 0;
-      const better = rank > bestRank
-        || (rank === bestRank && assessment > bestAssessment)
-        || (rank === bestRank && assessment === bestAssessment && definition > bestDefinition)
-        || (rank === bestRank && assessment === bestAssessment && definition === bestDefinition && score > bestScore)
-        || (rank === bestRank && assessment === bestAssessment && definition === bestDefinition && score === bestScore
+      const bestLocal = addsLocalImplementation(best, selected) || sameFileUncovered(best, selected, weights) ? 1 : 0;
+      const bestDistinctFact = selected.some((item) => item.factKey === best.factKey) ? 0 : 1;
+      const bestRelevance = unitFusion(best, ranks.get(windowRankKey(best)));
+      const bestHit = hitClassRank(best);
+      const better = navigation > bestNavigation
+        || (navigation === bestNavigation && role > bestRole)
+        || (navigation === bestNavigation && role === bestRole && definition > bestDefinition)
+        || (navigation === bestNavigation && role === bestRole && definition === bestDefinition && localImpl > bestLocal)
+        || (navigation === bestNavigation && role === bestRole && definition === bestDefinition && localImpl === bestLocal && distinctFact > bestDistinctFact)
+        || (navigation === bestNavigation && role === bestRole && definition === bestDefinition && localImpl === bestLocal && distinctFact === bestDistinctFact && relevance > bestRelevance)
+        || (navigation === bestNavigation && role === bestRole && definition === bestDefinition && localImpl === bestLocal && distinctFact === bestDistinctFact && relevance === bestRelevance && hit > bestHit)
+        || (navigation === bestNavigation && role === bestRole && definition === bestDefinition && localImpl === bestLocal && distinctFact === bestDistinctFact && relevance === bestRelevance && hit === bestHit
           && (comparePath(window.path, best.path) < 0 || (window.path === best.path && window.start < best.start)));
       if (better) {
         bestIndex = index;
-        bestRank = rank;
-        bestScore = score;
       }
     });
     selected.push(remaining.splice(bestIndex, 1)[0]!);
@@ -1121,7 +1184,7 @@ async function outlineForSnapshot(
   if (!deps.structure) return { status: "not-requested", provider: null };
   try {
     signal.throwIfAborted();
-    return await deps.structure.outline({
+    const result = await deps.structure.outline({
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
@@ -1129,6 +1192,8 @@ async function outlineForSnapshot(
       signal,
       hitLines,
     });
+    signal.throwIfAborted();
+    return result;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw error;
     return {
@@ -1157,6 +1222,8 @@ export type ExploreQueryTerminal = "active" | "finished" | "cancelled";
 
 export interface ExploreQueryRunOptions {
   signal?: AbortSignal;
+  /** Shared abort for this query's sources. Prefer this over a second internal controller. */
+  controller?: AbortController;
   deadlineAt?: number;
   reserveForJudgeMs?: number;
   now?: () => number;
@@ -1171,8 +1238,9 @@ export interface ExploreQueryRun {
     unevaluated: number;
     hypotheses?: { behavior?: string; expectedMaterials?: string[] };
   };
-  applySelection(groups: readonly ExploreQuerySelectionGroup[]): ExploreQuerySelectResult;
-  followup(request: ExploreQueryFollowupParams): Promise<{
+  applySelection(groups: readonly ExploreQuerySelectionGroup[], options?: { merge?: boolean }): ExploreQuerySelectResult;
+  refreshVocab(): Promise<void>;
+  followup(request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
     reused: string[];
     newViews: ExploreQueryView[];
@@ -1199,10 +1267,19 @@ export function createExploreQueryRun(
 ): ExploreQueryRun {
   const startedAt = options.now?.() ?? Date.now();
   const now = options.now ?? Date.now;
-  const external = options.signal ?? new AbortController().signal;
-  const controller = new AbortController();
-  const signal = AbortSignal.any([external, controller.signal]);
+  const controller = options.controller ?? new AbortController();
+  if (options.signal) {
+    if (options.signal.aborted) {
+      if (!controller.signal.aborted) controller.abort();
+    } else {
+      options.signal.addEventListener("abort", () => {
+        if (!controller.signal.aborted) controller.abort();
+      }, { once: true });
+    }
+  }
+  const signal = controller.signal;
   let terminal: ExploreQueryTerminal = "active";
+  const terminalState = (): ExploreQueryTerminal => terminal;
   const deadlineAt = options.deadlineAt ?? Number.POSITIVE_INFINITY;
   const reserveForJudgeMs = options.reserveForJudgeMs ?? 0;
   signal.throwIfAborted();
@@ -1231,6 +1308,10 @@ export function createExploreQueryRun(
     buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf),
   );
 
+  type SettledProductionStatus = Extract<
+    ExploreQuerySourceState["status"],
+    "ready" | "empty" | "unavailable" | "failed" | "incomplete"
+  >;
   type ProductionTask = {
     id: string;
     family: ExploreQuerySourceState["family"];
@@ -1242,17 +1323,66 @@ export function createExploreQueryRun(
   let fatalError: unknown;
   const launchedExpressions = new Set<string>();
   let catalogVocab: ExploreQueryVocab["catalog"];
+  let catalogPackages: string[] | undefined;
+  let catalogEntries: string[] | undefined;
   let planHypotheses: { behavior?: string; expectedMaterials?: string[] } | undefined;
   let frozenViews: ExploreQueryView[] = [];
   let unevaluatedViewCount = 0;
-  let selectedWindows: PreparedWindow[] | undefined;
+  type ChosenGroup = { id: string; purpose: string; windows: PreparedWindow[]; requiredFlags: boolean[] };
+  let chosenGroups: ChosenGroup[] = [];
   let selectionGaps: string[] = [];
+  const uniqueGaps = (values: readonly string[]): string[] => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   let viewsFrozen = false;
-  const requiredKeys = new Set<string>();
+  let frozenResult: ExploreResult | undefined;
+  const viewIdsByIdentity = new Map<string, string>();
+  let nextViewSerial = 1;
+  const explicitNavigation = exploreIsExplicitNavigation(input.question, parsed.objects);
+
+  const applyCatalogVocab = (stats: { symbolCount: number; fileCount?: number; paths?: string[] }): void => {
+    const scopedPaths = stats.paths?.filter((path) => pathInRoots(path, input.paths));
+    const built = vocabFromCatalog({ ...stats, ...(scopedPaths ? { paths: scopedPaths } : {}) });
+    // Whole-workspace counts are not scoped facts. A restricted query can still
+    // use package/entry vocabulary derived from paths inside its fixed scope.
+    catalogVocab = input.paths?.length ? undefined : built.catalog;
+    catalogPackages = built.packages;
+    catalogEntries = built.entries;
+  };
+
+  const refreshVocab = async (): Promise<void> => {
+    if (!deps.graph || catalogVocab) return;
+    try {
+      signal.throwIfAborted();
+      const stats = await deps.graph.catalogStats();
+      signal.throwIfAborted();
+      applyCatalogVocab(stats);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      // Vocab is advisory; a closed or failed catalog does not fail the query.
+    }
+  };
+
+  const stableViewId = (window: PreparedWindow): string => {
+    const key = windowIdentityKey(window);
+    const existing = viewIdsByIdentity.get(key);
+    if (existing) return existing;
+    const id = `v${nextViewSerial}`;
+    nextViewSerial += 1;
+    viewIdsByIdentity.set(key, id);
+    return id;
+  };
+
+  const viewLogicalKey = (view: Pick<ExploreQueryView, "path" | "revision" | "startLine" | "endLine">): string => (
+    `${view.path}@${view.revision}:${view.startLine}-${view.endLine}`
+  );
 
   const remainingMs = (): number => deadlineAt - now() - reserveForJudgeMs;
 
-  const launchTask = (id: string, family: ProductionTask["family"], primary: boolean, work: () => Promise<void>): void => {
+  const launchTask = (
+    id: string,
+    family: ProductionTask["family"],
+    primary: boolean,
+    work: () => Promise<SettledProductionStatus | void>,
+  ): void => {
     if (tasks.has(id)) return;
     const task: ProductionTask = { id, family, primary, status: "running", promise: Promise.resolve() };
     task.promise = (async () => {
@@ -1261,18 +1391,26 @@ export function createExploreQueryRun(
           task.status = "cancelled";
           return;
         }
-        await work();
+        const outcome = await work();
+        if (task.status === "incomplete") return;
         if (terminal !== "active") {
-          task.status = "cancelled";
+          task.status = terminal === "cancelled" ? "cancelled" : "incomplete";
           return;
         }
-        task.status = "ready";
+        task.status = outcome ?? "ready";
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-          task.status = "cancelled";
+          if (task.status === "running" || task.status === "pending") {
+            task.status = terminal === "cancelled" ? "cancelled" : "incomplete";
+          }
           return;
         }
-        task.status = "failed";
+        const code = error && typeof error === "object" && "harnessCode" in error
+          ? (error as { harnessCode?: unknown }).harnessCode
+          : error && typeof error === "object" && "code" in error
+            ? (error as { code?: unknown }).code
+            : undefined;
+        task.status = code === "unavailable" ? "unavailable" : "failed";
         fatalError ??= error;
       }
     })();
@@ -1283,9 +1421,10 @@ export function createExploreQueryRun(
     task.primary && (task.status === "running" || task.status === "pending")
   ));
 
-  const runRg = async (patterns: Map<string, Array<{ group: TermGroup; distinctive: boolean }>>): Promise<void> => {
-    if (terminal !== "active") return;
+  const runRg = async (patterns: Map<string, Array<{ group: TermGroup; distinctive: boolean }>>): Promise<SettledProductionStatus> => {
+    if (terminal !== "active") return "incomplete";
     launchedPatterns += patterns.size;
+    let hitCount = 0;
     for (const pattern of patterns.keys()) launchedExpressions.add(pattern);
     await Promise.all([...patterns.entries()].map(async ([pattern, owners]) => {
       signal.throwIfAborted();
@@ -1298,6 +1437,7 @@ export function createExploreQueryRun(
       }));
       signal.throwIfAborted();
       if (result.partial || result.filesDropped > 0) searchIncomplete = true;
+      hitCount += result.hits.length;
       filesDropped = Math.max(filesDropped, result.filesDropped);
       const previous = launchedCoverage.get(pattern);
       launchedCoverage.set(pattern, {
@@ -1314,6 +1454,7 @@ export function createExploreQueryRun(
         for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
       }
     }));
+    return hitCount > 0 ? "ready" : "empty";
   };
 
   for (const object of parsed.objects) {
@@ -1336,14 +1477,16 @@ export function createExploreQueryRun(
   let graphFilesDropped = 0;
   let graphPartial = false;
 
-  const runGraphSeeds = async (): Promise<void> => {
-    if (!deps.graph) return;
+  const runGraphSeeds = async (): Promise<SettledProductionStatus> => {
+    if (!deps.graph) return "unavailable";
+    const before = definitionFiles.size + connectionFiles.size + associateFiles.size;
     try {
       const stats = await deps.graph.catalogStats();
-      catalogVocab = { symbolCount: stats.symbolCount };
+      signal.throwIfAborted();
+      applyCatalogVocab(stats);
       if (stats.symbolCount === 0) {
         graphStatus = "empty";
-        return;
+        return "empty";
       }
       graphStatus = "ready";
       const seenDefinitions = new Set<string>();
@@ -1362,6 +1505,7 @@ export function createExploreQueryRun(
         if (!looksLikeSymbolName(object)) continue;
         signal.throwIfAborted();
         const hits = await deps.graph.searchDefinitions(object, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
+        signal.throwIfAborted();
         for (const hit of hits) {
           if (hit.match === "path-contains" || !pathInRoots(hit.path, input.paths)) continue;
           if (!acceptDefinition(hit.path)) {
@@ -1388,7 +1532,9 @@ export function createExploreQueryRun(
       for (const object of parsed.objects) {
         if (!looksLikeConnectionValue(object)) continue;
         signal.throwIfAborted();
-        for (const end of await deps.graph.findLinks(object)) {
+        const ends = await deps.graph.findLinks(object);
+        signal.throwIfAborted();
+        for (const end of ends) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const connects = end.kind === "connects";
           if (!connects && end.kind !== "associates") continue;
@@ -1417,53 +1563,97 @@ export function createExploreQueryRun(
         graphFilesDropped = Math.max(graphFilesDropped, connectionDropped);
         graphPartial = true;
       }
+      return definitionFiles.size + connectionFiles.size + associateFiles.size > before ? "ready" : "empty";
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
       graphStatus = code === "unavailable" ? "unavailable" : "failed";
+      return graphStatus === "unavailable" ? "unavailable" : "failed";
     }
   };
 
-  const runSemantic = async (): Promise<void> => {
-    if (!deps.semantic) return;
-    try {
-      const result = await deps.semantic.search(input.question, DEFAULT_SEMANTIC_RECALL);
-      semanticReport = {
-        status: result.status,
-        coverage: result.coverage,
-        ...(result.generation ? { generation: result.generation } : {}),
-        ...(result.spaceId ? { spaceId: result.spaceId } : {}),
-        ...(result.scope ? { scope: result.scope } : {}),
-        index: { lifecycle: result.lifecycle },
-        blocks: result.hits.length,
-      };
-      semanticBlocks = result.hits.length;
-      if (result.status === "unavailable" || result.status === "failed" || result.status === "stale") return;
-      for (const hit of result.hits) {
-        if (!pathInRoots(hit.documentId, input.paths)) continue;
-        const evidence = byFile.get(hit.documentId) ?? emptyEvidence();
-        if (!evidence.semanticClues.some((clue) => clue.blockId === hit.blockId)) {
-          evidence.semanticClues.push({
-            blockId: hit.blockId,
-            parentUnitId: hit.parentUnitId,
-            parentName: hit.parentName,
-            parentKind: hit.parentKind,
-            startLine: hit.startLine,
-            endLine: hit.endLine,
-            contentHash: hit.contentHash,
-            body: hit.body,
-            similarity: hit.similarity,
-            rank: hit.rank,
-          });
-        }
-        byFile.set(hit.documentId, evidence);
+  const ingestSemanticHits = (result: ExploreSemanticSearch): void => {
+    semanticReport = {
+      status: result.status,
+      coverage: result.coverage,
+      ...(result.generation ? { generation: result.generation } : {}),
+      ...(result.spaceId ? { spaceId: result.spaceId } : {}),
+      ...(result.scope ? { scope: result.scope } : {}),
+      index: { lifecycle: result.lifecycle },
+      blocks: (semanticReport.blocks ?? 0) + result.hits.length,
+    };
+    if (result.status === "unavailable" || result.status === "failed" || result.status === "stale") return;
+    for (const hit of result.hits) {
+      if (!pathInRoots(hit.documentId, input.paths)) continue;
+      const evidence = byFile.get(hit.documentId) ?? emptyEvidence();
+      if (!evidence.semanticClues.some((clue) => clue.blockId === hit.blockId)) {
+        evidence.semanticClues.push({
+          blockId: hit.blockId,
+          parentUnitId: hit.parentUnitId,
+          parentName: hit.parentName,
+          parentKind: hit.parentKind,
+          startLine: hit.startLine,
+          endLine: hit.endLine,
+          contentHash: hit.contentHash,
+          body: hit.body,
+          similarity: hit.similarity,
+          rank: hit.rank,
+        });
+        semanticBlocks += 1;
       }
-      if (semanticBlocks === 0 && result.status === "ready") semanticReport.status = "empty";
+      byFile.set(hit.documentId, evidence);
+    }
+    if (semanticBlocks === 0 && result.status === "ready") semanticReport.status = "empty";
+    else if (semanticBlocks > 0 && semanticReport.status === "empty") semanticReport.status = "ready";
+  };
+
+  const semanticTaskStatus = (status: ExploreSemanticStatus): SettledProductionStatus => {
+    if (status === "ready") return "ready";
+    if (status === "empty" || status === "not-requested") return "empty";
+    if (status === "incomplete") return "incomplete";
+    if (status === "unavailable" || status === "stale") return "unavailable";
+    return "failed";
+  };
+
+  const combineProductionStatuses = (statuses: readonly SettledProductionStatus[]): SettledProductionStatus => {
+    if (statuses.includes("failed")) return "failed";
+    if (statuses.includes("incomplete")) return "incomplete";
+    if (statuses.includes("ready")) return "ready";
+    if (statuses.includes("empty")) return "empty";
+    return "unavailable";
+  };
+
+  const runSemanticQuery = async (question: string): Promise<SettledProductionStatus> => {
+    if (!deps.semantic) return "unavailable";
+    signal.throwIfAborted();
+    try {
+      const result = await deps.semantic.search(question, DEFAULT_SEMANTIC_RECALL, signal);
+      signal.throwIfAborted();
+      if (!result || typeof result !== "object" || !("hits" in result) || !Array.isArray(result.hits)) {
+        semanticReport = { ...semanticReport, status: "failed" };
+        return "failed";
+      }
+      const blocksBefore = semanticBlocks;
+      ingestSemanticHits(result);
+      if (result.status === "ready" && semanticBlocks === blocksBefore) return "empty";
+      return semanticTaskStatus(result.status);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       semanticReport = { ...semanticReport, status: "failed" };
+      return "failed";
     }
   };
+
+  const runSemanticQueries = async (questions: readonly string[]): Promise<SettledProductionStatus> => {
+    const statuses: SettledProductionStatus[] = [];
+    for (const question of questions) {
+      if (!question.trim()) continue;
+      statuses.push(await runSemanticQuery(question));
+    }
+    return statuses.length > 0 ? combineProductionStatuses(statuses) : "empty";
+  };
+
+  const runSemantic = async (): Promise<SettledProductionStatus> => runSemanticQuery(input.question);
 
   const issues: ExploreIssue[] = [];
   const provenance = new Map<string, ExploreProvenance>();
@@ -1546,6 +1736,10 @@ export function createExploreQueryRun(
       }
     }
     rescanBodyGroups(lines, groups, evidence);
+    // Remember the evidence this build actually consumed. A source can arrive
+    // while outline/classification awaits; recording the later mutable object
+    // would falsely claim those late clues were already materialized.
+    const consumedEvidence = evidenceSignature(evidence);
     const hitLines = [
       ...evidence.hits.keys(),
       ...evidence.semanticClues.map((clue) => clue.startLine),
@@ -1572,11 +1766,11 @@ export function createExploreQueryRun(
     replacePrepared(path, windows);
     if (windows.length === 0) {
       markProvenance(path, sliced.stale ? "stale" : "empty", snapshot);
-      windowedEvidence.set(path, evidenceSignature(evidence));
+      windowedEvidence.set(path, consumedEvidence);
       return;
     }
     markProvenance(path, "ready", snapshot);
-    windowedEvidence.set(path, evidenceSignature(evidence));
+    windowedEvidence.set(path, consumedEvidence);
   };
 
   /**
@@ -1635,15 +1829,38 @@ export function createExploreQueryRun(
     const reserved = primaryInflight().length * DEFAULT_READ_PARALLELISM;
     const budget = maxMaterializeReads(scheduledNow.length, excerptLimit);
     const spendable = Math.max(DEFAULT_READ_PARALLELISM, Math.max(0, budget - reserved));
-    await materializeScheduled(scheduledNow, reads + spendable);
+    await materializeScheduled(scheduledNow, Math.min(budget, reads + spendable));
+  };
+
+  const markInflightIncomplete = (): boolean => {
+    let stopped = false;
+    for (const task of tasks.values()) {
+      if (task.status === "running" || task.status === "pending") {
+        task.status = "incomplete";
+        stopped = true;
+      }
+    }
+    if (stopped) searchIncomplete = true;
+    const semanticTask = [...tasks.values()].find((task) => task.family === "semantic");
+    if (semanticTask && (semanticTask.status === "incomplete" || semanticTask.status === "cancelled")) {
+      if (semanticReport.status === "unavailable" || semanticReport.status === "not-requested") {
+        semanticReport = { ...semanticReport, status: "incomplete" };
+      }
+    }
+    return stopped;
+  };
+
+  let deadlineStopped = false;
+  const abortLeftoverSources = (): void => {
+    markInflightIncomplete();
+    if (!controller.signal.aborted) controller.abort();
   };
 
   const pumpUntilPrimarySettled = async (): Promise<void> => {
     while (terminal === "active") {
       if (remainingMs() <= 0) {
-        for (const task of primaryInflight()) {
-          if (task.status === "running" || task.status === "pending") task.status = "incomplete";
-        }
+        deadlineStopped = true;
+        abortLeftoverSources();
         break;
       }
       if (byFile.size > 0) await materializeAvailable();
@@ -1656,10 +1873,33 @@ export function createExploreQueryRun(
         }),
       ]);
     }
-    if (terminal === "active") {
+    if (terminal === "active" && !signal.aborted) {
       await refreshReadEvidence();
       await materializeAvailable();
     }
+  };
+
+  let pumpPromise: Promise<void> | undefined;
+  const pumpErrors: unknown[] = [];
+  const ensurePump = (): Promise<void> => {
+    if (pumpPromise) return pumpPromise;
+    const running = pumpUntilPrimarySettled()
+      .catch((error) => { pumpErrors.push(error); })
+      .finally(() => { pumpPromise = undefined; });
+    pumpPromise = running;
+    return running;
+  };
+  const kickPump = (): void => {
+    void ensurePump().then(() => {
+      if (pumpErrors.length === 0 && terminal === "active" && !signal.aborted && primaryInflight().length > 0) kickPump();
+    });
+  };
+  const awaitPump = async (): Promise<void> => {
+    do {
+      await ensurePump();
+      const error = pumpErrors.shift();
+      if (error !== undefined) throw error;
+    } while (pumpErrors.length === 0 && terminal === "active" && !signal.aborted && primaryInflight().length > 0);
   };
 
   const toView = (viewId: string, window: PreparedWindow): ExploreQueryView => {
@@ -1690,22 +1930,26 @@ export function createExploreQueryRun(
     const unique: PreparedWindow[] = [];
     const seen = new Set<string>();
     for (const window of prepared) {
-      const key = `${window.path}@${window.revision}:${window.text}`;
+      const key = windowIdentityKey(window);
       if (seen.has(key)) continue;
       seen.add(key);
       unique.push(window);
     }
-    unique.sort((left, right) => (
-      ASSESSMENT_RANK[right.assessment] - ASSESSMENT_RANK[left.assessment]
-      || unitOwnRelevance(right) - unitOwnRelevance(left)
-      || comparePath(left.path, right.path)
-      || left.start - right.start
-    ));
+    const ranks = assignUnitLexicalRanks(unique);
+    unique.sort((left, right) => {
+      const navigation = Number(isDirectNavigationWindow(right, explicitNavigation)) - Number(isDirectNavigationWindow(left, explicitNavigation));
+      if (navigation !== 0) return navigation;
+      const fused = unitFusion(right, ranks.get(windowRankKey(right))) - unitFusion(left, ranks.get(windowRankKey(left)));
+      if (fused !== 0) return fused;
+      const hit = hitClassRank(right) - hitClassRank(left);
+      if (hit !== 0) return hit;
+      return comparePath(left.path, right.path) || left.start - right.start;
+    });
     frozenViews = [];
     unevaluatedViewCount = 0;
     let used = 0;
-    unique.forEach((window, index) => {
-      const view = toView(`v${index + 1}`, window);
+    for (const window of unique) {
+      const view = toView(stableViewId(window), window);
       const size = utf8Bytes(view.text) + 96;
       if (used + size <= byteBudget) {
         used += size;
@@ -1713,38 +1957,54 @@ export function createExploreQueryRun(
       } else {
         unevaluatedViewCount += 1;
       }
-    });
+    }
     viewsFrozen = true;
   };
 
   const start = (): void => {
     if (terminal !== "active") return;
-    if (tasks.has("lexical-original")) return;
-    launchTask("lexical-original", "lexical", true, async () => {
-      await runRg(objectPatterns);
-    });
-    launchTask("graph-seeds", "graph", true, async () => {
-      await runGraphSeeds();
-    });
-    launchTask("semantic-original", "semantic", true, async () => {
-      await runSemantic();
-    });
+    if (tasks.has("lexical-original") || tasks.has("lexical-content")) return;
+    if (objectPatterns.size > 0) {
+      launchTask("lexical-original", "lexical", true, () => runRg(objectPatterns));
+    }
+    if (contentPatterns.size > 0 && !explicitNavigation && !locating && !wantsBothEnds) {
+      launchTask("lexical-content", "lexical", true, () => runRg(contentPatterns));
+    }
+    if (deps.graph) launchTask("graph-seeds", "graph", true, runGraphSeeds);
+    if (deps.semantic) launchTask("semantic-original", "semantic", true, runSemantic);
+    kickPump();
   };
 
   const waitForViews = async (): Promise<void> => {
     if (terminal !== "active") return;
     start();
-    await pumpUntilPrimarySettled();
-    if (terminal !== "active") return;
+    try {
+      await awaitPump();
+      if (terminal !== "active") return;
+      if (fatalError && byFile.size === 0) throw fatalError;
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) throw error;
+      if (!deadlineStopped || terminalState() === "cancelled" || options.signal?.aborted) throw error;
+      if (terminal !== "active") return;
+    }
     if (fatalError && byFile.size === 0) throw fatalError;
+    if (options.signal?.aborted || terminalState() === "cancelled") {
+      const error = new Error("Explore query cancelled");
+      error.name = "AbortError";
+      throw error;
+    }
+    if (signal.aborted || remainingMs() <= 0) {
+      freezeViews();
+      return;
+    }
     let ranked = rankNow();
     let scheduled = scheduleReads(ranked, groups, parsed);
 
   const verifiedEnough = (!allSites && locating && hasVerifiedRegister(prepared))
     || (!allSites && wantsBothEnds && hasBothConnectsEnds(prepared));
-  if (verifiedEnough) {
+  if (verifiedEnough && !tasks.has("lexical-content")) {
     skippedContent.push(...contentPatterns.keys());
-  } else if (contentPatterns.size > 0) {
+  } else if (contentPatterns.size > 0 && !tasks.has("lexical-content") && !explicitNavigation) {
     await runRg(contentPatterns);
     // Check the content words against text already in hand before spending a
     // read on a new file: the answer may be in a file the object pass read.
@@ -1767,6 +2027,7 @@ export function createExploreQueryRun(
       for (const window of prepared) {
         signal.throwIfAborted();
         const relations = await deps.graph.fileRelations(window.path);
+        signal.throwIfAborted();
         if (!relations) continue;
         for (const conn of relations.connections) {
           if (window.text.includes(conn.literal)) literals.add(conn.literal);
@@ -1786,7 +2047,9 @@ export function createExploreQueryRun(
         const offTopic = literalOffTopic(literal, parsed);
         if ((locatingDone || bothEndsDone) && offTopic) continue;
         const arrivalReason = arrivalForLiteral(literal, parsed, prepared);
-        for (const end of await deps.graph.findLinks(literal)) {
+        const ends = await deps.graph.findLinks(literal);
+        signal.throwIfAborted();
+        for (const end of ends) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const connects = end.kind === "connects";
           const alreadyRead = readPaths.has(end.path);
@@ -1818,9 +2081,11 @@ export function createExploreQueryRun(
       let importDropped = 0;
       for (const seed of seedPaths) {
         signal.throwIfAborted();
+        const importers = await deps.graph.findImporters(seed);
+        signal.throwIfAborted();
         const rankedImporters = rankReverseImporters(
           seed,
-          (await deps.graph.findImporters(seed)).resolved,
+          importers.resolved,
           DEFAULT_GRAPH_IMPORT_PER_SEED,
         );
         for (const importer of rankedImporters) {
@@ -1920,38 +2185,60 @@ export function createExploreQueryRun(
       factKey: preparedWindow?.factKey ?? `${view.path}:${startLine}-${endLine}`,
       roleFit: preparedWindow?.roleFit ?? 0,
     };
-    if (required) requiredKeys.add(`${window.path}:${window.start}-${window.end}`);
     return window;
   };
 
-  const applySelection = (selectionGroups: readonly ExploreQuerySelectionGroup[]): ExploreQuerySelectResult => {
+  const applySelection = (
+    selectionGroups: readonly ExploreQuerySelectionGroup[],
+    selectionOptions?: { merge?: boolean },
+  ): ExploreQuerySelectResult => {
+    if (terminal !== "active") {
+      return {
+        queryId: "",
+        accepted: [],
+        rejected: [{ reason: "query is no longer active" }],
+        gaps: [],
+      };
+    }
     const accepted: ExploreQuerySelectResult["accepted"] = [];
     const rejected: ExploreQuerySelectResult["rejected"] = [];
     const gaps = [...selectionGroups.flatMap((group) => group.gap ? [group.gap] : [])];
-    const chosen: PreparedWindow[] = [];
+    const built: ChosenGroup[] = [];
     const byId = new Map(frozenViews.map((view) => [view.viewId, view]));
     for (const group of selectionGroups) {
       const viewIds: string[] = [];
+      const windows: PreparedWindow[] = [];
+      const requiredFlags: boolean[] = [];
+      let invalidRequired = false;
       for (const item of group.views) {
         const view = byId.get(item.viewId);
         if (!view) {
           rejected.push({ groupId: group.id, viewId: item.viewId, reason: "unknown or unevaluated view" });
+          if (item.required !== false) invalidRequired = true;
           continue;
         }
+        const required = item.required !== false;
         const ranges = item.rangeIds?.length
           ? item.rangeIds.map((rangeId) => {
             const range = view.ranges.find((entry) => entry.rangeId === rangeId);
-            return range ? { startLine: range.startLine, endLine: range.endLine, required: item.required !== false } : undefined;
+            return range ? { startLine: range.startLine, endLine: range.endLine, required } : undefined;
           })
           : [{
             startLine: item.startLine ?? view.startLine,
             endLine: item.endLine ?? view.endLine,
-            required: item.required === true,
+            required,
           }];
-        let ok = true;
+        const itemWindows: PreparedWindow[] = [];
+        const itemRequiredFlags: boolean[] = [];
+        let ok = Number.isSafeInteger(ranges[0]?.startLine) && Number.isSafeInteger(ranges[0]?.endLine);
         for (const range of ranges) {
           if (!range) {
             rejected.push({ groupId: group.id, viewId: item.viewId, reason: "unknown range" });
+            ok = false;
+            continue;
+          }
+          if (!Number.isSafeInteger(range.startLine) || !Number.isSafeInteger(range.endLine)) {
+            rejected.push({ groupId: group.id, viewId: item.viewId, reason: "range lines must be safe integers" });
             ok = false;
             continue;
           }
@@ -1961,19 +2248,55 @@ export function createExploreQueryRun(
             ok = false;
             continue;
           }
-          chosen.push(window);
+          itemWindows.push(window);
+          itemRequiredFlags.push(range.required);
         }
-        if (ok) viewIds.push(item.viewId);
+        if (ok) {
+          for (const [index, window] of itemWindows.entries()) {
+            const key = `${window.path}@${window.revision}:${window.start}-${window.end}`;
+            const existing = windows.findIndex((candidate) => (
+              `${candidate.path}@${candidate.revision}:${candidate.start}-${candidate.end}` === key
+            ));
+            if (existing === -1) {
+              windows.push(window);
+              requiredFlags.push(itemRequiredFlags[index]!);
+            } else if (itemRequiredFlags[index]) {
+              requiredFlags[existing] = true;
+            }
+          }
+          if (!viewIds.includes(item.viewId)) viewIds.push(item.viewId);
+        } else if (required) {
+          invalidRequired = true;
+        }
       }
-      if (viewIds.length > 0) accepted.push({ groupId: group.id, viewIds });
+      if (invalidRequired) {
+        gaps.push(`material group ${group.id} contains a required range the Host could not validate`);
+        continue;
+      }
+      const requiredCount = requiredFlags.filter(Boolean).length;
+      if (requiredCount > excerptLimit) {
+        rejected.push({ groupId: group.id, reason: "required group exceeds excerpt limit" });
+        gaps.push(`material group ${group.id} cannot be presented intact under the excerpt limit`);
+        continue;
+      }
+      if (viewIds.length > 0 && windows.length > 0) {
+        accepted.push({ groupId: group.id, viewIds });
+        built.push({ id: group.id, purpose: group.purpose, windows, requiredFlags });
+      }
     }
-    selectedWindows = chosen;
-    selectionGaps = gaps;
+    if (selectionOptions?.merge) {
+      const byGroup = new Map(chosenGroups.map((group) => [group.id, group]));
+      for (const next of built) byGroup.set(next.id, next);
+      chosenGroups = [...byGroup.values()];
+    } else {
+      chosenGroups = built;
+    }
+    selectionGaps = selectionOptions?.merge ? uniqueGaps([...selectionGaps, ...gaps]) : uniqueGaps(gaps);
     return { queryId: "", accepted, rejected, gaps };
   };
 
   const submitPlan = async (plan: ExploreGroupedSearchPlan): Promise<{ launched: string[]; reused: string[] }> => {
-    if (terminal !== "active") return { launched: [], reused: [] };
+    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [] };
     planHypotheses = {
       behavior: plan.behavior,
       expectedMaterials: plan.groups.flatMap((group) => group.expectedMaterials ?? []),
@@ -1990,7 +2313,7 @@ export function createExploreQueryRun(
       }
       if (fresh.length === 0) continue;
       const term: TermGroup = {
-        id: `plan:${group.id}`,
+        id: `plan:${group.id}:${fresh.join("|")}`,
         kind: "plan",
         distinctive: group.concept.trim() || fresh[0]!,
         variants: fresh,
@@ -1998,20 +2321,25 @@ export function createExploreQueryRun(
       groups.push(term);
       const patterns = collectPatterns([term]);
       launched.push(...fresh);
-      launchTask(`plan:${group.id}`, "plan", true, async () => {
-        await runRg(patterns);
+      launchTask(`plan:${group.id}:${fresh.join("\0")}`, "plan", true, async () => {
+        const statuses = await Promise.all([
+          runRg(patterns),
+          runSemanticQueries(fresh),
+        ]);
+        return combineProductionStatuses(statuses);
       });
     }
+    if (launched.length > 0) kickPump();
     return { launched, reused };
   };
 
-  const followup = async (request: ExploreQueryFollowupParams): Promise<{
+  const followup = async (request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
     reused: string[];
     newViews: ExploreQueryView[];
   }> => {
-    if (terminal !== "active") return { launched: [], reused: [], newViews: [] };
-    const before = new Set(frozenViews.map((view) => view.viewId));
+    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [], newViews: [] };
+    const before = new Set(frozenViews.map((view) => viewLogicalKey(view)));
     const launched: string[] = [];
     const reused: string[] = [];
     const searches = request.searches ?? [];
@@ -2031,7 +2359,11 @@ export function createExploreQueryRun(
       groups.push(term);
       launched.push(...fresh);
       launchTask(`followup:${fresh.join("|")}`, "followup", true, async () => {
-        await runRg(collectPatterns([term]));
+        const statuses = await Promise.all([
+          runRg(collectPatterns([term])),
+          runSemanticQueries(fresh),
+        ]);
+        return combineProductionStatuses(statuses);
       });
     }
     for (const locate of request.locates ?? []) {
@@ -2051,6 +2383,7 @@ export function createExploreQueryRun(
         if (!deps.graph) return;
         if (locate.kind === "symbol") {
           const hits = await deps.graph.searchDefinitions(value, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
+          signal.throwIfAborted();
           for (const hit of hits) {
             if (!pathInRoots(hit.path, input.paths)) continue;
             const evidence = byFile.get(hit.path) ?? emptyEvidence();
@@ -2066,7 +2399,9 @@ export function createExploreQueryRun(
           }
           return;
         }
-        for (const end of await deps.graph.findLinks(value)) {
+        const ends = await deps.graph.findLinks(value);
+        signal.throwIfAborted();
+        for (const end of ends) {
           if (!pathInRoots(end.path, input.paths)) continue;
           const evidence = byFile.get(end.path) ?? emptyEvidence();
           attachGraphClue(evidence, {
@@ -2081,14 +2416,64 @@ export function createExploreQueryRun(
         }
       });
     }
-    await pumpUntilPrimarySettled();
-    if (request.gaps?.length) selectionGaps.push(...request.gaps);
+    await awaitPump();
+    if (request.gaps?.length) selectionGaps = uniqueGaps([...selectionGaps, ...request.gaps]);
     freezeViews();
     return {
       launched,
       reused,
-      newViews: frozenViews.filter((view) => !before.has(view.viewId)),
+      newViews: frozenViews.filter((view) => !before.has(viewLogicalKey(view))),
     };
+  };
+
+  const packChosenGroups = (): {
+    packed: PreparedWindow[];
+    omittedRequired: ExploreResult["omitted"];
+    requiredKeys: Set<string>;
+    gaps: string[];
+  } => {
+    const packed: PreparedWindow[] = [];
+    const omittedRequired: ExploreResult["omitted"] = [];
+    const requiredKeys = new Set<string>();
+    const packedKeys = new Set<string>();
+    const acceptedGroups: ChosenGroup[] = [];
+    const gaps: string[] = [];
+    const keyOf = (window: PreparedWindow): string => `${window.path}@${window.revision}:${window.start}-${window.end}`;
+
+    // Required ranges from every group get first claim on the excerpt cap.
+    // Auxiliary ranges from an early group cannot evict a later required group.
+    for (const group of chosenGroups) {
+      const required = group.windows.filter((_, index) => group.requiredFlags[index]);
+      const newRequired = required.filter((window) => !packedKeys.has(keyOf(window)));
+      if (newRequired.length > excerptLimit || packed.length + newRequired.length > excerptLimit) {
+        gaps.push(`material group ${group.id} cannot be presented intact under the excerpt limit`);
+        omittedRequired.push(...group.windows.map((window) => ({
+          path: window.path,
+          startLine: window.start,
+          endLine: window.end,
+          reason: "required group exceeds excerpt limit",
+        })));
+        continue;
+      }
+      acceptedGroups.push(group);
+      for (const window of required) {
+        const key = keyOf(window);
+        requiredKeys.add(key);
+        if (packedKeys.has(key)) continue;
+        packedKeys.add(key);
+        packed.push(window);
+      }
+    }
+    for (const group of acceptedGroups) {
+      for (const window of group.windows.filter((_, index) => !group.requiredFlags[index])) {
+        if (packed.length >= excerptLimit) break;
+        const key = keyOf(window);
+        if (packedKeys.has(key)) continue;
+        packedKeys.add(key);
+        packed.push(window);
+      }
+    }
+    return { packed, omittedRequired, requiredKeys, gaps };
   };
 
   const finish = (model?: ExploreModelParticipation): ExploreResult => {
@@ -2097,27 +2482,31 @@ export function createExploreQueryRun(
       error.name = "AbortError";
       throw error;
     }
+    if (terminal === "finished" && frozenResult) return frozenResult;
     if (!viewsFrozen) freezeViews();
     const ranked = rankNow();
     const packWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
     const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
     const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
-    const packed = selectedWindows && selectedWindows.length > 0
-      ? selectedWindows.slice(0, excerptLimit)
+    const chosenPack = chosenGroups.length > 0 ? packChosenGroups() : undefined;
+    const packed = chosenPack
+      ? chosenPack.packed
       : packComplementary(
         prepared,
         excerptLimit,
         packWeights,
         locatingDone || bothEndsDone,
         parsed.preferTests === false,
+        explicitNavigation,
       );
     const packedKeys = new Set(packed.map((window) => `${window.path}:${window.start}-${window.end}`));
     for (const window of prepared) {
       const packedWindow = packedKeys.has(`${window.path}:${window.start}-${window.end}`);
       window.purpose = packedWindow ? (window.offTopic ? "support" : "primary") : "candidate";
     }
+    const requiredKeys = chosenPack?.requiredKeys ?? new Set<string>();
     for (const window of packed) {
-      if (requiredKeys.has(`${window.path}:${window.start}-${window.end}`)) window.purpose = "primary";
+      if (requiredKeys.has(`${window.path}@${window.revision}:${window.start}-${window.end}`)) window.purpose = "primary";
     }
     const distinctiveness = buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf);
     const windowTraces: ExploreWindowTrace[] = prepared.map((window) => {
@@ -2154,27 +2543,46 @@ export function createExploreQueryRun(
     };
     const snippets = packed.map((window) => ({
       ...snippetFrom(window),
-      ...(requiredKeys.has(`${window.path}:${window.start}-${window.end}`) ? { required: true as const } : {}),
+      ...(requiredKeys.has(`${window.path}@${window.revision}:${window.start}-${window.end}`) ? { required: true as const } : {}),
     }));
+    const omittedRequiredKeys = new Set(
+      (chosenPack?.omittedRequired ?? []).map((item) => `${item.path}:${item.startLine}-${item.endLine}`),
+    );
     const omitted = [
+      ...(chosenPack?.omittedRequired ?? []),
       ...prepared
-        .filter((window) => !packedKeys.has(`${window.path}:${window.start}-${window.end}`))
+        .filter((window) => {
+          const key = `${window.path}:${window.start}-${window.end}`;
+          return !packedKeys.has(key) && !omittedRequiredKeys.has(key);
+        })
         .map((window) => ({
           path: window.path,
           startLine: window.start,
           endLine: window.end,
           reason: "not selected for complementary pack",
         })),
-      ...selectionGaps.map((gap) => ({
+      ...[...selectionGaps, ...(chosenPack?.gaps ?? [])].map((gap) => ({
         path: "(gap)",
         startLine: 0,
         endLine: 0,
         reason: gap,
       })),
     ];
-    const partial = issues.length > 0 || omitted.length > 0 || unread.length > 0 || searchIncomplete || snippets.length < prepared.length || graphPartial;
+    abortLeftoverSources();
+    const sources = sourceStates();
+    const sourceIncomplete = sources.some((source) => (
+      source.status === "incomplete" || source.status === "cancelled" || source.status === "failed"
+    ));
+    if (sourceIncomplete) searchIncomplete = true;
+    const semanticTask = sources.find((source) => source.family === "semantic");
+    if (semanticTask && (semanticTask.status === "incomplete" || semanticTask.status === "cancelled")) {
+      if (semanticReport.status === "unavailable" || semanticReport.status === "not-requested") {
+        semanticReport = { ...semanticReport, status: "incomplete" };
+      }
+    }
+    const partial = issues.length > 0 || omitted.length > 0 || unread.length > 0 || searchIncomplete || snippets.length < prepared.length || graphPartial || sourceIncomplete;
     terminal = "finished";
-    return {
+    frozenResult = {
       snippets,
       issues,
       notRequested: { count: unread.length, paths: unread },
@@ -2211,8 +2619,10 @@ export function createExploreQueryRun(
           )).length,
         },
         ...(model ? { model } : {}),
+        sources,
       },
     };
+    return frozenResult;
   };
 
   const cancel = (): void => {
@@ -2231,6 +2641,8 @@ export function createExploreQueryRun(
     objects: parsed.objects,
     anchors: usedAnchors,
     ...(catalogVocab ? { catalog: catalogVocab } : {}),
+    ...(catalogPackages ? { packages: catalogPackages } : {}),
+    ...(catalogEntries ? { entries: catalogEntries } : {}),
   });
 
   return {
@@ -2242,11 +2654,12 @@ export function createExploreQueryRun(
     followup,
     finish,
     cancel,
+    refreshVocab,
     parsed,
     deadlineAt,
     question: input.question,
     signal,
-    terminal: () => terminal,
+    terminal: terminalState,
     sourceStates,
     vocab,
   };
@@ -2271,6 +2684,7 @@ export type ExploreFormatInput = Pick<
   graph?: ExploreGraphDetails;
   skippedQueries?: NonNullable<WireResult["details"]["skippedQueries"]>;
   model?: ExploreModelParticipation;
+  sources?: ExploreQuerySourceState[];
 };
 
 /**
@@ -2319,7 +2733,12 @@ function packExploreVisible(
   if (dropped > 0) {
     header.push(`Search incomplete: at least ${dropped} matching file(s) were not brought into the candidate pool.`);
   }
-  if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
+  const sourceStopped = result.sources?.some((source) => (
+    source.status === "incomplete" || source.status === "cancelled" || source.status === "failed"
+  ));
+  if (sourceStopped) {
+    header.push("Search incomplete: shared deadline or a source stopped before it finished.");
+  } else if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
     header.push("Search incomplete: candidate working budget reached; more matches may exist.");
   }
   if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready") {

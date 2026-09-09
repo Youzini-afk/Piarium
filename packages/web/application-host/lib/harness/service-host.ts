@@ -118,6 +118,7 @@ export interface HarnessServiceHost {
     workspaceId: string,
     question: string,
     limit: number,
+    signal?: AbortSignal,
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
   webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
@@ -286,6 +287,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       void previous.shellSupervisor?.dispose();
       observationCursors.clearKind(sessionId, "shell");
       options.dropAgentInputContexts?.(sessionId);
+      exploreQueryStore.dropSession(sessionId);
     }
     const interpreterResult = selectInterpreter({
       platform: process.platform,

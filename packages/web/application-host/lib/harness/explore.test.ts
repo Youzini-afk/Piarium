@@ -1967,7 +1967,10 @@ describe("explore semantic recall", () => {
       },
     });
     expect(result.snippets.some((snippet) => snippet.text.includes("reclaimLease"))).toBe(true);
-    expect(formatExploreOutput({ ...result, graph: result.details.graph }).visibleText).toContain("reclaimLease");
+    expect(formatExploreOutput({
+      ...result,
+      ...(result.details.graph ? { graph: result.details.graph } : {}),
+    }).visibleText).toContain("reclaimLease");
     const window = result.details.windows?.find((item) => item.path === "src/reclaim.ts");
     expect(window?.arrivals.some((item) => item.kind === "semantic")).toBe(true);
     expect(window?.arrivals.some((item) => item.kind === "lexical")).toBe(false);
@@ -2108,7 +2111,8 @@ describe("explore semantic recall", () => {
     });
     expect(result.snippets[0]?.text).toContain("needle");
     expect(result.details.semantic?.status).toBe("unavailable");
+    expect(result.details.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: "semantic", status: "unavailable" }),
+    ]));
   });
 });
-
-

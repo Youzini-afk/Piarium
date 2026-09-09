@@ -551,7 +551,8 @@ export type ExploreSemanticStatus =
   | "empty"
   | "unavailable"
   | "failed"
-  | "stale";
+  | "stale"
+  | "incomplete";
 
 export type ExploreSemanticCoverage = "empty" | "partial" | "complete";
 export type ExploreIndexLifecycle = "idle" | "building" | "rebuilding" | "ready";
@@ -627,6 +628,7 @@ export type ExploreQueryTaskStatus =
   | "running"
   | "ready"
   | "empty"
+  | "unavailable"
   | "failed"
   | "cancelled"
   | "incomplete";
@@ -746,6 +748,8 @@ export interface ExploreQuerySelectionGroup {
 export interface ExploreQuerySelectParams {
   queryId: string;
   groups: ExploreQuerySelectionGroup[];
+  /** Keep earlier accepted groups and merge by group id. Incremental follow-up uses this. */
+  merge?: boolean;
 }
 
 export interface ExploreQuerySelectResult {
@@ -841,6 +845,8 @@ export interface ExploreSearchResult {
     windows?: ExploreWindowTrace[];
     semantic?: ExploreSemanticDetails;
     model?: ExploreModelParticipation;
+    /** Per-source production outcome. failed/empty/unavailable/incomplete/cancelled stay distinct. */
+    sources?: ExploreQuerySourceState[];
   };
 }
 

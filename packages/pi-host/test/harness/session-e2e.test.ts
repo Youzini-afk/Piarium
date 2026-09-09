@@ -93,7 +93,7 @@ async function setupSession(options: {
       host.respondHarness(sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
-    cancelExploreQuery: (sessionId, queryId) => harnessServiceHost.exploreQueryStore.cancel(sessionId, queryId),
+    cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
     ...(options.authorizeWorkspacePath ? { authorizeWorkspacePath: options.authorizeWorkspacePath } : {}),
   });
   registerHarnessServices(router, harnessServiceHost);

@@ -292,6 +292,23 @@ export function buildTermGroups(question: string, anchors: readonly string[] = [
   };
 }
 
+const MECHANISM = /\b(how|why|mechanism|flow|wired|through)\b/iu;
+const MECHANISM_HAN = /怎么|如何|为何|机制|流程|为什么|怎样/;
+const PATH_LIKE = /[\\/]|\.[a-z][a-z0-9]+$/i;
+const NAV_STOP = /^(where|what|which|find|the|and|for|with|from|this|that|请|帮|找|查|一下)$/iu;
+
+/** Explicit path or identifier locate without a mechanism question. Wide content search can be omitted. */
+export function exploreIsExplicitNavigation(question: string, objects: readonly string[]): boolean {
+  const trimmed = question.trim();
+  const mechanism = MECHANISM.test(question) || MECHANISM_HAN.test(question);
+  if (PATH_LIKE.test(trimmed) && !/\s/.test(trimmed) && !mechanism) return true;
+  if (objects.length === 0 || mechanism) return false;
+  let rest = question;
+  for (const object of objects) rest = rest.split(object).join(" ");
+  const tokens = rest.match(/[$_\p{L}][$_\p{L}\p{M}\p{N}]{2,}/gu) ?? [];
+  return !tokens.some((token) => !NAV_STOP.test(token));
+}
+
 export function buildRgPatterns(identifiers: string[], literals: string[]): Array<{ pattern: string; fixedStrings: true }> {
   return [...new Set([...literals, ...identifiers])].map((pattern) => ({ pattern, fixedStrings: true }));
 }

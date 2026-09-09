@@ -2,7 +2,8 @@
  * File-level reciprocal rank fusion for explore read scheduling (D-170).
  * RRF eats ranks only, one term per source, k=60. A missing source is a
  * missing term. This is not D-145: no raw group weights mixed in, no
- * path-order-as-rank, and the fused score does not enter final packing.
+ * path-order-as-rank. File scheduling and unit selection build their own ranks
+ * from their own evidence before calling this helper.
  */
 
 export const EXPLORE_RRF_K = 60;

@@ -24,5 +24,7 @@ describe("explore graph helpers", () => {
   it("respects search roots for graph paths", () => {
     expect(pathInRoots("src/a.ts", ["src"])).toBe(true);
     expect(pathInRoots("lib/a.ts", ["src"])).toBe(false);
+    expect(pathInRoots("src/a.ts", ["."])).toBe(true);
+    if (process.platform === "win32") expect(pathInRoots("SRC/a.ts", ["src"])).toBe(true);
   });
 });

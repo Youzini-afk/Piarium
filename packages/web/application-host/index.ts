@@ -1646,8 +1646,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
-    semanticRecall: async (workspaceId, question, limit) => {
-      const result = await semanticIndexRuntime.search(workspaceScope(workspaceId), question, limit);
+    semanticRecall: async (workspaceId, question, limit, signal) => {
+      const result = await semanticIndexRuntime.search(
+        workspaceScope(workspaceId),
+        question,
+        limit,
+        signal ? { signal } : undefined,
+      );
       return {
         status: result.status.status,
         coverage: result.status.coverage,
@@ -1785,7 +1790,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
-    cancelExploreQuery: (sessionId, queryId) => harnessServiceHost.exploreQueryStore.cancel(sessionId, queryId),
+    cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
   interface SessionNotificationRequest extends DesktopNotificationPayload {

@@ -25,7 +25,7 @@ export interface ExploreGraphLink {
 }
 
 export interface ExploreGraphRecall {
-  catalogStats(): Promise<{ symbolCount: number }>;
+  catalogStats(): Promise<{ symbolCount: number; fileCount?: number; paths?: string[] }>;
   searchDefinitions(query: string, k: number): Promise<ExploreGraphDefinition[]>;
   findLinks(value: string): Promise<ExploreGraphLink[]>;
   fileRelations(path: string): Promise<{
@@ -37,9 +37,14 @@ export interface ExploreGraphRecall {
 
 export function pathInRoots(candidate: string, roots: readonly string[] | undefined): boolean {
   if (!roots || roots.length === 0) return true;
-  const path = candidate.replace(/\\/g, "/").replace(/^\.\//, "");
+  const comparable = (value: string): string => {
+    const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+    const rooted = normalized === "." ? "" : normalized;
+    return process.platform === "win32" ? rooted.toLowerCase() : rooted;
+  };
+  const path = comparable(candidate);
   return roots.some((root) => {
-    const prefix = root.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+    const prefix = comparable(root).replace(/\/$/, "");
     return !prefix || path === prefix || path.startsWith(`${prefix}/`);
   });
 }

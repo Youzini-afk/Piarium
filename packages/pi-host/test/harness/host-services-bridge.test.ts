@@ -4,7 +4,7 @@ import {
   HostServicesBridge,
   HarnessRequestError,
 } from "../../src/harness/host-services-bridge.js";
-import type { HarnessRequestData } from "@piarium/protocol";
+import type { HarnessCancelData, HarnessRequestData } from "@piarium/protocol";
 
 describe("HostServicesBridge", () => {
   it("correlates request and response by requestId", async () => {
@@ -25,8 +25,9 @@ describe("HostServicesBridge", () => {
   });
 
   it("rejects on timeout", async () => {
+    const emitted: Array<{ event: string; data: HarnessRequestData | HarnessCancelData }> = [];
     const bridge = new HostServicesBridge({
-      emit: () => {},
+      emit: (event, data) => { emitted.push({ event, data }); },
       sessionId: "session-1",
       defaultTimeoutMs: 50,
     });
@@ -36,6 +37,8 @@ describe("HostServicesBridge", () => {
       assert.equal(error.code, "timeout");
       return true;
     });
+    const request = emitted.find((item) => item.event === "harness.request")?.data as HarnessRequestData;
+    assert.ok(emitted.some((item) => item.event === "harness.cancel" && (item.data as HarnessCancelData).requestId === request.requestId));
     bridge.dispose();
   });
 
@@ -58,8 +61,9 @@ describe("HostServicesBridge", () => {
   });
 
   it("rejects all pending on dispose", async () => {
+    const emitted: Array<{ event: string; data: HarnessRequestData | HarnessCancelData }> = [];
     const bridge = new HostServicesBridge({
-      emit: () => {},
+      emit: (event, data) => { emitted.push({ event, data }); },
       sessionId: "session-1",
       defaultTimeoutMs: 10_000,
     });
@@ -76,6 +80,13 @@ describe("HostServicesBridge", () => {
       assert.ok(error instanceof HarnessRequestError);
       return true;
     });
+    const requestIds = emitted
+      .filter((item) => item.event === "harness.request")
+      .map((item) => (item.data as HarnessRequestData).requestId);
+    const cancelled = new Set(emitted
+      .filter((item) => item.event === "harness.cancel")
+      .map((item) => (item.data as HarnessCancelData).requestId));
+    assert.ok(requestIds.every((requestId) => cancelled.has(requestId)));
   });
 
   it("handles 50 concurrent requests each receiving their own result", async () => {

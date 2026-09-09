@@ -3743,6 +3743,138 @@ D-169 的独立代际库与部分可查，以及 Documents 来源边界保持。
 
 状态：已实施。
 
+### D-182 · 2026-09-09 · 快速检索返工：查询身份、授权取消、终态与一条取消链
+
+背景：`763ab2a9` 接通了跨进程骨架，但查询只绑 session/workspace；`queryId` 被当成授权。同一 session 换 worker、generation、run 或缩小 scope 后，新 actor 仍能操作旧查询，搜索/读取闭包却是旧 actor。`harness.cancel` 不解析 actor、不核 capability，按全局 `requestId` 即可中止他人请求。模型调用不受 `deadlineAt` 约束；Host 搜索/读取绑在 start RPC 或内部第二控制器上，`cancel`/`finish`/`release` 不能停在飞来源。`requireQuery` 只拒 cancelled，finished 查询仍接受 select，迟到选择会改最终原文。
+
+决定：
+
+1. 查询绑定启动时的 authority、session、worker、generation、run、workspace 与精确 workspace scope。每个阶段核对该 actor；session 重新注册丢弃旧查询。
+2. `harness.cancel` 先 `resolveActor` 并要求 `read.search`。inflight 按该 actor 定位；外会话或外代的 `requestId`/`queryId` 不得中止。
+3. 一条查询 `AbortController` 覆盖模型等待、rg、Documents、结构、图和语义。start 请求 abort 只在返回前链接；成功返回后断开。`finish`/`release`/`cancel`/截止中止残余工作。
+4. 改变状态的阶段只作用于 active。`finish` 是单次原子终结并缓存结果；已 finished 的再次 finish 返回同一原文。cancelled 不可复活。
+
+影响：`explore-query-identity.ts`、`explore-query-store.ts`、`explore-query-services.ts`、`router.ts`、`service-host.ts`、`explore-tool.ts`。
+
+状态：已实施。纠正 D-176/D-177 把查询 ID 当授权、以及取消/截止未真正停止来源的缺口。
+
+### D-183 · 2026-09-09 · 快速检索返工：原问题词法并行与真实来源结局
+
+背景：`start` 只启动 objectPatterns；普通内容词等所有 primary source 结束后才跑。慢语义会把常见自然语言的 rg 拖到截止附近。截止只改任务状态；`finish` 的 `partial`/`searchIncomplete` 不消费 source states，语义可保持初始 `unavailable`，截止未完成被写成干净成功。
+
+决定：
+
+1. start 同时启动对象词法与原问题内容词法（及语义/图）。仅明确纯导航按契约省略宽搜索。
+2. 计划/补查表达进入 rg **和** 当时可用的向量召回。
+3. 最终结果冻结并携带 `details.sources`。failed / empty / unavailable / incomplete / cancelled 不折叠。来源因截止未完成必须是 `partial` 且 `searchIncomplete`。
+4. formatter 区分“共享截止或来源未完成”与“候选工作预算用尽”。
+
+影响：`explore.ts`；protocol `ExploreSemanticStatus.incomplete`、`details.sources`。
+
+状态：已实施。
+
+### D-184 · 2026-09-09 · 快速检索返工：稳定视图、增量合并、成组 required
+
+背景：followup 重排序后从 v1 重编号，用旧 viewId 集合判断新材料，会把真正的新文件判成旧候选。增量 prompt 只展示 newViews；第二次 `applySelection` 覆盖已选。`limit` 对已 accepted 的 required 组 `slice`，静默丢掉成组证据。
+
+决定：
+
+1. viewId 在查询内按 `path@rev:start-end` 稳定分配，不因重排改号。新旧判断使用该逻辑身份。
+2. 增量模型同时看到已选材料与新增材料。`select` 可 `merge`：按 group id 合并，不默认替换。
+3. 一个 required 组装不进 `limit` 时整组放弃并记缺口，不得接受后再静默截组。
+
+影响：`explore.ts` applySelection/followup/finish；`explore-tool.ts`；protocol `ExploreQuerySelectParams.merge`。
+
+状态：已实施。
+
+### D-185 · 2026-09-09 · 快速检索返工：删除改名后的混合评分与评估墙
+
+背景：删除 `windowScore` 后，`unitOwnRelevance` / `complementaryScore` 仍混合词组数量、命中类别、implementation 类型、anchor、roleFit、关系端、字节成本、重复惩罚和语义名次。`freezeViews` 先按 assessment 分层再看该分数，对象文本命中能在模型输入预算阶段挤掉纯语义候选。
+
+决定：
+
+1. 模型视图与无模型打包使用单元自身词法名次（本窗口 weight / distinctive）与语义名次的 RRF 融合。
+2. 明确导航 / 已核验关系是分区，不是分数加项。去重、角色、范围和字节留在对应阶段。
+3. 不恢复 `candidateTier` 或文件分广播。
+
+影响：`explore.ts`。
+
+状态：已实施。纠正 D-179「已删除 windowScore」超过当时代码的表述。
+
+### D-186 · 2026-09-09 · 快速检索返工：模型输入契约与 guided 输出
+
+背景：`vocab()` 只有 symbolCount；packages/entries 无生产者。选段 prompt 不标 range 行号；原文未标不可信。计划表达只进 rg。pi-host 忽略 select 的 accepted/rejected。guided finish 不走 `loadSnippetRelations`。`remaining() > 2000` 静默关闭补查。
+
+决定：
+
+1. 开始返回时从已打开 graph 的 `catalogStats` 取 symbol/file 计数、package.json 父目录与 index/main/cli 入口，不等全仓摘要。
+2. 选段 prompt 写明每个 rangeId 的行跨度；源代码包在 `<untrusted-source>` 内，与用户请求和假设分隔。
+3. Host 全拒绝时 `model.select` 不得标 `used`。
+4. guided `finish` 同样注解 excerpt 关系。
+5. 去掉隐藏的 2s 补查门槛。公开 120s 剩余等待与 8s 判断预留保持，并标明不是 SLO，不新增设置 UI。
+6. 模型 `complete` 接 `deadlineAt` 与调用者 signal 的合取，provider 卡住不得超过宣称预算。
+
+影响：`explore.ts` vocab；`explore-model.ts`；`explore-tool.ts`；`explore-query-services.ts` pack。
+
+状态：已实施。
+
+### D-187 · 2026-09-09 · 快速检索独立验收：作用域、真实来源状态与迟到工作收口
+
+类型：主代理验收结论 + 实现纠正；补齐 D-182–D-186 超过当时代码的交付表述。
+
+背景：第二轮返工已修正查询身份、公开词法并行、稳定视图和终态，但逐行核对与最小反例仍发现：来源任务把
+`empty/unavailable/failed` 写成 `ready`；图、向量和 catalog 词汇只在读文件时才碰路径 authority，受限 actor 会让范围外候选
+消耗 Top-K 并泄露路径元数据；语义 adapter 接受 signal 却未传入运行时；bridge 本地 timeout/dispose 与 start 响应未送达不会通知
+Host 清理；`complementaryScore` 仍混合多个阶段；晚到同文件语义线索不在 evidence signature 中；被拒 required 选择会留下标记，先到组的
+optional 范围还能挤掉后续组的 required 范围。这些都能从当前代码构造反例，不以测试总数覆盖。
+
+决定：
+
+1. start 将显式 `paths` 或 actor 的固定 `workspaceScope` 变成整次查询的有效根；图候选、向量候选、catalog 词汇和模型 path locate
+   都在进入查询状态前按它过滤。范围受限时不把全工作区 symbol/file 计数冒充本范围统计。catalog 的 package 词汇从实际会进入符号目录的
+   `packages/<name>/…` / `apps/<name>/…` 源码路径推导；不再用生产目录不会收录的 `package.json` 写假测试。
+2. `ExploreQueryTaskStatus` 增加 `unavailable`。词法、图、语义任务按本次真实结果写 `ready/empty/unavailable/failed/incomplete`；算法
+   `explore.search` 与 guided finish 都返回同一 `details.sources`，截止或失败继续驱动 `partial/searchIncomplete`，可选来源不可用不伪装成失败。
+3. 同一个 actor request key 由 authority/session/worker/generation/run/requestId 组成。bridge 的 timeout、dispose、signal abort 都先发
+   `harness.cancel`；start 响应未送达通过 Router delivery 回调释放查询；store 在既有 `deadlineAt` 中止无人继续消费的来源。
+   semantic runtime 接 signal，取消后立即停止等待并禁止迟到向量写回本查询。当前 native ONNX 推理批本身不能被 JS signal 抢占，可能在后台
+   完成该批；这条能力承诺是调用链停止等待和丢弃迟到结果，不虚构硬件级抢占。
+4. 文件和单元的词法同分保持同 rank，路径只稳定顺序；纯语义单元不再得到伪造的词法票。删除 `complementaryScore`；导航、角色、
+   去重、局部互补与 hit class 逐级处理。机制问题中的 anchor 只在单元词法依据同分时优先，不恢复覆盖纯语义候选的永久墙。
+5. 已读文件记录“本次构建实际消费的 evidence signature”，包含语义块身份；来源在 outline/classify 等 await 期间到达会触发重建。
+   所有外部来源 await 后再检查 signal，迟到任务不能修改冻结结果。
+6. 选择按 item 原子验证范围与整数行号；无效 required 使该材料组拒绝。required 标记只从最终接纳并打包的组计算；所有组的 required
+   先于 optional 占用 excerpt limit，后续 required 不再被前组 optional 挤掉。pi-host 只把 Host 真正 accepted 的视图交给增量判断，
+   计划/选择/补查的 `used` 也以实际 launched/accepted 为准；补查失败不抹掉已经生效的首轮选择。
+
+验证边界：公开 `explore` 的真 Pi faux-provider 纵切证明 ModelRuntime 计划表达进入 Host 搜索并改变最终原文；定向测试覆盖同文件晚到语义、
+受限 actor 不见范围外路径、来源状态、响应未送达、bridge timeout/dispose、语义等待取消、稳定视图、required 组和终态。真实
+`models.explore` provider 的质量与墙钟仍未观察，作为使用事实记录，不退回“部分实现”或另设启用门。受限范围的图/向量后端当前仍先做
+全工作区 Top-K 再过滤，可能损失范围内召回；3.16 的 scoped 索引/查询优化继续处理，但不得泄露范围外候选。
+
+影响：`explore.ts` / query store/services/identity、router、bridge、semantic runtime、protocol、plan 3.15、status 3.15。
+
+状态：已实施并接入公开工具；真实 provider 观察与 3.16B–E 仍按各自项目推进。
+
+### D-188 · 2026-09-09 · 快速检索验收补项：搜索启动不等于到达即读
+
+类型：主代理验收结论 + 调度修正。
+
+背景：D-179/D-183 要求原检索与计划模型并行、候选到达即读，但 `start()` 只启动来源任务，唯一的 materialization pump 要到 pi-host
+完成计划模型后调用 `explore.query.views` 才运行。搜索虽已并行，正文读取仍串在模型之后；计划模型若越过 `deadlineAt - 8s`，pump 会先
+看到预算耗尽并冻结空视图。原 `reserveForJudge` 因此没有真实保留判断/呈现材料。测试“rg 在慢语义前启动”不能证明这条行为。
+
+决定：查询 `start()` 在 Host 立即启动唯一的后台 pump；来源到达后按同一调度器读取，`views` 只等待/接续它。计划和补查新增任务时复用
+同一个 pump，不能并发启动第二套读取循环。query store 在既有 `deadlineAt - reserveForJudgeMs` 中止来源等待，整体 deadline 仍留给模型选择
+与 finish；来源截止后提交的计划/补查不再报告 `launched`。后台错误保存到查询并由阶段调用者取得，不制造未处理 rejection。
+
+验证：`explore-query-run.test.ts` 在只调用 `start()`、尚未调用 `views` 时观察到 `readFile`；原词并行、晚到来源重建、截止冻结与公开
+ModelRuntime 纵切继续通过。
+
+影响：`explore.ts` query pump；`explore-query-store.ts` source deadline；plan/status 3.15。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -3924,8 +4056,15 @@ D-169 的独立代际库与部分可查，以及 Documents 来源边界保持。
 | D-172 | implementation（本地嵌入器补依赖与四层加载修正、首次真跑含词汇缺口与真运行时端到端；主证据分区覆盖全程且收窄为 verified-relation；arrivalForImport 补 statement-evidence） | — | explore.ts；semantic/minilm.ts；copy-semantic-model.mjs；recipe.json |
 | D-173 | superseded in part（职责、来源平等、当前原文/呈现和索引设计保持；将局部 LLM 判断移出当前工作项是误读，由 D-174 纠正） | D-174 | 设计 2/5.7/6/6.1/6.2/7.5/8.5；plan 0.7/2.8/2.9/3.2/3.15/3.16；status；architecture 4.4 |
 | D-174 | superseded in part（当前 LLM 主线保持；D-175 扩展分组计划、成组选段、局部补查及查询所有者，区分重排契约） | D-175 | 设计 2/5.7/5.10/6.1/8.5；plan 0.7/3.2/3.15D/3.16E；status；architecture 4.4 |
-| D-175 | implementation（契约保持；运行时由 D-176–D-179 接线） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
-| D-176 | implementation（查询方法 + Host 短生命周期上下文；`explore.search` 同一引擎门面） | — | protocol harness；explore-query-store/services；explore-tool |
-| D-177 | implementation（`harness.cancel`、共享截止、pin 的 inputContext、release/worker 清理） | — | events；bridge；router；explore-query-store |
-| D-178 | implementation（models.explore → completeSimple；分组计划/成组选段/可选补查；不回退主模型） | — | explore-model；explore-tool；session-host |
-| D-179 | implementation（取消来源 tier、删除 windowScore、呈现前视图、首批机会、致命空词法重抛） | — | explore.ts |
+| D-175 | implementation（契约保持；运行时由 D-176–D-188 接线） | — | 设计 2/5.7/6.1；plan 0.7/3.2/3.15/3.16C/E；status；architecture 4.4 |
+| D-176 | superseded in part（查询方法 + 同一引擎门面保持；完整 actor 绑定由 D-182 收口） | D-182 | protocol harness；explore-query-store/services；explore-tool |
+| D-177 | superseded in part（`harness.cancel` / pin 来源保持；授权取消与一条 abort 链由 D-182 收口） | D-182 | events；bridge；router；explore-query-store |
+| D-178 | superseded in part（不回退主模型保持；select rejected、增量材料、deadline signal 由 D-184/D-186 收口） | D-184；D-186 | explore-model；explore-tool；session-host |
+| D-179 | superseded in part（取消来源 tier / 呈现前视图保持；混合评分与 assessment 墙由 D-185 删除） | D-185 | explore.ts |
+| D-182 | implementation（完整 actor 绑定、授权 cancel、终态冻结；取消尾部由 D-187 补齐） | — | explore-query-identity/store/services；router；service-host；explore-tool |
+| D-183 | implementation（start 启动原问题词法；计划/补查进向量；来源状态由 D-187 补齐） | — | explore.ts；protocol sources/incomplete |
+| D-184 | implementation（稳定 viewId、增量 merge、成组 required；拒绝残留/required 顺序由 D-187 补齐） | — | explore.ts；explore-tool；select merge |
+| D-185 | implementation（单元词法/语义名次融合；混合分由 D-187 实际删除） | — | explore.ts |
+| D-186 | implementation（catalog vocab、untrusted prompt、select rejected、关系注解、去掉 2s 门槛、模型接 deadline；真实 catalog 输入由 D-187 修正） | — | explore vocab；explore-model；explore-tool；pack relations |
+| D-187 | implementation（scope 贯穿、真实来源状态、取消/迟到工作、排名与 required 组独立验收收口） | — | query/bridge/router；explore；semantic runtime；protocol；plan/status 3.15 |
+| D-188 | implementation（start 即后台物化；计划/补查复用单 pump；判断预留成为真实来源截止） | — | explore query pump/store；plan/status 3.15 |

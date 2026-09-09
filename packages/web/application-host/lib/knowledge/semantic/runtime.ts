@@ -47,6 +47,23 @@ const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
   setTimeout(resolve, 0);
 });
 
+const waitWithSignal = <T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> => {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      try {
+        signal.throwIfAborted();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+};
+
 export interface SemanticIndexRuntimeOptions {
   dataDir: string;
   hostId: string;
@@ -222,17 +239,27 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     };
   };
 
-  const search = async (scope: SemanticScopeKey, question: string, limit: number): Promise<{
+  const search = async (
+    scope: SemanticScopeKey,
+    question: string,
+    limit: number,
+    searchOptions?: { signal?: AbortSignal },
+  ): Promise<{
     status: SemanticIndexStatus;
     hits: SemanticHit[];
   }> => {
+    const signal = searchOptions?.signal;
+    signal?.throwIfAborted();
     const status = statusFor(scope);
     if (status.status === "unavailable") return { status, hits: [] };
     try {
-      await options.embedder.prepare();
-      const [vector] = await options.embedder.embed([question]);
+      await waitWithSignal(options.embedder.prepare(), signal);
+      signal?.throwIfAborted();
+      const [vector] = await waitWithSignal(options.embedder.embed([question]), signal);
+      signal?.throwIfAborted();
       const store = storeFor(scope);
-      const hits = vector ? await store.search(vector, limit) : [];
+      const hits = vector ? await waitWithSignal(store.search(vector, limit), signal) : [];
+      signal?.throwIfAborted();
       return {
         status: {
           ...status,
@@ -244,6 +271,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         hits,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
       try { options.onError?.(error); } catch { /* query failure is a status */ }
       return { status: { ...status, status: "failed" }, hits: [] };
     }

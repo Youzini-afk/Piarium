@@ -12,6 +12,7 @@ import type {
   ExploreSearchResult,
   HarnessServiceMap,
 } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -28,6 +29,8 @@ import {
 } from "./explore.js";
 import type { ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
+import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
+import { loadSnippetRelations } from "./explore-service.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
@@ -69,14 +72,12 @@ export function bindExploreGraphRecall(
 export function createExploreDeps(
   host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths">,
   ctx: HarnessServiceContext,
-  params: Pick<ExploreParams, "paths">,
   inputContext: AgentInputContext,
   signal: AbortSignal = ctx.signal,
 ): ExploreDeps {
   const workspaceId = ctx.actor.workspaceId;
   const readFile = host.readExploreFile;
   if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
-  let searchPartial = false;
   const deps: ExploreDeps = {
     rgSearch: async (pattern, options) => {
       const roots: Array<string | undefined> = options.paths?.length ? [...new Set(options.paths)] : [undefined];
@@ -100,7 +101,6 @@ export function createExploreDeps(
           throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
         }
         const callPartial = search.partial || (search.filesDropped ?? 0) > 0;
-        searchPartial ||= callPartial;
         return {
           hits: search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))),
           partial: callPartial,
@@ -146,12 +146,14 @@ export function createExploreDeps(
     ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
     ...(host.semanticRecall ? {
       semantic: {
-        search: (question: string, limit?: number) => host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL),
+        search: async (question: string, limit?: number, searchSignal?: AbortSignal) => {
+          const active = searchSignal ?? signal;
+          active.throwIfAborted();
+          return host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, active);
+        },
       },
     } : {}),
   };
-  void params;
-  void searchPartial;
   return deps;
 }
 
@@ -159,33 +161,43 @@ function requireQuery(
   host: Pick<HarnessServiceHost, "exploreQueryStore">,
   ctx: HarnessServiceContext,
   queryId: unknown,
+  access: "mutate" | "finish" | "read" | "control",
 ): StoredExploreQuery {
   if (typeof queryId !== "string" || !queryId.trim()) {
     throw new HarnessServiceError("invalid-params", "Provide the explore query id.");
   }
   const stored = host.exploreQueryStore.get(ctx.sessionId, queryId);
   if (!stored) throw new HarnessServiceError("expired", "Explore query is not active in this session.");
-  if (stored.workspaceId !== ctx.actor.workspaceId) {
-    throw new HarnessServiceError("forbidden", "Explore query does not belong to this workspace.");
+  if (!exploreQueryActorsMatch(stored.actor, ctx.actor)) {
+    throw new HarnessServiceError("forbidden", "Explore query does not belong to this actor.");
   }
-  if (stored.run.terminal() === "cancelled") {
+  const terminal = stored.run.terminal();
+  if (access === "mutate" && terminal !== "active") {
+    throw new HarnessServiceError("expired", "Explore query is no longer active.");
+  }
+  if ((access === "finish" || access === "read") && terminal === "cancelled") {
     throw new HarnessServiceError("expired", "Explore query was cancelled.");
   }
-  const onAbort = (): void => {
-    stored.run.cancel();
-  };
-  if (ctx.signal.aborted) onAbort();
-  else ctx.signal.addEventListener("abort", onAbort, { once: true });
+  if (access === "mutate" || access === "read") {
+    const onAbort = (): void => {
+      stored.run.cancel();
+    };
+    if (ctx.signal.aborted) onAbort();
+    else ctx.signal.addEventListener("abort", onAbort, { once: true });
+  }
   return stored;
 }
 
-export function packExploreSearchResult(
-  host: Pick<HarnessServiceHost, "outputStore">,
+export async function packExploreSearchResult(
+  host: Pick<HarnessServiceHost, "outputStore" | "fileRelations">,
   ctx: HarnessServiceContext,
   result: Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>,
   options?: { traceWindows?: boolean; searchPartial?: boolean },
-): ExploreSearchResult {
+): Promise<ExploreSearchResult> {
   const incomplete = (options?.searchPartial ?? false) || result.searched.incomplete;
+  const relations = ctx.workspaceId && host.fileRelations
+    ? await loadSnippetRelations(host, ctx.workspaceId, result.snippets, ctx.signal)
+    : undefined;
   const formatted = {
     snippets: result.snippets,
     issues: result.issues,
@@ -203,6 +215,8 @@ export function packExploreSearchResult(
     ...(result.details.graph ? { graph: result.details.graph } : {}),
     ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
     ...(result.details.model ? { model: result.details.model } : {}),
+    ...(relations ? { relations } : {}),
+    ...(result.details.sources ? { sources: result.details.sources } : {}),
   };
   const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
   const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
@@ -228,6 +242,8 @@ export function packExploreSearchResult(
       ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
       ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
       ...(result.details.model ? { model: result.details.model } : {}),
+      ...(relations ? { relations } : {}),
+      ...(result.details.sources ? { sources: result.details.sources } : {}),
     },
   };
 }
@@ -249,42 +265,78 @@ export function createExploreQueryStartService(
       if (params.anchors !== undefined && (!Array.isArray(params.anchors) || params.anchors.some((anchor) => typeof anchor !== "string"))) {
         throw new HarnessServiceError("invalid-params", "Anchors must be an array of strings.");
       }
+      if (params.budgetMs !== undefined && (
+        !Number.isFinite(params.budgetMs)
+        || params.budgetMs <= 0
+        || params.budgetMs > HARNESS_MAX_REQUEST_TIMEOUT_MS
+      )) {
+        throw new HarnessServiceError(
+          "invalid-params",
+          `The explore query budget must be between 1 and ${HARNESS_MAX_REQUEST_TIMEOUT_MS}ms.`,
+        );
+      }
+      if (params.reserveForJudge !== undefined && typeof params.reserveForJudge !== "boolean") {
+        throw new HarnessServiceError("invalid-params", "reserveForJudge must be a boolean.");
+      }
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
-      const budgetMs = typeof params.budgetMs === "number" && params.budgetMs > 0
+      const budgetMs = typeof params.budgetMs === "number"
         ? params.budgetMs
         : DEFAULT_EXPLORE_QUERY_BUDGET_MS;
       const queryController = new AbortController();
-      if (ctx.signal.aborted) queryController.abort();
-      else ctx.signal.addEventListener("abort", () => queryController.abort(), { once: true });
-      const stored = host.exploreQueryStore.start({
-        sessionId: ctx.sessionId,
-        workspaceId: ctx.actor.workspaceId,
-        inputContext,
-        input: {
-          question: params.question,
-          ...(params.anchors ? { anchors: params.anchors } : {}),
-          ...(params.paths ? { paths: params.paths } : {}),
-          ...(params.limit ? { limit: params.limit } : {}),
-        },
-        deps: createExploreDeps(host, ctx, params, inputContext, queryController.signal),
-        deadlineAt: Date.now() + budgetMs,
-        reserveForJudgeMs: params.reserveForJudge ? DEFAULT_JUDGE_RESERVE_MS : 0,
-        signal: queryController.signal,
-      });
-      return {
-        queryId: stored.id,
-        question: stored.run.question,
-        deadlineAt: stored.deadlineAt,
-        parsed: {
-          objects: stored.run.parsed.objects,
-          relation: stored.run.parsed.relation,
-          domain: stored.run.parsed.domain,
-        },
-        vocab: stored.run.vocab(),
-        sources: stored.run.sourceStates(),
-        inputSource: stored.inputContext.source,
+      let stored: StoredExploreQuery | undefined;
+      const onStartAbort = (): void => {
+        if (!queryController.signal.aborted) queryController.abort();
+        stored?.run.cancel();
       };
+      if (ctx.signal.aborted) onStartAbort();
+      else ctx.signal.addEventListener("abort", onStartAbort, { once: true });
+      try {
+        const effectivePaths = params.paths?.length
+          ? params.paths
+          : ctx.actor.workspaceScope?.length
+            ? [...ctx.actor.workspaceScope]
+            : undefined;
+        stored = host.exploreQueryStore.start({
+          actor: actorFromHarness(ctx.actor),
+          inputContext,
+          input: {
+            question: params.question,
+            ...(params.anchors ? { anchors: params.anchors } : {}),
+            ...(effectivePaths ? { paths: effectivePaths } : {}),
+            ...(params.limit ? { limit: params.limit } : {}),
+          },
+          deps: createExploreDeps(host, ctx, inputContext, queryController.signal),
+          deadlineAt: Date.now() + budgetMs,
+          reserveForJudgeMs: params.reserveForJudge ? DEFAULT_JUDGE_RESERVE_MS : 0,
+          controller: queryController,
+        });
+        await stored.run.refreshVocab();
+        ctx.signal.throwIfAborted();
+        ctx.deferResponseDelivery?.(
+          () => undefined,
+          () => { if (stored) host.exploreQueryStore.release(ctx.actor, stored.id); },
+        );
+        return {
+          queryId: stored.id,
+          question: stored.run.question,
+          deadlineAt: stored.deadlineAt,
+          parsed: {
+            objects: stored.run.parsed.objects,
+            relation: stored.run.parsed.relation,
+            domain: stored.run.parsed.domain,
+          },
+          vocab: stored.run.vocab(),
+          sources: stored.run.sourceStates(),
+          inputSource: stored.inputContext.source,
+        };
+      } catch (error) {
+        if (stored) host.exploreQueryStore.release(ctx.actor, stored.id);
+        else if (!queryController.signal.aborted) queryController.abort();
+        throw error;
+      } finally {
+        ctx.signal.removeEventListener("abort", onStartAbort);
+      }
     },
   };
 }
@@ -294,7 +346,7 @@ export function createExploreQueryPlanService(
 ): HarnessService<"explore.query.plan"> {
   return {
     handle: async (params: ExploreQueryPlanParams, ctx) => {
-      const stored = requireQuery(host, ctx, params.queryId);
+      const stored = requireQuery(host, ctx, params.queryId, "mutate");
       const submitted = await stored.run.submitPlan(params.plan);
       return {
         queryId: stored.id,
@@ -311,7 +363,7 @@ export function createExploreQueryViewsService(
 ): HarnessService<"explore.query.views"> {
   return {
     handle: async (params: ExploreQueryViewsParams, ctx) => {
-      const stored = requireQuery(host, ctx, params.queryId);
+      const stored = requireQuery(host, ctx, params.queryId, "read");
       await stored.run.waitForViews();
       const views = stored.run.viewsForModel();
       return {
@@ -332,8 +384,8 @@ export function createExploreQuerySelectService(
 ): HarnessService<"explore.query.select"> {
   return {
     handle: async (params: ExploreQuerySelectParams, ctx) => {
-      const stored = requireQuery(host, ctx, params.queryId);
-      const selected = stored.run.applySelection(params.groups);
+      const stored = requireQuery(host, ctx, params.queryId, "mutate");
+      const selected = stored.run.applySelection(params.groups, { merge: params.merge === true });
       return { ...selected, queryId: stored.id };
     },
   };
@@ -344,7 +396,7 @@ export function createExploreQueryFollowupService(
 ): HarnessService<"explore.query.followup"> {
   return {
     handle: async (params: ExploreQueryFollowupParams, ctx) => {
-      const stored = requireQuery(host, ctx, params.queryId);
+      const stored = requireQuery(host, ctx, params.queryId, "mutate");
       const result = await stored.run.followup(params);
       return {
         queryId: stored.id,
@@ -358,13 +410,14 @@ export function createExploreQueryFollowupService(
 }
 
 export function createExploreQueryFinishService(
-  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore">,
+  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore" | "fileRelations">,
   options?: { traceWindows?: boolean },
 ): HarnessService<"explore.query.finish"> {
   return {
     handle: async (params: ExploreQueryFinishParams & { model?: ExploreModelParticipation }, ctx) => {
-      const stored = requireQuery(host, ctx, params.queryId);
+      const stored = requireQuery(host, ctx, params.queryId, "finish");
       const result = stored.run.finish(params.model);
+      if (!stored.controller.signal.aborted) stored.controller.abort();
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue: ExploreIssue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
@@ -378,7 +431,7 @@ export function createExploreQueryCancelService(
 ): HarnessService<"explore.query.cancel"> {
   return {
     handle: async (params: ExploreQueryCancelParams, ctx) => ({
-      cancelled: host.exploreQueryStore.cancel(ctx.sessionId, params.queryId),
+      cancelled: host.exploreQueryStore.cancel(ctx.actor, params.queryId),
     }),
   };
 }
@@ -388,7 +441,7 @@ export function createExploreQueryReleaseService(
 ): HarnessService<"explore.query.release"> {
   return {
     handle: async (params: ExploreQueryReleaseParams, ctx) => ({
-      released: host.exploreQueryStore.release(ctx.sessionId, params.queryId),
+      released: host.exploreQueryStore.release(ctx.actor, params.queryId),
     }),
   };
 }

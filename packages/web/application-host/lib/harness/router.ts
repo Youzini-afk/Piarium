@@ -53,7 +53,7 @@ export interface HarnessRouterOptions {
     options: { allowMissing: boolean },
   ) => Promise<HarnessAuthorizedPath | null>;
   defaultTimeoutMs?: number;
-  cancelExploreQuery?: (sessionId: string, queryId: string) => boolean;
+  cancelExploreQuery?: (actor: HarnessActorContext, queryId: string) => boolean;
 }
 
 interface RouterHostEvent {
@@ -170,30 +170,61 @@ const harnessError = (code: HarnessError["code"], message: string, retryable = f
 export const createHarnessRouter = (options: HarnessRouterOptions) => {
   const services = new Map<HarnessMethod, HarnessService<HarnessMethod>>();
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
-  const inflight = new Map<string, { controller: AbortController; sessionId: string; queryId?: string }>();
+  const inflight = new Map<string, {
+    controller: AbortController;
+    identity: HarnessActorIdentity;
+    sessionId: string;
+    queryId?: string;
+  }>();
   let disposed = false;
 
   const register = <M extends HarnessMethod>(method: M, service: HarnessService<M>): void => {
     services.set(method, service as HarnessService<HarnessMethod>);
   };
 
-  const abortInflight = (requestId: string): boolean => {
-    const pending = inflight.get(requestId);
+  const abortInflight = (key: string): boolean => {
+    const pending = inflight.get(key);
     if (!pending) return false;
     pending.controller.abort();
     return true;
   };
 
-  const processCancel = (event: RouterHostEvent): void => {
+  const requestKey = (identity: HarnessActorIdentity, requestId: string): string => [
+    identity.authorityInstanceId,
+    identity.sessionId,
+    identity.workerId,
+    identity.workerGeneration,
+    identity.runId ?? "",
+    requestId,
+  ].join("\0");
+
+  const sameRequestActor = (stored: HarnessActorIdentity, current: HarnessActorIdentity): boolean => (
+    stored.authorityInstanceId === current.authorityInstanceId
+    && stored.sessionId === current.sessionId
+    && stored.workerId === current.workerId
+    && stored.workerGeneration === current.workerGeneration
+    && (stored.runId ?? "") === (current.runId ?? "")
+  );
+
+  const processCancel = async (event: RouterHostEvent): Promise<void> => {
     const data = event.envelope?.data as HarnessCancelData | undefined;
-    const sessionId = event.actor?.sessionId;
-    if (!data || !sessionId) return;
-    if (typeof data.requestId === "string" && data.requestId) abortInflight(data.requestId);
+    const identity = event.actor;
+    if (!data || !identity) return;
+    const actor = await options.resolveActor(identity);
+    if (!actor) return;
+    if (!actor.grantedCapabilities.includes(HARNESS_METHOD_CAPABILITY["explore.query.cancel"])) return;
+    if (typeof data.requestId === "string" && data.requestId) {
+      const key = requestKey(actor, data.requestId);
+      const pending = inflight.get(key);
+      if (pending && sameRequestActor(pending.identity, actor)) abortInflight(key);
+    }
     if (typeof data.queryId === "string" && data.queryId) {
-      for (const [requestId, pending] of inflight) {
-        if (pending.sessionId === sessionId && pending.queryId === data.queryId) abortInflight(requestId);
+      for (const [key, pending] of inflight) {
+        if (pending.queryId === data.queryId && sameRequestActor(pending.identity, actor)) {
+          abortInflight(key);
+        }
       }
-      options.cancelExploreQuery?.(sessionId, data.queryId);
+      options.cancelExploreQuery?.(actor, data.queryId);
     }
   };
 
@@ -201,7 +232,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     if (disposed) return;
     if (event.kind !== "host" || event.envelope?.kind !== "event") return;
     if (event.envelope.event === "harness.cancel") {
-      processCancel(event);
+      await processCancel(event);
       return;
     }
     if (event.envelope.event !== "harness.request") return;
@@ -224,8 +255,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       && typeof (data.params as { queryId?: unknown }).queryId === "string"
       ? (data.params as { queryId: string }).queryId
       : undefined;
-    inflight.set(data.requestId, {
+    const inflightKey = requestKey(identity, data.requestId);
+    inflight.set(inflightKey, {
       controller,
+      identity,
       sessionId: identity.sessionId,
       ...(queryId ? { queryId } : {}),
     });
@@ -349,7 +382,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       });
     } finally {
       clearTimeout(timer);
-      inflight.delete(data.requestId);
+      inflight.delete(inflightKey);
     }
   };
 

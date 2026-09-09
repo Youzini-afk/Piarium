@@ -9,6 +9,7 @@ import type {
 } from "@piarium/protocol";
 
 interface PendingRequest {
+  cleanup?: () => void;
   resolve: (value: unknown) => void;
   reject: (error: HarnessRequestError) => void;
   sessionId: string;
@@ -59,7 +60,7 @@ export class HostServicesBridge {
 
   cancel(data: HarnessCancelData): void {
     if (this.#disposed) return;
-    this.#emit("harness.cancel", data);
+    this.#emitCancel(data);
   }
 
   request<M extends HarnessMethod>(
@@ -81,25 +82,30 @@ export class HostServicesBridge {
     const timer = setTimeout(() => {
       const pending = this.#pending.get(requestId);
       if (!pending) return;
+      this.#emitCancel({ requestId });
       this.#pending.delete(requestId);
+      pending.cleanup?.();
       pending.reject(new HarnessRequestError("timeout", `harness request timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    this.#pending.set(requestId, {
+    const pending: PendingRequest = {
       resolve: resolveResponse,
       reject: rejectResponse,
       sessionId: this.#sessionId,
       timer,
-    });
+    };
+    this.#pending.set(requestId, pending);
     if (options?.signal?.aborted) {
-      this.#emit("harness.cancel", { requestId });
+      this.#emitCancel({ requestId });
       this.#cancel(requestId, new HarnessRequestError("failed", "aborted"));
       return response as Promise<HarnessServiceMap[M]["result"]>;
     }
     if (options?.signal) {
-      options.signal.addEventListener("abort", () => {
-        this.#emit("harness.cancel", { requestId });
+      const onAbort = (): void => {
+        this.#emitCancel({ requestId });
         this.#cancel(requestId, new HarnessRequestError("failed", "aborted"));
-      }, { once: true });
+      };
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      pending.cleanup = () => options.signal?.removeEventListener("abort", onAbort);
     }
     try {
       const inputContext = options?.inputContext ?? this.#getInputContext?.();
@@ -128,6 +134,7 @@ export class HostServicesBridge {
     if (!pending || pending.sessionId !== sessionId) return false;
     this.#pending.delete(requestId);
     if (pending.timer) clearTimeout(pending.timer);
+    pending.cleanup?.();
     if (outcome.ok) {
       pending.resolve(outcome.result);
     } else {
@@ -145,14 +152,25 @@ export class HostServicesBridge {
     if (!pending) return;
     this.#pending.delete(requestId);
     if (pending.timer) clearTimeout(pending.timer);
+    pending.cleanup?.();
     pending.reject(error);
+  }
+
+  #emitCancel(data: HarnessCancelData): void {
+    try {
+      this.#emit("harness.cancel", data);
+    } catch {
+      // Local completion still has to settle even when the transport is gone.
+    }
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    for (const pending of this.#pending.values()) {
+    for (const [requestId, pending] of this.#pending) {
+      this.#emitCancel({ requestId });
       if (pending.timer) clearTimeout(pending.timer);
+      pending.cleanup?.();
       pending.reject(new HarnessRequestError("failed", "disposed"));
     }
     this.#pending.clear();

@@ -1,14 +1,19 @@
 import { randomUUID } from "node:crypto";
-import type { AgentInputContext } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorIdentity } from "@piarium/protocol";
 import {
   createExploreQueryRun,
   type ExploreDeps,
   type ExploreInput,
   type ExploreQueryRun,
 } from "./explore.js";
+import {
+  exploreQueryActorsMatch,
+  type ExploreQueryActor,
+} from "./explore-query-identity.js";
 
 export interface StoredExploreQuery {
   id: string;
+  actor: ExploreQueryActor;
   sessionId: string;
   workspaceId: string | null;
   inputContext: AgentInputContext;
@@ -20,21 +25,21 @@ export interface StoredExploreQuery {
 }
 
 export interface ExploreQueryStoreStart {
-  sessionId: string;
-  workspaceId: string | null;
+  actor: ExploreQueryActor;
   inputContext: AgentInputContext;
   input: ExploreInput;
   deps: ExploreDeps;
   deadlineAt: number;
   reserveForJudgeMs?: number;
-  signal?: AbortSignal;
+  /** Single abort for this query: model waiters, rg, read, structure, graph, semantic. */
+  controller: AbortController;
 }
 
 export interface ExploreQueryStore {
   start(request: ExploreQueryStoreStart): StoredExploreQuery;
   get(sessionId: string, queryId: string): StoredExploreQuery | undefined;
-  cancel(sessionId: string, queryId: string): boolean;
-  release(sessionId: string, queryId: string): boolean;
+  cancel(actor: HarnessActorIdentity & { workspaceId?: string | null }, queryId: string): boolean;
+  release(actor: HarnessActorIdentity & { workspaceId?: string | null }, queryId: string): boolean;
   dropSession(sessionId: string): void;
   dispose(): void;
 }
@@ -46,20 +51,17 @@ export function createExploreQueryStore(): ExploreQueryStore {
 
   const start = (request: ExploreQueryStoreStart): StoredExploreQuery => {
     const id = `eq_${randomUUID()}`;
-    const controller = new AbortController();
-    if (request.signal) {
-      if (request.signal.aborted) controller.abort();
-      else request.signal.addEventListener("abort", () => controller.abort(), { once: true });
-    }
+    const controller = request.controller;
     const run = createExploreQueryRun(request.input, request.deps, {
       deadlineAt: request.deadlineAt,
       ...(request.reserveForJudgeMs !== undefined ? { reserveForJudgeMs: request.reserveForJudgeMs } : {}),
-      signal: controller.signal,
+      controller,
     });
     const stored: StoredExploreQuery = {
       id,
-      sessionId: request.sessionId,
-      workspaceId: request.workspaceId,
+      actor: request.actor,
+      sessionId: request.actor.sessionId,
+      workspaceId: request.actor.workspaceId,
       inputContext: request.inputContext,
       ...(request.input.paths ? { paths: request.input.paths } : {}),
       startedAt: Date.now(),
@@ -67,7 +69,12 @@ export function createExploreQueryStore(): ExploreQueryStore {
       controller,
       run,
     };
-    queries.set(keyOf(request.sessionId, id), stored);
+    queries.set(keyOf(request.actor.sessionId, id), stored);
+    const sourceDeadlineAt = request.deadlineAt - (request.reserveForJudgeMs ?? 0);
+    const deadlineTimer = setTimeout(() => {
+      if (!controller.signal.aborted) controller.abort();
+    }, Math.max(0, sourceDeadlineAt - Date.now()));
+    controller.signal.addEventListener("abort", () => clearTimeout(deadlineTimer), { once: true });
     run.start();
     return stored;
   };
@@ -76,18 +83,29 @@ export function createExploreQueryStore(): ExploreQueryStore {
     queries.get(keyOf(sessionId, queryId))
   );
 
-  const cancel = (sessionId: string, queryId: string): boolean => {
-    const stored = get(sessionId, queryId);
+  const requireOwned = (
+    actor: HarnessActorIdentity & { workspaceId?: string | null },
+    queryId: string,
+  ): StoredExploreQuery | undefined => {
+    const stored = get(actor.sessionId, queryId);
+    if (!stored || !exploreQueryActorsMatch(stored.actor, actor)) return undefined;
+    return stored;
+  };
+
+  const cancel = (actor: HarnessActorIdentity & { workspaceId?: string | null }, queryId: string): boolean => {
+    const stored = requireOwned(actor, queryId);
     if (!stored) return false;
     stored.run.cancel();
+    if (!stored.controller.signal.aborted) stored.controller.abort();
     return true;
   };
 
-  const release = (sessionId: string, queryId: string): boolean => {
-    const stored = get(sessionId, queryId);
+  const release = (actor: HarnessActorIdentity & { workspaceId?: string | null }, queryId: string): boolean => {
+    const stored = requireOwned(actor, queryId);
     if (!stored) return false;
     if (stored.run.terminal() === "active") stored.run.cancel();
-    queries.delete(keyOf(sessionId, queryId));
+    if (!stored.controller.signal.aborted) stored.controller.abort();
+    queries.delete(keyOf(actor.sessionId, queryId));
     return true;
   };
 
@@ -95,12 +113,16 @@ export function createExploreQueryStore(): ExploreQueryStore {
     for (const [key, stored] of queries) {
       if (stored.sessionId !== sessionId) continue;
       stored.run.cancel();
+      if (!stored.controller.signal.aborted) stored.controller.abort();
       queries.delete(key);
     }
   };
 
   const dispose = (): void => {
-    for (const stored of queries.values()) stored.run.cancel();
+    for (const stored of queries.values()) {
+      stored.run.cancel();
+      if (!stored.controller.signal.aborted) stored.controller.abort();
+    }
     queries.clear();
   };
 

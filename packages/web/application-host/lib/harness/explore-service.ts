@@ -52,7 +52,7 @@ const ownedDirtyPathsFor = (
  * (plan 0.4). A revision that differs from the excerpt is reported as `stale`
  * rather than printed as current (agent-harness 7.2, D-112).
  */
-async function loadSnippetRelations(
+export async function loadSnippetRelations(
   host: Pick<HarnessServiceHost, "fileRelations">,
   workspaceId: string,
   snippets: ReadonlyArray<{ path: string; revision: string }>,
@@ -115,8 +115,11 @@ export function createExploreSearchService(
       if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
+      const effectiveParams: ExploreParams = params.paths?.length || !ctx.actor.workspaceScope?.length
+        ? params
+        : { ...params, paths: [...ctx.actor.workspaceScope] };
       let searchPartial = false;
-      const result = await explore(params, {
+      const result = await explore(effectiveParams, {
         rgSearch: async (pattern, options) => {
           const roots: Array<string | undefined> = options.paths?.length ? [...new Set(options.paths)] : [undefined];
           const batches = await Promise.all(roots.map(async (path) => {
@@ -136,7 +139,7 @@ export function createExploreSearchService(
             });
             ctx.signal.throwIfAborted();
             if (search.status === "unavailable") {
-              const dirtyIssues = await collectDirtySourceIssues(params, ctx, inputContext, host, readFile);
+                  const dirtyIssues = await collectDirtySourceIssues(effectiveParams, ctx, inputContext, host, readFile);
               if (dirtyIssues.length > 0) {
                 throw new HarnessServiceError(
                   "unavailable",
@@ -196,7 +199,9 @@ export function createExploreSearchService(
         ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId) } : {}),
         ...(host.semanticRecall ? {
           semantic: {
-            search: (question: string, limit?: number) => host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL),
+            search: (question: string, limit?: number, signal?: AbortSignal) => (
+              host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, signal ?? ctx.signal)
+            ),
           },
         } : {}),
       }, ctx.signal);
@@ -222,6 +227,7 @@ export function createExploreSearchService(
         ...(relations ? { relations } : {}),
         ...(result.details.graph ? { graph: result.details.graph } : {}),
         ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
+        ...(result.details.sources ? { sources: result.details.sources } : {}),
       };
       const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
       const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
@@ -247,6 +253,7 @@ export function createExploreSearchService(
           ...(result.details.distinctiveness ? { distinctiveness: result.details.distinctiveness } : {}),
           ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
           ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
+          ...(result.details.sources ? { sources: result.details.sources } : {}),
         },
       };
     },

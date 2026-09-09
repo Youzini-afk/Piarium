@@ -148,4 +148,30 @@ describe("semantic index runtime", () => {
     expect(progress).toEqual([{ processedFiles: 2, totalFiles: 2, publishedDocuments: 2 }]);
     expect(runtime.statusFor(scope).coverage).toBe("complete");
   });
+
+  it("stops waiting for an in-flight query embedding when the caller cancels", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const base = createHashEmbedder();
+    let resolveEmbedding!: (vectors: number[][]) => void;
+    const embedding = new Promise<number[][]>((resolve) => { resolveEmbedding = resolve; });
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "semantic-host-cancel",
+      documents: documents.authority,
+      structureSource: parsingSource(),
+      embedder: { ...base, embed: async () => embedding },
+    });
+    disposes.push(() => runtime.dispose());
+    const controller = new AbortController();
+    const pending = runtime.search(
+      workspaceScope(documents.identity.workspaceId),
+      "cancel this query",
+      8,
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    resolveEmbedding([new Array(base.space.dim).fill(0)]);
+  });
 });

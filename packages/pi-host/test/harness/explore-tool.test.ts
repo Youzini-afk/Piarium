@@ -89,4 +89,149 @@ describe("Host-backed explore tool", () => {
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", "  "] }), true);
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: [7] }), false);
   });
+
+  it("does not mark select as used when the Host rejects every chosen view", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const bridge = {
+      inputContext: () => ({ source: "disk" as const }),
+      cancel: () => undefined,
+      request: async (method: string, params: Record<string, unknown>) => {
+        calls.push({ method, params });
+        if (method === "explore.query.start") {
+          return {
+            queryId: "eq_test",
+            question: params.question,
+            deadlineAt: Date.now() + 10_000,
+            parsed: { objects: [], relation: "unknown", domain: "unknown" },
+            vocab: { objects: [], anchors: [] },
+            sources: [],
+            inputSource: "disk",
+          };
+        }
+        if (method === "explore.query.views") {
+          return {
+            queryId: "eq_test",
+            question: "how does reclaim work",
+            views: [{
+              viewId: "v1",
+              path: "a.ts",
+              startLine: 1,
+              endLine: 1,
+              text: "reclaim",
+              revision: "r1",
+              source: "disk",
+              ranges: [{ rangeId: "v1:full", startLine: 1, endLine: 1 }],
+              arrivals: [],
+              assessment: "object-present",
+              purpose: "candidate",
+              why: "hit",
+            }],
+            unevaluated: 0,
+            sources: [],
+            deadlineAt: Date.now() + 10_000,
+          };
+        }
+        if (method === "explore.query.select") {
+          return { queryId: "eq_test", accepted: [], rejected: [{ viewId: "v1", reason: "unknown" }], gaps: [] };
+        }
+        if (method === "explore.query.finish") {
+          return {
+            ...finishResult,
+            details: {
+              ...finishResult.details,
+              model: (params as { model?: { select?: string } }).model,
+            },
+          };
+        }
+        if (method === "explore.query.release") return { released: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createExploreTool(bridge, "session", {
+      complete: async () => JSON.stringify({
+        groups: [{ id: "sel1", purpose: "x", views: [{ viewId: "v1", rangeIds: ["v1:full"], required: true }] }],
+      }),
+    });
+    const result = await tool.execute(
+      "call",
+      { question: "how does reclaim work" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    const finish = calls.find((call) => call.method === "explore.query.finish");
+    assert.equal((finish?.params.model as { select?: string } | undefined)?.select, "skipped");
+    assert.equal((result.details as { model?: { select?: string } }).model?.select, "skipped");
+  });
+
+  it("keeps an accepted selection when the optional incremental follow-up fails", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const view = (viewId: string, path: string) => ({
+      viewId,
+      path,
+      startLine: 1,
+      endLine: 1,
+      text: "reclaim",
+      revision: "r1",
+      source: "disk",
+      ranges: [{ rangeId: `${viewId}:full`, startLine: 1, endLine: 1 }],
+      arrivals: [],
+      assessment: "unverified",
+      purpose: "candidate",
+      why: "hit",
+    });
+    const bridge = {
+      inputContext: () => ({ source: "disk" as const }),
+      cancel: () => undefined,
+      request: async (method: string, params: Record<string, unknown>) => {
+        calls.push({ method, params });
+        if (method === "explore.query.start") return {
+          queryId: "eq_test",
+          question: params.question,
+          deadlineAt: Date.now() + 10_000,
+          parsed: { objects: [], relation: "unknown", domain: "implementation" },
+          vocab: { objects: [], anchors: [] },
+          sources: [],
+          inputSource: "disk",
+        };
+        if (method === "explore.query.plan") return { queryId: "eq_test", launched: ["reclaimLease"], reused: [], sources: [] };
+        if (method === "explore.query.views") return {
+          queryId: "eq_test",
+          question: "how does reclaim work",
+          views: [view("v1", "a.ts")],
+          unevaluated: 0,
+          sources: [],
+          deadlineAt: Date.now() + 10_000,
+        };
+        if (method === "explore.query.select") return { queryId: "eq_test", accepted: [{ groupId: "sel1", viewIds: ["v1"] }], rejected: [], gaps: [] };
+        if (method === "explore.query.followup") return { queryId: "eq_test", launched: ["reclaimNow"], reused: [], newViews: [view("v2", "b.ts")], sources: [] };
+        if (method === "explore.query.finish") return {
+          ...finishResult,
+          details: { ...finishResult.details, model: (params as { model?: unknown }).model },
+        };
+        if (method === "explore.query.release") return { released: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    let completion = 0;
+    const tool = createExploreTool(bridge, "session", {
+      complete: async () => {
+        completion += 1;
+        if (completion === 1) return JSON.stringify({ behavior: "reclaim", groups: [{ id: "g1", concept: "reclaim", expressions: ["reclaimLease"] }] });
+        if (completion === 2) return JSON.stringify({
+          groups: [{ id: "sel1", purpose: "reclaim path", views: [{ viewId: "v1", rangeIds: ["v1:full"], required: true }] }],
+          followup: { searches: [{ expression: "reclaimNow" }] },
+        });
+        throw new Error("incremental model failed");
+      },
+    });
+    await tool.execute("call", { question: "how does reclaim work" }, undefined, undefined, undefined as never);
+    const finish = calls.find((call) => call.method === "explore.query.finish");
+    assert.deepEqual(finish?.params.model, {
+      plan: "used",
+      select: "used",
+      followup: "failed",
+      note: "Explore follow-up failed; the earlier accepted material was kept.",
+    });
+  });
 });

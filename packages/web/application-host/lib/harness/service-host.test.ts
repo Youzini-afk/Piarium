@@ -73,4 +73,46 @@ describe("harness service host authorization", () => {
       await host.dispose();
     }
   });
+
+  it("drops explore queries when the same session is registered again", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+    });
+    try {
+      host.registerSession({
+        actor: ACTOR,
+        grantedCapabilities: ["read.search"],
+        workspaceId: "workspace-1",
+        workspaceRoot: "D:/workspace",
+      });
+      const stored = host.exploreQueryStore.start({
+        actor: {
+          authorityInstanceId: ACTOR.authorityInstanceId,
+          sessionId: ACTOR.sessionId,
+          workerId: ACTOR.workerId,
+          workerGeneration: ACTOR.workerGeneration,
+          workspaceId: "workspace-1",
+        },
+        inputContext: { source: "disk" },
+        input: { question: "needle" },
+        deps: {
+          rgSearch: async () => [],
+          readFile: async () => ({ status: "ready", content: "needle", revision: "r1", source: "disk" }),
+        },
+        deadlineAt: Date.now() + 5_000,
+        controller: new AbortController(),
+      });
+      expect(host.exploreQueryStore.get(ACTOR.sessionId, stored.id)).toBeDefined();
+      host.registerSession({
+        actor: { ...ACTOR, workerGeneration: 4 },
+        grantedCapabilities: ["read.search"],
+        workspaceId: "workspace-1",
+        workspaceRoot: "D:/workspace",
+      });
+      expect(host.exploreQueryStore.get(ACTOR.sessionId, stored.id)).toBeUndefined();
+    } finally {
+      await host.dispose();
+    }
+  });
 });

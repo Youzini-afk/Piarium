@@ -311,8 +311,8 @@ describe("harness router", () => {
         responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
       },
       resolveActor: async () => resolvedActor(["read.search"]),
-      cancelExploreQuery: (sessionId, queryId) => {
-        cancelled.push(`${sessionId}:${queryId}`);
+      cancelExploreQuery: (actor, queryId) => {
+        cancelled.push(`${actor.sessionId}:${queryId}`);
         return true;
       },
     });
@@ -346,6 +346,59 @@ describe("harness router", () => {
     expect(cancelled).toEqual(["session-1:eq_1"]);
     expect(responses).toEqual([{ ok: false, code: "timeout" }]);
     router.dispose();
+  });
+
+  it("does not abort another session's inflight requestId on harness.cancel", async () => {
+    const cancelled: string[] = [];
+    let sawAbort = false;
+    let entered!: () => void;
+    const enteredHandle = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const router = createHarnessRouter({
+      respond: async () => undefined,
+      resolveActor: async (identity) => ({
+        ...identity,
+        workspaceId: "workspace-1",
+        grantedCapabilities: ["read.search"],
+      }),
+      cancelExploreQuery: (actor, queryId) => {
+        cancelled.push(`${actor.sessionId}:${queryId}`);
+        return true;
+      },
+    });
+    router.register("explore.query.views", {
+      handle: async (_params, ctx) => {
+        entered();
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            sawAbort = true;
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          };
+          if (ctx.signal.aborted) fail();
+          else ctx.signal.addEventListener("abort", fail, { once: true });
+        });
+        return { queryId: "eq_1", question: "x", views: [], unevaluated: 0, sources: [], deadlineAt: Date.now() };
+      },
+    });
+    const pending = router.processEvent(harnessEvent("explore.query.views", { queryId: "eq_1" }, { requestId: "req-wait" }));
+    await enteredHandle;
+    await router.processEvent({
+      actor: { ...ACTOR, sessionId: "session-other", workerId: "worker-other" },
+      kind: "host",
+      envelope: {
+        event: "harness.cancel",
+        kind: "event",
+        data: { requestId: "req-wait", queryId: "eq_1" },
+      },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(sawAbort).toBe(false);
+    expect(cancelled).toEqual(["session-other:eq_1"]);
+    router.dispose();
+    await pending.catch(() => undefined);
   });
 
   it("ignores non-harness events and harness events without a broker actor", async () => {
