@@ -501,6 +501,7 @@ export function createRecallSearchService(host: HarnessServiceHost): HarnessServ
           const title = content.split("\n")[0] ?? content;
           return { scope, title, via: r.via, id: r.node.id };
         }),
+        details: result.details,
       };
     },
   };

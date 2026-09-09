@@ -12,17 +12,25 @@
  */
 
 import type { KnowledgeStore, RecallResult } from "../knowledge/store.js";
+import {
+  recallWorkspaceAndUser,
+  type KnowledgeRecallDetails,
+  type KnowledgeVectorRuntime,
+} from "../knowledge/vectors/index.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface RecallToolResult {
   text: string;
   results: RecallResult[];
+  details: KnowledgeRecallDetails;
 }
 
 export interface RecallToolDeps {
   workspaceStore: KnowledgeStore;
   userStore: KnowledgeStore | null;
+  workspaceId?: string;
+  vectors?: KnowledgeVectorRuntime;
 }
 
 // ── Tool execution ─────────────────────────────────────────────────
@@ -33,14 +41,15 @@ export async function executeRecall(
   deps: RecallToolDeps,
 ): Promise<RecallToolResult> {
   const { workspaceStore, userStore } = deps;
-
-  const workspaceResults = await workspaceStore.recall(query, k);
-  const userResults = userStore ? await userStore.recall(query, k) : [];
-
-  // Merge by score, take top k
-  const all = [...workspaceResults, ...userResults]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
+  const recalled = await recallWorkspaceAndUser({
+    workspaceStore,
+    userStore,
+    workspaceId: deps.workspaceId ?? "local",
+    query,
+    k,
+    ...(deps.vectors ? { vectors: deps.vectors } : {}),
+  });
+  const all = recalled.results;
 
   const lines = all.map((r) => {
     const payload = r.node.payload as Record<string, unknown>;
@@ -51,7 +60,7 @@ export async function executeRecall(
   });
 
   const text = `${all.length} memories for "${query}"\n${lines.join("\n")}`;
-  return { text, results: all };
+  return { text, results: all, details: recalled.details };
 }
 
 // ── Prompt ─────────────────────────────────────────────────────────
@@ -67,7 +76,12 @@ export const RECALL_PROMPT_SNIPPET =
  * Only allows knowledge nodes (no events, sessions, or blocks).
  */
 export async function openUserKnowledgeStore(
-  deps: { dataDir: string; hostId: string; embedding: import("../knowledge/store.js").EmbeddingProvider | null },
+  deps: {
+    dataDir: string;
+    hostId: string;
+    embedding: import("../knowledge/store.js").EmbeddingProvider | null;
+    onKnowledgeChanged?: (ids: readonly number[]) => void;
+  },
 ): Promise<KnowledgeStore> {
   // Reuse openWorkspaceKnowledge with a special workspaceId "user"
   const { openWorkspaceKnowledge } = await import("../knowledge/store.js");
@@ -76,6 +90,7 @@ export async function openUserKnowledgeStore(
     hostId: deps.hostId,
     workspaceId: "user",
     embedding: deps.embedding,
+    ...(deps.onKnowledgeChanged ? { onKnowledgeChanged: deps.onKnowledgeChanged } : {}),
   });
 
   // Wrap to reject non-knowledge writes

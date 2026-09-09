@@ -534,6 +534,17 @@ describe("KnowledgeStore", () => {
       expect(results.every((r) => r.via === "text")).toBe(true);
     });
 
+    it("does not return user-scope rows from a workspace store", async () => {
+      await store.putKnowledge({
+        scope: "user",
+        status: "accepted",
+        content: "private user note about testing",
+        trigger: "testing",
+      });
+      const results = await store.recall("testing", 5);
+      expect(results).toEqual([]);
+    });
+
     it("records recall count for knowledge nodes", async () => {
       const id = await store.putKnowledge({
         scope: "workspace",

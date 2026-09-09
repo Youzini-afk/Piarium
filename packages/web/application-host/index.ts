@@ -54,6 +54,8 @@ import { createSemanticIndexRuntime } from './lib/knowledge/semantic/runtime.js'
 import { createSemanticBackend } from './lib/knowledge/semantic/backend.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
+import { createKnowledgeVectorRuntime, recallWorkspaceAndUser } from './lib/knowledge/vectors/index.js';
+import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './lib/knowledge/semantic/workspace-inference.js';
 import { pinSemanticQueryView } from './lib/knowledge/semantic/query-view.js';
 import {
@@ -1147,6 +1149,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const knowledgeStoreLoads = new Map<string, Promise<KnowledgeStore>>();
   let userKnowledgeStore: KnowledgeStore | null = null;
   let userKnowledgeStoreLoad: Promise<KnowledgeStore> | null = null;
+  let knowledgeVectors: KnowledgeVectorRuntime | null = null;
   const sessionStores = new Map<string, KnowledgeStore>();
   const hostId = extensionRuntime.services.hostId;
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
@@ -1379,7 +1382,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       dataDir: PIARIUM_DATA_DIR,
       hostId,
       workspaceId,
-      embedding: null, // Placeholder vectors — see D-019/D-020
+      embedding: null, // Authority .tdb stays placeholder-dim; knowledge vectors are derived (D-196)
+      onKnowledgeChanged: (ids) => {
+        const store = knowledgeStores.get(workspaceId);
+        if (!store || !knowledgeVectors) return;
+        knowledgeVectors.notify(store, 'workspace', workspaceId, workspaceId, ids);
+      },
       onBlocksChanged: (sessionId, change) => {
         observeKnowledgeBlockChange(workspaceId, sessionId, change);
         broadcastGlobalUiEvent?.({
@@ -1390,6 +1398,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }).then((store) => {
       knowledgeStores.set(workspaceId, store);
       catalogScan.start(workspaceId);
+      knowledgeVectors?.scheduleReconcile(store, 'workspace', workspaceId, workspaceId);
       return store;
     });
     knowledgeStoreLoads.set(workspaceId, loading);
@@ -1420,8 +1429,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         dataDir: PIARIUM_DATA_DIR,
         hostId,
         embedding: null,
+        onKnowledgeChanged: (ids) => {
+          if (!userKnowledgeStore || !knowledgeVectors) return;
+          const workspaceId = knowledgeStores.keys().next().value;
+          if (!workspaceId) return;
+          knowledgeVectors.notify(userKnowledgeStore, 'user', 'user', workspaceId, ids);
+        },
       }).then((store) => {
         userKnowledgeStore = store;
+        const workspaceId = knowledgeStores.keys().next().value;
+        if (workspaceId) knowledgeVectors?.scheduleReconcile(store, 'user', 'user', workspaceId);
         return store;
       });
     }
@@ -1434,6 +1451,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForWorkspace,
+    recall: async (workspaceId, store, query) => {
+      if (!knowledgeVectors) return store.recall(query, 5);
+      const { results } = await recallWorkspaceAndUser({
+        workspaceStore: store,
+        userStore: await getUserKnowledgeStore(),
+        workspaceId,
+        query,
+        k: 5,
+        vectors: knowledgeVectors,
+      });
+      return results;
+    },
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
   const decisionSuggestionRuntime = createDecisionSuggestionRuntime({
@@ -1660,6 +1689,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticWorkspaceLoads.set(workspaceId, loading);
     try { return await loading; } finally { semanticWorkspaceLoads.delete(workspaceId); }
   };
+  knowledgeVectors = createKnowledgeVectorRuntime({
+    dataDir: PIARIUM_DATA_DIR,
+    hostId,
+    scheduler: semanticScheduler,
+    cache: semanticVectorCache,
+    resolveEmbedder: async (workspaceId) => {
+      const state = await getSemanticWorkspace(workspaceId);
+      if (state.binding.embedding.status === 'ready') {
+        return { status: 'ready', embedder: state.backend.embedder };
+      }
+      if (state.binding.embedding.status === 'unconfigured') return { status: 'unconfigured' };
+      return {
+        status: state.binding.embedding.status === 'invalid' ? 'invalid' : 'unavailable',
+        ...(state.binding.embedding.message === undefined ? {} : { message: state.binding.embedding.message }),
+      };
+    },
+  });
   catalogScan.start = (workspaceId: string): void => {
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
@@ -1756,9 +1802,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   async function recallDepsProvider(sessionId: string): Promise<RecallToolDeps> {
     const workspaceStore = await getKnowledgeStoreForSession(sessionId);
     if (!workspaceStore) throw new Error('No knowledge store for session');
+    const snapshot = sessionSnapshots.get(sessionId);
+    const workspace = snapshot?.workspace as { kind?: string; id?: string } | undefined;
+    const workspaceId = workspace?.kind === 'workspace' && typeof workspace.id === 'string'
+      ? workspace.id
+      : 'local';
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
+      workspaceId,
+      ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
     };
   }
 

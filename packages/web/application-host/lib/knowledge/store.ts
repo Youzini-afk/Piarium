@@ -11,8 +11,8 @@
  * `associates` is gated on the literal already being a confirmed connection
  * value elsewhere, so `connectionLiterals` must track the connects set (D-109).
  *
- * Placeholder vector mode: dim=8, all-zero vectors, recall uses searchHybrid
- * with hybridAlpha=0 (text + graph only, no vector contribution).
+ * Authority .tdb stays on placeholder dim=8 all-zero vectors. Knowledge
+ * semantic recall lives in a derived generation store (D-196), not here.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -297,6 +297,7 @@ export interface KnowledgeStore {
     expectedScope?: KnowledgeScope,
     expected?: { content: string; trigger: string },
   ): Promise<void>;
+  getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
   acceptKnowledge(id: NodeId, opts: {
     supersedes?: NodeId[] | undefined;
@@ -394,6 +395,7 @@ export interface OpenWorkspaceKnowledgeDeps {
   workspaceId: string;
   embedding: EmbeddingProvider | null;
   onBlocksChanged?: (sessionId: string, change: BlockChange) => void;
+  onKnowledgeChanged?: (ids: readonly NodeId[]) => void;
 }
 
 export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): Promise<KnowledgeStore> {
@@ -404,6 +406,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   const dbPath = join(dbDir, `${workspaceId}.tdb`);
 
+  const recallScope: KnowledgeScope = workspaceId === "user" ? "user" : "workspace";
   const dim = embedding?.dim ?? PLACEHOLDER_DIM;
   const db = new TriviumDB(dbPath, {
     dim,
@@ -460,6 +463,27 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     }
     return results;
   }
+
+  const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
+    if (p["type"] !== "knowledge") return null;
+    const invalidAt = p["invalidAt"] as number | undefined;
+    return {
+      id,
+      scope: p["scope"] as KnowledgeScope,
+      status: p["status"] as KnowledgeStatus,
+      content: p["content"] as string,
+      trigger: p["trigger"] as string,
+      ...(p["source"] ? { source: p["source"] as { sessionId: string; kind: string } } : {}),
+      createdAt: p["createdAt"] as number,
+      ...(invalidAt !== undefined ? { invalidAt } : {}),
+      recallCount: (p["recallCount"] as number) ?? 0,
+      ...(p["recalledAt"] !== undefined ? { recalledAt: p["recalledAt"] as number } : {}),
+    };
+  };
+  const notifyKnowledge = (ids: readonly NodeId[]): void => {
+    if (ids.length === 0 || !deps.onKnowledgeChanged) return;
+    queueMicrotask(() => deps.onKnowledgeChanged?.(ids));
+  };
 
   type StoredBlockNode = { id: number; payload: Record<string, unknown> };
   const blockFromPayload = (payload: Record<string, unknown>): Block => ({
@@ -912,8 +936,15 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, k.content);
         if (k.trigger) db.indexKeyword(id, k.trigger);
         db.flush();
+        notifyKnowledge([id]);
         return id;
       });
+    },
+
+    async getKnowledge(id: NodeId): Promise<Knowledge | null> {
+      const payload = db.getPayload(id) as Record<string, unknown> | null;
+      if (!payload) return null;
+      return knowledgeFromPayload(id, payload);
     },
 
     async listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]> {
@@ -925,20 +956,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         return true;
       });
 
-      const results: Knowledge[] = nodes.map(({ id, payload: p }) => {
-        const invalidAt = p["invalidAt"] as number | undefined;
-        return {
-          id,
-          scope: p["scope"] as KnowledgeScope,
-          status: p["status"] as KnowledgeStatus,
-          content: p["content"] as string,
-          trigger: p["trigger"] as string,
-          ...(p["source"] ? { source: p["source"] as { sessionId: string; kind: string } } : {}),
-          createdAt: p["createdAt"] as number,
-          ...(invalidAt !== undefined ? { invalidAt } : {}),
-          recallCount: (p["recallCount"] as number) ?? 0,
-          ...(p["recalledAt"] !== undefined ? { recalledAt: p["recalledAt"] as number } : {}),
-        };
+      const results: Knowledge[] = nodes.flatMap(({ id, payload: p }) => {
+        const parsed = knowledgeFromPayload(id, p);
+        return parsed ? [parsed] : [];
       });
       return results.sort((a, b) => b.createdAt - a.createdAt);
     },
@@ -963,6 +983,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, patch.content);
         if (patch.trigger) db.indexKeyword(id, patch.trigger);
         db.flush();
+        notifyKnowledge([id]);
       });
     },
 
@@ -1018,6 +1039,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           }
         }
         db.flush();
+        notifyKnowledge([id, ...superseded]);
       });
     },
 
@@ -1036,6 +1058,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         db.patchPayload(id, { $set: { status: "dismissed" } });
         db.flush();
+        notifyKnowledge([id]);
       });
     },
 
@@ -1056,64 +1079,34 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     },
 
     async recall(query: string, k: number): Promise<RecallResult[]> {
-      // Placeholder vector mode: hybridAlpha=0 → text + graph only
-      // In placeholder mode, searchHybrid with zero vectors may not return
-      // useful results. Fall back to scanning knowledge nodes and matching
-      // on trigger/content text.
-      if (!embedding) {
-        const nodes = scanNodes((p) =>
-          p["type"] === "knowledge" && p["status"] === "accepted" && p["invalidAt"] === undefined,
-        );
-        const queryLower = query.toLowerCase();
-        const scored = nodes.map(({ id, payload }) => {
-          const content = (payload["content"] as string) ?? "";
-          const trigger = (payload["trigger"] as string) ?? "";
-          const text = `${content} ${trigger}`.toLowerCase();
-          // Simple BM25-like scoring: count query term occurrences
-          const terms = queryLower.split(/\s+/).filter(Boolean);
-          let score = 0;
-          for (const term of terms) {
-            if (text.includes(term)) score += 1;
-          }
-          return { id, payload, score, via: "text" as const };
-        }).filter((r) => r.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, k);
-
-        const results: RecallResult[] = scored.map(({ id, payload, score, via }) => ({
-          node: { id, type: "knowledge", payload },
-          score,
-          via,
-        }));
-
-        // Record recall for knowledge nodes
-        if (results.length > 0) {
-          await store.recordRecall(results.map((r) => r.node.id));
+      const nodes = scanNodes((p) =>
+        p["type"] === "knowledge"
+        && p["scope"] === recallScope
+        && p["status"] === "accepted"
+        && p["invalidAt"] === undefined,
+      );
+      const queryLower = query.toLowerCase();
+      const scored = nodes.map(({ id, payload }) => {
+        const content = (payload["content"] as string) ?? "";
+        const trigger = (payload["trigger"] as string) ?? "";
+        const text = `${content} ${trigger}`.toLowerCase();
+        const terms = queryLower.split(/\s+/).filter(Boolean);
+        let score = 0;
+        for (const term of terms) {
+          if (text.includes(term)) score += 1;
         }
-        return results;
-      }
+        return { id, payload, score, via: "text" as const };
+      }).filter((row) => row.score > 0)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, k);
 
-      // With embedding: use searchHybrid
-      const alpha = 0.7;
-      const hits = db.searchHybrid(placeholderVec, query, k, 2, 0.0, alpha).filter((hit) => {
-        const payload = hit.payload as Record<string, unknown>;
-        return payload["type"] === "knowledge" && payload["status"] === "accepted" && payload["invalidAt"] === undefined;
-      });
-      const results: RecallResult[] = hits.map((hit) => {
-        const payload = hit.payload as Record<string, unknown>;
-        const type = payload["type"] as "knowledge" | "event";
-        return {
-          node: { id: hit.id, type, payload },
-          score: hit.score,
-          via: "vector" as const,
-        };
-      });
-      // Record recall for knowledge nodes
-      const knowledgeIds = results
-        .filter((r) => r.node.type === "knowledge")
-        .map((r) => r.node.id);
-      if (knowledgeIds.length > 0) {
-        await store.recordRecall(knowledgeIds);
+      const results: RecallResult[] = scored.map(({ id, payload, score, via }) => ({
+        node: { id, type: "knowledge", payload },
+        score,
+        via,
+      }));
+      if (results.length > 0) {
+        await store.recordRecall(results.map((result) => result.node.id));
       }
       return results;
     },

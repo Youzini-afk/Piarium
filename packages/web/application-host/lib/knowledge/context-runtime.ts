@@ -1,7 +1,7 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { Zone2ContextUsage, Zone2Material } from "../harness/zone2.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalExitEvent } from "./observers.js";
-import type { KnowledgeStore, StoredEvent } from "./store.js";
+import type { KnowledgeStore, RecallResult, StoredEvent } from "./store.js";
 
 interface SessionBinding {
   gitFingerprint: string | null;
@@ -15,6 +15,7 @@ interface SessionBinding {
 
 export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
+  recall?: (workspaceId: string, store: KnowledgeStore, query: string) => Promise<RecallResult[]>;
   onError?: (error: unknown) => void;
 }
 
@@ -211,7 +212,9 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       content: block.content,
     }));
     if (request.query?.trim()) {
-      const recalled = await store.recall(request.query, 5);
+      const recalled = options.recall
+        ? await options.recall(binding.workspaceId, store, request.query)
+        : await store.recall(request.query, 5);
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
         const content = result.node.payload.content;

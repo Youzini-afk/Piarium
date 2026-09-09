@@ -333,6 +333,10 @@ export interface RecallSearchResultItem {
 export interface RecallSearchResult {
   text: string;
   results: RecallSearchResultItem[];
+  details?: {
+    vector: "unconfigured" | "unavailable" | "failed" | "empty" | "partial" | "used";
+    spaceId?: string;
+  };
 }
 
 export interface RelatedQueryParams {

@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -671,8 +671,8 @@ limit 是上限，不是填满目标；相同原文与重复事实不反复占�
 装饰，不能让大量路径/签名占满输入，也不把 512 这类有效上限当成每块必须填满的目标。
 
 嵌入接口区分 query/document 用途、有效长度、取消、批次对应与实际维度。现有本地 MiniLM 保持为未配置远程时的后端；远程嵌入
-走 `harness.embedding` → `harness.embed` → OpenAI 兼容 `/embeddings`，复用 Pi provider 与凭据权威，不走知识库
-`knowledge/embedding.ts` 适配器。模型选择不取当前聊天主模型；换绑定按兼容空间切换查询与后台建设，不能用旧空间向量响应
+走 `harness.embedding` → `harness.embed` → OpenAI 兼容 `/embeddings`，复用 Pi provider 与凭据权威。知识库召回在配置有效时
+走同一绑定，向量写在独立代际目录，不改权威 `.tdb` 维度。模型选择不取当前聊天主模型；换绑定按兼容空间切换查询与后台建设，不能用旧空间向量响应
 新模型。第 8.5 节定义配置责任。本地模型是否适合中文、代码与当前吞吐分别说明，不以“小模型跑得动”推出检索效果或速度。
 
 身份继续分三类：向量空间（后端/endpoint、模型修订、维度、pooling、归一化与用途约定）；索引配方（切块、结构提取、装饰与粒度）；
@@ -903,10 +903,12 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
   对 0.8.5 的 1.7 µs），Piarium 以 `payloadCacheMb: 0` 关掉它——这是数据库侧的缺陷，已向作者报告。`flush()` 仍随库大小
   线性增长（两版一致），D-140 的派生数据去抖 flush 保留。
 
-- **embedding 后端与存储分别负责**（D-173/D-190）。TriviumDB 存向量不产向量。代码语义索引的远程路径是
-  `harness.embed` → OpenAI 兼容 `/embeddings`，与知识库 `knowledge/embedding.ts` 适配器不是同一条生产链；知识库生产
-  配置仍待接，不能据此宣称 `recall` 已用向量。后端选择、query/document 用途、缓存身份与取消契约见第 6.1/8.5 节。
-  - 未绑定向量的知识库继续提供文本和图能力；当前 `recall` 的具体实现见下方历史记录与 status，不把规划中的 BM25 当成已接。
+- **embedding 后端与存储分别负责**（D-173/D-190/D-196）。TriviumDB 存向量不产向量。代码语义与知识召回的远程路径都是
+  `harness.embed` → OpenAI 兼容 `/embeddings`。知识向量是引用权威知识身份与正文修订的派生代际库，换维度不重开
+  workspace/user `.tdb`。未配置远程时知识召回保持文本，不使用本地 MiniLM，也不把 placeholder 向量标成 `via:vector`。
+  后端选择、query/document 用途、缓存身份与取消契约见第 6.1/8.5 节。
+  - 未绑定向量的知识库继续提供文本和图能力；当前 `recall` 在有效绑定时对已接受条目做 scoped Top-K 再与文本 RRF 合并。
+    不把规划中的 BM25 当成已接。
   - 维度取所选后端实际支持的配置并写入空间身份，不假定所有模型支持同一种截断。切换空间重算派生向量，不混用新查询与旧空间；
     原始知识与代码向量的所有权保持分开，不为代码模型切换重写权威知识库。
   - 用户显式配置远程后端即按该绑定调用，沿现有 provider 凭据与项目受信规则，不另设 embedding 信任门或费用守卫（D-158）。

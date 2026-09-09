@@ -1,7 +1,8 @@
 # Semantic index
 
 Code-semantic index for explore’s third recall path (design 6.1 / 3.16, D-166–D-193).
-Host-only writer. Not the authoritative workspace `.tdb`.
+Host-only writer. Not the authoritative workspace `.tdb`. Knowledge-base vectors are a sibling
+derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM fallback.
 
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).

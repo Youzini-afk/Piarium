@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## 1. Context
 
@@ -266,10 +266,12 @@ model's semantic judgment. This adds no durable conversation or generic workflow
 state is in agent-harness-status.md. Remote embedding and HTTP rerank are user-owned harness bindings,
 not chat model slots. When `harness.embedding` is set, the workspace-worker Pi runtime resolves the
 provider endpoint and credential, and the application host submits authorized text through
-`harness.embed` without receiving secrets. Unconfigured workspaces keep the local MiniLM path. A
-configured remote failure reports semantic `failed`/`unavailable` and does not silently mix the local
-vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and is skipped
-when `models.explore` already selected candidates. See harness sections 6.1 and 8.5.
+`harness.embed` without receiving secrets. Unconfigured workspaces keep the local MiniLM path for
+code semantic indexes. Knowledge recall uses the same remote bind when configured, stores vectors in
+a derived generation directory, and stays text-only when remote is unset — it does not fall back to
+MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and does not silently
+mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and
+is skipped when `models.explore` already selected candidates. See harness sections 6.1, 7.5, and 8.5.
 
 Session memory blocks remain in the Host store. The renderer reads and edits them only through
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block

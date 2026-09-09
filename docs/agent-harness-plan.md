@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
@@ -203,10 +203,9 @@ provider 原生上下文编辑按实际 API 使用，缺能力不阻塞本地压
 
 ### 2.8 embedding
 
-知识库的远程 adapter 已有，workspace/user store 仍为 `embedding: null`；代码检索的本地 MiniLM 是另一条已接路径。
-复用 3.16B 提供的配置与执行绑定完成知识库消费者，保留未配置时的文本/图能力。知识条目本身是权威内容，代码向量是独立
-派生索引，不能因模型换维度把两种存储混起来。各自检查空间、用途、返回维度/批次对应和重建发布；失败不能把不兼容旧向量
-解释成新模型的结果。adapter、配置、消费者三者分别验证，不能只测构造器就标 wired。
+已接线（D-196）。权威 workspace/user `.tdb` 仍以 placeholder 维度打开，知识向量在独立代际目录。有效 `harness.embedding`
+时，召回与 Zone 2 注入走同一 `harness.embed` 绑定；未配置保持文本/图。旧 `knowledge/embedding.ts` HTTP adapter 已删除。
+知识库不使用本地 MiniLM。真实远程质量未观察。
 
 ### 2.9 模型槽位与执行配置
 
@@ -560,8 +559,8 @@ A–D 已由 D-176–D-189 接入同一引擎与公开工具。不把 3.16 的�
 **B. 已接线（D-190 / D-194–D-195）。** 调用边界：Settings `harness.embedding` → Host `settings.get` 与 Pi binding describe（无密钥）→ 确认未配置才走本地 MiniLM；
 配置后 `createRemoteEmbedder` → workspace `harness.embed` → Pi `BackgroundInferenceRuntime`（workspace worker 的
 隔离的 user/operator 配置 ModelRuntime / 用户 `auth.json`）→ OpenAI 兼容 `POST {baseUrl}/embeddings`。Host 提交已授权正文、用途、批次和绑定。空间身份
-由 protocol/provider/model/maxTokens、去凭据 endpoint/API 配置身份和最终实际维度命名；自动维度由首个真实输入解析，不持久化 `auto` 空间。知识库 `embedding:null` 与
-`knowledge/embedding.ts` 适配器不是这条链。
+由 protocol/provider/model/maxTokens、去凭据 endpoint/API 配置身份和最终实际维度命名；自动维度由首个真实输入解析，不持久化 `auto` 空间。知识库召回在 2.8 / D-196
+复用同一 `harness.embed` 绑定，向量写独立代际目录，不改权威 `.tdb`。
 
 **C. 已接线（D-191）。** 复用键为 space + purpose + 实际 embedText；查询缓存不绕过 D-189。调度器一次一批，当前批结束后
 前台优先于下一批后台。冷扫等本轮第一个兼容发布后再查 partial。远程不套用 MiniLM 512；超长单行续切。Node ORT
@@ -581,7 +580,7 @@ details 标明 rerank 状态。输入是 3.15B 当前 view；没有 provider tok
 Documents workspace。rerank 超预算 view 不截断冒充原 ID，finish 冻结配置且终态无二次 HTTP。
 
 工作区仍是包含陌生文件的范围，注意力只改变建设顺序。真实 provider 延迟、质量、成本和完整冷扫时间未观察。扩散模型/
-后训练、全仓生成式摘要与零样本路由仍留后续。知识库远程 embedding 仍按 2.8，未与本条混写为已接线。
+后训练、全仓生成式摘要与零样本路由仍留后续。知识库语义召回已按 2.8 / D-196 单独接线，不与代码语义 MiniLM 回退混写。
 
 ### 3.17 bash 输出压缩：按命令分派（D-160）
 

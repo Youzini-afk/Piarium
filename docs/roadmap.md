@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-04
+Last updated: 2026-09-10
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -648,9 +648,10 @@ conformance remains in the package tests and architecture checks.
 - **2.7 Knowledge suggestions**: Three triggers, review tray actions,
   supersedes chain (`lib/harness/knowledge-suggestions.ts`). 10 tests.
   **Not wired** (TODO).
-- **2.8 Embedding providers**: OpenAI/Voyage/Cohere/Jina/Mistral/Gemini
-  adapters, meta persistence, dimension validation
-  (`lib/knowledge/embedding.ts`). 11 tests. **Not wired** (TODO).
+- **2.8 Embedding providers**: Knowledge recall reuses `harness.embedding`
+  / `harness.embed` with a derived vector generation store
+  (`lib/knowledge/vectors/`). Authority `.tdb` stays placeholder-dimension.
+  **Wired** (D-196). No MiniLM fallback; real remote quality unobserved.
 - **2.9 Model slots**: Nine slots + permissionJudge, presets, resolution
   (`lib/harness/model-slots.ts`). 12 tests. **Not wired** (TODO).
 - **2.10 recall tool**: Workspace + user store merge, formatted output

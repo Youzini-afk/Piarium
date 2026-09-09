@@ -4003,6 +4003,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-196 · 2026-09-10 · 知识库语义召回走派生代际库（2.8）
+
+背景：权威 workspace/user `.tdb` 以 placeholder 维度打开，`putKnowledge` 与所谓 embedding 召回都写/查零向量。把 `embedding:null` 换成旧 `knowledge/embedding.ts` HTTP helper 不能完成生产接线，且会让 Host 持有密钥或在换维度时重开承载其他节点的权威库。
+
+决定：
+
+1. 知识正文、状态、来源和取代关系仍由现有 `.tdb` 拥有。向量是引用 knowledge id 与 `content+trigger` 修订的派生数据，存在独立代际目录，不因 embedding 维度变化重开或改写权威库。
+2. 有效 `harness.embedding` 时，文档与查询都走与代码语义相同的 `harness.embed` / workspace binding / 用户凭据权威。Host 不接收密钥。未配置远程时知识召回保持文本，不使用本地 MiniLM，也不把 placeholder 向量标成 `via:vector`。
+3. 默认只在已接受且仍有效的条目上召回。workspace 查询只取本工作区库的 workspace 范围；用户库只取 user 范围。允许集合在 Top-K 之前确定，不先全库再过滤。
+4. 文本与向量名次用 RRF（k=60）合并，不把不可比的原始分数相加。命中返回前再核对权威状态与正文修订。写入先提交权威，索引后台建设；旧 token 不能覆盖新修订或复活失效条目。
+5. 删除 `knowledge/embedding.ts` 的直接 HTTP adapter 与 meta 旁路，不保留第二套调用链。失败/未完成/无命中分列，不阻断文本或其他来源。
+
+验证：派生库 scoped Top-K 与 `via:vector` 反例；错工作区/未接受/已取代不可见；迟到 embedding 不覆盖；换空间不混入；失败保留文本；Settings 快照 → `resolveInferenceBinding` → `createSemanticBackend` → 公开 `recall.search` / Zone 2。未观察真实外部 embedding 质量。
+
+影响：`knowledge/store.ts`、`knowledge/vectors/`、`recall-tool.ts`、`context-runtime.ts`、Application Host 装配；设计 7.5/8.5；plan/status 2.8。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4203,3 +4221,4 @@ ModelRuntime 纵切继续通过。
 | D-193 | superseded in part（专用 HTTP/互斥/来源降级保持；exact view、终态幂等、独立取消与冻结 binding 由 D-194 收口） | D-194 | 设计 6.1/8.5；plan/status 3.16E |
 | D-194 | implementation（workspace-keyed inference；user/operator provider authority；final space/currentness/internal cancel；active-child Documents scope；exact rerank） | — | plan/status 3.16B–E；architecture 4.4 |
 | D-195 | implementation（异步发布 token、增量文件筛选、空目录重启对账、草稿后台建设、初始化/取消/finish 生命周期） | — | plan/status 3.16B–E；设计 6.1 |
+| D-196 | implementation（知识向量为派生代际库；复用 harness.embed；RRF；scoped Top-K；删除 HTTP adapter） | — | 设计 7.5/8.5；plan/status 2.8 |
