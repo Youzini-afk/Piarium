@@ -58,6 +58,10 @@ describe('HarnessThreadsPanel projection', () => {
     expect(projectHarnessThreadState({ thread: thread(), activeRun: run() })).toBe('running');
     expect(projectHarnessThreadState({ thread: thread({ attention: 'user' }), activeRun: run() })).toBe('waiting');
     expect(projectHarnessThreadState({
+      thread: thread({ lifecycle: 'settled', integration: 'dirty' }),
+      activeRun: run({ workerState: 'exited', outcome: 'success', endedAt: '2026-09-04T00:01:00.000Z' }),
+    })).toBe('dirty');
+    expect(projectHarnessThreadState({
       thread: thread({ lifecycle: 'settled', integration: 'merge-ready' }),
       activeRun: run({ workerState: 'exited', outcome: 'success', endedAt: '2026-09-04T00:01:00.000Z' }),
     })).toBe('merge-ready');

@@ -12,8 +12,10 @@ external registry, not in Zustand or Local Storage.
 - `prepareWorkspaceEdit` loads every target without committing, validates document versions/ranges and
   produces a reviewable before/after plan. `applyWorkspaceEdit` revalidates that plan and publishes all
   buffers before notifying any listener; disk writes remain explicit saves. Multi-file changes have one
-  lifecycle-bound undo group. Resource create/rename/delete remains explicitly unsupported until the
-  Host owns an atomic batch-mutation contract.
+  lifecycle-bound undo group. Callers may supply `groupId` so a Host Integration `operationId` becomes
+  that undo group. Thread surface integration uses this path and does not save. Resource
+  create/rename/delete remains explicitly unsupported until the Host owns an atomic batch-mutation
+  contract.
 - Agent patch review uses that same transaction path. A clean accepted patch becomes a dirty editor
   buffer for review and explicit save; dirty, conflicted, saving, missing, or stale documents are
   rejected rather than written directly to disk.

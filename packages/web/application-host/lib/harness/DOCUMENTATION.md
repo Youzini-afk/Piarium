@@ -244,9 +244,13 @@ fixed result. Draft-derived paths are checked even when Git ignores them.
 Configured `copyIgnored` roots are stored as branch `captureScopes`; narrowed
 publication scans only those roots plus known changed paths, so ignored additions,
 updates, and deletions enter the native result and survive reclaim/materialize.
-Until surface-buffer mutation is connected, integration reports those paths as
-`surfaceTargetPaths` and performs no disk write or marker insertion when the
-parent disk has diverged from both the draft base and child result.
+Draft and other live editor targets are classified from Documents dirty
+publications for that workspace resource, not the focused window. Host plans
+with the same three-way rules used on disk; surface edits return through
+`surfaceEdits` and are applied by Document Registry as one unsaved undo group
+keyed by the Integration `operationId`. Missing live buffers stay off disk and
+are recorded as unavailable or surface-pending. `merge-ready` comes from a
+bound preview, not from “files changed at settlement”.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
 The session-state sidebar reads/updates blocks through authenticated context

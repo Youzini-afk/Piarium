@@ -479,7 +479,7 @@ describe("thread runtime", () => {
     });
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       lifecycle: "settled",
-      integration: "merge-ready",
+      integration: "dirty",
       worktree: { branch: "piarium/thread", resultCommit: "result" },
       report: {
         conclusion: "Implemented it",
@@ -698,6 +698,9 @@ describe("thread runtime", () => {
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
       resolveIntegrationCoordinator: async () => ({
         mergeResult: mockMergeResult,
+        previewResult: vi.fn(),
+        acknowledgeSurface: vi.fn(),
+        latestPreview: vi.fn(),
       }),
     });
 
@@ -806,7 +809,7 @@ describe("thread runtime", () => {
     expect(publishDirectoryResult).toHaveBeenCalled();
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       resultRevision: 1,
-      integration: "merge-ready",
+      integration: "dirty",
     });
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "lost" });
     await partialRuntime.dispose();

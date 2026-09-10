@@ -68,6 +68,84 @@ describe("harness thread routes", () => {
     expect(convertDiscussion).toHaveBeenCalledWith({ parentSessionId: "session-1", threadId: "thread-1" });
   });
 
+  it("previews, merges, and acks through the Host runtime rather than a registry helper", async () => {
+    const app = express();
+    app.use(express.json());
+    const preview = {
+      operationId: "op-1",
+      threadId: "thread-1",
+      resultRevision: 1,
+      bindingFingerprint: "fp",
+      valid: true,
+      mergeReady: true,
+      binding: {},
+      paths: [],
+      conflictPaths: [],
+      surfaceTargetPaths: ["draft.txt"],
+      unavailablePaths: [],
+      appliedPaths: [],
+    };
+    const previewIntegration = vi.fn(async () => preview);
+    const merge = vi.fn(async () => ({
+      merged: 0,
+      conflicts: [],
+      surfaceEdits: [{ resourceId: "draft.txt", expectedLocalEditRevision: 2, expectedBaseRevision: "base", newText: "child" }],
+      preview,
+      operationId: "op-1",
+      resultRevision: 1,
+    }));
+    const acknowledgeSurface = vi.fn(async () => preview);
+    const getThread = vi.fn(async () => ({ id: "thread-1", integration: "dirty" }));
+    registerHarnessThreadRoutes(app, {
+      registry: { getThread } as never,
+      runtime: {
+        scopeForSession: vi.fn(async () => ({
+          workspaceId: "workspace-1",
+          parent: { kind: "session", id: "session-1" },
+        })),
+        previewIntegration,
+        merge,
+        acknowledgeSurface,
+      } as never,
+    });
+
+    const previewResponse = await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/integration")
+      .send({ surfaceParents: [{ resourceId: "draft.txt", localEditRevision: 2, baseRevision: "base", content: "parent" }] })
+      .expect(200);
+    expect(previewResponse.body.preview).toEqual(preview);
+    expect(previewIntegration).toHaveBeenCalledWith(
+      "workspace-1",
+      { kind: "session", id: "session-1" },
+      "thread-1",
+      expect.objectContaining({ surfaceParents: [expect.objectContaining({ resourceId: "draft.txt" })] }),
+    );
+
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/merge")
+      .send({ resultRevision: 1, resolutions: [{ path: "draft.txt", choice: "child" }] })
+      .expect(200);
+    expect(merge).toHaveBeenCalledWith(
+      "workspace-1",
+      { kind: "session", id: "session-1" },
+      "thread-1",
+      1,
+      undefined,
+      expect.objectContaining({ resolutions: [{ path: "draft.txt", choice: "child" }] }),
+    );
+
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/integration/ack")
+      .send({ operationId: "op-1", applied: ["draft.txt"], failed: [] })
+      .expect(200);
+    expect(acknowledgeSurface).toHaveBeenCalledWith(
+      "workspace-1",
+      { kind: "session", id: "session-1" },
+      "thread-1",
+      { operationId: "op-1", applied: ["draft.txt"], failed: [] },
+    );
+  });
+
   it("keeps stale fork points distinct from malformed input", async () => {
     const app = express();
     app.use(express.json());

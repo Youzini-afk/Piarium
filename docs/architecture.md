@@ -682,9 +682,10 @@ path-state, and conditional-compensation implementations are reused, with indepe
 result retention references. Deleting recovery history cannot delete a still-referenced thread result.
 Revision checks coordinate controlled writers; they do not claim atomic isolation from arbitrary native
 processes. Conflict resolution and undo preserve later user edits and unrelated staged changes.
-Until surface-buffer application is wired, a changed draft-derived path whose parent disk has diverged
-from both the draft base and child result is returned as a surface-target conflict with no disk write or
-conflict marker. Saving or reconciling the parent draft makes a later retry eligible for normal integration.
+Surface targets are classified from Documents dirty publications for the workspace resource, planned with
+the same three-way rules as disk, and applied through Document Registry as one unsaved undo group keyed by
+the Integration operation id. Unavailable or drifted buffers keep the child result and do not write disk.
+`merge-ready` is a bound preview, not “files changed at settlement”.
 
 Git trees and resultCommit are valid migration inputs and backend references. Publication switches to
 the new authority only after its records and content are readable; failure preserves the previous source.

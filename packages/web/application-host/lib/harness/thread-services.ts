@@ -472,10 +472,20 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         thread.id,
         params.resultRevision,
         ctx.actor.runId,
+        {
+          ...(params.surfaceParents ? { surfaceParents: params.surfaceParents } : {}),
+          ...(params.resolutions ? { resolutions: params.resolutions } : {}),
+        },
       );
       const appliedRevision = result.resultRevision ?? selectedRevision;
-      if (result.conflicts.length > 0 || result.status === "conflict" || result.status === "compensated" || result.status === "needs-attention") {
-        await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
+      const surfacePending = (result.surfaceEdits?.length ?? 0) > 0
+        || ((result.surfaceTargetPaths?.length ?? 0) > 0 && (result.preview?.paths.some((path) => (
+          path.target === "surface" && path.phase !== "surface-applied"
+        )) ?? true));
+      if (result.conflicts.length > 0 || result.status === "conflict" || result.status === "compensated" || result.status === "needs-attention" || surfacePending) {
+        if (!result.preview) {
+          await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
+        }
         const surfaceTargetPaths = result.surfaceTargetPaths ?? [];
         const resolution: string[] = [];
         if (surfaceTargetPaths.length > 0) {
@@ -509,18 +519,22 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
           status: result.status ?? "conflict",
           ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
           ...(surfaceTargetPaths.length > 0 ? { surfaceTargetPaths } : {}),
+          ...(result.surfaceEdits ? { surfaceEdits: result.surfaceEdits } : {}),
+          ...(result.preview ? { preview: result.preview } : {}),
           ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
           ...(result.operationId ? { operationId: result.operationId } : {}),
         };
       }
-      await registry.setIntegration(
-        workspaceId,
-        thread.id,
-        "merged",
-        result.diffStats,
-        appliedRevision === undefined ? thread.worktree?.resultCommit : undefined,
-        appliedRevision,
-      );
+      if (!result.preview) {
+        await registry.setIntegration(
+          workspaceId,
+          thread.id,
+          "merged",
+          result.diffStats,
+          appliedRevision === undefined ? thread.worktree?.resultCommit : undefined,
+          appliedRevision,
+        );
+      }
       return {
         text: `merged ${result.merged} files from ${appliedRevision === undefined ? "the fixed Git result" : `result revision ${appliedRevision}`}: ${result.changedFiles?.join(", ") ?? ""}`,
         merged: result.merged,

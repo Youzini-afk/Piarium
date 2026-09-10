@@ -23,6 +23,7 @@ import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKno
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
 import { useHarnessThreadState } from './HarnessThreadStateContext';
+import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
@@ -36,6 +37,7 @@ const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThrea
   failed: 'harness.threads.state.failed',
   cancelled: 'harness.threads.state.cancelled',
   interrupted: 'harness.threads.state.interrupted',
+  dirty: 'harness.threads.state.dirty',
   'merge-ready': 'harness.threads.state.merge-ready',
   conflict: 'harness.threads.state.conflict',
   merged: 'harness.threads.state.merged',
@@ -52,6 +54,7 @@ const stateTone: Record<HarnessThreadState, string> = {
   failed: 'bg-[var(--status-error)]',
   cancelled: 'bg-muted-foreground/50',
   interrupted: 'bg-[var(--status-error)]',
+  dirty: 'bg-[var(--status-warning)]',
   'merge-ready': 'bg-[var(--status-success)]',
   conflict: 'bg-[var(--status-error)]',
   merged: 'bg-[var(--status-success)]',
@@ -461,6 +464,17 @@ export const HarnessThreadsPanel: React.FC<{
                   ) : null}
                 </div>
               </button>
+              {entry.thread.kind === 'implementation'
+                && (entry.thread.integration === 'dirty'
+                  || entry.thread.integration === 'merge-ready'
+                  || entry.thread.integration === 'conflict') ? (
+                <HarnessThreadIntegrationPanel
+                  workspaceId={workspaceId}
+                  parentSessionId={parentSessionId}
+                  entry={entry}
+                  onThread={(next) => threadState.merge({ thread: next, activeRun: entry.activeRun })}
+                />
+              ) : null}
               {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
                 <div className="flex justify-end border-t border-border/40 px-2 py-1">
                   <button

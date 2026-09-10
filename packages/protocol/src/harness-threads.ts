@@ -114,6 +114,8 @@ export interface Thread {
   mergedCommit?: string;
   /** Native result revision most recently integrated into the parent. */
   mergedResultRevision?: number;
+  /** Compact Host preview binding shared by Thread, wait, Zone 2, and the thread UI. */
+  integrationBinding?: ThreadIntegrationBinding;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -234,18 +236,120 @@ export interface ThreadReadResult {
   transcriptRef: TranscriptRef | null;
 }
 
+export type IntegrationApplyPhase =
+  | "pending"
+  | "disk-applied"
+  | "surface-applied"
+  | "conflict"
+  | "unavailable"
+  | "compensated"
+  | "skipped-identical";
+
+export type IntegrationPathDecision =
+  | "identical"
+  | "apply-child"
+  | "keep-parent"
+  | "merge-clean"
+  | "conflict"
+  | "unavailable";
+
+export interface ThreadSurfaceParent {
+  resourceId: string;
+  localEditRevision: number;
+  baseRevision: string | null;
+  content: string;
+}
+
+export interface ThreadConflictResolution {
+  path: string;
+  choice: "parent" | "child" | "base" | "text";
+  text?: string;
+  expectedParentRevision?: string;
+  expectedLocalEditRevision?: number;
+}
+
+export interface IntegrationPathBinding {
+  target: "disk" | "surface" | "unavailable";
+  revision: string;
+  localEditRevision?: number;
+}
+
+export interface IntegrationPathProjection {
+  path: string;
+  target: IntegrationPathBinding["target"];
+  decision: IntegrationPathDecision;
+  phase: IntegrationApplyPhase;
+  isText: boolean;
+  conflictReason?: string;
+  parentText?: string;
+  childText?: string;
+  baselineText?: string;
+}
+
+export interface ThreadIntegrationBinding {
+  operationId: string;
+  resultRevision: number;
+  bindingFingerprint: string;
+  valid: boolean;
+  mergeReady: boolean;
+  conflictPaths: string[];
+  surfaceTargetPaths: string[];
+  unavailablePaths: string[];
+}
+
+export const threadIntegrationBindingFromPreview = (
+  preview: ThreadIntegrationPreview,
+): ThreadIntegrationBinding => ({
+  operationId: preview.operationId,
+  resultRevision: preview.resultRevision,
+  bindingFingerprint: preview.bindingFingerprint,
+  valid: preview.valid,
+  mergeReady: preview.mergeReady,
+  conflictPaths: [...preview.conflictPaths],
+  surfaceTargetPaths: [...preview.surfaceTargetPaths],
+  unavailablePaths: [...preview.unavailablePaths],
+});
+
+export interface ThreadIntegrationPreview {
+  operationId: string;
+  threadId: string;
+  resultRevision: number;
+  bindingFingerprint: string;
+  valid: boolean;
+  mergeReady: boolean;
+  binding: Record<string, IntegrationPathBinding>;
+  paths: IntegrationPathProjection[];
+  conflictPaths: string[];
+  surfaceTargetPaths: string[];
+  unavailablePaths: string[];
+  appliedPaths: string[];
+  invalidReason?: string;
+}
+
+export interface ThreadSurfaceEdit {
+  resourceId: string;
+  expectedLocalEditRevision: number;
+  expectedBaseRevision: string | null;
+  newText: string;
+}
+
 export interface ThreadMergeParams {
   threadId: string;
   /** Omit to integrate the latest published result. */
   resultRevision?: number;
+  /** Live editor buffers identified by workspace resource, not the focused window. */
+  surfaceParents?: ThreadSurfaceParent[];
+  resolutions?: ThreadConflictResolution[];
 }
 
 export interface ThreadMergeResult {
   text: string;
   merged: number;
   conflicts: string[];
-  /** Paths kept off disk because their baseline came from an unsaved editor draft. */
+  /** Draft paths that must be applied through Document Registry, not disk. */
   surfaceTargetPaths?: string[];
+  surfaceEdits?: ThreadSurfaceEdit[];
+  preview?: ThreadIntegrationPreview;
   status?: "applied" | "conflict" | "compensated" | "needs-attention";
   appliedPaths?: string[];
   resultRevision?: number;

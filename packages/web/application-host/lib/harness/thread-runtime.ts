@@ -10,12 +10,14 @@ import type {
   SessionStats,
   SessionSummary,
   Thread,
+  ThreadConflictResolution,
   ThreadParent,
   ThreadReport,
   ThreadRun,
   ThreadRunOutcome,
+  ThreadSurfaceParent,
 } from "@piarium/protocol";
-import { HARNESS_TOOL_META } from "@piarium/protocol";
+import { HARNESS_TOOL_META, threadIntegrationBindingFromPreview } from "@piarium/protocol";
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
@@ -76,7 +78,7 @@ export interface ThreadRuntimeOptions {
           revision: string;
         }>;
       };
-  resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult"> | null> | Pick<IntegrationCoordinator, "mergeResult"> | null;
+  resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
 }
 
@@ -928,6 +930,34 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             worktree: currentWorktree,
             diffStats: published.diffStats,
           });
+          const previewCoordinator = options.resolveIntegrationCoordinator
+            ? await options.resolveIntegrationCoordinator(binding.workspaceId)
+            : null;
+          if (previewCoordinator) {
+            try {
+              const preview = await previewCoordinator.previewResult({
+                workspaceId: binding.workspaceId,
+                threadId: binding.threadId,
+                branchId: thread.workBranchId,
+                resultRevision: published.resultRevision,
+              });
+              await options.registry.setIntegration(
+                binding.workspaceId,
+                binding.threadId,
+                preview.mergeReady ? "merge-ready" : preview.conflictPaths.length > 0 || preview.unavailablePaths.length > 0
+                  ? "conflict"
+                  : "dirty",
+                published.diffStats,
+              );
+              await options.registry.setIntegrationBinding(
+                binding.workspaceId,
+                binding.threadId,
+                threadIntegrationBindingFromPreview(preview),
+              );
+            } catch (error) {
+              unresolved.push(`Unable to bind integration preview: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
         } catch (error) {
           unresolved.push(`Unable to publish native thread result: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -951,7 +981,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         await options.registry.setIntegration(
           binding.workspaceId,
           binding.threadId,
-          changedFiles.length > 0 ? "merge-ready" : "none",
+          changedFiles.length > 0 ? "dirty" : "none",
           diffStats,
         );
       }
@@ -1499,7 +1529,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
-  const merge = async (workspaceId: string, parent: ThreadParent, threadId: string, requestedRevision?: number, executionId?: string) => {
+  const merge = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    requestedRevision?: number,
+    executionId?: string,
+    extras?: { surfaceParents?: ThreadSurfaceParent[]; resolutions?: ThreadConflictResolution[] },
+  ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
@@ -1536,7 +1573,30 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           branchId,
           resultRevision,
           ...(executionId ? { executionId, requireTurnBinding: true } : {}),
+          ...(extras?.surfaceParents ? { surfaceParents: extras.surfaceParents } : {}),
+          ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
         });
+        if (result.preview) {
+          const pendingSurface = (result.surfaceEdits?.length ?? 0) > 0
+            || result.preview.paths.some((path) => path.target === "surface" && path.phase !== "surface-applied");
+          const failed = result.status === "compensated"
+            || result.status === "needs-attention"
+            || result.preview.unavailablePaths.length > 0
+            || result.preview.conflictPaths.length > 0;
+          await options.registry.setIntegration(
+            workspaceId,
+            threadId,
+            failed ? "conflict" : pendingSurface ? (result.preview.mergeReady ? "merge-ready" : "dirty") : "merged",
+            result.diffStats,
+            undefined,
+            failed || pendingSurface ? undefined : resultRevision,
+          );
+          await options.registry.setIntegrationBinding(
+            workspaceId,
+            threadId,
+            threadIntegrationBindingFromPreview(result.preview),
+          );
+        }
         return {
           merged: result.appliedPaths.length,
           conflicts: [...new Set([...result.conflictPaths, ...(result.needsAttentionPaths ?? [])])],
@@ -1547,6 +1607,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats: result.diffStats,
           appliedPaths: result.appliedPaths,
           ...(result.surfaceTargetPaths ? { surfaceTargetPaths: result.surfaceTargetPaths } : {}),
+          ...(result.surfaceEdits ? { surfaceEdits: result.surfaceEdits } : {}),
+          ...(result.preview ? { preview: result.preview } : {}),
           status: result.status,
           resultRevision,
           operationId: result.operationId,
@@ -1559,6 +1621,79 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return options.withMergeWriter
       ? options.withMergeWriter(workspaceId, threadId, operation)
       : operation();
+  };
+
+  const previewIntegration = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    extras?: { resultRevision?: number; surfaceParents?: ThreadSurfaceParent[]; resolutions?: ThreadConflictResolution[] },
+  ) => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    const coordinator = options.resolveIntegrationCoordinator
+      ? await options.resolveIntegrationCoordinator(workspaceId)
+      : null;
+    const branchId = thread.workBranchId;
+    const resultRevision = extras?.resultRevision ?? thread.resultRevision;
+    if (!coordinator || !branchId || resultRevision === undefined) {
+      throw new Error("Thread has no published native result to preview");
+    }
+    const preview = await coordinator.previewResult({
+      workspaceId,
+      threadId,
+      branchId,
+      resultRevision,
+      ...(extras?.surfaceParents ? { surfaceParents: extras.surfaceParents } : {}),
+      ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
+    });
+    await options.registry.setIntegration(
+      workspaceId,
+      threadId,
+      preview.mergeReady ? "merge-ready" : preview.conflictPaths.length > 0 || preview.unavailablePaths.length > 0
+        ? "conflict"
+        : "dirty",
+      thread.diffStats,
+    );
+    await options.registry.setIntegrationBinding(workspaceId, threadId, threadIntegrationBindingFromPreview(preview));
+    return preview;
+  };
+
+  const acknowledgeSurface = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    input: { operationId: string; applied: string[]; failed: string[] },
+  ) => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    const coordinator = options.resolveIntegrationCoordinator
+      ? await options.resolveIntegrationCoordinator(workspaceId)
+      : null;
+    if (!coordinator) throw new Error("Thread integration coordinator is unavailable");
+    const preview = await coordinator.acknowledgeSurface({
+      workspaceId,
+      threadId,
+      operationId: input.operationId,
+      applied: input.applied,
+      failed: input.failed,
+    });
+    if (preview) {
+      const pending = preview.paths.some((path) => (
+        path.target === "surface" && path.phase !== "surface-applied" && path.decision !== "identical"
+      ));
+      const failed = preview.unavailablePaths.length > 0 || input.failed.length > 0;
+      await options.registry.setIntegration(
+        workspaceId,
+        threadId,
+        failed ? "conflict" : pending ? "dirty" : preview.mergeReady ? "merged" : "dirty",
+        thread.diffStats,
+        undefined,
+        failed || pending ? undefined : preview.resultRevision,
+      );
+      await options.registry.setIntegrationBinding(workspaceId, threadId, threadIntegrationBindingFromPreview(preview));
+    }
+    return preview;
   };
 
   const drain = async (): Promise<void> => {
@@ -1604,6 +1739,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     send,
     kill,
     merge,
+    previewIntegration,
+    acknowledgeSurface,
     drain,
     isThreadSession,
     getSessionBinding,

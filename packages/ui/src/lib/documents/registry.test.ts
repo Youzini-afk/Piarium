@@ -8,6 +8,7 @@ import type {
   PiariumResourceReference,
 } from '@piarium/application-client';
 import { DocumentRegistry } from './registry';
+import { applyThreadSurfaceEdits, collectSurfaceParents } from './thread-surface-integration';
 import { documentKey } from './types';
 
 const resource = (resourceId = 'note.txt'): PiariumResourceReference => ({
@@ -902,6 +903,75 @@ describe('DocumentRegistry', () => {
         message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
       }],
     });
+    registry.dispose();
+  });
+
+  test('applies a thread surface edit as one undo group without saving', async () => {
+    const { api, files } = createMemoryDocuments();
+    const identity = resource('draft.txt');
+    await api.write({
+      token: mutationToken(),
+      resource: identity,
+      content: 'disk parent\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: 'seed',
+    });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const opened = await registry.open(identity);
+    registry.applyTransaction(identity, 'unsaved parent\n', { origin: 'editor' });
+    const current = registry.get(identity)!;
+    const applied = await applyThreadSurfaceEdits({
+      workspaceId: identity.workspaceId,
+      operationId: 'integration-op-1',
+      edits: [{
+        resourceId: identity.resourceId,
+        expectedLocalEditRevision: current.localEditRevision,
+        expectedBaseRevision: current.baseRevision,
+        newText: 'child result\n',
+      }],
+      registry,
+    });
+    expect(applied).toEqual({ applied: ['draft.txt'], failed: [] });
+    expect(registry.get(identity)?.buffer).toBe('child result\n');
+    expect(registry.get(identity)?.dirty).toBe(true);
+    expect(files.get(documentKey(identity))?.content).toBe('disk parent\n');
+    expect(registry.undoWorkspaceEdit('integration-op-1').status).toBe('undone');
+    expect(registry.get(identity)?.buffer).toBe('unsaved parent\n');
+    expect(collectSurfaceParents(identity.workspaceId, ['draft.txt', 'other.txt'], registry).map((entry) => entry.resourceId)).toEqual(['draft.txt']);
+    registry.dispose();
+  });
+
+  test('keeps a caller-supplied workspace edit group id', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource('named.txt');
+    await api.write({
+      token: mutationToken(),
+      resource: identity,
+      content: 'before\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: 'seed-named',
+    });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const opened = await registry.open(identity);
+    const preview = await registry.prepareWorkspaceEdit({
+      workspaceId: identity.workspaceId,
+      origin: 'thread-integration',
+      groupId: 'integration-op-named',
+      textEdits: [{
+        identity,
+        version: opened.localEditRevision,
+        edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } }, newText: 'after' }],
+      }],
+    });
+    expect(preview.status).toBe('ready');
+    if (preview.status !== 'ready') throw new Error('expected named group');
+    expect(preview.groupId).toBe('integration-op-named');
+    expect((await registry.applyWorkspaceEdit('integration-op-named')).status).toBe('applied');
+    expect(registry.undoWorkspaceEdit('integration-op-named').status).toBe('undone');
     registry.dispose();
   });
 });

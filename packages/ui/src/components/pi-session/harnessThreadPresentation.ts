@@ -22,6 +22,7 @@ export type HarnessThreadState =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  | 'dirty'
   | 'merge-ready'
   | 'conflict'
   | 'merged';
@@ -38,6 +39,7 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
     if (activeRun?.outcome === 'cancelled') return 'cancelled';
     if (activeRun?.outcome === 'lost') return 'interrupted';
     if (thread.integration === 'merge-ready') return 'merge-ready';
+    if (thread.integration === 'dirty') return 'dirty';
     return 'completed';
   }
   if (activeRun?.workerState === 'lost') return 'interrupted';

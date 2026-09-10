@@ -106,6 +106,8 @@ export type DocumentWorkspaceResourceOperation =
 export type DocumentWorkspaceEditInput = {
   workspaceId: string;
   origin: string;
+  /** When set, apply/undo use this group id (thread integration operationId). */
+  groupId?: string;
   textEdits: DocumentWorkspaceTextDocumentEdit[];
   resourceOperations?: DocumentWorkspaceResourceOperation[];
   changeAnnotations?: Record<string, {

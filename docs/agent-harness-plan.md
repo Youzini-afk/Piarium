@@ -91,7 +91,7 @@ Last updated: 2026-09-10
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
-   草稿基线已进入生产链；虚拟分支工具、surface 写回、空间总预算和归档产品面随对应消费者继续。
+   草稿基线与 surface 写回/绑定预览已进入生产链（D-201）；虚拟分支工具、空间总预算和归档产品面随对应消费者继续。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -275,8 +275,8 @@ RunManifest 不成为这组能力共同前置。
 
 已交付的第一段是 dispatch 草稿基线：请求内复制固定正文与字节格式，Thread catalog 持有不可变 baseline id，queued/lost 恢复从持久
 对象重建；有效草稿是 branch revision 0，不是 child delta。dirty 角色强制 isolated，来源不可用则 dispatch 失败。当前非草稿路径仍
-在 Run 启动时捕获。父会话的同名 read 与 grep 已消费同一固定 surface snapshot；find/ls、surface 写回、无目录 branch 工具和整仓
-dispatch 快照尚未交付。
+在 Run 启动时捕获。父会话的同名 read 与 grep 已消费同一固定 surface snapshot；find/ls 已消费同一快照。surface 写回与绑定预览
+已按 D-201 接入线程面板 / Document Registry。无目录 branch 工具和整仓 dispatch 快照尚未交付。
 
 **D. 环境与执行写回。** Git/copy/CoW 按平台选择，缺 CoW 用正常复制，默认不硬链接可写目录；包管理器缓存可复用。
 setup 采用用户工作区配置，配置一次授权正常重复执行，不猜仓库命令；按工具、依赖输入和实际环境需要运行幂等准备。

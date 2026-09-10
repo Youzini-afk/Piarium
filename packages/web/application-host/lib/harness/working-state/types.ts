@@ -106,6 +106,8 @@ export interface IntegrationApplyResult {
   conflictPaths: string[];
   /** Draft-derived paths that require reconciliation with the originating editor surface. */
   surfaceTargetPaths?: string[];
+  surfaceEdits?: import("@piarium/protocol").ThreadSurfaceEdit[];
+  preview?: import("@piarium/protocol").ThreadIntegrationPreview;
   compensatedPaths?: string[];
   needsAttentionPaths?: string[];
   diffStats: ThreadDiffStats;

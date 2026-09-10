@@ -1456,11 +1456,12 @@ base → resultCommit，patch、新文件正文、类型与 mode 全从该 commi
 不把这种正常冲突处理自动撤回。记录的完成状态使用户解决冲突后无需再次重放整个 patch。
 
 草稿来源的最终目标是对应 Document Registry 缓冲，不隐式保存用户未保存内容；磁盘目标经 Host 文件路径写入。同一次集成可能包含
-两类目标，分别记录撤销材料。当前 D-083 尚未接 surface 写回：子修改了草稿路径而父磁盘既不是固定草稿基线、也不是同一子结果时，
-Integration 通过 `surfaceTargetPaths` 返回需要编辑器协调的路径，既不写磁盘也不放冲突标记；用户在父编辑器保存或协调该草稿后可重试。父磁盘已经等于
-子结果时按 no-op 完成。其他当前原生集成直接应用路径状态，不执行 git apply --3way，不修改用户 index；旧 Git 结果先导入再走同一
-原生集成。未来后端若涉及 index，必须记录实际影响并只条件恢复相关条目。UI 与工具共用 Integration，重开仍能继续处理；合并后按
-实际变化执行相关验证。
+两类目标，共用同一个 Integration `operationId`、选定结果修订和操作投影，并逐目标记录 apply 阶段。生产分类优先看该 workspace
+资源的 dirty publication；未注入 dirty 检查时才回退到 D-083 的磁盘启发式。需要编辑器协调的路径返回 `surfaceTargetPaths` /
+`surfaceEdits`，由线程面板经 Document Registry 一次分组应用，不写磁盘、不顺手保存。缓冲不可用或修订漂移标 unavailable，保留
+子结果，不静默改磁盘。父磁盘已经等于子结果时按 no-op 完成。其他原生集成直接应用路径状态，不执行 git apply --3way，不修改
+用户 index；旧 Git 结果先导入再走同一原生集成。UI、`thread.merge`、`threads`/`wait` 与 Zone 2 共用 Thread `integration` 与
+`integrationBinding`。合并预览只说明可应用性，不代表测试通过。
 
 **重叠提示与合并预览。** 已记录的分支变更路径可投影非阻塞重叠提示；恢复日志覆盖不到的 shell 路径标未知，未发现重叠不等于无冲突。
 提示不长期占有编辑锁，不阻塞独立分支写者。后台三方预览绑定子 resultRevision 与父受影响路径/草稿版本；输入变更即失效重算，

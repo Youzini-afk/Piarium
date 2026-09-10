@@ -4088,6 +4088,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-201 · 2026-09-10 · 草稿集成写回、绑定预览与冲突处理（3.4C/F、3.5、3.10）
+
+背景：dispatch 已持久化草稿基线，原生结果和磁盘 Integration 已可用。需要编辑器协调的路径只返回 `surfaceTargetPaths`，没有写回缓冲。settle 在“有文件变化”时标 `merge-ready`，不是绑定预览。双修订预览、独立冲突 UI 和验证绑定未交付。
+
+决定：
+
+1. 生产 `IntegrationCoordinator` 注入 Documents `inspectDirtyBuffers`。目标按 workspace + resource 的 dirty publication 分类，不用聚焦窗口。未注入检查时保留原草稿磁盘启发式，以免旧测试/无 Documents 装配改语义。
+2. 预览与应用共用 `buildThreeWayMergePlan`。绑定选定子 `resultRevision` 与每路径父身份（磁盘对象修订或 surface `localEditRevision`/`baseRevision`），不依赖整仓 WorkspaceHead。未知、未完成或父/子变化后的旧预览不能标 `merge-ready`。settle 先标 `dirty`，预览干净再升为 `merge-ready`。
+3. 磁盘走既有 `applyDurableFileOperation`。surface 返回 `surfaceEdits`；UI 用 Document Registry `prepareWorkspaceEdit`/`applyWorkspaceEdit`，`groupId = operationId`，整组撤销且不保存。ack 把真实 surface 阶段写回同一 Integration `data_json.surfacePhases`。缓冲不可用或修订漂移标 unavailable，保留子结果，不改磁盘。
+4. 冲突 UI 展示父/子/基线，文本可编辑，非文本只选版本；提交时按当前目标修订重核。重试复用同一 operation/result，不叠加标记。预览文案只说明可应用性。
+5. Thread / `threads` / `wait` / Zone 2 / 线程面板共用 `integration` 与紧凑 `integrationBinding`。重叠提示保持非阻塞。不暗改 D-088 的写入后草稿来源失效。
+
+验证：coordinator 预览/surface/dirty 分类；Document Registry 分组撤销且磁盘不变；thread routes preview/merge/ack；settlement 不再因“有文件”标 merge-ready。浏览器完整点击链未跑。
+
+影响：protocol 线程合并类型；coordinator / runtime / routes / registry / 线程面板；设计 3.4–3.5；status 3.5a / 3.10。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4293,3 +4311,4 @@ ModelRuntime 纵切继续通过。
 | D-198 | implementation（复用代际存储；自动维度建设；固定召回绑定；失效/配置/关闭；并发 bootstrap 与 resolver 取消反例已验证） | — | 设计 7.5；plan/status 2.8 |
 | D-199 | implementation（保留未知正文与分片；混合命令通用展示；大块/提示预算与 UTF-8 首尾；条件免二次截断） | — | 设计 5.2；plan/status 3.17 |
 | D-200 | implementation（生产发现 Git Bash；按工作区 settings.get 选解释器；usr\\bin 优先） | — | 设计 5.2；status 1.3；host DOCUMENTATION |
+| D-201 | implementation（dirty 分类写回 Document Registry；绑定预览；settle=dirty） | — | 设计 3.4–3.5；status 3.5a / 3.10 |

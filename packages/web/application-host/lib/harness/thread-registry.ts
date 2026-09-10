@@ -16,6 +16,7 @@ import type {
   ThreadCreatedBy,
   ThreadDiffStats,
   ThreadIntegration,
+  ThreadIntegrationBinding,
   ThreadKind,
   ThreadLifecycle,
   ThreadLaunchManifest,
@@ -215,6 +216,23 @@ interface MutationResult<T> {
 const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "archived"]);
 const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "stalled", "looping"]);
 const INTEGRATIONS = new Set<ThreadIntegration>(["none", "dirty", "merge-ready", "conflict", "merged"]);
+
+const isStringArray = (value: unknown): value is string[] => (
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+);
+
+const isIntegrationBinding = (value: unknown): value is ThreadIntegrationBinding => (
+  isRecord(value)
+  && isString(value.operationId)
+  && Number.isSafeInteger(value.resultRevision)
+  && Number(value.resultRevision) > 0
+  && isString(value.bindingFingerprint)
+  && typeof value.valid === "boolean"
+  && typeof value.mergeReady === "boolean"
+  && isStringArray(value.conflictPaths)
+  && isStringArray(value.surfaceTargetPaths)
+  && isStringArray(value.unavailablePaths)
+);
 const WORKER_STATES = new Set<ThreadRun["workerState"]>(["starting", "running", "lost", "exited"]);
 const OUTCOMES = new Set<ThreadRunOutcome>(["success", "failure", "cancelled", "lost"]);
 
@@ -350,6 +368,7 @@ const isThread = (value: unknown): value is Thread => {
     && isReport(value.report)
     && (value.mergedCommit === undefined || isString(value.mergedCommit))
     && (value.mergedResultRevision === undefined || (Number.isSafeInteger(value.mergedResultRevision) && Number(value.mergedResultRevision) > 0))
+    && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
     && isNullableString(value.activeRunId)
     && isString(value.createdAt)
     && isString(value.updatedAt)
@@ -1142,7 +1161,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       thread.lifecycle = outcome === "lost" ? "active" : "settled";
       if (report) {
         thread.report = report;
-        if (thread.integration === "none" && report.changedFiles.length > 0) thread.integration = "merge-ready";
+        if (thread.integration === "none" && report.changedFiles.length > 0) thread.integration = "dirty";
       }
       touchThread(catalog, thread);
       return {
@@ -1218,6 +1237,20 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (mergedResultRevision) thread.mergedResultRevision = mergedResultRevision;
       else delete thread.mergedResultRevision;
     }
+    if (integration === "merged" || integration === "none") delete thread.integrationBinding;
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
+
+  const setIntegrationBinding = async (
+    workspaceId: string,
+    threadId: string,
+    binding: ThreadIntegrationBinding | null,
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    if (binding) thread.integrationBinding = structuredClone(binding);
+    else delete thread.integrationBinding;
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });
@@ -1249,7 +1282,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (input.worktree) thread.worktree = structuredClone(input.worktree);
     if (input.diffStats) {
       thread.diffStats = structuredClone(input.diffStats);
-      thread.integration = input.diffStats.files > 0 ? "merge-ready" : "none";
+      if (thread.integration === "none") {
+        thread.integration = input.diffStats.files > 0 ? "dirty" : "none";
+      }
     }
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
@@ -1626,6 +1661,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     updateRunProgress,
     setAttention,
     setIntegration,
+    setIntegrationBinding,
     setWorktree,
     setWorkingState,
     completeThread,

@@ -4,7 +4,7 @@ import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "acknowledgeSurface">;
   requireAuth?: RequestHandler;
 }
 
@@ -84,6 +84,134 @@ export function registerHarnessThreadRoutes(
         response.json(await runtime.convertDiscussion({ parentSessionId, threadId }));
       } catch (error) {
         sendError(response, error, "Unable to convert discussion thread");
+      }
+    },
+  );
+
+  app.get(
+    "/api/harness/sessions/:sessionId/threads/:threadId/integration",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const resultRevision = typeof request.query.resultRevision === "string"
+          ? Number(request.query.resultRevision)
+          : undefined;
+        const extras = Number.isSafeInteger(resultRevision) && resultRevision! > 0
+          ? { resultRevision: resultRevision as number }
+          : {};
+        response.json({
+          workspaceId,
+          parent,
+          preview: await runtime.previewIntegration(workspaceId, parent, threadId, extras),
+          thread: await registry.getThread(workspaceId, parent, threadId),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to preview thread integration");
+      }
+    },
+  );
+
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/integration",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const preview = await runtime.previewIntegration(workspaceId, parent, threadId, {
+          ...(typeof request.body?.resultRevision === "number" ? { resultRevision: request.body.resultRevision } : {}),
+          ...(Array.isArray(request.body?.surfaceParents) ? { surfaceParents: request.body.surfaceParents } : {}),
+          ...(Array.isArray(request.body?.resolutions) ? { resolutions: request.body.resolutions } : {}),
+        });
+        response.json({
+          workspaceId,
+          parent,
+          preview,
+          thread: await registry.getThread(workspaceId, parent, threadId),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to preview thread integration");
+      }
+    },
+  );
+
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/merge",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const result = await runtime.merge(
+          workspaceId,
+          parent,
+          threadId,
+          typeof request.body?.resultRevision === "number" ? request.body.resultRevision : undefined,
+          undefined,
+          {
+            ...(Array.isArray(request.body?.surfaceParents) ? { surfaceParents: request.body.surfaceParents } : {}),
+            ...(Array.isArray(request.body?.resolutions) ? { resolutions: request.body.resolutions } : {}),
+          },
+        );
+        response.json({
+          workspaceId,
+          parent,
+          result,
+          thread: await registry.getThread(workspaceId, parent, threadId),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to merge thread result");
+      }
+    },
+  );
+
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/integration/ack",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      const operationId = typeof request.body?.operationId === "string" ? request.body.operationId.trim() : "";
+      if (!parentSessionId || !threadId || !operationId || !Array.isArray(request.body?.applied) || !Array.isArray(request.body?.failed)) {
+        response.status(400).json({ error: "sessionId, threadId, operationId, applied, and failed are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const preview = await runtime.acknowledgeSurface(workspaceId, parent, threadId, {
+          operationId,
+          applied: request.body.applied.filter((entry: unknown) => typeof entry === "string"),
+          failed: request.body.failed.filter((entry: unknown) => typeof entry === "string"),
+        });
+        response.json({
+          workspaceId,
+          parent,
+          preview,
+          thread: await registry.getThread(workspaceId, parent, threadId),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to acknowledge surface integration");
       }
     },
   );

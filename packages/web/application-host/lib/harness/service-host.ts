@@ -163,7 +163,17 @@ export interface HarnessServiceHost {
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
-  threadApplyWorktreeDiff: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent, threadId: string, resultRevision?: number, executionId?: string) => Promise<{
+  threadApplyWorktreeDiff: ((
+    workspaceId: string,
+    parent: import("@piarium/protocol").ThreadParent,
+    threadId: string,
+    resultRevision?: number,
+    executionId?: string,
+    extras?: {
+      surfaceParents?: import("@piarium/protocol").ThreadSurfaceParent[];
+      resolutions?: import("@piarium/protocol").ThreadConflictResolution[];
+    },
+  ) => Promise<{
     merged: number;
     conflicts: string[];
     conflictState?: "none" | "markers" | "parent-unchanged";
@@ -171,6 +181,8 @@ export interface HarnessServiceHost {
     diffStats?: import("@piarium/protocol").ThreadDiffStats;
     appliedPaths?: string[];
     surfaceTargetPaths?: string[];
+    surfaceEdits?: import("@piarium/protocol").ThreadSurfaceEdit[];
+    preview?: import("@piarium/protocol").ThreadIntegrationPreview;
     status?: "applied" | "conflict" | "compensated" | "needs-attention";
     operationId?: string;
     resultRevision?: number;

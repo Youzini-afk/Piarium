@@ -1245,7 +1245,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return branch.entries.map((entry) => entry.id);
   };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
-  const threadIntegrationCoordinator = new IntegrationCoordinator({ workingStates: harnessWorkingStates });
+  const threadIntegrationCoordinator = new IntegrationCoordinator({
+    workingStates: harnessWorkingStates,
+    inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
+  });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
@@ -2019,7 +2022,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadSpawnSession: (input) => threadRuntime!.spawn(input),
     threadKillSession: (threadId, keepWorktree) => threadRuntime!.kill(threadId, keepWorktree),
     requireThreadMergeJournal: true,
-    threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId) => threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId),
+    threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId, extras) => (
+      threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)
+    ),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
   });
   const registerHarnessSession = (

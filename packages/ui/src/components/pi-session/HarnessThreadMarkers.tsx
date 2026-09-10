@@ -22,6 +22,7 @@ const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThrea
   failed: 'harness.threads.state.failed',
   cancelled: 'harness.threads.state.cancelled',
   interrupted: 'harness.threads.state.interrupted',
+  dirty: 'harness.threads.state.dirty',
   'merge-ready': 'harness.threads.state.merge-ready',
   conflict: 'harness.threads.state.conflict',
   merged: 'harness.threads.state.merged',

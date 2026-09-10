@@ -144,7 +144,7 @@ describe("thread registry", () => {
     const first = await registry.completeThread(WORKSPACE, thread.id, report());
     const second = await registry.completeThread(WORKSPACE, thread.id, report("ignored"));
     expect(first?.lifecycle).toBe("settled");
-    expect(first?.integration).toBe("merge-ready");
+    expect(first?.integration).toBe("dirty");
     expect(second).toEqual(first);
     await registry.mergeThread(WORKSPACE, thread.id);
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.integration).toBe("merged");

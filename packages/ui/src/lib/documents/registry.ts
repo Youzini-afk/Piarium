@@ -729,7 +729,10 @@ export class DocumentRegistry {
       });
     }
     if (failures.length > 0) return { status: 'rejected', failures };
-    const groupId = crypto.randomUUID();
+    const groupId = input.groupId?.trim() || crypto.randomUUID();
+    if (input.groupId && this.preparedWorkspaceEdits.has(groupId)) {
+      this.preparedWorkspaceEdits.delete(groupId);
+    }
     const annotationIds = new Set(input.textEdits.flatMap((change) => (
       change.edits.map((edit) => edit.annotationId).filter((value): value is string => Boolean(value))
     )));

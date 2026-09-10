@@ -810,4 +810,127 @@ describe("IntegrationCoordinator", () => {
       await h.engine.dispose();
     }
   });
+
+  it("previews a clean disk result as merge-ready and invalidates after the parent changes", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base\n");
+      const child = path.join(h.root, "child-preview");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "a.txt"), "child\n");
+      const result = await prepareResult(h, child);
+      const first = await h.coordinator.previewResult({
+        workspaceId: "ws",
+        threadId: "thread-1",
+        branchId: "thread-1",
+        resultRevision: result.resultRevision,
+      });
+      expect(first.mergeReady).toBe(true);
+      expect(first.valid).toBe(true);
+      expect(first.paths[0]?.target).toBe("disk");
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "parent continued\n");
+      const second = await h.coordinator.previewResult({
+        workspaceId: "ws",
+        threadId: "thread-1",
+        branchId: "thread-1",
+        resultRevision: result.resultRevision,
+      });
+      expect(second.bindingFingerprint).not.toBe(first.bindingFingerprint);
+      expect(second.mergeReady).toBe(false);
+      expect(second.conflictPaths).toContain("a.txt");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("applies a supplied editor buffer without writing disk and records the surface phase", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "draft.txt"), "disk bytes\n");
+      const child = path.join(h.root, "child-surface");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "draft.txt"), "child bytes\n");
+      const result = await h.workingStates.withStore("ws", "surface-result", async (store) => {
+        const diskState = await store.captureDirectory(h.workspace);
+        const object = await store.putObject(Buffer.from("unsaved draft\n"));
+        const current = diskState["draft.txt"]!;
+        await store.createBranch("ws", "thread-surface", {
+          ...diskState,
+          "draft.txt": {
+            kind: "regular-file",
+            objectHash: object.hash,
+            byteLength: object.byteLength,
+            ...(current.kind === "regular-file" && current.mode !== undefined ? { mode: current.mode } : {}),
+          },
+        }, "base", ["draft.txt"]);
+        return store.publishDirectoryResult("thread-surface", child);
+      });
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-surface",
+        branchId: "thread-surface",
+        resultRevision: result.resultRevision,
+        surfaceParents: [{
+          resourceId: "draft.txt",
+          localEditRevision: 4,
+          baseRevision: "base-1",
+          content: "unsaved draft\n",
+        }],
+      });
+      expect(merged.surfaceEdits).toEqual([expect.objectContaining({
+        resourceId: "draft.txt",
+        expectedLocalEditRevision: 4,
+        newText: "child bytes\n",
+      })]);
+      expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("disk bytes\n");
+      expect(merged.preview?.mergeReady).toBe(true);
+      await h.coordinator.acknowledgeSurface({
+        workspaceId: "ws",
+        threadId: "thread-surface",
+        operationId: merged.operationId,
+        applied: ["draft.txt"],
+        failed: [],
+      });
+      await h.workingStates.withStore("ws", "inspect-surface-phase", (_store, { database }) => {
+        const row = database.prepare("SELECT data_json FROM operations WHERE id = ?").get(merged.operationId) as { data_json: string };
+        const data = JSON.parse(row.data_json) as { surfacePhases?: Record<string, string> };
+        expect(data.surfacePhases?.["draft.txt"]).toBe("surface-applied");
+      });
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("classifies a live dirty publication as a surface target even after the draft is saved on disk", async () => {
+    const h = await createHarness();
+    const coordinator = new IntegrationCoordinator({
+      workingStates: h.workingStates,
+      inspectDirtyBuffers: async () => [{
+        ownerId: "editor-one",
+        resources: [{
+          baseRevision: "rev-1",
+          localEditRevision: 3,
+          resource: { resourceId: "live.txt" },
+        }],
+      }],
+    });
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "live.txt"), "saved disk\n");
+      const child = path.join(h.root, "child-live");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "live.txt"), "child\n");
+      const result = await prepareResult(h, child, "thread-live");
+      const preview = await coordinator.previewResult({
+        workspaceId: "ws",
+        threadId: "thread-live",
+        branchId: "thread-live",
+        resultRevision: result.resultRevision,
+      });
+      expect(preview.mergeReady).toBe(false);
+      expect(preview.surfaceTargetPaths).toEqual(["live.txt"]);
+      expect(preview.paths[0]?.target).toBe("surface");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
 });
