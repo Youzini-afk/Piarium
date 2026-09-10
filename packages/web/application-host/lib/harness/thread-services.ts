@@ -466,6 +466,14 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       if (host.requireThreadMergeJournal && !ctx.actor.runId) {
         throw new HarnessServiceError("unavailable", "Thread integration requires an active parent turn recovery binding");
       }
+      let sourceOwner: { ownerId: string; generation: number } | undefined;
+      if (ctx.inputContext?.source === "surface") {
+        const resolved = host.agentInputSurfaceOwner?.(ctx.sessionId, ctx.inputContext);
+        if (!resolved) {
+          throw new HarnessServiceError("unavailable", "The originating document surface for this turn is no longer available");
+        }
+        sourceOwner = { ownerId: resolved.ownerId, generation: resolved.generation };
+      }
       const result = await host.threadApplyWorktreeDiff(
         workspaceId,
         parentFor(ctx),
@@ -473,23 +481,30 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         params.resultRevision,
         ctx.actor.runId,
         {
-          ...(params.surfaceParents ? { surfaceParents: params.surfaceParents } : {}),
+          ...(sourceOwner ? { sourceOwner } : {}),
+          ...(params.expectedBindingFingerprint ? { expectedBindingFingerprint: params.expectedBindingFingerprint } : {}),
           ...(params.resolutions ? { resolutions: params.resolutions } : {}),
+          signal: ctx.signal,
         },
       );
       const appliedRevision = result.resultRevision ?? selectedRevision;
-      const surfacePending = (result.surfaceEdits?.length ?? 0) > 0
-        || ((result.surfaceTargetPaths?.length ?? 0) > 0 && (result.preview?.paths.some((path) => (
-          path.target === "surface" && path.phase !== "surface-applied"
-        )) ?? true));
+      const appliedDraftPaths = result.preview?.paths.filter((path) => (
+        path.target === "surface" && path.phase === "surface-applied"
+      )).map((path) => path.path) ?? [];
+      const pendingSurfaceTargetPaths = result.preview
+        ? result.preview.paths.filter((path) => (
+            path.target === "surface" && path.phase !== "surface-applied" && path.phase !== "skipped-identical"
+          )).map((path) => path.path)
+        : result.surfaceTargetPaths ?? [];
+      const surfacePending = pendingSurfaceTargetPaths.length > 0;
       if (result.conflicts.length > 0 || result.status === "conflict" || result.status === "compensated" || result.status === "needs-attention" || surfacePending) {
         if (!result.preview) {
           await registry.setIntegration(workspaceId, thread.id, "conflict", result.diffStats);
         }
         const surfaceTargetPaths = result.surfaceTargetPaths ?? [];
         const resolution: string[] = [];
-        if (surfaceTargetPaths.length > 0) {
-          resolution.push(`Editor draft paths were left untouched on disk: ${surfaceTargetPaths.join(", ")}. Save or reconcile those drafts in the parent editor, then retry.`);
+        if (pendingSurfaceTargetPaths.length > 0) {
+          resolution.push(`Editor draft paths still require attention: ${pendingSurfaceTargetPaths.join(", ")}. Reopen the originating surface or resolve those paths before retrying.`);
         }
         if (result.status === "needs-attention") {
           resolution.push("Some paths could not be restored automatically. Inspect the integration operation and resolve them before retrying.");
@@ -511,6 +526,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         if (result.appliedPaths && result.appliedPaths.length > 0) {
           lines.push(`written paths (${result.appliedPaths.length}): ${result.appliedPaths.join(", ")}`);
         }
+        if (appliedDraftPaths.length > 0) lines.push(`Editor drafts updated without saving: ${appliedDraftPaths.join(", ")}. Disk-based commands still read the saved files.`);
         lines.push(...resolution);
         return {
           text: lines.join("\n"),
@@ -519,7 +535,6 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
           status: result.status ?? "conflict",
           ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
           ...(surfaceTargetPaths.length > 0 ? { surfaceTargetPaths } : {}),
-          ...(result.surfaceEdits ? { surfaceEdits: result.surfaceEdits } : {}),
           ...(result.preview ? { preview: result.preview } : {}),
           ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
           ...(result.operationId ? { operationId: result.operationId } : {}),
@@ -536,11 +551,15 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         );
       }
       return {
-        text: `merged ${result.merged} files from ${appliedRevision === undefined ? "the fixed Git result" : `result revision ${appliedRevision}`}: ${result.changedFiles?.join(", ") ?? ""}`,
+        text: [
+          `merged ${result.merged} files from ${appliedRevision === undefined ? "the fixed Git result" : `result revision ${appliedRevision}`}: ${result.changedFiles?.join(", ") ?? ""}`,
+          ...(appliedDraftPaths.length > 0 ? [`Editor drafts updated without saving: ${appliedDraftPaths.join(", ")}. Disk-based commands still read the saved files.`] : []),
+        ].join("\n"),
         merged: result.merged,
         conflicts: [],
         status: "applied",
         ...(result.appliedPaths ? { appliedPaths: result.appliedPaths } : {}),
+        ...(appliedDraftPaths.length > 0 ? { surfaceTargetPaths: appliedDraftPaths } : {}),
         ...(appliedRevision === undefined ? {} : { resultRevision: appliedRevision }),
         ...(result.operationId ? { operationId: result.operationId } : {}),
       };

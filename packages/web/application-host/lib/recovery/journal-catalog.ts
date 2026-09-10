@@ -554,7 +554,7 @@ const migrateV3Catalog = (database: SqliteDatabase): void => {
     // are marked 'needs-attention' to prevent false success on resume.
     // Completed/aborted/compensated operations get 'safety-observed' for all
     // their files since no further action is needed.
-    const TERMINAL_V3_STATES = new Set(['complete', 'aborted', 'compensated', 'needs-attention']);
+    const TERMINAL_V3_STATES = new Set(['complete', 'aborted', 'compensated', 'needs-attention', 'undone']);
     const insertFile = database.prepare(`
       INSERT INTO operation_files(operation_id, ordinal, path, expected_json, target_json, phase, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1090,6 +1090,8 @@ export const writeOperationRow = (database: SqliteDatabase, operation: Operation
 const OPERATION_FILE_PHASES = [
   'pending', 'apply-intent', 'target-observed',
   'compensate-intent', 'safety-observed', 'needs-attention',
+  'external-intent', 'external-dispatched', 'external-target-observed',
+  'external-compensate-intent', 'external-safety-observed',
 ] as const;
 
 export type OperationFilePhase = typeof OPERATION_FILE_PHASES[number];

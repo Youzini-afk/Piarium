@@ -23,10 +23,13 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 - `POST /api/documents/delete`
 - `POST /api/documents/dirty/publish|clear|barrier/ack`
 - `POST /api/documents/agent-input/capture|release`
+- `POST /api/documents/surface-operation/read|complete`
 - `GET /api/documents/watch?workspaceId=` (SSE; credentials stay in headers, not the URL)
 - `POST /api/documents/recovery/list|read|write|delete`
 
 Watch events carry resource metadata only. Agent-input capture bodies use the authenticated Documents POST channel. Runtime worker requests receive only an opaque snapshot reference or unavailable dirty paths; file bodies are not written to logs, event payloads, or URLs.
+
+Thread Integration uses Host-directed surface capture/apply/undo requests. The dirty-owner connection carries the request ID; the authenticated surface-operation routes carry bodies and receipts. Authority checks owner registration, generation, workspace and document identity. Integration persists its intent before dispatch and only completes after a valid receipt; caller-provided paths cannot acknowledge a write. Confirmed own writes update matching active agent-input sources. An uncertain dispatched write invalidates those paths, so reads cannot silently return either the old draft or old disk. Ordinary later user edits still do not mutate an already captured input.
 
 ## Persistence
 

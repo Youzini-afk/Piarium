@@ -47,7 +47,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 7;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 8;
 
 export type ThreadRegistryErrorCode =
   | "corrupt"
@@ -115,6 +115,13 @@ interface ThreadCatalogV6 {
   schemaVersion: 6;
   workspaceId: string;
   threads: LegacyDraftlessThread[];
+  runs: ThreadRun[];
+}
+
+interface ThreadCatalogV7 {
+  schemaVersion: 7;
+  workspaceId: string;
+  threads: Thread[];
   runs: ThreadRun[];
 }
 
@@ -216,6 +223,12 @@ interface MutationResult<T> {
 const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "archived"]);
 const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "stalled", "looping"]);
 const INTEGRATIONS = new Set<ThreadIntegration>(["none", "dirty", "merge-ready", "conflict", "merged"]);
+const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparationStage"]>>([
+  "materialize",
+  "materializing",
+  "setup",
+  "ready",
+]);
 
 const isStringArray = (value: unknown): value is string[] => (
   Array.isArray(value) && value.every((entry) => typeof entry === "string")
@@ -357,6 +370,9 @@ const isThread = (value: unknown): value is Thread => {
       && (value.worktree.resultCommit === undefined || isString(value.worktree.resultCommit))
       && (value.worktree.resultPath === undefined || isString(value.worktree.resultPath))
       && (value.worktree.materialized === undefined || typeof value.worktree.materialized === "boolean")
+      && (value.worktree.preparationStage === undefined
+        || WORKTREE_PREPARATION_STAGES.has(value.worktree.preparationStage as NonNullable<ThreadWorktree["preparationStage"]>))
+      && (value.worktree.materializationFingerprint === undefined || isString(value.worktree.materializationFingerprint))
       && (value.worktree.retentionReason === undefined || isString(value.worktree.retentionReason))))
     && (value.workBranchId === undefined || isString(value.workBranchId))
     && (value.resultRevision === undefined || (Number.isSafeInteger(value.resultRevision) && Number(value.resultRevision) > 0))
@@ -534,6 +550,23 @@ const migrateLegacyReport = (report: LegacyThreadReport | null, sessionId: strin
     : null
 );
 
+const normalizeThreadWorktree = (worktree: ThreadWorktree): ThreadWorktree => (
+  worktree.preparationStage
+    ? structuredClone(worktree)
+    : {
+        ...structuredClone(worktree),
+        preparationStage: worktree.materialized === false ? "materialize" : "ready",
+      }
+);
+
+const normalizeWorktreePreparation = (thread: Thread): Thread => {
+  if (!thread.worktree || thread.worktree.preparationStage) return thread;
+  return {
+    ...thread,
+    worktree: normalizeThreadWorktree(thread.worktree),
+  };
+};
+
 const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): ThreadCatalogDocument => {
   const value = parseJson(raw, path);
   if (!isRecord(value)) {
@@ -550,7 +583,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       path,
     );
   }
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
   if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
@@ -645,8 +678,15 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
     if (!value.threads.every(isThread)) {
       throw new ThreadRegistryError("corrupt", `Thread registry contains malformed thread records: ${path}`, path);
     }
-    catalog = value as unknown as ThreadCatalogDocument;
+    const current = value as unknown as ThreadCatalogV7 | ThreadCatalogDocument;
+    catalog = {
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
+      workspaceId: current.workspaceId,
+      runs: structuredClone(current.runs),
+      threads: current.threads.map((thread) => normalizeWorktreePreparation(structuredClone(thread))),
+    };
   }
+  catalog.threads = catalog.threads.map(normalizeWorktreePreparation);
   const threadIds = new Set<string>();
   for (const thread of catalog.threads) {
     if (thread.workspaceId !== catalog.workspaceId || threadIds.has(thread.id)) {
@@ -1074,7 +1114,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }).length;
   };
 
-  const startRun = async (workspaceId: string, threadId: string, runtimeId = "pi"): Promise<ThreadRun> => (
+  const startRun = async (
+    workspaceId: string,
+    threadId: string,
+    runtimeId = "pi",
+    options: { allowSettled?: boolean } = {},
+  ): Promise<ThreadRun> => (
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
@@ -1086,7 +1131,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (current?.workerState === "starting" || current?.workerState === "running") {
         throw new Error(`Thread already has an active run: ${threadId}`);
       }
-      if (thread.lifecycle === "settled" || thread.lifecycle === "archived") {
+      if ((thread.lifecycle === "settled" && !options.allowSettled) || thread.lifecycle === "archived") {
         throw new Error(`Cannot start a run for ${thread.lifecycle} thread: ${threadId}`);
       }
       const attempt = catalog.runs
@@ -1233,6 +1278,20 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
+    const nextMergedCommit = mergedCommit === undefined
+      ? thread.mergedCommit
+      : mergedCommit || undefined;
+    const nextMergedResultRevision = mergedResultRevision === undefined
+      ? thread.mergedResultRevision
+      : mergedResultRevision || undefined;
+    const clearsBinding = (integration === "merged" || integration === "none") && Boolean(thread.integrationBinding);
+    if (thread.integration === integration
+      && (diffStats === undefined || JSON.stringify(thread.diffStats) === JSON.stringify(diffStats))
+      && nextMergedCommit === thread.mergedCommit
+      && nextMergedResultRevision === thread.mergedResultRevision
+      && !clearsBinding) {
+      return { value: thread, changed: [], write: false };
+    }
     thread.integration = integration;
     if (diffStats !== undefined) thread.diffStats = diffStats;
     if (mergedCommit !== undefined) {
@@ -1255,8 +1314,37 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
-    if (binding) thread.integrationBinding = structuredClone(binding);
-    else delete thread.integrationBinding;
+    if (binding) {
+      if (thread.integration === "merged" || thread.integration === "none") {
+        return { value: thread, changed: [], write: false };
+      }
+      if (JSON.stringify(thread.integrationBinding) === JSON.stringify(binding)) {
+        return { value: thread, changed: [], write: false };
+      }
+      thread.integrationBinding = structuredClone(binding);
+    } else {
+      if (!thread.integrationBinding) return { value: thread, changed: [], write: false };
+      delete thread.integrationBinding;
+    }
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
+
+  const invalidateIntegrationBinding = async (
+    workspaceId: string,
+    threadId: string,
+    expectedBindingFingerprint: string,
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    if (thread.integration === "merged" || thread.integration === "none"
+      || !thread.integrationBinding
+      || thread.integrationBinding.bindingFingerprint !== expectedBindingFingerprint
+      || !thread.integrationBinding.valid) {
+      return { value: thread, changed: [], write: false };
+    }
+    thread.integrationBinding = { ...thread.integrationBinding, valid: false, mergeReady: false };
+    if (thread.integration === "merge-ready") thread.integration = "dirty";
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });
@@ -1265,7 +1353,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
-      thread.worktree = worktree;
+      thread.worktree = normalizeThreadWorktree(worktree);
       touchThread(catalog, thread);
       return { value: thread, changed: [thread] };
     })
@@ -1285,7 +1373,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (!thread) return { value: null, changed: [], write: false };
     thread.workBranchId = input.branchId;
     if (input.resultRevision !== undefined) thread.resultRevision = input.resultRevision;
-    if (input.worktree) thread.worktree = structuredClone(input.worktree);
+    if (input.worktree) thread.worktree = normalizeThreadWorktree(input.worktree);
     if (input.diffStats) {
       thread.diffStats = structuredClone(input.diffStats);
       if (thread.integration === "none") {
@@ -1332,6 +1420,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const result = await mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
+      const activeRun = activeRunFor(catalog, thread);
+      if (activeRun?.outcome === null) {
+        throw new Error(`Cannot archive a thread with an active Run: ${threadId}`);
+      }
       thread.lifecycle = "archived";
       thread.attention = "none";
       thread.waitingFor = null;
@@ -1491,7 +1583,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       tools: [...new Set(input.tools)],
       worktree: "isolated",
     };
-    thread.worktree = structuredClone(input.worktree);
+    thread.worktree = normalizeThreadWorktree(input.worktree);
     thread.lifecycle = "active";
     thread.attention = "none";
     thread.waitingFor = null;
@@ -1696,6 +1788,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setAttention,
     setIntegration,
     setIntegrationBinding,
+    invalidateIntegrationBinding,
     setWorktree,
     setWorkingState,
     completeThread,

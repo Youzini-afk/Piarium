@@ -95,6 +95,73 @@ describe("thread worktree runtime", () => {
     }
   });
 
+  it("reports the created Git directory and drains bootstrap before cancellation completes", async () => {
+    const fixture = createRepo();
+    let bootstrapReady = false;
+    let childPath = "";
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async (directory, input) => {
+        childPath = join(fixture.worktrees, String(input.worktreeName));
+        git(directory, ["worktree", "add", "-b", String(input.branchName), childPath, String(input.startRef)]);
+        return { path: childPath };
+      },
+      getWorktreeBootstrapStatus: async () => bootstrapReady
+        ? { status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }
+        : { status: "pending", phase: "directory-created", error: null, updatedAt: Date.now() },
+    });
+    const states: Array<{ path: string; preparationStage: string | undefined }> = [];
+    const controller = new AbortController();
+    let settled = false;
+    try {
+      const preparing = runtime.prepare({
+        mode: "isolated",
+        sourceRoot: fixture.repo,
+        threadId: "bootstrap-cancel",
+        signal: controller.signal,
+        onWorktreeState: async (worktree) => {
+          states.push({ path: worktree.path, preparationStage: worktree.preparationStage });
+        },
+      }).finally(() => { settled = true; });
+      while (states.length === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(states[0]).toEqual({ path: childPath, preparationStage: "materializing" });
+
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(settled).toBe(false);
+      bootstrapReady = true;
+      await expect(preparing).rejects.toMatchObject({ name: "AbortError" });
+      expect(states.at(-1)).toEqual({ path: childPath, preparationStage: "ready" });
+    } finally {
+      if (childPath && existsSync(childPath)) {
+        try { git(fixture.repo, ["worktree", "remove", "--force", childPath]); } catch { /* test cleanup */ }
+      }
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("estimates only the paths the Git prepare backend will materialize", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    try {
+      writeFileSync(join(fixture.repo, ".gitignore"), "node_modules/\n");
+      git(fixture.repo, ["add", ".gitignore"]);
+      git(fixture.repo, ["commit", "-m", "ignore dependencies"]);
+      writeFileSync(join(fixture.repo, "untracked.txt"), "extra\n");
+      mkdirSync(join(fixture.repo, "node_modules"));
+      writeFileSync(join(fixture.repo, "node_modules", "ignored.js"), "ignored\n");
+
+      const estimate = await runtime.estimatePrepare(fixture.repo);
+      expect(estimate).toMatchObject({ unknown: false, allocatedBytes: null });
+      expect(estimate.logicalBytes).toBe(
+        Buffer.byteLength("base\n")
+        + Buffer.byteLength("node_modules/\n")
+        + Buffer.byteLength("extra\n"),
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === "win32")("preserves a relative child symlink without dereferencing it into the parent", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
@@ -259,6 +326,7 @@ describe("thread worktree runtime", () => {
       const materialized = await runtime.materialize(fixture.repo, snapshotted);
       expect(materialized.materialized).toBe(true);
       expect(existsSync(childPath)).toBe(true);
+      expect(existsSync(join(childPath, ".git"))).toBe(true);
       expect(readFileSync(join(childPath, "work.txt"), "utf8")).toBe("some work done\n");
     } finally {
       if (childPath && existsSync(childPath)) {

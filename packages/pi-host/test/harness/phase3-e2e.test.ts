@@ -132,6 +132,63 @@ async function executeTool(tool: ToolDefinition, params: Record<string, unknown>
 }
 
 describe("Phase 3 Thread/ThreadRun e2e", () => {
+  it("returns the reviewed conflict binding to the model and forwards a bound choice", async () => {
+    const fingerprint = "a".repeat(64);
+    const requests: unknown[] = [];
+    const bridge = new HostServicesBridge({
+      sessionId: SESSION_ID,
+      emit: (_event, request) => {
+        requests.push(request.params);
+        bridge.respond(SESSION_ID, request.requestId, { ok: true, result: {
+          text: "Conflict in a.ts", merged: 0, conflicts: ["a.ts"], status: "conflict",
+          preview: {
+            operationId: "integration-1", threadId: "thread-1", resultRevision: 2,
+            bindingFingerprint: fingerprint, valid: true, mergeReady: false,
+            binding: { "a.ts": { target: "disk", revision: "reviewed-parent" } },
+            paths: [{ path: "a.ts", target: "disk", decision: "conflict", phase: "pending", isText: false }],
+            conflictPaths: ["a.ts"], surfaceTargetPaths: [], unavailablePaths: [], appliedPaths: [],
+          },
+        } });
+      },
+    });
+    try {
+      const tool = createMergeTool(bridge, SESSION_ID);
+      const first = await executeTool(tool, { threadId: "thread-1" });
+      const binding = JSON.parse(first.text.slice(first.text.indexOf('{'))) as {
+        resultRevision: number; expectedBindingFingerprint: string; paths: Array<{ path: string; expectedParentRevision: string }>;
+      };
+      assert.equal(binding.expectedBindingFingerprint, fingerprint);
+      assert.equal(binding.paths[0]?.expectedParentRevision, "reviewed-parent");
+      const resolution = { path: "a.ts", choice: "child", expectedParentRevision: "reviewed-parent" };
+      await executeTool(tool, { threadId: "thread-1", resultRevision: binding.resultRevision,
+        expectedBindingFingerprint: binding.expectedBindingFingerprint, resolutions: [resolution] });
+      assert.deepEqual(requests[1], { threadId: "thread-1", resultRevision: 2,
+        expectedBindingFingerprint: fingerprint, resolutions: [resolution] });
+    } finally {
+      bridge.dispose();
+    }
+  });
+
+  it("forwards public merge cancellation to the Host bridge", async () => {
+    const cancelled: Array<{ requestId?: string; queryId?: string }> = [];
+    const bridge = new HostServicesBridge({
+      sessionId: SESSION_ID,
+      emit: (event, request) => { if (String(event) === "harness.cancel") cancelled.push(request); },
+    });
+    const controller = new AbortController();
+    try {
+      const result = createMergeTool(bridge, SESSION_ID).execute(
+        "merge-cancel", { threadId: "thread-1" }, controller.signal, undefined, undefined as never,
+      );
+      controller.abort();
+      assert.equal((await result as { isError?: boolean }).isError, true);
+      assert.equal(cancelled.length, 1);
+      assert.equal(typeof cancelled[0]?.requestId, "string");
+    } finally {
+      bridge.dispose();
+    }
+  });
+
   it("dispatch creates a Thread and a running attempt", async () => {
     const harness = await setup();
     try {

@@ -1,6 +1,9 @@
 import type {
   DocumentsAPI,
   PiariumDirtyStateBarrierEvent,
+  PiariumDocumentSurfaceOperationEvent,
+  PiariumDocumentSurfaceOperationPayload,
+  PiariumDocumentSurfaceOperationResourceResult,
   PiariumDocumentReadResult,
   PiariumResourceReference,
   PiariumWorkspaceFileEvent,
@@ -35,6 +38,11 @@ export type DocumentListener = (record: DocumentRecord) => void;
 
 const EMPTY_RESOURCE_IDS: ReadonlySet<string> = new Set();
 
+const bufferHash = async (content: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return `sha256-${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+};
+
 const replacementBetween = (previous: string, next: string): DocumentChange | null => {
   if (previous === next) return null;
   let from = 0;
@@ -51,6 +59,11 @@ const replacementBetween = (previous: string, next: string): DocumentChange | nu
     nextEnd -= 1;
   }
   return { from, to: previousEnd, insert: next.slice(from, nextEnd) };
+};
+
+const endPosition = (content: string): DocumentTextPosition => {
+  const lines = content.split('\n');
+  return { line: lines.length - 1, character: lines.at(-1)?.length ?? 0 };
 };
 
 type PreparedWorkspaceDocument = {
@@ -374,6 +387,10 @@ export class DocumentRegistry {
     return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
   }
 
+  surfaceOwner(): { generation: number; ownerId: string } {
+    return { generation: this.getGeneration(), ownerId: this.dirtyOwnerId };
+  }
+
   async captureAgentInputContext(sessionId: string, workspaceId: string): Promise<AgentInputContext> {
     this.assertActive();
     const dirtyRecords = [...this.records.values()]
@@ -389,14 +406,17 @@ export class DocumentRegistry {
     });
     if (!this.documents.captureAgentInputSnapshot) return unavailable();
     const generation = this.getGeneration();
-    const resources = dirtyRecords.map((record) => ({
+    const resources = await Promise.all(dirtyRecords.map(async (record) => ({
       baseRevision: record.baseRevision,
-      content: serializeEditorContent(record.buffer, record.lineEnding),
+      bufferHash: await bufferHash(record.buffer),
+      documentInstanceId: record.documentInstanceId,
       encoding: record.encoding,
       bom: record.bom,
+      lineEnding: record.lineEnding,
+      content: serializeEditorContent(record.buffer, record.lineEnding),
       localEditRevision: record.localEditRevision,
       resource: { ...record.identity },
-    }));
+    })));
     try {
       this.ensureWatch(workspaceId);
       await this.enqueueDirtyPublication(workspaceId, generation, resources.map(({ content: _content, ...resource }) => resource));
@@ -801,6 +821,13 @@ export class DocumentRegistry {
       const current = this.records.get(documentKey(document.before.identity))
         ?? diskSnapshots.get(documentKey(document.before.identity));
       if (!current
+        || current.documentInstanceId !== document.before.documentInstanceId
+        || current.connectionGeneration !== document.before.connectionGeneration
+        || current.workspaceEpoch !== document.before.workspaceEpoch
+        || current.baseRevision !== document.before.baseRevision
+        || current.encoding !== document.before.encoding
+        || current.bom !== document.before.bom
+        || current.lineEnding !== document.before.lineEnding
         || current.localEditRevision !== document.before.localEditRevision
         || current.buffer !== document.before.buffer
         || current.status !== document.before.status
@@ -840,7 +867,6 @@ export class DocumentRegistry {
     });
     this.preparedWorkspaceEdits.delete(groupId);
     this.invalidateWorkspaceEditUndoGroups(records.map((record) => record.identity));
-    this.commitAtomic(records, prepared.preview.workspaceId);
     this.workspaceEditUndoGroups.set(groupId, {
       groupId,
       documents: records.map((record, index) => ({
@@ -850,6 +876,7 @@ export class DocumentRegistry {
         appliedRevision: record.localEditRevision,
       })),
     });
+    this.commitAtomic(records, prepared.preview.workspaceId);
     return { status: 'applied', groupId, records };
   }
 
@@ -1322,15 +1349,20 @@ export class DocumentRegistry {
     }
   }
 
-  private publishDirtyWorkspace(workspaceId: string): Promise<void> {
+  private async publishDirtyWorkspace(workspaceId: string): Promise<void> {
     if (this.disposed) return Promise.resolve();
-    const resources = [...this.records.values()]
+    const resources = await Promise.all([...this.records.values()]
       .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
-      .map((record) => ({
+      .map(async (record) => ({
         baseRevision: record.baseRevision,
+        bufferHash: await bufferHash(record.buffer),
+        documentInstanceId: record.documentInstanceId,
+        encoding: record.encoding,
+        bom: record.bom,
+        lineEnding: record.lineEnding,
         localEditRevision: record.localEditRevision,
         resource: record.identity,
-      }));
+      })));
     const generation = this.getGeneration();
     return this.enqueueDirtyPublication(workspaceId, generation, resources);
   }
@@ -1338,7 +1370,16 @@ export class DocumentRegistry {
   private enqueueDirtyPublication(
     workspaceId: string,
     generation: number,
-    resources: Array<{ baseRevision: string | null; localEditRevision: number; resource: DocumentIdentity }>,
+    resources: Array<{
+      baseRevision: string | null;
+      bufferHash?: string;
+      documentInstanceId?: string;
+      encoding?: string;
+      bom?: boolean;
+      lineEnding?: 'lf' | 'crlf' | 'cr';
+      localEditRevision: number;
+      resource: DocumentIdentity;
+    }>,
   ): Promise<void> {
     const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
@@ -1371,14 +1412,20 @@ export class DocumentRegistry {
     this.ensureWatch(workspaceId);
     for (const record of records) {
       const listeners = this.listeners.get(documentKey(record.identity));
-      if (listeners) for (const listener of listeners) listener(record);
+      if (listeners) for (const listener of listeners) {
+        try { listener(record); } catch (error) { this.reportJournalFailure(error); }
+      }
     }
     if (!sameResourceSet(previousDirty, nextDirty)) {
       const listeners = this.dirtyListenersByWorkspace.get(workspaceId);
-      if (listeners) for (const listener of listeners) listener();
+      if (listeners) for (const listener of listeners) {
+        try { listener(); } catch (error) { this.reportJournalFailure(error); }
+      }
     }
     const workspaceListeners = this.workspaceListeners.get(workspaceId);
-    if (workspaceListeners) for (const listener of workspaceListeners) listener();
+    if (workspaceListeners) for (const listener of workspaceListeners) {
+      try { listener(); } catch (error) { this.reportJournalFailure(error); }
+    }
     for (const record of records) this.scheduleJournal(record);
   }
 
@@ -1404,6 +1451,8 @@ export class DocumentRegistry {
     const subscription = this.documents.watch(workspaceId, (event) => {
       if (event.kind === 'dirty-state-barrier') {
         void this.handleDirtyStateBarrier(event);
+      } else if (event.kind === 'surface-operation') {
+        void this.handleSurfaceOperation(event);
       } else {
         this.handleWatchEvent(event, workspaceId);
       }
@@ -1411,6 +1460,189 @@ export class DocumentRegistry {
       dirtyOwner: { generation: this.getGeneration(), ownerId: this.dirtyOwnerId },
     });
     this.watches.set(workspaceId, subscription);
+  }
+
+  private async handleSurfaceOperation(event: PiariumDocumentSurfaceOperationEvent): Promise<void> {
+    if (!this.documents.readSurfaceOperation || !this.documents.completeSurfaceOperation) return;
+    const owner = this.surfaceOwner();
+    let payload: PiariumDocumentSurfaceOperationPayload;
+    try {
+      payload = await this.documents.readSurfaceOperation({
+        ...owner,
+        requestId: event.requestId,
+        workspaceId: event.workspaceId,
+      });
+    } catch (error) {
+      this.reportJournalFailure(error);
+      return;
+    }
+    const failed = (message: string): PiariumDocumentSurfaceOperationResourceResult[] => payload.targets.map((target) => ({
+      resource: target.resource,
+      status: 'failed',
+      message,
+    }));
+    let resources: PiariumDocumentSurfaceOperationResourceResult[];
+    try {
+      resources = await this.executeSurfaceOperation(payload);
+    } catch (error) {
+      resources = failed(error instanceof Error ? error.message : String(error));
+    }
+    try {
+      await this.documents.completeSurfaceOperation({
+        ...owner,
+        operationId: payload.operationId,
+        requestId: payload.requestId,
+        resources,
+        workspaceId: payload.workspaceId,
+      });
+    } catch (error) {
+      this.reportJournalFailure(error);
+    }
+  }
+
+  private async executeSurfaceOperation(
+    payload: PiariumDocumentSurfaceOperationPayload,
+  ): Promise<PiariumDocumentSurfaceOperationResourceResult[]> {
+    const existingUndoGroup = payload.action === 'apply'
+      ? this.workspaceEditUndoGroups.get(payload.operationId)
+      : undefined;
+    const existingByPath = new Map(existingUndoGroup?.documents.map((document) => [document.identity.resourceId, document]) ?? []);
+    const records: Array<{ target: PiariumDocumentSurfaceOperationPayload['targets'][number]; record: DocumentRecord; hash: string }> = [];
+    for (const target of payload.targets) {
+      const record = this.records.get(documentKey(target.resource));
+      const hash = record ? await bufferHash(record.buffer) : '';
+      const existingApplied = existingByPath.get(target.resource.resourceId);
+      const expectedRevision = payload.action === 'undo'
+        ? target.expectedAppliedRevision
+        : existingApplied?.appliedRevision ?? target.localEditRevision;
+      const expectedHash = payload.action === 'undo'
+        ? target.expectedAppliedHash
+        : existingApplied && target.newText !== undefined
+          ? await bufferHash(target.newText)
+          : target.bufferHash;
+      if (!record || record.status !== 'ready' || record.identity.workspaceId !== payload.workspaceId
+        || record.connectionGeneration !== this.getGeneration()
+        || record.documentInstanceId !== target.documentInstanceId
+        || record.baseRevision !== target.baseRevision
+        || record.localEditRevision !== expectedRevision
+        || hash !== expectedHash
+        || record.encoding !== target.encoding || record.bom !== target.bom
+        || record.lineEnding !== target.lineEnding
+        || this.records.get(documentKey(target.resource)) !== record) {
+        return this.surfaceOperationFailures(payload, `Document surface binding changed before ${payload.action}`);
+      }
+      records.push({ target, record, hash });
+    }
+
+    if (payload.action === 'capture') {
+      return records.map(({ target, record, hash }) => ({
+        resource: target.resource,
+        status: 'captured',
+        documentInstanceId: record.documentInstanceId,
+        beforeLocalEditRevision: record.localEditRevision,
+        beforeHash: hash,
+        content: record.buffer,
+      }));
+    }
+
+    if (payload.action === 'undo') {
+      const undone = this.undoWorkspaceEdit(payload.operationId);
+      if (undone.status !== 'undone') {
+        const message = undone.status === 'unavailable'
+          ? 'The surface undo baseline is unavailable'
+          : undone.failures.map((failure) => failure.message).join('; ');
+        return this.surfaceOperationFailures(payload, message);
+      }
+      return Promise.all(undone.records.map(async (record) => ({
+        resource: record.identity,
+        status: 'undone' as const,
+        documentInstanceId: record.documentInstanceId,
+        afterLocalEditRevision: record.localEditRevision,
+        afterHash: await bufferHash(record.buffer),
+        content: record.buffer,
+      })));
+    }
+
+    const previous = existingUndoGroup;
+    if (previous) {
+      const previousByPath = new Map(previous.documents.map((document) => [document.identity.resourceId, document]));
+      const reusable = records.every(({ target, record }) => {
+        const document = previousByPath.get(target.resource.resourceId);
+        return document && target.newText !== undefined
+          && document.appliedBuffer === target.newText
+          && document.appliedRevision === record.localEditRevision
+          && record.buffer === target.newText;
+      }) && previous.documents.length === records.length;
+      if (!reusable) {
+        return this.surfaceOperationFailures(payload, 'The existing integration undo group no longer matches this operation');
+      }
+      return Promise.all(records.map(async ({ target, record }) => ({
+        resource: target.resource,
+        status: 'applied' as const,
+        documentInstanceId: record.documentInstanceId,
+        beforeLocalEditRevision: target.localEditRevision,
+        beforeHash: target.bufferHash,
+        afterLocalEditRevision: record.localEditRevision,
+        afterHash: await bufferHash(record.buffer),
+      })));
+    }
+    if (records.some(({ target }) => target.newText === undefined)) {
+      return this.surfaceOperationFailures(payload, 'Surface text replacement is missing');
+    }
+    const prepared = await this.prepareWorkspaceEdit({
+      workspaceId: payload.workspaceId,
+      origin: 'thread-integration',
+      groupId: payload.operationId,
+      textEdits: records.map(({ target, record }) => ({
+        identity: target.resource,
+        version: record.localEditRevision,
+        edits: [{
+          range: { start: { line: 0, character: 0 }, end: endPosition(record.buffer) },
+          newText: target.newText!,
+        }],
+      })),
+    });
+    if (prepared.status === 'rejected') {
+      const message = prepared.failures.map((failure) => failure.message).join('; ');
+      return this.surfaceOperationFailures(payload, message);
+    }
+    const applied = await this.applyWorkspaceEdit(payload.operationId);
+    if (applied.status !== 'applied') {
+      const message = applied.failures.map((failure) => failure.message).join('; ');
+      return this.surfaceOperationFailures(payload, message);
+    }
+    const beforeByPath = new Map(records.map((entry) => [entry.target.resource.resourceId, entry]));
+    return Promise.all(applied.records.map(async (record) => {
+      const before = beforeByPath.get(record.identity.resourceId)!;
+      return {
+        resource: record.identity,
+        status: 'applied' as const,
+        documentInstanceId: record.documentInstanceId,
+        beforeLocalEditRevision: before.record.localEditRevision,
+        beforeHash: before.hash,
+        afterLocalEditRevision: record.localEditRevision,
+        afterHash: await bufferHash(record.buffer),
+      };
+    }));
+  }
+
+  private async surfaceOperationFailures(
+    payload: PiariumDocumentSurfaceOperationPayload,
+    message: string,
+  ): Promise<PiariumDocumentSurfaceOperationResourceResult[]> {
+    return Promise.all(payload.targets.map(async (target) => {
+      const record = this.records.get(documentKey(target.resource));
+      return {
+        resource: target.resource,
+        status: 'failed' as const,
+        message,
+        ...(record ? {
+          documentInstanceId: record.documentInstanceId,
+          afterLocalEditRevision: record.localEditRevision,
+          afterHash: await bufferHash(record.buffer),
+        } : {}),
+      };
+    }));
   }
 
   private scheduleJournal(record: DocumentRecord): void {

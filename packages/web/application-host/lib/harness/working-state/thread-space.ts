@@ -3,12 +3,6 @@ import type { HarnessWorktreeBudget, Thread, ThreadOccupancy, ThreadSpaceMeasure
 import type { RecoveryState } from "./types.js";
 import type { WorkingStateStore } from "./working-state-store.js";
 
-const emptyMeasurement = (unknown = false): ThreadSpaceMeasurement => ({
-  logicalBytes: unknown ? null : 0,
-  allocatedBytes: unknown ? null : 0,
-  unknown,
-});
-
 const addHash = (
   hashes: Map<string, number | null>,
   state: RecoveryState | undefined,
@@ -53,6 +47,11 @@ export const assembleKeepReasons = (input: {
 }): string[] => {
   const reasons: string[] = [];
   if (input.thread.keepWorktree) reasons.push("User requested keep_worktree");
+  if (input.thread.worktree?.preparationStage === "materializing") {
+    reasons.push("Directory materialization is incomplete");
+  } else if (input.thread.worktree?.preparationStage === "setup") {
+    reasons.push("Directory setup is incomplete");
+  }
   if (input.runActive) reasons.push("Thread still has an active run");
   if (input.thread.lifecycle === "active" || input.thread.lifecycle === "queued") {
     reasons.push(`Thread lifecycle is ${input.thread.lifecycle}`);
@@ -91,6 +90,29 @@ export const measurementFromHashes = (hashes: Map<string, number | null>): Threa
   for (const size of hashes.values()) {
     if (size === null || !Number.isFinite(size)) unknown = true;
     else logical += size;
+  }
+  return {
+    logicalBytes: unknown ? null : logical,
+    allocatedBytes: null,
+    unknown,
+  };
+};
+
+/** Estimate the logical footprint of a persisted working-state view. */
+export const measurementFromStates = (
+  states: Record<string, RecoveryState>,
+): ThreadSpaceMeasurement => {
+  let logical = 0;
+  let unknown = false;
+  for (const state of Object.values(states)) {
+    if (state.kind === "regular-file") {
+      if (!Number.isFinite(state.byteLength) || state.byteLength < 0) unknown = true;
+      else logical += state.byteLength;
+    } else if (state.kind === "symlink") {
+      logical += Buffer.byteLength(state.symlinkTarget, "utf8");
+    } else if (state.kind === "unsupported") {
+      unknown = true;
+    }
   }
   return {
     logicalBytes: unknown ? null : logical,
@@ -191,8 +213,9 @@ export const projectWorkspaceSpace = (
     if (thread.materialized.unknown || thread.materialized.logicalBytes === null) materializedUnknown = true;
     else materializedLogical += thread.materialized.logicalBytes;
   }
+  // The known portion is a lower bound. Unknown files must not hide a
+  // confirmed overage, while an unknown lower bound remains visible below.
   const overBudget = budget?.maxBytes !== undefined
-    && !materializedUnknown
     && materializedLogical > budget.maxBytes;
   const freeRatio = volume ? volume.freeBytes / volume.totalBytes : null;
   const lowFree = budget?.minFreeRatio !== undefined && freeRatio !== null && freeRatio < budget.minFreeRatio;

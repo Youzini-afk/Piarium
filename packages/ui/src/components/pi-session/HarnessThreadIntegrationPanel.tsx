@@ -5,7 +5,6 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { getDocumentRegistry } from '@/lib/documents/session';
-import { applyThreadSurfaceEdits, collectSurfaceParents } from '@/lib/documents/thread-surface-integration';
 import { cn } from '@/lib/utils';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
@@ -30,56 +29,51 @@ export const HarnessThreadIntegrationPanel: React.FC<{
   parentSessionId: string;
   entry: HarnessThreadSnapshot;
   onThread: (thread: Thread) => void;
-}> = ({ workspaceId, parentSessionId, entry, onThread }) => {
+}> = ({ parentSessionId, entry, onThread }) => {
   const { t } = useI18n();
   const thread = entry.thread;
   const [preview, setPreview] = React.useState<ThreadIntegrationPreview | null>(null);
   const [resolutions, setResolutions] = React.useState<Record<string, ThreadConflictResolution>>({});
   const [busy, setBusy] = React.useState(false);
   const [lastOperationId, setLastOperationId] = React.useState<string | null>(null);
+  const onThreadRef = React.useRef(onThread);
+  const previewRequest = React.useRef(0);
+
+  React.useEffect(() => { onThreadRef.current = onThread; }, [onThread]);
 
   const loadPreview = React.useCallback(async (signal?: AbortSignal) => {
-    const first = await runtimeFetch(
-      `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(thread.id)}/integration`,
-      { cache: 'no-store', ...(signal ? { signal } : {}) },
-    );
-    const firstBody = await first.json().catch(() => ({}));
-    if (!first.ok) throw new Error(isRecord(firstBody) && typeof firstBody.error === 'string' ? firstBody.error : `Unable to preview integration (${first.status})`);
-    const firstPreview = parsePreview(firstBody.preview);
-    const surfaceParents = collectSurfaceParents(workspaceId, firstPreview.surfaceTargetPaths);
-    if (firstPreview.surfaceTargetPaths.length === 0 || surfaceParents.length === 0) {
-      setPreview(firstPreview);
-      if (isRecord(firstBody) && firstBody.thread) onThread(parseThread(firstBody.thread));
-      return firstPreview;
-    }
-    const second = await runtimeFetch(
+    const request = ++previewRequest.current;
+    const response = await runtimeFetch(
       `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(thread.id)}/integration`,
       {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resultRevision: firstPreview.resultRevision,
-          surfaceParents,
-          resolutions: Object.values(resolutions),
+          resultRevision: thread.resultRevision,
+          sourceOwner: getDocumentRegistry().surfaceOwner(),
         }),
         ...(signal ? { signal } : {}),
       },
     );
-    const secondBody = await second.json().catch(() => ({}));
-    if (!second.ok) throw new Error(isRecord(secondBody) && typeof secondBody.error === 'string' ? secondBody.error : `Unable to preview integration (${second.status})`);
-    const next = parsePreview(secondBody.preview);
+    const body = await response.json().catch(() => ({}));
+    if (signal?.aborted || request !== previewRequest.current) return null;
+    if (!response.ok) throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : `Unable to preview integration (${response.status})`);
+    const next = parsePreview(body.preview);
     setPreview(next);
-    if (isRecord(secondBody) && secondBody.thread) onThread(parseThread(secondBody.thread));
+    if (isRecord(body) && body.thread) onThreadRef.current(parseThread(body.thread));
     return next;
-  }, [onThread, parentSessionId, resolutions, thread.id, workspaceId]);
+  }, [parentSessionId, thread.id, thread.resultRevision]);
 
   React.useEffect(() => {
     const controller = new AbortController();
+    setPreview(null);
+    setResolutions({});
     void loadPreview(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadIntegration] preview failed:', error);
     });
     return () => controller.abort();
-  }, [loadPreview, thread.eventSeq, thread.resultRevision, thread.integration]);
+  }, [loadPreview, thread.resultRevision, thread.integrationBinding?.bindingFingerprint, thread.integrationBinding?.valid]);
 
   const choose = (path: string, choice: ThreadConflictResolution['choice'], text?: string) => {
     setResolutions((current) => ({
@@ -93,7 +87,15 @@ export const HarnessThreadIntegrationPanel: React.FC<{
     setBusy(true);
     try {
       const current = preview ?? await loadPreview();
-      const surfaceParents = collectSurfaceParents(workspaceId, current.surfaceTargetPaths);
+      if (!current) return;
+      const boundResolutions = Object.values(resolutions).map((resolution) => {
+        const binding = current.binding[resolution.path];
+        return {
+          ...resolution,
+          expectedParentRevision: binding?.revision,
+          ...(binding?.localEditRevision === undefined ? {} : { expectedLocalEditRevision: binding.localEditRevision }),
+        };
+      });
       const response = await runtimeFetch(
         `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(thread.id)}/merge`,
         {
@@ -101,8 +103,9 @@ export const HarnessThreadIntegrationPanel: React.FC<{
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             resultRevision: current.resultRevision,
-            surfaceParents,
-            resolutions: Object.values(resolutions),
+            sourceOwner: getDocumentRegistry().surfaceOwner(),
+            expectedBindingFingerprint: current.bindingFingerprint,
+            resolutions: boundResolutions,
           }),
         },
       );
@@ -113,34 +116,6 @@ export const HarnessThreadIntegrationPanel: React.FC<{
       if (isRecord(body) && body.thread) onThread(parseThread(body.thread));
       const result = isRecord(body) ? body.result : null;
       const operationId = isRecord(result) && typeof result.operationId === 'string' ? result.operationId : current.operationId;
-      const surfaceEdits = isRecord(result) && Array.isArray(result.surfaceEdits) ? result.surfaceEdits : [];
-      if (surfaceEdits.length > 0) {
-        const applied = await applyThreadSurfaceEdits({
-          workspaceId,
-          operationId,
-          edits: surfaceEdits as never,
-        });
-        const ack = await runtimeFetch(
-          `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(thread.id)}/integration/ack`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              operationId,
-              applied: applied.applied,
-              failed: applied.failed.map((item) => item.path),
-            }),
-          },
-        );
-        const ackBody = await ack.json().catch(() => ({}));
-        if (!ack.ok) {
-          throw new Error(isRecord(ackBody) && typeof ackBody.error === 'string' ? ackBody.error : t('harness.threads.mergeFailed'));
-        }
-        if (isRecord(ackBody) && ackBody.thread) onThread(parseThread(ackBody.thread));
-        if (applied.failed.length > 0) {
-          throw new Error(applied.failed.map((item) => `${item.path}: ${item.reason}`).join('\n'));
-        }
-      }
       setLastOperationId(operationId);
       setResolutions({});
       await loadPreview();
@@ -151,15 +126,25 @@ export const HarnessThreadIntegrationPanel: React.FC<{
     }
   };
 
-  const undo = () => {
+  const undo = async () => {
     if (!lastOperationId) return;
-    const undone = getDocumentRegistry().undoWorkspaceEdit(lastOperationId);
-    if (undone.status !== 'undone') {
-      toast.error(t('harness.threads.undoUnavailable'));
-      return;
+    try {
+      const response = await runtimeFetch(
+        `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(thread.id)}/integration/undo`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operationId: lastOperationId, sourceOwner: getDocumentRegistry().surfaceOwner() }),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : t('harness.threads.undoUnavailable'));
+      if (isRecord(body) && body.thread) onThread(parseThread(body.thread));
+      setLastOperationId(null);
+      await loadPreview();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('harness.threads.undoUnavailable'));
     }
-    setLastOperationId(null);
-    void loadPreview().catch(() => undefined);
   };
 
   const conflicts = preview?.paths.filter((path) => path.decision === 'conflict') ?? [];
@@ -220,13 +205,13 @@ export const HarnessThreadIntegrationPanel: React.FC<{
       ))}
       <div className="mt-2 flex justify-end gap-1.5">
         {lastOperationId ? (
-          <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={undo}>
+          <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => { void undo(); }}>
             {t('harness.threads.undoMerge')}
           </button>
         ) : null}
         <button
           type="button"
-          disabled={busy || (preview ? !preview.mergeReady && conflicts.some((path) => !resolutions[path.path]) : false)}
+          disabled={busy || !preview?.valid || unavailable.length > 0 || conflicts.some((path) => !resolutions[path.path])}
           onClick={() => { void merge(); }}
           className={cn('inline-flex items-center gap-1 rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50')}
         >

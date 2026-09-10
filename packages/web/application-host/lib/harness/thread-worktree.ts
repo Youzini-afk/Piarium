@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadWorktree } from "@piarium/protocol";
+import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadSpaceMeasurement, ThreadWorktree } from "@piarium/protocol";
 import type { WorktreeBootstrapState } from "../git/types.js";
 import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
 import { mergeText3Way } from "./working-state/three-way-merge.js";
@@ -33,6 +33,8 @@ export interface PrepareThreadWorktreeInput {
   sourceRoot: string;
   threadId: string;
   signal?: AbortSignal;
+  /** Persist ownership as soon as the backend reveals a path, then persist readiness after bootstrap/copy finishes. */
+  onWorktreeState?(worktree: ThreadWorktree): Promise<void>;
 }
 
 export interface PreparedThreadWorktree {
@@ -169,6 +171,15 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const fixedCopyResultPath = (worktree: ThreadWorktree): string | undefined => (
     worktree.resultPath ?? (worktree.resultCommit ? `${worktree.path}.snapshot` : undefined)
   );
+  const pathExists = async (value: string): Promise<boolean> => {
+    try {
+      await fsPromises.lstat(value);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  };
 
   const waitUntilReady = async (directory: string, signal?: AbortSignal): Promise<void> => {
     for (;;) {
@@ -180,7 +191,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
   };
 
-  const copyUntracked = async (sourceRoot: string, destinationRoot: string, relativePaths: string[]): Promise<void> => {
+  const copyUntracked = async (
+    sourceRoot: string,
+    destinationRoot: string,
+    relativePaths: string[],
+  ): Promise<void> => {
     for (const relativeValue of relativePaths) {
       const relative = normalizeRelative(relativeValue, pathModule);
       const source = pathModule.resolve(sourceRoot, relative);
@@ -320,7 +335,56 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     };
   };
 
-  const prepare = async ({ mode, sourceRoot, threadId, signal }: PrepareThreadWorktreeInput): Promise<PreparedThreadWorktree> => {
+  const estimatePrepare = async (sourceRoot: string): Promise<ThreadSpaceMeasurement> => {
+    const logicalFromPaths = async (paths: string[]): Promise<ThreadSpaceMeasurement> => {
+      let logical = 0;
+      let unknown = false;
+      for (const value of paths) {
+        try {
+          const absolute = pathModule.resolve(sourceRoot, normalizeRelative(value, pathModule));
+          const stat = await fsPromises.lstat(absolute);
+          logical += stat.size;
+        } catch {
+          unknown = true;
+        }
+      }
+      return { logicalBytes: unknown ? null : logical, allocatedBytes: null, unknown };
+    };
+    try {
+      await Promise.all([
+        runGit(sourceRoot, ["rev-parse", "HEAD"]),
+        runGit(sourceRoot, ["diff", "--binary", "HEAD"]),
+        runGit(sourceRoot, ["ls-files", "--others", "--exclude-standard", "-z"]),
+      ]);
+      const { stdout } = await runGit(sourceRoot, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
+      return logicalFromPaths(parseNullList(stdout));
+    } catch {
+      let logical = 0;
+      let unknown = false;
+      const scan = async (directory: string): Promise<void> => {
+        let entries: fs.Dirent[];
+        try {
+          const readdirFn = (fsPromises as typeof fs.promises).readdir ?? fs.promises.readdir;
+          entries = await readdirFn(directory, { withFileTypes: true });
+        } catch {
+          unknown = true;
+          return;
+        }
+        for (const entry of entries) {
+          if (entry.name === ".git" || entry.name === ".piarium") continue;
+          const full = pathModule.join(directory, entry.name);
+          if (entry.isDirectory()) await scan(full);
+          else {
+            try { logical += (await fsPromises.lstat(full)).size; } catch { unknown = true; }
+          }
+        }
+      };
+      await scan(sourceRoot);
+      return { logicalBytes: unknown ? null : logical, allocatedBytes: null, unknown };
+    }
+  };
+
+  const prepare = async ({ mode, sourceRoot, threadId, signal, onWorktreeState }: PrepareThreadWorktreeInput): Promise<PreparedThreadWorktree> => {
     if (mode === "none" || mode === "shared") return { cwd: sourceRoot, worktree: null };
 
     let isGit = true;
@@ -356,16 +420,23 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         await fsPromises.mkdir(targetDir, { recursive: true });
       }
 
+      const worktree: ThreadWorktree = {
+        path: targetDir,
+        base: "zero-commit",
+        branch: `piarium/${threadId}`,
+        materialized: await pathExists(targetDir),
+        preparationStage: "materializing",
+      };
+      await onWorktreeState?.(worktree);
       await copyDirRecursive(sourceRoot, targetDir);
       await copyDirRecursive(targetDir, `${targetDir}.baseline`);
+      worktree.materialized = true;
+      worktree.preparationStage = "ready";
+      await onWorktreeState?.(worktree);
+      if (signal?.aborted) throw abortError();
       return {
         cwd: targetDir,
-        worktree: {
-          path: targetDir,
-          base: "zero-commit",
-          branch: `piarium/${threadId}`,
-          materialized: true,
-        },
+        worktree,
       };
     }
 
@@ -375,7 +446,23 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       branchName: `piarium/${threadId}`,
       startRef: parentHead,
     });
-    await waitUntilReady(created.path, signal);
+    const worktree: ThreadWorktree = {
+      path: created.path,
+      base: parentHead,
+      branch: `piarium/${threadId}`,
+      materialized: await pathExists(created.path),
+      preparationStage: "materializing",
+    };
+    await onWorktreeState?.(worktree);
+    try {
+      await waitUntilReady(created.path, signal);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
+      // Worktree bootstrap is owned by the Git service and cannot be cancelled
+      // by stopping this polling loop. Wait for its real terminal state so the
+      // recorded directory does not outlive an abandoned prepare promise.
+      await waitUntilReady(created.path);
+    }
     if (patch.length > 0) await runGit(created.path, ["apply", "--binary", "--whitespace=nowarn", "-"], patch);
     const untracked = parseNullList(untrackedOutput);
     await copyUntracked(sourceRoot, created.path, untracked);
@@ -389,9 +476,13 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       ]);
       base = (await runGit(created.path, ["rev-parse", "HEAD"])).stdout.trim();
     }
+    worktree.base = base;
+    worktree.preparationStage = "ready";
+    await onWorktreeState?.(worktree);
+    if (signal?.aborted) throw abortError();
     return {
       cwd: created.path,
-      worktree: { path: created.path, base, branch: `piarium/${threadId}`, materialized: true },
+      worktree,
     };
   };
 
@@ -804,7 +895,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     worktree: ThreadWorktree,
     extras?: { nativeVerified?: boolean },
   ): Promise<{ reclaimed: boolean; reason?: string }> => {
-    if (worktree.materialized === false) return { reclaimed: true };
+    if (worktree.materialized === false) {
+      worktree.preparationStage = "materialize";
+      delete worktree.materializationFingerprint;
+      return { reclaimed: true };
+    }
     if (!worktree.resultCommit && !extras?.nativeVerified) {
       return { reclaimed: false, reason: "Thread worktree result has not been snapshotted" };
     }
@@ -836,6 +931,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             worktree.materialized = false;
+            worktree.preparationStage = "materialize";
+            delete worktree.materializationFingerprint;
             return { reclaimed: true };
           }
           return {
@@ -849,6 +946,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
       await rmFn(worktree.path, { recursive: true, force: true });
       worktree.materialized = false;
+      worktree.preparationStage = "materialize";
+      delete worktree.materializationFingerprint;
       return { reclaimed: true };
     } catch (error) {
       return { reclaimed: false, reason: error instanceof Error ? error.message : String(error) };
@@ -860,7 +959,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     worktree: ThreadWorktree,
     signal?: AbortSignal,
   ): Promise<ThreadWorktree> => {
-    if (worktree.materialized !== false) {
+    if (worktree.materialized !== false && worktree.preparationStage !== "materializing") {
       try {
         await fsPromises.stat(worktree.path);
         return worktree;
@@ -879,6 +978,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
+    worktree.preparationStage = "materializing";
     if (worktree.base !== "zero-commit") {
       const ref = worktree.branch || worktree.resultCommit || worktree.base;
       await runGit(sourceRoot, ["worktree", "prune"]).catch(() => {});
@@ -892,7 +992,13 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           startRef: ref,
         });
       }
-      await waitUntilReady(worktree.path, signal);
+      try {
+        await waitUntilReady(worktree.path, signal);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
+        await waitUntilReady(worktree.path);
+        worktree.materialized = true;
+      }
     } else {
       const snapshotDir = fixedCopyResultPath(worktree);
       const baselineDir = `${worktree.path}.baseline`;
@@ -912,6 +1018,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       await copyDirRecursive(src, worktree.path);
     }
     worktree.materialized = true;
+    worktree.preparationStage = "ready";
+    delete worktree.materializationFingerprint;
     return worktree;
   };
 
@@ -919,8 +1027,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     sourceRoot: string,
     worktree: ThreadWorktree,
     settings?: HarnessWorktreeSettings,
+    signal?: AbortSignal,
   ): Promise<void> => {
     for (const rel of settings?.copyIgnored ?? []) {
+      if (signal?.aborted) throw abortError();
       const src = pathModule.resolve(sourceRoot, rel);
       const dst = pathModule.resolve(worktree.path, rel);
       await assertAbsolutePathInWorkspace(src, { root: sourceRoot, fsPromises, pathModule });
@@ -1029,7 +1139,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return totalBytes;
   };
 
-  return { prepare, inspect, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
+  return { prepare, estimatePrepare, inspect, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

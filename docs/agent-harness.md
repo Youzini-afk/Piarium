@@ -253,6 +253,8 @@ research 与 knowledge-work profile 再评估）。
 可切 PowerShell。该值来自现有 Pi `settings.json`（用户默认 + 受信任项目覆盖），在**该会话注册时**生效，不另建配置
 文件。Application Host 在构造时用与 Git 服务相同的 Windows 安装根、PATH 和已解析的 `git.exe` 位置发现可执行的
 `bash.exe`，优先 `usr\bin` 而不是 `bin` 启动器。未发现时工具返回准确原因和安装/改设置入口，不能把已安装误报成未安装。
+注册与工具准入按 actor 的 worker 代际协调：首个请求等待本代配置，关闭或换代后的迟到结果不能复活会话。设置不可读与配置非法
+都明确 unavailable，不当成 auto；首次注册保留已经捕获的输入快照。PowerShell 用 ConPTY 可用的交互启动与自身命令包装（D-205）。
 此外 Windows 原生工具随时可从 bash 内调用（`powershell.exe -c ...`、`cmd //c ...`），harness 不
 禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Piarium 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
@@ -292,6 +294,8 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
 - 声明 `executionMode: "sequential"`：同一批工具调用中有 `bash` 时整批串行（Pi 的批次语义），因为它可以触碰任何路径。
 - 执行期间向 mutation authority 注册为 `process` writer（`WRITER_MODES` 中已存在的模式），使恢复系统知道本轮
   文件覆盖不完整。这是恢复设计已预留的语义。
+- 会话关闭等待 PTY 实际退出，再释放写者；中断请求不等于命令已经结束。失败保留活动状态与可重试关闭，已从会话表移除的
+  shell 在关闭完成前仍参与目录回收判断。线程不能只凭 Pi close 响应就删除执行目录（D-205）。
 
 模型看到的文本形状：
 
@@ -1456,16 +1460,19 @@ base → resultCommit，patch、新文件正文、类型与 mode 全从该 commi
 不把这种正常冲突处理自动撤回。记录的完成状态使用户解决冲突后无需再次重放整个 patch。
 
 草稿来源的最终目标是对应 Document Registry 缓冲，不隐式保存用户未保存内容；磁盘目标经 Host 文件路径写入。同一次集成可能包含
-两类目标，共用同一个 Integration `operationId`、选定结果修订和操作投影，并逐目标记录 apply 阶段。生产分类优先看该 workspace
-资源的 dirty publication；未注入 dirty 检查时才回退到 D-083 的磁盘启发式。需要编辑器协调的路径返回 `surfaceTargetPaths` /
-`surfaceEdits`，由线程面板经 Document Registry 一次分组应用，不写磁盘、不顺手保存。缓冲不可用或修订漂移标 unavailable，保留
-子结果，不静默改磁盘。父磁盘已经等于子结果时按 no-op 完成。其他原生集成直接应用路径状态，不执行 git apply --3way，不修改
+两类目标，共用同一个持久 Integration `operationId`、选定结果修订和逐目标 apply 阶段。草稿按发起 owner、连接注册/代际、文档实例、
+base/local 修订、正文哈希与格式核验；agent 的 owner 从 Host 固定 inputContext 解析。Documents 定向请求对应 Registry，事件只带
+元数据，正文与确认走认证通道；调用方不能用自报正文或裸路径 ack 替代权威。窗口断连不等于草稿消失；只有磁盘已保存同一基线或
+已经等于子结果等可核对情况才按磁盘处理。目标 before/after 和 intent 在执行前持久化并保护对象，缓冲未确认时不 complete；
+重启不能把 surface 记录当磁盘目标。条件补偿与整组撤销走同一 Host 操作，重试保留首次撤销基线，后续用户编辑不被覆盖（D-203）。
+缓冲不可用或修订漂移保留子结果，不静默改磁盘。其他原生集成直接应用路径状态，不执行 git apply --3way，不修改
 用户 index；旧 Git 结果先导入再走同一原生集成。UI、`thread.merge`、`threads`/`wait` 与 Zone 2 共用 Thread `integration` 与
 `integrationBinding`。合并预览只说明可应用性，不代表测试通过。
 
 **重叠提示与合并预览。** 已记录的分支变更路径可投影非阻塞重叠提示；恢复日志覆盖不到的 shell 路径标未知，未发现重叠不等于无冲突。
 提示不长期占有编辑锁，不阻塞独立分支写者。后台三方预览绑定子 resultRevision 与父受影响路径/草稿版本；输入变更即失效重算，
-只显示“此修订可干净合并”或具体冲突。复用 Thread integration 投影，不需要全仓 WorkspaceHead。接通即提供，成本按变化路径计量。
+只显示“此修订可干净合并”或具体冲突。提交解决必须消费所审阅的 binding，不能用旧解决覆盖新父输入。预览读取与同值投影不产生
+新的 Thread 事件，避免面板读取触发自身重载。复用 Thread integration 投影，不需要全仓 WorkspaceHead。接通即提供，成本按变化路径计量。
 
 **环境准备。** 使用工作区用户配置的 setup 命令与环境文件规则，按需要执行/分析的工具准备环境；没有命令不伪称已准备，也不因此
 禁用不需要准备的任务。setup 幂等，重建或依赖输入变化后重跑；超时由用户配置或既有任务运行时语义处理，不设无依据的 600 秒默认。
@@ -1598,10 +1605,14 @@ ThreadRun {
   固定结果在原路径重建，按需重跑 setup。无活跃 Run 之外还要检查相关 shell/process writer 与实际使用者。Git status 干净仅说明
   Git 跟踪范围；需保留的 ignored 输入/结果同样要已保存，已声明可重建缓存允许删除，未知内容保留并报告。路径必须位于该记录的
   受管根内且身份一致。条件不满足仅保留该目录，不禁用其他线程；显式 keep_worktree 选择继续有效。
+  归档取消并等待该 Run 的准备/setup/启动、实际会话与 shell 退出，失败保留绑定和目录。删除期间持续持有 Documents 写者屏障并
+  重核结果。同线程的归档、恢复和回收互斥，自动清理跳过正忙目标。恢复从选定 native resultRevision 重建，沿原 session 绑定新 Run；
+  普通已结束/已回收线程的打开也走该链。失败保持原生命周期可重试，不开放错误目录；准备进度持久化为明确阶段，部分目录重试清理核对 fingerprint（D-204）。
 - **占用与背压。** 记录物化目录、对象库、受引用历史及可回收量，删除目录不等于释放结果对象。共享对象在工作区只计一次。
   优先回收符合条件的缓存；新增物化按用户配置预算、实际可用空间与可知准备需求安排，必要时排队或返回可行动的 unavailable，
   不终止已有线程来腾配额。没有定标时不默认设置 8 GiB/10% 硬拒绝，也不把未知所需空间当 0；运行中的实际空间不足按 I/O 失败
   明确记录（ENOSPC）。线程面板展示 Host 占用、保留原因和立即回收，不设无依据的 80% 统一阈值（D-202）。
+  统计覆盖该工作区全部父会话；首次物化与恢复在短临界区预留已知新增需求，慢 setup/会话调用不持工作区锁。未知量不遮住已知超额，也不因此统一拒绝任务（D-204）。
 - **启动对账与历史清理。** 对受管记录和目录对账，修复 Git 元数据；能确认属于 Piarium 且已保存的无使用者目录正常回收，归属
   不明的目录展示而不猜测删除。历史对象与分支按引用及用户保留配置清理，不以固定 30 天删除仍可继续的结果。分支名虽小，其
   引用会保留内容对象，须计入历史占用；对账和回收不依赖某个 idle 定时器。

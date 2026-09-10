@@ -64,6 +64,14 @@ const ThreadReadParams = Type.Object({
 const ThreadMergeParams = Type.Object({
   threadId: Type.String(),
   resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Published result revision to integrate; defaults to the thread's latest result." })),
+  expectedBindingFingerprint: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+  resolutions: Type.Optional(Type.Array(Type.Object({
+    path: Type.String(),
+    choice: Type.Union([Type.Literal("parent"), Type.Literal("child"), Type.Literal("base"), Type.Literal("text")]),
+    text: Type.Optional(Type.String()),
+    expectedParentRevision: Type.String(),
+    expectedLocalEditRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  }))),
 });
 
 const ThreadKillParams = Type.Object({
@@ -253,20 +261,38 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
   return defineTool({
     name: "merge",
     label: "Merge",
-    description: "Integrate a completed sub-agent's published result into the parent. Reports applied paths, conflicts, and any recovery required.",
-    promptSnippet: "merge: merge a completed teammate's changes into your worktree",
+    description: "Integrate a completed sub-agent's published result into parent files or editor drafts. Draft changes remain unsaved. Reports applied paths, conflicts, and any recovery required.",
+    promptSnippet: "merge: integrate a completed teammate's published result",
     promptGuidelines: [],
     parameters: ThreadMergeParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         const result = await bridge.request<"thread.merge">("thread.merge", {
           threadId: params.threadId,
           ...(params.resultRevision !== undefined ? { resultRevision: params.resultRevision } : {}),
-        });
+          ...(params.expectedBindingFingerprint !== undefined ? { expectedBindingFingerprint: params.expectedBindingFingerprint } : {}),
+          ...(params.resolutions !== undefined ? { resolutions: params.resolutions } : {}),
+        }, signal ? { signal } : undefined);
         const typed = result as ThreadMergeResult;
+        const preview = typed.preview;
+        const resolutionPaths = preview?.paths.filter((path) => path.decision === "conflict") ?? [];
+        const resolutionBinding = preview && resolutionPaths.length > 0 ? {
+          resultRevision: preview.resultRevision,
+          expectedBindingFingerprint: preview.bindingFingerprint,
+          paths: resolutionPaths.map((path) => ({
+            path: path.path,
+            target: path.target,
+            expectedParentRevision: preview.binding[path.path]?.revision,
+            ...(preview.binding[path.path]?.localEditRevision === undefined ? {} : {
+              expectedLocalEditRevision: preview.binding[path.path]!.localEditRevision,
+            }),
+          })),
+        } : null;
         return {
-          content: [{ type: "text", text: typed.text }],
+          content: [{ type: "text", text: resolutionBinding
+            ? `${typed.text}\nConflict resolution binding (use these versions when submitting resolutions):\n${JSON.stringify(resolutionBinding)}`
+            : typed.text }],
           details: {
             merged: typed.merged,
             conflicts: typed.conflicts,
@@ -275,6 +301,7 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
             surfaceTargetPaths: typed.surfaceTargetPaths,
             operationId: typed.operationId,
             resultRevision: typed.resultRevision,
+            ...(resolutionBinding ? { resolutionBinding } : {}),
           },
         };
       } catch (error) {

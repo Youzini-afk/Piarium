@@ -104,6 +104,16 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
 const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEvent => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
+    if (event.kind === 'surface-operation') {
+      if (!['capture', 'apply', 'undo'].includes(String(event.action))
+        || typeof event.requestId !== 'string' || !event.requestId
+        || typeof event.operationId !== 'string' || !event.operationId
+        || typeof event.workspaceId !== 'string' || !event.workspaceId
+        || Object.hasOwn(event, 'content') || Object.hasOwn(event, 'targets')) {
+        throw new DocumentsError('Document watch returned an invalid surface operation', { reason: 'failed' });
+      }
+      return event as PiariumDocumentWatchEvent;
+    }
     if (event.kind === 'dirty-state-barrier') {
       if (!['acquire', 'release'].includes(String(event.action))
         || typeof event.barrierId !== 'string' || !event.barrierId
@@ -163,6 +173,8 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   clearDirtyBuffers: (request) => postJson('/api/documents/dirty/clear', request) as Promise<{ cleared: boolean }>,
   captureAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/capture', request) as Promise<AgentInputContext>,
   releaseAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/release', request) as Promise<{ released: boolean }>,
+  readSurfaceOperation: (request) => postJson('/api/documents/surface-operation/read', request) as ReturnType<NonNullable<DocumentsAPI['readSurfaceOperation']>>,
+  completeSurfaceOperation: (request) => postJson('/api/documents/surface-operation/complete', request) as ReturnType<NonNullable<DocumentsAPI['completeSurfaceOperation']>>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<PiariumWorkspaceIdentity>,
   read: (resource: PiariumResourceReference) => postJson('/api/documents/read', { resource }) as Promise<PiariumDocumentReadResult>,
   write: (request: PiariumDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<PiariumDocumentWriteResult>,

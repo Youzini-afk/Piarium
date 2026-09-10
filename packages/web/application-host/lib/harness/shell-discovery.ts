@@ -80,6 +80,8 @@ export const parseWslDistroList = (stdout: Buffer | string): string[] => {
   const seen = new Set<string>();
   const distros: string[] = [];
   for (const line of text.split(/\r?\n/)) {
+    // WSL's UTF-16 output may include explicit NUL separators.
+    // eslint-disable-next-line no-control-regex
     const name = line.replace(/\u0000/g, "").replace(/^\uFEFF/, "").trim();
     if (!name || seen.has(name)) continue;
     seen.add(name);

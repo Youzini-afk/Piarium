@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { initOperationFiles, openRecoveryJournalCatalog, updateOperationFilePhase, writeOperationRow } from "../../recovery/journal-catalog.js";
@@ -10,10 +11,26 @@ import { createWorkspaceWorkingStateAccess, type WorkspaceWorkingStateAccess } f
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
-import { applyDurableFileOperation } from "../../recovery/durable-file-operation.js";
+import { applyDurableFileOperation, markDurableExternalDispatched } from "../../recovery/durable-file-operation.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
 
 const roots: string[] = [];
+const textHash = (text: string) => `sha256-${createHash("sha256").update(text).digest("hex")}`;
+const dirtyPublication = (resourceId: string, content: string, localEditRevision = 1) => ({
+  ownerId: "editor-a",
+  generation: 1,
+  registrationId: "registration-a",
+  resources: [{
+    resource: { resourceId },
+    localEditRevision,
+    baseRevision: "base",
+    documentInstanceId: `document-${resourceId}`,
+    bufferHash: textHash(content),
+    encoding: "utf-8",
+    bom: false,
+    lineEnding: "lf" as const,
+  }],
+});
 
 const createHarness = async (fileStore = createRecoveryFileStore()) => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-integration-"));
@@ -52,6 +69,88 @@ afterEach(async () => {
 });
 
 describe("IntegrationCoordinator", () => {
+  it("does not apply a manual conflict resolution against a parent newer than the reviewed revision", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base\n");
+      const child = path.join(h.root, "reviewed-child");
+      await fs.promises.cp(h.workspace, child, { recursive: true });
+      await fs.promises.writeFile(path.join(child, "a.txt"), "child\n");
+      const result = await prepareResult(h, child);
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "parent at review\n");
+      const input = { workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision };
+      const preview = await h.coordinator.previewResult(input);
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "new user edit\n");
+      await h.coordinator.mergeResult({
+        ...input,
+        expectedBindingFingerprint: preview.bindingFingerprint,
+        resolutions: [{ path: "a.txt", choice: "text", text: "reviewed resolution\n", expectedParentRevision: preview.binding["a.txt"]!.revision }],
+      }).catch(() => undefined);
+      expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("new user edit\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("keeps a surface-only integration unfinished until the buffer application is confirmed", async () => {
+    const h = await createHarness();
+    let releaseApply: (() => void) | undefined;
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base\n");
+      const child = path.join(h.root, "surface-child");
+      await fs.promises.cp(h.workspace, child, { recursive: true });
+      await fs.promises.writeFile(path.join(child, "a.txt"), "child\n");
+      const result = await prepareResult(h, child);
+      const applyGate = new Promise<void>((resolve) => { releaseApply = resolve; });
+      let signalApplyStarted!: () => void;
+      const applyStarted = new Promise<void>((resolve) => { signalApplyStarted = resolve; });
+      const coordinator = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        inspectDirtyBuffers: async () => [dirtyPublication("a.txt", "base\n")],
+        requestSurfaceOperation: async (request) => {
+          if (request.action === "capture") return [{
+            resource: { workspaceId: "ws", resourceId: "a.txt" }, status: "captured",
+            documentInstanceId: "document-a.txt", beforeLocalEditRevision: 1,
+            beforeHash: textHash("base\n"), content: "base\n",
+          }];
+          signalApplyStarted();
+          await applyGate;
+          return [{
+            resource: { workspaceId: "ws", resourceId: "a.txt" }, status: "applied",
+            documentInstanceId: "document-a.txt", beforeLocalEditRevision: 1,
+            beforeHash: textHash("base\n"), afterLocalEditRevision: 2, afterHash: textHash("child\n"),
+          }];
+        },
+      });
+      const pending = coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision,
+      });
+      let settled = false;
+      void pending.finally(() => { settled = true; });
+      await applyStarted;
+      expect(settled).toBe(false);
+      const catalogFiles = (await fs.promises.readdir(h.dataDir, { recursive: true }))
+        .map(String)
+        .filter((file) => file.replace(/\\/gu, "/").endsWith("/catalog.sqlite"));
+      expect(catalogFiles).toHaveLength(1);
+      const database = await openRecoveryJournalCatalog(path.dirname(path.join(h.dataDir, catalogFiles[0]!)), { create: false });
+      if (!database) throw new Error("expected recovery catalog");
+      expect(database.prepare("SELECT state FROM operations WHERE kind = 'integration' ORDER BY created_at DESC LIMIT 1").get())
+        .toEqual({ state: "awaiting-surface" });
+      database.close();
+      releaseApply?.();
+      const merged = await pending;
+      expect(merged.status).toBe("applied");
+      await h.workingStates.withStore("ws", "inspect-pending-surface", (_store, { database }) => {
+        const operation = database.prepare("SELECT state FROM operations WHERE id = ?").get(merged.operationId) as { state: string };
+        expect(operation.state).toBe("complete");
+      });
+    } finally {
+      releaseApply?.();
+      await h.engine.dispose();
+    }
+  });
+
   it("runs a non-Git prepare, publish, merge, reclaim, and reopen file chain", async () => {
     const h = await createHarness();
     const runtime = createThreadWorktreeRuntime({
@@ -785,6 +884,51 @@ describe("IntegrationCoordinator", () => {
     }
   });
 
+  it("startup recovery never replays a dispatched surface target as disk and keeps the mixed operation visible", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "disk.txt"), "before");
+      await h.workingStates.withStore("ws", "seed-surface-crash", async (store, context) => {
+        const before = (await context.fileStore.captureState(context.identity, context.root, "disk.txt", { store: true })).state;
+        const diskTargetObject = await store.putObject(Buffer.from("after"));
+        const surfaceBeforeObject = await store.putObject(Buffer.from("surface before"));
+        const surfaceTargetObject = await store.putObject(Buffer.from("surface after"));
+        const diskTarget: RecoveryState = {
+          kind: "regular-file", objectHash: diskTargetObject.hash, byteLength: diskTargetObject.byteLength,
+          ...(before.kind === "regular-file" && before.mode !== undefined ? { mode: before.mode } : {}),
+        };
+        const surfaceBefore: RecoveryState = { kind: "regular-file", objectHash: surfaceBeforeObject.hash, byteLength: surfaceBeforeObject.byteLength };
+        const surfaceTarget: RecoveryState = { kind: "regular-file", objectHash: surfaceTargetObject.hash, byteLength: surfaceTargetObject.byteLength };
+        const pending = await applyDurableFileOperation(context, {
+          id: "crashed-surface-integration", workspaceId: "ws", threadId: "thread-surface-crash", resultRevision: 1,
+          targets: { "disk.txt": { expected: before, target: diskTarget } },
+          externalTargets: { "surface.txt": { expected: surfaceBefore, target: surfaceTarget } },
+          externalBindings: { "surface.txt": {
+            ownerId: "surface", ownerGeneration: 1, ownerRegistrationId: "registration",
+            documentInstanceId: "document", baseRevision: "base", beforeLocalEditRevision: 1,
+            beforeHash: textHash("surface before"), encoding: "utf-8", bom: false, lineEnding: "lf",
+          } },
+          conflictPaths: [], diffStats: { files: 2, insertions: 2, deletions: 0 },
+        });
+        expect(pending.status).toBe("pending");
+        markDurableExternalDispatched(context, pending.operationId, ["surface.txt"]);
+      });
+      await h.engine.dispose();
+      const restarted = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir: h.dataDir, documents: h.documents, sessionNavigation: h.navigation });
+      await restarted.fenceUnfinishedOperations();
+      expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("after");
+      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
+        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-surface-integration"))
+          .toEqual({ state: "needs-attention" });
+        expect(database.prepare("SELECT phase FROM operation_files WHERE operation_id = ? AND path = ?").get("crashed-surface-integration", "surface.txt"))
+          .toEqual({ phase: "needs-attention" });
+      });
+      await restarted.dispose();
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
   it("startup recovery never reconciles another workspace's row in a shared catalog", async () => {
     const h = await createHarness();
     try {
@@ -829,6 +973,9 @@ describe("IntegrationCoordinator", () => {
       expect(first.valid).toBe(true);
       expect(first.paths[0]?.target).toBe("disk");
       await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "parent continued\n");
+      expect(h.coordinator.invalidateWorkspace("ws", ["a.txt"])).toMatchObject([{
+        threadId: "thread-1", valid: false, mergeReady: false,
+      }]);
       const second = await h.coordinator.previewResult({
         workspaceId: "ws",
         threadId: "thread-1",
@@ -865,32 +1012,32 @@ describe("IntegrationCoordinator", () => {
         }, "base", ["draft.txt"]);
         return store.publishDirectoryResult("thread-surface", child);
       });
-      const merged = await h.coordinator.mergeResult({
+      const coordinator = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        inspectDirtyBuffers: async () => [dirtyPublication("draft.txt", "unsaved draft\n", 4)],
+        requestSurfaceOperation: async (request) => {
+          if (request.action === "capture") return [{
+            resource: { workspaceId: "ws", resourceId: "draft.txt" }, status: "captured",
+            documentInstanceId: "document-draft.txt", beforeLocalEditRevision: 4,
+            beforeHash: textHash("unsaved draft\n"), content: "unsaved draft\n",
+          }];
+          if (request.action === "apply") return [{
+            resource: { workspaceId: "ws", resourceId: "draft.txt" }, status: "applied",
+            documentInstanceId: "document-draft.txt", beforeLocalEditRevision: 4,
+            beforeHash: textHash("unsaved draft\n"), afterLocalEditRevision: 5,
+            afterHash: textHash("child bytes\n"),
+          }];
+          throw new Error("unexpected undo");
+        },
+      });
+      const merged = await coordinator.mergeResult({
         workspaceId: "ws",
         threadId: "thread-surface",
         branchId: "thread-surface",
         resultRevision: result.resultRevision,
-        surfaceParents: [{
-          resourceId: "draft.txt",
-          localEditRevision: 4,
-          baseRevision: "base-1",
-          content: "unsaved draft\n",
-        }],
       });
-      expect(merged.surfaceEdits).toEqual([expect.objectContaining({
-        resourceId: "draft.txt",
-        expectedLocalEditRevision: 4,
-        newText: "child bytes\n",
-      })]);
       expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("disk bytes\n");
       expect(merged.preview?.mergeReady).toBe(true);
-      await h.coordinator.acknowledgeSurface({
-        workspaceId: "ws",
-        threadId: "thread-surface",
-        operationId: merged.operationId,
-        applied: ["draft.txt"],
-        failed: [],
-      });
       await h.workingStates.withStore("ws", "inspect-surface-phase", (_store, { database }) => {
         const row = database.prepare("SELECT data_json FROM operations WHERE id = ?").get(merged.operationId) as { data_json: string };
         const data = JSON.parse(row.data_json) as { surfacePhases?: Record<string, string> };
@@ -901,17 +1048,191 @@ describe("IntegrationCoordinator", () => {
     }
   });
 
+  it("compensates disk paths when the same operation's surface group explicitly rejects apply", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "disk.txt"), "disk base\n");
+      await fs.promises.writeFile(path.join(h.workspace, "surface.txt"), "saved base\n");
+      const child = path.join(h.root, "mixed-surface-child");
+      await fs.promises.cp(h.workspace, child, { recursive: true });
+      await fs.promises.writeFile(path.join(child, "disk.txt"), "disk child\n");
+      await fs.promises.writeFile(path.join(child, "surface.txt"), "surface child\n");
+      const result = await h.workingStates.withStore("ws", "mixed-surface-result", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        const draft = await store.putObject(Buffer.from("surface draft\n"));
+        const saved = base["surface.txt"]!;
+        await store.createBranch("ws", "thread-mixed-surface", {
+          ...base,
+          "surface.txt": {
+            kind: "regular-file", objectHash: draft.hash, byteLength: draft.byteLength,
+            ...(saved.kind === "regular-file" && saved.mode !== undefined ? { mode: saved.mode } : {}),
+          },
+        }, "base", ["surface.txt"]);
+        return store.publishDirectoryResult("thread-mixed-surface", child);
+      });
+      const coordinator = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        inspectDirtyBuffers: async () => [dirtyPublication("surface.txt", "surface draft\n", 2)],
+        requestSurfaceOperation: async (request) => request.action === "capture" ? [{
+          resource: { workspaceId: "ws", resourceId: "surface.txt" }, status: "captured",
+          documentInstanceId: "document-surface.txt", beforeLocalEditRevision: 2,
+          beforeHash: textHash("surface draft\n"), content: "surface draft\n",
+        }] : [{
+          resource: { workspaceId: "ws", resourceId: "surface.txt" }, status: "failed",
+          documentInstanceId: "document-surface.txt", afterLocalEditRevision: 2,
+          afterHash: textHash("surface draft\n"),
+          message: "buffer changed before apply",
+        }],
+      });
+      const merged = await coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-mixed-surface", branchId: "thread-mixed-surface",
+        resultRevision: result.resultRevision,
+      });
+      expect(merged.status).toBe("compensated");
+      expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("disk base\n");
+      expect(await fs.promises.readFile(path.join(h.workspace, "surface.txt"), "utf8")).toBe("saved base\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("undoes surface and disk targets as one conditional Integration operation", async () => {
+    const h = await createHarness();
+    let surfaceText = "surface draft\n";
+    let surfaceRevision = 3;
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "disk.txt"), "disk base\n");
+      await fs.promises.writeFile(path.join(h.workspace, "surface.txt"), "saved base\n");
+      const child = path.join(h.root, "mixed-undo-child");
+      await fs.promises.cp(h.workspace, child, { recursive: true });
+      await fs.promises.writeFile(path.join(child, "disk.txt"), "disk child\n");
+      await fs.promises.writeFile(path.join(child, "surface.txt"), "surface child\n");
+      const result = await h.workingStates.withStore("ws", "mixed-undo-result", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        const draft = await store.putObject(Buffer.from(surfaceText));
+        const saved = base["surface.txt"]!;
+        await store.createBranch("ws", "thread-mixed-undo", {
+          ...base,
+          "surface.txt": {
+            kind: "regular-file", objectHash: draft.hash, byteLength: draft.byteLength,
+            ...(saved.kind === "regular-file" && saved.mode !== undefined ? { mode: saved.mode } : {}),
+          },
+        }, "base", ["surface.txt"]);
+        return store.publishDirectoryResult("thread-mixed-undo", child);
+      });
+      const coordinator = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        inspectDirtyBuffers: async () => [dirtyPublication("surface.txt", surfaceText, surfaceRevision)],
+        requestSurfaceOperation: async (request) => {
+          if (request.action === "capture") return [{
+            resource: { workspaceId: "ws", resourceId: "surface.txt" }, status: "captured",
+            documentInstanceId: "document-surface.txt", beforeLocalEditRevision: surfaceRevision,
+            beforeHash: textHash(surfaceText), content: surfaceText,
+          }];
+          if (request.action === "apply") {
+            const before = surfaceText;
+            surfaceText = request.targets[0]!.newText!;
+            const beforeRevision = surfaceRevision++;
+            return [{
+              resource: { workspaceId: "ws", resourceId: "surface.txt" }, status: "applied",
+              documentInstanceId: "document-surface.txt", beforeLocalEditRevision: beforeRevision,
+              beforeHash: textHash(before), afterLocalEditRevision: surfaceRevision, afterHash: textHash(surfaceText),
+            }];
+          }
+          surfaceText = "surface draft\n";
+          surfaceRevision += 1;
+          return [{
+            resource: { workspaceId: "ws", resourceId: "surface.txt" }, status: "undone",
+            documentInstanceId: "document-surface.txt", afterLocalEditRevision: surfaceRevision,
+            afterHash: textHash(surfaceText),
+          }];
+        },
+      });
+      const merged = await coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-mixed-undo", branchId: "thread-mixed-undo",
+        resultRevision: result.resultRevision,
+      });
+      expect(merged.status).toBe("applied");
+      expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("disk child\n");
+      expect(surfaceText).toBe("surface child\n");
+      const undone = await coordinator.undoIntegration({
+        workspaceId: "ws", threadId: "thread-mixed-undo", operationId: merged.operationId,
+        sourceOwner: { ownerId: "editor-a", generation: 1 },
+      });
+      expect(undone.status).toBe("compensated");
+      expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("disk base\n");
+      expect(surfaceText).toBe("surface draft\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("normalizes a UTF-8 BOM and CRLF draft for surface merge while preserving its editor format binding", async () => {
+    const h = await createHarness();
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "draft-crlf.txt"), "saved\r\n");
+      const child = path.join(h.root, "surface-crlf-child");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "draft-crlf.txt"), Buffer.concat([bom, Buffer.from("child\r\n")]));
+      const result = await h.workingStates.withStore("ws", "surface-crlf-result", async (store) => {
+        const disk = await store.captureDirectory(h.workspace);
+        const draft = await store.putObject(Buffer.concat([bom, Buffer.from("base\r\n")]));
+        const current = disk["draft-crlf.txt"]!;
+        await store.createBranch("ws", "thread-surface-crlf", {
+          ...disk,
+          "draft-crlf.txt": {
+            kind: "regular-file", objectHash: draft.hash, byteLength: draft.byteLength,
+            ...(current.kind === "regular-file" && current.mode !== undefined ? { mode: current.mode } : {}),
+          },
+        }, "base", ["draft-crlf.txt"]);
+        return store.publishDirectoryResult("thread-surface-crlf", child);
+      });
+      let appliedText: string | undefined;
+      const basePublication = dirtyPublication("draft-crlf.txt", "base\n", 6);
+      const publication = {
+        ...basePublication,
+        resources: [{ ...basePublication.resources[0]!, bom: true, lineEnding: "crlf" as const }],
+      };
+      const coordinator = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        inspectDirtyBuffers: async () => [publication],
+        requestSurfaceOperation: async (request) => {
+          if (request.action === "capture") return [{
+            resource: { workspaceId: "ws", resourceId: "draft-crlf.txt" }, status: "captured",
+            documentInstanceId: "document-draft-crlf.txt", beforeLocalEditRevision: 6,
+            beforeHash: textHash("base\n"), content: "base\n",
+          }];
+          appliedText = request.targets[0]?.newText;
+          return [{
+            resource: { workspaceId: "ws", resourceId: "draft-crlf.txt" }, status: "applied",
+            documentInstanceId: "document-draft-crlf.txt", beforeLocalEditRevision: 6,
+            beforeHash: textHash("base\n"), afterLocalEditRevision: 7, afterHash: textHash("child\n"),
+          }];
+        },
+      });
+      const merged = await coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-surface-crlf", branchId: "thread-surface-crlf",
+        resultRevision: result.resultRevision,
+      });
+      expect(merged.status).toBe("applied");
+      expect(appliedText).toBe("child\n");
+      expect(merged.preview?.binding["draft-crlf.txt"]).toMatchObject({ bom: true, lineEnding: "crlf" });
+      expect(await fs.promises.readFile(path.join(h.workspace, "draft-crlf.txt"), "utf8")).toBe("saved\r\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
   it("classifies a live dirty publication as a surface target even after the draft is saved on disk", async () => {
     const h = await createHarness();
     const coordinator = new IntegrationCoordinator({
       workingStates: h.workingStates,
-      inspectDirtyBuffers: async () => [{
-        ownerId: "editor-one",
-        resources: [{
-          baseRevision: "rev-1",
-          localEditRevision: 3,
-          resource: { resourceId: "live.txt" },
-        }],
+      inspectDirtyBuffers: async () => [dirtyPublication("live.txt", "saved disk\n", 3)],
+      requestSurfaceOperation: async () => [{
+        resource: { workspaceId: "ws", resourceId: "live.txt" }, status: "captured",
+        documentInstanceId: "document-live.txt", beforeLocalEditRevision: 3,
+        beforeHash: textHash("saved disk\n"), content: "saved disk\n",
       }],
     });
     try {
@@ -926,9 +1247,41 @@ describe("IntegrationCoordinator", () => {
         branchId: "thread-live",
         resultRevision: result.resultRevision,
       });
-      expect(preview.mergeReady).toBe(false);
+      expect(preview.mergeReady).toBe(true);
       expect(preview.surfaceTargetPaths).toEqual(["live.txt"]);
       expect(preview.paths[0]?.target).toBe("surface");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("does not fall back to disk when the turn's explicit draft owner is disconnected", async () => {
+    const h = await createHarness();
+    const coordinator = new IntegrationCoordinator({
+      workingStates: h.workingStates,
+      inspectDirtyBuffers: async () => [],
+    });
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "draft.txt"), "saved baseline\n");
+      const child = path.join(h.root, "child-disconnected-owner");
+      await fs.promises.mkdir(child);
+      await fs.promises.writeFile(path.join(child, "draft.txt"), "child\n");
+      const result = await h.workingStates.withStore("ws", "disconnected-owner-result", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-disconnected-owner", base, "base", ["draft.txt"]);
+        return store.publishDirectoryResult("thread-disconnected-owner", child);
+      });
+      const preview = await coordinator.previewResult({
+        workspaceId: "ws",
+        threadId: "thread-disconnected-owner",
+        branchId: "thread-disconnected-owner",
+        resultRevision: result.resultRevision,
+        sourceOwner: { ownerId: "disconnected-editor", generation: 4 },
+      });
+      expect(preview.mergeReady).toBe(false);
+      expect(preview.unavailablePaths).toEqual(["draft.txt"]);
+      expect(preview.paths[0]?.target).toBe("unavailable");
+      expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("saved baseline\n");
     } finally {
       await h.engine.dispose();
     }

@@ -298,6 +298,41 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("allows a thread actor to cancel its admitted merge without granting search access", async () => {
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const cancelExploreQuery = vi.fn(() => true);
+    const router = createHarnessRouter({
+      respond: async () => {},
+      resolveActor: async () => resolvedActor(["control.thread"]),
+      cancelExploreQuery,
+    });
+    let signal!: AbortSignal;
+    router.register("thread.merge", {
+      handle: async (_params, ctx) => {
+        signal = ctx.signal;
+        entered();
+        await new Promise<void>((_resolve, reject) => {
+          ctx.signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+        });
+        return { text: "", merged: 0, conflicts: [] };
+      },
+    });
+    const request = router.processEvent(harnessEvent("thread.merge", { threadId: "thread-1" }));
+    try {
+      await ready;
+      await router.processEvent({
+        actor: ACTOR, kind: "host",
+        envelope: { kind: "event", event: "harness.cancel", data: { requestId: "req-1", queryId: "eq_ungranted" } },
+      });
+      expect(signal.aborted).toBe(true);
+      expect(cancelExploreQuery).not.toHaveBeenCalled();
+    } finally {
+      router.dispose();
+      await request;
+    }
+  });
+
   it("aborts the inflight request and the explore query on harness.cancel", async () => {
     const responses: Array<{ ok: boolean; code?: string }> = [];
     const cancelled: string[] = [];

@@ -1,27 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { classifyIntegrationTarget, dirtyResourceMap, parentRevisionOf } from "./integration-parents.js";
+import { classifyIntegrationTarget, dirtyResourceMap, parentRevisionOf, selectDirtyResource } from "./integration-parents.js";
+
+const resource = (ownerId: string, generation: number, localEditRevision: number) => ({
+  ownerId,
+  generation,
+  registrationId: `registration-${ownerId}`,
+  resources: [{
+    baseRevision: `base-${ownerId}`,
+    localEditRevision,
+    resource: { resourceId: "note.txt" },
+    documentInstanceId: `document-${ownerId}`,
+    bufferHash: `sha256-${"a".repeat(64)}`,
+    encoding: "utf-8",
+    bom: false,
+    lineEnding: "lf" as const,
+  }],
+});
 
 describe("integration parent classification", () => {
-  it("maps the first dirty publication per resource, not the focused window", () => {
+  it("keeps every owner and selects only an explicit or unique surface", () => {
     const dirty = dirtyResourceMap([
-      {
-        ownerId: "other-owner",
-        resources: [{
-          baseRevision: "base-a",
-          localEditRevision: 2,
-          resource: { resourceId: "note.txt" },
-        }],
-      },
-      {
-        ownerId: "focused-window",
-        resources: [{
-          baseRevision: "base-b",
-          localEditRevision: 9,
-          resource: { resourceId: "note.txt" },
-        }],
-      },
+      resource("other-owner", 2, 2),
+      resource("focused-window", 9, 9),
     ]);
-    expect(dirty.get("note.txt")).toMatchObject({ ownerId: "other-owner", localEditRevision: 2 });
+    expect(dirty.get("note.txt")).toHaveLength(2);
+    expect(selectDirtyResource(dirty.get("note.txt"))).toEqual({ status: "ambiguous" });
+    expect(selectDirtyResource(dirty.get("note.txt"), { ownerId: "focused-window", generation: 9 }))
+      .toMatchObject({ status: "selected", resource: { ownerId: "focused-window", localEditRevision: 9 } });
   });
 
   it("uses live dirty inspection when injected and falls back to the draft heuristic otherwise", () => {
@@ -34,7 +39,7 @@ describe("integration parent classification", () => {
       parentState: disk,
       baseState: draft,
       childState: child,
-    })).toBe("disk");
+    })).toBe("unavailable");
     expect(classifyIntegrationTarget({
       draftBasePath: true,
       inspectDirtyBuffers: false,
@@ -45,11 +50,15 @@ describe("integration parent classification", () => {
     expect(classifyIntegrationTarget({
       draftBasePath: true,
       inspectDirtyBuffers: true,
-      dirty: { resourceId: "note.txt", baseRevision: "base", localEditRevision: 1, ownerId: "editor" },
+      dirty: {
+        resourceId: "note.txt", baseRevision: "base", localEditRevision: 1, ownerId: "editor",
+        generation: 1, registrationId: "registration", documentInstanceId: "document",
+        bufferHash: `sha256-${"b".repeat(64)}`, encoding: "utf-8", bom: false, lineEnding: "lf",
+      },
       parentState: disk,
       baseState: draft,
       childState: child,
     })).toBe("surface");
-    expect(parentRevisionOf(disk)).toBe("disk:disk");
+    expect(parentRevisionOf(disk)).toMatch(/^disk:[0-9a-f]{64}$/u);
   });
 });

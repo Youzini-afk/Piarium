@@ -13,7 +13,10 @@ external registry, not in Zustand or Local Storage.
   produces a reviewable before/after plan. `applyWorkspaceEdit` revalidates that plan and publishes all
   buffers before notifying any listener; disk writes remain explicit saves. Multi-file changes have one
   lifecycle-bound undo group. Callers may supply `groupId` so a Host Integration `operationId` becomes
-  that undo group. Thread surface integration uses this path and does not save. Resource
+  that undo group. The Host-directed surface operation handler uses this path and does not save. It
+  only captures existing records, binds the owner/registration, document instance, base/local revisions,
+  content hash and format, and rechecks them after asynchronous preparation. Closed or reopened records
+  cannot receive an old request. Undo uses the same Host operation and retains later user edits. Resource
   create/rename/delete remains explicitly unsupported until the Host owns an atomic batch-mutation
   contract.
 - Agent patch review uses that same transaction path. A clean accepted patch becomes a dirty editor

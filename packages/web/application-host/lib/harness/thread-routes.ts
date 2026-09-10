@@ -1,16 +1,92 @@
 import type { Express, Request, RequestHandler, Response } from "express";
+import type { ThreadConflictResolution } from "@piarium/protocol";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "acknowledgeSurface" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser">;
   requireAuth?: RequestHandler;
 }
 
 const noAuth: RequestHandler = (_request, _response, next) => next();
 const sessionIdOf = (request: Request): string => String(request.params.sessionId ?? "").trim();
 const threadIdOf = (request: Request): string => String(request.params.threadId ?? "").trim();
+
+const requestAbort = (request: Request, response: Response): { signal: AbortSignal; dispose(): void } => {
+  const controller = new AbortController();
+  const abort = () => controller.abort(new Error("Thread integration request was disconnected"));
+  const close = () => { if (!response.writableEnded) abort(); };
+  request.once("aborted", abort);
+  response.once("close", close);
+  return {
+    signal: controller.signal,
+    dispose() {
+      request.off("aborted", abort);
+      response.off("close", close);
+    },
+  };
+};
+
+const parseIntegrationBody = (value: unknown): {
+  resultRevision?: number;
+  sourceOwner?: { ownerId: string; generation: number };
+  expectedBindingFingerprint?: string;
+  resolutions?: ThreadConflictResolution[];
+} => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ThreadRuntimeError("invalid-request", "Integration request body is malformed");
+  const body = value as Record<string, unknown>;
+  const allowed = new Set(["resultRevision", "sourceOwner", "expectedBindingFingerprint", "resolutions"]);
+  if (Object.keys(body).some((key) => !allowed.has(key))) throw new ThreadRuntimeError("invalid-request", "Integration request contains unsupported fields");
+  if (body.resultRevision !== undefined && (!Number.isSafeInteger(body.resultRevision) || Number(body.resultRevision) < 1)) {
+    throw new ThreadRuntimeError("invalid-request", "resultRevision must be a positive integer");
+  }
+  let sourceOwner: { ownerId: string; generation: number } | undefined;
+  if (body.sourceOwner !== undefined) {
+    if (!body.sourceOwner || typeof body.sourceOwner !== "object" || Array.isArray(body.sourceOwner)) {
+      throw new ThreadRuntimeError("invalid-request", "sourceOwner is malformed");
+    }
+    const candidate = body.sourceOwner as Record<string, unknown>;
+    if (Object.keys(candidate).some((key) => key !== "ownerId" && key !== "generation")
+      || typeof candidate.ownerId !== "string" || !candidate.ownerId
+      || !Number.isSafeInteger(candidate.generation) || Number(candidate.generation) < 0) {
+      throw new ThreadRuntimeError("invalid-request", "sourceOwner is malformed");
+    }
+    sourceOwner = { ownerId: candidate.ownerId, generation: Number(candidate.generation) };
+  }
+  if (body.expectedBindingFingerprint !== undefined
+    && (typeof body.expectedBindingFingerprint !== "string" || !/^[0-9a-f]{64}$/u.test(body.expectedBindingFingerprint))) {
+    throw new ThreadRuntimeError("invalid-request", "expectedBindingFingerprint is malformed");
+  }
+  let resolutions: ThreadConflictResolution[] | undefined;
+  if (body.resolutions !== undefined) {
+    if (!Array.isArray(body.resolutions)) throw new ThreadRuntimeError("invalid-request", "resolutions must be an array");
+    const seen = new Set<string>();
+    resolutions = body.resolutions.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new ThreadRuntimeError("invalid-request", "Conflict resolution is malformed");
+      const resolution = entry as Record<string, unknown>;
+      const resolutionAllowed = new Set(["path", "choice", "text", "expectedParentRevision", "expectedLocalEditRevision"]);
+      if (Object.keys(resolution).some((key) => !resolutionAllowed.has(key))
+        || typeof resolution.path !== "string" || !resolution.path || seen.has(resolution.path)
+        || !["parent", "child", "base", "text"].includes(String(resolution.choice))
+        || typeof resolution.expectedParentRevision !== "string" || !resolution.expectedParentRevision
+        || (resolution.expectedLocalEditRevision !== undefined
+          && (!Number.isSafeInteger(resolution.expectedLocalEditRevision) || Number(resolution.expectedLocalEditRevision) < 0))
+        || (resolution.choice === "text" && typeof resolution.text !== "string")
+        || (resolution.choice !== "text" && resolution.text !== undefined)) {
+        throw new ThreadRuntimeError("invalid-request", "Conflict resolution is malformed or stale-binding fields are missing");
+      }
+      seen.add(resolution.path);
+      return resolution as unknown as ThreadConflictResolution;
+    });
+  }
+  return {
+    ...(body.resultRevision === undefined ? {} : { resultRevision: Number(body.resultRevision) }),
+    ...(sourceOwner ? { sourceOwner } : {}),
+    ...(typeof body.expectedBindingFingerprint === "string" ? { expectedBindingFingerprint: body.expectedBindingFingerprint } : {}),
+    ...(resolutions ? { resolutions } : {}),
+  };
+};
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
   if (error instanceof ThreadRuntimeError) {
@@ -102,17 +178,21 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
+        const cancellation = requestAbort(request, response);
         const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
         const resultRevision = typeof request.query.resultRevision === "string"
           ? Number(request.query.resultRevision)
           : undefined;
-        const extras = Number.isSafeInteger(resultRevision) && resultRevision! > 0
-          ? { resultRevision: resultRevision as number }
-          : {};
+        const extras = {
+          ...(Number.isSafeInteger(resultRevision) && resultRevision! > 0 ? { resultRevision: resultRevision as number } : {}),
+          signal: cancellation.signal,
+        };
+        const preview = await runtime.previewIntegration(workspaceId, parent, threadId, extras);
+        cancellation.dispose();
         response.json({
           workspaceId,
           parent,
-          preview: await runtime.previewIntegration(workspaceId, parent, threadId, extras),
+          preview,
           thread: await registry.getThread(workspaceId, parent, threadId),
         });
       } catch (error) {
@@ -133,12 +213,13 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
+        const cancellation = requestAbort(request, response);
         const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
         const preview = await runtime.previewIntegration(workspaceId, parent, threadId, {
-          ...(typeof request.body?.resultRevision === "number" ? { resultRevision: request.body.resultRevision } : {}),
-          ...(Array.isArray(request.body?.surfaceParents) ? { surfaceParents: request.body.surfaceParents } : {}),
-          ...(Array.isArray(request.body?.resolutions) ? { resolutions: request.body.resolutions } : {}),
+          ...parseIntegrationBody(request.body),
+          signal: cancellation.signal,
         });
+        cancellation.dispose();
         response.json({
           workspaceId,
           parent,
@@ -163,18 +244,18 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
+        const cancellation = requestAbort(request, response);
         const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const parsed = parseIntegrationBody(request.body);
         const result = await runtime.merge(
           workspaceId,
           parent,
           threadId,
-          typeof request.body?.resultRevision === "number" ? request.body.resultRevision : undefined,
+          parsed.resultRevision,
           undefined,
-          {
-            ...(Array.isArray(request.body?.surfaceParents) ? { surfaceParents: request.body.surfaceParents } : {}),
-            ...(Array.isArray(request.body?.resolutions) ? { resolutions: request.body.resolutions } : {}),
-          },
+          { ...parsed, signal: cancellation.signal },
         );
+        cancellation.dispose();
         response.json({
           workspaceId,
           parent,
@@ -188,32 +269,35 @@ export function registerHarnessThreadRoutes(
   );
 
   app.post(
-    "/api/harness/sessions/:sessionId/threads/:threadId/integration/ack",
+    "/api/harness/sessions/:sessionId/threads/:threadId/integration/undo",
     requireAuth,
     async (request: Request, response: Response) => {
       response.setHeader("Cache-Control", "no-store");
       const parentSessionId = sessionIdOf(request);
       const threadId = threadIdOf(request);
       const operationId = typeof request.body?.operationId === "string" ? request.body.operationId.trim() : "";
-      if (!parentSessionId || !threadId || !operationId || !Array.isArray(request.body?.applied) || !Array.isArray(request.body?.failed)) {
-        response.status(400).json({ error: "sessionId, threadId, operationId, applied, and failed are required" });
+      if (!parentSessionId || !threadId || !operationId) {
+        response.status(400).json({ error: "sessionId, threadId, and operationId are required" });
         return;
       }
       try {
+        const cancellation = requestAbort(request, response);
+        const parsed = parseIntegrationBody({ sourceOwner: request.body?.sourceOwner });
         const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
-        const preview = await runtime.acknowledgeSurface(workspaceId, parent, threadId, {
+        const result = await runtime.undoIntegration(workspaceId, parent, threadId, {
           operationId,
-          applied: request.body.applied.filter((entry: unknown) => typeof entry === "string"),
-          failed: request.body.failed.filter((entry: unknown) => typeof entry === "string"),
+          ...(parsed.sourceOwner ? { sourceOwner: parsed.sourceOwner } : {}),
+          signal: cancellation.signal,
         });
+        cancellation.dispose();
         response.json({
           workspaceId,
           parent,
-          preview,
+          result,
           thread: await registry.getThread(workspaceId, parent, threadId),
         });
       } catch (error) {
-        sendError(response, error, "Unable to acknowledge surface integration");
+        sendError(response, error, "Unable to undo thread integration");
       }
     },
   );

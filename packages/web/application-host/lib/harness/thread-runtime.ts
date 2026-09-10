@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import type {
   AgentInputContext,
@@ -17,7 +18,6 @@ import type {
   ThreadRunOutcome,
   ThreadOccupancy,
   ThreadRestoreStatus,
-  ThreadSurfaceParent,
   WorkspaceThreadSpace,
 } from "@piarium/protocol";
 import { HARNESS_TOOL_META, threadIntegrationBindingFromPreview } from "@piarium/protocol";
@@ -27,6 +27,7 @@ import {
   collectDraftBaselineHashes,
   measureDirectory,
   measurementFromHashes,
+  measurementFromStates,
   mergeHashMaps,
   projectThreadOccupancy,
   projectWorkspaceSpace,
@@ -64,7 +65,7 @@ export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
-    Partial<Pick<ThreadWorktreeRuntime, "importFixedResult" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
+    Partial<Pick<ThreadWorktreeRuntime, "estimatePrepare" | "importFixedResult" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -92,7 +93,7 @@ export interface ThreadRuntimeOptions {
           revision: string;
         }>;
       };
-  resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null;
+  resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
 }
@@ -121,6 +122,8 @@ interface RuntimeBinding {
     toolCalls: number;
     tokens: { input: number; output: number; cacheRead: number };
   };
+  /** Archive already received a successful provider abort+close; later capture steps may be retried without closing twice. */
+  archiveStopConfirmed?: boolean;
 }
 
 export type ThreadRuntimeErrorCode = "conflict" | "invalid-request" | "not-found" | "unavailable";
@@ -335,9 +338,272 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const stalledThreads = new Set<string>();
   const waitingSessions = new Set<string>();
   const abortController = new AbortController();
+  interface PreparationTask {
+    controller: AbortController;
+    promise: Promise<unknown>;
+    stage: string;
+  }
+  const preparations = new Map<string, PreparationTask>();
+  const spaceMutationTails = new Map<string, Promise<void>>();
+  const spaceReservations = new Map<string, Map<string, ReturnType<typeof measurementFromStates>>>();
+  const threadLifecycleTails = new Map<string, Promise<void>>();
 
   const reportError = (error: unknown): void => {
     try { options.onError?.(error); } catch { /* Diagnostics cannot break runtime state. */ }
+  };
+
+  const runPreparation = async <T>(
+    threadId: string,
+    operation: (signal: AbortSignal, setStage: (stage: string) => void) => Promise<T>,
+  ): Promise<T> => {
+    if (preparations.has(threadId)) throw new ThreadRuntimeError("conflict", `Thread preparation is already running: ${threadId}`);
+    const controller = new AbortController();
+    let stage = "starting";
+    let resolvePromise!: (value: T) => void;
+    let rejectPromise!: (error: unknown) => void;
+    const promise = new Promise<T>((resolve, reject) => {
+      resolvePromise = resolve;
+      rejectPromise = reject;
+    });
+    const task: PreparationTask = { controller, promise, get stage() { return stage; } };
+    preparations.set(threadId, task);
+    void (async () => {
+      try {
+        resolvePromise(await operation(controller.signal, (next) => { stage = next; }));
+      } catch (error) {
+        rejectPromise(error);
+      } finally {
+        if (preparations.get(threadId) === task) preparations.delete(threadId);
+      }
+    })();
+    return promise;
+  };
+
+  const waitForPreparation = async (threadId: string): Promise<void> => {
+    const preparation = preparations.get(threadId);
+    if (!preparation) return;
+    preparation.controller.abort();
+    await preparation.promise.catch((error) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) reportError(error);
+    });
+  };
+
+  // Budget checks and reclamation operate on the whole workspace. Serialize
+  // their mutations at that same scope so two threads cannot both pass a
+  // stale occupancy check and materialize over the configured budget.
+  const withSpaceMutation = async <T>(workspaceId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = spaceMutationTails.get(workspaceId) ?? Promise.resolve();
+    const next = previous.then(operation);
+    const settled = next.then(() => undefined, () => undefined);
+    spaceMutationTails.set(workspaceId, settled);
+    try {
+      return await next;
+    } finally {
+      if (spaceMutationTails.get(workspaceId) === settled) spaceMutationTails.delete(workspaceId);
+    }
+  };
+
+  const withThreadLifecycle = async <T>(
+    workspaceId: string,
+    threadId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const key = `${workspaceId}\0${threadId}`;
+    const previous = threadLifecycleTails.get(key) ?? Promise.resolve();
+    const next = previous.then(operation);
+    const settled = next.then(() => undefined, () => undefined);
+    threadLifecycleTails.set(key, settled);
+    try {
+      return await next;
+    } finally {
+      if (threadLifecycleTails.get(key) === settled) threadLifecycleTails.delete(key);
+    }
+  };
+
+  const tryWithThreadLifecycle = async (
+    workspaceId: string,
+    threadId: string,
+    operation: () => Promise<void>,
+  ): Promise<boolean> => {
+    const key = `${workspaceId}\0${threadId}`;
+    // This check and the following set are synchronous, so another lifecycle
+    // operation cannot enter the same thread between them.
+    if (threadLifecycleTails.has(key)) return false;
+    const next = Promise.resolve().then(operation);
+    const settled = next.then(() => undefined, () => undefined);
+    threadLifecycleTails.set(key, settled);
+    try {
+      await next;
+      return true;
+    } finally {
+      if (threadLifecycleTails.get(key) === settled) threadLifecycleTails.delete(key);
+    }
+  };
+
+  const assertMaterializationPathAvailable = async (directory: string): Promise<void> => {
+    try {
+      await fs.promises.lstat(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    const error = new Error(`Original thread path is occupied by other content: ${directory}`);
+    (error as NodeJS.ErrnoException).code = "EEXIST";
+    throw error;
+  };
+
+  const directoryFingerprint = async (directory: string): Promise<string> => {
+    const hash = createHash("sha256");
+    const visit = async (absolute: string, relative: string): Promise<void> => {
+      const stat = await fs.promises.lstat(absolute);
+      hash.update(relative.replace(/\\/g, "/"));
+      hash.update("\0");
+      hash.update(String(stat.mode & 0o7777));
+      hash.update("\0");
+      if (stat.isSymbolicLink()) {
+        hash.update("link\0");
+        hash.update(await fs.promises.readlink(absolute));
+        return;
+      }
+      if (stat.isDirectory()) {
+        hash.update("directory\0");
+        const entries = await fs.promises.readdir(absolute, { withFileTypes: true });
+        for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
+          await visit(path.join(absolute, entry.name), relative ? `${relative}/${entry.name}` : entry.name);
+        }
+        return;
+      }
+      if (stat.isFile()) {
+        hash.update("file\0");
+        hash.update(await fs.promises.readFile(absolute));
+        return;
+      }
+      hash.update("other\0");
+      hash.update(String(stat.size));
+    };
+    await visit(directory, "");
+    return hash.digest("base64url");
+  };
+
+  const observeMaterialization = async (directory: string): Promise<{ exists: false } | { exists: true; fingerprint: string }> => {
+    try {
+      return { exists: true, fingerprint: await directoryFingerprint(directory) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false };
+      throw error;
+    }
+  };
+
+  const preparationStageOf = (
+    worktree: NonNullable<Thread["worktree"]>,
+  ): NonNullable<NonNullable<Thread["worktree"]>["preparationStage"]> => (
+    worktree.preparationStage ?? (worktree.materialized === false ? "materialize" : "ready")
+  );
+
+  const unknownMeasurement = (): ReturnType<typeof measurementFromStates> => ({
+    logicalBytes: null,
+    allocatedBytes: null,
+    unknown: true,
+  });
+
+  const estimateResultFootprint = async (
+    workspaceId: string,
+    thread: Thread | null,
+    worktree: Thread["worktree"],
+    sourceRoot?: string,
+  ): Promise<ReturnType<typeof measurementFromStates>> => {
+    if (thread?.workBranchId && thread.resultRevision && options.workingStates) {
+      return options.workingStates.withStore(workspaceId, "thread-result-budget-estimate", (store) => {
+        const states = typeof store.resultState === "function"
+          ? store.resultState(thread.workBranchId!, thread.resultRevision!)
+          : null;
+        return states ? measurementFromStates(states) : unknownMeasurement();
+      }, "shared");
+    }
+    if (worktree?.resultPath) return measureDirectory(worktree.resultPath).catch(() => unknownMeasurement());
+    // A legacy retained result without a resultPath cannot be estimated from
+    // the live parent workspace; treating that as the new directory would
+    // charge unrelated files to the restore.
+    if (sourceRoot && thread === null) {
+      if (!options.worktrees.estimatePrepare) return unknownMeasurement();
+      return options.worktrees.estimatePrepare(sourceRoot).catch(() => unknownMeasurement());
+    }
+    return unknownMeasurement();
+  };
+
+  const budgetFailureFor = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    settings: HarnessWorktreeSettings | undefined,
+    additional: ReturnType<typeof measurementFromStates>,
+    additionalThreadId = "",
+  ): Promise<string | null> => {
+    const budget = settings?.budget;
+    if (!budget) return null;
+    const space = await inspectSpace(workspaceId, parent);
+    const occupancyByThread = new Map(space.threads.map((entry) => [entry.threadId, entry.materialized.logicalBytes]));
+    const reservedKnown = [...(spaceReservations.get(workspaceId)?.entries() ?? [])].reduce((sum, [threadId, reservation]) => {
+      if (reservation.logicalBytes === null || threadId === additionalThreadId) return sum;
+      const alreadyMaterialized = occupancyByThread.get(threadId) ?? 0;
+      return sum + Math.max(0, reservation.logicalBytes - alreadyMaterialized);
+    }, 0);
+    if (budget.maxBytes !== undefined) {
+      const knownCurrent = space.threads.reduce((sum, thread) => (
+        thread.materialized.logicalBytes === null ? sum : sum + thread.materialized.logicalBytes
+      ), 0);
+      const projected = knownCurrent + reservedKnown + (additional.logicalBytes ?? 0);
+      if (projected > budget.maxBytes) {
+        return `Configured worktree maxBytes would be exceeded by known occupancy (${projected} > ${budget.maxBytes})`;
+      }
+    }
+    if (budget.minFreeRatio !== undefined) {
+      let volume: { freeBytes: number; totalBytes: number } | null = null;
+      try { volume = await readVolumeSpace(await options.resolveWorkspaceRoot(workspaceId)); } catch { volume = null; }
+      if (volume && space.freeBytes !== null) {
+        const projectedFree = Math.max(0, volume.freeBytes - reservedKnown - (additional.logicalBytes ?? 0));
+        if (projectedFree / volume.totalBytes < budget.minFreeRatio) {
+          return "Configured minimum free-space ratio would be exceeded by known occupancy";
+        }
+      }
+    }
+    return null;
+  };
+
+  const reserveMaterialization = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    settings: HarnessWorktreeSettings | undefined,
+    additional: ReturnType<typeof measurementFromStates>,
+    reclaimOthers = false,
+  ): Promise<{ failure: string | null; release(): Promise<void> }> => {
+    if (!settings?.budget) return { failure: null, release: async () => undefined };
+    if (reclaimOthers || settings.reclaimIdle) {
+      await reclaimEligibleOthers(workspaceId, parent, threadId);
+    }
+    return withSpaceMutation(workspaceId, async () => {
+      const failure = await budgetFailureFor(workspaceId, parent, settings, additional, threadId);
+      if (failure) return { failure, release: async () => undefined };
+      const reservations = spaceReservations.get(workspaceId) ?? new Map();
+      if (reservations.has(threadId)) {
+        throw new ThreadRuntimeError("conflict", `Thread already has a worktree space reservation: ${threadId}`);
+      }
+      reservations.set(threadId, additional);
+      spaceReservations.set(workspaceId, reservations);
+      let released = false;
+      return {
+        failure: null,
+        release: async () => {
+          if (released) return;
+          released = true;
+          await withSpaceMutation(workspaceId, async () => {
+            const current = spaceReservations.get(workspaceId);
+            current?.delete(threadId);
+            if (current?.size === 0) spaceReservations.delete(workspaceId);
+          });
+        },
+      };
+    });
   };
 
   const enqueue = (threadId: string, operation: () => Promise<void>): void => {
@@ -367,6 +633,139 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       return relative;
     });
+  };
+
+  const recordIncompleteMaterialization = async (
+    workspaceId: string,
+    threadId: string,
+    worktree: NonNullable<Thread["worktree"]>,
+    reason: string,
+  ): Promise<void> => {
+    try {
+      const observed = await observeMaterialization(worktree.path);
+      if (observed.exists) {
+        worktree.materialized = true;
+        worktree.preparationStage = "materializing";
+        worktree.materializationFingerprint = observed.fingerprint;
+      } else {
+        worktree.materialized = false;
+        worktree.preparationStage = "materialize";
+        delete worktree.materializationFingerprint;
+      }
+    } catch (error) {
+      worktree.materialized = true;
+      worktree.preparationStage = "materializing";
+      delete worktree.materializationFingerprint;
+      reportError(error);
+    }
+    worktree.retentionReason = reason;
+    await persistWorktree(workspaceId, threadId, worktree).catch(reportError);
+  };
+
+  const clearIncompleteMaterialization = async (
+    workspaceId: string,
+    threadId: string,
+    worktree: NonNullable<Thread["worktree"]>,
+  ): Promise<void> => {
+    const observed = await observeMaterialization(worktree.path);
+    if (!observed.exists) {
+      worktree.materialized = false;
+      worktree.preparationStage = "materialize";
+      delete worktree.materializationFingerprint;
+      await persistWorktree(workspaceId, threadId, worktree);
+      return;
+    }
+    if (!worktree.materializationFingerprint || worktree.materializationFingerprint !== observed.fingerprint) {
+      const error = new Error(`Incomplete thread materialization contains new or unverified content: ${worktree.path}`);
+      (error as NodeJS.ErrnoException).code = "EEXIST";
+      throw error;
+    }
+    if (!options.worktrees.reclaim || !options.canReclaimWorktree) {
+      throw new ThreadRuntimeError("unavailable", "The incomplete managed directory cannot be retried until its reclaim guard is available");
+    }
+    const permission = await options.canReclaimWorktree(workspaceId, threadId, worktree.path);
+    try {
+      if (!permission.safe) {
+        throw new ThreadRuntimeError("unavailable", permission.reason ?? "The incomplete managed directory still has an active user or writer");
+      }
+      // The directory was first inspected before awaiting the guard. A
+      // controlled writer may have completed during that wait, so the guarded
+      // fingerprint is the one that authorizes deletion.
+      const guarded = await observeMaterialization(worktree.path);
+      if (!guarded.exists) {
+        worktree.materialized = false;
+        worktree.preparationStage = "materialize";
+        delete worktree.materializationFingerprint;
+        await persistWorktree(workspaceId, threadId, worktree);
+        return;
+      }
+      if (!worktree.materializationFingerprint || guarded.fingerprint !== worktree.materializationFingerprint) {
+        const error = new Error(`Incomplete thread materialization contains new or unverified content: ${worktree.path}`);
+        (error as NodeJS.ErrnoException).code = "EEXIST";
+        throw error;
+      }
+      const reclaimed = await options.worktrees.reclaim(worktree, { nativeVerified: true });
+      if (!reclaimed.reclaimed) {
+        throw new ThreadRuntimeError("unavailable", reclaimed.reason ?? "The incomplete managed directory could not be reclaimed for retry");
+      }
+    } finally {
+      await permission.release?.();
+    }
+    worktree.materialized = false;
+    worktree.preparationStage = "materialize";
+    delete worktree.materializationFingerprint;
+    await persistWorktree(workspaceId, threadId, worktree);
+  };
+
+  const materializeRecordedWorktree = async (input: {
+    workspaceId: string;
+    threadId: string;
+    sourceRoot: string;
+    worktree: NonNullable<Thread["worktree"]>;
+    branchId?: string;
+    resultRevision?: number;
+    setupRequired: boolean;
+    signal: AbortSignal;
+  }): Promise<NonNullable<Thread["worktree"]>> => {
+    let worktree = input.worktree;
+    if (preparationStageOf(worktree) === "materializing") {
+      await clearIncompleteMaterialization(input.workspaceId, input.threadId, worktree);
+    }
+    await assertMaterializationPathAvailable(worktree.path);
+    if (!options.worktrees.materialize) throw new Error("Thread worktree materialization is unavailable");
+    worktree.materialized = false;
+    worktree.preparationStage = "materializing";
+    delete worktree.materializationFingerprint;
+    await persistWorktree(input.workspaceId, input.threadId, worktree);
+    try {
+      worktree = await options.worktrees.materialize(input.sourceRoot, worktree, input.signal);
+      worktree.materialized = true;
+      worktree.preparationStage = "materializing";
+      await persistWorktree(input.workspaceId, input.threadId, worktree);
+      if (input.branchId && input.resultRevision && options.workingStates) {
+        await options.workingStates.withStore(
+          input.workspaceId,
+          "thread-result-materialize",
+          (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
+        );
+      }
+      worktree.preparationStage = input.setupRequired ? "setup" : "ready";
+      delete worktree.materializationFingerprint;
+      delete worktree.retentionReason;
+      await persistWorktree(input.workspaceId, input.threadId, worktree);
+      if (input.signal.aborted) throw new DOMException("Thread preparation aborted", "AbortError");
+      return worktree;
+    } catch (error) {
+      if (preparationStageOf(worktree) !== "ready" && preparationStageOf(worktree) !== "setup") {
+        await recordIncompleteMaterialization(
+          input.workspaceId,
+          input.threadId,
+          worktree,
+          `Directory materialization did not complete: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw error;
+    }
   };
 
   const parentSession = async (workspaceId: string, parent: ThreadParent): Promise<{ id: string; file: string; cwd: string }> => {
@@ -475,18 +874,29 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const closeBinding = async (binding: RuntimeBinding, abort: boolean): Promise<void> => {
     terminatingSessions.add(binding.sessionId);
-    try {
-      if (abort) await options.sessions.abort(binding.sessionId).catch(reportError);
-      await options.sessions.close(binding.sessionId).catch(reportError);
-    } finally {
-      if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
-      if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
-      lastAgentEnd.delete(binding.sessionId);
-      clearStallTimer(binding.sessionId);
-      stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
-      waitingSessions.delete(binding.sessionId);
-      terminatingSessions.delete(binding.sessionId);
+    if (abort) {
+      try { await options.sessions.abort(binding.sessionId); } catch (error) { reportError(error); }
     }
+    try {
+      await options.sessions.close(binding.sessionId);
+    } catch (error) {
+      reportError(error);
+      // The binding is the only authoritative route back to this live Pi
+      // session. Keep it (and the terminating marker) until a later close is
+      // actually confirmed.
+      throw new ThreadRuntimeError(
+        "unavailable",
+        `Unable to close thread session: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
+    if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
+    lastAgentEnd.delete(binding.sessionId);
+    clearStallTimer(binding.sessionId);
+    stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
+    waitingSessions.delete(binding.sessionId);
+    terminatingSessions.delete(binding.sessionId);
   };
 
   const publishPartialResult = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
@@ -503,6 +913,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       worktree = await options.worktrees.snapshot(worktree);
     } catch (error) {
       reportError(error);
+      // A published native result without its corresponding retained
+      // worktree snapshot is not a complete archive capture. Propagate the
+      // failure so stopRunForArchive keeps the binding and active Run for a
+      // retry instead of reporting a successful archive over a stale path.
+      throw new ThreadRuntimeError(
+        "unavailable",
+        `Unable to snapshot the thread worktree before archive: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     }
     await options.registry.setWorkingState(workspaceId, threadId, {
       branchId: thread.workBranchId,
@@ -584,6 +1003,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   const spawn = async (input: SpawnThreadRunInput): Promise<{ sessionId: string }> => {
+    let releaseSpaceReservation = async (): Promise<void> => undefined;
+    try {
+      return await runPreparation(
+        input.threadId,
+        async (preparationSignal, setPreparationStage) => {
+    const checkPreparation = (): void => {
+      if (preparationSignal.aborted) throw new DOMException("Thread preparation aborted", "AbortError");
+    };
+    setPreparationStage("resolving-parent");
     const parent = await parentSession(input.workspaceId, input.parent);
     let parentBlocks: Array<{ label: string; content: string }> | null | undefined;
     if (input.carryBlocks !== false && options.readBlocks) {
@@ -597,6 +1025,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const sourceRoot = input.kind === "discussion"
       ? parent.cwd
       : await options.resolveWorkspaceRoot(input.workspaceId);
+    const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
     const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     const draftBaselineId = existing?.manifest.draftBaselineId ?? input.draftBaselineId ?? null;
     if (existing && (input.draftBaselineId ?? null) !== existing.manifest.draftBaselineId) {
@@ -609,34 +1038,97 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let worktree = existing?.worktree;
     let needsBranchCapture = false;
     if (!worktree) {
-      const prep = await options.worktrees.prepare({
-        mode: input.worktree,
-        sourceRoot,
-        threadId: input.threadId,
-        signal: abortController.signal,
-      });
+      if (input.worktree === "isolated" && effectiveSettings?.budget) {
+        const reservation = await reserveMaterialization(
+          input.workspaceId,
+          input.parent,
+          input.threadId,
+          effectiveSettings,
+          await estimateResultFootprint(input.workspaceId, null, null, sourceRoot),
+        );
+        releaseSpaceReservation = reservation.release;
+        checkPreparation();
+        if (reservation.failure) throw new ThreadRuntimeError("unavailable", `Worktree budget unavailable: ${reservation.failure}`);
+      }
+      setPreparationStage("preparing-worktree");
+      let prep: Awaited<ReturnType<ThreadRuntimeOptions["worktrees"]["prepare"]>>;
+      try {
+        prep = await options.worktrees.prepare({
+          mode: input.worktree,
+          sourceRoot,
+          threadId: input.threadId,
+          signal: preparationSignal,
+          onWorktreeState: async (candidate) => {
+            worktree = candidate;
+            if (candidate.preparationStage === "ready"
+              && input.tools.includes("bash")
+              && options.worktrees.runSetup
+              && effectiveSettings?.setup) {
+              candidate.preparationStage = "setup";
+            }
+            await options.registry.setWorktree(input.workspaceId, input.threadId, candidate);
+          },
+        });
+      } catch (error) {
+        if (worktree && preparationStageOf(worktree) === "materializing") {
+          await recordIncompleteMaterialization(
+            input.workspaceId,
+            input.threadId,
+            worktree,
+            `Directory preparation did not complete: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        throw error;
+      }
       preparedCwd = prep.cwd;
       worktree = prep.worktree;
       if (worktree) {
+        worktree.materialized = true;
+        worktree.preparationStage = input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup
+          ? "setup"
+          : "ready";
+        delete worktree.materializationFingerprint;
         await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
         needsBranchCapture = true;
       }
+      // Persist the physical owner before observing cancellation: an
+      // uninterruptible copy may have completed a directory by this point.
+      checkPreparation();
     } else {
-      if (worktree.materialized === false && options.worktrees.materialize) {
-        if (options.workingStates && existing?.workBranchId && existing.resultRevision && worktree.base === "zero-commit") {
-          await options.workingStates.withStore(input.workspaceId, "thread-result-materialize", (store) => (
-            store.materializeResult(existing.workBranchId!, existing.resultRevision!, worktree!.path)
-          ));
-          worktree.materialized = true;
-        } else {
-          await options.worktrees.materialize(sourceRoot, worktree, abortController.signal);
-          if (options.workingStates && existing?.workBranchId && existing.resultRevision) {
-            await options.workingStates.withStore(input.workspaceId, "thread-result-materialize", (store) => (
-              store.materializeResult(existing.workBranchId!, existing.resultRevision!, worktree!.path)
-            ));
-          }
-        }
-        await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
+      const needsExistingMaterialization = worktree.materialized === false
+        || preparationStageOf(worktree) === "materialize"
+        || preparationStageOf(worktree) === "materializing";
+      if (needsExistingMaterialization
+        && !options.worktrees.materialize
+        && !(options.workingStates && existing?.workBranchId && existing.resultRevision)) {
+        throw new ThreadRuntimeError("unavailable", "Thread worktree materialization is unavailable");
+      }
+      if (needsExistingMaterialization && (
+        Boolean(options.worktrees.materialize)
+        || Boolean(options.workingStates && existing?.workBranchId && existing.resultRevision)
+      )) {
+        setPreparationStage("materializing-worktree");
+        const reservation = await reserveMaterialization(
+          input.workspaceId,
+          input.parent,
+          input.threadId,
+          effectiveSettings,
+          await estimateResultFootprint(input.workspaceId, existing ?? null, worktree, sourceRoot),
+        );
+        releaseSpaceReservation = reservation.release;
+        checkPreparation();
+        if (reservation.failure) throw new ThreadRuntimeError("unavailable", `Worktree budget unavailable: ${reservation.failure}`);
+        worktree = await materializeRecordedWorktree({
+          workspaceId: input.workspaceId,
+          threadId: input.threadId,
+          sourceRoot,
+          worktree,
+          ...(existing?.workBranchId ? { branchId: existing.workBranchId } : {}),
+          ...(existing?.resultRevision ? { resultRevision: existing.resultRevision } : {}),
+          setupRequired: Boolean(input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup),
+          signal: preparationSignal,
+        });
+        checkPreparation();
       }
       preparedCwd = worktree.path;
       if (options.workingStates && options.worktrees.importFixedResult && !existing?.workBranchId && worktree.resultCommit) {
@@ -663,17 +1155,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for the editor draft baseline");
     }
 
-    const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
     // A persisted branch owns its capture scope. A missing worktree still
     // follows the existing branch capture/materialization flow, but must not
     // recopy live parent inputs or replace that scope from current settings.
     const launchBranchCapture = Boolean(worktree && needsBranchCapture && !existing?.workBranchId);
     const captureScopes = launchBranchCapture ? resolveCaptureScopes(sourceRoot, effectiveSettings) : [];
     if (launchBranchCapture && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
-      await options.worktrees.prepareInputs(sourceRoot, worktree!, effectiveSettings);
+      setPreparationStage("preparing-inputs");
+      await options.worktrees.prepareInputs(sourceRoot, worktree!, effectiveSettings, preparationSignal);
+      checkPreparation();
     }
     if (worktree && needsBranchCapture && options.workingStates) {
       const branchId = `thread-${input.threadId}`;
+      setPreparationStage("capturing-baseline");
       await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
         const baseline = await store.captureDirectory(preparedCwd);
         if (!draftBaselineId) {
@@ -702,15 +1196,31 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           preparedCwd,
         );
       });
+      checkPreparation();
       await options.registry.setWorkingState(input.workspaceId, input.threadId, { branchId, worktree });
     }
     if (worktree && input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup) {
+      setPreparationStage("running-setup");
+      worktree.preparationStage = "setup";
+      await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
       try {
-        await options.worktrees.runSetup(sourceRoot, worktree, effectiveSettings, abortController.signal);
+        await options.worktrees.runSetup(sourceRoot, worktree, effectiveSettings, preparationSignal);
+        worktree.preparationStage = "ready";
+        delete worktree.retentionReason;
+        await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
       } catch (setupErr) {
+        const setupMessage = setupErr instanceof Error ? setupErr.message : String(setupErr);
+        worktree.preparationStage = "setup";
+        if (preparationSignal.aborted) {
+          worktree.retentionReason = "Directory setup was interrupted";
+          await options.registry.setWorktree(input.workspaceId, input.threadId, worktree).catch(reportError);
+          throw setupErr;
+        }
         const setupFailure = setupErr as { exitReason?: unknown } | null;
         const exitReason = typeof setupFailure?.exitReason === "string" ? setupFailure.exitReason : "setup-failed";
-        const message = setupErr instanceof Error ? setupErr.message : String(setupErr);
+        const message = setupMessage;
+        worktree.retentionReason = `Directory setup failed: ${message}`;
+        await options.registry.setWorktree(input.workspaceId, input.threadId, worktree).catch(reportError);
         await options.registry.endRun(
           input.workspaceId,
           input.threadId,
@@ -736,6 +1246,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
     }
 
+    if (effectiveSettings?.budget) {
+      const actualFailure = await withSpaceMutation(input.workspaceId, () => budgetFailureFor(
+        input.workspaceId,
+        input.parent,
+        effectiveSettings,
+        { logicalBytes: 0, allocatedBytes: 0, unknown: false },
+        input.threadId,
+      ));
+      if (actualFailure) throw new ThreadRuntimeError("unavailable", `Worktree budget unavailable: ${actualFailure}`);
+    }
+
+    checkPreparation();
+    setPreparationStage("opening-session");
     const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(preparedCwd);
     let sessionId: string | null = null;
     try {
@@ -761,26 +1284,51 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         baseline: { cost: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0 } },
       };
       bind(binding);
+      checkPreparation();
       scheduleStallTimer(binding);
       await options.registry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
+      checkPreparation();
       await options.sessions.prompt(
         sessionId,
         input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks),
       );
+      checkPreparation();
       return { sessionId };
     } catch (error) {
       if (sessionId) {
-        await options.registry.endRun(
-          input.workspaceId,
-          input.threadId,
-          input.runId,
-          "failure",
-          `start failed: ${error instanceof Error ? error.message : String(error)}`,
-        ).catch(reportError);
-        const binding = bindingsBySession.get(sessionId);
-        if (binding) await closeBinding(binding, false);
+        if (!preparationSignal.aborted) {
+          await options.registry.endRun(
+            input.workspaceId,
+            input.threadId,
+            input.runId,
+            "failure",
+            `start failed: ${error instanceof Error ? error.message : String(error)}`,
+          ).catch(reportError);
+          const binding = bindingsBySession.get(sessionId);
+          if (binding) await closeBinding(binding, false);
+        }
       }
       throw error;
+    }
+        },
+      );
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === "AbortError";
+      if (!isAbort) {
+        const active = await options.registry.getActiveRun(input.workspaceId, input.threadId).catch(() => null);
+        if (active?.id === input.runId && active.outcome === null) {
+          await options.registry.endRun(
+            input.workspaceId,
+            input.threadId,
+            input.runId,
+            "failure",
+            `thread preparation failed: ${error instanceof Error ? error.message : String(error)}`,
+          ).catch(reportError);
+        }
+      }
+      throw error;
+    } finally {
+      await releaseSpaceReservation();
     }
   };
 
@@ -1061,41 +1609,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     autoResumedThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
     await closeBinding(binding, false);
     const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId, binding.parent);
-    const retainedResult = publishedResultRevision !== undefined
-      && (currentWorktree?.base === "zero-commit" || Boolean(currentWorktree?.resultCommit));
-    if (currentWorktree && retainedResult && options.worktrees.reclaim && effectiveSettings?.reclaimIdle) {
-      try {
-        const captured = await options.workingStates!.withStore(
-          binding.workspaceId,
-          "thread-result-reclaim-check",
-          (store) => store.directoryMatchesResult(thread.workBranchId!, publishedResultRevision!, currentWorktree!.path),
-          "shared",
-        );
-        if (!captured) {
-          currentWorktree.retentionReason = "Worktree changed after its latest result was published";
-          await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
-          return;
-        }
-        const permission = options.canReclaimWorktree
-          ? await options.canReclaimWorktree(binding.workspaceId, binding.threadId, currentWorktree.path)
-          : { safe: false, reason: "No worktree user/writer authority is configured" };
-        try {
-          if (permission.safe) {
-            const reclaimed = await options.worktrees.reclaim(currentWorktree);
-            if (reclaimed.reclaimed) delete currentWorktree.retentionReason;
-            else currentWorktree.retentionReason = reclaimed.reason ?? "Worktree reclamation was not safe";
-          } else {
-            currentWorktree.retentionReason = permission.reason ?? "The worktree still has an active user or writer";
-          }
-        } finally {
-          await permission.release?.();
-        }
-        await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
-      } catch (error) {
-        currentWorktree.retentionReason = error instanceof Error ? error.message : String(error);
-        await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree).catch(reportError);
-        reportError(error);
-      }
+    if (effectiveSettings?.reclaimIdle) {
+      await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
     }
   };
 
@@ -1307,9 +1822,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             `resume failed: ${error instanceof Error ? error.message : String(error)}`,
           );
           if (resumedSessionId) {
-            bindingsBySession.delete(resumedSessionId);
-            sessionByThread.delete(thread.id);
-            await options.sessions.close(resumedSessionId).catch(reportError);
+            const resumedBinding = bindingsBySession.get(resumedSessionId);
+            if (resumedBinding) await closeBinding(resumedBinding, false).catch(reportError);
+            else await options.sessions.close(resumedSessionId).catch(reportError);
           }
           reportError(error);
         } finally {
@@ -1386,9 +1901,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     });
     if (!converted) throw new ThreadRuntimeError("not-found", `Thread not found: ${thread.id}`);
 
-    terminatingSessions.add(binding.sessionId);
     try {
-      await options.sessions.close(binding.sessionId);
+      await closeBinding(binding, false);
     } catch (error) {
       await options.registry.endRun(
         scope.workspaceId,
@@ -1398,14 +1912,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         `worker restart failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
       ).catch(reportError);
       throw error;
-    } finally {
-      if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
-      if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
-      lastAgentEnd.delete(binding.sessionId);
-      clearStallTimer(binding.sessionId);
-      stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
-      waitingSessions.delete(binding.sessionId);
-      terminatingSessions.delete(binding.sessionId);
     }
 
     let opened: SessionSnapshot;
@@ -1499,48 +2005,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (run?.id === binding.runId && run.outcome === null) {
           await options.registry.endRun(binding.workspaceId, threadId, binding.runId, "cancelled", "killed by parent");
         }
-        if (!keepWorktree && options.workingStates && options.worktrees.reclaim) {
-          const current = await options.registry.getThread(binding.workspaceId, binding.parent, threadId);
-          const worktree = current?.worktree;
-          if (current?.workBranchId && current.resultRevision && worktree) {
-            try {
-              const captured = await options.workingStates.withStore(
-                binding.workspaceId,
-                "thread-result-reclaim-check",
-                (store) => store.directoryMatchesResult(current.workBranchId!, current.resultRevision!, worktree.path),
-                "shared",
-              );
-              if (!captured) {
-                worktree.retentionReason = "Worktree changed after its latest result was published";
-              } else {
-                const permission = options.canReclaimWorktree
-                  ? await options.canReclaimWorktree(binding.workspaceId, threadId, worktree.path)
-                  : { safe: false, reason: "No worktree user/writer authority is configured" };
-                try {
-                  if (permission.safe) {
-                    const reclaimed = await options.worktrees.reclaim(worktree);
-                    if (reclaimed.reclaimed) delete worktree.retentionReason;
-                    else worktree.retentionReason = reclaimed.reason ?? "Worktree reclamation was not safe";
-                  } else {
-                    worktree.retentionReason = permission.reason ?? "The worktree still has an active user or writer";
-                  }
-                } finally {
-                  await permission.release?.();
-                }
-              }
-              await options.registry.setWorktree(binding.workspaceId, threadId, worktree);
-            } catch (error) {
-              worktree.retentionReason = error instanceof Error ? error.message : String(error);
-              await options.registry.setWorktree(binding.workspaceId, threadId, worktree).catch(reportError);
-              reportError(error);
-            }
-          }
+        if (!keepWorktree) {
+          await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, threadId).catch(reportError);
         }
       }
     } finally {
-      if (bindingsBySession.get(sessionId) === binding) bindingsBySession.delete(sessionId);
-      if (sessionByThread.get(threadId) === sessionId) sessionByThread.delete(threadId);
-      terminatingSessions.delete(sessionId);
+      if (!binding) {
+        if (sessionByThread.get(threadId) === sessionId) sessionByThread.delete(threadId);
+        terminatingSessions.delete(sessionId);
+      }
     }
   };
 
@@ -1550,7 +2023,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string,
     requestedRevision?: number,
     executionId?: string,
-    extras?: { surfaceParents?: ThreadSurfaceParent[]; resolutions?: ThreadConflictResolution[] },
+    extras?: { sourceOwner?: { ownerId: string; generation: number }; expectedBindingFingerprint?: string; resolutions?: ThreadConflictResolution[]; signal?: AbortSignal },
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -1588,12 +2061,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           branchId,
           resultRevision,
           ...(executionId ? { executionId, requireTurnBinding: true } : {}),
-          ...(extras?.surfaceParents ? { surfaceParents: extras.surfaceParents } : {}),
+          ...(extras?.sourceOwner ? { sourceOwner: extras.sourceOwner } : {}),
+          ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
+          ...(extras?.signal ? { signal: extras.signal } : {}),
           ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
         });
         if (result.preview) {
-          const pendingSurface = (result.surfaceEdits?.length ?? 0) > 0
-            || result.preview.paths.some((path) => path.target === "surface" && path.phase !== "surface-applied");
+          const pendingSurface = result.preview.paths.some((path) => (
+            path.target === "surface"
+            && path.phase !== "surface-applied"
+            && path.phase !== "skipped-identical"
+          ));
           const failed = result.status === "compensated"
             || result.status === "needs-attention"
             || result.preview.unavailablePaths.length > 0
@@ -1622,7 +2100,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats: result.diffStats,
           appliedPaths: result.appliedPaths,
           ...(result.surfaceTargetPaths ? { surfaceTargetPaths: result.surfaceTargetPaths } : {}),
-          ...(result.surfaceEdits ? { surfaceEdits: result.surfaceEdits } : {}),
           ...(result.preview ? { preview: result.preview } : {}),
           status: result.status,
           resultRevision,
@@ -1642,7 +2119,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     workspaceId: string,
     parent: ThreadParent,
     threadId: string,
-    extras?: { resultRevision?: number; surfaceParents?: ThreadSurfaceParent[]; resolutions?: ThreadConflictResolution[] },
+    extras?: { resultRevision?: number; sourceOwner?: { ownerId: string; generation: number }; expectedBindingFingerprint?: string; resolutions?: ThreadConflictResolution[]; signal?: AbortSignal },
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -1659,7 +2136,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       threadId,
       branchId,
       resultRevision,
-      ...(extras?.surfaceParents ? { surfaceParents: extras.surfaceParents } : {}),
+      ...(extras?.sourceOwner ? { sourceOwner: extras.sourceOwner } : {}),
+      ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
+      ...(extras?.signal ? { signal: extras.signal } : {}),
       ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
     });
     await options.registry.setIntegration(
@@ -1681,17 +2160,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return /\bENOSPC\b|no space left/i.test(message);
   };
 
-  const unfinishedIntegrationReasons = async (workspaceId: string, threadId: string, thread: Thread): Promise<string[]> => {
+  const unfinishedIntegrationReasons = async (workspaceId: string, threadId: string): Promise<string[]> => {
     const reasons: string[] = [];
-    if (thread.integration === "dirty" || thread.integration === "merge-ready" || thread.integration === "conflict") {
-      reasons.push(`Unfinished integration (${thread.integration})`);
-    }
+    // `dirty`/`merge-ready`/`conflict` are projections of a persisted result.
+    // Only a still-running integration operation owns the directory.
     if (!options.workingStates) return reasons;
     const operations = await options.workingStates.withStore(workspaceId, "thread-space-ops", (_store, context) => {
       const rows = context.database.prepare(`
         SELECT id, state, data_json FROM operations
         WHERE workspace_id = ? AND kind = 'integration'
-        AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted')
+        AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone')
       `).all(workspaceId) as Array<{ id: string; state: string; data_json: string }>;
       return rows.flatMap((row) => {
         try {
@@ -1724,19 +2202,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     } else if (thread.worktree?.materialized === false) {
       matchesResult = true;
     }
-    let writerReason: string | undefined;
-    let permissionRelease: (() => Promise<void>) | undefined;
-    if (thread.worktree && thread.worktree.materialized !== false && options.canReclaimWorktree) {
-      try {
-        const permission = await options.canReclaimWorktree(workspaceId, thread.id, thread.worktree.path);
-        permissionRelease = permission.release;
-        if (!permission.safe) writerReason = permission.reason ?? "The worktree still has an active user or writer";
-      } catch (error) {
-        writerReason = error instanceof Error ? error.message : String(error);
-      } finally {
-        await permissionRelease?.().catch(reportError);
-      }
-    }
     const hasActiveCommands = Boolean(
       thread.worktree
       && thread.worktree.materialized !== false
@@ -1746,8 +2211,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return assembleKeepReasons({
       thread,
       runActive,
-      unfinishedIntegration: await unfinishedIntegrationReasons(workspaceId, thread.id, thread),
-      ...(writerReason ? { writerReason } : {}),
+      unfinishedIntegration: await unfinishedIntegrationReasons(workspaceId, thread.id),
       matchesResult,
       hasPublishedResult,
       hasActiveCommands,
@@ -1794,9 +2258,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   const inspectSpace = async (workspaceId: string, parent?: ThreadParent): Promise<WorkspaceThreadSpace> => {
-    const listed = parent
-      ? await options.registry.listThreads(workspaceId, parent, true)
-      : await options.registry.listWorkspaceThreads(workspaceId);
+    // Space is a workspace budget and object graph. `parent` is retained by
+    // the route as a presentation scope, but must never narrow accounting.
+    const listed = await options.registry.listWorkspaceThreads(workspaceId);
     const threads = listed.filter((thread) => !thread.hidden);
     const perThreadHashes = await objectHashMaps(workspaceId, threads);
     const owners = new Map<string, Set<string>>();
@@ -1846,8 +2310,41 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const occupancy = space.threads.find((entry) => entry.threadId === thread.id)
       ?? await occupancyFor(workspaceId, thread, new Map(), new Map());
     const current = await options.registry.getThread(workspaceId, parent, thread.id) ?? thread;
-    if (!current.worktree || current.worktree.materialized === false) {
+    if (!current.worktree) {
       return { thread: current, reclaimed: true, occupancy };
+    }
+    if (current.worktree.materialized === false) {
+      try {
+        await fs.promises.lstat(current.worktree.path);
+        current.worktree.retentionReason = "Original thread path contains uncollected content";
+        await persistWorktree(workspaceId, current.id, current.worktree).catch(reportError);
+        return {
+          thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+          reclaimed: false,
+          occupancy,
+          message: current.worktree.retentionReason,
+        };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          if (current.worktree.retentionReason) {
+            return {
+              thread: current,
+              reclaimed: false,
+              occupancy,
+              message: current.worktree.retentionReason,
+            };
+          }
+          return { thread: current, reclaimed: true, occupancy };
+        }
+        current.worktree.retentionReason = error instanceof Error ? error.message : String(error);
+        await persistWorktree(workspaceId, current.id, current.worktree).catch(reportError);
+        return {
+          thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+          reclaimed: false,
+          occupancy,
+          message: current.worktree.retentionReason,
+        };
+      }
     }
     if (occupancy.keepReasons.length > 0 || !occupancy.reclaimable) {
       current.worktree.retentionReason = occupancy.keepReasons.join("; ") || "Directory is not reclaimable";
@@ -1862,43 +2359,171 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.worktrees.reclaim) {
       return { thread: current, reclaimed: false, occupancy, message: "Worktree reclamation is unavailable" };
     }
-    const nativeVerified = Boolean(current.workBranchId && current.resultRevision);
-    const result = await options.worktrees.reclaim(current.worktree, nativeVerified ? { nativeVerified } : undefined);
-    if (result.reclaimed) delete current.worktree.retentionReason;
-    else current.worktree.retentionReason = result.reason ?? "Worktree reclamation was not safe";
-    await persistWorktree(workspaceId, current.id, current.worktree);
-    const updated = await options.registry.getThread(workspaceId, parent, current.id) ?? current;
-    const nextSpace = await inspectSpace(workspaceId, parent);
-    return {
-      thread: updated,
-      reclaimed: result.reclaimed,
-      occupancy: nextSpace.threads.find((entry) => entry.threadId === current.id) ?? occupancy,
-      ...(result.reclaimed ? {} : { message: current.worktree.retentionReason }),
-    };
+    // The observation above is only a candidate check. Re-read all mutable
+    // ownership facts after acquiring the real guard, and keep that guard
+    // until the physical delete has completed.
+    let permission: { safe: boolean; reason?: string; release?: () => Promise<void> };
+    try {
+      permission = options.canReclaimWorktree
+        ? await options.canReclaimWorktree(workspaceId, current.id, current.worktree.path)
+        : { safe: false, reason: "No worktree user/writer authority is configured" };
+    } catch (error) {
+      current.worktree.retentionReason = error instanceof Error ? error.message : String(error);
+      await persistWorktree(workspaceId, current.id, current.worktree).catch(reportError);
+      return {
+        thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+        reclaimed: false,
+        occupancy,
+        message: current.worktree.retentionReason,
+      };
+    }
+    try {
+      if (!permission.safe) {
+        current.worktree.retentionReason = permission.reason ?? "The worktree still has an active user or writer";
+        await persistWorktree(workspaceId, current.id, current.worktree);
+        return {
+          thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+          reclaimed: false,
+          occupancy,
+          message: current.worktree.retentionReason,
+        };
+      }
+      const latest = await options.registry.getThread(workspaceId, parent, current.id) ?? current;
+      const latestRun = await options.registry.getActiveRun(workspaceId, current.id);
+      const latestReasons = await keepReasonsFor(workspaceId, latest);
+      if (latestRun?.outcome === null || latestReasons.length > 0
+        || !latest.worktree || latest.worktree.materialized === false
+        || latest.worktree.path !== current.worktree.path) {
+        current.worktree.retentionReason = latestReasons[0] ?? "Thread changed while worktree reclamation was starting";
+        await persistWorktree(workspaceId, current.id, current.worktree);
+        return {
+          thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+          reclaimed: false,
+          occupancy,
+          message: current.worktree.retentionReason,
+        };
+      }
+      if (latest.workBranchId && latest.resultRevision && options.workingStates) {
+        const matches = await options.workingStates.withStore(
+          workspaceId,
+          "thread-result-reclaim-check",
+          (store) => store.directoryMatchesResult(latest.workBranchId!, latest.resultRevision!, latest.worktree!.path),
+          "shared",
+        ).catch(() => false);
+        if (!matches) {
+          current.worktree.retentionReason = "Worktree changed after its latest result was published";
+          await persistWorktree(workspaceId, current.id, current.worktree);
+          return {
+            thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+            reclaimed: false,
+            occupancy,
+            message: current.worktree.retentionReason,
+          };
+        }
+      }
+      const nativeVerified = Boolean(latest.workBranchId && latest.resultRevision);
+      let result: { reclaimed: boolean; reason?: string };
+      try {
+        result = await options.worktrees.reclaim(latest.worktree, nativeVerified ? { nativeVerified } : undefined);
+      } catch (error) {
+        latest.worktree.retentionReason = error instanceof Error ? error.message : String(error);
+        await persistWorktree(workspaceId, latest.id, latest.worktree).catch(reportError);
+        return {
+          thread: await options.registry.getThread(workspaceId, parent, latest.id) ?? latest,
+          reclaimed: false,
+          occupancy,
+          message: latest.worktree.retentionReason,
+        };
+      }
+      if (result.reclaimed) delete latest.worktree.retentionReason;
+      else latest.worktree.retentionReason = result.reason ?? "Worktree reclamation was not safe";
+      await persistWorktree(workspaceId, latest.id, latest.worktree);
+      const updated = await options.registry.getThread(workspaceId, parent, latest.id) ?? latest;
+      const nextSpace = await inspectSpace(workspaceId, parent);
+      return {
+        thread: updated,
+        reclaimed: result.reclaimed,
+        occupancy: nextSpace.threads.find((entry) => entry.threadId === latest.id) ?? occupancy,
+        ...(result.reclaimed ? {} : { message: latest.worktree.retentionReason }),
+      };
+    } finally {
+      await permission.release?.();
+    }
+  };
+
+  const tryAutoReclaimDirectory = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+  ): Promise<boolean> => {
+    // Automatic cleanup is opportunistic. It must never wait on a target
+    // thread that is preparing/restoring, because the caller may itself hold a
+    // different thread lifecycle turn while reserving workspace budget.
+    if (preparations.has(threadId)) return false;
+    return tryWithThreadLifecycle(workspaceId, threadId, async () => {
+      if (preparations.has(threadId)) return;
+      const current = await options.registry.getThread(workspaceId, parent, threadId);
+      if (!current || preparations.has(threadId)) return;
+      await tryReclaimDirectory(workspaceId, parent, current);
+    });
   };
 
   const reclaimEligibleOthers = async (workspaceId: string, parent: ThreadParent, exceptThreadId: string): Promise<void> => {
     const space = await inspectSpace(workspaceId, parent);
     for (const occupancy of space.threads) {
       if (occupancy.threadId === exceptThreadId || !occupancy.reclaimable) continue;
-      const thread = await options.registry.getThread(workspaceId, parent, occupancy.threadId);
+      const thread = (await options.registry.listWorkspaceThreads(workspaceId)).find((entry) => entry.id === occupancy.threadId);
       if (!thread) continue;
-      await tryReclaimDirectory(workspaceId, parent, thread).catch(reportError);
+      await tryAutoReclaimDirectory(workspaceId, thread.parent, thread.id).catch(reportError);
     }
   };
 
   const stopRunForArchive = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
+    await waitForPreparation(threadId);
     const sessionId = sessionByThread.get(threadId);
     const binding = sessionId ? bindingsBySession.get(sessionId) : undefined;
     const run = await options.registry.getActiveRun(workspaceId, threadId);
-    if (sessionId) {
+    if (!sessionId && run?.outcome === null && run.sessionId) {
+      throw new ThreadRuntimeError("unavailable", "The active thread session is not available to stop; retry after it is restored");
+    }
+    const failures: string[] = [];
+    if (sessionId && !binding) {
+      throw new ThreadRuntimeError("unavailable", "The active thread session binding is unavailable to stop safely");
+    }
+    if (sessionId && binding && !binding.archiveStopConfirmed) {
       terminatingSessions.add(sessionId);
-      await options.sessions.abort(sessionId).catch(reportError);
-      await options.sessions.close(sessionId).catch(reportError);
+      let closeSucceeded = false;
+      try { await options.sessions.abort(sessionId); } catch (error) {
+        // A successful close is the authoritative stop confirmation. Some
+        // providers reject abort after an earlier cancellation even though the
+        // still-required close can complete normally.
+        reportError(error);
+      }
+      try {
+        await options.sessions.close(sessionId);
+        closeSucceeded = true;
+      } catch (error) {
+        failures.push(`Unable to close thread session: ${error instanceof Error ? error.message : String(error)}`);
+        reportError(error);
+      }
+      if (closeSucceeded) binding.archiveStopConfirmed = true;
+    }
+    if (failures.length > 0) {
+      throw new ThreadRuntimeError("unavailable", failures.join("; "));
     }
     if (run && run.outcome === null) {
-      await publishPartialResult(workspaceId, parent, threadId).catch(reportError);
-      await options.registry.endRun(workspaceId, threadId, run.id, "cancelled", "archived by user").catch(reportError);
+      try {
+        await publishPartialResult(workspaceId, parent, threadId);
+      } catch (error) {
+        reportError(error);
+        throw new ThreadRuntimeError("unavailable", `Unable to capture the thread result before archive: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      }
+      try {
+        await options.registry.endRun(workspaceId, threadId, run.id, "cancelled", "archived by user");
+      } catch (error) {
+        reportError(error);
+        throw new ThreadRuntimeError("unavailable", `Unable to settle the thread Run before archive: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      }
     }
     if (sessionId && bindingsBySession.get(sessionId) === binding) bindingsBySession.delete(sessionId);
     if (sessionByThread.get(threadId) === sessionId) sessionByThread.delete(threadId);
@@ -1911,7 +2536,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     stalledThreads.delete(`${workspaceId}\0${threadId}`);
   };
 
-  const archiveUser = async (
+  const archiveUserImpl = async (
     workspaceId: string,
     parent: ThreadParent,
     threadId: string,
@@ -1919,7 +2544,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
-    if (thread.lifecycle !== "archived") await stopRunForArchive(workspaceId, parent, threadId);
+    if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
+      await stopRunForArchive(workspaceId, parent, threadId);
+    }
     const archived = await options.registry.archiveThread(workspaceId, threadId, keepWorktree);
     if (!archived) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
     const shouldKeep = archived.keepWorktree === true;
@@ -1935,69 +2562,284 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
   };
 
-  const restoreUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
-    const existing = await options.registry.getThread(workspaceId, parent, threadId);
-    if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
-    const restored = await options.registry.restoreThread(workspaceId, threadId);
-    if (!restored) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
-    let status: ThreadRestoreStatus = "restored";
-    let message: string | undefined;
-    const worktree = restored.worktree;
-    if (worktree && worktree.materialized === false && options.worktrees.materialize) {
-      const settings = await resolveEffectiveWorktreeSettings(workspaceId, parent);
-      await reclaimEligibleOthers(workspaceId, parent, threadId);
-      const space = await inspectSpace(workspaceId, parent);
-      if (space.status === "over-budget" || space.status === "low-free") {
-        status = "budget-unavailable";
-        message = space.note;
-        worktree.retentionReason = message;
-        await persistWorktree(workspaceId, threadId, worktree);
-      } else {
-        try {
-          const sourceRoot = await options.resolveWorkspaceRoot(workspaceId);
-          const materialized = await options.worktrees.materialize(sourceRoot, worktree);
-          delete materialized.retentionReason;
-          if (options.worktrees.runSetup && settings?.setup) {
-            try {
-              await options.worktrees.runSetup(sourceRoot, materialized, settings);
-            } catch (error) {
-              materialized.retentionReason = error instanceof Error ? error.message : String(error);
-              status = "rebuild-failed";
-              message = `Directory restored but setup failed: ${materialized.retentionReason}`;
-            }
-          }
-          await persistWorktree(workspaceId, threadId, materialized);
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code === "EEXIST") {
-            status = "path-occupied";
-            message = error instanceof Error ? error.message : "Original thread path is occupied by other content";
-          } else if (isEnospc(error)) {
-            status = "enospc";
-            message = error instanceof Error ? error.message : "No space left on the volume";
-          } else {
-            status = "rebuild-failed";
-            message = error instanceof Error ? error.message : String(error);
-          }
-          worktree.retentionReason = message;
-          await persistWorktree(workspaceId, threadId, worktree).catch(reportError);
-        }
-      }
-    }
-    const thread = await options.registry.getThread(workspaceId, parent, threadId) ?? restored;
-    const activeRun = await options.registry.getActiveRun(workspaceId, threadId);
-    return {
-      workspaceId,
-      parent,
-      thread,
-      activeRun,
-      restoreStatus: status,
-      space: await inspectSpace(workspaceId, parent),
-      ...(message ? { message } : {}),
-    };
+  const archiveUser = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    keepWorktree?: boolean,
+  ) => {
+    // Archive cancels only this thread's preparation. Workspace budget
+    // coordination uses a separate short reservation critical section.
+    preparations.get(threadId)?.controller.abort();
+    return withThreadLifecycle(workspaceId, threadId, async () => {
+      // Cover a preparation that registered in the small interval between the
+      // eager cancellation above and acquiring this thread's lifecycle turn.
+      preparations.get(threadId)?.controller.abort();
+      return archiveUserImpl(workspaceId, parent, threadId, keepWorktree);
+    });
   };
 
-  const reclaimUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
+  const reopenRestoredSession = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    thread: Thread,
+    signal?: AbortSignal,
+  ): Promise<ThreadRun | null> => {
+    const checkRestore = (): void => {
+      if (signal?.aborted) throw new DOMException("Thread restore aborted", "AbortError");
+    };
+    const previous = await options.registry.getActiveRun(workspaceId, thread.id);
+    const sessionId = thread.report?.transcriptRef.sessionId || previous?.sessionId || null;
+    if (!sessionId) return null;
+    const sourceRoot = await options.resolveWorkspaceRoot(workspaceId);
+    const cwd = thread.worktree?.path ?? sourceRoot;
+    const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
+    let openedSessionId: string | null = null;
+    try {
+      checkRestore();
+      const opened = await options.sessions.open({
+        cwd,
+        ...(thread.model ? { model: thread.model } : {}),
+        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+        sessionId,
+        tools: [...thread.manifest.tools],
+        workspaceId: runtimeWorkspaceId,
+      });
+      openedSessionId = opened.sessionId;
+      checkRestore();
+      const run = await options.registry.startRun(workspaceId, thread.id, previous?.runtimeId ?? "pi", { allowSettled: true });
+      const baselineStats = await options.sessions.stats(opened.sessionId).catch((error) => {
+        reportError(error);
+        return null;
+      });
+      const binding: RuntimeBinding = {
+        workspaceId,
+        parent,
+        threadId: thread.id,
+        runId: run.id,
+        sessionId: opened.sessionId,
+        cwd,
+        kind: thread.kind,
+        providerId: thread.model?.providerId ?? null,
+        baseline: {
+          cost: baselineStats?.cost ?? 0,
+          toolCalls: baselineStats?.toolCalls ?? 0,
+          tokens: {
+            input: baselineStats?.tokens.input ?? 0,
+            output: baselineStats?.tokens.output ?? 0,
+            cacheRead: baselineStats?.tokens.cacheRead ?? 0,
+          },
+        },
+      };
+      bind(binding);
+      await options.registry.markRunRunning(workspaceId, thread.id, run.id, opened.sessionId);
+      checkRestore();
+      if (thread.kind === "implementation") scheduleStallTimer(binding);
+      return run;
+    } catch (error) {
+      if (openedSessionId) {
+        const bound = bindingsBySession.get(openedSessionId);
+        if (signal?.aborted && bound) throw error;
+        if (bound) {
+          try {
+            await closeBinding(bound, false);
+          } catch (closeError) {
+            throw new ThreadRuntimeError(
+              "unavailable",
+              `Thread session opened but could not be closed after restore failed: ${closeError instanceof Error ? closeError.message : String(closeError)}`,
+              { cause: error },
+            );
+          }
+        } else {
+          try {
+            await options.sessions.close(openedSessionId);
+          } catch (closeError) {
+            throw new ThreadRuntimeError(
+              "unavailable",
+              `Thread session opened but could not be closed after restore failed: ${closeError instanceof Error ? closeError.message : String(closeError)}`,
+              { cause: error },
+            );
+          }
+        }
+      }
+      throw error;
+    }
+  };
+
+  const restoreUserImpl = async (workspaceId: string, parent: ThreadParent, threadId: string) => runPreparation(
+    threadId,
+    async (restoreSignal, setRestoreStage) => {
+      const checkRestore = (): void => {
+        if (restoreSignal.aborted) throw new DOMException("Thread restore aborted", "AbortError");
+      };
+      const existing = await options.registry.getThread(workspaceId, parent, threadId);
+      if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+      const existingRun = await options.registry.getActiveRun(workspaceId, threadId);
+      const existingSessionId = sessionByThread.get(threadId);
+      const existingBinding = existingSessionId ? bindingsBySession.get(existingSessionId) : undefined;
+      const directoryReady = !existing.worktree
+        || (existing.worktree.materialized !== false && preparationStageOf(existing.worktree) === "ready");
+      if (existingRun?.outcome === null
+        && existingRun.workerState === "running"
+        && existingBinding?.runId === existingRun.id
+        && directoryReady) {
+        return {
+          ...await snapshotFor(workspaceId, parent, threadId),
+          restoreStatus: "restored" as const,
+          space: await inspectSpace(workspaceId, parent),
+        };
+      }
+      if (existingRun?.outcome === null) {
+        throw new ThreadRuntimeError("unavailable", "The current thread Run has not stopped and cannot be reopened safely");
+      }
+      if (existingSessionId && !existingBinding) {
+        throw new ThreadRuntimeError("unavailable", "The previous thread session binding is unavailable to close safely");
+      }
+      if (existingBinding) await closeBinding(existingBinding, false);
+      if (existing.lifecycle === "queued") {
+        throw new ThreadRuntimeError("conflict", "A queued thread must finish its existing launch before it can be reopened");
+      }
+      const wasArchived = existing.lifecycle === "archived";
+      let status: ThreadRestoreStatus = "restored";
+      let message: string | undefined;
+      let worktree = existing.worktree;
+      const settings = await resolveEffectiveWorktreeSettings(workspaceId, parent);
+      const worktreeStage = worktree ? preparationStageOf(worktree) : "ready";
+      const needsMaterialize = Boolean(
+        worktree
+        && (worktree.materialized === false || worktreeStage === "materialize" || worktreeStage === "materializing"),
+      );
+      const needsSetupRetry = Boolean(
+        worktree
+        && worktree.materialized !== false
+        && worktreeStage === "setup",
+      );
+      if (needsMaterialize || needsSetupRetry) {
+        setRestoreStage("reclaiming-space");
+        const sourceRoot = await options.resolveWorkspaceRoot(workspaceId);
+        checkRestore();
+        if (needsMaterialize && worktree) {
+          let releaseReservation = async (): Promise<void> => undefined;
+          try {
+            if (preparationStageOf(worktree) === "materializing") {
+              await clearIncompleteMaterialization(workspaceId, threadId, worktree);
+            }
+            const reservation = await reserveMaterialization(
+              workspaceId,
+              parent,
+              threadId,
+              settings,
+              await estimateResultFootprint(workspaceId, existing, worktree, sourceRoot),
+              true,
+            );
+            releaseReservation = reservation.release;
+            checkRestore();
+            if (reservation.failure) {
+              status = "budget-unavailable";
+              message = reservation.failure;
+            } else {
+              setRestoreStage("materializing-worktree");
+              worktree = await materializeRecordedWorktree({
+                workspaceId,
+                threadId,
+                sourceRoot,
+                worktree,
+                ...(existing.workBranchId ? { branchId: existing.workBranchId } : {}),
+                ...(existing.resultRevision ? { resultRevision: existing.resultRevision } : {}),
+                setupRequired: Boolean(options.worktrees.runSetup && settings?.setup),
+                signal: restoreSignal,
+              });
+              checkRestore();
+            }
+          } catch (error) {
+            if (restoreSignal.aborted) throw error;
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === "EEXIST") {
+              status = "path-occupied";
+              message = error instanceof Error ? error.message : "Original thread path is occupied by other content";
+            } else if (isEnospc(error)) {
+              status = "enospc";
+              message = error instanceof Error ? error.message : "No space left on the volume";
+            } else {
+              status = "rebuild-failed";
+              message = error instanceof Error ? error.message : String(error);
+            }
+          } finally {
+            await releaseReservation();
+          }
+        }
+        if (status === "restored" && worktree && options.worktrees.runSetup && settings?.setup) {
+          setRestoreStage("running-setup");
+          worktree.preparationStage = "setup";
+          await persistWorktree(workspaceId, threadId, worktree);
+          try {
+            await options.worktrees.runSetup(sourceRoot, worktree, settings, restoreSignal);
+            worktree.preparationStage = "ready";
+            delete worktree.retentionReason;
+          } catch (error) {
+            worktree.preparationStage = "setup";
+            if (restoreSignal.aborted) {
+              worktree.retentionReason = "Directory restore was interrupted during setup";
+              await persistWorktree(workspaceId, threadId, worktree).catch(reportError);
+              throw error;
+            }
+            status = "rebuild-failed";
+            message = `Directory restored but setup failed: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
+        if (status === "restored" && worktree && (!options.worktrees.runSetup || !settings?.setup)) {
+          worktree.preparationStage = "ready";
+          delete worktree.retentionReason;
+        }
+        if (worktree && status !== "restored" && message) worktree.retentionReason = message;
+        if (worktree) await persistWorktree(workspaceId, threadId, worktree).catch(reportError);
+      }
+
+      let restored = existing;
+      if (status === "restored") {
+        checkRestore();
+        if (wasArchived) {
+          const value = await options.registry.restoreThread(workspaceId, threadId);
+          if (!value) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+          restored = value;
+        }
+        try {
+          const reopened = await reopenRestoredSession(workspaceId, parent, restored, restoreSignal);
+          if (!reopened) throw new ThreadRuntimeError("unavailable", "The thread has no persisted Pi session to reopen");
+        } catch (error) {
+          if (restoreSignal.aborted) throw error;
+          status = "rebuild-failed";
+          message = `Thread session could not be reopened: ${error instanceof Error ? error.message : String(error)}`;
+          const run = await options.registry.getActiveRun(workspaceId, threadId);
+          if (run?.outcome === null) await options.registry.endRun(workspaceId, threadId, run.id, "failure", message).catch(reportError);
+          if (wasArchived) await options.registry.archiveThread(workspaceId, threadId).catch(reportError);
+          const failedThread = await options.registry.getThread(workspaceId, parent, threadId);
+          if (failedThread?.worktree) {
+            failedThread.worktree.retentionReason = message;
+            await persistWorktree(workspaceId, threadId, failedThread.worktree).catch(reportError);
+          }
+        }
+      }
+      checkRestore();
+      const thread = await options.registry.getThread(workspaceId, parent, threadId) ?? restored;
+      const activeRun = await options.registry.getActiveRun(workspaceId, threadId);
+      return {
+        workspaceId,
+        parent,
+        thread,
+        activeRun,
+        restoreStatus: status,
+        space: await inspectSpace(workspaceId, parent),
+        ...(message ? { message } : {}),
+      };
+    },
+  );
+
+  const restoreUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => (
+    withThreadLifecycle(workspaceId, threadId, () => restoreUserImpl(workspaceId, parent, threadId))
+  );
+
+  const reclaimUserImpl = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
     const result = await tryReclaimDirectory(workspaceId, parent, thread);
@@ -2010,6 +2852,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
   };
 
+  const reclaimUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => (
+    withThreadLifecycle(workspaceId, threadId, () => reclaimUserImpl(workspaceId, parent, threadId))
+  );
+
   const snapshotFor = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
@@ -2021,11 +2867,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
   };
 
-  const acknowledgeSurface = async (
+  const undoIntegration = async (
     workspaceId: string,
     parent: ThreadParent,
     threadId: string,
-    input: { operationId: string; applied: string[]; failed: string[] },
+    input: { operationId: string; sourceOwner?: { ownerId: string; generation: number }; signal?: AbortSignal },
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -2033,34 +2879,51 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       ? await options.resolveIntegrationCoordinator(workspaceId)
       : null;
     if (!coordinator) throw new Error("Thread integration coordinator is unavailable");
-    const preview = await coordinator.acknowledgeSurface({
+    const result = await coordinator.undoIntegration({
       workspaceId,
       threadId,
       operationId: input.operationId,
-      applied: input.applied,
-      failed: input.failed,
+      ...(input.sourceOwner ? { sourceOwner: input.sourceOwner } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
-    if (preview) {
-      const pending = preview.paths.some((path) => (
-        path.target === "surface" && path.phase !== "surface-applied" && path.decision !== "identical"
-      ));
-      const failed = preview.unavailablePaths.length > 0 || input.failed.length > 0;
-      await options.registry.setIntegration(
-        workspaceId,
-        threadId,
-        failed ? "conflict" : pending ? "dirty" : preview.mergeReady ? "merged" : "dirty",
-        thread.diffStats,
-        undefined,
-        failed || pending ? undefined : preview.resultRevision,
-      );
-      await options.registry.setIntegrationBinding(workspaceId, threadId, threadIntegrationBindingFromPreview(preview));
-    }
-    return preview;
+    const failed = result.status === "needs-attention";
+    await options.registry.setIntegration(
+      workspaceId,
+      threadId,
+      failed ? "conflict" : "dirty",
+      thread.diffStats,
+      undefined,
+      failed ? undefined : null,
+    );
+    if (!failed) await options.registry.setIntegrationBinding(workspaceId, threadId, null);
+    return result;
+  };
+
+  const invalidateIntegrationPreviews = async (
+    workspaceId: string,
+    resourceIds?: readonly string[],
+  ): Promise<void> => {
+    const coordinator = options.resolveIntegrationCoordinator
+      ? await options.resolveIntegrationCoordinator(workspaceId)
+      : null;
+    if (!coordinator) return;
+    const invalidated = coordinator.invalidateWorkspace(workspaceId, resourceIds);
+    await Promise.all(invalidated.map((preview) => options.registry.invalidateIntegrationBinding(
+      workspaceId,
+      preview.threadId,
+      preview.bindingFingerprint,
+    )));
   };
 
   const drain = async (): Promise<void> => {
     for (;;) {
-      const pending = [...eventTails.values(), ...backgroundTasks];
+      const pending = [
+        ...eventTails.values(),
+        ...backgroundTasks,
+        ...[...preparations.values()].map((task) => task.promise),
+        ...spaceMutationTails.values(),
+        ...threadLifecycleTails.values(),
+      ];
       if (pending.length === 0) return;
       await Promise.allSettled(pending);
     }
@@ -2077,6 +2940,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const dispose = async (): Promise<void> => {
     abortController.abort();
+    for (const preparation of preparations.values()) preparation.controller.abort();
     await drain();
     bindingsBySession.clear();
     sessionByThread.clear();
@@ -2088,6 +2952,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     stallTimers.clear();
     stalledThreads.clear();
     waitingSessions.clear();
+    preparations.clear();
+    spaceMutationTails.clear();
+    spaceReservations.clear();
+    threadLifecycleTails.clear();
   };
 
   return {
@@ -2102,7 +2970,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     kill,
     merge,
     previewIntegration,
-    acknowledgeSurface,
+    undoIntegration,
+    invalidateIntegrationPreviews,
     archiveUser,
     restoreUser,
     inspectSpace,

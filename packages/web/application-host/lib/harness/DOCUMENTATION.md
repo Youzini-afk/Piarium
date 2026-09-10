@@ -63,6 +63,10 @@ reported as such; a present install is not.
 passes that workspace's setting into `registerSession`. A running PTY is not
 hot-swapped; a later session or worker generation registers again. Two
 workspaces therefore cannot inherit each other's interpreter.
+`session-registration.ts` coalesces initialization by broker actor generation.
+The Router waits for its generation; close/replacement cancels old initialization,
+and late settings cannot restore an obsolete actor. Missing settings produce an
+unavailable interpreter rather than silently selecting `auto`.
 
 ### ShellSupervisor (`shell-supervisor.ts`)
 
@@ -74,6 +78,10 @@ PTY-based persistent shell per session:
 - Data and cwd/exit sentinels continue to be consumed after a command moves to the background
 - `registerWriter` callback for `mode: 'process'` writer registration
 - Interpreter command is the discovered executable path, including spaces
+- PowerShell starts interactively under ConPTY with its own readiness/command wrappers.
+- Interrupt delivery does not mark a command exited. Shutdown waits for PTY exit
+  and writer release; a failed stop remains observable and retryable. ServiceHost
+  retains retiring supervisors after a session drop, and thread close awaits them.
 
 ### OutputStore (`output-store.ts`)
 
@@ -244,13 +252,15 @@ fixed result. Draft-derived paths are checked even when Git ignores them.
 Configured `copyIgnored` roots are stored as branch `captureScopes`; narrowed
 publication scans only those roots plus known changed paths, so ignored additions,
 updates, and deletions enter the native result and survive reclaim/materialize.
-Draft and other live editor targets are classified from Documents dirty
-publications for that workspace resource, not the focused window. Host plans
-with the same three-way rules used on disk; surface edits return through
-`surfaceEdits` and are applied by Document Registry as one unsaved undo group
-keyed by the Integration `operationId`. Missing live buffers stay off disk and
-are recorded as unavailable or surface-pending. `merge-ready` comes from a
-bound preview, not from “files changed at settlement”.
+Draft targets use the originating surface owner and its live Documents registration,
+document instance, content hash, revision and format. Agent calls resolve that owner
+from their fixed inputContext. Documents directs capture/apply/undo to the owning
+Registry; events carry metadata and authenticated requests carry body/receipts.
+The durable Integration records both disk and buffer targets before dispatch and
+does not complete before confirmation. Conditional compensation/undo preserves
+subsequent edits; reconnect or restart cannot reinterpret a surface target as disk.
+`merge-ready` comes from a bound preview; resolution submissions must consume that
+binding. Preview reads and identical projections do not create event feedback loops.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
 User archive keeps the report, transcript reference, native results, and original
@@ -261,7 +271,11 @@ Occupancy distinguishes materialized logical size, allocated blocks when the
 platform reports them, and shared content-addressed objects. Reclaim stays
 blocked for `keep_worktree`, unfinished Integration, active writers, editor
 surfaces, background commands, or unverified/uncollected content. Budget uses
-only the user-configured `harness.worktree.budget`. Thread panel routes
+only the user-configured `harness.worktree.budget`, across all parent sessions in
+the workspace, including known costs of first materialization and restore. Archive
+waits for preparation/setup and real session shutdown. Restore binds the original
+session to a new Run; a failed restore stays archived and cannot open an occupied
+path. The Documents reclaim guard remains held through deletion. Thread panel routes
 `GET /space` and archive/restore/reclaim share this Host projection.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
@@ -397,10 +411,11 @@ The harness is wired in `packages/web/application-host/index.ts`:
 - **Register**: `session.snapshot` event with `workspace.kind === 'workspace'`
   resolves that workspace's `harness.shell` from Pi settings, then
   `harnessServiceHost.registerSession()` creates a `ShellSupervisor` from the
-  Host's discovered interpreters. Settings failure falls back to `auto` plus
-  real discovery; an invalid `harness.shell` value is reported as unavailable.
-- **Drop**: `harnessServiceHost.dropSession()` disposes the shell supervisor
+  Host's discovered interpreters. Unreadable settings and an invalid
+  `harness.shell` value are reported as unavailable.
+- **Drop**: `harnessServiceHost.dropSession()` retires the shell supervisor
   and clears session-scoped output entries, observation cursors, and the
-  in-memory keeper coverage evidence.
+  in-memory keeper coverage evidence. Its commands remain visible to reclamation
+  until `closeSessionShell()` confirms shutdown and writer release.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.

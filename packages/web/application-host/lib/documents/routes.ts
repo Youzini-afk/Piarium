@@ -12,6 +12,8 @@ interface DocumentAuthority {
   acknowledgeDirtyStateBarrier(request: unknown): Promise<unknown>;
   captureAgentInputSnapshot(request: unknown): Promise<unknown>;
   releaseAgentInputSnapshot(sessionId: unknown, context: unknown): unknown;
+  readSurfaceOperation(request: unknown): Promise<unknown>;
+  completeSurfaceOperation(request: unknown): Promise<unknown>;
   inspectWorkspace(workspaceId: string): Promise<unknown>;
   watch(workspaceId: string, listener: (event: unknown) => void): { close(): void };
   registerDirtySurface(request: unknown, listener: (event: unknown) => void): { close(): void };
@@ -135,6 +137,22 @@ export const registerDocumentRoutes = (app: Express, {
     try {
       const body = readBody(req);
       return res.json(await documents.releaseAgentInputSnapshot(body.sessionId, body.context));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/surface-operation/read', requireAuth, async (req: Request, res: Response) => {
+    try {
+      return res.json(await documents.readSurfaceOperation(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/surface-operation/complete', requireAuth, async (req: Request, res: Response) => {
+    try {
+      return res.json(await documents.completeSurfaceOperation(readBody(req)));
     } catch (error) {
       return sendError(res, error);
     }

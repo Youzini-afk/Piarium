@@ -170,7 +170,9 @@ export interface HarnessServiceHost {
     resultRevision?: number,
     executionId?: string,
     extras?: {
-      surfaceParents?: import("@piarium/protocol").ThreadSurfaceParent[];
+      signal?: AbortSignal;
+      sourceOwner?: { ownerId: string; generation: number };
+      expectedBindingFingerprint?: string;
       resolutions?: import("@piarium/protocol").ThreadConflictResolution[];
     },
   ) => Promise<{
@@ -181,7 +183,6 @@ export interface HarnessServiceHost {
     diffStats?: import("@piarium/protocol").ThreadDiffStats;
     appliedPaths?: string[];
     surfaceTargetPaths?: string[];
-    surfaceEdits?: import("@piarium/protocol").ThreadSurfaceEdit[];
     preview?: import("@piarium/protocol").ThreadIntegrationPreview;
     status?: "applied" | "conflict" | "compensated" | "needs-attention";
     operationId?: string;
@@ -194,12 +195,15 @@ export interface HarnessServiceHost {
   hasActor(identity: HarnessActorIdentity): boolean;
   resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
+  /** Wait for this session's current and retiring shells to stop and release their writers. */
+  closeSessionShell(sessionId: string): Promise<void>;
   hasActiveCommandAtDirectory(directory: string): boolean;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
   /** Dirty paths this turn's fixed source still owns (D-088). */
   agentInputDraftPaths?: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => readonly string[];
+  agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
   commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
   releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
   dispose(): Promise<void>;
@@ -210,6 +214,7 @@ export interface HarnessServiceHostOptions {
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readExploreFile?: ExploreFileReader;
   agentInputDraftPaths?: HarnessServiceHost["agentInputDraftPaths"];
+  agentInputSurfaceOwner?: HarnessServiceHost["agentInputSurfaceOwner"];
   commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
   releaseAgentInputContext?: HarnessServiceHost["releaseAgentInputContext"];
   dropAgentInputContexts?: (sessionId: string) => void;
@@ -324,6 +329,25 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const releaseAgentInputContext = options.releaseAgentInputContext ?? (() => ({ released: false }));
 
   const sessions = new Map<string, SessionEntry>();
+  // A broker session can disappear before its PTY exits. Keep that writer visible
+  // to worktree reclamation until disposal has actually completed.
+  const retiringShells = new Map<ShellSupervisor, { sessionId: string; pending: Promise<void> | null }>();
+  const stopShell = (sessionId: string, supervisor: ShellSupervisor): Promise<void> => {
+    const previous = retiringShells.get(supervisor);
+    if (previous?.pending) return previous.pending;
+    const entry = previous ?? { sessionId, pending: null };
+    retiringShells.set(supervisor, entry);
+    entry.pending = Promise.resolve().then(() => supervisor.dispose()).then(() => {
+      retiringShells.delete(supervisor);
+    }).finally(() => { entry.pending = null; });
+    return entry.pending;
+  };
+  const retireShell = (sessionId: string, supervisor: ShellSupervisor | null): void => {
+    if (!supervisor) return;
+    void stopShell(sessionId, supervisor).catch((error: unknown) => {
+      console.error('[HarnessShell] Session shell shutdown failed:', sessionId, error);
+    });
+  };
   const discoveredShells = options.discoveredShells
     ?? (options.discoverShells ?? discoverShells)();
 
@@ -331,7 +355,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     const sessionId = ctx.actor.sessionId;
     const previous = sessions.get(sessionId);
     if (previous) {
-      void previous.shellSupervisor?.dispose();
+      retireShell(sessionId, previous.shellSupervisor);
       observationCursors.clearKind(sessionId, "shell");
       options.dropAgentInputContexts?.(sessionId);
       exploreQueryStore.dropSession(sessionId);
@@ -385,7 +409,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     const entry = sessions.get(sessionId);
     if (actor && (!entry || !hasActor(actor))) return;
     if (entry) {
-      void entry.shellSupervisor?.dispose();
+      retireShell(sessionId, entry.shellSupervisor);
       sessions.delete(sessionId);
     }
     outputStore.dropSession(sessionId);
@@ -401,7 +425,20 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     for (const entry of sessions.values()) {
       if (entry.shellSupervisor?.hasActiveCommandAt(directory)) return true;
     }
+    for (const supervisor of retiringShells.keys()) {
+      if (supervisor.hasActiveCommandAt(directory)) return true;
+    }
     return false;
+  };
+
+  const closeSessionShell = async (sessionId: string): Promise<void> => {
+    const supervisors = new Set<ShellSupervisor>();
+    const current = sessions.get(sessionId)?.shellSupervisor;
+    if (current) supervisors.add(current);
+    for (const [supervisor, entry] of retiringShells) {
+      if (entry.sessionId === sessionId) supervisors.add(supervisor);
+    }
+    await Promise.all([...supervisors].map((supervisor) => stopShell(sessionId, supervisor)));
   };
 
   const getShellSupervisor = (sessionId: string): ShellSupervisor | null => {
@@ -435,11 +472,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const dispose = async (): Promise<void> => {
     const disposes: Promise<void>[] = [];
-    for (const entry of sessions.values()) {
-      if (entry.shellSupervisor) disposes.push(entry.shellSupervisor.dispose());
-    }
+    const sessionIds = new Set([...sessions.keys(), ...[...retiringShells.values()].map((entry) => entry.sessionId)]);
+    await Promise.all([...sessionIds].map(closeSessionShell));
     sessions.clear();
-    await Promise.all(disposes);
     exploreQueryStore.dispose();
     outputStore.dispose();
     observationCursors.dispose();
@@ -494,11 +529,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     hasActor,
     resolveActor,
     getShellSupervisor,
+    closeSessionShell,
     hasActiveCommandAtDirectory,
     getInterpreter,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
     ...(options.readExploreFile ? { readExploreFile: options.readExploreFile } : {}),
     ...(options.agentInputDraftPaths ? { agentInputDraftPaths: options.agentInputDraftPaths } : {}),
+    ...(options.agentInputSurfaceOwner ? { agentInputSurfaceOwner: options.agentInputSurfaceOwner } : {}),
   };
 }

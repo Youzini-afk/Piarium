@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HarnessActorIdentity } from "@piarium/protocol";
 import {
   createHarnessServiceHost,
@@ -13,6 +13,61 @@ const ACTOR: HarnessActorIdentity = {
 };
 
 describe("harness service host authorization", () => {
+  it("keeps a dropped session's command observable until shell shutdown finishes", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: { hasBash: true, gitBashPath: "bash.exe" },
+    });
+    host.registerSession({ actor: ACTOR, grantedCapabilities: ["process.shell"], workspaceId: "workspace-1", workspaceRoot: "D:/workspace" });
+    const supervisor = host.getShellSupervisor(ACTOR.sessionId)!;
+    let finish!: () => void;
+    let active = true;
+    const stopped = new Promise<void>((resolve) => { finish = () => { active = false; resolve(); }; });
+    vi.spyOn(supervisor, "dispose").mockImplementation(() => stopped);
+    vi.spyOn(supervisor, "hasActiveCommandAt").mockImplementation(() => active);
+    try {
+      host.dropSession(ACTOR.sessionId);
+      expect(host.getShellSupervisor(ACTOR.sessionId)).toBeNull();
+      expect(host.hasActiveCommandAtDirectory("D:/workspace")).toBe(true);
+      let closed = false;
+      const closing = host.closeSessionShell(ACTOR.sessionId).then(() => { closed = true; });
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      finish();
+      await closing;
+      expect(supervisor.dispose).toHaveBeenCalledTimes(1);
+      expect(host.hasActiveCommandAtDirectory("D:/workspace")).toBe(false);
+    } finally {
+      finish();
+      await host.dispose();
+    }
+  });
+
+  it("preserves failed shell shutdown for observation and an explicit retry", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: { hasBash: true, gitBashPath: "bash.exe" },
+    });
+    host.registerSession({ actor: ACTOR, grantedCapabilities: ["process.shell"], workspaceId: "workspace-1", workspaceRoot: "D:/workspace" });
+    const supervisor = host.getShellSupervisor(ACTOR.sessionId)!;
+    let active = true;
+    const shutdown = vi.spyOn(supervisor, "dispose")
+      .mockRejectedValueOnce(new Error("PTY has not exited"))
+      .mockImplementation(async () => { active = false; });
+    vi.spyOn(supervisor, "hasActiveCommandAt").mockImplementation(() => active);
+    try {
+      await expect(host.closeSessionShell(ACTOR.sessionId)).rejects.toThrow("PTY has not exited");
+      expect(host.hasActiveCommandAtDirectory("D:/workspace")).toBe(true);
+      await host.closeSessionShell(ACTOR.sessionId);
+      expect(shutdown).toHaveBeenCalledTimes(2);
+      expect(host.hasActiveCommandAtDirectory("D:/workspace")).toBe(false);
+    } finally {
+      await host.dispose();
+    }
+  });
+
   it("derives structural authority from the tools frozen into the session", () => {
     expect(deriveHarnessCapabilities(["bash", "grep", "webfetch", "apply_patch"], {
       threadRuntime: false,

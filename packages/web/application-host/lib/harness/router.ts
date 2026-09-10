@@ -46,7 +46,7 @@ export interface HarnessService<M extends HarnessMethod> {
 
 export interface HarnessRouterOptions {
   respond: (sessionId: string, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
-  resolveActor: (identity: HarnessActorIdentity) => Promise<HarnessActorContext | null>;
+  resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
@@ -212,13 +212,13 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     if (!data || !identity) return;
     const actor = await options.resolveActor(identity);
     if (!actor) return;
-    if (!actor.grantedCapabilities.includes(HARNESS_METHOD_CAPABILITY["explore.query.cancel"])) return;
     if (typeof data.requestId === "string" && data.requestId) {
       const key = requestKey(actor, data.requestId);
       const pending = inflight.get(key);
       if (pending && sameRequestActor(pending.identity, actor)) abortInflight(key);
     }
     if (typeof data.queryId === "string" && data.queryId) {
+      if (!actor.grantedCapabilities.includes(HARNESS_METHOD_CAPABILITY["explore.query.cancel"])) return;
       for (const [key, pending] of inflight) {
         if (pending.queryId === data.queryId && sameRequestActor(pending.identity, actor)) {
           abortInflight(key);
@@ -282,7 +282,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       : defaultTimeoutMs;
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      const actor = await options.resolveActor(identity);
+      const actor = await options.resolveActor(identity, controller.signal);
       if (!actor) {
         await respond({
           ok: false,

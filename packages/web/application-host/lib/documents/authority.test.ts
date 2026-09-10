@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDocumentAuthority,
@@ -15,6 +15,8 @@ import {
 import type { WatchPosition, WorkspaceWatchFs } from './watch.js';
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
+
+const surfaceHash = (text: string) => `sha256-${createHash('sha256').update(text).digest('hex')}`;
 
 it('assigns a nested runtime root its own workspace identity', async () => {
   const harness = await createDocumentAuthorityHarness();
@@ -54,6 +56,198 @@ it('publishes committed document mutations without letting an observer fail the 
     expect(result.status).toBe('written');
     expect(events).toMatchObject([{ resourceId: 'observed.ts', kind: 'created', owner: { kind: 'web-route' } }]);
   } finally {
+    await harness.cleanup();
+  }
+});
+
+it('routes surface bodies only to the bound owner registration and rejects late completion after disconnect', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const events: unknown[] = [];
+  const ownerId = 'surface-owner';
+  const generation = 4;
+  const subscription = harness.authority.registerDirtySurface({
+    ownerId, generation, workspaceId: harness.identity.workspaceId,
+  }, (event) => events.push(event));
+  const target = {
+    resource: harness.resource('surface.txt'),
+    baseRevision: 'disk-revision',
+    localEditRevision: 7,
+    documentInstanceId: 'document-instance',
+    bufferHash: surfaceHash('draft\n'),
+    encoding: 'utf-8',
+    bom: false,
+    lineEnding: 'lf' as const,
+  };
+  try {
+    await harness.authority.publishDirtyBuffers({
+      ownerId, generation, workspaceId: harness.identity.workspaceId, resources: [target],
+    });
+    const publication = (await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))[0]!;
+    const pending = harness.authority.requestSurfaceOperation({
+      action: 'capture', ownerId, generation, registrationId: publication.registrationId!,
+      operationId: 'integration-surface', targets: [target], workspaceId: harness.identity.workspaceId,
+    });
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    const event = events[0] as { requestId: string; content?: unknown; targets?: unknown };
+    expect(event.content).toBeUndefined();
+    expect(event.targets).toBeUndefined();
+    const payload = await harness.authority.readSurfaceOperation({
+      ownerId, generation, requestId: event.requestId, workspaceId: harness.identity.workspaceId,
+    });
+    expect(payload.targets[0]).toMatchObject({ resource: { resourceId: 'surface.txt' } });
+    await expect(harness.authority.completeSurfaceOperation({
+      ownerId, generation, requestId: event.requestId, operationId: 'integration-surface',
+      workspaceId: harness.identity.workspaceId, resources: [{
+        resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
+        documentInstanceId: 'document-instance', beforeLocalEditRevision: 7, beforeHash: surfaceHash('draft\n'),
+      }],
+    })).resolves.toEqual({ accepted: true });
+    await expect(pending).resolves.toMatchObject([{ status: 'captured', content: 'draft\n' }]);
+
+    const disconnected = harness.authority.requestSurfaceOperation({
+      action: 'capture', ownerId, generation, registrationId: publication.registrationId!,
+      operationId: 'integration-disconnected', targets: [target], workspaceId: harness.identity.workspaceId,
+    });
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    const disconnectedEvent = events[1] as { requestId: string };
+    subscription.close();
+    await expect(disconnected).rejects.toThrow(/disconnected/u);
+    await expect(harness.authority.completeSurfaceOperation({
+      ownerId, generation, requestId: disconnectedEvent.requestId, operationId: 'integration-disconnected',
+      workspaceId: harness.identity.workspaceId, resources: [{
+        resource: harness.resource('surface.txt'), status: 'captured', content: 'draft\n',
+      }],
+    })).rejects.toThrow(/stale or unavailable/u);
+  } finally {
+    subscription.close();
+    await harness.cleanup();
+  }
+});
+
+it('advances the matching fixed input snapshot after a confirmed surface apply and invalidates older snapshots', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const events: Array<{ requestId?: string }> = [];
+  const ownerId = 'surface-owner';
+  const generation = 5;
+  const resource = harness.resource('surface-read.txt');
+  const subscription = harness.authority.registerDirtySurface({ ownerId, generation, workspaceId: harness.identity.workspaceId }, (event) => {
+    events.push(event as { requestId?: string });
+  });
+  const publish = async (localEditRevision: number, content: string) => {
+    const target = {
+      resource, baseRevision: 'disk-base', localEditRevision,
+      documentInstanceId: 'document-instance', bufferHash: surfaceHash(content),
+      encoding: 'utf-8', bom: false, lineEnding: 'lf' as const,
+    };
+    await harness.authority.publishDirtyBuffers({ ownerId, generation, workspaceId: harness.identity.workspaceId, resources: [target] });
+    return target;
+  };
+  try {
+    const oldTarget = await publish(6, 'older\n');
+    const oldContext = await harness.authority.captureAgentInputSnapshot({
+      ownerId, generation, workspaceId: harness.identity.workspaceId, sessionId: 'old-session',
+      resources: [{ ...oldTarget, content: 'older\n' }],
+    });
+    harness.authority.commitAgentInputSnapshot('old-session', oldContext);
+    const target = await publish(7, 'current\n');
+    const currentContext = await harness.authority.captureAgentInputSnapshot({
+      ownerId, generation, workspaceId: harness.identity.workspaceId, sessionId: 'current-session',
+      resources: [{ ...target, content: 'current\n' }],
+    });
+    harness.authority.commitAgentInputSnapshot('current-session', currentContext);
+    const publication = (await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))[0]!;
+    const pending = harness.authority.requestSurfaceOperation({
+      action: 'apply', ownerId, generation, registrationId: publication.registrationId!, operationId: 'surface-apply',
+      workspaceId: harness.identity.workspaceId, targets: [{ ...target, newText: 'integrated\n' }],
+    });
+    await vi.waitFor(() => expect(events.some((event) => event.requestId)).toBe(true));
+    const requestId = events.find((event) => event.requestId)!.requestId!;
+    await harness.authority.completeSurfaceOperation({
+      ownerId, generation, requestId, operationId: 'surface-apply', workspaceId: harness.identity.workspaceId,
+      resources: [{
+        resource, status: 'applied', documentInstanceId: 'document-instance',
+        beforeLocalEditRevision: 7, beforeHash: surfaceHash('current\n'),
+        afterLocalEditRevision: 8, afterHash: surfaceHash('integrated\n'),
+      }],
+    });
+    await pending;
+    expect(harness.authority.readAgentInputSnapshot('current-session', currentContext, 'surface-read.txt'))
+      .toMatchObject({ status: 'ready', content: 'integrated\n', revision: expect.stringContaining(':8') });
+    expect(harness.authority.readAgentInputSnapshot('old-session', oldContext, 'surface-read.txt'))
+      .toMatchObject({ status: 'unavailable' });
+
+    await harness.authority.publishDirtyBuffers({
+      ownerId, generation, workspaceId: harness.identity.workspaceId, resources: [],
+    });
+    const undo = harness.authority.requestSurfaceOperation({
+      action: 'undo', ownerId, generation, registrationId: publication.registrationId!, operationId: 'surface-undo',
+      workspaceId: harness.identity.workspaceId,
+      targets: [{ ...target, expectedAppliedRevision: 8, expectedAppliedHash: surfaceHash('integrated\n') }],
+    });
+    await vi.waitFor(() => expect(events.filter((event) => event.requestId)).toHaveLength(2));
+    const undoRequestId = events.filter((event) => event.requestId).at(-1)!.requestId!;
+    await harness.authority.completeSurfaceOperation({
+      ownerId, generation, requestId: undoRequestId, operationId: 'surface-undo', workspaceId: harness.identity.workspaceId,
+      resources: [{
+        resource, status: 'undone', documentInstanceId: 'document-instance', content: 'current\n',
+        afterLocalEditRevision: 9, afterHash: surfaceHash('current\n'),
+      }],
+    });
+    await undo;
+    expect(harness.authority.readAgentInputSnapshot('current-session', currentContext, 'surface-read.txt'))
+      .toMatchObject({ status: 'ready', content: 'current\n', revision: expect.stringContaining(':9') });
+  } finally {
+    subscription.close();
+    await harness.cleanup();
+  }
+});
+
+it('invalidates a fixed input snapshot when a dispatched surface write is cancelled without a receipt', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const events: Array<{ requestId?: string }> = [];
+  const ownerId = 'surface-owner';
+  const generation = 6;
+  const resource = harness.resource('surface-cancelled.txt');
+  const subscription = harness.authority.registerDirtySurface({ ownerId, generation, workspaceId: harness.identity.workspaceId }, (event) => {
+    events.push(event as { requestId?: string });
+  });
+  const target = {
+    resource,
+    baseRevision: 'disk-base',
+    localEditRevision: 3,
+    documentInstanceId: 'document-instance',
+    bufferHash: surfaceHash('draft\n'),
+    encoding: 'utf-8',
+    bom: false,
+    lineEnding: 'lf' as const,
+  };
+  try {
+    await harness.authority.publishDirtyBuffers({
+      ownerId, generation, workspaceId: harness.identity.workspaceId, resources: [target],
+    });
+    const context = await harness.authority.captureAgentInputSnapshot({
+      ownerId,
+      generation,
+      workspaceId: harness.identity.workspaceId,
+      sessionId: 'surface-cancelled-session',
+      resources: [{ ...target, content: 'draft\n' }],
+    });
+    harness.authority.commitAgentInputSnapshot('surface-cancelled-session', context);
+    const publication = (await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId))[0]!;
+    const controller = new AbortController();
+    const pending = harness.authority.requestSurfaceOperation({
+      action: 'apply', ownerId, generation, registrationId: publication.registrationId!,
+      operationId: 'surface-cancelled', workspaceId: harness.identity.workspaceId,
+      targets: [{ ...target, newText: 'possibly-applied\n' }],
+    }, { signal: controller.signal });
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    controller.abort(new Error('caller disconnected'));
+    await expect(pending).rejects.toThrow(/caller disconnected/u);
+    expect(harness.authority.readAgentInputSnapshot(
+      'surface-cancelled-session', context, 'surface-cancelled.txt',
+    )).toMatchObject({ status: 'unavailable' });
+  } finally {
+    subscription.close();
     await harness.cleanup();
   }
 });

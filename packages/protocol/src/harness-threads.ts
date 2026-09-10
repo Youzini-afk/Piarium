@@ -57,6 +57,14 @@ export interface ThreadWorktree {
   resultPath?: string;
   /** Whether the physical directory is currently materialized on disk. */
   materialized?: boolean;
+  /**
+   * Durable progress through directory reconstruction and environment setup.
+   * `materializing` may have a partial managed directory on disk; it is never
+   * safe to open until the state advances to `setup` or `ready`.
+   */
+  preparationStage?: "materialize" | "materializing" | "setup" | "ready";
+  /** Fingerprint of a failed partial materialization used to detect later user changes before retry cleanup. */
+  materializationFingerprint?: string;
   /** Physical disk footprint in bytes, if measured. */
   diskBytes?: number;
   /** Files changed in the worktree if inspected or recorded. */
@@ -276,7 +284,10 @@ export interface ThreadReadResult {
 export type IntegrationApplyPhase =
   | "pending"
   | "disk-applied"
+  | "surface-intent"
+  | "surface-dispatched"
   | "surface-applied"
+  | "surface-undone"
   | "conflict"
   | "unavailable"
   | "compensated"
@@ -290,13 +301,6 @@ export type IntegrationPathDecision =
   | "conflict"
   | "unavailable";
 
-export interface ThreadSurfaceParent {
-  resourceId: string;
-  localEditRevision: number;
-  baseRevision: string | null;
-  content: string;
-}
-
 export interface ThreadConflictResolution {
   path: string;
   choice: "parent" | "child" | "base" | "text";
@@ -309,6 +313,15 @@ export interface IntegrationPathBinding {
   target: "disk" | "surface" | "unavailable";
   revision: string;
   localEditRevision?: number;
+  baseRevision?: string | null;
+  ownerId?: string;
+  ownerGeneration?: number;
+  ownerRegistrationId?: string;
+  documentInstanceId?: string;
+  bufferHash?: string;
+  encoding?: string;
+  bom?: boolean;
+  lineEnding?: "lf" | "crlf" | "cr";
 }
 
 export interface IntegrationPathProjection {
@@ -363,19 +376,12 @@ export interface ThreadIntegrationPreview {
   invalidReason?: string;
 }
 
-export interface ThreadSurfaceEdit {
-  resourceId: string;
-  expectedLocalEditRevision: number;
-  expectedBaseRevision: string | null;
-  newText: string;
-}
-
 export interface ThreadMergeParams {
   threadId: string;
   /** Omit to integrate the latest published result. */
   resultRevision?: number;
-  /** Live editor buffers identified by workspace resource, not the focused window. */
-  surfaceParents?: ThreadSurfaceParent[];
+  /** Required when submitting conflict resolutions from a prior preview. */
+  expectedBindingFingerprint?: string;
   resolutions?: ThreadConflictResolution[];
 }
 
@@ -385,7 +391,6 @@ export interface ThreadMergeResult {
   conflicts: string[];
   /** Draft paths that must be applied through Document Registry, not disk. */
   surfaceTargetPaths?: string[];
-  surfaceEdits?: ThreadSurfaceEdit[];
   preview?: ThreadIntegrationPreview;
   status?: "applied" | "conflict" | "compensated" | "needs-attention";
   appliedPaths?: string[];

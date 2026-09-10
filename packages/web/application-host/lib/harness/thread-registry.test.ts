@@ -81,6 +81,7 @@ describe("thread registry", () => {
       base: "base-commit",
       branch: "piarium/thread-1",
       resultCommit: "result-commit",
+      preparationStage: "ready",
     });
     await registry.dispose();
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
@@ -89,6 +90,7 @@ describe("thread registry", () => {
       base: "base-commit",
       branch: "piarium/thread-1",
       resultCommit: "result-commit",
+      preparationStage: "ready",
     });
   });
 
@@ -135,6 +137,29 @@ describe("thread registry", () => {
     await registry.setIntegration(WORKSPACE, thread.id, "conflict", { files: 2, insertions: 3, deletions: 1 });
     const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
     expect(current).toMatchObject({ lifecycle: "active", attention: "stalled", integration: "conflict" });
+  });
+
+  it("updates integration bindings idempotently and invalidates only the expected active preview", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.setIntegration(WORKSPACE, thread.id, "merge-ready");
+    const binding = {
+      operationId: "preview-1", resultRevision: 1, bindingFingerprint: "a".repeat(64),
+      valid: true, mergeReady: true, conflictPaths: [], surfaceTargetPaths: [], unavailablePaths: [],
+    };
+    const first = await registry.setIntegrationBinding(WORKSPACE, thread.id, binding);
+    const firstSeq = first!.eventSeq;
+    const repeated = await registry.setIntegrationBinding(WORKSPACE, thread.id, binding);
+    expect(repeated?.eventSeq).toBe(firstSeq);
+    const repeatedStatus = await registry.setIntegration(WORKSPACE, thread.id, "merge-ready");
+    expect(repeatedStatus?.eventSeq).toBe(firstSeq);
+    const wrong = await registry.invalidateIntegrationBinding(WORKSPACE, thread.id, "b".repeat(64));
+    expect(wrong?.eventSeq).toBe(firstSeq);
+    const invalid = await registry.invalidateIntegrationBinding(WORKSPACE, thread.id, binding.bindingFingerprint);
+    expect(invalid).toMatchObject({ integration: "dirty", integrationBinding: { valid: false, mergeReady: false } });
+    expect(invalid!.eventSeq).toBe(firstSeq + 1);
+    await registry.setIntegration(WORKSPACE, thread.id, "merged");
+    await registry.setIntegrationBinding(WORKSPACE, thread.id, binding);
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.integrationBinding).toBeUndefined();
   });
 
   it("completes a run idempotently and retains merge state as a Thread concern", async () => {
@@ -374,6 +399,32 @@ describe("thread registry", () => {
 
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.draftBaselineId).toBeNull();
+    await registry.setAttention(WORKSPACE, thread.id, "stalled");
+    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+  });
+
+  it("upgrades schema v7 worktrees with an explicit preparation stage", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "D:/worktrees/v7-thread",
+      base: "base",
+      materialized: false,
+    });
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const v7 = JSON.parse(await readFile(path, "utf8")) as {
+      schemaVersion: number;
+      threads: Array<{ worktree: Record<string, unknown> | null }>;
+    };
+    v7.schemaVersion = 7;
+    delete v7.threads[0]!.worktree?.preparationStage;
+    await writeFile(path, JSON.stringify(v7), "utf8");
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toMatchObject({
+      materialized: false,
+      preparationStage: "materialize",
+    });
     await registry.setAttention(WORKSPACE, thread.id, "stalled");
     expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
   });

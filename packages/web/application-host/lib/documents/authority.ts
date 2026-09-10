@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   parseAgentInputContext,
   type AgentInputContext,
@@ -172,6 +172,11 @@ interface DirtySurfaceSubscription {
 
 export interface DirtyBufferResource {
   baseRevision: string | null;
+  bufferHash?: string;
+  documentInstanceId?: string;
+  encoding?: string;
+  bom?: boolean;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
   localEditRevision: number;
   resource: DocumentResource;
 }
@@ -188,9 +193,57 @@ interface DirtyBufferRecord {
 export interface DirtyBufferPublication {
   generation: number;
   ownerId: string;
+  /** Present only while the matching owner/generation watch registration is live. */
+  registrationId?: string;
   resources: DirtyBufferResource[];
   updatedAt: string;
   workspaceId: string;
+}
+
+export interface DocumentSurfaceBinding {
+  baseRevision: string | null;
+  bufferHash: string;
+  documentInstanceId: string;
+  encoding: string;
+  bom: boolean;
+  lineEnding: 'lf' | 'crlf' | 'cr';
+  localEditRevision: number;
+  resource: DocumentResource;
+}
+
+export interface DocumentSurfaceOperationTarget extends DocumentSurfaceBinding {
+  newText?: string;
+  expectedAppliedRevision?: number;
+  expectedAppliedHash?: string;
+}
+
+export interface DocumentSurfaceOperationRequest {
+  action: 'capture' | 'apply' | 'undo';
+  generation: number;
+  operationId: string;
+  ownerId: string;
+  registrationId: string;
+  targets: DocumentSurfaceOperationTarget[];
+  workspaceId: string;
+}
+
+export interface DocumentSurfaceOperationResult {
+  resource: DocumentResource;
+  status: 'captured' | 'applied' | 'undone' | 'failed';
+  documentInstanceId?: string;
+  beforeLocalEditRevision?: number;
+  beforeHash?: string;
+  afterLocalEditRevision?: number;
+  afterHash?: string;
+  content?: string;
+  message?: string;
+}
+
+interface PendingDocumentSurfaceOperation extends DocumentSurfaceOperationRequest {
+  requestId: string;
+  resolve: (results: DocumentSurfaceOperationResult[]) => void;
+  reject: (error: unknown) => void;
+  cleanup: () => void;
 }
 
 interface DirtyBarrierWaiter {
@@ -284,6 +337,7 @@ export interface DocumentAuthorityOptions {
   isAllowedRoot?: (root: string) => Promise<boolean>;
   onWorkspaceResolved?: (resolved: ResolveWorkspaceResult) => void;
   onMutation?: (event: DocumentMutationObservation) => void | Promise<void>;
+  onIntegrationParentChanged?: (workspaceId: string, resourceIds?: readonly string[]) => void;
   maxReadBytes?: number;
   overflowLimit?: number;
   dirtyBarrierTimeoutMs?: number;
@@ -340,6 +394,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     isAllowedRoot = async () => true,
     onWorkspaceResolved = () => undefined,
     onMutation = () => undefined,
+    onIntegrationParentChanged = () => undefined,
     maxReadBytes = Number.POSITIVE_INFINITY,
     overflowLimit,
     dirtyBarrierTimeoutMs = 15_000,
@@ -364,6 +419,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dirtyBuffersByOwner = new Map<string, DirtyBufferRecord>();
   const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
   const dirtyBarriers = new Map<string, DirtyBarrier>();
+  const pendingSurfaceOperations = new Map<string, PendingDocumentSurfaceOperation>();
   const surfaceSnapshots = createSurfaceSnapshotStore({ caseSensitive: platform !== 'win32' });
   let dirtyPublicationRevision = 0;
   let disposed = false;
@@ -381,6 +437,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     // A written path can no longer be answered from a draft captured before the
     // write; this runs before the observer so a reader cannot race it (D-088).
     surfaceSnapshots.observeWrite(event.workspaceId, event.resourceId);
+    onIntegrationParentChanged(event.workspaceId, [event.resourceId]);
     try {
       void Promise.resolve(onMutation({ ...event, owner: { ...event.owner } })).catch((error: unknown) => {
         console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
@@ -955,10 +1012,49 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   };
 
   const dirtyBufferKey = (ownerId: string, workspaceId: string): string => `${ownerId}\0${workspaceId}`;
+  const dirtyResourceIdentity = (resource: DirtyBufferResource): string => JSON.stringify({
+    resourceId: resource.resource.resourceId,
+    baseRevision: resource.baseRevision,
+    localEditRevision: resource.localEditRevision,
+    documentInstanceId: resource.documentInstanceId ?? null,
+    bufferHash: resource.bufferHash ?? null,
+    encoding: resource.encoding ?? null,
+    bom: resource.bom ?? null,
+    lineEnding: resource.lineEnding ?? null,
+  });
+  const sameDirtyResources = (left: readonly DirtyBufferResource[], right: readonly DirtyBufferResource[]): boolean => {
+    const a = left.map(dirtyResourceIdentity).sort();
+    const b = right.map(dirtyResourceIdentity).sort();
+    return a.length === b.length && a.every((entry, index) => entry === b[index]);
+  };
   const publicDirtyBufferRecord = (record: DirtyBufferRecord): DirtyBufferPublication => {
     const result = structuredClone(record);
     delete (result as Partial<DirtyBufferRecord>).publicationRevision;
-    return result;
+    const surface = dirtySurfaces.get(dirtyBufferKey(record.ownerId, record.workspaceId));
+    return {
+      ...result,
+      ...(surface?.generation === record.generation ? { registrationId: surface.registrationId } : {}),
+    };
+  };
+
+  const invalidateUncertainSurfaceOperation = (operation: PendingDocumentSurfaceOperation): void => {
+    if (operation.action === 'capture') return;
+    surfaceSnapshots.invalidateOwnerEdit({
+      ownerId: operation.ownerId,
+      ownerGeneration: operation.generation,
+      workspaceId: operation.workspaceId,
+      resourceIds: operation.targets.map((target) => target.resource.resourceId),
+    });
+  };
+
+  const rejectSurfaceOperationsForRegistration = (registrationId: string, reason: string): void => {
+    for (const [requestId, operation] of pendingSurfaceOperations) {
+      if (operation.registrationId !== registrationId) continue;
+      pendingSurfaceOperations.delete(requestId);
+      operation.cleanup();
+      invalidateUncertainSurfaceOperation(operation);
+      operation.reject(new DocumentAuthorityError(reason, { code: 'stale-completion', statusCode: 409 }));
+    }
   };
 
   const releaseDirtyBarrier = (barrier: DirtyBarrier, error?: unknown): void => {
@@ -1034,8 +1130,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       throw new DocumentAuthorityError('Dirty surface registration is malformed', { code: 'failed', statusCode: 400 });
     }
     const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const previous = dirtySurfaces.get(key);
+    if (previous) rejectSurfaceOperationsForRegistration(previous.registrationId, 'Document surface registration was replaced');
     const record: DirtySurfaceRecord = { ...request, key, listener, registrationId: randomUUID() };
     dirtySurfaces.set(key, record);
+    onIntegrationParentChanged(request.workspaceId);
     for (const barrier of dirtyBarriers.values()) {
       if (barrier.workspaceId !== request.workspaceId || barrier.released) continue;
       barrier.surfaceKeys.add(key);
@@ -1060,6 +1159,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (dirtySurfaces.get(key)?.registrationId !== record.registrationId) return;
         dirtySurfaces.delete(key);
         dirtyBuffersByOwner.delete(key);
+        onIntegrationParentChanged(request.workspaceId);
+        rejectSurfaceOperationsForRegistration(record.registrationId, 'Document surface disconnected during an operation');
         surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
         for (const barrier of dirtyBarriers.values()) {
           if (!barrier.surfaceKeys.has(key) || barrier.released) continue;
@@ -1177,13 +1278,35 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || !((entry as Record<string, unknown>).resource as Record<string, unknown>).resourceId
         || ((entry as Record<string, unknown>).baseRevision !== null && typeof (entry as Record<string, unknown>).baseRevision !== 'string')
         || !Number.isSafeInteger((entry as Record<string, unknown>).localEditRevision)
-        || ((entry as Record<string, unknown>).localEditRevision as number) < 0) {
+        || ((entry as Record<string, unknown>).localEditRevision as number) < 0
+        || ((entry as Record<string, unknown>).documentInstanceId !== undefined
+          && (typeof (entry as Record<string, unknown>).documentInstanceId !== 'string'
+            || !(entry as Record<string, unknown>).documentInstanceId))
+        || ((entry as Record<string, unknown>).bufferHash !== undefined
+          && (typeof (entry as Record<string, unknown>).bufferHash !== 'string'
+            || !/^sha256-[0-9a-f]{64}$/u.test((entry as Record<string, unknown>).bufferHash as string)))
+        || ((entry as Record<string, unknown>).encoding !== undefined
+          && typeof (entry as Record<string, unknown>).encoding !== 'string')
+        || ((entry as Record<string, unknown>).bom !== undefined
+          && typeof (entry as Record<string, unknown>).bom !== 'boolean')
+        || ((entry as Record<string, unknown>).lineEnding !== undefined
+          && !['lf', 'crlf', 'cr'].includes(String((entry as Record<string, unknown>).lineEnding)))) {
         throw new DocumentAuthorityError('Dirty buffer resource is malformed', { code: 'failed', statusCode: 400 });
       }
       return {
         baseRevision: (entry as Record<string, unknown>).baseRevision as string | null,
         localEditRevision: (entry as Record<string, unknown>).localEditRevision as number,
         resource: { ...((entry as Record<string, unknown>).resource as DocumentResource) },
+        ...(typeof (entry as Record<string, unknown>).documentInstanceId === 'string'
+          ? { documentInstanceId: (entry as Record<string, unknown>).documentInstanceId as string } : {}),
+        ...(typeof (entry as Record<string, unknown>).bufferHash === 'string'
+          ? { bufferHash: (entry as Record<string, unknown>).bufferHash as string } : {}),
+        ...(typeof (entry as Record<string, unknown>).encoding === 'string'
+          ? { encoding: (entry as Record<string, unknown>).encoding as string } : {}),
+        ...(typeof (entry as Record<string, unknown>).bom === 'boolean'
+          ? { bom: (entry as Record<string, unknown>).bom as boolean } : {}),
+        ...(typeof (entry as Record<string, unknown>).lineEnding === 'string'
+          ? { lineEnding: (entry as Record<string, unknown>).lineEnding as 'lf' | 'crlf' | 'cr' } : {}),
       };
     });
     const record: DirtyBufferRecord = {
@@ -1195,6 +1318,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       workspaceId: request.workspaceId,
     };
     dirtyBuffersByOwner.set(key, record);
+    if (!existing || existing.generation !== request.generation || !sameDirtyResources(existing.resources, resources)) {
+      const previousPaths = new Set(existing?.resources.map((resource) => resource.resource.resourceId) ?? []);
+      const currentPaths = resources.map((resource) => resource.resource.resourceId);
+      onIntegrationParentChanged(request.workspaceId, [...new Set([...previousPaths, ...currentPaths])]);
+    }
     return publicDirtyBufferRecord(record);
   };
 
@@ -1213,6 +1341,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       });
     }
     const cleared = dirtyBuffersByOwner.delete(key);
+    if (cleared) {
+      onIntegrationParentChanged(request.workspaceId, existing?.resources.map((resource) => resource.resource.resourceId));
+    }
     surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
     return { cleared };
   };
@@ -1223,6 +1354,254 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       .filter((record) => record.workspaceId === workspaceId)
       .map(publicDirtyBufferRecord)
       .sort((left, right) => left.ownerId.localeCompare(right.ownerId));
+  };
+
+  const assertSurfaceOperationCaller = (request: Record<string, unknown>): {
+    generation: number;
+    ownerId: string;
+    requestId: string;
+    workspaceId: string;
+    pending: PendingDocumentSurfaceOperation;
+  } => {
+    const ownerId = typeof request.ownerId === 'string' ? request.ownerId : '';
+    const workspaceId = typeof request.workspaceId === 'string' ? request.workspaceId : '';
+    const requestId = typeof request.requestId === 'string' ? request.requestId : '';
+    const generation = Number(request.generation);
+    if (!ownerId || !workspaceId || !requestId || !Number.isSafeInteger(generation) || generation < 0) {
+      throw new DocumentAuthorityError('Document surface operation identity is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const pending = pendingSurfaceOperations.get(requestId);
+    const surface = dirtySurfaces.get(dirtyBufferKey(ownerId, workspaceId));
+    if (!pending || pending.ownerId !== ownerId || pending.workspaceId !== workspaceId
+      || pending.generation !== generation || !surface
+      || surface.registrationId !== pending.registrationId || surface.generation !== generation) {
+      throw new DocumentAuthorityError('Document surface operation is stale or unavailable', {
+        code: 'stale-completion',
+        statusCode: 409,
+      });
+    }
+    return { generation, ownerId, requestId, workspaceId, pending };
+  };
+
+  const requestSurfaceOperation = async (
+    request: DocumentSurfaceOperationRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<DocumentSurfaceOperationResult[]> => {
+    if (!request || !['capture', 'apply', 'undo'].includes(request.action)
+      || typeof request.operationId !== 'string' || !request.operationId
+      || typeof request.ownerId !== 'string' || !request.ownerId
+      || typeof request.workspaceId !== 'string' || !request.workspaceId
+      || typeof request.registrationId !== 'string' || !request.registrationId
+      || !Number.isSafeInteger(request.generation) || request.generation < 0
+      || !Array.isArray(request.targets) || request.targets.length === 0) {
+      throw new DocumentAuthorityError('Document surface operation is malformed', { code: 'failed', statusCode: 400 });
+    }
+    await loadWorkspace(request.workspaceId);
+    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
+    const surface = dirtySurfaces.get(key);
+    const publication = dirtyBuffersByOwner.get(key);
+    if (!surface || surface.registrationId !== request.registrationId || surface.generation !== request.generation
+      || !publication || publication.generation !== request.generation) {
+      throw new DocumentAuthorityError('Document surface owner is no longer connected', {
+        code: 'stale-completion', statusCode: 409,
+      });
+    }
+    const published = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
+    const seen = new Set<string>();
+    for (const target of request.targets) {
+      const resourceId = target?.resource?.resourceId;
+      const current = typeof resourceId === 'string' ? published.get(resourceId) : undefined;
+      if ((request.action === 'apply' && typeof target.newText !== 'string')
+        || (request.action === 'undo' && (!Number.isSafeInteger(target.expectedAppliedRevision)
+          || target.expectedAppliedRevision! < 0
+          || typeof target.expectedAppliedHash !== 'string'
+          || !/^sha256-[0-9a-f]{64}$/u.test(target.expectedAppliedHash)))) {
+        throw new DocumentAuthorityError('Document surface operation target is malformed', { code: 'failed', statusCode: 400 });
+      }
+      const expectedLocalEditRevision = request.action === 'undo'
+        ? target.expectedAppliedRevision
+        : target.localEditRevision;
+      const expectedBufferHash = request.action === 'undo'
+        ? target.expectedAppliedHash
+        : target.bufferHash;
+      const currentMismatch = current && (
+        current.baseRevision !== target.baseRevision
+        || current.localEditRevision !== expectedLocalEditRevision
+        || current.documentInstanceId !== target.documentInstanceId
+        || current.bufferHash !== expectedBufferHash
+        || current.encoding !== target.encoding || current.bom !== target.bom
+        || current.lineEnding !== target.lineEnding
+      );
+      if (!resourceId || seen.has(resourceId) || target.resource.workspaceId !== request.workspaceId
+        || (request.action !== 'undo' && !current) || currentMismatch) {
+        throw new DocumentAuthorityError('Document surface binding changed before the operation was dispatched', {
+          code: 'stale-completion', statusCode: 409,
+        });
+      }
+      seen.add(resourceId);
+      await resolveResourcePath(target.resource, true);
+    }
+    if (dirtySurfaces.get(key) !== surface || dirtyBuffersByOwner.get(key) !== publication
+      || surface.registrationId !== request.registrationId || surface.generation !== request.generation) {
+      throw new DocumentAuthorityError('Document surface binding changed before dispatch', {
+        code: 'stale-completion', statusCode: 409,
+      });
+    }
+    options.signal?.throwIfAborted();
+    const requestId = randomUUID();
+    return new Promise<DocumentSurfaceOperationResult[]>((resolve, reject) => {
+      const cleanup = () => options.signal?.removeEventListener('abort', abort);
+      const abort = () => {
+        const pending = pendingSurfaceOperations.get(requestId);
+        if (!pending) return;
+        pendingSurfaceOperations.delete(requestId);
+        cleanup();
+        invalidateUncertainSurfaceOperation(pending);
+        reject(options.signal?.reason ?? new Error('Document surface operation was cancelled'));
+      };
+      const pending: PendingDocumentSurfaceOperation = {
+        ...structuredClone(request),
+        requestId,
+        resolve: (results) => { cleanup(); resolve(results); },
+        reject: (error) => { cleanup(); reject(error); },
+        cleanup,
+      };
+      pendingSurfaceOperations.set(requestId, pending);
+      options.signal?.addEventListener('abort', abort, { once: true });
+      try {
+        surface.listener({
+          action: request.action,
+          kind: 'surface-operation',
+          operationId: request.operationId,
+          requestId,
+          workspaceId: request.workspaceId,
+        });
+      } catch (error) {
+        pendingSurfaceOperations.delete(requestId);
+        cleanup();
+        invalidateUncertainSurfaceOperation(pending);
+        reject(error);
+      }
+    });
+  };
+
+  const readSurfaceOperation = async (value: unknown): Promise<Omit<DocumentSurfaceOperationRequest, 'generation' | 'ownerId' | 'registrationId'> & { requestId: string }> => {
+    const request = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const { pending } = assertSurfaceOperationCaller(request);
+    return {
+      action: pending.action,
+      operationId: pending.operationId,
+      requestId: pending.requestId,
+      targets: structuredClone(pending.targets),
+      workspaceId: pending.workspaceId,
+    };
+  };
+
+  const completeSurfaceOperation = async (value: unknown): Promise<{ accepted: boolean }> => {
+    const request = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const { pending, requestId } = assertSurfaceOperationCaller(request);
+    const completionError = (message: string, options: { code: DocumentAuthorityError['code']; statusCode: number }) => {
+      invalidateUncertainSurfaceOperation(pending);
+      return new DocumentAuthorityError(message, options);
+    };
+    if (request.operationId !== pending.operationId || !Array.isArray(request.resources)) {
+      throw completionError('Document surface operation completion is malformed', { code: 'failed', statusCode: 400 });
+    }
+    const targets = new Set(pending.targets.map((target) => target.resource.resourceId));
+    const targetByPath = new Map(pending.targets.map((target) => [target.resource.resourceId, target]));
+    const results: DocumentSurfaceOperationResult[] = request.resources.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw completionError('Document surface operation result is malformed', { code: 'failed', statusCode: 400 });
+      }
+      const result = entry as Record<string, unknown>;
+      const allowed = new Set([
+        'resource', 'status', 'documentInstanceId', 'beforeLocalEditRevision', 'beforeHash',
+        'afterLocalEditRevision', 'afterHash', 'content', 'message',
+      ]);
+      const resource = result.resource && typeof result.resource === 'object' && !Array.isArray(result.resource)
+        ? result.resource as Record<string, unknown> : {};
+      const status = String(result.status);
+      const expectedStatuses = pending.action === 'capture'
+        ? new Set(['captured', 'failed'])
+        : pending.action === 'apply' ? new Set(['applied', 'failed']) : new Set(['undone', 'failed']);
+      const validHash = (field: unknown) => field === undefined
+        || (typeof field === 'string' && /^sha256-[0-9a-f]{64}$/u.test(field));
+      const validRevision = (field: unknown) => field === undefined
+        || (Number.isSafeInteger(field) && Number(field) >= 0);
+      const shapeValid = Object.keys(result).every((key) => allowed.has(key))
+        && (result.documentInstanceId === undefined || (typeof result.documentInstanceId === 'string' && result.documentInstanceId.length > 0))
+        && validRevision(result.beforeLocalEditRevision) && validRevision(result.afterLocalEditRevision)
+        && validHash(result.beforeHash) && validHash(result.afterHash)
+        && (result.content === undefined || typeof result.content === 'string')
+        && (result.message === undefined || typeof result.message === 'string')
+        && (status !== 'captured' || (typeof result.content === 'string' && typeof result.documentInstanceId === 'string'
+          && result.beforeLocalEditRevision !== undefined && result.beforeHash !== undefined))
+        && (status !== 'applied' || (typeof result.documentInstanceId === 'string'
+          && result.beforeLocalEditRevision !== undefined && result.beforeHash !== undefined
+          && result.afterLocalEditRevision !== undefined && result.afterHash !== undefined))
+        && (status !== 'undone' || (typeof result.documentInstanceId === 'string'
+          && result.afterLocalEditRevision !== undefined && result.afterHash !== undefined
+          && typeof result.content === 'string'));
+      if (resource.workspaceId !== pending.workspaceId || typeof resource.resourceId !== 'string'
+        || !targets.delete(resource.resourceId)
+        || !expectedStatuses.has(status) || !shapeValid) {
+        throw completionError('Document surface operation result is malformed', { code: 'failed', statusCode: 400 });
+      }
+      return structuredClone(entry) as DocumentSurfaceOperationResult;
+    });
+    if (targets.size > 0) {
+      throw completionError('Document surface operation result is incomplete', { code: 'failed', statusCode: 400 });
+    }
+    for (const result of results) {
+      if (result.status !== 'applied' && result.status !== 'undone') continue;
+      const target = targetByPath.get(result.resource.resourceId)!;
+      const content = result.status === 'applied' ? target.newText : result.content;
+      if (typeof content !== 'string' || result.documentInstanceId !== target.documentInstanceId
+        || result.afterLocalEditRevision === undefined || !result.afterHash
+        || `sha256-${createHash('sha256').update(content, 'utf8').digest('hex')}` !== result.afterHash) {
+        throw completionError('Document surface operation completion does not match its target', {
+          code: 'stale-completion', statusCode: 409,
+        });
+      }
+      const serialized = target.lineEnding === 'crlf'
+        ? content.replace(/\n/gu, '\r\n')
+        : target.lineEnding === 'cr' ? content.replace(/\n/gu, '\r') : content;
+      surfaceSnapshots.applyOwnerEdit({
+        ownerId: pending.ownerId,
+        ownerGeneration: pending.generation,
+        workspaceId: pending.workspaceId,
+        resourceId: result.resource.resourceId,
+        expectedBaseRevision: target.baseRevision,
+        expectedLocalEditRevision: result.status === 'undone'
+          ? target.expectedAppliedRevision!
+          : target.localEditRevision,
+        nextLocalEditRevision: result.afterLocalEditRevision,
+        content: serialized,
+        encoding: target.encoding,
+        bom: target.bom,
+      });
+    }
+    for (const result of results) {
+      if (result.status !== 'failed') continue;
+      const target = targetByPath.get(result.resource.resourceId)!;
+      const expectedRevision = pending.action === 'undo' ? target.expectedAppliedRevision : target.localEditRevision;
+      const expectedHash = pending.action === 'undo' ? target.expectedAppliedHash : target.bufferHash;
+      const provenUnchanged = result.documentInstanceId === target.documentInstanceId
+        && result.afterLocalEditRevision === expectedRevision
+        && result.afterHash === expectedHash;
+      if (!provenUnchanged) {
+        surfaceSnapshots.invalidateOwnerEdit({
+          ownerId: pending.ownerId,
+          ownerGeneration: pending.generation,
+          workspaceId: pending.workspaceId,
+          resourceIds: [result.resource.resourceId],
+        });
+      }
+    }
+    pendingSurfaceOperations.delete(requestId);
+    pending.cleanup();
+    pending.resolve(results);
+    return { accepted: true };
   };
 
   const captureAgentInputSnapshot = async (request: CaptureAgentInputSnapshotRequest): Promise<AgentInputContext> => {
@@ -1293,6 +1672,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     return surfaceSnapshots.capture({
       ownerId: request.ownerId,
+      ownerGeneration: request.generation,
       resources,
       sessionId: request.sessionId,
       workspaceId: request.workspaceId,
@@ -1409,6 +1789,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     dirtySurfaces.clear();
     dirtyBuffersByOwner.clear();
+    for (const [requestId, operation] of pendingSurfaceOperations) {
+      pendingSurfaceOperations.delete(requestId);
+      operation.cleanup();
+      invalidateUncertainSurfaceOperation(operation);
+      operation.reject(new DocumentAuthorityError('Document authority was disposed during a surface operation', {
+        code: 'stale-completion', statusCode: 409,
+      }));
+    }
     surfaceSnapshots.dispose();
     const mutationDisposal = mutations.dispose();
     disposePromise = (async () => {
@@ -1451,6 +1839,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     publishDirtyBuffers,
     clearDirtyBuffers,
     inspectDirtyBuffers,
+    requestSurfaceOperation,
+    readSurfaceOperation,
+    completeSurfaceOperation,
     captureAgentInputSnapshot,
     releaseAgentInputSnapshot,
     commitAgentInputSnapshot,
@@ -1458,6 +1849,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     readAgentInputSnapshot: surfaceSnapshots.read,
     cloneAgentInputSnapshot: surfaceSnapshots.clone,
     agentInputDraftPaths: surfaceSnapshots.draftPaths,
+    agentInputSurfaceOwner: surfaceSnapshots.owner,
     inspectAgentWriteTarget,
     observeAgentWrite,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,

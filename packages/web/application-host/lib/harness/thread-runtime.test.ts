@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
+import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary, ThreadWorktree } from "@piarium/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
@@ -699,8 +699,8 @@ describe("thread runtime", () => {
       resolveIntegrationCoordinator: async () => ({
         mergeResult: mockMergeResult,
         previewResult: vi.fn(),
-        acknowledgeSurface: vi.fn(),
-        latestPreview: vi.fn(),
+        undoIntegration: vi.fn(),
+        invalidateWorkspace: vi.fn(() => []),
       }),
     });
 
@@ -790,7 +790,7 @@ describe("thread runtime", () => {
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
       workingStates: {
-        withStore: async (_workspaceId, purpose, operation) => operation({
+        withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "thread-partial" }),
           publishDirectoryResult,
@@ -872,8 +872,13 @@ describe("thread runtime", () => {
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "branch" }),
           publishDirectoryResult: async () => ({ resultRevision: 1, branchId: "branch", changedPaths: ["a.txt"], baseStates: { "a.txt": { kind: "missing" } }, pathStates: { "a.txt": { kind: "missing" } }, diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() }),
+          getBranch: () => ({ baseState: {}, deltas: {} }),
+          listResults: () => [],
+          getDraftBaselineRecord: () => null,
           directoryMatchesResult: async () => purpose === "thread-result-reclaim-check",
-        } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
+        } as unknown as WorkingStateStore, {
+          database: { prepare: () => ({ all: () => [] }) },
+        } as unknown as WorkspaceRecoveryStorageContext),
       },
       canReclaimWorktree: async () => {
         expect(sessionAdapter.close).toHaveBeenCalledWith("child-1");
@@ -891,6 +896,52 @@ describe("thread runtime", () => {
     expect(order).toEqual(["guard", "delete", "release"]);
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ worktree: { materialized: false } });
     await guardedRuntime.dispose();
+  });
+
+  it("holds the reclaim guard through direct reclaim deletion", async () => {
+    const order: string[] = [];
+    const child = join(dataDir, "direct-reclaim");
+    await fs.promises.mkdir(child, { recursive: true });
+    const directRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async (worktree) => { order.push("delete"); worktree.materialized = false; return { reclaimed: true }; },
+      },
+      workingStates: {
+        withStore: async (_workspaceId, purpose, operation) => operation({
+          getBranch: () => ({ baseState: {}, deltas: {} }),
+          listResults: () => [],
+          getDraftBaselineRecord: () => null,
+          directoryMatchesResult: async () => purpose === "thread-result-reclaim-check",
+        } as unknown as WorkingStateStore, { database: { prepare: () => ({ all: () => [] }) } } as unknown as WorkspaceRecoveryStorageContext),
+      },
+      canReclaimWorktree: async () => ({ safe: true, release: async () => { order.push("release"); } }),
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+    });
+    const input = { ...createInput(), autoRun: false };
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, { path: child, base: "base", resultCommit: "fixed", materialized: true });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "direct-branch", resultRevision: 1 });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      conclusion: "done",
+      changedFiles: ["a.txt"],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
+      blocksSnapshot: {},
+    });
+    const reclaimed = await directRuntime.reclaimUser(WORKSPACE, PARENT, thread.id);
+    expect(reclaimed.reclaimed).toBe(true);
+    expect(order).toEqual(["delete", "release"]);
+    await directRuntime.dispose();
   });
 
   it("does not recopy live parent inputs when reopening a fixed child result", async () => {
@@ -941,9 +992,22 @@ describe("thread runtime", () => {
     expect(sessionAdapter.close).toHaveBeenCalledWith("child-1");
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ sessionId: "child-1" });
     const restored = await runtime.restoreUser(WORKSPACE, PARENT, thread.id);
-    expect(restored.thread.lifecycle).toBe("settled");
+    expect(restored.thread.lifecycle).toBe("active");
     expect(restored.thread.report).toMatchObject({ conclusion: "done" });
     expect(restored.restoreStatus).toBe("restored");
+    expect(restored.activeRun).toMatchObject({ sessionId: "child-1", workerState: "running", outcome: null });
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("continued")], willRetry: false } } },
+    });
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await runtime.drain();
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "success", sessionId: "child-1" });
   });
 
   it("does not rebuild onto an occupied path and blocks reclaim for keep_worktree and unfinished integration", async () => {
@@ -993,7 +1057,846 @@ describe("thread runtime", () => {
     const restored = await spaceRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
     expect(restored.restoreStatus).toBe("path-occupied");
     expect(fs.existsSync(join(child, "other.txt"))).toBe(true);
-    expect(materialize).toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
     await spaceRuntime.dispose();
+  });
+
+  it("accounts for materialized threads from every parent in workspace space", async () => {
+    const otherParent = { kind: "session", id: "parent-2" } as const;
+    const other = await registry.createThread({ ...createInput(), parent: otherParent, brief: "other parent" });
+    const leftPath = join(dataDir, "left-space");
+    const rightPath = join(dataDir, "right-space");
+    await fs.promises.mkdir(leftPath, { recursive: true });
+    await fs.promises.mkdir(rightPath, { recursive: true });
+    await fs.promises.writeFile(join(leftPath, "left.txt"), "left");
+    await fs.promises.writeFile(join(rightPath, "right.txt"), "right");
+    const first = await registry.createThread(createInput());
+    await registry.setWorktree(WORKSPACE, first.id, { path: leftPath, base: "base", materialized: true });
+    await registry.setWorktree(WORKSPACE, other.id, { path: rightPath, base: "base", materialized: true });
+
+    const space = await runtime.inspectSpace(WORKSPACE, PARENT);
+    expect(space.threads.map((entry) => entry.threadId).toSorted()).toEqual([first.id, other.id].toSorted());
+  });
+
+  it("checks the configured budget before the first isolated prepare", async () => {
+    const sourceRoot = join(dataDir, "budget-source");
+    await fs.promises.mkdir(sourceRoot, { recursive: true });
+    await fs.promises.writeFile(join(sourceRoot, "input.txt"), "larger than one byte");
+    const prepare = vi.fn(async () => ({
+      cwd: join(dataDir, "budget-child"),
+      worktree: { path: join(dataDir, "budget-child"), base: "base", materialized: true },
+    }));
+    const budgetRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktreeSettings: { budget: { maxBytes: 1 } },
+      resolveWorkspaceRoot: async () => sourceRoot,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        estimatePrepare: async () => ({ logicalBytes: 20, allocatedBytes: null, unknown: false }),
+        prepare,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await expect(budgetRuntime.spawn({ ...input, threadId: thread.id, runId: run.id })).rejects.toMatchObject({ code: "unavailable" });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "failure" });
+    await budgetRuntime.dispose();
+  });
+
+  it("reserves known prepare demand so concurrent threads cannot both spend the same budget", async () => {
+    let releaseFirst!: () => void;
+    let firstStarted!: () => void;
+    const firstReady = new Promise<void>((resolve) => { firstStarted = resolve; });
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const prepare = vi.fn(async (input: Parameters<ThreadRuntimeOptions["worktrees"]["prepare"]>[0]) => {
+      firstStarted();
+      await firstBlocked;
+      const child = join(dataDir, input.threadId);
+      await fs.promises.mkdir(child, { recursive: true });
+      await fs.promises.writeFile(join(child, "payload.bin"), Buffer.alloc(60));
+      return {
+        cwd: child,
+        worktree: { path: child, base: "base", materialized: true, preparationStage: "ready" as const },
+      };
+    });
+    const budgetRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktreeSettings: { budget: { maxBytes: 100 } },
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        estimatePrepare: async () => ({ logicalBytes: 60, allocatedBytes: null, unknown: false }),
+        prepare,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const firstInput = createInput();
+    const first = await registry.createThread(firstInput);
+    const firstRun = await registry.startRun(WORKSPACE, first.id);
+    const firstSpawn = budgetRuntime.spawn({ ...firstInput, threadId: first.id, runId: firstRun.id });
+    await firstReady;
+
+    const secondInput = { ...createInput(), brief: "second concurrent thread" };
+    const second = await registry.createThread(secondInput);
+    const secondRun = await registry.startRun(WORKSPACE, second.id);
+    await expect(budgetRuntime.spawn({ ...secondInput, threadId: second.id, runId: secondRun.id })).rejects.toMatchObject({ code: "unavailable" });
+    expect(prepare).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await expect(firstSpawn).resolves.toMatchObject({ sessionId: "child-1" });
+    await budgetRuntime.dispose();
+  });
+
+  it("skips budget reclamation for a thread currently restoring before its new Run starts", async () => {
+    const restoringPath = join(dataDir, "restoring-budget-target");
+    await fs.promises.mkdir(restoringPath, { recursive: true });
+    await fs.promises.writeFile(join(restoringPath, "result.txt"), "retained\n");
+    let openStarted!: () => void;
+    let releaseOpen!: () => void;
+    const opening = new Promise<void>((resolve) => { openStarted = resolve; });
+    const openAllowed = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    const sessions: ThreadSessionAdapter = {
+      ...sessionAdapter,
+      open: vi.fn(async (input) => {
+        openStarted();
+        await openAllowed;
+        return snapshot(input.sessionId, input.cwd);
+      }),
+    };
+    const reclaim = vi.fn(async (worktree: ThreadWorktree) => {
+      await fs.promises.rm(worktree.path, { recursive: true, force: true });
+      worktree.materialized = false;
+      return { reclaimed: true };
+    });
+    const store = {
+      captureDirectory: async () => ({}),
+      createBranch: async () => ({ branchId: "budget-source-branch" }),
+      getBranch: () => ({ baseState: {}, deltas: {} }),
+      listResults: () => [],
+      getDraftBaselineRecord: () => null,
+      resultState: () => ({}),
+      directoryMatchesResult: async () => true,
+    };
+    const budgetRuntime = createThreadRuntime({
+      registry,
+      sessions,
+      worktreeSettings: { budget: { maxBytes: 1_000_000 }, reclaimIdle: true },
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation(
+          store as unknown as WorkingStateStore,
+          { database: { prepare: () => ({ all: () => [] }) } } as unknown as WorkspaceRecoveryStorageContext,
+        ),
+      },
+      canReclaimWorktree: async () => ({ safe: true }),
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        estimatePrepare: async () => ({ logicalBytes: 1, allocatedBytes: null, unknown: false }),
+        prepare: async (input) => {
+          const child = join(dataDir, `budget-${input.threadId}`);
+          await fs.promises.mkdir(child, { recursive: true });
+          const worktree: ThreadWorktree = { path: child, base: "base", materialized: true, preparationStage: "ready" };
+          await input.onWorktreeState?.(worktree);
+          return { cwd: child, worktree };
+        },
+        reclaim,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+
+    const restoringInput = { ...createInput(), brief: "restore target" };
+    const restoringThread = await registry.createThread(restoringInput);
+    await registry.setWorktree(WORKSPACE, restoringThread.id, {
+      path: restoringPath,
+      base: "base",
+      materialized: true,
+      preparationStage: "ready",
+    });
+    await registry.setWorkingState(WORKSPACE, restoringThread.id, { branchId: "restore-branch", resultRevision: 1 });
+    const restoringRun = await registry.startRun(WORKSPACE, restoringThread.id);
+    await registry.endRun(WORKSPACE, restoringThread.id, restoringRun.id, "success", null, {
+      conclusion: "retained",
+      changedFiles: ["result.txt"],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "restoring-session", fromEntryId: null, toEntryId: null },
+      blocksSnapshot: {},
+    });
+
+    const restoring = budgetRuntime.restoreUser(WORKSPACE, PARENT, restoringThread.id);
+    await opening;
+    const sourceInput = { ...createInput(), brief: "needs budget" };
+    const sourceThread = await registry.createThread(sourceInput);
+    const sourceRun = await registry.startRun(WORKSPACE, sourceThread.id);
+    await expect(budgetRuntime.spawn({ ...sourceInput, threadId: sourceThread.id, runId: sourceRun.id })).resolves.toBeTruthy();
+    expect(reclaim).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(join(restoringPath, "result.txt"), "utf8")).toBe("retained\n");
+
+    releaseOpen();
+    await expect(restoring).resolves.toMatchObject({ restoreStatus: "restored", thread: { lifecycle: "active" } });
+    await budgetRuntime.dispose();
+  });
+
+  it("persists a created worktree before cancellation and waits for its non-cancellable preparation", async () => {
+    let releasePrepare!: () => void;
+    let pathRecorded!: () => void;
+    const recorded = new Promise<void>((resolve) => { pathRecorded = resolve; });
+    const preparationDone = new Promise<void>((resolve) => { releasePrepare = resolve; });
+    const child = join(dataDir, "created-before-cancel");
+    const ownedRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: async (input) => {
+          await fs.promises.mkdir(child, { recursive: true });
+          const worktree: ThreadWorktree = {
+            path: child,
+            base: "base",
+            materialized: true,
+            preparationStage: "materializing",
+          };
+          await input.onWorktreeState?.(worktree);
+          pathRecorded();
+          await preparationDone;
+          worktree.preparationStage = "ready";
+          await input.onWorktreeState?.(worktree);
+          if (input.signal?.aborted) throw new DOMException("cancelled", "AbortError");
+          return { cwd: child, worktree };
+        },
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    const spawning = ownedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await recorded;
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toMatchObject({
+      path: child,
+      preparationStage: "materializing",
+    });
+    const archiving = ownedRuntime.archiveUser(WORKSPACE, PARENT, thread.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
+    releasePrepare();
+    await expect(spawning).rejects.toMatchObject({ name: "AbortError" });
+    await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toMatchObject({
+      path: child,
+      preparationStage: "ready",
+    });
+    await ownedRuntime.dispose();
+  });
+
+  it("waits for a slow preparation to finish before archiving", async () => {
+    let releaseSetup!: () => void;
+    let setupStarted!: () => void;
+    const setupReady = new Promise<void>((resolve) => { setupStarted = resolve; });
+    const setupDone = new Promise<void>((resolve) => { releaseSetup = resolve; });
+    const slowRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktreeSettings: { setup: "install" },
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: async () => ({ cwd: "/workspace/slow", worktree: { path: "/workspace/slow", base: "base", materialized: true } }),
+        runSetup: async () => { setupStarted(); await setupDone; return { output: "" }; },
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = { ...createInput(), tools: ["bash"] };
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    const spawning = slowRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await setupReady;
+    const archiving = slowRuntime.archiveUser(WORKSPACE, PARENT, thread.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
+    releaseSetup();
+    await expect(spawning).rejects.toMatchObject({ name: "AbortError" });
+    await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "cancelled" });
+    expect(sessionAdapter.create).not.toHaveBeenCalled();
+    await slowRuntime.dispose();
+  });
+
+  it("retries setup for an archived directory after a prior setup failure", async () => {
+    const setup = vi.fn()
+      .mockRejectedValueOnce(new Error("dependency install failed"))
+      .mockResolvedValueOnce({ output: "" });
+    const retryRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktreeSettings: { setup: "install" },
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        runSetup: setup,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      conclusion: "done",
+      changedFiles: [],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
+      blocksSnapshot: {},
+    });
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/retry-setup",
+      base: "base",
+      materialized: true,
+      preparationStage: "setup",
+      retentionReason: "Directory restored but setup failed: previous failure",
+    });
+    await registry.archiveThread(WORKSPACE, thread.id);
+
+    const first = await retryRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(first.restoreStatus).toBe("rebuild-failed");
+    expect(first.thread.lifecycle).toBe("archived");
+    expect(setup).toHaveBeenCalledTimes(1);
+    const second = await retryRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(second.restoreStatus).toBe("restored");
+    expect(second.thread.lifecycle).toBe("active");
+    expect(setup).toHaveBeenCalledTimes(2);
+    await retryRuntime.dispose();
+  });
+
+  it("does not hold the workspace budget lock while restore waits in setup", async () => {
+    let releaseSetup!: () => void;
+    let setupStarted!: () => void;
+    const setupReady = new Promise<void>((resolve) => { setupStarted = resolve; });
+    const setupDone = new Promise<void>((resolve) => { releaseSetup = resolve; });
+    const setup = vi.fn(async () => { setupStarted(); await setupDone; return { output: "" }; });
+    const concurrentRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktreeSettings: { setup: "install" },
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        runSetup: setup,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+
+    const archivedInput = { ...createInput(), brief: "restore slowly" };
+    const archived = await registry.createThread(archivedInput);
+    await registry.setWorktree(WORKSPACE, archived.id, {
+      path: "/workspace/slow-restore",
+      base: "base",
+      materialized: true,
+      preparationStage: "setup",
+    });
+    const archivedRun = await registry.startRun(WORKSPACE, archived.id);
+    await registry.endRun(WORKSPACE, archived.id, archivedRun.id, "success", null, {
+      conclusion: "done",
+      changedFiles: [],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "restore-session", fromEntryId: null, toEntryId: null },
+      blocksSnapshot: {},
+    });
+    await registry.archiveThread(WORKSPACE, archived.id);
+
+    const activeInput = { ...createInput(), brief: "archive independently" };
+    const active = await registry.createThread(activeInput);
+    const activeRun = await registry.startRun(WORKSPACE, active.id);
+    await concurrentRuntime.spawn({ ...activeInput, threadId: active.id, runId: activeRun.id });
+
+    let restoreSettled = false;
+    const restoring = concurrentRuntime.restoreUser(WORKSPACE, PARENT, archived.id).finally(() => { restoreSettled = true; });
+    await setupReady;
+    await expect(concurrentRuntime.archiveUser(WORKSPACE, PARENT, active.id)).resolves.toMatchObject({
+      thread: { lifecycle: "archived" },
+    });
+    expect(restoreSettled).toBe(false);
+    releaseSetup();
+    await expect(restoring).resolves.toMatchObject({ restoreStatus: "restored" });
+    await concurrentRuntime.dispose();
+  });
+
+  it("serializes archive reclamation and restore for the same thread", async () => {
+    const child = join(dataDir, "archive-restore-serialized");
+    let guardRequested!: () => void;
+    let releaseGuard!: () => void;
+    const guardStarted = new Promise<void>((resolve) => { guardRequested = resolve; });
+    const guardAllowed = new Promise<void>((resolve) => { releaseGuard = resolve; });
+    const store = {
+      captureDirectory: async () => ({}),
+      createBranch: async () => ({ branchId: "serialized-branch" }),
+      publishDirectoryResult: async () => ({
+        resultRevision: 1,
+        branchId: "serialized-branch",
+        changedPaths: [],
+        baseStates: {},
+        pathStates: {},
+        diffStats: { files: 0, insertions: 0, deletions: 0 },
+        createdAt: new Date().toISOString(),
+      }),
+      getBranch: () => ({ baseState: {}, deltas: {} }),
+      listResults: () => [],
+      getDraftBaselineRecord: () => null,
+      resultState: () => ({}),
+      directoryMatchesResult: async () => true,
+      materializeResult: async () => undefined,
+    };
+    const lifecycleRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation(
+          store as unknown as WorkingStateStore,
+          { database: { prepare: () => ({ all: () => [] }) } } as unknown as WorkspaceRecoveryStorageContext,
+        ),
+      },
+      canReclaimWorktree: async () => {
+        guardRequested();
+        await guardAllowed;
+        return { safe: true };
+      },
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: async (input) => {
+          await fs.promises.mkdir(child, { recursive: true });
+          const worktree: ThreadWorktree = {
+            path: child,
+            base: "base",
+            materialized: true,
+            preparationStage: "ready",
+          };
+          await input.onWorktreeState?.(worktree);
+          return { cwd: child, worktree };
+        },
+        materialize: async (_source, worktree) => {
+          await fs.promises.mkdir(worktree.path, { recursive: true });
+          return { ...worktree, materialized: true, preparationStage: "ready" };
+        },
+        reclaim: async (worktree) => {
+          await fs.promises.rm(worktree.path, { recursive: true, force: true });
+          worktree.materialized = false;
+          worktree.preparationStage = "materialize";
+          return { reclaimed: true };
+        },
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "fixed-result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await lifecycleRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+
+    const archiving = lifecycleRuntime.archiveUser(WORKSPACE, PARENT, thread.id);
+    await guardStarted;
+    let restoreSettled = false;
+    const restoring = lifecycleRuntime.restoreUser(WORKSPACE, PARENT, thread.id).finally(() => { restoreSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(restoreSettled).toBe(false);
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+
+    releaseGuard();
+    await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" }, reclaimed: true });
+    await expect(restoring).resolves.toMatchObject({ thread: { lifecycle: "active" }, restoreStatus: "restored" });
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-1", cwd: child }));
+    await lifecycleRuntime.dispose();
+  });
+
+  it("retains the binding and active Run when session stop is not confirmed", async () => {
+    const stopRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await stopRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    sessionAdapter.close = vi.fn()
+      .mockRejectedValueOnce(new Error("close failed"))
+      .mockResolvedValueOnce(undefined);
+    await expect(stopRuntime.archiveUser(WORKSPACE, PARENT, thread.id)).rejects.toMatchObject({ code: "unavailable" });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "active" });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: null, sessionId: "child-1" });
+    expect(stopRuntime.isThreadSession("child-1")).toBe(true);
+    await expect(stopRuntime.archiveUser(WORKSPACE, PARENT, thread.id)).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
+    expect(sessionAdapter.close).toHaveBeenCalledTimes(2);
+    await stopRuntime.dispose();
+  });
+
+  it("retains the active Run when partial result capture fails during archive", async () => {
+    const captureRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation({
+          captureDirectory: async () => ({}),
+          createBranch: async () => ({ branchId: "capture-branch" }),
+          publishDirectoryResult: async () => { throw new Error("capture failed"); },
+        } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
+      },
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await captureRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await expect(captureRuntime.archiveUser(WORKSPACE, PARENT, thread.id)).rejects.toMatchObject({ code: "unavailable" });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "active" });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: null, sessionId: "child-1" });
+    await captureRuntime.dispose();
+  });
+
+  it("retains the active Run when snapshot capture fails after publishing", async () => {
+    const snapshotRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation({
+          captureDirectory: async () => ({}),
+          createBranch: async () => ({ branchId: "snapshot-branch" }),
+          getBranch: () => ({ baseState: {}, deltas: {} }),
+          listResults: () => [],
+          getDraftBaselineRecord: () => null,
+          publishDirectoryResult: async () => ({
+            resultRevision: 1,
+            branchId: "snapshot-branch",
+            changedPaths: [],
+            baseStates: {},
+            pathStates: {},
+            diffStats: { files: 0, insertions: 0, deletions: 0 },
+            createdAt: new Date().toISOString(),
+          }),
+        } as unknown as WorkingStateStore, {
+          database: { prepare: () => ({ all: () => [] }) },
+        } as unknown as WorkspaceRecoveryStorageContext),
+      },
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: vi.fn()
+          .mockRejectedValueOnce(new Error("snapshot failed"))
+          .mockImplementation(async (worktree: ThreadWorktree) => ({ ...worktree, resultCommit: "retry-result" })),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await snapshotRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    sessionAdapter.abort = vi.fn(async () => {
+      if (vi.mocked(sessionAdapter.abort).mock.calls.length > 1) throw new Error("session no longer exists");
+    });
+    sessionAdapter.close = vi.fn(async () => {
+      if (vi.mocked(sessionAdapter.close).mock.calls.length > 1) throw new Error("session no longer exists");
+    });
+    await expect(snapshotRuntime.archiveUser(WORKSPACE, PARENT, thread.id)).rejects.toMatchObject({ code: "unavailable" });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "active" });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: null, sessionId: "child-1" });
+    await expect(snapshotRuntime.archiveUser(WORKSPACE, PARENT, thread.id)).resolves.toMatchObject({
+      thread: { lifecycle: "archived" },
+    });
+    expect(sessionAdapter.abort).toHaveBeenCalledTimes(1);
+    expect(sessionAdapter.close).toHaveBeenCalledTimes(1);
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "cancelled" });
+    await snapshotRuntime.dispose();
+  });
+
+  it("restores a native result before opening the original session", async () => {
+    const childPath = join(dataDir, "native-restore");
+    const materializeResult = vi.fn(async () => undefined);
+    const materialize = vi.fn(async (_source: string, worktree: ThreadWorktree) => {
+      await fs.promises.mkdir(worktree.path, { recursive: true });
+      return { ...worktree, materialized: true };
+    });
+    const nativeStore = {
+      getBranch: () => ({ baseState: {}, deltas: {} }),
+      listResults: () => [],
+      getDraftBaselineRecord: () => null,
+      resultState: () => ({ "result.txt": { kind: "regular-file", objectHash: "sha", byteLength: 8 } }),
+      materializeResult,
+      directoryMatchesResult: async () => true,
+    };
+    const nativeRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation(
+          nativeStore as unknown as WorkingStateStore,
+          { database: { prepare: () => ({ all: () => [] }) } } as unknown as WorkspaceRecoveryStorageContext,
+        ),
+      },
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        materialize,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, { path: childPath, base: "native", materialized: false });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "native-branch", resultRevision: 1 });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      conclusion: "done",
+      changedFiles: ["result.txt"],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
+      blocksSnapshot: {},
+    });
+    await registry.archiveThread(WORKSPACE, thread.id);
+    const restored = await nativeRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(restored.restoreStatus).toBe("restored");
+    expect(materialize).toHaveBeenCalledWith(dataDir, expect.objectContaining({ path: childPath }), expect.any(AbortSignal));
+    expect(materializeResult).toHaveBeenCalledWith("native-branch", 1, childPath);
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-1", cwd: childPath }));
+    expect(restored.activeRun).toMatchObject({ workerState: "running", outcome: null, sessionId: "child-1" });
+    const openCalls = vi.mocked(sessionAdapter.open).mock.calls.length;
+    const repeated = await nativeRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(sessionAdapter.open).toHaveBeenCalledTimes(openCalls);
+    expect(repeated.activeRun?.id).toBe(restored.activeRun?.id);
+    await nativeRuntime.dispose();
+  });
+
+  it("reopens a settled implementation after its directory was reclaimed", async () => {
+    const childPath = join(dataDir, "settled-reopen");
+    const materialize = vi.fn(async (_source: string, worktree: ThreadWorktree) => {
+      await fs.promises.mkdir(worktree.path, { recursive: true });
+      return { ...worktree, materialized: true, preparationStage: "ready" as const };
+    });
+    const settledRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        materialize,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: childPath,
+      base: "base",
+      materialized: false,
+      preparationStage: "materialize",
+    });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    const originalReport = {
+      conclusion: "kept result",
+      changedFiles: ["result.txt"],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "settled-session", fromEntryId: null, toEntryId: null },
+      blocksSnapshot: {},
+    };
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, originalReport);
+
+    const reopened = await settledRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(reopened).toMatchObject({
+      restoreStatus: "restored",
+      thread: { lifecycle: "active", report: originalReport },
+      activeRun: { sessionId: "settled-session", workerState: "running", outcome: null },
+    });
+    expect(materialize).toHaveBeenCalledTimes(1);
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "settled-session", cwd: childPath }));
+    await settledRuntime.dispose();
+  });
+
+  it("keeps a settled thread non-archived when its reclaimed path is occupied", async () => {
+    const childPath = join(dataDir, "settled-occupied");
+    await fs.promises.mkdir(childPath, { recursive: true });
+    await fs.promises.writeFile(join(childPath, "user.txt"), "user content\n");
+    const settledRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        materialize: async (_source, worktree) => ({ ...worktree, materialized: true, preparationStage: "ready" }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: childPath,
+      base: "base",
+      materialized: false,
+      preparationStage: "materialize",
+    });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      conclusion: "kept result",
+      changedFiles: [],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "settled-session", fromEntryId: null, toEntryId: null },
+      blocksSnapshot: {},
+    });
+
+    const failed = await settledRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(failed).toMatchObject({ restoreStatus: "path-occupied", thread: { lifecycle: "settled" } });
+    expect(await fs.promises.readFile(join(childPath, "user.txt"), "utf8")).toBe("user content\n");
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+    await settledRuntime.dispose();
+  });
+
+  it("retries an unchanged managed partial materialization but preserves later user content", async () => {
+    const childPath = join(dataDir, "partial-restore");
+    const materialize = vi.fn()
+      .mockImplementationOnce(async (_source: string, worktree: ThreadWorktree) => {
+        await fs.promises.mkdir(worktree.path, { recursive: true });
+        await fs.promises.writeFile(join(worktree.path, "partial.txt"), "owned partial\n");
+        throw new Error("copy failed halfway");
+      })
+      .mockImplementationOnce(async (_source: string, worktree: ThreadWorktree) => {
+        await fs.promises.mkdir(worktree.path, { recursive: true });
+        await fs.promises.writeFile(join(worktree.path, "complete.txt"), "complete\n");
+        return { ...worktree, materialized: true, preparationStage: "ready" as const };
+      });
+    const reclaim = vi.fn(async (worktree: ThreadWorktree) => {
+      await fs.promises.rm(worktree.path, { recursive: true, force: true });
+      worktree.materialized = false;
+      worktree.preparationStage = "materialize";
+      return { reclaimed: true };
+    });
+    let acquireGuard = async () => ({ safe: true });
+    const partialRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      canReclaimWorktree: async () => acquireGuard(),
+      worktrees: {
+        prepare: prepareWorktree,
+        materialize,
+        reclaim,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: childPath,
+      base: "base",
+      materialized: false,
+      preparationStage: "materialize",
+    });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      conclusion: "done",
+      changedFiles: [],
+      unresolved: [],
+      deviations: [],
+      confidence: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "partial-session", fromEntryId: null, toEntryId: null },
+      blocksSnapshot: {},
+    });
+    await registry.archiveThread(WORKSPACE, thread.id);
+
+    const failed = await partialRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(failed.restoreStatus).toBe("rebuild-failed");
+    expect(failed.thread.worktree).toMatchObject({
+      materialized: true,
+      preparationStage: "materializing",
+      materializationFingerprint: expect.any(String),
+    });
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+
+    let guardRequested!: () => void;
+    let releaseGuard!: () => void;
+    const guardStarted = new Promise<void>((resolve) => { guardRequested = resolve; });
+    const guardAllowed = new Promise<void>((resolve) => { releaseGuard = resolve; });
+    acquireGuard = async () => {
+      guardRequested();
+      await guardAllowed;
+      return { safe: true };
+    };
+    const occupiedRestore = partialRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    await guardStarted;
+    await fs.promises.writeFile(join(childPath, "user-note.txt"), "keep me\n");
+    releaseGuard();
+    const occupied = await occupiedRestore;
+    expect(occupied.restoreStatus).toBe("path-occupied");
+    expect(await fs.promises.readFile(join(childPath, "user-note.txt"), "utf8")).toBe("keep me\n");
+    expect(reclaim).not.toHaveBeenCalled();
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+
+    await fs.promises.rm(join(childPath, "user-note.txt"));
+    acquireGuard = async () => ({ safe: true });
+    const restored = await partialRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(restored.restoreStatus).toBe("restored");
+    expect(reclaim).toHaveBeenCalledTimes(1);
+    expect(materialize).toHaveBeenCalledTimes(2);
+    expect(await fs.promises.readFile(join(childPath, "complete.txt"), "utf8")).toBe("complete\n");
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "partial-session", cwd: childPath }));
+    await partialRuntime.dispose();
   });
 });

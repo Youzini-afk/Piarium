@@ -251,8 +251,37 @@ describe("thread services", () => {
       status: "conflict",
       surfaceTargetPaths: ["draft.ts"],
     });
-    expect(result.text).toContain("left untouched on disk");
-    expect(result.text).toContain("parent editor");
+    expect(result.text).toContain("Editor draft paths still require attention");
+    expect(result.text).toContain("originating surface");
     expect(setIntegration).toHaveBeenCalledWith("workspace-1", "thread-1", "conflict", expect.anything());
+  });
+
+  it("uses the originating owner and tells the agent that applied drafts remain unsaved", async () => {
+    const apply = vi.fn(async () => ({
+      merged: 1, conflicts: [], status: "applied", appliedPaths: ["draft.ts"], changedFiles: ["draft.ts"],
+      resultRevision: 1, operationId: "integration-1",
+      preview: { paths: [{ path: "draft.ts", target: "surface", phase: "surface-applied" }] },
+    }));
+    const owner = vi.fn(() => ({ ownerId: "originating-editor", generation: 2, workspaceId: "workspace-1" }));
+    const service = createThreadMergeService({
+      threadRegistry: {
+        getThread: async () => ({
+          id: "thread-1", integration: "merge-ready", lifecycle: "settled", resultRevision: 1,
+          workBranchId: "branch-1", worktree: null,
+        }),
+        getActiveRun: async () => ({ outcome: "success" }),
+      },
+      agentInputSurfaceOwner: owner,
+      threadApplyWorktreeDiff: apply,
+    } as never);
+    const ctx = serviceContext({ source: "surface", workspaceId: "workspace-1", dirtyPaths: ["draft.ts"], snapshot: { status: "ready", ref: "source-ref" } });
+    const result = await service.handle({ threadId: "thread-1" }, ctx);
+    expect(owner).toHaveBeenCalledWith("parent-1", ctx.inputContext);
+    expect(apply).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "parent-1" }, "thread-1", undefined, undefined, {
+      sourceOwner: { ownerId: "originating-editor", generation: 2 }, signal: ctx.signal,
+    });
+    expect(result.surfaceTargetPaths).toEqual(["draft.ts"]);
+    expect(result.text).toContain("Editor drafts updated without saving: draft.ts");
+    expect(result.text).toContain("Disk-based commands still read the saved files");
   });
 });

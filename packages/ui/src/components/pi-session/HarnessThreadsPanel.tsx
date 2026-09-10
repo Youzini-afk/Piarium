@@ -90,11 +90,12 @@ export const HarnessThreadsPanel: React.FC<{
   const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
 
-  const readError = (body: unknown, fallback: string): string => (
-    body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
-      ? (body as { error: string }).error
-      : fallback
-  );
+  const readError = (body: unknown, fallback: string): string => {
+    if (!body || typeof body !== 'object') return fallback;
+    if ('message' in body && typeof body.message === 'string') return body.message;
+    if ('error' in body && typeof body.error === 'string') return body.error;
+    return fallback;
+  };
 
   const reloadSpace = React.useCallback(async (signal?: AbortSignal) => {
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/space`, {
@@ -125,6 +126,11 @@ export const HarnessThreadsPanel: React.FC<{
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(readError(payload, t(failedKey)));
     const mutated = parseHarnessThreadMutation(payload);
+    const restoreFailed = path.endsWith('/restore')
+      && payload
+      && typeof payload === 'object'
+      && 'restoreStatus' in payload
+      && payload.restoreStatus !== 'restored';
     threadState.merge(mutated);
     if (payload && typeof payload === 'object' && 'space' in payload) {
       try { setSpace(parseHarnessThreadSpace((payload as { space: unknown }).space)); }
@@ -133,7 +139,37 @@ export const HarnessThreadsPanel: React.FC<{
       await reloadSpace();
     }
     await threadState.reload();
+    if (restoreFailed) throw new Error(readError(payload, t(failedKey)));
+    return mutated;
   }, [parentSessionId, reloadSpace, t, threadState]);
+
+  const openThread = React.useCallback(async (entry: HarnessThreadSnapshot) => {
+    setThreadAction(entry.thread.id);
+    try {
+      // Settled threads can have reclaimed directories too. The Host restores
+      // the materialization and Run binding before the UI selects the session.
+      const restored = await applyThreadMutation(
+        `${encodeURIComponent(entry.thread.id)}/restore`, 'harness.threads.restoreFailed',
+      );
+      const sessionId = restored.activeRun?.sessionId;
+      const worktree = restored.thread.worktree;
+      if (!sessionId || restored.thread.lifecycle === 'archived' || worktree?.materialized === false) {
+        throw new Error(t('harness.threads.restoreFailed'));
+      }
+      const cwd = worktree?.path ?? fallbackCwd;
+      await openSession({
+        sessionId,
+        ...(cwd ? { cwd } : {}),
+        ...(restored.thread.model ? { model: restored.thread.model } : {}),
+        ...(restored.thread.manifest.scope.length > 0 ? { scope: restored.thread.manifest.scope } : {}),
+        tools: restored.thread.manifest.tools,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('harness.threads.restoreFailed'));
+    } finally {
+      setThreadAction((current) => current === entry.thread.id ? null : current);
+    }
+  }, [applyThreadMutation, fallbackCwd, openSession, t]);
 
   const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
     if (convertingThreadId) return;
@@ -491,8 +527,9 @@ export const HarnessThreadsPanel: React.FC<{
         ) : null}
         {threads.map((entry) => {
           const state = projectHarnessThreadState(entry);
-          const sessionId = entry.activeRun?.sessionId;
-          const cwd = entry.thread.worktree?.path ?? fallbackCwd;
+          // An archived Run retains its transcript session id for recovery, but
+          // that session is closed and must not be opened from the stale cwd.
+          const sessionId = entry.thread.lifecycle === 'archived' ? undefined : entry.activeRun?.sessionId;
           const converting = convertingThreadId === entry.thread.id;
           const occupancy = space?.threads.find((item) => item.threadId === entry.thread.id);
           const busy = threadAction === entry.thread.id;
@@ -505,19 +542,11 @@ export const HarnessThreadsPanel: React.FC<{
             <div key={entry.thread.id} className="overflow-hidden rounded-lg border border-transparent transition-colors hover:border-border/60 hover:bg-interactive-hover">
               <button
                 type="button"
-                disabled={!sessionId}
+                disabled={!sessionId || busy}
                 title={sessionId ? t('harness.threads.open') : undefined}
                 onClick={() => {
                   if (!sessionId) return;
-                  void openSession({
-                    sessionId,
-                    ...(cwd ? { cwd } : {}),
-                    ...(entry.thread.model ? { model: entry.thread.model } : {}),
-                    ...(entry.thread.manifest.scope.length > 0 ? { scope: entry.thread.manifest.scope } : {}),
-                    tools: entry.thread.manifest.tools,
-                  }).catch((error) => {
-                    toast.error(error instanceof Error ? error.message : String(error));
-                  });
+                  void openThread(entry);
                 }}
                 className="group w-full px-2.5 py-2 text-left disabled:cursor-default disabled:opacity-80"
               >

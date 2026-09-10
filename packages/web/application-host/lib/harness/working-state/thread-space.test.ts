@@ -89,6 +89,31 @@ describe("thread space accounting", () => {
     expect(space.note).toMatch(/unknown sizes are not treated as zero/i);
   });
 
+  it("does not hide a known budget overage behind another unknown directory", () => {
+    const known = projectThreadOccupancy({
+      thread: thread({ id: "known" }),
+      materialized: { logicalBytes: 20, allocatedBytes: 20, unknown: false },
+      exclusive: new Map(),
+      shared: new Map(),
+      keepReasons: [],
+    });
+    const unknown = projectThreadOccupancy({
+      thread: thread({ id: "unknown" }),
+      materialized: { logicalBytes: null, allocatedBytes: null, unknown: true },
+      exclusive: new Map(),
+      shared: new Map(),
+      keepReasons: [],
+    });
+    const space = projectWorkspaceSpace("workspace-1", [known, unknown], {
+      logicalBytes: 0,
+      allocatedBytes: null,
+      unknown: false,
+    }, { maxBytes: 10 }, null);
+    expect(space.status).toBe("over-budget");
+    expect(space.materializedLogicalBytes).toBeNull();
+    expect(space.note).toMatch(/already exceeded/i);
+  });
+
   it("keeps directories for keep_worktree, active runs, unfinished integration, and unverified content", () => {
     expect(assembleKeepReasons({
       thread: thread({ keepWorktree: true, integration: "conflict", lifecycle: "archived" }),

@@ -2363,7 +2363,7 @@ export const createWorkspaceRecoveryEngine = (
         const unfinishedIntegration = database.prepare(`
           SELECT id FROM operations
           WHERE workspace_id = ? AND kind = 'integration'
-          AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted')
+          AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone')
           LIMIT 1
         `).get(workspaceId) as { id: string } | undefined;
         if (unfinishedIntegration) {
@@ -2394,7 +2394,7 @@ export const createWorkspaceRecoveryEngine = (
         // Delete operations for this workspace.
         const operationsResult = database.prepare(`
           DELETE FROM operations WHERE workspace_id = ?
-          AND (kind = 'combined' OR (kind = 'integration' AND state IN ('complete', 'conflict', 'compensated', 'aborted')))
+          AND (kind = 'combined' OR (kind = 'integration' AND state IN ('complete', 'conflict', 'compensated', 'aborted', 'undone')))
         `).run(workspaceId);
         recordsDeleted += operationsResult.changes;
         database.prepare("DELETE FROM object_references WHERE workspace_id = ? AND owner_kind IN ('checkpoint-change', 'operation', 'operation-file')").run(workspaceId);

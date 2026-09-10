@@ -44,11 +44,7 @@ import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { discoverShells } from './lib/harness/shell-discovery.js';
-import {
-  HarnessShellSettingsError,
-  resolveHarnessShellSetting,
-  type HarnessShellSetting,
-} from './lib/harness/harness-shell-settings.js';
+import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
@@ -65,7 +61,6 @@ import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './lib/knowledge/semantic/workspace-inference.js';
 import { pinSemanticQueryView } from './lib/knowledge/semantic/query-view.js';
 import {
-  type HarnessActorIdentity,
   type HarnessEmbedParams,
   type HarnessInferenceBindingSnapshot,
   type HarnessRerankParams,
@@ -985,12 +980,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     : undefined;
   let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
   let observeKnowledgeBlockChange = (_workspaceId: string, _sessionId: string, _change: BlockChange): void => {};
+  let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
     onMutation: (event) => observeKnowledgeDocumentMutation(event),
+    onIntegrationParentChanged: (workspaceId, resourceIds) => observeThreadIntegrationParentChange(workspaceId, resourceIds),
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
@@ -1161,6 +1158,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
   const harnessShellActivity = {
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
+    closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
@@ -1251,6 +1249,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const threadIntegrationCoordinator = new IntegrationCoordinator({
     workingStates: harnessWorkingStates,
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
+    beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
+    requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options),
   });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
@@ -1334,7 +1334,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!result.accepted) throw new Error(`Pi child session rejected follow-up input: ${sessionId}`);
       },
       abort: async (sessionId) => { await piRuntimeBroker.requestForSession(sessionId, 'agent.abort', { sessionId }); },
-      close: async (sessionId) => { await piRuntimeBroker.closeSession(sessionId); },
+      close: async (sessionId) => {
+        await harnessShellActivity.closeSessionShell(sessionId);
+        await piRuntimeBroker.closeSession(sessionId);
+      },
       snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
       summary: async (sessionId) => {
         try {
@@ -1352,6 +1355,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
     },
   });
+  observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
+    void threadRuntime!.invalidateIntegrationPreviews(workspaceId, resourceIds).catch((error: unknown) => {
+      console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
+    });
+  };
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,
@@ -1829,7 +1837,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   const discoveredShells = discoverShells();
-  const pendingHarnessSessionRegisters = new Map<string, Promise<void>>();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
@@ -2022,6 +2029,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     recallDepsProvider,
     threadRegistry,
     threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
+    agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,
     threadTranscriptReader,
     threadSpawnSession: (input) => threadRuntime!.spawn(input),
     threadKillSession: (threadId, keepWorktree) => threadRuntime!.kill(threadId, keepWorktree),
@@ -2034,56 +2042,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   harnessShellActivity.hasActiveCommandAtDirectory = (directory) => (
     harnessServiceHost.hasActiveCommandAtDirectory(directory)
   );
-  const registerHarnessSession = (
-    actor: HarnessActorIdentity,
-    sessionId: string,
-    workspaceId: string,
-    workspaceRoot: string,
-    activeTools: readonly string[],
-  ): Promise<void> => {
-    const pending = pendingHarnessSessionRegisters.get(sessionId);
-    if (pending) return pending;
-    const work = (async () => {
-      let shellSetting: HarnessShellSetting = 'auto';
-      let shellResolution: { invalid: { reason: string; hint: string } } | undefined;
-      try {
-        const broker = getReadyPiRuntimeBroker();
-        if (broker) {
-          shellSetting = resolveHarnessShellSetting(
-            await broker.requestForSession(sessionId, 'settings.get', {}),
-          );
-        }
-      } catch (error) {
-        if (error instanceof HarnessShellSettingsError) {
-          shellResolution = {
-            invalid: {
-              reason: error.message,
-              hint: 'Set harness.shell to auto, git-bash, powershell, or wsl in Pi settings.json.',
-            },
-          };
-        } else {
-          console.error('[Harness] harness.shell resolution failed; using auto:', errorMessage(error));
-        }
-      }
-      if (harnessServiceHost.hasActor(actor)) return;
-      harnessServiceHost.registerSession({
-        actor,
-        grantedCapabilities: deriveHarnessCapabilities(activeTools, {
-          documentRead: true,
-          documentPathOverlay: true,
-          threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
-        }),
-        workspaceId,
-        workspaceRoot,
-        shellSetting,
-        ...(shellResolution ? { shellResolution } : {}),
-      });
-    })().finally(() => {
-      pendingHarnessSessionRegisters.delete(sessionId);
-    });
-    pendingHarnessSessionRegisters.set(sessionId, work);
-    return work;
-  };
+  harnessShellActivity.closeSessionShell = harnessServiceHost.closeSessionShell;
+  const harnessSessionRegistration = createHarnessSessionRegistration({
+    host: harnessServiceHost,
+    readSettings: async ({ actor }) => {
+      const broker = getReadyPiRuntimeBroker();
+      if (!broker) throw new Error('Pi settings are unavailable');
+      return broker.requestForSession(actor.sessionId, 'settings.get', {});
+    },
+  });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -2171,7 +2138,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     respond: async (sessionId, requestId, outcome) => {
       await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId, outcome));
     },
-    resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
+    resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
@@ -2258,8 +2225,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }
       }
       if (event.sessionId) {
-        const ownsRegisteredSession = !event.actor || harnessServiceHost.hasActor(event.actor);
-        harnessServiceHost.dropSession(event.sessionId, event.actor);
+        const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
+        harnessSessionRegistration.dropSession(event.sessionId, event.actor);
         if (ownsRegisteredSession) {
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
@@ -2273,8 +2240,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const envelopeData = recordOf(envelope.data);
     const sessionId = event.sessionId ?? '';
     if (envelope.event === 'session.closed' && sessionId) {
-      harnessServiceHost.dropSession(sessionId, event.actor);
-      knowledgeContextRuntime.dropSession(sessionId);
+      const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
+      harnessSessionRegistration.dropSession(sessionId, event.actor);
+      if (ownsRegisteredSession) knowledgeContextRuntime.dropSession(sessionId);
       return;
     }
     if (envelope.event === 'session.snapshot' && sessionId) {
@@ -2295,17 +2263,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         && typeof envelopeData.cwd === 'string'
       ) {
         bindKnowledgeSession(sessionId, harnessWorkspaceId);
-        if (!harnessServiceHost.hasActor(event.actor)) {
+        if (!harnessSessionRegistration.hasActor(event.actor)) {
           const activeTools = Array.isArray(envelopeData.activeTools)
             ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
             : [];
-          void registerHarnessSession(
-            event.actor,
-            sessionId,
-            harnessWorkspaceId,
-            envelopeData.cwd,
-            activeTools,
-          ).catch((error) => {
+          void harnessSessionRegistration.register({
+            actor: event.actor,
+            workspaceId: harnessWorkspaceId,
+            workspaceRoot: envelopeData.cwd,
+            grantedCapabilities: deriveHarnessCapabilities(activeTools, {
+              documentRead: true,
+              documentPathOverlay: true,
+              threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
+            }),
+          }).catch((error) => {
             console.error('[Harness] Failed to register session shell:', errorMessage(error));
           });
         }
@@ -2500,6 +2471,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       piSessionAutomation.stop();
       brokerUnsubscribe();
+      await harnessSessionRegistration.dispose();
       await unregisterWorkbenchLayoutService();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();

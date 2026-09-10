@@ -22,8 +22,9 @@ interface StoredResource extends Omit<SurfaceSnapshotResource, 'content'> {
 interface StoredSnapshot {
   dirtyPaths: readonly string[];
   ownerId: string;
+  ownerGeneration: number;
   ref: string;
-  resources: ReadonlyMap<string, StoredResource>;
+  resources: Map<string, StoredResource>;
   sessionId: string;
   state: 'active' | 'pending';
   /**
@@ -32,6 +33,7 @@ interface StoredSnapshot {
    * holds the newer text and the draft must stop answering for it (D-088).
    */
   superseded: Set<string>;
+  invalidated: Set<string>;
   workspaceId: string;
 }
 
@@ -106,6 +108,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
 
   const capture = (input: {
     ownerId: string;
+    ownerGeneration?: number;
     resources: readonly SurfaceSnapshotResource[];
     sessionId: string;
     workspaceId: string;
@@ -132,11 +135,13 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const snapshot: StoredSnapshot = Object.freeze({
       dirtyPaths,
       ownerId: input.ownerId,
+      ownerGeneration: input.ownerGeneration ?? 0,
       ref,
       resources,
       sessionId: input.sessionId,
       state: 'pending',
       superseded: new Set<string>(),
+      invalidated: new Set<string>(),
       workspaceId: input.workspaceId,
     });
     snapshots.set(ref, snapshot);
@@ -172,6 +177,65 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         if (pathKey(normalizeResourceId(resource.resource.resourceId)) === written) {
           snapshot.superseded.add(key);
         }
+      }
+    }
+  };
+
+  const applyOwnerEdit = (input: {
+    ownerId: string;
+    ownerGeneration: number;
+    workspaceId: string;
+    resourceId: string;
+    expectedBaseRevision: string | null;
+    expectedLocalEditRevision: number;
+    nextLocalEditRevision: number;
+    content: string;
+    encoding: string;
+    bom: boolean;
+  }): void => {
+    const key = pathKey(input.resourceId);
+    const hash = contentHash(input.content);
+    for (const snapshot of snapshots.values()) {
+      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration
+        || snapshot.workspaceId !== input.workspaceId || snapshot.superseded.has(key)) continue;
+      const resource = snapshot.resources.get(key);
+      if (!resource) continue;
+      if (resource.baseRevision !== input.expectedBaseRevision
+        || resource.localEditRevision !== input.expectedLocalEditRevision) {
+        snapshot.invalidated.add(key);
+        continue;
+      }
+      const previous = contents.get(resource.contentHash);
+      if (previous) {
+        previous.references -= 1;
+        if (previous.references === 0) contents.delete(resource.contentHash);
+      }
+      const existing = contents.get(hash);
+      if (existing) existing.references += 1;
+      else contents.set(hash, { content: input.content, references: 1 });
+      snapshot.resources.set(key, Object.freeze({
+        ...resource,
+        contentHash: hash,
+        localEditRevision: input.nextLocalEditRevision,
+        encoding: input.encoding,
+        bom: input.bom,
+      }));
+      snapshot.invalidated.delete(key);
+    }
+  };
+
+  const invalidateOwnerEdit = (input: {
+    ownerId: string;
+    ownerGeneration: number;
+    workspaceId: string;
+    resourceIds: readonly string[];
+  }): void => {
+    const keys = new Set(input.resourceIds.map(pathKey));
+    for (const snapshot of snapshots.values()) {
+      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration
+        || snapshot.workspaceId !== input.workspaceId) continue;
+      for (const key of keys) {
+        if (snapshot.resources.has(key) && !snapshot.superseded.has(key)) snapshot.invalidated.add(key);
       }
     }
   };
@@ -228,6 +292,9 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const resource = snapshot.resources.get(pathKey(resourceId));
     if (!resource) return { status: 'disk' };
     if (snapshot.superseded.has(pathKey(resourceId))) return { status: 'disk', superseded: true };
+    if (snapshot.invalidated.has(pathKey(resourceId))) {
+      return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
+    }
     const content = contents.get(resource.contentHash)?.content;
     if (content === undefined) {
       return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
@@ -257,6 +324,9 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       if (snapshot.superseded.has(pathKey(resourceId))) {
         supersededPaths.push(resourceId);
         continue;
+      }
+      if (snapshot.invalidated.has(pathKey(resourceId))) {
+        return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
       }
       const resource = snapshot.resources.get(pathKey(resourceId));
       const content = resource ? contents.get(resource.contentHash)?.content : undefined;
@@ -290,6 +360,11 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     return snapshot.dirtyPaths.filter((resourceId) => !snapshot.superseded.has(pathKey(resourceId)));
   };
 
+  const owner = (sessionId: string, context: AgentInputContext): { ownerId: string; generation: number; workspaceId: string } | null => {
+    const snapshot = resolveReady(sessionId, context);
+    return snapshot ? { ownerId: snapshot.ownerId, generation: snapshot.ownerGeneration, workspaceId: snapshot.workspaceId } : null;
+  };
+
   /**
    * Return a content-free fixed path view for native find/ls wrappers. A
    * request outside the dirty set remains a disk operation; a related request
@@ -319,6 +394,9 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       .map(normalizeResourceId)
       .filter((resourceId) => isWithin(resourceId, normalizedRoot));
     if (dirtyPaths.length === 0) return { status: 'disk' };
+    if (dirtyPaths.some((resourceId) => snapshot.invalidated.has(pathKey(resourceId)))) {
+      return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
+    }
     const files = dirtyPaths
       .map((resourceId) => {
         const resource = snapshot.resources.get(pathKey(resourceId));
@@ -387,7 +465,22 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     activeBySession.clear();
   };
 
-  return { capture, clone, commit, dispose, draftPaths, dropPendingOwner, dropSession, observeWrite, overlay, read, release };
+  return {
+    applyOwnerEdit,
+    capture,
+    clone,
+    commit,
+    dispose,
+    draftPaths,
+    dropPendingOwner,
+    dropSession,
+    invalidateOwnerEdit,
+    observeWrite,
+    overlay,
+    owner,
+    read,
+    release,
+  };
 };
 
 export type SurfaceSnapshotStore = ReturnType<typeof createSurfaceSnapshotStore>;

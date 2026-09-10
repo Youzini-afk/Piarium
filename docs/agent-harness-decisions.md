@@ -4124,6 +4124,51 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-203 · 2026-09-10 · 草稿 Integration 由 Documents 定向执行，确认与撤销共用持久操作
+
+背景：验收 D-201 时，真实文件反例证明旧预览的手工解决可以覆盖预览后的父编辑；纯 surface 操作在缓冲尚未写入时已经记为 complete。调用方传正文、UI 本地应用再按路径 ack，不能证明目标窗口、文档实例或实际写入。预览 GET 还会触发 Thread 更新并再次加载自身。
+
+决定：
+
+1. 预览固定子结果和父完整身份。草稿包括 owner、连接代际/注册、文档实例、base/local 修订、正文哈希与保存格式；磁盘身份含路径状态与 mode。提交必须消费所审阅的 binding 和路径修订，不能重取父正文后套用旧解决。预览读取不刷新 Thread 事件，同值投影不发新事件；父输入变化使绑定失效。
+2. Agent 沿本次 inputContext 的 Host 快照解析发起 surface，UI 显式指向自身 owner。Documents 沿已有 dirty-owner 连接发送定向操作；事件只带元数据，正文经已认证的 Documents HTTP 通道读写。回执绑定 request、operation、owner、注册代际与文档实例。缺失记录不自动打开替代；窗口失联不被解释为草稿不存在。
+3. 同一 Integration 在执行前持久化磁盘和 surface 目标的 before/after、对象引用、身份与 apply intent。缓冲确认前不能 complete；断连、重启或不明回执保留 needs-attention，恢复不能把 surface 行当磁盘写入。失败条件补偿，撤销走同一 Host 操作并校验当前产物，保留后续用户编辑。
+4. UI 与 agent 共用此操作，无调用方正文与裸路径 ack 旁路。缓冲修改仍不保存；同 operation 的重试保留首次撤销基线。已知本次缓冲写入后，旧读取快照不再冒充当前草稿，也不能失效后读回旧磁盘。可应用性与测试验证继续分列。
+
+影响：Documents authority/Registry/客户端、恢复操作、coordinator、线程工具/路由与冲突面板；修订 D-201 的执行与确认方式，沿用 D-078 的原生状态及默认交付方向。
+
+状态：已实施，真实 Documents/Registry/Coordinator 混合集成与撤销、故障与 UI 请求行为证据见 status 3.5a。
+
+### D-204 · 2026-09-10 · 归档等待真实执行退出，物化与预算按整个工作区处理
+
+背景：D-202 的回收检查提前释放写者屏障；准备任务、关闭失败与 native 结果恢复没有闭合。首次物化绕过用户预算，空间统计只覆盖当前父会话；恢复只取消 archived 标记，没有把原会话重新接到 ThreadRun。
+
+决定：
+
+1. 每个 Run 的准备/setup/会话启动有自己的取消与完成生命周期。归档取消并等待实际任务、Pi 会话和 Host shell 退出，再发布待保留结果；任一步失败保留可重试的绑定与目录，不吞错并宣称归档成功。成功关闭的事实绑定该 Run，后续采集或落盘失败重试不再要求已关闭的 provider 再关闭一次。目录创建即登记归属，准备取消仍等待实际生产者结束。
+2. 同线程的归档、恢复和回收共用生命周期协调；自动清理跳过正忙的目标，不持有一个线程的锁等待另一个线程。真正删除期间持续持有 Documents 写者屏障，屏障内重核结果和后台命令。dirty/merge-ready 的提示本身不等于未完持久 Integration；已独立保存的结果仍可回收物化目录。
+3. 恢复按选定 native resultRevision 重建，沿同一 Thread、原 Pi session 创建并绑定新 Run。`materialize/materializing/setup/ready` 是持久阶段，失败原因只供展示。失败的部分目录重试清理要核对保存的 fingerprint；出现新内容则保留。已结束或已回收但未归档的线程点击打开也先走 Host 恢复；失败保留原可重试生命周期，UI 不打开错误目录。
+4. 用户预算适用于首次准备和恢复，按工作区全部父会话的目录与去重对象统计，加上可知新增需求。短临界区预留并发准备的已知需求，慢 setup/会话调用不占工作区锁。未知量保留未知，不能遮住已知超额，也不因未知自动禁止所有任务；没有新增默认配额。优先回收合格目录，不杀已有任务。
+
+影响：Thread runtime/registry、materializer/worktree、space、Host 关闭装配与线程面板；补正 D-202 的生命周期实现。
+
+状态：已实施，真实 Git/native 生命周期、失败与并发反例、React 打开消费证据见 status 3.4/3.5 与 3.10。
+
+### D-205 · 2026-09-10 · shell 注册按 actor 代际等待，退出以进程和写者完成为准
+
+背景：D-200 的异步 settings 注册存在首个工具请求先到、旧 worker 注册迟到复活的问题。PowerShell 的 `-Command -` 不适用于 ConPTY。Host 丢弃会话时火忘关闭 PTY，也不能作为线程目录可回收的依据。
+
+决定：
+
+1. 注册按 authority/session/worker/generation 归属并去重，工具准入等待自己的注册。换代、会话关闭和 Host 停止使旧等待失效，迟到配置不能复活旧 actor。首次注册不清除已捕获的用户输入快照。
+2. 设置读取失败明确 unavailable，替代 D-200 第 3 条的 auto 回退；配置有效时仍按工作区选定并固定解释器。PowerShell 使用真实交互进程与其自身命令包装，Git Bash 继续使用 Bash 包装。
+3. 关闭先确认 PTY 退出，再释放命令写者。超时或失败不伪造已停，仍可观察与重试；被 drop/换代移出的 shell 在关闭完成前仍参与回收判断。线程的 sessions.close 等待这条 Host 关闭链，再完成 Pi 会话关闭。
+4. `harness.cancel.requestId` 取消同 actor 已准入的请求，不额外要求搜索权限；按 `queryId` 取消 explore 仍要求 `read.search`。公开 merge 的 signal 进入同一取消链，不能因借用 explore 的权限检查而失效。
+
+影响：session registration、Router、shell supervisor、service-host 与 index；不增加解释器设置或后台终端 tab。
+
+状态：已实施，真实 Windows 与定向证据见 status 1.3。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4328,6 +4373,9 @@ ModelRuntime 纵切继续通过。
 | D-197 | superseded in part（默认整理与原文读取保持；未知正文/分片/旧 Host 由 D-199 收口） | D-199 | 设计 5.2；plan/status 3.17 |
 | D-198 | implementation（复用代际存储；自动维度建设；固定召回绑定；失效/配置/关闭；并发 bootstrap 与 resolver 取消反例已验证） | — | 设计 7.5；plan/status 2.8 |
 | D-199 | implementation（保留未知正文与分片；混合命令通用展示；大块/提示预算与 UTF-8 首尾；条件免二次截断） | — | 设计 5.2；plan/status 3.17 |
-| D-200 | implementation（生产发现 Git Bash；按工作区 settings.get 选解释器；usr\\bin 优先） | — | 设计 5.2；status 1.3；host DOCUMENTATION |
-| D-201 | implementation（dirty 分类写回 Document Registry；绑定预览；settle=dirty） | — | 设计 3.4–3.5；status 3.5a / 3.10 |
-| D-202 | implementation（用户归档保留结果/转录；占用与预算按 Host 投影；占用路径不删） | — | 设计 9.3.4；status 3.4 / 3.10 |
+| D-200 | superseded in part（发现与解释器配置保留；异步准入/失败与退出由 D-205 补正） | D-205 | 设计 5.2；status 1.3；host DOCUMENTATION |
+| D-201 | superseded in part（固定结果与三方计划保留；surface 执行/确认与绑定由 D-203 收口） | D-203 | 设计 9.2.5b；status 3.5a / 3.10 |
+| D-202 | superseded in part（保留策略与产品入口保留；退出/恢复/预算由 D-204 补正） | D-204 | 设计 9.3.4；status 3.4 / 3.10 |
+| D-203 | implementation（定向 surface、持久确认/撤销、来源更新与绑定提交） | — | 设计 9.2.5b；plan 3.4F / 3.5；status 3.5a |
+| D-204 | implementation（退出、结构化准备、并发预算与原会话恢复） | — | 设计 9.3.4；plan 3.4E / 3.10；status 3.4 / 3.10 |
+| D-205 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 |

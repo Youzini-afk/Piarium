@@ -1,14 +1,16 @@
 import { describe, expect, test } from 'bun:test';
+import { vi } from 'vitest';
 import type {
   DocumentsAPI,
   PiariumAgentInputSnapshotCaptureRequest,
   PiariumDocumentReadResult,
   PiariumDocumentRecoveryJournalSummary,
+  PiariumDocumentSurfaceOperationCompletion,
+  PiariumDocumentSurfaceOperationPayload,
   PiariumDocumentWatchEvent,
   PiariumResourceReference,
 } from '@piarium/application-client';
 import { DocumentRegistry } from './registry';
-import { applyThreadSurfaceEdits, collectSurfaceParents } from './thread-surface-integration';
 import { documentKey } from './types';
 
 const resource = (resourceId = 'note.txt'): PiariumResourceReference => ({
@@ -21,6 +23,11 @@ const mutationToken = () => ({
   epoch: 1,
   owner: { kind: 'test', id: 'document-registry' },
 });
+
+const hashText = async (text: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return `sha256-${Buffer.from(digest).toString('hex')}`;
+};
 
 const createMemoryDocuments = () => {
   const files = new Map<string, { content: string; revision: string }>();
@@ -35,6 +42,8 @@ const createMemoryDocuments = () => {
   const listeners = new Set<(event: PiariumDocumentWatchEvent) => void>();
   const dirtyPublications: Array<Parameters<DocumentsAPI['publishDirtyBuffers']>[0]> = [];
   const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
+  const surfaceCompletions: PiariumDocumentSurfaceOperationCompletion[] = [];
+  let surfaceOperation: PiariumDocumentSurfaceOperationPayload | null = null;
   let revisionSeq = 1;
   let workspaceEpoch = 1;
   let watchSequence = 0;
@@ -50,6 +59,14 @@ const createMemoryDocuments = () => {
       return { acknowledged: true };
     },
     clearDirtyBuffers: async () => ({ cleared: true }),
+    readSurfaceOperation: async () => {
+      if (!surfaceOperation) throw new Error('surface operation unavailable');
+      return surfaceOperation;
+    },
+    completeSurfaceOperation: async (request) => {
+      surfaceCompletions.push(request);
+      return { accepted: true };
+    },
     publishDirtyBuffers: async (request) => {
       dirtyPublications.push(request);
       return { ...request, updatedAt: '2026-08-28T00:00:00.000Z' };
@@ -201,6 +218,8 @@ const createMemoryDocuments = () => {
     dirtyPublications,
     files,
     journals,
+    surfaceCompletions,
+    setSurfaceOperation: (operation: PiariumDocumentSurfaceOperationPayload) => { surfaceOperation = operation; },
     emit,
     setEpoch: (epoch: number) => { workspaceEpoch = epoch; },
   };
@@ -887,6 +906,42 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
+  test('rejects a prepared edit after the same path is reopened as a new document instance', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource('reopened.ts');
+    const temporary = resource('moved-away.ts');
+    await api.write({
+      token: mutationToken(), resource: identity, content: 'same\n', encoding: 'utf-8', bom: false,
+      expectedRevision: null, operationId: 'seed-reopened',
+    });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const original = await registry.open(identity);
+    const preview = await registry.prepareWorkspaceEdit({
+      workspaceId: identity.workspaceId,
+      origin: 'thread-integration',
+      groupId: 'reopened-operation',
+      textEdits: [{
+        identity,
+        version: original.localEditRevision,
+        edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } }, newText: 'next' }],
+      }],
+    });
+    expect(preview.status).toBe('ready');
+
+    registry.handleWatchEvent({
+      sourceId: 'test', generation: 1, kind: 'moved', sequence: 1, from: identity, resource: temporary,
+    });
+    const reopened = await registry.open(identity);
+    expect(reopened.buffer).toBe(original.buffer);
+    expect(reopened.localEditRevision).toBe(original.localEditRevision);
+    expect(reopened.documentInstanceId).not.toBe(original.documentInstanceId);
+
+    const result = await registry.applyWorkspaceEdit('reopened-operation');
+    expect(result.status).toBe('rejected');
+    expect(registry.get(identity)?.buffer).toBe('same\n');
+    registry.dispose();
+  });
+
   test('returns explicit unsupported for resource operations before changing documents', async () => {
     const { api } = createMemoryDocuments();
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
@@ -903,43 +958,6 @@ describe('DocumentRegistry', () => {
         message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
       }],
     });
-    registry.dispose();
-  });
-
-  test('applies a thread surface edit as one undo group without saving', async () => {
-    const { api, files } = createMemoryDocuments();
-    const identity = resource('draft.txt');
-    await api.write({
-      token: mutationToken(),
-      resource: identity,
-      content: 'disk parent\n',
-      encoding: 'utf-8',
-      bom: false,
-      expectedRevision: null,
-      operationId: 'seed',
-    });
-    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
-    const opened = await registry.open(identity);
-    registry.applyTransaction(identity, 'unsaved parent\n', { origin: 'editor' });
-    const current = registry.get(identity)!;
-    const applied = await applyThreadSurfaceEdits({
-      workspaceId: identity.workspaceId,
-      operationId: 'integration-op-1',
-      edits: [{
-        resourceId: identity.resourceId,
-        expectedLocalEditRevision: current.localEditRevision,
-        expectedBaseRevision: current.baseRevision,
-        newText: 'child result\n',
-      }],
-      registry,
-    });
-    expect(applied).toEqual({ applied: ['draft.txt'], failed: [] });
-    expect(registry.get(identity)?.buffer).toBe('child result\n');
-    expect(registry.get(identity)?.dirty).toBe(true);
-    expect(files.get(documentKey(identity))?.content).toBe('disk parent\n');
-    expect(registry.undoWorkspaceEdit('integration-op-1').status).toBe('undone');
-    expect(registry.get(identity)?.buffer).toBe('unsaved parent\n');
-    expect(collectSurfaceParents(identity.workspaceId, ['draft.txt', 'other.txt'], registry).map((entry) => entry.resourceId)).toEqual(['draft.txt']);
     registry.dispose();
   });
 
@@ -972,6 +990,78 @@ describe('DocumentRegistry', () => {
     expect(preview.groupId).toBe('integration-op-named');
     expect((await registry.applyWorkspaceEdit('integration-op-named')).status).toBe('applied');
     expect(registry.undoWorkspaceEdit('integration-op-named').status).toBe('undone');
+    registry.dispose();
+  });
+
+  test('applies, retries, and undoes a Host surface operation without reopening or saving', async () => {
+    const memory = createMemoryDocuments();
+    const identity = resource('surface-operation.txt');
+    await memory.api.write({
+      token: mutationToken(), resource: identity, content: 'disk\n', encoding: 'utf-8', bom: false,
+      expectedRevision: null, operationId: 'seed-surface-operation',
+    });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(identity);
+    registry.applyTransaction(identity, 'unsaved\n', { origin: 'editor' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const before = registry.get(identity)!;
+    const beforeHash = await hashText(before.buffer);
+    const afterText = 'child\n';
+    const afterHash = await hashText(afterText);
+    const target = {
+      resource: identity,
+      documentInstanceId: before.documentInstanceId,
+      baseRevision: before.baseRevision,
+      localEditRevision: before.localEditRevision,
+      bufferHash: beforeHash,
+      encoding: before.encoding,
+      bom: before.bom,
+      lineEnding: before.lineEnding,
+      newText: afterText,
+    };
+    const reportedErrors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const unsubscribeThrowingObserver = registry.subscribe(identity, () => {
+      throw new Error('observer failed after the buffer commit');
+    });
+    const dispatch = async (requestId: string, action: 'apply' | 'undo', extra: Record<string, unknown> = {}) => {
+      const previousCompletions = memory.surfaceCompletions.length;
+      memory.setSurfaceOperation({
+        action,
+        operationId: 'integration-surface-1',
+        requestId,
+        workspaceId: identity.workspaceId,
+        targets: [{ ...target, ...extra }],
+      });
+      memory.emit({
+        kind: 'surface-operation', action, operationId: 'integration-surface-1', requestId,
+        workspaceId: identity.workspaceId,
+      });
+      for (let attempt = 0; attempt < 20 && memory.surfaceCompletions.length === previousCompletions; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+
+    await dispatch('apply-1', 'apply');
+    expect(memory.surfaceCompletions.at(-1)?.resources[0]?.status).toBe('applied');
+    const applied = registry.get(identity)!;
+    expect(applied.buffer).toBe(afterText);
+    expect(memory.files.get(documentKey(identity))?.content).toBe('disk\n');
+
+    const appliedRevision = applied.localEditRevision;
+    await dispatch('apply-retry', 'apply');
+    expect(memory.surfaceCompletions.at(-1)?.resources[0]?.status).toBe('applied');
+    expect(registry.get(identity)?.localEditRevision).toBe(appliedRevision);
+
+    await dispatch('undo-1', 'undo', {
+      expectedAppliedRevision: appliedRevision,
+      expectedAppliedHash: afterHash,
+    });
+    expect(memory.surfaceCompletions.at(-1)?.resources[0]?.status).toBe('undone');
+    expect(registry.get(identity)?.buffer).toBe('unsaved\n');
+    expect(memory.files.get(documentKey(identity))?.content).toBe('disk\n');
+    expect(reportedErrors.mock.calls.length > 0).toBe(true);
+    unsubscribeThrowingObserver();
+    reportedErrors.mockRestore();
     registry.dispose();
   });
 });

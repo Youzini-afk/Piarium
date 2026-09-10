@@ -137,4 +137,42 @@ describe("production shell assembly", () => {
       expect(result.stdout).toMatch(/piarium-shell-assembly/);
     }
   }, 30_000);
+
+  it("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
+    if (process.platform !== "win32") return;
+    const discovered = discoverShells();
+    expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
+    const workspace = mkdtempSync(join(tmpdir(), "shell-powershell-"));
+    dirs.push(workspace);
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => workspace,
+    });
+    hosts.push(host);
+    host.registerSession({
+      actor: actor("session-powershell"),
+      grantedCapabilities: ["process.shell"],
+      workspaceId: "ws-powershell",
+      workspaceRoot: workspace,
+      shellSetting: "powershell",
+    });
+    const ctx = serviceContext("session-powershell", "ws-powershell");
+    const first = await createShellExecService(host).handle(
+      { command: "Write-Output piarium-powershell-one", cwd: workspace, waitMs: 15_000 },
+      ctx,
+    );
+    const second = await createShellExecService(host).handle(
+      { command: "Write-Output piarium-powershell-two", waitMs: 15_000 },
+      ctx,
+    );
+    const failed = await createShellExecService(host).handle(
+      { command: "cmd.exe /c exit 7", waitMs: 15_000 },
+      ctx,
+    );
+    expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
+    expect(second).toMatchObject({ kind: "completed", exitCode: 0 });
+    expect(failed).toMatchObject({ kind: "completed", exitCode: 7 });
+    if (first.kind === "completed") expect(first.stdout).toContain("piarium-powershell-one");
+    if (second.kind === "completed") expect(second.stdout).toContain("piarium-powershell-two");
+  }, 45_000);
 });

@@ -84,14 +84,14 @@ Last updated: 2026-09-10
 | 文件/恢复 | packages/web/application-host/lib/documents/、lib/recovery/ 的 DOCUMENTATION.md；authority、journal-files、journal-catalog、journal-engine |
 | 搜索/LSP/终端 | packages/web/application-host/lib/search/content.ts、lib/lsp/supervisor.ts、lib/terminal/runtime.ts |
 | UI | packages/ui/src/components/pi-session/；HarnessThreadState、HarnessThreadsPanel、PiChatView |
-| 真 Pi 测试 | packages/pi-host/test/harness/session-e2e.test.ts；Host thread-runtime-session.e2e.test.ts |
+| 真 Pi 测试 | packages/pi-host/test/harness/session-e2e.test.ts；同目录 thread-runtime-session.e2e.test.ts |
 
 ### 0.7 当前顺序与交付方式（D-078）
 
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
-   草稿基线与 surface 写回/绑定预览已进入生产链（D-201）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-202）。虚拟分支工具仍待对应消费者。
+   草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。虚拟分支工具仍待对应消费者。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -99,9 +99,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    3.16A 已提交（`37b12e8e`、`8752e039`）。3.16B–E 已接入生产链（D-190–D-193）：远程 embedding 绑定、向量复用与前台优先、
    草稿/线程语义覆盖、专用 HTTP rerank。已实现的旧 3.15①②④ 接口继续使用。
    explore 负责快速提供当前代码，较长开放追踪由 retrieval 承担；扩散模型与后训练留待后续。
-   3.17 的命令输出解析可按模块责任独立实施。完成能力即按有效配置提供，缺某一路不丢弃其他材料。
-4. **其余产品面**：知识管理、embedding、自动 review、归档/恢复、terminal runtime、bundled Pi 按实际依赖交付；重叠提示与
-   合并预览随线程服务实现，不设独立收益审批。
+   3.17 的命令输出整理已交付（D-197/D-199）。完成能力即按有效配置提供，缺某一路不丢弃其他材料。
+4. **其余产品面**：知识全量管理、自动 review、后台终端 tab、bundled Pi 按实际依赖交付；知识语义召回已沿远程 embedding 接线（D-196）。重叠提示与合并预览随线程服务实现，不设独立收益审批。
 
 TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台与外部 provider 的未验证范围如实报告，不把缺另一平台机器
 写成已验证平台的禁用条件。不自行发起付费记忆实验；完成一个切片后按本节顺序继续，不把文档同步解释为停工点。
@@ -294,6 +293,7 @@ setup 采用用户工作区配置，配置一次授权正常重复执行，不�
 
 **F. 提示。** 路径重叠非阻塞，未知 shell 覆盖明示，不长期占编辑锁。合并预览绑定子结果与父相关路径/草稿版本，改变即失效，
 接 integration/Zone 2/UI，不等全仓 WorkspaceHead 或收益 benchmark。实现与集成共用查询，不复制状态 authority。
+预览查询不制造自身 Thread 更新循环；冲突提交消费旧预览的完整 binding，不在重取父正文后复用旧解决（D-203）。
 
 对应验收：固定结果后 live 修改不混入；父改动不串读；子原地写不改父；setup/执行写回；ignored/后台 writer 不误回收；
 原路径重建；跨清理/迁移引用；非 Git/无 HEAD；真实 Pi child 创建到执行、结果和重开。平台后端在相应机器验证，不要求所有
@@ -312,6 +312,8 @@ UI/agent 共用 operationId，重试与新结果分别处理。
 结果明确 applied/conflict/compensated/needs-attention 并给已应用/冲突路径，不用 merged:0 暗示父完全未改。
 冲突解决核对同一操作，不重放已写 patch。草稿在 surface 应用撤销，磁盘经 Host。原生路径集成不修改 index；旧 Git 结果先导入，
 不继续使用写入 index 的 --3way。集成完成状态与父回合 checkpoint 的变更绑定同事务提交；不能把 process writer 注册等同于可撤销日志。
+草稿执行复用 Documents owner 连接，绑定实例/代际/修订/哈希；正文与回执经认证通道。磁盘与 surface 在同一持久操作先记 intent，
+确认后才完成，崩溃不明保留 needs-attention；撤销与条件补偿校验当前产物。agent 不依赖线程面板代为执行，UI 不自报裸路径完成（D-203）。
 合并与验证分别记录；父对合并后状态做相关检查。结构感知优化沿合并策略实施，不把不同函数等同语义无冲突。
 
 验证正常/冲突/部分失败/中断、幂等、父并发、草稿不存盘、index 后续修改和报告绑定；覆盖重叠区间、权限位、无效 UTF-8、日志提交失败
@@ -365,6 +367,8 @@ LRU 上限与空闲释放、导航的固定草稿与"草稿不可用不回退磁
 
 rail/overlay/时间线共用 session feed/SSE。接归档/独立恢复、结果修订、占用/保留原因和集成状态；重开按需物化，在原 Pi
 session 继续，讨论转实现新分支/Run 保留 transcript。子消息不进父正文；未知占用不补零；新文案 i18n。
+归档等待 Run 准备与真实执行退出，失败保留重试所需身份；恢复原 session 时创建并绑定新 Run。已结束或已回收的普通线程打开也先恢复，失败保留原生命周期。
+回收持有写者屏障直到删除完成；同线程生命周期互斥，自动回收跳过忙目标；首次准备/恢复按工作区全局占用预留可知新增需求，慢 setup 不持工作区锁（D-204）。
 
 ### 3.11 结构来源 provider 与 tree-sitter 语法包（D-091）
 

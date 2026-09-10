@@ -1700,7 +1700,18 @@ export type PiariumDirtyStateBarrierEvent = {
   workspaceId: string;
 };
 
-export type PiariumDocumentWatchEvent = PiariumWorkspaceFileEvent | PiariumDirtyStateBarrierEvent;
+export type PiariumDocumentSurfaceOperationEvent = {
+  action: 'capture' | 'apply' | 'undo';
+  kind: 'surface-operation';
+  operationId: string;
+  requestId: string;
+  workspaceId: string;
+};
+
+export type PiariumDocumentWatchEvent =
+  | PiariumWorkspaceFileEvent
+  | PiariumDirtyStateBarrierEvent
+  | PiariumDocumentSurfaceOperationEvent;
 
 export interface PiariumDocumentRecoveryJournalSummary {
   journalId: string;
@@ -1714,8 +1725,60 @@ export interface PiariumDocumentRecoveryJournalSummary {
 
 export interface PiariumDirtyBufferResource {
   baseRevision: string | null;
+  /** Hash of the editor-normalized buffer text, not the serialized file bytes. */
+  bufferHash?: string;
+  documentInstanceId?: string;
+  encoding?: string;
+  bom?: boolean;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
   localEditRevision: number;
   resource: PiariumResourceReference;
+}
+
+export interface PiariumDocumentSurfaceBinding {
+  baseRevision: string | null;
+  bufferHash: string;
+  documentInstanceId: string;
+  encoding: string;
+  bom: boolean;
+  lineEnding: 'lf' | 'crlf' | 'cr';
+  localEditRevision: number;
+  resource: PiariumResourceReference;
+}
+
+export interface PiariumDocumentSurfaceOperationTarget extends PiariumDocumentSurfaceBinding {
+  newText?: string;
+  expectedAppliedRevision?: number;
+  expectedAppliedHash?: string;
+}
+
+export interface PiariumDocumentSurfaceOperationPayload {
+  action: 'capture' | 'apply' | 'undo';
+  operationId: string;
+  requestId: string;
+  targets: PiariumDocumentSurfaceOperationTarget[];
+  workspaceId: string;
+}
+
+export interface PiariumDocumentSurfaceOperationResourceResult {
+  resource: PiariumResourceReference;
+  status: 'captured' | 'applied' | 'undone' | 'failed';
+  documentInstanceId?: string;
+  beforeLocalEditRevision?: number;
+  beforeHash?: string;
+  afterLocalEditRevision?: number;
+  afterHash?: string;
+  content?: string;
+  message?: string;
+}
+
+export interface PiariumDocumentSurfaceOperationCompletion {
+  generation: number;
+  ownerId: string;
+  operationId: string;
+  requestId: string;
+  resources: PiariumDocumentSurfaceOperationResourceResult[];
+  workspaceId: string;
 }
 
 export interface PiariumAgentInputSnapshotResource extends PiariumDirtyBufferResource {
@@ -1783,6 +1846,13 @@ export interface DocumentsAPI {
   }): Promise<{ cleared: boolean }>;
   captureAgentInputSnapshot?(request: PiariumAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
   releaseAgentInputSnapshot?(request: { context: AgentInputContext; sessionId: string }): Promise<{ released: boolean }>;
+  readSurfaceOperation?(request: {
+    generation: number;
+    ownerId: string;
+    requestId: string;
+    workspaceId: string;
+  }): Promise<PiariumDocumentSurfaceOperationPayload>;
+  completeSurfaceOperation?(request: PiariumDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<PiariumWorkspaceIdentity>;
   read(resource: PiariumResourceReference): Promise<PiariumDocumentReadResult>;
   write(request: PiariumDocumentWriteRequest): Promise<PiariumDocumentWriteResult>;
