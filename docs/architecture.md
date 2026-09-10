@@ -912,7 +912,9 @@ Development and diagnostics still enumerate:
 5. an explicit custom Node/module path.
 
 The selected source, Pi version, Node version, package root, agent directory, and Git Bash path are
-always visible. A source mismatch is a diagnostic state, never silently repaired.
+always visible. Application Host discovers the bash executable from the same Windows install roots
+and PATH used for Git, and applies `harness.shell` from Pi settings at session register. A source
+mismatch is a diagnostic state, never silently repaired.
 
 The production diagnostics surface is Pi-native and shared by About, the desktop Help menu, the
 keyboard shortcut, and `window.__piariumDebug`. It combines the negotiated host handshake, the

@@ -43,6 +43,12 @@ import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
+import { discoverShells } from './lib/harness/shell-discovery.js';
+import {
+  HarnessShellSettingsError,
+  resolveHarnessShellSetting,
+  type HarnessShellSetting,
+} from './lib/harness/harness-shell-settings.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
 import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
@@ -59,6 +65,7 @@ import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './lib/knowledge/semantic/workspace-inference.js';
 import { pinSemanticQueryView } from './lib/knowledge/semantic/query-view.js';
 import {
+  type HarnessActorIdentity,
   type HarnessEmbedParams,
   type HarnessInferenceBindingSnapshot,
   type HarnessRerankParams,
@@ -1814,7 +1821,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     };
   }
 
+  const discoveredShells = discoverShells();
+  const pendingHarnessSessionRegisters = new Map<string, Promise<void>>();
   const harnessServiceHost = createHarnessServiceHost({
+    discoveredShells,
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: (sessionId, context, resourceId) => documentsAuthority.readAgentInputSnapshot(
@@ -2012,6 +2022,56 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId) => threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
   });
+  const registerHarnessSession = (
+    actor: HarnessActorIdentity,
+    sessionId: string,
+    workspaceId: string,
+    workspaceRoot: string,
+    activeTools: readonly string[],
+  ): Promise<void> => {
+    const pending = pendingHarnessSessionRegisters.get(sessionId);
+    if (pending) return pending;
+    const work = (async () => {
+      let shellSetting: HarnessShellSetting = 'auto';
+      let shellResolution: { invalid: { reason: string; hint: string } } | undefined;
+      try {
+        const broker = getReadyPiRuntimeBroker();
+        if (broker) {
+          shellSetting = resolveHarnessShellSetting(
+            await broker.requestForSession(sessionId, 'settings.get', {}),
+          );
+        }
+      } catch (error) {
+        if (error instanceof HarnessShellSettingsError) {
+          shellResolution = {
+            invalid: {
+              reason: error.message,
+              hint: 'Set harness.shell to auto, git-bash, powershell, or wsl in Pi settings.json.',
+            },
+          };
+        } else {
+          console.error('[Harness] harness.shell resolution failed; using auto:', errorMessage(error));
+        }
+      }
+      if (harnessServiceHost.hasActor(actor)) return;
+      harnessServiceHost.registerSession({
+        actor,
+        grantedCapabilities: deriveHarnessCapabilities(activeTools, {
+          documentRead: true,
+          documentPathOverlay: true,
+          threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
+        }),
+        workspaceId,
+        workspaceRoot,
+        shellSetting,
+        ...(shellResolution ? { shellResolution } : {}),
+      });
+    })().finally(() => {
+      pendingHarnessSessionRegisters.delete(sessionId);
+    });
+    pendingHarnessSessionRegisters.set(sessionId, work);
+    return work;
+  };
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -2227,15 +2287,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           const activeTools = Array.isArray(envelopeData.activeTools)
             ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
             : [];
-          harnessServiceHost.registerSession({
-            actor: event.actor,
-            grantedCapabilities: deriveHarnessCapabilities(activeTools, {
-              documentRead: true,
-              documentPathOverlay: true,
-              threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
-            }),
-            workspaceId: harnessWorkspaceId,
-            workspaceRoot: envelopeData.cwd,
+          void registerHarnessSession(
+            event.actor,
+            sessionId,
+            harnessWorkspaceId,
+            envelopeData.cwd,
+            activeTools,
+          ).catch((error) => {
+            console.error('[Harness] Failed to register session shell:', errorMessage(error));
           });
         }
         void threadRuntime.resumeLostForParent(

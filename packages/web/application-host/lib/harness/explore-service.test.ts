@@ -35,6 +35,7 @@ async function fixture(
   const host = createHarnessServiceHost({
     search: (request, options) => search.searchContent(request, options),
     resolveWorkspaceRoot: async () => workspace,
+    discoveredShells: {},
     readExploreFile: createExploreFileReader(documents, paths),
     ...(structureSource ? { structureSource } : {}),
     ...(fileRelations ? { fileRelations } : {}),

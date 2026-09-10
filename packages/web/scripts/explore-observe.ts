@@ -401,6 +401,7 @@ const main = async (): Promise<void> => {
 
   const host = createHarnessServiceHost({
     resolveWorkspaceRoot: async () => repoRoot,
+    discoveredShells: {},
     readExploreFile: createExploreFileReader(documents, paths),
     // No editor in this process, so nothing is unsaved (D-082).
     agentInputDraftPaths: () => [],

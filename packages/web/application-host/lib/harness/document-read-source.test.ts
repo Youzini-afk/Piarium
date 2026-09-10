@@ -36,6 +36,7 @@ async function fixture() {
   const host = createHarnessServiceHost({
     search: async () => ({ status: "empty", generation: undefined }),
     resolveWorkspaceRoot: async () => workspace,
+    discoveredShells: {},
     documentReadSource: (sessionId, context, resourceId) => (
       documents.readAgentInputSnapshot(sessionId, context, resourceId)
     ),

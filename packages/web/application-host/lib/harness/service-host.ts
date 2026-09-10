@@ -1,5 +1,7 @@
 import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
+import { discoverShells } from "./shell-discovery.js";
+import type { HarnessShellSetting } from "./harness-shell-settings.js";
 import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
@@ -34,6 +36,9 @@ export interface HarnessSessionContext {
   grantedCapabilities: readonly HarnessCapability[] | Promise<readonly HarnessCapability[]>;
   workspaceId: string | null;
   workspaceRoot: string;
+  /** Resolved for this workspace at session register. Host-wide options are only a fallback. */
+  shellSetting?: HarnessShellSetting;
+  shellResolution?: { invalid: { reason: string; hint: string } };
 }
 
 interface SessionEntry {
@@ -203,8 +208,16 @@ export interface HarnessServiceHostOptions {
   semanticRecall?: HarnessServiceHost["semanticRecall"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
-  shellSetting?: "auto" | "git-bash" | "powershell" | "wsl";
+  shellSetting?: HarnessShellSetting;
+  /**
+   * Machine-level discovery. Production passes the Host construction result.
+   * When omitted, the Host discovers once from the real environment so a
+   * forgotten option cannot collapse Windows to "Git for Windows not found".
+   */
   discoveredShells?: { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
+  discoverShells?: () => { gitBashPath?: string; wslDistros?: string[]; hasBash?: boolean; hasPowerShell?: boolean };
+  /** Per-workspace fallback when the session context does not carry a setting. */
+  resolveShellSetting?: (workspaceId: string | null) => HarnessShellSetting;
   remote?: boolean;
   /**
    * Called when a session's shell supervisor is created to register a
@@ -298,6 +311,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const releaseAgentInputContext = options.releaseAgentInputContext ?? (() => ({ released: false }));
 
   const sessions = new Map<string, SessionEntry>();
+  const discoveredShells = options.discoveredShells
+    ?? (options.discoverShells ?? discoverShells)();
 
   const registerSession = (ctx: HarnessSessionContext): void => {
     const sessionId = ctx.actor.sessionId;
@@ -308,13 +323,18 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       options.dropAgentInputContexts?.(sessionId);
       exploreQueryStore.dropSession(sessionId);
     }
-    const interpreterResult = selectInterpreter({
-      platform: process.platform,
-      workspaceRoot: ctx.workspaceRoot,
-      setting: options.shellSetting ?? "auto",
-      discovered: options.discoveredShells ?? {},
-      remote: options.remote ?? false,
-    });
+    const interpreterResult = ctx.shellResolution
+      ? { unavailable: ctx.shellResolution.invalid }
+      : selectInterpreter({
+        platform: process.platform,
+        workspaceRoot: ctx.workspaceRoot,
+        setting: ctx.shellSetting
+          ?? options.resolveShellSetting?.(ctx.workspaceId)
+          ?? options.shellSetting
+          ?? "auto",
+        discovered: discoveredShells,
+        remote: options.remote ?? false,
+      });
 
     let shellSupervisor: ShellSupervisor | null = null;
     if ("kind" in interpreterResult) {

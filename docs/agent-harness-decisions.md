@@ -4071,6 +4071,23 @@ ModelRuntime 纵切继续通过。
 
 状态：待验收。
 
+### D-200 · 2026-09-10 · Windows shell 真实发现与按工作区配置接线（1.3）
+
+背景：生产 `index.ts` 创建 `HarnessServiceHost` 时不传 `discoveredShells` / `shellSetting`。Host 因此用 `auto` 加空 discovery。普通 Windows 路径下 `selectInterpreter` 返回 “Git for Windows not found”，即使用户已安装 Git Bash 或在现有设置里选了可用解释器。e2e 里手工塞 `gitBashPath` 不能证明生产装配。
+
+决定：
+
+1. 解释器发现是 Host 机器级责任，复用 Git 服务 / environment runtime 已有的 Windows 安装根、PATH 可执行检查，以及已解析的 `git.exe` 旁边的 bash。优先记录可执行的 `usr\bin\bash.exe`，避免 `bin` 启动器和把 `usr\bin` 误写成 `usr\usr\bin`。WSL 发行版来自 `wsl.exe --list --quiet`（含 UTF-16LE）。不另建配置文件。
+2. `harness.shell` 沿现有 Pi `settings.get`（用户默认 + 受信任项目覆盖）在**该会话注册时**解析，按 workspace/session 生效。Host 不再使用单一冻结的 `shellSetting` 作为生产权威。已运行的 PTY 不热切换；新会话或新 worker 代际再注册。两个工作区不能串用对方的解释器。
+3. 生产 `index.ts` 在构造 Host 时传入真实 `discoverShells()` 结果；Host 在选项省略时也自己发现一次，避免再次漏接。设置读取失败回退 `auto` + 真实发现；非法 `harness.shell` 记为 unavailable 并给出修复入口，不假装未安装。
+4. 本阶段只修可用性和配置接线。后台 shell 变终端 tab、bundled Pi 默认优先级不在此列。WSL 路径、PowerShell、远端和非 Windows 的原有选择规则保留；`auto` 在原生 Windows 上仍要求 Git Bash，不暗降到 PowerShell。
+
+验证：注入式发现/设置单测；缺解释器走公开 `shell.exec` 的 spawn-failed；本机 Windows 上 Host 默认发现 + 公开 `shell.exec` 执行 `echo`。不把 e2e 手工路径当作生产证明。
+
+影响：`shell-discovery.ts`、`harness-shell-settings.ts`、`service-host.ts`、`index.ts`、`shell-supervisor.ts`；设计 5.2；status 1.3；Host DOCUMENTATION。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4275,3 +4292,4 @@ ModelRuntime 纵切继续通过。
 | D-197 | superseded in part（默认整理与原文读取保持；未知正文/分片/旧 Host 由 D-199 收口） | D-199 | 设计 5.2；plan/status 3.17 |
 | D-198 | implementation（复用代际存储；自动维度建设；固定召回绑定；失效/配置/关闭；并发 bootstrap 与 resolver 取消反例已验证） | — | 设计 7.5；plan/status 2.8 |
 | D-199 | implementation（保留未知正文与分片；混合命令通用展示；大块/提示预算与 UTF-8 首尾；条件免二次截断） | — | 设计 5.2；plan/status 3.17 |
+| D-200 | implementation（生产发现 Git Bash；按工作区 settings.get 选解释器；usr\\bin 优先） | — | 设计 5.2；status 1.3；host DOCUMENTATION |

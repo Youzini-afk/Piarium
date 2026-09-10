@@ -250,7 +250,10 @@ research 与 knowledge-work profile 再评估）。
 | macOS / Linux | `bash` |
 
 工作区设置 `harness.shell: auto | git-bash | powershell | wsl`（默认 `auto`）供用户覆盖——整套工具链是 `.ps1` 的团队
-可切 PowerShell。此外 Windows 原生工具随时可从 bash 内调用（`powershell.exe -c ...`、`cmd //c ...`），harness 不
+可切 PowerShell。该值来自现有 Pi `settings.json`（用户默认 + 受信任项目覆盖），在**该会话注册时**生效，不另建配置
+文件。Application Host 在构造时用与 Git 服务相同的 Windows 安装根、PATH 和已解析的 `git.exe` 位置发现可执行的
+`bash.exe`，优先 `usr\bin` 而不是 `bin` 启动器。未发现时工具返回准确原因和安装/改设置入口，不能把已安装误报成未安装。
+此外 Windows 原生工具随时可从 bash 内调用（`powershell.exe -c ...`、`cmd //c ...`），harness 不
 禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Piarium 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
 

@@ -138,7 +138,8 @@ Host 规范化、完整批次全序获取 owner-bound lease；只保证该 Host 
 
 身份、Unicode、跨会话、注册表故障测试已存在，修改相关契约时复用，不重新跑一轮完整 P0。
 
-阶段 1 待做：shell 接 terminal runtime/终端 tab；apply_patch 多文件恢复真会话证据；平台 shell 与 Electron 打包验证。
+阶段 1 待做：shell 接 terminal runtime/终端 tab；apply_patch 多文件恢复真会话证据；macOS/Linux 与 Electron 打包验证。
+Windows 生产发现与按工作区 `harness.shell` 接线已由 D-200 交付。
 websearch provider 当前变更需重启 Host，后续新会话使用新的能力世代，旧会话保持配置；不注册不存在的 provider。
 
 ## 阶段 2：上下文与知识

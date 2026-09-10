@@ -37,10 +37,13 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
   }
 
   if (setting === "powershell") {
-    if (platform === "win32") {
-      return { kind: "powershell", command: "powershell.exe", args: ["-NoProfile", "-Command", "-"], env: {} };
+    if (platform !== "win32") {
+      return { unavailable: { reason: "PowerShell is only available on Windows", hint: "Use auto or bash setting on this platform." } };
     }
-    return { unavailable: { reason: "PowerShell is only available on Windows", hint: "Use auto or bash setting on this platform." } };
+    if (discovered.hasPowerShell === false) {
+      return { unavailable: { reason: "PowerShell not found", hint: "Install Windows PowerShell or set harness.shell to auto / git-bash." } };
+    }
+    return { kind: "powershell", command: "powershell.exe", args: ["-NoProfile", "-Command", "-"], env: {} };
   }
 
   if (setting === "wsl") {
@@ -52,11 +55,10 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
 
   if (setting === "git-bash") {
     if (platform !== "win32") return { unavailable: { reason: "Git Bash is only available on Windows", hint: "Use auto or bash setting on this platform." } };
-    if (!discovered.gitBashPath) return { unavailable: { reason: "Git for Windows not found", hint: 'Install it from https://git-scm.com/download/win or set harness.shell to "powershell".' } };
-    // Use usr\bin\bash.exe directly (not the bin\bash.exe launcher) to avoid
-    // spawning an extra wrapper process that survives dispose().
-    const bashExe = discovered.gitBashPath.replace(/\\bin\\bash\.exe$/i, "\\usr\\bin\\bash.exe");
-    return { kind: "git-bash", command: bashExe, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
+    if (!discovered.gitBashPath) return { unavailable: { reason: "Git for Windows not found", hint: 'Install Git for Windows from https://git-scm.com/download/win, or set harness.shell to "powershell" if that interpreter is installed.' } };
+    // Discovery records the executable to spawn. Prefer usr\bin\bash.exe there
+    // so this path is not rewritten when only the bin\ launcher exists.
+    return { kind: "git-bash", command: discovered.gitBashPath, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
   }
 
   // Auto detection
@@ -67,10 +69,9 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
       return { kind: "wsl", command: "wsl.exe", args: ["-d", distro, "--", "bash", "-l"], env: {}, distro };
     }
     if (discovered.gitBashPath) {
-      const bashExe = discovered.gitBashPath.replace(/\\bin\\bash\.exe$/i, "\\usr\\bin\\bash.exe");
-      return { kind: "git-bash", command: bashExe, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
+      return { kind: "git-bash", command: discovered.gitBashPath, args: ["-l"], env: { MSYS_NO_PATHCONV: "1" } };
     }
-    return { unavailable: { reason: "Git for Windows not found", hint: 'Install it from https://git-scm.com/download/win or set harness.shell to "powershell".' } };
+    return { unavailable: { reason: "Git for Windows not found", hint: 'Install Git for Windows from https://git-scm.com/download/win, or set harness.shell to "powershell" if that interpreter is installed.' } };
   }
 
   if (discovered.hasBash !== false) {

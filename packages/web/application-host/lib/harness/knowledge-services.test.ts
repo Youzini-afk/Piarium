@@ -43,6 +43,7 @@ describe("knowledge public service wiring", () => {
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => null,
+      discoveredShells: {},
       recallDepsProvider: async (sessionId, workspaceId) => {
         calls.push([sessionId, workspaceId]);
         return { workspaceStore: store, userStore: null, workspaceId: workspaceId! };
@@ -97,6 +98,7 @@ describe("knowledge public service wiring", () => {
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => null,
+      discoveredShells: {},
       recallDepsProvider: async () => deps, zone2Provider: zone.zone2Material,
     });
     cleanup.push(() => host.dispose());

@@ -37,6 +37,7 @@ describe("harness service host authorization", () => {
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: {},
     });
     try {
       host.registerSession({
@@ -78,6 +79,7 @@ describe("harness service host authorization", () => {
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: {},
     });
     try {
       host.registerSession({

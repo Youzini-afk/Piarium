@@ -48,6 +48,22 @@ broker-pinned Actor must match the Host session registry and carry the method's
 frozen capability. Path-bearing methods are resolved through Documents and, for
 a restricted child Run, must also remain inside its scope.
 
+### Shell discovery (`shell-discovery.ts`)
+
+Host-owned, machine-level discovery. Production `index.ts` calls `discoverShells()`
+once when constructing `HarnessServiceHost`. The same Windows program roots used
+by Git binary resolution (`ProgramFiles`, `ProgramFiles(x86)`, `LocalAppData`)
+plus PATH and an already-resolved `git.exe` home are searched. When both
+`Git\bin\bash.exe` and `Git\usr\bin\bash.exe` exist, the Host records the
+`usr\bin` executable so the `bin` launcher is not spawned. Missing Git Bash is
+reported as such; a present install is not.
+
+`harness.shell` is not a Host-wide freeze. `index.ts` reads the session's Pi
+`settings.get` snapshot (user file + trusted project) at session register and
+passes that workspace's setting into `registerSession`. A running PTY is not
+hot-swapped; a later session or worker generation registers again. Two
+workspaces therefore cannot inherit each other's interpreter.
+
 ### ShellSupervisor (`shell-supervisor.ts`)
 
 PTY-based persistent shell per session:
@@ -57,6 +73,7 @@ PTY-based persistent shell per session:
 - Background shells keep PTY alive, stdin open
 - Data and cwd/exit sentinels continue to be consumed after a command moves to the background
 - `registerWriter` callback for `mode: 'process'` writer registration
+- Interpreter command is the discovered executable path, including spaces
 
 ### OutputStore (`output-store.ts`)
 
@@ -364,8 +381,10 @@ The harness is wired in `packages/web/application-host/index.ts`:
 ## Session Lifecycle
 
 - **Register**: `session.snapshot` event with `workspace.kind === 'workspace'`
-  triggers `harnessServiceHost.registerSession()` which creates a
-  `ShellSupervisor` for the session.
+  resolves that workspace's `harness.shell` from Pi settings, then
+  `harnessServiceHost.registerSession()` creates a `ShellSupervisor` from the
+  Host's discovered interpreters. Settings failure falls back to `auto` plus
+  real discovery; an invalid `harness.shell` value is reported as unavailable.
 - **Drop**: `harnessServiceHost.dropSession()` disposes the shell supervisor
   and clears session-scoped output entries, observation cursors, and the
   in-memory keeper coverage evidence.

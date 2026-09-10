@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { discoverShells } from "./shell-discovery.js";
 import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells, type PtyProcess, type PtyProvider } from "./shell-supervisor.js";
 import { createOutputStore } from "./output-store.js";
 
@@ -135,6 +136,35 @@ describe("selectInterpreter", () => {
     expect("kind" in result && result.kind).toBe("git-bash");
     if ("kind" in result && result.kind === "git-bash") {
       expect(result.env.MSYS_NO_PATHCONV).toBe("1");
+      expect(result.command).toBe("C:\\Git\\bin\\bash.exe");
+    }
+  });
+
+  it("does not rewrite usr\\bin\\bash.exe into usr\\usr\\bin", () => {
+    const result = selectInterpreter({
+      platform: "win32",
+      workspaceRoot: "C:\\workspace",
+      setting: "auto",
+      discovered: { gitBashPath: "C:\\Program Files\\Git\\usr\\bin\\bash.exe" },
+      remote: false,
+    });
+    expect(result).toMatchObject({
+      kind: "git-bash",
+      command: "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+    });
+  });
+
+  it("returns unavailable when powershell is explicitly missing", () => {
+    const result = selectInterpreter({
+      platform: "win32",
+      workspaceRoot: "C:\\workspace",
+      setting: "powershell",
+      discovered: { hasPowerShell: false },
+      remote: false,
+    });
+    expect("unavailable" in result).toBe(true);
+    if ("unavailable" in result) {
+      expect(result.unavailable.reason).toMatch(/PowerShell not found/);
     }
   });
 });
@@ -211,9 +241,7 @@ describe("shell-supervisor dispose kills process tree", () => {
   it("dispose() terminates the PTY process and its children", async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "shell-dispose-"));
     const outputStore = createOutputStore();
-    const discovered: DiscoveredShells = process.platform === "win32"
-      ? { gitBashPath: "C:\\Program Files\\Git\\bin\\bash.exe" }
-      : { hasBash: true };
+    const discovered: DiscoveredShells = discoverShells();
     const interp = selectInterpreter({
       platform: process.platform,
       workspaceRoot,
