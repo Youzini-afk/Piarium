@@ -8,10 +8,12 @@ import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   parseHarnessThreadMutation,
+  parseHarnessThreadSpace,
   projectHarnessThreadState,
   type HarnessThreadSnapshot,
   type HarnessThreadState,
 } from './harnessThreadPresentation';
+import type { WorkspaceThreadSpace } from '@piarium/protocol';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
   harnessKnowledgeKey,
@@ -41,6 +43,7 @@ const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThrea
   'merge-ready': 'harness.threads.state.merge-ready',
   conflict: 'harness.threads.state.conflict',
   merged: 'harness.threads.state.merged',
+  archived: 'harness.threads.state.archived',
 };
 
 const stateTone: Record<HarnessThreadState, string> = {
@@ -58,6 +61,7 @@ const stateTone: Record<HarnessThreadState, string> = {
   'merge-ready': 'bg-[var(--status-success)]',
   conflict: 'bg-[var(--status-error)]',
   merged: 'bg-[var(--status-success)]',
+  archived: 'bg-muted-foreground/50',
 };
 
 export const HarnessThreadsPanel: React.FC<{
@@ -83,6 +87,53 @@ export const HarnessThreadsPanel: React.FC<{
   const [savingBlock, setSavingBlock] = React.useState(false);
   const [narrowOpen, setNarrowOpen] = React.useState(false);
   const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
+  const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
+  const [threadAction, setThreadAction] = React.useState<string | null>(null);
+
+  const readError = (body: unknown, fallback: string): string => (
+    body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
+      ? (body as { error: string }).error
+      : fallback
+  );
+
+  const reloadSpace = React.useCallback(async (signal?: AbortSignal) => {
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/space`, {
+      cache: 'no-store',
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        setSpace(null);
+        return;
+      }
+      throw new Error(`Unable to load thread space (${response.status})`);
+    }
+    setSpace(parseHarnessThreadSpace(await response.json()));
+  }, [parentSessionId]);
+
+  const applyThreadMutation = React.useCallback(async (path: string, failedKey: 'harness.threads.archiveFailed' | 'harness.threads.restoreFailed' | 'harness.threads.reclaimFailed' | 'harness.threads.keepFailed', body?: unknown) => {
+    const response = await runtimeFetch(
+      `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${path}`,
+      {
+        method: 'POST',
+        ...(body === undefined ? {} : {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(readError(payload, t(failedKey)));
+    const mutated = parseHarnessThreadMutation(payload);
+    threadState.merge(mutated);
+    if (payload && typeof payload === 'object' && 'space' in payload) {
+      try { setSpace(parseHarnessThreadSpace((payload as { space: unknown }).space)); }
+      catch { await reloadSpace(); }
+    } else {
+      await reloadSpace();
+    }
+    await threadState.reload();
+  }, [parentSessionId, reloadSpace, t, threadState]);
 
   const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
     if (convertingThreadId) return;
@@ -285,10 +336,14 @@ export const HarnessThreadsPanel: React.FC<{
     void reloadKnowledge(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load knowledge suggestions:', error);
     });
+    void reloadSpace(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load thread space:', error);
+    });
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'stream-ready') {
         void reloadBlocks(controller.signal).catch(() => undefined);
         void reloadKnowledge(controller.signal).catch(() => undefined);
+        void reloadSpace(controller.signal).catch(() => undefined);
         return;
       }
       if (event.type === 'harness-blocks-changed' && event.workspaceId === workspaceId && event.sessionId === parentSessionId) {
@@ -304,11 +359,15 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parentSessionId, reloadBlocks, reloadKnowledge, workspaceId]);
+  }, [parentSessionId, reloadBlocks, reloadKnowledge, reloadSpace, workspaceId]);
 
-  if (threads.length === 0 && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0) return null;
+  const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
+  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0) return null;
 
-  const itemCount = blocks.length + threads.length + suggestions.length + webSources.length;
+  const itemCount = blocks.length + Math.max(threads.length, space?.threads.length ?? 0) + suggestions.length + webSources.length;
+  const formatLogical = (bytes: number | null, unknown: boolean): string => (
+    unknown || bytes === null ? t('harness.threads.space.unknownSize') : t('harness.threads.space.bytes', { bytes })
+  );
   const content = (
     <div className="min-h-0 flex-1 overflow-y-auto">
         <HarnessKnowledgeReviewSection
@@ -405,15 +464,38 @@ export const HarnessThreadsPanel: React.FC<{
             </div>
           </section>
         ) : null}
-        {threads.length > 0 ? (
+        {hasThreadRecords ? (
           <section className="p-2" aria-label={t('harness.threads.title')}>
-            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.threads.title')}</h3>
+            <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
+              <h3 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.threads.title')}</h3>
+              <button
+                type="button"
+                onClick={() => threadState.setIncludeArchived(!threadState.includeArchived)}
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground"
+              >
+                {t(threadState.includeArchived ? 'harness.threads.hideArchived' : 'harness.threads.showArchived')}
+              </button>
+            </div>
+            {space ? (
+              <div className="mb-2 rounded-md border border-border/50 bg-background/40 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground">
+                <p>{t('harness.threads.space.title')}: {formatLogical(space.materializedLogicalBytes, space.status === 'unknown')}</p>
+                <p>{space.note}</p>
+                {space.status === 'over-budget' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.overBudget')}</p> : null}
+                {space.status === 'low-free' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.lowFree')}</p> : null}
+                {space.status === 'enospc' ? <p className="text-[var(--status-error)]">{t('harness.threads.space.enospc')}</p> : null}
+              </div>
+            ) : null}
             <div className="space-y-1.5">
+        {threads.length === 0 ? (
+          <p className="px-1 text-[10px] text-muted-foreground">{t('harness.threads.empty')}</p>
+        ) : null}
         {threads.map((entry) => {
           const state = projectHarnessThreadState(entry);
           const sessionId = entry.activeRun?.sessionId;
           const cwd = entry.thread.worktree?.path ?? fallbackCwd;
           const converting = convertingThreadId === entry.thread.id;
+          const occupancy = space?.threads.find((item) => item.threadId === entry.thread.id);
+          const busy = threadAction === entry.thread.id;
           const label = entry.thread.role ?? (
             entry.thread.kind === 'discussion'
               ? t('harness.threads.discussion')
@@ -462,7 +544,18 @@ export const HarnessThreadsPanel: React.FC<{
                   {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (
                     <span>Δ {entry.thread.diffStats.files} · +{entry.thread.diffStats.insertions} −{entry.thread.diffStats.deletions}</span>
                   ) : null}
+                  {occupancy ? (
+                    <span>{t('harness.threads.space.logical', { bytes: formatLogical(occupancy.materialized.logicalBytes, occupancy.materialized.unknown) })}</span>
+                  ) : null}
                 </div>
+                {occupancy && occupancy.keepReasons.length > 0 ? (
+                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
+                    {t('harness.threads.space.kept', { reason: occupancy.keepReasons.join('; ') })}
+                  </p>
+                ) : null}
+                {entry.thread.worktree?.retentionReason ? (
+                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
+                ) : null}
               </button>
               {entry.thread.kind === 'implementation'
                 && (entry.thread.integration === 'dirty'
@@ -475,8 +568,8 @@ export const HarnessThreadsPanel: React.FC<{
                   onThread={(next) => threadState.merge({ thread: next, activeRun: entry.activeRun })}
                 />
               ) : null}
-              {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
-                <div className="flex justify-end border-t border-border/40 px-2 py-1">
+              <div className="flex flex-wrap justify-end gap-1 border-t border-border/40 px-2 py-1">
+                {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
                   <button
                     type="button"
                     disabled={convertingThreadId !== null}
@@ -486,8 +579,79 @@ export const HarnessThreadsPanel: React.FC<{
                     <Icon name={converting ? 'loader-4' : 'git-branch'} className={cn('size-3', converting && 'animate-spin')} />
                     {t(converting ? 'harness.threads.converting' : 'harness.threads.convert')}
                   </button>
-                </div>
-              ) : null}
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setThreadAction(entry.thread.id);
+                    void applyThreadMutation(
+                      `${encodeURIComponent(entry.thread.id)}/keep-worktree`,
+                      'harness.threads.keepFailed',
+                      { keepWorktree: !entry.thread.keepWorktree },
+                    ).catch((error) => {
+                      toast.error(error instanceof Error ? error.message : t('harness.threads.keepFailed'));
+                    }).finally(() => setThreadAction(null));
+                  }}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                >
+                  {t(entry.thread.keepWorktree ? 'harness.threads.keepWorktreeOn' : 'harness.threads.keepWorktree')}
+                </button>
+                {occupancy?.reclaimable ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setThreadAction(entry.thread.id);
+                      void applyThreadMutation(
+                        `${encodeURIComponent(entry.thread.id)}/reclaim`,
+                        'harness.threads.reclaimFailed',
+                      ).catch((error) => {
+                        toast.error(error instanceof Error ? error.message : t('harness.threads.reclaimFailed'));
+                      }).finally(() => setThreadAction(null));
+                    }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    {t(busy ? 'harness.threads.reclaiming' : 'harness.threads.reclaim')}
+                  </button>
+                ) : null}
+                {entry.thread.lifecycle === 'archived' ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setThreadAction(entry.thread.id);
+                      void applyThreadMutation(
+                        `${encodeURIComponent(entry.thread.id)}/restore`,
+                        'harness.threads.restoreFailed',
+                      ).catch((error) => {
+                        toast.error(error instanceof Error ? error.message : t('harness.threads.restoreFailed'));
+                      }).finally(() => setThreadAction(null));
+                    }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    {t(busy ? 'harness.threads.restoring' : 'harness.threads.restore')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setThreadAction(entry.thread.id);
+                      void applyThreadMutation(
+                        `${encodeURIComponent(entry.thread.id)}/archive`,
+                        'harness.threads.archiveFailed',
+                        { keepWorktree: entry.thread.keepWorktree === true },
+                      ).catch((error) => {
+                        toast.error(error instanceof Error ? error.message : t('harness.threads.archiveFailed'));
+                      }).finally(() => setThreadAction(null));
+                    }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    {t(busy ? 'harness.threads.archiving' : 'harness.threads.archive')}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

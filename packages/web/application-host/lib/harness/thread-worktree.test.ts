@@ -317,6 +317,30 @@ describe("thread worktree runtime", () => {
     }
   });
 
+  it("refuses to rematerialize when the original path is occupied by other content", async () => {
+    const root = mkdtempSync(join(tmpdir(), "thread-path-occupied-"));
+    const sourceRoot = join(root, "source");
+    const child = join(root, "child");
+    mkdirSync(sourceRoot, { recursive: true });
+    mkdirSync(child, { recursive: true });
+    writeFileSync(join(child, "stranger.txt"), "someone else\n");
+    const runtime = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: child }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+    try {
+      await expect(runtime.materialize(sourceRoot, {
+        path: child,
+        base: "zero-commit",
+        resultCommit: "fixed",
+        materialized: false,
+      })).rejects.toMatchObject({ code: "EEXIST" });
+      expect(readFileSync(join(child, "stranger.txt"), "utf8")).toBe("someone else\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("runs setup command and copies ignored whitelist files", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);

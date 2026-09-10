@@ -329,6 +329,11 @@ export class WorkingStateStore {
     return branch ? clone(branch) : null;
   }
 
+  getDraftBaselineRecord(id: string): DraftBaseline | null {
+    const baseline = this.document.draftBaselines[id];
+    return baseline ? clone(baseline) : null;
+  }
+
   async getDraftBaseline(id: string): Promise<DraftBaseline | null> {
     const baseline = this.document.draftBaselines[id];
     if (!baseline) return null;
@@ -338,6 +343,12 @@ export class WorkingStateStore {
       }
     }
     return clone(baseline);
+  }
+
+  listResults(branchId?: string): WorkingResult[] {
+    return Object.values(this.document.results)
+      .filter((result) => branchId === undefined || result.branchId === branchId)
+      .map((result) => clone(result));
   }
 
   getResult(branchId: string, revision: number): WorkingResult | null {

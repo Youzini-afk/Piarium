@@ -566,6 +566,12 @@ and a read-only role cannot regain write tools merely because the global
 settings expose them. Opening the child from the UI supplies the same frozen
 launch values again.
 
+User archive and restore stay on the same catalog and Host runtime. Archive
+keeps results, the transcript reference, and the original Pi session file;
+restore rematerializes the published result at the recorded path or reports
+that the path is occupied. Thread occupancy and reclaim reasons are Host
+projections, not a second store.
+
 User-created discussions use authenticated, session-scoped Host routes: the
 caller supplies only a persisted message entry and the block-snapshot choice;
 the Host derives the parent edge and workspace from the broker-owned session.

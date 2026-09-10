@@ -1,4 +1,4 @@
-import type { Thread, ThreadParent, ThreadRun } from '@piarium/protocol';
+import type { Thread, ThreadOccupancy, ThreadParent, ThreadRun, WorkspaceThreadSpace } from '@piarium/protocol';
 
 export interface HarnessThreadSnapshot {
   thread: Thread;
@@ -8,6 +8,7 @@ export interface HarnessThreadSnapshot {
 export interface HarnessThreadProjection {
   workspaceId: string;
   parent: ThreadParent;
+  includeArchived: boolean;
   threads: HarnessThreadSnapshot[];
 }
 
@@ -25,9 +26,11 @@ export type HarnessThreadState =
   | 'dirty'
   | 'merge-ready'
   | 'conflict'
-  | 'merged';
+  | 'merged'
+  | 'archived';
 
 export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSnapshot): HarnessThreadState => {
+  if (thread.lifecycle === 'archived') return 'archived';
   if (thread.integration === 'merged') return 'merged';
   if (thread.integration === 'conflict') return 'conflict';
   if (thread.lifecycle === 'queued') return 'queued';
@@ -54,11 +57,13 @@ export const sameHarnessThreadParent = (left: ThreadParent, right: ThreadParent)
 export const mergeHarnessThreadSnapshot = (
   current: HarnessThreadSnapshot[],
   incoming: HarnessThreadSnapshot,
+  options?: { includeArchived?: boolean },
 ): HarnessThreadSnapshot[] => {
   const existing = current.find((entry) => entry.thread.id === incoming.thread.id);
   if (existing && existing.thread.eventSeq > incoming.thread.eventSeq) return current;
   const next = current.filter((entry) => entry.thread.id !== incoming.thread.id);
-  if (!incoming.thread.hidden && incoming.thread.lifecycle !== 'archived') next.push(incoming);
+  const keepArchived = options?.includeArchived === true || incoming.thread.lifecycle !== 'archived';
+  if (!incoming.thread.hidden && keepArchived) next.push(incoming);
   return next.sort((left, right) => right.thread.updatedAt.localeCompare(left.thread.updatedAt));
 };
 
@@ -106,14 +111,94 @@ const parseSnapshot = (value: unknown): HarnessThreadSnapshot => {
   return { thread: thread as unknown as Thread, activeRun: value.activeRun as ThreadRun | null };
 };
 
-export const parseHarnessThreadProjection = (value: unknown): HarnessThreadProjection => {
+export const parseHarnessThreadProjection = (
+  value: unknown,
+  options?: { includeArchived?: boolean },
+): HarnessThreadProjection => {
   if (!isRecord(value) || typeof value.workspaceId !== 'string' || !Array.isArray(value.threads)) {
     throw new Error('Malformed thread list response');
   }
+  const includeArchived = options?.includeArchived === true || value.includeArchived === true;
   return {
     workspaceId: value.workspaceId,
     parent: parseParent(value.parent),
-    threads: value.threads.map(parseSnapshot).filter((item) => !item.thread.hidden && item.thread.lifecycle !== 'archived'),
+    includeArchived,
+    threads: value.threads.map(parseSnapshot).filter((item) => (
+      !item.thread.hidden && (includeArchived || item.thread.lifecycle !== 'archived')
+    )),
+  };
+};
+
+const parseMeasurement = (value: unknown): { logicalBytes: number | null; allocatedBytes: number | null; unknown: boolean } => {
+  if (!isRecord(value) || typeof value.unknown !== 'boolean') throw new Error('Malformed space measurement');
+  const logical = value.logicalBytes;
+  const allocated = value.allocatedBytes;
+  if (logical !== null && typeof logical !== 'number') throw new Error('Malformed space measurement');
+  if (allocated !== null && typeof allocated !== 'number') throw new Error('Malformed space measurement');
+  return {
+    logicalBytes: logical === null ? null : logical,
+    allocatedBytes: allocated === null ? null : allocated,
+    unknown: value.unknown,
+  };
+};
+
+export const parseHarnessThreadSpace = (value: unknown): WorkspaceThreadSpace => {
+  if (
+    !isRecord(value)
+    || typeof value.workspaceId !== 'string'
+    || !Array.isArray(value.threads)
+    || typeof value.uniqueObjectUnknown !== 'boolean'
+    || typeof value.note !== 'string'
+    || (value.status !== 'ok'
+      && value.status !== 'over-budget'
+      && value.status !== 'low-free'
+      && value.status !== 'enospc'
+      && value.status !== 'unknown')
+  ) {
+    throw new Error('Malformed thread space response');
+  }
+  const uniqueLogical = value.uniqueObjectLogicalBytes;
+  const materializedLogical = value.materializedLogicalBytes;
+  const freeBytes = value.freeBytes;
+  if (uniqueLogical !== null && typeof uniqueLogical !== 'number') throw new Error('Malformed thread space response');
+  if (materializedLogical !== null && typeof materializedLogical !== 'number') throw new Error('Malformed thread space response');
+  if (freeBytes !== null && typeof freeBytes !== 'number') throw new Error('Malformed thread space response');
+  return {
+    workspaceId: value.workspaceId,
+    uniqueObjectLogicalBytes: uniqueLogical === null ? null : uniqueLogical,
+    uniqueObjectUnknown: value.uniqueObjectUnknown,
+    materializedLogicalBytes: materializedLogical === null ? null : materializedLogical,
+    freeBytes: freeBytes === null ? null : freeBytes,
+    status: value.status,
+    note: value.note,
+    threads: value.threads.map((entry): ThreadOccupancy => {
+      if (
+        !isRecord(entry)
+        || typeof entry.threadId !== 'string'
+        || typeof entry.reclaimable !== 'boolean'
+        || !Array.isArray(entry.keepReasons)
+        || !entry.keepReasons.every((reason) => typeof reason === 'string')
+      ) throw new Error('Malformed thread occupancy');
+      const reclaimableLogical = entry.reclaimableLogicalBytes;
+      if (reclaimableLogical !== null && typeof reclaimableLogical !== 'number') {
+        throw new Error('Malformed thread occupancy');
+      }
+      return {
+        threadId: entry.threadId,
+        materialized: parseMeasurement(entry.materialized),
+        exclusiveObjects: parseMeasurement(entry.exclusiveObjects),
+        sharedObjects: parseMeasurement(entry.sharedObjects),
+        reclaimable: entry.reclaimable,
+        reclaimableLogicalBytes: reclaimableLogical === null ? null : reclaimableLogical,
+        keepReasons: entry.keepReasons,
+      };
+    }),
+    ...(isRecord(value.budget) ? {
+      budget: {
+        ...(typeof value.budget.maxBytes === 'number' ? { maxBytes: value.budget.maxBytes } : {}),
+        ...(typeof value.budget.minFreeRatio === 'number' ? { minFreeRatio: value.budget.minFreeRatio } : {}),
+      },
+    } : {}),
   };
 };
 
@@ -127,6 +212,7 @@ export const parseHarnessThreadMutation = (value: unknown): HarnessThreadProject
   return {
     workspaceId: value.workspaceId,
     parent: parseParent(value.parent),
+    includeArchived: isRecord(value.thread) && value.thread.lifecycle === 'archived',
     threads: [snapshot],
     ...snapshot,
   };

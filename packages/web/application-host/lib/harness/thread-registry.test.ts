@@ -605,4 +605,20 @@ describe("thread registry", () => {
     expect(archived.map((entry) => entry.id)).toEqual([thread.id]);
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
   });
+
+  it("archives a user thread without dropping its report and restores the original lifecycle", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-keep");
+    await registry.completeThread(WORKSPACE, thread.id, report("keep this"));
+    const archived = await registry.archiveThread(WORKSPACE, thread.id, true);
+    expect(archived).toMatchObject({
+      lifecycle: "archived",
+      keepWorktree: true,
+      report: { conclusion: "keep this", transcriptRef: { sessionId: "child-1" } },
+    });
+    const restored = await registry.restoreThread(WORKSPACE, thread.id);
+    expect(restored).toMatchObject({ lifecycle: "settled", report: { conclusion: "keep this" } });
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ sessionId: "child-keep", outcome: "success" });
+  });
 });

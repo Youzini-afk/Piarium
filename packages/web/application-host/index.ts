@@ -1159,6 +1159,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let knowledgeVectors: KnowledgeVectorRuntime | null = null;
   const hostId = extensionRuntime.services.hostId;
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
+  const harnessShellActivity = {
+    hasActiveCommandAtDirectory: (_directory: string): boolean => false,
+  };
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
@@ -1256,6 +1259,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
+    hasActiveCommands: (directory) => harnessShellActivity.hasActiveCommandAtDirectory(directory),
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
     resolveWorktreeSettings: async (workspaceId, parent) => {
       const sessionId = parent.kind === 'session'
@@ -2027,6 +2031,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
   });
+  harnessShellActivity.hasActiveCommandAtDirectory = (directory) => (
+    harnessServiceHost.hasActiveCommandAtDirectory(directory)
+  );
   const registerHarnessSession = (
     actor: HarnessActorIdentity,
     sessionId: string,

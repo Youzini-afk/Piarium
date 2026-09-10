@@ -26,6 +26,7 @@ const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThrea
   'merge-ready': 'harness.threads.state.merge-ready',
   conflict: 'harness.threads.state.conflict',
   merged: 'harness.threads.state.merged',
+  archived: 'harness.threads.state.archived',
 };
 
 export const HarnessThreadMarkers: React.FC<{

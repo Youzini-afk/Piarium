@@ -58,8 +58,11 @@ const renderTimeline = (
       <RuntimeAPIContext.Provider value={runtimeAPIs}>
         <I18nProvider>
           <HarnessThreadStateContext.Provider value={{
+            includeArchived: false,
             merge: () => {},
             parent: { kind: 'session', id: 'session' },
+            reload: async () => {},
+            setIncludeArchived: () => {},
             threads,
             workspaceId: 'workspace',
           }}>

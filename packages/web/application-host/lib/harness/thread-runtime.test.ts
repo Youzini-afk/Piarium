@@ -922,4 +922,78 @@ describe("thread runtime", () => {
     expect(prepareInputs).not.toHaveBeenCalled();
     await reopenRuntime.dispose();
   });
+
+  it("archives a running thread without clearing its transcript or using the session-delete path", async () => {
+    const { thread } = await start();
+    await registry.completeThread(WORKSPACE, thread.id, {
+      conclusion: "done",
+      changedFiles: ["a.ts"],
+      unresolved: [],
+      deviations: [],
+      confidence: 0.8,
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
+      blocksSnapshot: {},
+    });
+    const archived = await runtime.archiveUser(WORKSPACE, PARENT, thread.id);
+    expect(archived.thread).toMatchObject({ lifecycle: "archived", report: { conclusion: "done" } });
+    expect(archived.thread.report).not.toBeNull();
+    expect(sessionAdapter.abort).toHaveBeenCalled();
+    expect(sessionAdapter.close).toHaveBeenCalledWith("child-1");
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ sessionId: "child-1" });
+    const restored = await runtime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(restored.thread.lifecycle).toBe("settled");
+    expect(restored.thread.report).toMatchObject({ conclusion: "done" });
+    expect(restored.restoreStatus).toBe("restored");
+  });
+
+  it("does not rebuild onto an occupied path and blocks reclaim for keep_worktree and unfinished integration", async () => {
+    const child = join(dataDir, "occupied-child");
+    await fs.promises.mkdir(child, { recursive: true });
+    await fs.promises.writeFile(join(child, "other.txt"), "not this thread");
+    const materialize = vi.fn(async () => {
+      const error = new Error(`Original thread path is occupied by other content: ${child}`);
+      (error as NodeJS.ErrnoException).code = "EEXIST";
+      throw error;
+    });
+    const reclaim = vi.fn(async () => ({ reclaimed: true }));
+    const spaceRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim,
+        materialize,
+      },
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation({
+          getBranch: () => null,
+          listResults: () => [],
+          getDraftBaselineRecord: () => null,
+          directoryMatchesResult: async () => true,
+        } as unknown as WorkingStateStore, { database: { prepare: () => ({ all: () => [] }) } } as unknown as WorkspaceRecoveryStorageContext),
+      },
+      resolveWorkspaceRoot: async () => dataDir,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, { path: child, base: "zero-commit", materialized: true });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "branch", resultRevision: 1 });
+    await registry.setIntegration(WORKSPACE, thread.id, "conflict");
+    await registry.archiveThread(WORKSPACE, thread.id, true);
+    const kept = await spaceRuntime.reclaimUser(WORKSPACE, PARENT, thread.id);
+    expect(kept.reclaimed).toBe(false);
+    expect(kept.message).toMatch(/keep_worktree|Unfinished integration/i);
+    expect(reclaim).not.toHaveBeenCalled();
+    expect(fs.existsSync(join(child, "other.txt"))).toBe(true);
+    await registry.setWorktree(WORKSPACE, thread.id, { path: child, base: "zero-commit", materialized: false });
+    const restored = await spaceRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
+    expect(restored.restoreStatus).toBe("path-occupied");
+    expect(fs.existsSync(join(child, "other.txt"))).toBe(true);
+    expect(materialize).toHaveBeenCalled();
+    await spaceRuntime.dispose();
+  });
 });

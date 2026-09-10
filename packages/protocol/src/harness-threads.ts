@@ -121,7 +121,44 @@ export interface Thread {
   updatedAt: string;
   eventSeq: number;
   hidden: boolean;
+  /** User-requested keep of the materialized directory across archive/reclaim. */
+  keepWorktree?: boolean;
 }
+
+export interface ThreadSpaceMeasurement {
+  logicalBytes: number | null;
+  allocatedBytes: number | null;
+  unknown: boolean;
+}
+
+export interface ThreadOccupancy {
+  threadId: string;
+  materialized: ThreadSpaceMeasurement;
+  exclusiveObjects: ThreadSpaceMeasurement;
+  sharedObjects: ThreadSpaceMeasurement;
+  reclaimable: boolean;
+  reclaimableLogicalBytes: number | null;
+  keepReasons: string[];
+}
+
+export interface WorkspaceThreadSpace {
+  workspaceId: string;
+  threads: ThreadOccupancy[];
+  uniqueObjectLogicalBytes: number | null;
+  uniqueObjectUnknown: boolean;
+  materializedLogicalBytes: number | null;
+  budget?: { maxBytes?: number; minFreeRatio?: number };
+  freeBytes: number | null;
+  status: "ok" | "over-budget" | "low-free" | "enospc" | "unknown";
+  note: string;
+}
+
+export type ThreadRestoreStatus =
+  | "restored"
+  | "path-occupied"
+  | "rebuild-failed"
+  | "enospc"
+  | "budget-unavailable";
 
 export interface ThreadRun {
   id: string;

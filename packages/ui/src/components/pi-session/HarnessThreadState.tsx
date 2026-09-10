@@ -15,6 +15,8 @@ export const HarnessThreadStateProvider: React.FC<{
   parentSessionId: string;
   workspaceId: string | null;
 }> = ({ children, parentSessionId, workspaceId }) => {
+  const [includeArchived, setIncludeArchived] = React.useState(false);
+  const includeArchivedRef = React.useRef(false);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const [scope, setScope] = React.useState<{ parent: ThreadParent; workspaceId: string }>({
     parent: { kind: 'session', id: parentSessionId },
@@ -34,12 +36,13 @@ export const HarnessThreadStateProvider: React.FC<{
 
   const merge = React.useCallback((snapshot: HarnessThreadSnapshot) => {
     eventRevision.current += 1;
-    setThreads((current) => mergeHarnessThreadSnapshot(current, snapshot));
+    setThreads((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: includeArchivedRef.current }));
   }, []);
 
   const reload = React.useCallback(async (signal?: AbortSignal) => {
     const revisionAtStart = eventRevision.current;
-    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads`, {
+    const query = includeArchivedRef.current ? '?archived=1' : '';
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads${query}`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
@@ -47,11 +50,14 @@ export const HarnessThreadStateProvider: React.FC<{
       if (response.status === 404) return;
       throw new Error(`Unable to load threads (${response.status})`);
     }
-    const projection = parseHarnessThreadProjection(await response.json());
+    const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: includeArchivedRef.current });
     commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
     setThreads((current) => {
       if (eventRevision.current === revisionAtStart) return projection.threads;
-      return projection.threads.reduce(mergeHarnessThreadSnapshot, current);
+      return projection.threads.reduce(
+        (list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: includeArchivedRef.current }),
+        current,
+      );
     });
   }, [commitScope, parentSessionId]);
 
@@ -82,12 +88,23 @@ export const HarnessThreadStateProvider: React.FC<{
     };
   }, [commitScope, merge, parentSessionId, reload, workspaceId]);
 
+  const setIncludeArchivedAndReload = React.useCallback((value: boolean) => {
+    includeArchivedRef.current = value;
+    setIncludeArchived(value);
+    void reload().catch((error) => {
+      console.warn('[HarnessThreadState] Failed to reload threads:', error);
+    });
+  }, [reload]);
+
   const value = React.useMemo<HarnessThreadStateValue>(() => ({
+    includeArchived,
     merge,
     parent: scope.parent,
+    reload,
+    setIncludeArchived: setIncludeArchivedAndReload,
     threads,
     workspaceId: scope.workspaceId,
-  }), [merge, scope.parent, scope.workspaceId, threads]);
+  }), [includeArchived, merge, reload, scope.parent, scope.workspaceId, setIncludeArchivedAndReload, threads]);
 
   return <HarnessThreadStateContext.Provider value={value}>{children}</HarnessThreadStateContext.Provider>;
 };

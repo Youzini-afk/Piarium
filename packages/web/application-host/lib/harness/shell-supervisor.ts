@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import path from "node:path";
 import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@piarium/protocol";
 import type { OutputStore } from "./output-store.js";
 
@@ -525,5 +526,20 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }
   };
 
-  return { exec, read, write, kill, dispose };
+  const hasActiveCommandAt = (directory: string): boolean => {
+    const target = path.resolve(directory);
+    const same = (cwd: string): boolean => {
+      const resolved = path.resolve(cwd);
+      return process.platform === "win32"
+        ? resolved.toLowerCase() === target.toLowerCase()
+        : resolved === target;
+    };
+    if (pendingCommand && same(pendingCommand.cwd)) return true;
+    for (const background of backgroundShells.values()) {
+      if (!background.exited && same(background.cwd)) return true;
+    }
+    return false;
+  };
+
+  return { exec, read, write, kill, dispose, hasActiveCommandAt };
 }

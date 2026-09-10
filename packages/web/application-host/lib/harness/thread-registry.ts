@@ -373,7 +373,8 @@ const isThread = (value: unknown): value is Thread => {
     && isString(value.createdAt)
     && isString(value.updatedAt)
     && Number.isSafeInteger(value.eventSeq)
-    && typeof value.hidden === "boolean";
+    && typeof value.hidden === "boolean"
+    && (value.keepWorktree === undefined || typeof value.keepWorktree === "boolean");
 };
 
 const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManifest => {
@@ -1017,6 +1018,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(findThreadInScope(catalog, parent, threadId));
   };
 
+  const listWorkspaceThreads = async (workspaceId: string): Promise<Thread[]> => {
+    const catalog = await loadWorkspace(workspaceId);
+    return structuredClone(catalog.threads);
+  };
+
   const listThreads = async (workspaceId: string, parent: ThreadParent, includeHidden = false): Promise<Thread[]> => {
     const catalog = await catalogForScope(workspaceId, parent);
     return structuredClone(catalog.threads.filter((thread) => (
@@ -1322,11 +1328,38 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return result;
   };
 
-  const archiveThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
-    mutateWorkspace(workspaceId, (catalog) => {
+  const archiveThread = async (workspaceId: string, threadId: string, keepWorktree?: boolean): Promise<Thread | null> => {
+    const result = await mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       thread.lifecycle = "archived";
+      thread.attention = "none";
+      thread.waitingFor = null;
+      if (keepWorktree !== undefined) thread.keepWorktree = keepWorktree;
+      touchThread(catalog, thread);
+      return { value: thread, changed: [thread] };
+    });
+    if (result) await maybeDequeue(workspaceId, result.parent).catch(reportObserverError);
+    return result;
+  };
+
+  const restoreThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
+    mutateWorkspace(workspaceId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      if (!thread) return { value: null, changed: [], write: false };
+      if (thread.lifecycle !== "archived") return { value: thread, changed: [], write: false };
+      const run = activeRunFor(catalog, thread);
+      thread.lifecycle = run && run.outcome === null ? "active" : "settled";
+      touchThread(catalog, thread);
+      return { value: thread, changed: [thread] };
+    })
+  );
+
+  const setKeepWorktree = async (workspaceId: string, threadId: string, keepWorktree: boolean): Promise<Thread | null> => (
+    mutateWorkspace(workspaceId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      if (!thread) return { value: null, changed: [], write: false };
+      thread.keepWorktree = keepWorktree;
       touchThread(catalog, thread);
       return { value: thread, changed: [thread] };
     })
@@ -1650,6 +1683,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     createThread,
     getThread,
     listThreads,
+    listWorkspaceThreads,
     listThreadSnapshots,
     getActiveRun,
     listRuns,
@@ -1667,6 +1701,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     completeThread,
     cancelThread,
     archiveThread,
+    restoreThread,
+    setKeepWorktree,
     archiveThreadsForDeletedSession,
     archiveThreadsForDeletedSessionAcrossWorkspaces,
     convertThread,

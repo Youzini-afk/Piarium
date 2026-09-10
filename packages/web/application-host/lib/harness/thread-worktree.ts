@@ -800,44 +800,49 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     };
   };
 
-  const reclaim = async (worktree: ThreadWorktree): Promise<{ reclaimed: boolean; reason?: string }> => {
+  const reclaim = async (
+    worktree: ThreadWorktree,
+    extras?: { nativeVerified?: boolean },
+  ): Promise<{ reclaimed: boolean; reason?: string }> => {
     if (worktree.materialized === false) return { reclaimed: true };
-    if (!worktree.resultCommit) {
+    if (!worktree.resultCommit && !extras?.nativeVerified) {
       return { reclaimed: false, reason: "Thread worktree result has not been snapshotted" };
     }
-    if (worktree.base === "zero-commit") {
-      const snapshotDir = fixedCopyResultPath(worktree);
-      if (!snapshotDir) return { reclaimed: false, reason: "Thread worktree result path missing" };
-      try {
-        await fsPromises.stat(snapshotDir);
-        const diff = await diffDirectories(snapshotDir, worktree.path);
-        if (diff.diffStats.files > 0) {
-          return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
+    if (!extras?.nativeVerified) {
+      if (worktree.base === "zero-commit") {
+        const snapshotDir = fixedCopyResultPath(worktree);
+        if (!snapshotDir) return { reclaimed: false, reason: "Thread worktree result path missing" };
+        try {
+          await fsPromises.stat(snapshotDir);
+          const diff = await diffDirectories(snapshotDir, worktree.path);
+          if (diff.diffStats.files > 0) {
+            return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            reclaimed: false,
+            reason: (error as NodeJS.ErrnoException).code === "ENOENT"
+              ? "Thread worktree snapshot missing"
+              : `Unable to verify thread worktree snapshot: ${message}`,
+          };
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          reclaimed: false,
-          reason: (error as NodeJS.ErrnoException).code === "ENOENT"
-            ? "Thread worktree snapshot missing"
-            : `Unable to verify thread worktree snapshot: ${message}`,
-        };
-      }
-    } else {
-      try {
-        const status = await runGit(worktree.path, ["status", "--porcelain", "-z"]);
-        if (status.stdout.length > 0) {
-          return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
+      } else {
+        try {
+          const status = await runGit(worktree.path, ["status", "--porcelain", "-z"]);
+          if (status.stdout.length > 0) {
+            return { reclaimed: false, reason: "Thread worktree has uncommitted modifications" };
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            worktree.materialized = false;
+            return { reclaimed: true };
+          }
+          return {
+            reclaimed: false,
+            reason: `Unable to verify thread worktree before reclamation: ${error instanceof Error ? error.message : String(error)}`,
+          };
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          worktree.materialized = false;
-          return { reclaimed: true };
-        }
-        return {
-          reclaimed: false,
-          reason: `Unable to verify thread worktree before reclamation: ${error instanceof Error ? error.message : String(error)}`,
-        };
       }
     }
     try {
@@ -861,6 +866,17 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         return worktree;
       } catch {
         // Missing on disk, continue to materialize
+      }
+    } else {
+      try {
+        const existing = await fsPromises.stat(worktree.path);
+        if (existing.isDirectory() || existing.isFile()) {
+          const error = new Error(`Original thread path is occupied by other content: ${worktree.path}`);
+          (error as NodeJS.ErrnoException).code = "EEXIST";
+          throw error;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
     if (worktree.base !== "zero-commit") {

@@ -4,7 +4,7 @@ import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "acknowledgeSurface">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "acknowledgeSurface" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser">;
   requireAuth?: RequestHandler;
 }
 
@@ -37,12 +37,14 @@ export function registerHarnessThreadRoutes(
     }
     try {
       const { workspaceId, parent } = await runtime.scopeForSession(sessionId);
-      const threads = await registry.listThreads(workspaceId, parent);
+      const includeArchived = request.query.archived === "1" || request.query.archived === "true";
+      const threads = (await registry.listThreads(workspaceId, parent))
+        .filter((thread) => includeArchived || thread.lifecycle !== "archived");
       const projected = await Promise.all(threads.map(async (thread) => ({
         thread,
         activeRun: await registry.getActiveRun(workspaceId, thread.id),
       })));
-      response.json({ workspaceId, parent, threads: projected });
+      response.json({ workspaceId, parent, includeArchived, threads: projected });
     } catch (error) {
       sendError(response, error, "Unable to read harness threads");
     }
@@ -212,6 +214,91 @@ export function registerHarnessThreadRoutes(
         });
       } catch (error) {
         sendError(response, error, "Unable to acknowledge surface integration");
+      }
+    },
+  );
+
+  app.get(
+    "/api/harness/sessions/:sessionId/space",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const sessionId = sessionIdOf(request);
+      if (!sessionId) {
+        response.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(sessionId);
+        response.json(await runtime.inspectSpace(workspaceId, parent));
+      } catch (error) {
+        sendError(response, error, "Unable to inspect thread space");
+      }
+    },
+  );
+
+  const mutateThreadSpace = (
+    action: "archive" | "restore" | "reclaim",
+  ): RequestHandler => async (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const parentSessionId = sessionIdOf(request);
+    const threadId = threadIdOf(request);
+    if (!parentSessionId || !threadId) {
+      response.status(400).json({ error: "sessionId and threadId are required" });
+      return;
+    }
+    try {
+      const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+      if (action === "archive") {
+        const keepWorktree = request.body?.keepWorktree;
+        response.json(await runtime.archiveUser(
+          workspaceId,
+          parent,
+          threadId,
+          typeof keepWorktree === "boolean" ? keepWorktree : undefined,
+        ));
+        return;
+      }
+      if (action === "restore") {
+        response.json(await runtime.restoreUser(workspaceId, parent, threadId));
+        return;
+      }
+      response.json(await runtime.reclaimUser(workspaceId, parent, threadId));
+    } catch (error) {
+      sendError(response, error, `Unable to ${action} thread`);
+    }
+  };
+
+  app.post("/api/harness/sessions/:sessionId/threads/:threadId/archive", requireAuth, mutateThreadSpace("archive"));
+  app.post("/api/harness/sessions/:sessionId/threads/:threadId/restore", requireAuth, mutateThreadSpace("restore"));
+  app.post("/api/harness/sessions/:sessionId/threads/:threadId/reclaim", requireAuth, mutateThreadSpace("reclaim"));
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/keep-worktree",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId || typeof request.body?.keepWorktree !== "boolean") {
+        response.status(400).json({ error: "sessionId, threadId, and boolean keepWorktree are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const thread = await registry.setKeepWorktree(workspaceId, threadId, request.body.keepWorktree);
+        if (!thread) {
+          response.status(404).json({ error: `Thread not found: ${threadId}` });
+          return;
+        }
+        response.json({
+          workspaceId,
+          parent,
+          thread,
+          activeRun: await registry.getActiveRun(workspaceId, threadId),
+          space: await runtime.inspectSpace(workspaceId, parent),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to update keep_worktree");
       }
     },
   );

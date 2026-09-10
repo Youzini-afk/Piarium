@@ -15,9 +15,23 @@ import type {
   ThreadReport,
   ThreadRun,
   ThreadRunOutcome,
+  ThreadOccupancy,
+  ThreadRestoreStatus,
   ThreadSurfaceParent,
+  WorkspaceThreadSpace,
 } from "@piarium/protocol";
 import { HARNESS_TOOL_META, threadIntegrationBindingFromPreview } from "@piarium/protocol";
+import {
+  assembleKeepReasons,
+  collectBranchObjectHashes,
+  collectDraftBaselineHashes,
+  measureDirectory,
+  measurementFromHashes,
+  mergeHashMaps,
+  projectThreadOccupancy,
+  projectWorkspaceSpace,
+  readVolumeSpace,
+} from "./working-state/thread-space.js";
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
@@ -80,6 +94,7 @@ export interface ThreadRuntimeOptions {
       };
   resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "acknowledgeSurface" | "latestPreview"> | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
+  hasActiveCommands?(directory: string): boolean | Promise<boolean>;
 }
 
 export interface SpawnThreadRunInput extends CreateThreadInput {
@@ -1659,6 +1674,353 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return preview;
   };
 
+  const isEnospc = (error: unknown): boolean => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOSPC") return true;
+    const message = error instanceof Error ? error.message : String(error);
+    return /\bENOSPC\b|no space left/i.test(message);
+  };
+
+  const unfinishedIntegrationReasons = async (workspaceId: string, threadId: string, thread: Thread): Promise<string[]> => {
+    const reasons: string[] = [];
+    if (thread.integration === "dirty" || thread.integration === "merge-ready" || thread.integration === "conflict") {
+      reasons.push(`Unfinished integration (${thread.integration})`);
+    }
+    if (!options.workingStates) return reasons;
+    const operations = await options.workingStates.withStore(workspaceId, "thread-space-ops", (_store, context) => {
+      const rows = context.database.prepare(`
+        SELECT id, state, data_json FROM operations
+        WHERE workspace_id = ? AND kind = 'integration'
+        AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted')
+      `).all(workspaceId) as Array<{ id: string; state: string; data_json: string }>;
+      return rows.flatMap((row) => {
+        try {
+          const data = JSON.parse(row.data_json) as { threadId?: string };
+          return data.threadId === threadId ? [`Unfinished integration operation ${row.id} (${row.state})`] : [];
+        } catch {
+          return [];
+        }
+      });
+    }, "shared");
+    return [...reasons, ...operations];
+  };
+
+  const keepReasonsFor = async (workspaceId: string, thread: Thread): Promise<string[]> => {
+    const run = await options.registry.getActiveRun(workspaceId, thread.id);
+    const runActive = Boolean(run && run.outcome === null);
+    let matchesResult: boolean | null = null;
+    const hasPublishedResult = Boolean(thread.workBranchId && thread.resultRevision);
+    if (hasPublishedResult && thread.worktree && thread.worktree.materialized !== false && options.workingStates) {
+      try {
+        matchesResult = await options.workingStates.withStore(
+          workspaceId,
+          "thread-result-reclaim-check",
+          (store) => store.directoryMatchesResult(thread.workBranchId!, thread.resultRevision!, thread.worktree!.path),
+          "shared",
+        );
+      } catch {
+        matchesResult = null;
+      }
+    } else if (thread.worktree?.materialized === false) {
+      matchesResult = true;
+    }
+    let writerReason: string | undefined;
+    let permissionRelease: (() => Promise<void>) | undefined;
+    if (thread.worktree && thread.worktree.materialized !== false && options.canReclaimWorktree) {
+      try {
+        const permission = await options.canReclaimWorktree(workspaceId, thread.id, thread.worktree.path);
+        permissionRelease = permission.release;
+        if (!permission.safe) writerReason = permission.reason ?? "The worktree still has an active user or writer";
+      } catch (error) {
+        writerReason = error instanceof Error ? error.message : String(error);
+      } finally {
+        await permissionRelease?.().catch(reportError);
+      }
+    }
+    const hasActiveCommands = Boolean(
+      thread.worktree
+      && thread.worktree.materialized !== false
+      && options.hasActiveCommands
+      && await options.hasActiveCommands(thread.worktree.path),
+    );
+    return assembleKeepReasons({
+      thread,
+      runActive,
+      unfinishedIntegration: await unfinishedIntegrationReasons(workspaceId, thread.id, thread),
+      ...(writerReason ? { writerReason } : {}),
+      matchesResult,
+      hasPublishedResult,
+      hasActiveCommands,
+    });
+  };
+
+  const occupancyFor = async (
+    workspaceId: string,
+    thread: Thread,
+    exclusive: Map<string, number | null>,
+    shared: Map<string, number | null>,
+  ): Promise<ThreadOccupancy> => {
+    const materialized = !thread.worktree || thread.worktree.materialized === false
+      ? { logicalBytes: 0, allocatedBytes: 0, unknown: false }
+      : await measureDirectory(thread.worktree.path).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return { logicalBytes: null, allocatedBytes: null, unknown: true };
+        }
+        throw error;
+      });
+    return projectThreadOccupancy({
+      thread,
+      materialized,
+      exclusive,
+      shared,
+      keepReasons: await keepReasonsFor(workspaceId, thread),
+    });
+  };
+
+  const objectHashMaps = async (workspaceId: string, threads: Thread[]): Promise<Map<string, Map<string, number | null>>> => {
+    const perThread = new Map<string, Map<string, number | null>>();
+    if (!options.workingStates) {
+      for (const thread of threads) perThread.set(thread.id, new Map());
+      return perThread;
+    }
+    return options.workingStates.withStore(workspaceId, "thread-space-measure", (store) => {
+      for (const thread of threads) {
+        const branchHashes = thread.workBranchId ? collectBranchObjectHashes(store, thread.workBranchId) : new Map();
+        const draftHashes = collectDraftBaselineHashes(store, thread.manifest.draftBaselineId);
+        perThread.set(thread.id, mergeHashMaps(branchHashes, draftHashes));
+      }
+      return perThread;
+    }, "shared");
+  };
+
+  const inspectSpace = async (workspaceId: string, parent?: ThreadParent): Promise<WorkspaceThreadSpace> => {
+    const listed = parent
+      ? await options.registry.listThreads(workspaceId, parent, true)
+      : await options.registry.listWorkspaceThreads(workspaceId);
+    const threads = listed.filter((thread) => !thread.hidden);
+    const perThreadHashes = await objectHashMaps(workspaceId, threads);
+    const owners = new Map<string, Set<string>>();
+    const unique = new Map<string, number | null>();
+    for (const [threadId, hashes] of perThreadHashes) {
+      for (const [hash, size] of hashes) {
+        const current = owners.get(hash) ?? new Set<string>();
+        current.add(threadId);
+        owners.set(hash, current);
+        if (!unique.has(hash)) unique.set(hash, size);
+        else if (unique.get(hash) === null || size === null) unique.set(hash, null);
+      }
+    }
+    const occupancies: ThreadOccupancy[] = [];
+    for (const thread of threads) {
+      const hashes = perThreadHashes.get(thread.id) ?? new Map();
+      const exclusive = new Map<string, number | null>();
+      const shared = new Map<string, number | null>();
+      for (const [hash, size] of hashes) {
+        if ((owners.get(hash)?.size ?? 1) > 1) shared.set(hash, size);
+        else exclusive.set(hash, size);
+      }
+      occupancies.push(await occupancyFor(workspaceId, thread, exclusive, shared));
+    }
+    const settings = parent
+      ? await resolveEffectiveWorktreeSettings(workspaceId, parent)
+      : options.worktreeSettings;
+    let volume: { freeBytes: number; totalBytes: number } | null = null;
+    try {
+      volume = await readVolumeSpace(await options.resolveWorkspaceRoot(workspaceId));
+    } catch {
+      volume = null;
+    }
+    return projectWorkspaceSpace(workspaceId, occupancies, measurementFromHashes(unique), settings?.budget, volume);
+  };
+
+  const persistWorktree = async (workspaceId: string, threadId: string, worktree: NonNullable<Thread["worktree"]>): Promise<void> => {
+    await options.registry.setWorktree(workspaceId, threadId, worktree);
+  };
+
+  const tryReclaimDirectory = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    thread: Thread,
+  ): Promise<{ thread: Thread; reclaimed: boolean; occupancy: ThreadOccupancy; message?: string }> => {
+    const space = await inspectSpace(workspaceId, parent);
+    const occupancy = space.threads.find((entry) => entry.threadId === thread.id)
+      ?? await occupancyFor(workspaceId, thread, new Map(), new Map());
+    const current = await options.registry.getThread(workspaceId, parent, thread.id) ?? thread;
+    if (!current.worktree || current.worktree.materialized === false) {
+      return { thread: current, reclaimed: true, occupancy };
+    }
+    if (occupancy.keepReasons.length > 0 || !occupancy.reclaimable) {
+      current.worktree.retentionReason = occupancy.keepReasons.join("; ") || "Directory is not reclaimable";
+      await persistWorktree(workspaceId, current.id, current.worktree);
+      return {
+        thread: await options.registry.getThread(workspaceId, parent, current.id) ?? current,
+        reclaimed: false,
+        occupancy,
+        message: current.worktree.retentionReason,
+      };
+    }
+    if (!options.worktrees.reclaim) {
+      return { thread: current, reclaimed: false, occupancy, message: "Worktree reclamation is unavailable" };
+    }
+    const nativeVerified = Boolean(current.workBranchId && current.resultRevision);
+    const result = await options.worktrees.reclaim(current.worktree, nativeVerified ? { nativeVerified } : undefined);
+    if (result.reclaimed) delete current.worktree.retentionReason;
+    else current.worktree.retentionReason = result.reason ?? "Worktree reclamation was not safe";
+    await persistWorktree(workspaceId, current.id, current.worktree);
+    const updated = await options.registry.getThread(workspaceId, parent, current.id) ?? current;
+    const nextSpace = await inspectSpace(workspaceId, parent);
+    return {
+      thread: updated,
+      reclaimed: result.reclaimed,
+      occupancy: nextSpace.threads.find((entry) => entry.threadId === current.id) ?? occupancy,
+      ...(result.reclaimed ? {} : { message: current.worktree.retentionReason }),
+    };
+  };
+
+  const reclaimEligibleOthers = async (workspaceId: string, parent: ThreadParent, exceptThreadId: string): Promise<void> => {
+    const space = await inspectSpace(workspaceId, parent);
+    for (const occupancy of space.threads) {
+      if (occupancy.threadId === exceptThreadId || !occupancy.reclaimable) continue;
+      const thread = await options.registry.getThread(workspaceId, parent, occupancy.threadId);
+      if (!thread) continue;
+      await tryReclaimDirectory(workspaceId, parent, thread).catch(reportError);
+    }
+  };
+
+  const stopRunForArchive = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
+    const sessionId = sessionByThread.get(threadId);
+    const binding = sessionId ? bindingsBySession.get(sessionId) : undefined;
+    const run = await options.registry.getActiveRun(workspaceId, threadId);
+    if (sessionId) {
+      terminatingSessions.add(sessionId);
+      await options.sessions.abort(sessionId).catch(reportError);
+      await options.sessions.close(sessionId).catch(reportError);
+    }
+    if (run && run.outcome === null) {
+      await publishPartialResult(workspaceId, parent, threadId).catch(reportError);
+      await options.registry.endRun(workspaceId, threadId, run.id, "cancelled", "archived by user").catch(reportError);
+    }
+    if (sessionId && bindingsBySession.get(sessionId) === binding) bindingsBySession.delete(sessionId);
+    if (sessionByThread.get(threadId) === sessionId) sessionByThread.delete(threadId);
+    if (sessionId) {
+      lastAgentEnd.delete(sessionId);
+      clearStallTimer(sessionId);
+      waitingSessions.delete(sessionId);
+      terminatingSessions.delete(sessionId);
+    }
+    stalledThreads.delete(`${workspaceId}\0${threadId}`);
+  };
+
+  const archiveUser = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    keepWorktree?: boolean,
+  ) => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    if (thread.lifecycle !== "archived") await stopRunForArchive(workspaceId, parent, threadId);
+    const archived = await options.registry.archiveThread(workspaceId, threadId, keepWorktree);
+    if (!archived) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    const shouldKeep = archived.keepWorktree === true;
+    const reclaimed = shouldKeep
+      ? { thread: archived, reclaimed: false, occupancy: await occupancyFor(workspaceId, archived, new Map(), new Map()), message: "User requested keep_worktree" }
+      : await tryReclaimDirectory(workspaceId, parent, archived);
+    return {
+      ...await snapshotFor(workspaceId, parent, archived.id),
+      occupancy: reclaimed.occupancy,
+      space: await inspectSpace(workspaceId, parent),
+      reclaimed: reclaimed.reclaimed,
+      ...(reclaimed.message ? { message: reclaimed.message } : {}),
+    };
+  };
+
+  const restoreUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
+    const existing = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    const restored = await options.registry.restoreThread(workspaceId, threadId);
+    if (!restored) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    let status: ThreadRestoreStatus = "restored";
+    let message: string | undefined;
+    const worktree = restored.worktree;
+    if (worktree && worktree.materialized === false && options.worktrees.materialize) {
+      const settings = await resolveEffectiveWorktreeSettings(workspaceId, parent);
+      await reclaimEligibleOthers(workspaceId, parent, threadId);
+      const space = await inspectSpace(workspaceId, parent);
+      if (space.status === "over-budget" || space.status === "low-free") {
+        status = "budget-unavailable";
+        message = space.note;
+        worktree.retentionReason = message;
+        await persistWorktree(workspaceId, threadId, worktree);
+      } else {
+        try {
+          const sourceRoot = await options.resolveWorkspaceRoot(workspaceId);
+          const materialized = await options.worktrees.materialize(sourceRoot, worktree);
+          delete materialized.retentionReason;
+          if (options.worktrees.runSetup && settings?.setup) {
+            try {
+              await options.worktrees.runSetup(sourceRoot, materialized, settings);
+            } catch (error) {
+              materialized.retentionReason = error instanceof Error ? error.message : String(error);
+              status = "rebuild-failed";
+              message = `Directory restored but setup failed: ${materialized.retentionReason}`;
+            }
+          }
+          await persistWorktree(workspaceId, threadId, materialized);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "EEXIST") {
+            status = "path-occupied";
+            message = error instanceof Error ? error.message : "Original thread path is occupied by other content";
+          } else if (isEnospc(error)) {
+            status = "enospc";
+            message = error instanceof Error ? error.message : "No space left on the volume";
+          } else {
+            status = "rebuild-failed";
+            message = error instanceof Error ? error.message : String(error);
+          }
+          worktree.retentionReason = message;
+          await persistWorktree(workspaceId, threadId, worktree).catch(reportError);
+        }
+      }
+    }
+    const thread = await options.registry.getThread(workspaceId, parent, threadId) ?? restored;
+    const activeRun = await options.registry.getActiveRun(workspaceId, threadId);
+    return {
+      workspaceId,
+      parent,
+      thread,
+      activeRun,
+      restoreStatus: status,
+      space: await inspectSpace(workspaceId, parent),
+      ...(message ? { message } : {}),
+    };
+  };
+
+  const reclaimUser = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    const result = await tryReclaimDirectory(workspaceId, parent, thread);
+    return {
+      ...await snapshotFor(workspaceId, parent, threadId),
+      occupancy: result.occupancy,
+      space: await inspectSpace(workspaceId, parent),
+      reclaimed: result.reclaimed,
+      ...(result.message ? { message: result.message } : {}),
+    };
+  };
+
+  const snapshotFor = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    return {
+      workspaceId,
+      parent,
+      thread,
+      activeRun: await options.registry.getActiveRun(workspaceId, threadId),
+    };
+  };
+
   const acknowledgeSurface = async (
     workspaceId: string,
     parent: ThreadParent,
@@ -1741,6 +2103,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     merge,
     previewIntegration,
     acknowledgeSurface,
+    archiveUser,
+    restoreUser,
+    inspectSpace,
+    reclaimUser,
     drain,
     isThreadSession,
     getSessionBinding,

@@ -4106,6 +4106,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施。
 
+### D-202 · 2026-09-10 · 线程归档/恢复与空间治理（3.4E、3.10）
+
+背景：`archiveThread` 只改 lifecycle；用户归档若走会话删除路径会清掉 `report`。UI 投影丢掉 archived。`materialize` 在原路径被其他内容占用时没有明确拒绝。占用统计只加 `stat.size`，预算和归档产品面未接线。
+
+决定：
+
+1. 用户归档走 `threadRuntime.archiveUser`：运行中/等待输入先 abort 并 `endRun(cancelled)`，保留 Pi 会话文件、转录引用、结果和 `report`。不调用 `archiveThreadsForDeletedSession`。恢复沿原 Thread / 原 `sessionId` / 已有结果继续；目录已回收则按结果在原路径重建。
+2. 原路径存在且 `materialized === false` 时视为被其他内容占用：报 `path-occupied`，不删除不明目录。ENOSPC 与用户预算不足分别标 `enospc` / `budget-unavailable`。未知占用不记成零；不杀已有任务来腾配额。
+3. 占用区分物化目录逻辑大小、`stat.blocks * 512` 分配（拿不到则为 null）、以及内容寻址对象。共享 hash 在工作区只计一次，线程上拆 exclusive/shared。预算只对照用户配置的 `harness.worktree.budget`，不引入 8 GiB / 百分比 / 保留天数默认值。
+4. 回收复用结果发布、`directoryMatchesResult`、Documents 写者屏障和 Host 上的后台命令检查。`keep_worktree`、未完 Integration、活跃 Run、写者/编辑器、后台命令、未收集内容或无法核对结果时只保留该目录并写明原因。归档不释放 object_references。
+5. 线程面板、`GET ?archived=1`、`GET /space` 与 archive/restore/reclaim/keep-worktree 共用 Host 投影。默认列表仍不展示 archived。
+
+验证：registry 用户归档保留 report；runtime 占用路径不删目录；routes 走 runtime 而不是只调 registry helper；space 共享对象与 unknown≠0；UI 投影在 Host 要求时保留 archived。浏览器完整点击链与真实 ENOSPC 未跑。
+
+影响：protocol 占用类型；thread-space / runtime / routes / registry / worktree / 线程面板；设计 9.3.4；status 3.4 / 3.10。
+
+状态：已实施。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4312,3 +4330,4 @@ ModelRuntime 纵切继续通过。
 | D-199 | implementation（保留未知正文与分片；混合命令通用展示；大块/提示预算与 UTF-8 首尾；条件免二次截断） | — | 设计 5.2；plan/status 3.17 |
 | D-200 | implementation（生产发现 Git Bash；按工作区 settings.get 选解释器；usr\\bin 优先） | — | 设计 5.2；status 1.3；host DOCUMENTATION |
 | D-201 | implementation（dirty 分类写回 Document Registry；绑定预览；settle=dirty） | — | 设计 3.4–3.5；status 3.5a / 3.10 |
+| D-202 | implementation（用户归档保留结果/转录；占用与预算按 Host 投影；占用路径不删） | — | 设计 9.3.4；status 3.4 / 3.10 |

@@ -253,6 +253,16 @@ are recorded as unavailable or surface-pending. `merge-ready` comes from a
 bound preview, not from “files changed at settlement”.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
+User archive keeps the report, transcript reference, native results, and original
+Pi session file; it does not use the session-delete path that clears `report`.
+Restore rematerializes the published result at the same path. If that path is
+occupied by other content, Host reports `path-occupied` and does not delete it.
+Occupancy distinguishes materialized logical size, allocated blocks when the
+platform reports them, and shared content-addressed objects. Reclaim stays
+blocked for `keep_worktree`, unfinished Integration, active writers, editor
+surfaces, background commands, or unverified/uncollected content. Budget uses
+only the user-configured `harness.worktree.budget`. Thread panel routes
+`GET /space` and archive/restore/reclaim share this Host projection.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

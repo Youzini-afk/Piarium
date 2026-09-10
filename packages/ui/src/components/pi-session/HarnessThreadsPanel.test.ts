@@ -5,6 +5,7 @@ import {
   mergeHarnessThreadSnapshot,
   parseHarnessThreadList,
   parseHarnessThreadMutation,
+  parseHarnessThreadSpace,
   projectHarnessThreadState,
 } from './harnessThreadPresentation';
 
@@ -95,5 +96,46 @@ describe('HarnessThreadsPanel projection', () => {
     expect(mergeHarnessThreadSnapshot([original], stale)).toEqual([original]);
     expect(harnessThreadsAtEntry([original], 'entry-1')).toEqual([original]);
     expect(harnessThreadsAtEntry([original], 'entry-2')).toEqual([]);
+  });
+
+  test('keeps archived threads only when the Host list asked for them', () => {
+    const archived = { thread: thread({ lifecycle: 'archived' }), activeRun: run({ outcome: 'cancelled', workerState: 'exited' }) };
+    expect(projectHarnessThreadState(archived)).toBe('archived');
+    expect(mergeHarnessThreadSnapshot([], archived)).toEqual([]);
+    expect(mergeHarnessThreadSnapshot([], archived, { includeArchived: true })).toEqual([archived]);
+    const hidden = parseHarnessThreadList({
+      workspaceId: 'workspace-1',
+      parent: { kind: 'session', id: 'parent-1' },
+      includeArchived: false,
+      threads: [archived],
+    });
+    expect(hidden).toEqual([]);
+    const shown = parseHarnessThreadList({
+      workspaceId: 'workspace-1',
+      parent: { kind: 'session', id: 'parent-1' },
+      includeArchived: true,
+      threads: [archived],
+    });
+    expect(shown).toHaveLength(1);
+    const space = parseHarnessThreadSpace({
+      workspaceId: 'workspace-1',
+      threads: [{
+        threadId: 'thread-1',
+        materialized: { logicalBytes: 12, allocatedBytes: 16, unknown: false },
+        exclusiveObjects: { logicalBytes: 4, allocatedBytes: null, unknown: false },
+        sharedObjects: { logicalBytes: 8, allocatedBytes: null, unknown: false },
+        reclaimable: false,
+        reclaimableLogicalBytes: 0,
+        keepReasons: ['User requested keep_worktree'],
+      }],
+      uniqueObjectLogicalBytes: 12,
+      uniqueObjectUnknown: false,
+      materializedLogicalBytes: 12,
+      freeBytes: 100,
+      status: 'ok',
+      note: 'logical occupancy',
+    });
+    expect(space.threads[0]?.keepReasons).toEqual(['User requested keep_worktree']);
+    expect(() => parseHarnessThreadSpace({ workspaceId: 'workspace-1', threads: [], status: 'ready' })).toThrow(/Malformed/);
   });
 });

@@ -26,6 +26,7 @@ describe("harness thread routes", () => {
     expect(response.body).toEqual({
       workspaceId: "workspace-1",
       parent: { kind: "session", id: "session-1" },
+      includeArchived: false,
       threads: [{ thread, activeRun: { id: "run-1", workerState: "running" } }],
     });
   });
@@ -175,5 +176,84 @@ describe("harness thread routes", () => {
       .get("/api/harness/sessions/session-1/threads")
       .expect(401);
     expect(listThreads).not.toHaveBeenCalled();
+  });
+
+  it("archives, restores, reclaims, and inspects space through the Host runtime", async () => {
+    const app = express();
+    app.use(express.json());
+    const archived = { id: "thread-1", lifecycle: "archived", report: { conclusion: "done" } };
+    const archiveUser = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+      thread: archived,
+      activeRun: { id: "run-1", sessionId: "child-1", outcome: "cancelled" },
+      reclaimed: true,
+    }));
+    const restoreUser = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+      thread: { ...archived, lifecycle: "settled" },
+      activeRun: { id: "run-1", sessionId: "child-1", outcome: "cancelled" },
+      restoreStatus: "path-occupied",
+      message: "Original thread path is occupied by other content",
+    }));
+    const reclaimUser = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+      thread: archived,
+      activeRun: null,
+      reclaimed: false,
+      message: "User requested keep_worktree",
+    }));
+    const inspectSpace = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      threads: [{ threadId: "thread-1", reclaimable: false, keepReasons: ["User requested keep_worktree"] }],
+      status: "ok",
+      note: "logical occupancy",
+      uniqueObjectLogicalBytes: 12,
+      uniqueObjectUnknown: false,
+      materializedLogicalBytes: 0,
+      freeBytes: 100,
+    }));
+    const listThreads = vi.fn(async () => [archived]);
+    registerHarnessThreadRoutes(app, {
+      registry: {
+        listThreads,
+        getActiveRun: vi.fn(async () => null),
+        setKeepWorktree: vi.fn(async () => ({ ...archived, keepWorktree: true })),
+      } as never,
+      runtime: {
+        scopeForSession: vi.fn(async () => ({
+          workspaceId: "workspace-1",
+          parent: { kind: "session", id: "session-1" },
+        })),
+        archiveUser,
+        restoreUser,
+        reclaimUser,
+        inspectSpace,
+      } as never,
+    });
+
+    const hidden = await request(app).get("/api/harness/sessions/session-1/threads").expect(200);
+    expect(hidden.body.includeArchived).toBe(false);
+    expect(hidden.body.threads).toEqual([]);
+
+    const shown = await request(app).get("/api/harness/sessions/session-1/threads?archived=1").expect(200);
+    expect(shown.body.includeArchived).toBe(true);
+    expect(shown.body.threads).toHaveLength(1);
+
+    await request(app).post("/api/harness/sessions/session-1/threads/thread-1/archive").send({ keepWorktree: false }).expect(200);
+    expect(archiveUser).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "session-1" }, "thread-1", false);
+
+    const restored = await request(app).post("/api/harness/sessions/session-1/threads/thread-1/restore").expect(200);
+    expect(restored.body.restoreStatus).toBe("path-occupied");
+    expect(restoreUser).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "session-1" }, "thread-1");
+
+    await request(app).post("/api/harness/sessions/session-1/threads/thread-1/reclaim").expect(200);
+    expect(reclaimUser).toHaveBeenCalled();
+
+    const space = await request(app).get("/api/harness/sessions/session-1/space").expect(200);
+    expect(space.body.status).toBe("ok");
+    expect(inspectSpace).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "session-1" });
   });
 });

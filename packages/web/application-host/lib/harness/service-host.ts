@@ -194,6 +194,7 @@ export interface HarnessServiceHost {
   hasActor(identity: HarnessActorIdentity): boolean;
   resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
+  hasActiveCommandAtDirectory(directory: string): boolean;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
@@ -396,6 +397,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     options.dropAgentInputContexts?.(sessionId);
   };
 
+  const hasActiveCommandAtDirectory = (directory: string): boolean => {
+    for (const entry of sessions.values()) {
+      if (entry.shellSupervisor?.hasActiveCommandAt(directory)) return true;
+    }
+    return false;
+  };
+
   const getShellSupervisor = (sessionId: string): ShellSupervisor | null => {
     return sessions.get(sessionId)?.shellSupervisor ?? null;
   };
@@ -486,6 +494,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     hasActor,
     resolveActor,
     getShellSupervisor,
+    hasActiveCommandAtDirectory,
     getInterpreter,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
