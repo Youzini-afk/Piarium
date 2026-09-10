@@ -262,6 +262,162 @@ describe("KnowledgeStore", () => {
       const list = await store.listKnowledge({ status: "dismissed" });
       expect(list).toHaveLength(1);
     });
+
+    it("edits current accepted knowledge and rejects stale or retired rows", async () => {
+      const id = await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "Use npm",
+        trigger: "packages",
+      });
+      await store.updateAcceptedKnowledge(id, { content: "Use bun", trigger: "packages" }, "workspace", {
+        content: "Use npm",
+        trigger: "packages",
+      });
+      expect(await store.getKnowledge(id)).toMatchObject({ content: "Use bun", status: "accepted" });
+      await expect(store.updateAcceptedKnowledge(id, { content: "stale", trigger: "packages" }, "workspace", {
+        content: "Use npm",
+        trigger: "packages",
+      })).rejects.toMatchObject({ code: "conflict" });
+      await store.retireKnowledge(id, "workspace", {
+        content: "Use bun",
+        trigger: "packages",
+        status: "accepted",
+      });
+      await expect(store.updateAcceptedKnowledge(id, { content: "again", trigger: "packages" }, "workspace", {
+        content: "Use bun",
+        trigger: "packages",
+      })).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("retires one identity without cascading or dropping history", async () => {
+      const kept = await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "Keep unique-kept-phrase",
+        trigger: "keep",
+      });
+      const retired = await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "Retire unique-retired-phrase",
+        trigger: "drop",
+      });
+      const otherScope = await store.putKnowledge({
+        scope: "user",
+        status: "accepted",
+        content: "Retire unique-retired-phrase",
+        trigger: "drop",
+      });
+      await store.retireKnowledge(retired, "workspace", {
+        content: "Retire unique-retired-phrase",
+        trigger: "drop",
+        status: "accepted",
+      });
+      expect((await store.getKnowledge(retired))?.invalidAt).toEqual(expect.any(Number));
+      expect((await store.getKnowledge(kept))?.invalidAt).toBeUndefined();
+      expect((await store.getKnowledge(otherScope))?.invalidAt).toBeUndefined();
+      expect(await store.listKnowledge({ status: "accepted", activeOnly: true }))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: kept }),
+          expect.objectContaining({ id: otherScope }),
+        ]));
+      expect((await store.listKnowledge({ status: "accepted", activeOnly: true })).map((item) => item.id))
+        .not.toContain(retired);
+      expect(await store.recall("unique-retired-phrase", 5)).toEqual([]);
+      expect((await store.recall("unique-kept-phrase", 5)).map((row) => row.node.id)).toEqual([kept]);
+      await expect(store.retireKnowledge(retired, "workspace", {
+        content: "Retire unique-retired-phrase",
+        trigger: "drop",
+        status: "accepted",
+      })).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("walks a supersede chain in both directions", async () => {
+      const first = await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "v1",
+        trigger: "rule",
+      });
+      const second = await store.putKnowledge({
+        scope: "workspace",
+        status: "suggested",
+        content: "v2",
+        trigger: "rule",
+      });
+      await store.acceptKnowledge(second, { supersedes: [first] });
+      const third = await store.putKnowledge({
+        scope: "workspace",
+        status: "suggested",
+        content: "v3",
+        trigger: "rule",
+      });
+      await store.acceptKnowledge(third, { supersedes: [second] });
+      const fromFirst = await store.getSupersedeChain(first, "workspace");
+      expect(fromFirst?.chain.map((item) => item.id)).toEqual([first, second, third]);
+      expect(fromFirst?.successors.map((item) => item.id)).toEqual([second, third]);
+      const fromThird = await store.getSupersedeChain(third, "workspace");
+      expect(fromThird?.predecessors.map((item) => item.id)).toEqual([first, second]);
+      expect(fromThird?.chain.map((item) => item.content)).toEqual(["v1", "v2", "v3"]);
+    });
+
+    it("rejects non-user writes on the user store", async () => {
+      const userDir = join(TEST_DIR, "user-store");
+      mkdirSync(userDir, { recursive: true });
+      const userStore = await openWorkspaceKnowledge({
+        dataDir: userDir,
+        hostId: "test-host",
+        workspaceId: "user",
+        embedding: null,
+      });
+      await expect(userStore.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "forged",
+        trigger: "",
+      })).rejects.toMatchObject({ code: "invalid" });
+      const id = await userStore.putKnowledge({
+        scope: "user",
+        status: "accepted",
+        content: "mine",
+        trigger: "style",
+      });
+      expect((await userStore.getKnowledge(id))?.scope).toBe("user");
+      await userStore.close();
+    });
+
+    it("keeps retired knowledge out of recall after reopen", async () => {
+      const dir = join(TEST_DIR, "knowledge-reopen");
+      mkdirSync(dir, { recursive: true });
+      const first = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-reopen",
+        embedding: null,
+      });
+      const id = await first.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: "Old effective rule",
+        trigger: "old rule",
+      });
+      await first.retireKnowledge(id, "workspace", {
+        content: "Old effective rule",
+        trigger: "old rule",
+        status: "accepted",
+      });
+      await first.close();
+      const second = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-reopen",
+        embedding: null,
+      });
+      expect((await second.getKnowledge(id))?.invalidAt).toEqual(expect.any(Number));
+      expect(await second.recall("Old effective rule", 5)).toEqual([]);
+      await second.close();
+    });
   });
 
   describe("file and symbol graph", () => {

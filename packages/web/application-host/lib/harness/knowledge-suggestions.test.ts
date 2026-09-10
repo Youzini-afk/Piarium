@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import {
   createSuggestion,
+  proposeUserMessageSuggestion,
   suggestSupersedes,
   acceptSuggestion,
   dismissSuggestion,
@@ -64,6 +65,21 @@ describe("createSuggestion", () => {
     );
     expect(result.content).toBe("Use bun for package management");
     expect(result.trigger).toBe("package management");
+  });
+
+  it("skips user-message duplicates including dismissed rows", async () => {
+    await createSuggestion(
+      { trigger: "user-message", content: "Use bun", sessionId: "s1", kind: "user-message" },
+      { store, settings: DEFAULT_SUGGESTIONS_SETTINGS },
+    );
+    const first = (await store.listKnowledge({ status: "suggested" }))[0]!;
+    await dismissSuggestion(first.id, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS }, "workspace");
+    const skipped = await proposeUserMessageSuggestion(
+      { trigger: "user-message", content: "Use bun", sessionId: "s2", kind: "user-message" },
+      { store, settings: DEFAULT_SUGGESTIONS_SETTINGS },
+    );
+    expect(skipped).toEqual({ created: false, skippedReason: "duplicate" });
+    expect(await store.listKnowledge({ scope: "workspace" })).toHaveLength(1);
   });
 
   it("auto-accepts when configured", async () => {

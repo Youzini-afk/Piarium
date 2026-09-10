@@ -10,7 +10,7 @@
  * 3. User message explicit pattern (only when models.suggestions configured)
  */
 
-import type { KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId } from "../knowledge/store.js";
+import type { Knowledge, KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -45,6 +45,44 @@ export interface KnowledgeSuggestionsSettings {
 export const DEFAULT_SUGGESTIONS_SETTINGS: KnowledgeSuggestionsSettings = {
   autoAcceptSuggestions: { workspace: false, user: false },
 };
+
+export const normalizeKnowledgeIdentity = (value: string): string => (
+  value.replace(/\s+/g, " ").trim().toLowerCase()
+);
+
+export async function findDuplicateKnowledge(
+  store: KnowledgeStore,
+  scope: KnowledgeScope,
+  content: string,
+): Promise<Knowledge | null> {
+  const identity = normalizeKnowledgeIdentity(content);
+  if (!identity) return null;
+  const existing = await store.listKnowledge({ scope });
+  return existing.find((item) => normalizeKnowledgeIdentity(item.content) === identity) ?? null;
+}
+
+export async function proposeUserMessageSuggestion(
+  input: SuggestionInput,
+  deps: SuggestionDeps,
+): Promise<{ created: boolean; skippedReason?: "empty" | "duplicate"; suggestion?: SuggestionResult }> {
+  const drafted = input.draftWithModel
+    ? await input.draftWithModel(`${SUGGESTION_PROMPT}\n\nUser message: ${input.content}`)
+    : { content: input.content, trigger: input.recallTrigger ?? "" };
+  const content = drafted.content.trim();
+  if (!content) return { created: false, skippedReason: "empty" };
+  const scope = input.scope ?? "workspace";
+  const duplicate = await findDuplicateKnowledge(deps.store, scope, content);
+  if (duplicate) return { created: false, skippedReason: "duplicate" };
+  const suggestion = await createSuggestion({
+    trigger: "user-message",
+    content,
+    recallTrigger: drafted.trigger,
+    sessionId: input.sessionId,
+    kind: input.kind,
+    scope,
+  }, deps);
+  return { created: true, suggestion };
+}
 
 // ── Suggestion creation ────────────────────────────────────────────
 

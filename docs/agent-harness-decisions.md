@@ -4205,6 +4205,25 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；调用链与定向证据见 status 3.4 / 3.5 / 3.7。真实付费模型审阅质量与完整浏览器点击链未测。
 
+### D-208 · 2026-09-10 · 2.7 / 2.10（Settings 知识目录与用户消息建议）
+
+背景：D-058/D-060/D-061 接了用户标记、审阅托盘和 keeper decisions，但 Settings 没有全量知识入口，配置 `models.suggestions` 后也不会从用户消息提议。status 仍把这两项写成未接。
+
+决定：
+
+1. 权威正文仍是现有 workspace/user `.tdb`。不迁库、不双写。Settings 与审阅托盘、公开 recall、Zone 2 读同一 store。向量仍是派生；编辑/停用/接受/取代走现有 `notifyKnowledge`。
+2. Settings 经鉴权目录路由列表/查看/编辑/停用，并展示来源与 `supersedes` 链。workspace 操作先经 Documents `resolveWorkspace({ workspaceId })`，不给客户端自造 id 开库。user 目录用 `user.tdb`，并拒绝非 user scope 写入。
+3. 删除是对该 id 写 `invalidAt`，不物理删节点，不级联其他 scope 或相邻历史。并发编辑继续用打开时的 content/trigger/status/invalidAt 做 409。
+4. 已接受条目的 Settings 编辑是同 id 就地改正文（用户纠正这一条）。agent 提议更新仍走建议 + 接受时取代。suggested 编辑复用既有 `updateSuggestedKnowledge`。
+5. `models.suggestions` 配置后，pi-host 在 `before_agent_start` 用该槽位 `completeSimple` 草拟；只有解析出的 JSON `{content,trigger}` 才调用 Host `knowledge.suggest`。未配置或模型返回 null 不落库，不借用主模型。失败只记 Host 诊断，不挡用户回合。
+6. user-message 建议固定写 workspace，并按规范化正文对 suggested/accepted/dismissed/retired 去重。接受策略沿用现有 `createSuggestion` / auto-accept 设置（生产 HTTP 与 Host 服务当前都读默认关闭的 auto-accept，与既有审阅托盘一致）。
+
+考虑过的替代：(1) 把知识目录塞进 Harness Settings 长页——列表/取代链不合适。(2) Settings 走 session 建议路由——Settings 没有会话。(3) 未配置时借用主模型——违背槽位契约。(4) 物理删除——丢掉取代链。
+
+影响：KnowledgeStore mutation/chain、catalog routes、`knowledge.suggest`、pi-host suggestions extension、Settings `knowledge` 页与 i18n；设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10。
+
+状态：已实施；调用链与定向证据见 status 2.7 / 2.10。真实付费 suggestions 质量与完整浏览器点击链未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4417,3 +4436,4 @@ ModelRuntime 纵切继续通过。
 | D-205 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 |
 | D-206 | implementation（后台 shell 与终端同一进程、bundled Pi 默认、todo confidence 只作信息） | — | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 |
 | D-207 | implementation（固定结果验证记录、三事实分离、发布后自动 review） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
+| D-208 | implementation（Settings 知识目录与 suggestions 槽位用户消息提议） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |

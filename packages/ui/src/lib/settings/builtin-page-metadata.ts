@@ -8,6 +8,7 @@ export type BuiltinSettingsRenderer =
   | 'commands'
   | 'extensions'
   | 'git'
+  | 'knowledge'
   | 'language-support'
   | 'magic-prompts'
   | 'plugins'
@@ -55,6 +56,7 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'remote-instances', title: 'Remote Instances', titleKey: 'settings.page.remoteInstances.title', group: 'projects', kind: 'single', icon: 'computer', order: 21, keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'] }, 'remote-instances', 'not-vscode'),
   spec({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, 'piarium:tunnel', 'not-vscode'),
   spec({ slug: 'git', title: 'Git', titleKey: 'settings.page.git.title', group: 'projects', kind: 'single', icon: 'git-branch', order: 23, keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'] }, 'git', 'not-vscode'),
+  spec({ slug: 'knowledge', title: 'Knowledge', titleKey: 'settings.page.knowledge.title', group: 'pi', kind: 'single', icon: 'brain', order: 37, keywords: ['knowledge', 'memory', 'recall', 'suggestion', 'supersede'] }, 'knowledge'),
   spec({ slug: 'language-support', title: 'Language Support', titleKey: 'settings.page.languageSupport.title', group: 'pi', kind: 'single', icon: 'code-box', order: 38, keywords: ['language', 'languages', 'grammar', 'tree-sitter', 'structure', 'lsp', 'language server'] }, 'language-support'),
   spec({ slug: 'runtime', title: 'Runtime', titleKey: 'settings.page.runtime.title', group: 'pi', kind: 'single', icon: 'terminal-box', order: 39, keywords: ['pi', 'runtime', 'install', 'upgrade', 'node', 'path', 'package root'] }, 'runtime'),
   spec({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, 'providers'),

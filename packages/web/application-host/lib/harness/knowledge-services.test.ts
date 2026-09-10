@@ -10,7 +10,8 @@ import { createEmbedScheduler } from "../knowledge/semantic/embed-scheduler.js";
 import { createVectorCache } from "../knowledge/semantic/vector-cache.js";
 import { createRemoteEmbedder } from "../knowledge/semantic/remote-embedder.js";
 import { remoteEmbeddingSpaceId } from "../knowledge/semantic/identity.js";
-import { createRecallSearchService, createZone2AssembleService } from "./harness-services.js";
+import { createKnowledgeSuggestService, createRecallSearchService, createZone2AssembleService } from "./harness-services.js";
+import { DEFAULT_SUGGESTIONS_SETTINGS } from "./knowledge-suggestions.js";
 import { executeRecall } from "./recall-tool.js";
 import { createHarnessServiceHost } from "./service-host.js";
 import type { HarnessServiceContext } from "./router.js";
@@ -53,6 +54,42 @@ describe("knowledge public service wiring", () => {
     const result = await createRecallSearchService(host).handle({ query: "bun" }, context(new AbortController().signal));
     expect(calls).toEqual([[actor.sessionId, actor.workspaceId]]);
     expect(result.results[0]).toMatchObject({ title: "Prefer bun", via: "text" });
+  });
+
+  it("records a user-message suggestion on the authorized workspace store and skips dismissed identities", async () => {
+    const { store } = await fixture();
+    const changed: string[] = [];
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => null,
+      discoveredShells: {},
+      knowledgeSuggestDepsProvider: async (_sessionId, workspaceId, scope) => {
+        expect(workspaceId).toBe(actor.workspaceId);
+        expect(scope).toBe("workspace");
+        return {
+          store,
+          settings: DEFAULT_SUGGESTIONS_SETTINGS,
+          onChanged: () => { changed.push("workspace"); },
+        };
+      },
+    });
+    cleanup.push(() => host.dispose());
+    const service = createKnowledgeSuggestService(host);
+    const created = await service.handle({
+      content: "Always prefer bun",
+      trigger: "install",
+      kind: "user-message",
+    }, context(new AbortController().signal));
+    expect(created.created).toBe(true);
+    expect(created.suggestion).toMatchObject({ content: "Always prefer bun", status: "suggested", scope: "workspace" });
+    await store.dismissKnowledge(created.suggestion!.id, "workspace");
+    const skipped = await service.handle({
+      content: "Always prefer bun",
+      kind: "user-message",
+    }, context(new AbortController().signal));
+    expect(skipped).toEqual({ created: false, skippedReason: "duplicate" });
+    expect(changed).toEqual(["workspace"]);
+    expect((await store.listKnowledge({ scope: "workspace" })).filter((item) => item.content === "Always prefer bun")).toHaveLength(1);
   });
 
   it.each(["recall", "zone2"] as const)("cancels a pending remote query through public %s", async (entry) => {

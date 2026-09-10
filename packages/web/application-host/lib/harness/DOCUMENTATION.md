@@ -24,6 +24,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
                            ├── memory.blocks.* → KnowledgeStore block validator
+                           ├── knowledge.suggest → workspace/user .tdb via existing suggestion accept policy
                            ├── zone2.assemble → Knowledge material + ThreadRegistry projection + source-thread <review>
                            └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification bind / auto review
 ```
@@ -309,10 +310,18 @@ Blocks can be explicitly promoted into workspace or user knowledge suggestions.
 The authenticated review API keeps `(scope, id)` identities distinct, uses
 opened-value conflict checks for edits, validates same-scope supersedes before
 mutation, and broadcasts only invalidation identities over SSE.
+Settings catalog routes list/edit/retire the same workspace and user `.tdb`
+rows after Documents workspace resolution. Delete sets `invalidAt` on one id;
+it does not cascade to other scopes or supersede neighbors. Derived vectors
+are notified through the existing knowledge-change hook.
 Committed `memory-agent` changes to a `decisions` block also feed a mechanical
 suggestion runtime: only new structured list entries are proposed, and any
 content previously suggested, accepted, or dismissed for that session is not
 proposed again. This path never invokes a model or auto-accepts.
+When `models.suggestions` is configured, pi-host drafts from the current user
+message and Host `knowledge.suggest` stores the proposal. Unconfigured sessions
+do not borrow the main model. Suggested, dismissed, and superseded identities
+are not re-proposed and do not enter public recall.
 
 Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
 authority has already validated and frozen any dirty buffers behind its opaque

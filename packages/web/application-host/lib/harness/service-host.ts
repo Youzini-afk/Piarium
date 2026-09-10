@@ -15,6 +15,7 @@ import type { CompactionHandlerDeps, CompactionSettings, KeeperCoverageStore } f
 import { createKeeperCoverageStore } from "./compaction.js";
 import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
+import type { KnowledgeSuggestionsSettings } from "./knowledge-suggestions.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { StructureSource } from "../structure/types.js";
 import type { ThreadRegistry } from "./thread-registry.js";
@@ -158,6 +159,11 @@ export interface HarnessServiceHost {
   keeperCoverageStore: KeeperCoverageStore;
   todoSettings: TodoToolSettings;
   recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
+  knowledgeSuggestDepsProvider: ((
+    sessionId: string,
+    workspaceId: string | null,
+    scope: "workspace" | "user",
+  ) => Promise<{ store: KnowledgeStore; settings: KnowledgeSuggestionsSettings; onChanged?: () => void } | null>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
@@ -269,6 +275,7 @@ export interface HarnessServiceHostOptions {
   keeperCoverageStore?: KeeperCoverageStore;
   todoSettings?: TodoToolSettings;
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
+  knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
@@ -317,6 +324,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const keeperCoverageStore = options.keeperCoverageStore ?? createKeeperCoverageStore();
   const todoSettings = options.todoSettings ?? { requireConfirmation: false };
   const recallDepsProvider = options.recallDepsProvider ?? null;
+  const knowledgeSuggestDepsProvider = options.knowledgeSuggestDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
   // Phase 3
   const threadRegistry = options.threadRegistry ?? null;
@@ -530,6 +538,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     keeperCoverageStore,
     todoSettings,
     recallDepsProvider,
+    knowledgeSuggestDepsProvider,
     todoDepsProvider,
     threadRegistry,
     threadCaptureDraftBaseline,

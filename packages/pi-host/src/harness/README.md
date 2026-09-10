@@ -57,6 +57,10 @@ const customTools = selectHarnessTools(settings, {
   `pi-permission-system`. It resolves the plugin's session-keyed service on every
   call and yields completely while that service is active, so there is one
   approval owner rather than two dialogs. Smart mode is part of this fallback.
+- `createKnowledgeSuggestionExtension` — when `models.suggestions` is configured,
+  drafts a workspace knowledge proposal from the current user message and stores
+  it through Host `knowledge.suggest`. Unconfigured sessions keep user-mark and
+  keeper paths only and never borrow the main model.
 - `createMemoryAgentExtension` — background memory keeper. It captures the real
   session context at Pi hooks, calls the active model, and submits only
   `memory_edit` operations plus the active ancestor path and exact

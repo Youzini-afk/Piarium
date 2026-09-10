@@ -139,6 +139,13 @@ export interface Knowledge {
   recalledAt?: number;
 }
 
+export interface KnowledgeSupersedeChain {
+  current: Knowledge;
+  predecessors: Knowledge[];
+  successors: Knowledge[];
+  chain: Knowledge[];
+}
+
 export class KnowledgeMutationError extends Error {
   readonly code: "conflict" | "not-found" | "invalid";
 
@@ -297,8 +304,24 @@ export interface KnowledgeStore {
     expectedScope?: KnowledgeScope,
     expected?: { content: string; trigger: string },
   ): Promise<void>;
+  updateAcceptedKnowledge(
+    id: NodeId,
+    patch: { content: string; trigger: string },
+    expectedScope?: KnowledgeScope,
+    expected?: { content: string; trigger: string },
+  ): Promise<void>;
+  /**
+   * Hide one knowledge row from current-effective queries by setting `invalidAt`.
+   * Does not delete the node, other scopes, or supersede neighbors (D-208).
+   */
+  retireKnowledge(
+    id: NodeId,
+    expectedScope?: KnowledgeScope,
+    expected?: { content: string; trigger: string; status: KnowledgeStatus; invalidAt?: number | null },
+  ): Promise<void>;
   getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
+  getSupersedeChain(id: NodeId, expectedScope?: KnowledgeScope): Promise<KnowledgeSupersedeChain | null>;
   acceptKnowledge(id: NodeId, opts: {
     supersedes?: NodeId[] | undefined;
     expectedScope?: KnowledgeScope;
@@ -921,6 +944,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async putKnowledge(k: KnowledgeInput): Promise<NodeId> {
       return enqueueWrite(() => {
+        if (recallScope === "user" && k.scope !== "user") {
+          throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
+        }
         const now = Date.now();
         const payload = {
           type: "knowledge",
@@ -985,6 +1011,112 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.flush();
         notifyKnowledge([id]);
       });
+    },
+
+    async updateAcceptedKnowledge(id, patch, expectedScope, expected): Promise<void> {
+      return enqueueWrite(() => {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "knowledge") {
+          throw new KnowledgeMutationError("not-found", `Knowledge not found: ${id}`);
+        }
+        if (expectedScope && payload["scope"] !== expectedScope) {
+          throw new KnowledgeMutationError("not-found", `Knowledge not found in ${expectedScope} scope: ${id}`);
+        }
+        if (payload["status"] !== "accepted") {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is not current accepted knowledge`);
+        }
+        if (payload["invalidAt"] !== undefined) {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer current`);
+        }
+        if (expected && (payload["content"] !== expected.content || payload["trigger"] !== expected.trigger)) {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
+        }
+        if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+        db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
+        db.indexText(id, patch.content);
+        if (patch.trigger) db.indexKeyword(id, patch.trigger);
+        db.flush();
+        notifyKnowledge([id]);
+      });
+    },
+
+    async retireKnowledge(id, expectedScope, expected): Promise<void> {
+      return enqueueWrite(() => {
+        const payload = db.getPayload(id) as Record<string, unknown> | null;
+        if (!payload || payload["type"] !== "knowledge") {
+          throw new KnowledgeMutationError("not-found", `Knowledge not found: ${id}`);
+        }
+        if (expectedScope && payload["scope"] !== expectedScope) {
+          throw new KnowledgeMutationError("not-found", `Knowledge not found in ${expectedScope} scope: ${id}`);
+        }
+        if (expected) {
+          if (
+            payload["content"] !== expected.content
+            || payload["trigger"] !== expected.trigger
+            || payload["status"] !== expected.status
+          ) {
+            throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
+          }
+          const currentInvalid = typeof payload["invalidAt"] === "number" ? payload["invalidAt"] : undefined;
+          if (expected.invalidAt === null || expected.invalidAt === undefined) {
+            if (currentInvalid !== undefined) {
+              throw new KnowledgeMutationError("conflict", `Knowledge ${id} was already retired`);
+            }
+          } else if (currentInvalid !== expected.invalidAt) {
+            throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
+          }
+        }
+        if (payload["invalidAt"] !== undefined) return;
+        db.patchPayload(id, { $set: { invalidAt: Date.now() } });
+        db.flush();
+        notifyKnowledge([id]);
+      });
+    },
+
+    async getSupersedeChain(id, expectedScope): Promise<KnowledgeSupersedeChain | null> {
+      const current = await store.getKnowledge(id);
+      if (!current) return null;
+      if (expectedScope && current.scope !== expectedScope) return null;
+      const catalog = (await store.listKnowledge({ scope: current.scope }))
+        .filter((item) => item.scope === current.scope);
+      const byId = new Map(catalog.map((item) => [item.id, item]));
+      const outgoingOf = (from: NodeId): NodeId[] => db.getEdges(from)
+        .filter((edge) => edge.label === "supersedes")
+        .map((edge) => edge.targetId);
+      const incomingOf = (to: NodeId): NodeId[] => {
+        const found: NodeId[] = [];
+        for (const item of catalog) {
+          for (const edge of db.getEdges(item.id)) {
+            if (edge.label === "supersedes" && edge.targetId === to) found.push(item.id);
+          }
+        }
+        return found;
+      };
+      const collect = (start: NodeId, neighbors: (from: NodeId) => NodeId[]): Knowledge[] => {
+        const collected: Knowledge[] = [];
+        const seen = new Set<NodeId>([start]);
+        const queue = [start];
+        while (queue.length > 0) {
+          const from = queue.shift()!;
+          for (const nextId of neighbors(from)) {
+            if (seen.has(nextId)) continue;
+            const next = byId.get(nextId);
+            if (!next) continue;
+            seen.add(nextId);
+            collected.push(next);
+            queue.push(nextId);
+          }
+        }
+        return collected.sort((left, right) => left.createdAt - right.createdAt || left.id - right.id);
+      };
+      const predecessors = collect(id, outgoingOf);
+      const successors = collect(id, incomingOf);
+      return {
+        current,
+        predecessors,
+        successors,
+        chain: [...predecessors, current, ...successors],
+      };
     },
 
     async acceptKnowledge(id: NodeId, opts: {

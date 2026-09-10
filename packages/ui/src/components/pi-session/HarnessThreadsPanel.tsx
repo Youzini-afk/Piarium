@@ -386,7 +386,11 @@ export const HarnessThreadsPanel: React.FC<{
         void reloadBlocks(controller.signal).catch(() => undefined);
         return;
       }
-      if (event.type === 'harness-knowledge-changed' && (event.scope === 'user' || event.sessionId === parentSessionId)) {
+      if (event.type === 'harness-knowledge-changed' && (
+        event.scope === 'user'
+        || event.sessionId === parentSessionId
+        || !event.sessionId
+      )) {
         void reloadKnowledge(controller.signal).catch(() => undefined);
         return;
       }

@@ -880,6 +880,9 @@ event、block 或文件内容。`recall` 先查工作区库再查用户库，用
 - **作用域晋升逐级审阅。** session（块）→ workspace（`knowledge`）→ user（`user.tdb`），每一级晋升都是一条新的建议。
 
 Settings 提供列表视图：每条可见、可编辑、可删除、可查看取代链，并记录来源（哪个会话、由哪类时刻触发、谁接受）。
+删除是对该 id 写 `invalidAt`，不物理删节点，也不扩大到其他 scope 或相邻历史。权威正文仍在 workspace/user `.tdb`；
+派生向量随同一套 store 变更失效。`models.suggestions` 配置后由 pi-host 对用户消息草拟建议并经 Host 落库；
+未配置时只保留用户标记和 keeper 路径，不借用主模型。未接受、已驳回或已被取代的条目不进入公开 recall。
 
 ### 7.3 写入者
 

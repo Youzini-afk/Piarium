@@ -87,6 +87,8 @@ import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@p
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
+import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
+import { DEFAULT_SUGGESTIONS_SETTINGS } from './lib/harness/knowledge-suggestions.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
@@ -1428,6 +1430,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerHarnessKnowledgeCatalogRoutes(app, {
+    resolveWorkspace: async ({ workspaceId }) => documentsAuthority.resolveWorkspace({ workspaceId }),
+    getWorkspaceStore: getKnowledgeStoreForWorkspace,
+    getUserStore: getUserKnowledgeStore,
+    onKnowledgeChanged: ({ scope, workspaceId }) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-knowledge-changed',
+        properties: { scope, ...(workspaceId ? { workspaceId } : {}) },
+      });
+    },
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
   registerWebSearchCredentialRoutes(app, {
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
@@ -2086,6 +2100,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     keeperCoverageStore,
     todoDepsProvider,
     recallDepsProvider,
+    knowledgeSuggestDepsProvider: async (sessionId, workspaceId, scope) => {
+      const store = scope === 'user'
+        ? await getUserKnowledgeStore()
+        : workspaceId
+          ? await getKnowledgeStoreForWorkspace(workspaceId)
+          : null;
+      if (!store) return null;
+      return {
+        store,
+        settings: DEFAULT_SUGGESTIONS_SETTINGS,
+        onChanged: () => {
+          broadcastGlobalUiEvent?.({
+            type: 'piarium:harness-knowledge-changed',
+            properties: { sessionId, scope, ...(workspaceId ? { workspaceId } : {}) },
+          });
+        },
+      };
+    },
     threadRegistry,
     threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
     agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,

@@ -353,6 +353,25 @@ export interface RecallSearchResult {
   };
 }
 
+export interface KnowledgeSuggestParams {
+  content: string;
+  trigger?: string;
+  kind?: string;
+  scope?: "workspace" | "user";
+}
+
+export interface KnowledgeSuggestResult {
+  created: boolean;
+  skippedReason?: "empty" | "duplicate" | "no-workspace";
+  suggestion?: {
+    id: number;
+    content: string;
+    trigger: string;
+    status: "suggested" | "accepted";
+    scope: "workspace" | "user";
+  };
+}
+
 export interface RelatedQueryParams {
   /** Workspace path or symbol / connection-literal name. */
   anchor: string;
@@ -914,6 +933,7 @@ export interface HarnessServiceMap {
   "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
+  "knowledge.suggest": { params: KnowledgeSuggestParams; result: KnowledgeSuggestResult };
   "memory.blocks.get": { params: { branchEntryIds: string[] }; result: { blocks: MemoryBlockSnapshot[] } };
   "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[]; branchEntryIds: string[]; coveredEntryIds: string[] }; result: MemoryApplyResult };
   // Phase 3: Thread operations
@@ -1011,6 +1031,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "compaction.after": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
+  "knowledge.suggest": "context.session",
   "memory.blocks.get": "context.session",
   "memory.blocks.apply": "context.session",
   "thread.dispatch": "control.thread",
@@ -1077,6 +1098,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "compaction.after",
   "todo.upsert",
   "recall.search",
+  "knowledge.suggest",
   "memory.blocks.get",
   "memory.blocks.apply",
   "thread.dispatch",

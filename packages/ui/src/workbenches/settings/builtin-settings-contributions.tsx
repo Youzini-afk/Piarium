@@ -2,6 +2,7 @@ import type { SurfaceActivationContext } from '@piarium/extension-surface';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { KnowledgeSettingsPage } from '@/components/sections/knowledge/KnowledgeSettingsPage';
 import { LanguageSupportPage } from '@/components/sections/language-support/LanguageSupportPage';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
@@ -46,6 +47,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'commands': implementation = { renderContent: () => <CommandsPage /> }; break;
       case 'extensions': implementation = { renderContent: () => <ExtensionsPage /> }; break;
       case 'git': implementation = { renderContent: () => <GitPage /> }; break;
+      case 'knowledge': implementation = { renderContent: () => <KnowledgeSettingsPage /> }; break;
       case 'language-support': implementation = { renderContent: () => <LanguageSupportPage /> }; break;
       case 'magic-prompts': implementation = { renderContent: () => <MagicPromptsPage />, renderSidebar: (options) => <MagicPromptsSidebar onItemSelect={options.onItemSelect} /> }; break;
       case 'plugins': implementation = { renderContent: () => <PluginsPage /> }; break;

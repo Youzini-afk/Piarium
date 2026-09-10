@@ -22,7 +22,8 @@ export type HarnessBlocksChangedEvent = {
 
 export type HarnessKnowledgeChangedEvent = {
   type: 'harness-knowledge-changed';
-  sessionId: string;
+  sessionId?: string;
+  workspaceId?: string;
   scope: 'workspace' | 'user';
 };
 
@@ -206,9 +207,15 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'piarium:harness-knowledge-changed') {
     const properties = getEventProperties(envelope.properties);
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';
     const scope = properties?.scope;
-    if (sessionId && (scope === 'workspace' || scope === 'user')) {
-      for (const listener of listeners) listener({ type: 'harness-knowledge-changed', sessionId, scope });
+    if (scope === 'workspace' || scope === 'user') {
+      for (const listener of listeners) listener({
+        type: 'harness-knowledge-changed',
+        scope,
+        ...(sessionId ? { sessionId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+      });
     }
     return;
   }

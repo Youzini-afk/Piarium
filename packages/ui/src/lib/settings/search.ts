@@ -775,6 +775,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['markdown', 'prompt', 'template'],
   },
   {
+    id: 'knowledge.workspace',
+    page: 'knowledge',
+    titleKey: 'settings.knowledge.section.workspace',
+    descriptionKey: 'settings.page.knowledge.description',
+    keywords: ['knowledge', 'memory', 'recall', 'workspace', 'supersede'],
+  },
+  {
+    id: 'knowledge.user',
+    page: 'knowledge',
+    titleKey: 'settings.knowledge.section.user',
+    descriptionKey: 'settings.page.knowledge.description',
+    keywords: ['knowledge', 'memory', 'user', 'recall'],
+  },
+  {
     id: 'language-support.workspace',
     page: 'language-support',
     titleKey: 'settings.languageSupport.section.workspace',

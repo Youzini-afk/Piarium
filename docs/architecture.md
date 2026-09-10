@@ -644,6 +644,7 @@ Git and copy directories remain materialization and migration backends as specif
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
+| Workspace and user knowledge | Per-host workspace/user `.tdb` under `PIARIUM_DATA_DIR` | Settings catalog and suggestion accept/edit/retire mutate this store; vectors are derived and must not become a second write authority |
 | Workspace text documents | Application-host document authority; the file on disk | One revisioned read/write/watch path with opaque revisions; never a second text shape in `FilesAPI`/`WorkspaceAPI` |
 | Workspace identity and document recovery journals | Per-host records below `PIARIUM_DATA_DIR` | Scoped to the owning application host; another host never inherits a same-path selection |
 | Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |

@@ -21,6 +21,7 @@ import { assembleZone2Content } from "./zone2.js";
 import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
+import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
 import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
@@ -568,6 +569,31 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
   };
 }
 
+export function createKnowledgeSuggestService(host: HarnessServiceHost): HarnessService<"knowledge.suggest"> {
+  return {
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!host.knowledgeSuggestDepsProvider) {
+        throw new HarnessServiceError("unavailable", "Knowledge suggestion deps not configured");
+      }
+      const content = typeof params.content === "string" ? params.content : "";
+      if (!content.trim()) return { created: false, skippedReason: "empty" };
+      const scope = params.scope === "user" ? "user" : "workspace";
+      const deps = await host.knowledgeSuggestDepsProvider(ctx.sessionId, ctx.workspaceId, scope);
+      if (!deps) return { created: false, skippedReason: "no-workspace" };
+      const result = await proposeUserMessageSuggestion({
+        trigger: "user-message",
+        content,
+        recallTrigger: typeof params.trigger === "string" ? params.trigger : "",
+        sessionId: ctx.sessionId,
+        kind: typeof params.kind === "string" && params.kind.trim() ? params.kind.trim() : "user-message",
+        scope,
+      }, deps);
+      if (result.created) deps.onChanged?.();
+      return result;
+    },
+  };
+}
+
 export function createRecallSearchService(host: HarnessServiceHost): HarnessService<"recall.search"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
@@ -661,6 +687,9 @@ export function registerHarnessServices(
   }
   if (host.recallDepsProvider) {
     router.register("recall.search", createRecallSearchService(host));
+  }
+  if (host.knowledgeSuggestDepsProvider) {
+    router.register("knowledge.suggest", createKnowledgeSuggestService(host));
   }
   // Phase 3 thread services — registered only when thread registry is available
   if (host.threadRegistry && host.threadSpawnSession) {
