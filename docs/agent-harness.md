@@ -272,8 +272,9 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
   TTY 交互提示"。Piarium 选 PTY，复用 host 现有终端运行时：后台 shell 天然就是用户可附着、可输入的终端 tab（第 2 节
   已定的 UI 投影），程序的行为与在终端中一致。给模型的文本剥去 ANSI 与控制序列（host 已有 replay-safe 字节逻辑），
   终端 tab 显示原始字节。后台命令使用 terminal runtime 的同一会话身份（D-206）：监督器经
-  `createTerminalSession` / `attachTerminalSession` 创建与附着，HTTP 不能指定 owner/spawn。关闭查看界面只脱离附着，
-  显式终止仍走统一关闭链。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
+  `createTerminalSession` / `attachTerminalSession` 创建与附着，HTTP 不能指定 owner/spawn。`sh_N` 由全局 terminal runtime
+  分配，监督器使用返回的实际 id；同名会话只有完整创建身份一致且仍在运行时才能复用，HTTP 不能接管 Harness handle。
+  关闭查看界面只脱离附着，显式终止仍走统一关闭链。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
 - **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`wait_ms` 到了它转后台，模型在输出里看到提示文本，
   用 `write_to_process` 回答或 `kill_shell` 放弃。Pi 内置 bash 的 stdin 是 ignore，与 `write_to_process` 不相容，
   因此这里不沿用。
@@ -291,11 +292,13 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
   locale（`C.UTF-8` 在旧版 macOS 不存在，硬设会让每条命令刷 `setlocale` 警告），没有则不设，PTY 自身按 UTF-8 解码。
   PTY 提供真实 `TERM`，不设 `TERM=dumb`。整套默认环境在设置中可见、可按工作区修改。
 - `kill_shell` 与会话结束时终止整个进程树；复用 host 已有的 process-tree termination。没有超时杀死。
+- 后台命令的完成由 PTY exit 事件产生，不以模型调用 `get_output` 为前提；start/end 各记录一次，重复观察只读已有事实。
 - 声明 `executionMode: "sequential"`：同一批工具调用中有 `bash` 时整批串行（Pi 的批次语义），因为它可以触碰任何路径。
 - 执行期间向 mutation authority 注册为 `process` writer（`WRITER_MODES` 中已存在的模式），使恢复系统知道本轮
   文件覆盖不完整。这是恢复设计已预留的语义。
 - 会话关闭等待 PTY 实际退出，再释放写者；中断请求不等于命令已经结束。失败保留活动状态与可重试关闭，已从会话表移除的
-  shell 在关闭完成前仍参与目录回收判断。线程不能只凭 Pi close 响应就删除执行目录（D-205）。
+  shell 在关闭完成前仍参与目录回收判断。writer 释放失败同样保留目录保护并可在后续关闭重试；线程不能只凭 Pi close
+  响应就删除执行目录（D-205/D-209）。
 
 模型看到的文本形状：
 
@@ -386,8 +389,8 @@ Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，�
 confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模型训练过。写入知识库的 `plan` 块（主 agent 是该块唯一
 的结构所有者，记忆 agent 只能标条目状态），显示在计划面板，Zone 2 复述。`confidence` 可选：主 agent 声明对计划的信心，
 只作说明，不以自报分数自动增加确认步骤。只有用户显式选择 plan mode 或配置计划审批时才按该选择等待。系统提示只建议
-"非平凡任务先计划"，harness 不检查它是否被调用，也不因其陈旧而提醒。confidence 只作信息；只有已有、明确启用的审批
-策略才会等待确认（D-206）。
+"非平凡任务先计划"，harness 不检查它是否被调用，也不因其陈旧而提醒。confidence 只作信息；plan mode 或权限策略需要
+批准时由既有 pre-tool 流程处理，`todo.upsert` 写入后没有第二次确认协议（D-206/D-209）。
 
 ### 5.7 `explore`、`dispatch` / `wait`（新增）
 
@@ -884,6 +887,12 @@ Settings 提供列表视图：每条可见、可编辑、可删除、可查看�
 派生向量随同一套 store 变更失效。`models.suggestions` 配置后由 pi-host 对用户消息草拟建议并经 Host 落库；
 未配置时只保留用户标记和 keeper 路径，不借用主模型。未接受、已驳回或已被取代的条目不进入公开 recall。
 
+Settings 目录与会话审阅托盘的写操作携带用户打开条目时的 content、trigger、status 与 invalidAt，store 在同一写队列内核对完整期望修订、scope 和当前状态后
+再修改；工作区或作用域切换会使旧选择和迟到响应失效。模型提议的 Host 入口只接受正文与触发描述，workspace 与 `user-message`
+来源取自已认证 actor，不能由 worker 自报。规范化正文的历史去重和插入也在同一个写队列操作内完成，包含 dismissed/retired，
+所以并发相同提议不会生成两个节点或复活旧建议。用户标记、memory decision 与模型提议都读取同一会话的有效 auto-accept 设置；
+trusted project 只能调整 workspace scope，设置不可读时保留 suggested 而不自动接受（D-211）。
+
 ### 7.3 写入者
 
 - Document Registry 在成功提交 `write/move/delete` 后发布带已校验 writer owner 的结构化事件；观察失败不反噬文件提交。
@@ -1368,10 +1377,11 @@ timeout_ms?)` 等待（第 9.2.6 节）。返回结构化结果：改动文件�
 
 记忆 agent（第 8.4.1 节）与阅读子 agent（第 5.8 节）由 harness 规则触发，主 agent 没有调用它们的工具。`review` 角色
 有两个入口：主 agent 可以 `dispatch('review', ...)`；harness 也在子线程成功发布非空结果后作为**传感器**自动运行一次
-（第 9.1 节，D-207）。两者输入相同——已存储结果的 diff、任务说明与已接受的项目 knowledge，**不带父的对话**，干净是它有效的原因（Devin
+（第 9.1 节，D-207/D-210）。两者输入相同——已存储结果的 diff、任务说明与已接受的项目 knowledge，**不带父的对话**，干净是它有效的原因（Devin
 Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；输出带严重度与 `file:line` 的发现，写回源线程投影并进入 Zone 2。
-自动 review 默认运行且不阻断 settle；以 `resultRevision` 去重，新修订不继承旧审阅。用户可关闭，或把 `harness.review.gate` 设为完成门；
-用量归 review 槽位（未配置则回退主模型），不以 T4 配对为启用前提。父会话的 journaled 变化不是自动 review 触发。
+自动 review 默认运行且不阻断 settle；一轮执行以 `resultRevision + reviewThreadId + reviewRunId` 识别，新修订和新 Run 不继承
+旧审阅，迟到旧结论不能覆盖。用户可关闭，或把 `harness.review.gate` 设为完成门；gate 保存同一组结构身份，只由对应完成、失败或
+取消解除，后两者也会显示。用量归 review 槽位（未配置则回退主模型），不以 T4 配对为启用前提。父会话的 journaled 变化不是自动 review 触发。
 
 #### 9.2.4 委派的判断交给主 agent，harness 不设配额、不估成本
 
@@ -1410,7 +1420,7 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 | 内容对象 / 路径状态 | Host 存字节与哈希；路径状态复用 missing、file+mode、directory、symlink 原始目标、unsupported 的恢复模型，保留编码与换行；文本/二进制用于合并策略 |
 | 工作树 / 工作分支 | 固定 baseState、按路径的 delta/tombstone、单调 revision、草稿路径与显式 captureScopes；目录节点采用 Merkle 结构共享，旧修订不变 |
 | 物化记录 | branchId、输入 revision、实际路径、已收集 revision、运行者与未收集改动、环境准备状态、占用；同一分支写入按世代协调 |
-| 结果 / 验证记录 | resultRevision、可读取正文的引用、变更路径与来源；验证记录输入修订、环境、命令、退出与生成物，运行中输入变了须说明 |
+| 结果 / 验证记录 | resultRevision、可读取正文的引用、变更路径与来源；验证记录保存 actor/Run/binding generation、观察边界输入身份、命令、cwd、退出与输出引用，运行中输入变了须说明 |
 | Integration | 选定子结果、父相关路径/草稿的期望状态、逐路径计划和实际 before/after、冲突、暂存区影响与恢复操作引用 |
 
 这是正式实施目标，不以第二个消费者或独立评测为前置。对象名称是领域责任，不要求每一行另建数据库或服务。Thread/ThreadRun
@@ -1441,8 +1451,11 @@ Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非
 Branch 和目录同时各自接受不相容的写入。shared 模式是有意的实时共享，与虚拟隔离分支不同。
 
 命令返回、后台 shell 退出、Run 结算与重开时收集变化；工具 journal、目录变化记录和后端 diff 一起确定需要读取的路径。发生遗漏
-或重启时按后端状态对账，必要时在该物化目录捕获差异；未确认收集完成就保留目录并显示原因。测试通过绑定命令的实际输入；
-格式化、生成源码或后台写入产生新修订，不自动继承旧修订的验证结论。相关流程直接实现并用故障测试验证，不另建研究门槛。
+或重启时按后端状态对账，必要时在该物化目录捕获差异；未确认收集完成就保留目录并显示原因。验证观察在命令 start/end 固定
+authority/session/worker generation/Run 与 binding generation。Git 输入身份用不可变 base/HEAD 加 staged、unstaged、tracked mode、
+非忽略 untracked 的变化路径状态；子分支再含固定草稿和显式 captureScopes。只有 start/end/publish 身份一致的同 Run 命令才能绑定
+结果修订，不做每命令全目录扫描。非 Git 在没有便宜固定身份时标 uncertain。格式化、生成源码或后台写入产生新修订，不自动继承旧修订的验证结论。
+相关流程直接实现并用故障测试验证，不另建研究门槛（D-210）。
 
 **存储迁移与保留。** 复用恢复库的内容寻址、流式捕获、路径状态与条件补偿实现，增加工作分支、结果、集成的独立引用所有者。
 恢复历史清理、恢复插件关闭/更换不得删除仍由线程引用的对象；线程删除释放自身引用，只有没有任何所有者的对象才能清理。
@@ -1472,6 +1485,10 @@ base/local 修订、正文哈希与格式核验；agent 的 owner 从 Host 固�
 缓冲不可用或修订漂移保留子结果，不静默改磁盘。其他原生集成直接应用路径状态，不执行 git apply --3way，不修改
 用户 index；旧 Git 结果先导入再走同一原生集成。UI、`thread.merge`、`threads`/`wait` 与 Zone 2 共用 Thread `integration` 与
 `integrationBinding`。合并预览只说明可应用性，不代表测试通过。
+
+父状态检查只在一次 Integration 完整 applied 后，为选定 `resultRevision + operationId + parentSessionId` 打开持久观察窗口；冲突、补偿、
+needs-attention 和未保存草稿不进入磁盘验证。Host 重启可恢复该窗口，只有窗口之后且命令 start/end 都匹配合并后 Git 身份的父命令
+才进入记录。退出码是事实，`allExitedZero` 只汇总这些已绑定命令，不表示检查充分或行为兼容（D-210）。
 
 **重叠提示与合并预览。** 已记录的分支变更路径可投影非阻塞重叠提示；恢复日志覆盖不到的 shell 路径标未知，未发现重叠不等于无冲突。
 提示不长期占有编辑锁，不阻塞独立分支写者。后台三方预览绑定子 resultRevision 与父受影响路径/草稿版本；输入变更即失效重算，
@@ -1560,7 +1577,8 @@ ThreadRun {
 ```
 
 工作分支、结果修订与草稿基线身份已经进入当前协议。验证记录写在 WorkingState 可选字段，Thread 只投影子检查、合并可应用性与父检查
-以及该修订的 review 状态（D-207）。更完整的物化记录仍是后续形状。旧 worktree 在迁移期间作为后端记录保留。
+以及该修订的 review 状态；观察和 review 都绑定实际 actor/Run 身份，不能由时间相邻推断（D-207/D-210）。更完整的物化记录仍是后续形状。
+旧 worktree 在迁移期间作为后端记录保留。
 状态是**正交维度**，不是一个枚举：`done + merge conflict`、`active + worker lost`、`archived + worktree retained`、
 `waiting-for-input + permission pending` 都是合法组合，一条状态机表达不了。worker 崩溃 = 当前 Run 以 `lost` 结束，
 恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；**不在同一条记录上把 worker-lost 清掉、改回 running**——那是把

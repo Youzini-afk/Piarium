@@ -118,7 +118,7 @@ describe("get_output tool", () => {
 
 describe("write_to_process tool", () => {
   it("writes to shell via shell.write", async () => {
-    const bridge = createFakeBridge((method, params) => {
+    const bridge = createFakeBridge((method, _params) => {
       if (method === "shell.write") return { accepted: true };
       throw new Error(`unexpected: ${method}`);
     });
@@ -150,7 +150,7 @@ describe("kill_shell tool", () => {
     const bridge = createFakeBridge(() => { return { killed: false }; });
     const tool = createKillShellTool(bridge as HostServicesBridge, "s1");
     const text = await executeTool(tool, { shellId: "sh_missing" });
-    assert.match(text, /not found or already exited/);
+    assert.match(text, /not found or termination failed/);
   });
 });
 

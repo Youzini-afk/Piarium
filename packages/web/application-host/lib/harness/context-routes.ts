@@ -11,12 +11,14 @@ import {
   createSuggestion,
   dismissSuggestion,
   suggestSupersedes,
+  type KnowledgeSuggestionsSettings,
 } from "./knowledge-suggestions.js";
 
 export interface HarnessContextRoutesOptions {
   getStore(sessionId: string): Promise<KnowledgeStore | null>;
   getBranchEntryIds(sessionId: string): Promise<string[]>;
   getUserStore?: () => Promise<KnowledgeStore>;
+  getSuggestionSettings?: (sessionId: string) => Promise<KnowledgeSuggestionsSettings>;
   onKnowledgeChanged?: (sessionId: string, scope: KnowledgeScope) => void;
   requireAuth?: RequestHandler;
 }
@@ -26,6 +28,7 @@ const noAuth: RequestHandler = (_request, _response, next) => next();
 const sessionIdOf = (request: Request): string => String(request.params.sessionId ?? "").trim();
 const labelOf = (request: Request): string => String(request.params.label ?? "").trim();
 const scopeOf = (value: unknown): KnowledgeScope | null => value === "workspace" || value === "user" ? value : null;
+const statusOf = (value: unknown) => value === "suggested" || value === "accepted" || value === "dismissed" ? value : null;
 const idOf = (value: unknown): number | null => {
   const id = typeof value === "number" ? value : Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
@@ -37,6 +40,7 @@ export function registerHarnessContextRoutes(
     getStore,
     getBranchEntryIds,
     getUserStore,
+    getSuggestionSettings,
     onKnowledgeChanged,
     requireAuth = noAuth,
   }: HarnessContextRoutesOptions,
@@ -184,6 +188,9 @@ export function registerHarnessContextRoutes(
         response.status(404).json({ error: `${scope} knowledge store is unavailable` });
         return;
       }
+      const settings = getSuggestionSettings
+        ? await getSuggestionSettings(sessionId)
+        : DEFAULT_SUGGESTIONS_SETTINGS;
       const suggestion = await createSuggestion({
         trigger: "user-mark",
         content,
@@ -191,7 +198,7 @@ export function registerHarnessContextRoutes(
         sessionId,
         kind,
         scope,
-      }, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS });
+      }, { store, settings });
       onKnowledgeChanged?.(sessionId, scope);
       response.status(201).json({ sessionId, suggestion });
     } catch (error) {
@@ -207,8 +214,11 @@ export function registerHarnessContextRoutes(
     const trigger = typeof request.body?.trigger === "string" ? request.body.trigger.trim() : "";
     const expectedContent = request.body?.expectedContent;
     const expectedTrigger = request.body?.expectedTrigger;
-    if (!sessionId || !scope || id === null || !content || typeof expectedContent !== "string" || typeof expectedTrigger !== "string") {
-      response.status(400).json({ error: "sessionId, scope, id, content, and the opened suggestion values are required" });
+    const expectedStatus = statusOf(request.body?.expectedStatus);
+    const expectedInvalidAt = request.body?.expectedInvalidAt;
+    if (!sessionId || !scope || id === null || !content || typeof expectedContent !== "string" || typeof expectedTrigger !== "string"
+      || !expectedStatus || (expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")) {
+      response.status(400).json({ error: "sessionId, scope, id, content, and the complete opened suggestion revision are required" });
       return;
     }
     try {
@@ -217,7 +227,12 @@ export function registerHarnessContextRoutes(
         response.status(404).json({ error: `${scope} knowledge store is unavailable` });
         return;
       }
-      await store.updateSuggestedKnowledge(id, { content, trigger }, scope, { content: expectedContent, trigger: expectedTrigger });
+      await store.updateSuggestedKnowledge(id, { content, trigger }, scope, {
+        content: expectedContent,
+        trigger: expectedTrigger,
+        status: expectedStatus,
+        invalidAt: expectedInvalidAt,
+      });
       onKnowledgeChanged?.(sessionId, scope);
       response.json({ updated: true });
     } catch (error) {
@@ -241,10 +256,18 @@ export function registerHarnessContextRoutes(
       response.status(400).json({ error: "supersedes must contain positive integer ids" });
       return;
     }
-    const editValues = [request.body?.content, request.body?.trigger, request.body?.expectedContent, request.body?.expectedTrigger];
-    const hasEdit = editValues.some((value) => value !== undefined);
-    if (hasEdit && editValues.some((value) => typeof value !== "string")) {
-      response.status(400).json({ error: "content, trigger, expectedContent, and expectedTrigger must be provided together" });
+    const hasEdit = request.body?.content !== undefined || request.body?.trigger !== undefined;
+    if (hasEdit && (typeof request.body?.content !== "string" || typeof request.body?.trigger !== "string")) {
+      response.status(400).json({ error: "content and trigger must be provided together" });
+      return;
+    }
+    const expectedContent = request.body?.expectedContent;
+    const expectedTrigger = request.body?.expectedTrigger;
+    const expectedStatus = statusOf(request.body?.expectedStatus);
+    const expectedInvalidAt = request.body?.expectedInvalidAt;
+    if (typeof expectedContent !== "string" || typeof expectedTrigger !== "string" || !expectedStatus
+      || (expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")) {
+      response.status(400).json({ error: "The complete opened suggestion revision is required" });
       return;
     }
     try {
@@ -257,14 +280,27 @@ export function registerHarnessContextRoutes(
       if (action === "accept") await acceptSuggestion(id, deps, {
         supersedes,
         scope,
+        expected: {
+          content: expectedContent,
+          trigger: expectedTrigger,
+          status: expectedStatus,
+          invalidAt: expectedInvalidAt,
+        },
         ...(hasEdit ? { edit: {
           content: String(request.body.content),
           trigger: String(request.body.trigger),
-          expectedContent: String(request.body.expectedContent),
-          expectedTrigger: String(request.body.expectedTrigger),
+          expectedContent,
+          expectedTrigger,
+          expectedStatus,
+          expectedInvalidAt,
         } } : {}),
       });
-      else await dismissSuggestion(id, deps, scope);
+      else await dismissSuggestion(id, deps, scope, {
+        content: expectedContent,
+        trigger: expectedTrigger,
+        status: expectedStatus,
+        invalidAt: expectedInvalidAt,
+      });
       onKnowledgeChanged?.(sessionId, scope);
       response.json({ action, completed: true });
     } catch (error) {

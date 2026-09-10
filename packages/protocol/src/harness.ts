@@ -323,13 +323,10 @@ export interface TodoUpsertParams {
   items: Array<{ text: string; status: "open" | "done" | "blocked" }>;
   branchEntryIds: string[];
   confidence?: number;
-  confirmed?: boolean;
 }
 
 export interface TodoUpsertResult {
   text: string;
-  confirmed?: boolean;
-  askedConfirmation: boolean;
 }
 
 export interface RecallSearchParams {
@@ -356,8 +353,6 @@ export interface RecallSearchResult {
 export interface KnowledgeSuggestParams {
   content: string;
   trigger?: string;
-  kind?: string;
-  scope?: "workspace" | "user";
 }
 
 export interface KnowledgeSuggestResult {

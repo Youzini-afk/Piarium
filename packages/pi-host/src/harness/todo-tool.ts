@@ -18,7 +18,6 @@ const TodoParams = Type.Object({
 });
 
 export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
-  let sessionConfirmed = false;
   return defineTool({
     name: "todo",
     label: "Todo",
@@ -35,48 +34,17 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
           items: params.items,
           branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
           ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
-          ...(sessionConfirmed ? { confirmed: true } : {}),
         });
         const typed = result as TodoUpsertResult;
-        if (typed.askedConfirmation && typed.confirmed === false) {
-          const choice = await ctx.ui.select(
-            "The session requires confirmation before updating the plan. Use it?",
-            ["Use plan", "Cancel"],
-          );
-          if (choice !== "Use plan") {
-            return {
-              content: [{ type: "text", text: "plan update cancelled by user" }],
-              details: { askedConfirmation: true, confirmed: false },
-            };
-          }
-          sessionConfirmed = true;
-          const confirmed = await bridge.request<"todo.upsert">("todo.upsert", {
-            items: params.items,
-            branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
-            ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
-            confirmed: true,
-          });
-          const confirmedResult = confirmed as TodoUpsertResult;
-          return {
-            content: [{ type: "text", text: confirmedResult.text }],
-            details: {
-              askedConfirmation: true,
-              ...(confirmedResult.confirmed !== undefined ? { confirmed: confirmedResult.confirmed } : {}),
-            },
-          };
-        }
         return {
           content: [{ type: "text", text: typed.text }],
-          details: {
-            askedConfirmation: typed.askedConfirmation,
-            ...(typed.confirmed !== undefined ? { confirmed: typed.confirmed } : {}),
-          },
+          details: {},
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `todo failed: ${message}` }],
-          details: { askedConfirmation: false },
+          details: {},
         };
       }
     },

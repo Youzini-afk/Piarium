@@ -45,6 +45,12 @@ describe("thread worktree runtime", () => {
     try {
       writeFileSync(join(fixture.repo, "tracked.txt"), "parent dirty\n");
       writeFileSync(join(fixture.repo, "parent-note.txt"), "untracked baseline\n");
+      const parentIdentity = await runtime.inspectWorkspaceIdentity(fixture.repo);
+      expect(parentIdentity).toMatchObject({
+        status: "ready",
+        baseRef: git(fixture.repo, ["rev-parse", "HEAD"]),
+        changedFiles: ["parent-note.txt", "tracked.txt"],
+      });
       const prepared = await runtime.prepare({ mode: "isolated", sourceRoot: fixture.repo, threadId: "thread-one" });
       childPath = prepared.cwd;
       expect(prepared.worktree).not.toBeNull();

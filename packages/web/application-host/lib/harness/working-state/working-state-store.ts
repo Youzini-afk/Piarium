@@ -54,6 +54,23 @@ export interface WorkspaceWorkingStateAccess {
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
+export const treeIdentityFromStates = (states: Record<string, RecoveryState>): string => {
+  const hash = createHash("sha256");
+  for (const file of Object.keys(states).sort()) {
+    const state = states[file]!;
+    hash.update(file);
+    hash.update("\0");
+    hash.update(JSON.stringify([
+      state.kind,
+      "mode" in state ? state.mode ?? null : null,
+      state.kind === "regular-file" ? state.byteLength : null,
+      state.kind === "regular-file" ? state.objectHash : null,
+      state.kind === "symlink" ? state.symlinkTarget : null,
+    ]));
+    hash.update("\0");
+  }
+  return `sha256-${hash.digest("hex")}`;
+};
 const normalizeRelative = (value: string): string => {
   const raw = value.replace(/\\/g, "/");
   const segments = raw.split("/").filter((segment) => segment && segment !== ".");
@@ -203,14 +220,28 @@ const parseCommandRecord = (value: unknown, label: string): CommandVerificationR
   if (typeof row.id !== "string" || typeof row.runId !== "string" || typeof row.command !== "string"
     || typeof row.cwd !== "string" || !isSafeInt(row.startedAt) || !isSafeInt(row.endedAt)
     || (row.exitCode !== null && !isSafeInt(row.exitCode)) || typeof row.cancelled !== "boolean"
-    || (row.relationToPublished !== "same-run-before-publish" && row.relationToPublished !== "unbound"
+    || (row.relationToPublished !== "same-run-matching-result"
+      && row.relationToPublished !== "post-merge-matching-tree"
+      && row.relationToPublished !== "same-run-before-publish"
+      && row.relationToPublished !== "unbound"
       && row.relationToPublished !== "uncertain")
     || (row.inputChangedDuringRun !== null && typeof row.inputChangedDuringRun !== "boolean")
     || !row.inputIdentity || typeof row.inputIdentity !== "object" || Array.isArray(row.inputIdentity)) {
     throw new Error(`${label} is malformed`);
   }
   const identity = row.inputIdentity as Record<string, unknown>;
-  if (identity.kind !== "published-revision" && identity.kind !== "unbound") throw new Error(`${label} identity is malformed`);
+  if (identity.kind !== "tree" && identity.kind !== "published-revision" && identity.kind !== "unbound") {
+    throw new Error(`${label} identity is malformed`);
+  }
+  const actor = row.actor && typeof row.actor === "object" && !Array.isArray(row.actor)
+    ? row.actor as Record<string, unknown>
+    : null;
+  if (actor && (typeof actor.authorityInstanceId !== "string" || typeof actor.sessionId !== "string"
+    || typeof actor.workerId !== "string" || !isSafeInt(actor.workerGeneration)
+    || (actor.runId !== undefined && typeof actor.runId !== "string"))) {
+    throw new Error(`${label} actor is malformed`);
+  }
+  const legacyIdentity = identity.kind === "published-revision" || row.relationToPublished === "same-run-before-publish";
   return {
     id: row.id,
     runId: row.runId,
@@ -226,17 +257,28 @@ const parseCommandRecord = (value: unknown, label: string): CommandVerificationR
     cancelled: row.cancelled,
     ...(typeof row.outputHandle === "string" ? { outputHandle: row.outputHandle } : {}),
     ...(typeof row.outputPreview === "string" ? { outputPreview: row.outputPreview } : {}),
-    inputIdentity: {
-      kind: identity.kind,
-      ...(typeof identity.branchId === "string" ? { branchId: identity.branchId } : {}),
-      ...(isSafeInt(identity.startPublishedRevision) ? { startPublishedRevision: identity.startPublishedRevision } : {}),
-      ...(isSafeInt(identity.endPublishedRevision) ? { endPublishedRevision: identity.endPublishedRevision } : {}),
-      ...(isSafeInt(identity.startHeadRevision) ? { startHeadRevision: identity.startHeadRevision } : {}),
-      ...(isSafeInt(identity.endHeadRevision) ? { endHeadRevision: identity.endHeadRevision } : {}),
-      ...(typeof identity.reason === "string" ? { reason: identity.reason } : {}),
-    },
-    inputChangedDuringRun: row.inputChangedDuringRun as boolean | null,
-    relationToPublished: row.relationToPublished,
+    actor: actor
+      ? {
+          authorityInstanceId: actor.authorityInstanceId as string,
+          sessionId: actor.sessionId as string,
+          workerId: actor.workerId as string,
+          workerGeneration: actor.workerGeneration as number,
+          ...(typeof actor.runId === "string" ? { runId: actor.runId } : {}),
+        }
+      : { authorityInstanceId: "unknown", sessionId: "unknown", workerId: "unknown", workerGeneration: 0 },
+    bindingGeneration: isSafeInt(row.bindingGeneration) ? row.bindingGeneration : 0,
+    inputIdentity: legacyIdentity
+      ? { kind: "unbound", reason: "legacy command record has no captured tree identity" }
+      : {
+          kind: identity.kind as "tree" | "unbound",
+          ...(typeof identity.branchId === "string" ? { branchId: identity.branchId } : {}),
+          ...(typeof identity.root === "string" ? { root: identity.root } : {}),
+          ...(typeof identity.startTreeHash === "string" ? { startTreeHash: identity.startTreeHash } : {}),
+          ...(typeof identity.endTreeHash === "string" ? { endTreeHash: identity.endTreeHash } : {}),
+          ...(typeof identity.reason === "string" ? { reason: identity.reason } : {}),
+        },
+    inputChangedDuringRun: legacyIdentity ? null : row.inputChangedDuringRun as boolean | null,
+    relationToPublished: legacyIdentity ? "uncertain" : row.relationToPublished as CommandVerificationRecord["relationToPublished"],
   };
 };
 
@@ -245,12 +287,13 @@ const parseChildBundle = (value: unknown, label: string): ResultVerificationBund
   const row = value as Record<string, unknown>;
   if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || typeof row.branchId !== "string"
     || !isSafeInt(row.recordedAt) || (row.binding !== "bound" && row.binding !== "uncertain")
-    || !Array.isArray(row.checks) || !isOptionalString(row.bindingReason)) {
+    || !Array.isArray(row.checks) || !isOptionalString(row.bindingReason) || !isOptionalString(row.resultTreeHash)) {
     throw new Error(`${label} is malformed`);
   }
   return {
     resultRevision: row.resultRevision,
     branchId: row.branchId,
+    ...(typeof row.resultTreeHash === "string" ? { resultTreeHash: row.resultTreeHash } : {}),
     recordedAt: row.recordedAt,
     binding: row.binding,
     ...(typeof row.bindingReason === "string" ? { bindingReason: row.bindingReason } : {}),
@@ -261,14 +304,19 @@ const parseChildBundle = (value: unknown, label: string): ResultVerificationBund
 const parseParentBundle = (value: unknown, label: string): ParentVerificationBundle => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
   const row = value as Record<string, unknown>;
-  const bindings = new Set(["bound", "uncertain", "cannot-verify-unsaved-draft", "not-recorded"]);
+  const bindings = new Set(["bound", "uncertain", "cannot-verify-unsaved-draft", "not-recorded", "not-integrated"]);
   if (!isSafeInt(row.mergedResultRevision) || Number(row.mergedResultRevision) <= 0 || !isSafeInt(row.recordedAt)
     || typeof row.draftUnsaved !== "boolean" || !bindings.has(row.binding as string) || !Array.isArray(row.checks)
-    || !isOptionalString(row.note)) {
+    || !isOptionalString(row.note) || !isOptionalString(row.mergeOperationId)
+    || !isOptionalString(row.parentTreeHash)
+    || (row.windowOpenedAt !== undefined && !isSafeInt(row.windowOpenedAt))) {
     throw new Error(`${label} is malformed`);
   }
   return {
     mergedResultRevision: row.mergedResultRevision,
+    ...(typeof row.mergeOperationId === "string" ? { mergeOperationId: row.mergeOperationId } : {}),
+    ...(typeof row.parentTreeHash === "string" ? { parentTreeHash: row.parentTreeHash } : {}),
+    ...(isSafeInt(row.windowOpenedAt) ? { windowOpenedAt: row.windowOpenedAt } : {}),
     recordedAt: row.recordedAt,
     draftUnsaved: row.draftUnsaved,
     binding: row.binding as ParentVerificationBundle["binding"],
@@ -282,7 +330,7 @@ const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord =>
   const row = value as Record<string, unknown>;
   const statuses = new Set(["running", "completed", "failed", "cancelled"]);
   if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || !statuses.has(row.status as string)
-    || !isSafeInt(row.recordedAt)) {
+    || !isSafeInt(row.recordedAt) || (row.gate !== undefined && typeof row.gate !== "boolean")) {
     throw new Error(`${label} is malformed`);
   }
   return {
@@ -291,6 +339,7 @@ const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord =>
     recordedAt: row.recordedAt,
     ...(typeof row.reviewThreadId === "string" ? { reviewThreadId: row.reviewThreadId } : {}),
     ...(typeof row.reviewRunId === "string" ? { reviewRunId: row.reviewRunId } : {}),
+    ...(typeof row.gate === "boolean" ? { gate: row.gate } : {}),
     ...(typeof row.conclusion === "string" ? { conclusion: row.conclusion } : {}),
     ...(Array.isArray(row.findings)
       ? {
@@ -517,9 +566,15 @@ export class WorkingStateStore {
   getParentVerification(threadId: string, mergedResultRevision?: number): ParentVerificationBundle | null {
     const list = this.document.verifications?.parent[threadId] ?? [];
     const match = mergedResultRevision === undefined
-      ? list.at(-1)
+      ? list.reduce<ParentVerificationBundle | undefined>((latest, bundle) => (
+          !latest || (bundle.windowOpenedAt ?? bundle.recordedAt) >= (latest.windowOpenedAt ?? latest.recordedAt) ? bundle : latest
+        ), undefined)
       : list.find((bundle) => bundle.mergedResultRevision === mergedResultRevision);
     return match ? clone(match) : null;
+  }
+
+  listParentVerifications(threadId: string): ParentVerificationBundle[] {
+    return (this.document.verifications?.parent[threadId] ?? []).map((bundle) => clone(bundle));
   }
 
   getReviewRecord(threadId: string, resultRevision: number): ResultReviewRecord | null {
@@ -572,6 +627,46 @@ export class WorkingStateStore {
     const result = this.document.results[`${branchId}@${revision}`];
     if (!branch || !result) return null;
     return { ...clone(branch.baseState), ...clone(result.pathStates) };
+  }
+
+  resultTreeIdentity(branchId: string, revision: number): string | null {
+    const states = this.resultState(branchId, revision);
+    return states ? treeIdentityFromStates(states) : null;
+  }
+
+  async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> {
+    const branch = this.document.branches[branchId];
+    if (!branch) return null;
+    const candidates = await this.branchCaptureCandidates(branch, directory, changedPaths);
+    const captured: Record<string, RecoveryState> = {};
+    const identity = { ...this.context.identity, canonicalRoot: directory };
+    for (const file of candidates) {
+      captured[file] = (await this.context.fileStore.captureState(identity, this.context.root, file, { store: false })).state;
+    }
+    const effective = clone(branch.baseState);
+    for (const [file, state] of Object.entries(captured)) {
+      if (state.kind === "missing" && !Object.hasOwn(branch.baseState, file)) delete effective[file];
+      else effective[file] = state;
+    }
+    return treeIdentityFromStates(effective);
+  }
+
+  async captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string> {
+    const candidates = [...new Set(changedPaths.map(normalizeRelative).flatMap((file) => {
+      const paths = [file];
+      let parent = this.pathModule.posix.dirname(file);
+      while (parent !== "." && parent !== "/") {
+        paths.push(parent);
+        parent = this.pathModule.posix.dirname(parent);
+      }
+      return paths;
+    }))].sort();
+    const captured: Record<string, RecoveryState> = {};
+    const identity = { ...this.context.identity, canonicalRoot: directory };
+    for (const file of candidates) {
+      captured[file] = (await this.context.fileStore.captureState(identity, this.context.root, file, { store: false })).state;
+    }
+    return `sha256-${createHash("sha256").update(seed).update("\0").update(treeIdentityFromStates(captured)).digest("hex")}`;
   }
 
   async createBranch(
@@ -696,6 +791,11 @@ export class WorkingStateStore {
     if (!changedPaths) return this.publishStates(branchId, await this.captureDirectory(directory));
     const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const candidates = await this.branchCaptureCandidates(branch, directory, changedPaths);
+    return this.publishStates(branchId, await this.captureDirectory(directory, candidates), candidates);
+  }
+
+  private async branchCaptureCandidates(branch: WorkingBranch, directory: string, changedPaths: string[]): Promise<string[]> {
     const changed = changedPaths.map(normalizeRelative);
     const ancestors = changed.flatMap((file) => {
       const result: string[] = [];
@@ -712,13 +812,12 @@ export class WorkingStateStore {
       ...Object.keys(branch.baseState).filter((file) => file === scope || file.startsWith(`${scope}/`)),
       ...currentPaths.filter((file) => file === scope || file.startsWith(`${scope}/`)),
     ]);
-    const candidates = [...new Set([
+    return [...new Set([
       ...branch.draftBasePaths,
       ...scopePaths,
       ...changed,
       ...ancestors,
     ])];
-    return this.publishStates(branchId, await this.captureDirectory(directory, candidates), candidates);
   }
 
   async materializeResult(branchId: string, revision: number, directory: string): Promise<void> {

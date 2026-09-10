@@ -28,7 +28,7 @@ const threadState = ({ thread, activeRun }: ThreadSnapshot): string => {
   if (thread.integration === "merged") return "merged";
   if (thread.integration === "conflict") return "conflict";
   if (thread.lifecycle === "queued") return "queued";
-  if (thread.attention === "user" || thread.attention === "permission") return "waiting-for-input";
+  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread") return "waiting-for-input";
   if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;
   if (thread.lifecycle === "settled") {
     if (thread.integration === "merge-ready" && activeRun?.outcome === "success") return "merge-ready";

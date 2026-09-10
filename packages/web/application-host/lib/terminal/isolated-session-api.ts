@@ -34,5 +34,5 @@ export function createIsolatedTerminalSessionApi(
     TERMINAL_INPUT_WS_REBIND_WINDOW_MS: 1_000,
     TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: 3,
     ...overrides,
-  } as Parameters<typeof createTerminalRuntime>[0]);
+  } as unknown as Parameters<typeof createTerminalRuntime>[0]);
 }

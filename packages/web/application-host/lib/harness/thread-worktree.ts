@@ -555,6 +555,31 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return { patch: patchResult, untracked: newPaths, changedFiles, diffStats };
   };
 
+  const inspectWorkspaceIdentity = async (directory: string): Promise<
+    | { status: "ready"; baseRef: string; changedFiles: string[] }
+    | { status: "unavailable"; reason: string }
+  > => {
+    try {
+      const [{ stdout: head }, { stdout: tracked }, { stdout: untracked }] = await Promise.all([
+        runGit(directory, ["rev-parse", "HEAD"]),
+        runGit(directory, ["diff", "--name-only", "-z", "HEAD", "--", "."]),
+        runGit(directory, ["ls-files", "--others", "--exclude-standard", "-z"]),
+      ]);
+      const baseRef = head.trim();
+      if (!baseRef) return { status: "unavailable", reason: "Git HEAD is unavailable" };
+      return {
+        status: "ready",
+        baseRef,
+        changedFiles: [...new Set([...parseNullList(tracked), ...parseNullList(untracked)])].sort(),
+      };
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason: `Git workspace identity is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  };
+
   const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
     if (worktree.base === "zero-commit") {
       const resultsRoot = `${worktree.path}.results`;
@@ -1139,7 +1164,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return totalBytes;
   };
 
-  return { prepare, estimatePrepare, inspect, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
+  return { prepare, estimatePrepare, inspect, inspectWorkspaceIdentity, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

@@ -145,7 +145,17 @@ export function registerHarnessKnowledgeCatalogRoutes(
     const trigger = typeof request.body?.trigger === "string" ? request.body.trigger.trim() : "";
     const expectedContent = request.body?.expectedContent;
     const expectedTrigger = request.body?.expectedTrigger;
-    if (!scope || id === null || !content || typeof expectedContent !== "string" || typeof expectedTrigger !== "string") {
+    const expectedStatus = statusOf(request.body?.expectedStatus);
+    const expectedInvalidAt = request.body?.expectedInvalidAt;
+    if (
+      !scope
+      || id === null
+      || !content
+      || typeof expectedContent !== "string"
+      || typeof expectedTrigger !== "string"
+      || !expectedStatus
+      || (expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")
+    ) {
       response.status(400).json({ error: "scope, id, content, and the opened knowledge values are required" });
       return;
     }
@@ -156,7 +166,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
         response.status(404).json({ error: "Knowledge not found" });
         return;
       }
-      const expected = { content: expectedContent, trigger: expectedTrigger };
+      const expected = { content: expectedContent, trigger: expectedTrigger, status: expectedStatus, invalidAt: expectedInvalidAt };
       if (current.status === "suggested") {
         await store.updateSuggestedKnowledge(id, { content, trigger }, scope, expected);
       } else if (current.status === "accepted") {
@@ -185,7 +195,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
       || typeof expectedContent !== "string"
       || typeof expectedTrigger !== "string"
       || !expectedStatus
-      || (expectedInvalidAt !== undefined && expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")
+      || (expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")
     ) {
       response.status(400).json({ error: "scope, id, and the opened knowledge revision are required" });
       return;
@@ -196,7 +206,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
         content: expectedContent,
         trigger: expectedTrigger,
         status: expectedStatus,
-        ...(expectedInvalidAt === undefined ? {} : { invalidAt: expectedInvalidAt }),
+        invalidAt: expectedInvalidAt,
       });
       onKnowledgeChanged?.({ scope, ...(workspaceId ? { workspaceId } : {}) });
       response.json({ retired: true, item: await store.getKnowledge(id) });
@@ -221,9 +231,24 @@ export function registerHarnessKnowledgeCatalogRoutes(
       return;
     }
     const editValues = [request.body?.content, request.body?.trigger, request.body?.expectedContent, request.body?.expectedTrigger];
-    const hasEdit = editValues.some((value) => value !== undefined);
+    // Opened revision fields are required for every Settings action, but only
+    // content/trigger indicate the optional accept-and-edit operation.
+    const hasEdit = request.body?.content !== undefined || request.body?.trigger !== undefined;
     if (hasEdit && editValues.some((value) => typeof value !== "string")) {
       response.status(400).json({ error: "content, trigger, expectedContent, and expectedTrigger must be provided together" });
+      return;
+    }
+    const expectedContent = request.body?.expectedContent;
+    const expectedTrigger = request.body?.expectedTrigger;
+    const expectedStatus = statusOf(request.body?.expectedStatus);
+    const expectedInvalidAt = request.body?.expectedInvalidAt;
+    if (
+      typeof expectedContent !== "string"
+      || typeof expectedTrigger !== "string"
+      || !expectedStatus
+      || (expectedInvalidAt !== null && typeof expectedInvalidAt !== "number")
+    ) {
+      response.status(400).json({ error: "opened content, trigger, status, and invalidAt are required" });
       return;
     }
     try {
@@ -233,6 +258,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
         await acceptSuggestion(id, deps, {
           supersedes,
           scope,
+          expected: { content: expectedContent, trigger: expectedTrigger, status: expectedStatus, invalidAt: expectedInvalidAt },
           ...(hasEdit ? {
             edit: {
               content: String(request.body.content),
@@ -243,7 +269,12 @@ export function registerHarnessKnowledgeCatalogRoutes(
           } : {}),
         });
       } else {
-        await dismissSuggestion(id, deps, scope);
+        await dismissSuggestion(id, deps, scope, {
+          content: expectedContent,
+          trigger: expectedTrigger,
+          status: expectedStatus,
+          invalidAt: expectedInvalidAt,
+        });
       }
       onKnowledgeChanged?.({ scope, ...(workspaceId ? { workspaceId } : {}) });
       response.json({ action, completed: true, item: await store.getKnowledge(id) });

@@ -58,8 +58,6 @@ export function createKnowledgeSuggestionExtension(options: KnowledgeSuggestionE
         await options.bridge.request("knowledge.suggest", {
           content: drafted.content,
           trigger: drafted.trigger,
-          kind: "user-message",
-          scope: "workspace",
         });
       })());
     });

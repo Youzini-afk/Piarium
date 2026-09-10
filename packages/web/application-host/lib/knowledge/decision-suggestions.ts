@@ -1,8 +1,13 @@
-import { createSuggestion, DEFAULT_SUGGESTIONS_SETTINGS } from "../harness/knowledge-suggestions.js";
+import {
+  createSuggestion,
+  DEFAULT_SUGGESTIONS_SETTINGS,
+  type KnowledgeSuggestionsSettings,
+} from "../harness/knowledge-suggestions.js";
 import type { BlockChange, KnowledgeStore } from "./store.js";
 
 export interface DecisionSuggestionRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
+  getSettings?(sessionId: string): Promise<KnowledgeSuggestionsSettings>;
   onChanged?(sessionId: string): void;
   onError?(error: unknown): void;
 }
@@ -32,6 +37,9 @@ export function createDecisionSuggestionRuntime(options: DecisionSuggestionRunti
     if (added.length === 0) return;
     const store = await options.getStore(workspaceId);
     if (!store) return;
+    const settings = options.getSettings
+      ? await options.getSettings(sessionId)
+      : DEFAULT_SUGGESTIONS_SETTINGS;
     const existing = await store.listKnowledge({ scope: "workspace" });
     const seen = new Set(existing
       .filter((entry) => entry.source?.sessionId === sessionId && entry.source.kind === "memory-decision")
@@ -46,7 +54,7 @@ export function createDecisionSuggestionRuntime(options: DecisionSuggestionRunti
         sessionId,
         kind: "memory-decision",
         scope: "workspace",
-      }, { store, settings: DEFAULT_SUGGESTIONS_SETTINGS });
+      }, { store, settings });
       seen.add(identity);
       changed = true;
     }

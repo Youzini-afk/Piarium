@@ -10,6 +10,7 @@ import {
   acceptSuggestion,
   dismissSuggestion,
   DEFAULT_SUGGESTIONS_SETTINGS,
+  suggestionSettingsFromSnapshot,
 } from "./knowledge-suggestions.js";
 
 // Scratch stores live in the OS temp dir; see recall-tool.test.ts.
@@ -29,6 +30,24 @@ async function openStore() {
     dataDir: dir, hostId: "test-host", workspaceId: "ws-test", embedding: null,
   });
 }
+
+describe("suggestion settings", () => {
+  it("uses trusted project workspace policy without letting it change user scope", () => {
+    const snapshot = {
+      global: { harness: { knowledge: { autoAcceptSuggestions: { workspace: false, user: true } } } },
+      globalRevision: "global-1",
+      project: { harness: { knowledge: { autoAcceptSuggestions: { workspace: true, user: false } } } },
+      projectRevision: "project-1",
+      projectTrusted: true,
+    };
+    expect(suggestionSettingsFromSnapshot(snapshot)).toEqual({
+      autoAcceptSuggestions: { workspace: true, user: true },
+    });
+    expect(suggestionSettingsFromSnapshot({ ...snapshot, projectTrusted: false })).toEqual({
+      autoAcceptSuggestions: { workspace: false, user: true },
+    });
+  });
+});
 
 describe("createSuggestion", () => {
   beforeEach(async () => {
@@ -80,6 +99,36 @@ describe("createSuggestion", () => {
     );
     expect(skipped).toEqual({ created: false, skippedReason: "duplicate" });
     expect(await store.listKnowledge({ scope: "workspace" })).toHaveLength(1);
+  });
+
+  it("serializes concurrent user-message proposals and checks retired history", async () => {
+    const [first, second] = await Promise.all([
+      proposeUserMessageSuggestion(
+        { trigger: "user-message", content: "Keep this durable policy", sessionId: "s1", kind: "user-message" },
+        { store, settings: DEFAULT_SUGGESTIONS_SETTINGS },
+      ),
+      proposeUserMessageSuggestion(
+        { trigger: "user-message", content: "Keep   this durable policy", sessionId: "s2", kind: "user-message" },
+        { store, settings: DEFAULT_SUGGESTIONS_SETTINGS },
+      ),
+    ]);
+    expect([first.created, second.created].filter(Boolean)).toHaveLength(1);
+    expect(await store.listKnowledge({ scope: "workspace" })).toHaveLength(1);
+
+    const id = first.suggestion?.id ?? second.suggestion?.id;
+    expect(id).toBeDefined();
+    const opened = await store.getKnowledge(id!);
+    await store.retireKnowledge(id!, "workspace", {
+      content: opened!.content,
+      trigger: opened!.trigger,
+      status: opened!.status,
+      invalidAt: null,
+    });
+    const afterRetire = await proposeUserMessageSuggestion(
+      { trigger: "user-message", content: "Keep this durable policy", sessionId: "s3", kind: "user-message" },
+      { store, settings: DEFAULT_SUGGESTIONS_SETTINGS },
+    );
+    expect(afterRetire).toEqual({ created: false, skippedReason: "duplicate" });
   });
 
   it("auto-accepts when configured", async () => {
@@ -200,5 +249,14 @@ describe("review tray actions", () => {
     await store.acceptKnowledge(suggestion, { expectedScope: "workspace" });
     await expect(store.updateSuggestedKnowledge(suggestion, { content: "late", trigger: "test" }, "workspace"))
       .rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects accepting or dismissing a retired suggestion", async () => {
+    const id = await store.putKnowledge({ scope: "workspace", status: "suggested", content: "retired", trigger: "test" });
+    await store.retireKnowledge(id, "workspace", {
+      content: "retired", trigger: "test", status: "suggested", invalidAt: null,
+    });
+    await expect(store.acceptKnowledge(id, { expectedScope: "workspace" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(store.dismissKnowledge(id, "workspace")).rejects.toMatchObject({ code: "conflict" });
   });
 });

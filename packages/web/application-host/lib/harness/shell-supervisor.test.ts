@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { discoverShells } from "./shell-discovery.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
-import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells, type PtyProcess, type PtyProvider } from "./shell-supervisor.js";
+import {
+  createShellSupervisor,
+  selectInterpreter,
+  stripControlSequences,
+  type DiscoveredShells,
+  type PtyProcess,
+  type PtyProvider,
+  type ShellCommandCompletedEvent,
+  type ShellCommandStartedEvent,
+} from "./shell-supervisor.js";
 import { createOutputStore } from "./output-store.js";
 
 const EMPTY_DISCOVERED: DiscoveredShells = {};
@@ -221,16 +230,26 @@ describe("background shell output", () => {
     };
     const ptyProvider: PtyProvider = { backend: "fake", spawn: () => process };
     const outputStore = createOutputStore();
+    const startedEvents: ShellCommandStartedEvent[] = [];
+    const completedEvents: ShellCommandCompletedEvent[] = [];
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
       outputStore,
       sessionId: "background-test",
       ptyProvider,
+      commandLifecycle: {
+        started: (event) => { startedEvents.push(event); },
+        completed: (event) => { completedEvents.push(event); },
+      },
     });
     try {
       const result = await supervisor.exec("slow command", { waitMs: 5 });
       expect(result).toMatchObject({ kind: "background", id: "sh_1", outputSoFar: expect.stringContaining("first") });
+      expect(startedEvents).toHaveLength(1);
+      expect(startedEvents[0]).toMatchObject({ command: "slow command", commandRunId: "sh_1", executionId: expect.any(String) });
       await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(completedEvents).toHaveLength(1);
+      expect(completedEvents[0]).toMatchObject({ command: "slow command", commandRunId: "sh_1", exitCode: 0, cancelled: false });
       const read = await supervisor.read("sh_1");
       expect(read.text).toContain("first second");
       expect(read).toMatchObject({ running: false, exitCode: 0 });
@@ -428,6 +447,7 @@ describe("shell-supervisor disposal protection", () => {
   const controlledProcess = (options: {
     failSecondExitRegistration?: boolean;
     killThrows?: boolean;
+    killEmitsExit?: boolean;
   } = {}): PtyProcess & { emitExit: () => void } => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
@@ -436,6 +456,9 @@ describe("shell-supervisor disposal protection", () => {
       emitExit: () => { for (const handler of [...exitHandlers]) handler({ exitCode: 0, signal: 0 }); },
       kill: () => {
         if (options.killThrows) throw new Error("kill failed");
+        if (options.killEmitsExit) {
+          for (const handler of [...exitHandlers]) handler({ exitCode: 0, signal: 0 });
+        }
       },
       onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
       onExit: (handler) => {
@@ -528,7 +551,7 @@ describe("shell-supervisor disposal protection", () => {
     }
   });
 
-  it("keeps a background shell running until interrupt or PTY exit is observed", async () => {
+  it("reports a failed kill when interrupt does not produce a terminal exit", async () => {
     const outputStore = createOutputStore();
     const process = controlledProcess();
     const supervisor = createShellSupervisor({
@@ -540,11 +563,31 @@ describe("shell-supervisor disposal protection", () => {
     try {
       const started = await supervisor.exec("never completes", { waitMs: 5 });
       expect(started).toMatchObject({ kind: "background", id: "sh_1" });
-      await expect(supervisor.kill("sh_1")).resolves.toBe(true);
+      await expect(supervisor.kill("sh_1")).resolves.toBe(false);
       await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: true });
       process.emitExit();
       await new Promise((resolve) => setTimeout(resolve, 10));
       await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: false, exitCode: 0 });
+    } finally {
+      await supervisor.dispose().catch(() => undefined);
+      outputStore.dispose();
+    }
+  });
+
+  it("returns from kill only after the background PTY exits", async () => {
+    const outputStore = createOutputStore();
+    const process = controlledProcess({ killEmitsExit: true });
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "background-kill-success",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const started = await supervisor.exec("never completes", { waitMs: 5 });
+      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
+      await expect(supervisor.kill("sh_1")).resolves.toBe(true);
+      await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: false });
     } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();
@@ -583,6 +626,44 @@ describe("shell-supervisor disposal protection", () => {
       expect(supervisor.hasActiveCommandAt(workspace)).toBe(false);
     } finally {
       resolveWriter({ close: async () => { writerClosed++; } });
+      await supervisor.dispose().catch(() => undefined);
+      outputStore.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the directory protected and retries when writer release fails", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "shell-writer-retry-"));
+    const outputStore = createOutputStore();
+    const process = controlledProcess();
+    let closeAttempts = 0;
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "writer-retry",
+      cwd: workspace,
+      ptyProvider: { backend: "fake", spawn: () => process },
+      registerWriter: async () => ({
+        close: async () => {
+          closeAttempts += 1;
+          if (closeAttempts === 1) throw new Error("release failed");
+        },
+      }),
+    });
+    try {
+      await expect(supervisor.exec("never completes", { waitMs: 5 })).resolves.toMatchObject({
+        kind: "background",
+        id: "sh_1",
+      });
+      process.emitExit();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(closeAttempts).toBe(1);
+      expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
+
+      await expect(supervisor.dispose()).resolves.toBeUndefined();
+      expect(closeAttempts).toBe(2);
+      expect(supervisor.hasActiveCommandAt(workspace)).toBe(false);
+    } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();
       rmSync(workspace, { recursive: true, force: true });

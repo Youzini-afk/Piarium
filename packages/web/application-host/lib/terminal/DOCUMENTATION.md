@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, status, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. Programmatic `createTerminalSession` / `attachTerminalSession` / `inspectSession` are the same authority used by HTTP and WebSocket. Harness background shells create sessions with `owner: 'harness'` and `retainWhenDetached: true`; HTTP create ignores client `owner` / `spawn` / retain flags. Closing a retained session detaches viewers and leaves the process running. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.js` owns terminal identity, PTY processes, status, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. Programmatic `createTerminalSession` / `attachTerminalSession` / `inspectSession` are the same authority used by HTTP and WebSocket. Harness background shells create sessions with `owner: 'harness'` and `retainWhenDetached: true`; the runtime allocates their process-wide `sh_N` ids. HTTP create ignores client `owner` / `spawn` / retain flags and cannot reuse a programmatic Harness identity. Closing a retained session detaches viewers and leaves the process running. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -20,8 +20,8 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 
 ## PTY Lifecycle
 
-- IDs are client-provided or generated with `randomUUID()`.
-- Concurrent creates for one ID are single-flight only when working directory and shell preference match. Existing IDs cannot be reused for another working directory.
+- User IDs are client-provided or generated with `randomUUID()`; Harness IDs are allocated by the runtime and returned to the caller.
+- Concurrent creates for one ID are single-flight only when the complete creation identity matches: owner, HTTP/programmatic source, working directory, shell/spawn, login, writer registration, and retain behavior. An exited ID cannot be reused until it is explicitly closed.
 - Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
 - PTY children explicitly clear `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Preference changes affect new sessions and explicit restarts, not running PTYs.
@@ -29,7 +29,7 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.
 - Exited sessions remain attachable until explicit close or idle cleanup.
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID.
-- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill, idle cleanup, and runtime shutdown terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
+- Close uses SIGTERM with bounded SIGKILL escalation. Harness kill/close and explicit force-kill wait for a real PTY exit and process-writer release before evicting the session; failure leaves the same identity observable and retryable. Idle cleanup and runtime shutdown terminate process groups immediately where supported. Attached terminals are not considered idle.
 
 ## Security And Relay
 

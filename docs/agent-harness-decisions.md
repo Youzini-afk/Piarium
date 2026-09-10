@@ -4224,6 +4224,58 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；调用链与定向证据见 status 2.7 / 2.10。真实付费 suggestions 质量与完整浏览器点击链未测。
 
+### D-209 · 2026-09-10 · 1.3 / 2.5（终端身份、退出事实与 todo 单一审批边界）
+
+类型：问题与解法（补正 D-206）
+
+背景：D-206 把 Harness shell 接进 terminal runtime，但初版仍由每个 `ShellSupervisor` 从 `sh_1` 开始编号；terminal runtime 是全局表，多个会话会碰撞。`kill_shell` 还可能在只发送中断、PTY 尚未退出时返回成功，强制终止则可能先移除会话再异步等待，导致 exit 事件、写者释放和目录回收互相失真。todo 的 Host 二次确认字段没有生产审批策略消费者，只留下一个看似可用的假契约。
+
+决定：
+
+1. terminal runtime 是 `sh_N` 的唯一分配者，编号在该 runtime 内全局唯一；监督器采用返回 handle 的实际 id。已有 id 只有 owner、创建来源、cwd、shell/spawn、writer 注册与 retain 语义全部一致且仍在运行时才能复用。HTTP 不能接管程序化 Harness 会话，已退出 id 必须先显式关闭。
+2. 一条命令的 started/completed 由监督器在真实执行边界发出。后台命令由 PTY exit 完成，不依赖 agent 是否再次调用 `get_output`；重复读取不重复完成记录。
+3. `kill_shell`、会话关闭和 force-kill 只在目标 PTY 真实退出、相关 process writer 释放后报告成功。退出或 writer 释放失败保留可观察、可重试状态，并继续阻止相关目录回收；迟到 exit 仍由原 handle 消费。
+4. `todo.confidence` 只作内容信息。若 plan mode 或权限策略需要批准，批准发生在既有 pre-tool 流程；`todo.upsert` 不在写入后再问一次。删除没有生产消费者的 `confirmed` / `askedConfirmation` 协议字段，不保留假兼容层。
+
+影响：terminal runtime / Harness bridge / shell supervisor / service-host、公开 shell 工具、todo protocol/Host/pi-host、设计 5.2 / 5.6、architecture 4.4 / 6、status 1.3 / 2.5。
+
+状态：已实施；进程身份、跨监督器冲突、后台自然退出、终止失败和 writer 释放重试有定向证据。完整浏览器点击链与 macOS/Linux 真机仍未测。
+
+### D-210 · 2026-09-10 · 3.4 / 3.5 / 3.7（验证绑定采用观察边界身份与一次性运行主体）
+
+类型：问题与解法（补正 D-207）
+
+背景：D-207 初版把同一 Run 中较早的命令在结果发布时统一挂到新 `resultRevision`，没有证明命令执行时的输入就是该结果；父合并后的命令也可能从旧观察中回填。后台完成若依赖读取输出、session 重注册后仍保留旧 actor、review 只按结果修订去重，都会把时间相邻误写成身份相同。为补救而在每条命令前后扫描全目录会重新引入 D-078 已否决的常态全工作区扫描。
+
+决定：
+
+1. 命令观察在 start 时固定 authority instance、session、worker、worker generation、Run 与本次 binding generation，在 end 时再次核对；会话重注册撤销旧 actor 和未完成观察。子线程的持久绑定可以保留等待新 actor，但旧代际不能继续写记录。已消费的完成观察只能绑定一次。
+2. Git 工作区的受检输入身份由不可变 base/HEAD 加实际 staged、unstaged、tracked mode 与非忽略 untracked 的变化路径状态组成；子分支还包含固定草稿与显式 `captureScopes`。在命令 start/end 和发布或合并边界核对同一身份。Git 仍承担 index/status 的变化发现成本，但正文捕获与哈希只读变化路径，不为每条命令遍历并哈希整仓字节。普通 ignored 缓存不冒充已覆盖；非 Git 目录在没有便宜固定身份时明确 `uncertain`，不为得到绿色状态扫描全目录。
+3. 子检查只有在 thread、Run、branch、actor/binding generation、执行目录和 start/end/publish 身份全部相符时才标 `same-run-matching-result`。命令、cwd、退出码、取消与输出引用仍完整记录；`allExitedZero` 只聚合已绑定命令，不等于行为正确或测试充分。
+4. 父检查只在一次 Integration 完整 applied 后，为选定 `resultRevision + operationId + parentSessionId` 打开持久窗口。冲突、补偿、needs-attention、未保存草稿不打开磁盘验证窗口。Host 重启可从 WorkingState 恢复窗口；只有窗口之后且 start/end 都匹配合并后 Git 身份的父命令进入该记录。
+5. 自动 review 以 `resultRevision + reviewThreadId + reviewRunId` 识别一次执行；晚到的旧 Run 不能覆盖新记录。gate 的 `waitingFor.review` 保存这组结构身份，只由对应完成/失败/取消清除；失败与取消进入源线程和 Zone 2，不伪装成未运行。删除没有生产调用方的旧 `onAgentSettled` 门面，固定结果发布是唯一自动触发。
+
+影响：WorkingState verification 记录、verification coordinator、shell 生命周期观察、ThreadRuntime settle/merge、review sensor、Thread/Zone 2 投影、设计 9.2.3 / 9.2.5b / 9.3.1、architecture 6.1、status 3.4 / 3.5 / 3.7。
+
+状态：已实施；证据见 status。非 Git 的精确命令输入绑定、真实付费 review 质量及完整浏览器链未验证。
+
+### D-211 · 2026-09-10 · 2.7 / 2.10（知识目录的完整 CAS、原子去重与 Host 固定提议身份）
+
+类型：问题与解法（补正 D-208）
+
+背景：D-208 初版的 Settings 写操作没有始终携带用户打开条目时的完整修订，接受可能吞掉并发编辑，已停用历史也可能被旧界面继续修改。作用域切换时迟到响应能覆盖新列表。`knowledge.suggest` 还接受 worker 自报 scope/kind，且“先查重、再插入”不在同一写队列临界区，并发提议会生成重复节点。
+
+决定：
+
+1. Settings 与会话审阅托盘的编辑、接受、驳回和停用都携带打开时的 `{content, trigger, status, invalidAt}`；KnowledgeStore 在同一单写队列内核对 scope、当前状态、停用状态和完整期望修订后再变更，不符合返回 conflict。作用域或 workspace 改变立即使旧选择失效；Settings 请求带本地代际与取消，迟到结果不能覆盖当前目录。
+2. `knowledge.suggest` 的目标固定为已认证 actor 的 workspace store，来源固定为 `user-message`。worker 协议不再接受 scope 或 kind，无法借内部服务向 user store 或伪造来源写入。
+3. 规范化正文的历史去重与插入在同一个 KnowledgeStore 写队列操作中完成，覆盖 suggested、accepted、dismissed 和 retired；并发相同提议只创建一个节点，也不会复活已驳回历史。
+4. 用户标记、memory decision 和 suggestions 模型三条创建路径读取同一会话的有效 `knowledge.autoAcceptSuggestions`。trusted project 只能调整 workspace scope，不能打开 user scope；设置不可读时保持默认 suggested，不能静默自动接受。
+
+影响：KnowledgeStore、catalog routes、`knowledge.suggest` protocol/Host/pi-host、Settings Knowledge 页与请求层、设计 7.2.2、architecture 数据所有权、status 2.7 / 2.10。
+
+状态：已实施；CAS、并发去重、跨 scope 伪造与 UI 迟到响应有定向证据。真实 suggestions 模型质量与完整浏览器点击链仍未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4434,6 +4486,9 @@ ModelRuntime 纵切继续通过。
 | D-203 | implementation（定向 surface、持久确认/撤销、来源更新与绑定提交） | — | 设计 9.2.5b；plan 3.4F / 3.5；status 3.5a |
 | D-204 | implementation（退出、结构化准备、并发预算与原会话恢复） | — | 设计 9.3.4；plan 3.4E / 3.10；status 3.4 / 3.10 |
 | D-205 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 |
-| D-206 | implementation（后台 shell 与终端同一进程、bundled Pi 默认、todo confidence 只作信息） | — | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 |
-| D-207 | implementation（固定结果验证记录、三事实分离、发布后自动 review） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
-| D-208 | implementation（Settings 知识目录与 suggestions 槽位用户消息提议） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
+| D-206 | superseded in part（terminal 接线、bundled 优先与 confidence 信息语义保留；身份、退出和 todo 假确认由 D-209 补正） | D-209 | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 |
+| D-207 | superseded in part（三事实与自动 review 保留；命令/父窗口/审阅运行身份由 D-210 补正） | D-210 | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
+| D-208 | superseded in part（知识目录与 suggestions 入口保留；CAS、提议身份和去重由 D-211 补正） | D-211 | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
+| D-209 | implementation（全局终端身份、真实退出与 writer 释放、后台自然完成、todo 单一审批边界） | — | 设计 5.2 / 5.6；architecture 4.4 / 6；status 1.3 / 2.5 |
+| D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
+| D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |

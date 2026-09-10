@@ -112,8 +112,10 @@ describe("WorkingStateStore", () => {
       await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "old.txt"), "changed old\n");
       await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "new.txt"), "new\n");
       await fs.promises.rm(path.join(h.workspace, "ordinary.txt"));
+      const candidateIdentity = await h.store.captureBranchCandidateIdentity("scoped", h.workspace, ["tracked.txt"]);
       const first = await h.store.publishDirectoryResult("scoped", h.workspace, ["tracked.txt"]);
       expect(first.changedPaths).toEqual(["ignored-dir/new.txt", "ignored-dir/old.txt", "ignored.env"]);
+      expect(candidateIdentity).toBe(h.store.resultTreeIdentity("scoped", first.resultRevision));
 
       const reopened = await WorkingStateStore.open(h.context);
       await fs.promises.writeFile(path.join(h.workspace, "ignored-dir", "newer.txt"), "newer\n");
@@ -280,6 +282,7 @@ describe("WorkingStateStore", () => {
       await h.store.putChildVerification("thread-a", {
         resultRevision: published.resultRevision,
         branchId: "thread-1",
+        resultTreeHash: h.store.resultTreeIdentity("thread-1", published.resultRevision)!,
         recordedAt: 1,
         binding: "bound",
         bindingReason: "same run",
@@ -292,14 +295,46 @@ describe("WorkingStateStore", () => {
           endedAt: 2,
           exitCode: 0,
           cancelled: false,
-          inputIdentity: { kind: "published-revision", branchId: "thread-1", startPublishedRevision: 0, endPublishedRevision: 0 },
+          actor: { authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1, runId: "run-1" },
+          bindingGeneration: 1,
+          inputIdentity: {
+            kind: "tree", branchId: "thread-1", root: h.workspace,
+            startTreeHash: h.store.resultTreeIdentity("thread-1", published.resultRevision)!,
+            endTreeHash: h.store.resultTreeIdentity("thread-1", published.resultRevision)!,
+          },
           inputChangedDuringRun: false,
-          relationToPublished: "same-run-before-publish",
+          relationToPublished: "same-run-matching-result",
         }],
       });
       const reopened = await WorkingStateStore.open(h.context);
       expect(reopened.getChildVerification("thread-a", published.resultRevision)?.checks[0]?.command).toBe("bun test");
       expect(reopened.getResult("thread-1", published.resultRevision)).toEqual(published);
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("projects the most recently merged parent operation instead of the highest result revision", async () => {
+    const h = await harness();
+    try {
+      await h.store.putParentVerification("thread-a", {
+        mergedResultRevision: 2, mergeOperationId: "merge-r2", windowOpenedAt: 10, recordedAt: 10,
+        draftUnsaved: false, binding: "not-recorded", checks: [],
+      });
+      await h.store.putParentVerification("thread-a", {
+        mergedResultRevision: 1, mergeOperationId: "merge-r1-later", windowOpenedAt: 20, recordedAt: 20,
+        draftUnsaved: false, binding: "not-recorded", checks: [],
+      });
+      expect(h.store.getParentVerification("thread-a")).toMatchObject({
+        mergedResultRevision: 1,
+        mergeOperationId: "merge-r1-later",
+      });
+      expect(h.store.getParentVerification("thread-a", 2)?.mergeOperationId).toBe("merge-r2");
+      await h.store.putParentVerification("thread-a", {
+        mergedResultRevision: 2, mergeOperationId: "merge-r2", windowOpenedAt: 10, recordedAt: 30,
+        draftUnsaved: false, binding: "bound", checks: [],
+      });
+      expect(h.store.getParentVerification("thread-a")?.mergeOperationId).toBe("merge-r1-later");
     } finally {
       h.database.close();
     }

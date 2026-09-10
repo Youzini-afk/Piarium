@@ -13,7 +13,7 @@ import type { MemoryAgentSettings } from "@piarium/protocol";
 import type { Zone2MaterialRequest, Zone2MaterialResult } from "../knowledge/context-runtime.js";
 import type { CompactionHandlerDeps, CompactionSettings, KeeperCoverageStore } from "./compaction.js";
 import { createKeeperCoverageStore } from "./compaction.js";
-import type { TodoToolDeps, TodoToolSettings } from "./todo-tool.js";
+import type { TodoToolDeps } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { KnowledgeSuggestionsSettings } from "./knowledge-suggestions.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
@@ -157,12 +157,10 @@ export interface HarnessServiceHost {
   compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
   compactionSettings: CompactionSettings;
   keeperCoverageStore: KeeperCoverageStore;
-  todoSettings: TodoToolSettings;
   recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
   knowledgeSuggestDepsProvider: ((
     sessionId: string,
     workspaceId: string | null,
-    scope: "workspace" | "user",
   ) => Promise<{ store: KnowledgeStore; settings: KnowledgeSuggestionsSettings; onChanged?: () => void } | null>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
@@ -273,7 +271,6 @@ export interface HarnessServiceHostOptions {
   compactionSettings?: CompactionSettings;
   /** External keeper coverage store; if omitted, the host creates one. */
   keeperCoverageStore?: KeeperCoverageStore;
-  todoSettings?: TodoToolSettings;
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
   knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
@@ -322,7 +319,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const compactionDepsProvider = options.compactionDepsProvider ?? null;
   const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
   const keeperCoverageStore = options.keeperCoverageStore ?? createKeeperCoverageStore();
-  const todoSettings = options.todoSettings ?? { requireConfirmation: false };
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const knowledgeSuggestDepsProvider = options.knowledgeSuggestDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
@@ -394,6 +390,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         outputStore,
         sessionId,
         cwd: ctx.workspaceRoot ?? undefined,
+        commandLifecycle: {
+          started: (event) => verification.beginCommand({ ...event, actor: ctx.actor }),
+          completed: (event) => verification.completeCommand({ ...event, actor: ctx.actor }),
+        },
         ...(options.registerWriter ? {
           registerWriter: () => options.registerWriter!(sessionId, ctx.workspaceRoot),
         } : {}),
@@ -414,6 +414,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         workspaceId: ctx.workspaceId,
         parentRoot: ctx.workspaceRoot,
         parentSessionId: sessionId,
+        actor: ctx.actor,
       });
     }
     sessions.set(sessionId, {
@@ -443,7 +444,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     pathLockService.dropSession(sessionId);
     keeperCoverageStore.clear(sessionId);
     options.dropAgentInputContexts?.(sessionId);
-    verification.detachSession(sessionId);
+    verification.revokeSessionActor(sessionId);
   };
 
   const hasActiveCommandAtDirectory = (directory: string): boolean => {
@@ -536,7 +537,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     compactionDepsProvider,
     compactionSettings,
     keeperCoverageStore,
-    todoSettings,
     recallDepsProvider,
     knowledgeSuggestDepsProvider,
     todoDepsProvider,

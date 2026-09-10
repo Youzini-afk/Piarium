@@ -273,6 +273,8 @@ export const HarnessThreadsPanel: React.FC<{
           trigger: draft.trigger,
           expectedContent: suggestion.content,
           expectedTrigger: suggestion.trigger,
+          expectedStatus: 'suggested',
+          expectedInvalidAt: null,
         }),
       },
     );
@@ -308,7 +310,15 @@ export const HarnessThreadsPanel: React.FC<{
               trigger: draft?.trigger ?? suggestion.trigger,
               expectedContent: suggestion.content,
               expectedTrigger: suggestion.trigger,
-            } : { supersedes: [] }),
+              expectedStatus: 'suggested',
+              expectedInvalidAt: null,
+            } : {
+              supersedes: [],
+              expectedContent: suggestion.content,
+              expectedTrigger: suggestion.trigger,
+              expectedStatus: 'suggested',
+              expectedInvalidAt: null,
+            }),
           },
         );
         if (response.status === 409) {

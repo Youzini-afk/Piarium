@@ -24,28 +24,30 @@ export const cwdUnderRoot = (cwd: string, root: string): boolean => {
 };
 
 export const inputChangedDuringCommand = (record: {
-  startPublishedRevision?: number;
-  endPublishedRevision?: number;
-  startHeadRevision?: number;
-  endHeadRevision?: number;
+  startTreeHash?: string;
+  endTreeHash?: string;
 }): boolean | null => {
-  const publishedKnown = record.startPublishedRevision !== undefined && record.endPublishedRevision !== undefined;
-  const headKnown = record.startHeadRevision !== undefined && record.endHeadRevision !== undefined;
-  if (!publishedKnown && !headKnown) return null;
-  return (
-    (publishedKnown && record.startPublishedRevision !== record.endPublishedRevision)
-    || (headKnown && record.startHeadRevision !== record.endHeadRevision)
-  );
+  if (record.startTreeHash === undefined || record.endTreeHash === undefined) return null;
+  return record.startTreeHash !== record.endTreeHash;
 };
 
 export const relateCommandToPublish = (
   record: Pick<CommandVerificationRecord, "cwd" | "runId" | "endedAt">,
-  context: { worktreePath?: string; runId: string; publishedAt: number },
+  context: {
+    worktreePath?: string;
+    runId: string;
+    publishedAt: number;
+    startTreeHash?: string;
+    endTreeHash?: string;
+    resultTreeHash?: string;
+  },
 ): CommandVerificationRecord["relationToPublished"] => {
   if (!context.worktreePath || !cwdUnderRoot(record.cwd, context.worktreePath)) return "unbound";
   if (record.runId !== context.runId) return "uncertain";
   if (record.endedAt > context.publishedAt) return "uncertain";
-  return "same-run-before-publish";
+  if (!context.startTreeHash || !context.endTreeHash || !context.resultTreeHash) return "uncertain";
+  if (context.startTreeHash !== context.endTreeHash || context.endTreeHash !== context.resultTreeHash) return "uncertain";
+  return "same-run-matching-result";
 };
 
 export const bindCommandsToPublishedResult = (input: {
@@ -54,23 +56,20 @@ export const bindCommandsToPublishedResult = (input: {
   runId: string;
   worktreePath?: string;
   publishedAt?: number;
-  commands: Array<Omit<CommandVerificationRecord, "relationToPublished" | "inputChangedDuringRun" | "inputIdentity"> & {
-    startPublishedRevision?: number;
-    endPublishedRevision?: number;
-    startHeadRevision?: number;
-    endHeadRevision?: number;
-    branchId?: string;
-  }>;
+  resultTreeHash?: string;
+  commands: Array<Omit<CommandVerificationRecord, "relationToPublished" | "inputChangedDuringRun">>;
 }): ResultVerificationBundle => {
   const publishedAt = input.publishedAt ?? Date.now();
   const checks: CommandVerificationRecord[] = input.commands.map((command) => {
     const relation = relateCommandToPublish(command, {
       runId: input.runId,
       publishedAt,
+      ...(command.inputIdentity.startTreeHash ? { startTreeHash: command.inputIdentity.startTreeHash } : {}),
+      ...(command.inputIdentity.endTreeHash ? { endTreeHash: command.inputIdentity.endTreeHash } : {}),
+      ...(input.resultTreeHash ? { resultTreeHash: input.resultTreeHash } : {}),
       ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
     });
-    const changed = inputChangedDuringCommand(command);
-    const identityKnown = command.startPublishedRevision !== undefined || command.startHeadRevision !== undefined;
+    const changed = inputChangedDuringCommand(command.inputIdentity);
     return {
       id: command.id,
       runId: command.runId,
@@ -84,32 +83,25 @@ export const bindCommandsToPublishedResult = (input: {
       cancelled: command.cancelled,
       ...(command.outputHandle ? { outputHandle: command.outputHandle } : {}),
       ...(command.outputPreview ? { outputPreview: command.outputPreview } : {}),
-      inputIdentity: identityKnown
-        ? {
-            kind: "published-revision" as const,
-            ...(command.branchId ? { branchId: command.branchId } : { branchId: input.branchId }),
-            ...(command.startPublishedRevision !== undefined ? { startPublishedRevision: command.startPublishedRevision } : {}),
-            ...(command.endPublishedRevision !== undefined ? { endPublishedRevision: command.endPublishedRevision } : {}),
-            ...(command.startHeadRevision !== undefined ? { startHeadRevision: command.startHeadRevision } : {}),
-            ...(command.endHeadRevision !== undefined ? { endHeadRevision: command.endHeadRevision } : {}),
-          }
-        : {
-            kind: "unbound" as const,
-            reason: "command started without a readable branch or published revision",
-          },
+      actor: command.actor,
+      bindingGeneration: command.bindingGeneration,
+      inputIdentity: command.inputIdentity.kind === "tree"
+        ? { ...command.inputIdentity, branchId: command.inputIdentity.branchId ?? input.branchId }
+        : command.inputIdentity,
       inputChangedDuringRun: changed,
       relationToPublished: relation,
     };
   });
-  const attached = checks.filter((check) => check.relationToPublished === "same-run-before-publish");
+  const attached = checks.filter((check) => check.relationToPublished === "same-run-matching-result");
   return {
     resultRevision: input.resultRevision,
     branchId: input.branchId,
+    ...(input.resultTreeHash ? { resultTreeHash: input.resultTreeHash } : {}),
     recordedAt: publishedAt,
     binding: attached.length > 0 ? "bound" : "uncertain",
     bindingReason: attached.length > 0
-      ? "commands observed the live worktree in the same run before publish; published objects were captured later"
-      : "no completed command could be bound to this published result",
+      ? "observed command start/end and publish boundaries matched the fixed branch identity (base plus tracked/non-ignored delta and explicit capture scopes)"
+      : "no completed same-run command had matching observed boundary identities for this published result",
     checks,
   };
 };
@@ -131,24 +123,30 @@ const allExitedZero = (checks: CommandVerificationRecord[]): boolean | null => {
 
 export const projectChildChecks = (bundle: ResultVerificationBundle | undefined): ThreadChildCheckProjection | null => {
   if (!bundle) return null;
+  const proven = bundle.checks.filter((check) => check.relationToPublished === "same-run-matching-result");
   return {
     resultRevision: bundle.resultRevision,
-    binding: bundle.binding,
-    ...(bundle.bindingReason ? { bindingReason: bundle.bindingReason } : {}),
+    binding: proven.length > 0 ? "bound" : "uncertain",
+    ...(proven.length > 0 && bundle.bindingReason
+      ? { bindingReason: bundle.bindingReason }
+      : { bindingReason: "No command record has matching observed start/end/publish boundary identities" }),
     commands: bundle.checks.map(commandFact),
-    allExitedZero: allExitedZero(bundle.checks.filter((check) => check.relationToPublished === "same-run-before-publish")),
+    allExitedZero: allExitedZero(proven),
   };
 };
 
 export const projectParentChecks = (bundle: ParentVerificationBundle | undefined): ThreadParentCheckProjection | null => {
   if (!bundle) return null;
+  const proven = bundle.checks.filter((check) => check.relationToPublished === "post-merge-matching-tree");
+  const binding = bundle.binding === "bound" && proven.length === 0 ? "uncertain" : bundle.binding;
   return {
     mergedResultRevision: bundle.mergedResultRevision,
+    ...(bundle.mergeOperationId ? { mergeOperationId: bundle.mergeOperationId } : {}),
     draftUnsaved: bundle.draftUnsaved,
-    binding: bundle.binding,
+    binding,
     ...(bundle.note ? { note: bundle.note } : {}),
     commands: bundle.checks.map(commandFact),
-    allExitedZero: bundle.draftUnsaved ? null : allExitedZero(bundle.checks),
+    allExitedZero: binding === "bound" ? allExitedZero(proven) : null,
   };
 };
 
@@ -168,6 +166,7 @@ export const projectReview = (
     status: record.status,
     ...(record.reviewThreadId ? { reviewThreadId: record.reviewThreadId } : {}),
     ...(record.reviewRunId ? { reviewRunId: record.reviewRunId } : {}),
+    ...(record.gate !== undefined ? { gate: record.gate } : {}),
     ...(record.conclusion ? { conclusion: record.conclusion } : {}),
     ...(record.findings ? { findings: record.findings } : {}),
     ...(record.error ? { error: record.error } : {}),

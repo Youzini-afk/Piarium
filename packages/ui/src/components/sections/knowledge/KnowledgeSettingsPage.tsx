@@ -41,42 +41,102 @@ export const KnowledgeSettingsPage: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
 
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
-  const selected = items.find((item) => item.id === selectedId) ?? null;
-  const visible = items.filter((item) => showRetired || item.invalidAt === undefined);
+  const contextKey = `${scope}:${workspaceId ?? ''}`;
+  const currentContextKey = React.useRef(contextKey);
+  currentContextKey.current = contextKey;
+  const contextGeneration = React.useRef(0);
+  const requestGeneration = React.useRef(0);
+  const loadedContextKey = React.useRef<string | null>(null);
+  const refreshController = React.useRef<AbortController | null>(null);
+  const actionController = React.useRef<AbortController | null>(null);
+  const resetContext = React.useCallback(() => {
+    contextGeneration.current += 1;
+    requestGeneration.current += 1;
+    refreshController.current?.abort();
+    actionController.current?.abort();
+    loadedContextKey.current = null;
+    setItems([]);
+    setSelectedId(null);
+    setChain(null);
+    setDraft({ content: '', trigger: '' });
+    setBusy(false);
+    setLoading(false);
+  }, []);
+  const selected = loadedContextKey.current === contextKey
+    ? items.find((item) => item.id === selectedId) ?? null
+    : null;
+  const visible = loadedContextKey.current === contextKey
+    ? items.filter((item) => showRetired || item.invalidAt === undefined)
+    : [];
 
-  const refresh = React.useCallback(async (signal?: AbortSignal) => {
+  const refresh = React.useCallback(async () => {
+    const requestId = ++requestGeneration.current;
+    const generation = contextGeneration.current;
+    refreshController.current?.abort();
+    const controller = new AbortController();
+    refreshController.current = controller;
     if (scope === 'workspace' && workspace.status !== 'ready') {
-      setItems([]);
-      setChain(null);
+      if (
+        generation === contextGeneration.current
+        && requestId === requestGeneration.current
+        && currentContextKey.current === contextKey
+      ) {
+        loadedContextKey.current = contextKey;
+        setItems([]);
+        setSelectedId(null);
+        setChain(null);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
     try {
-      const next = await loadKnowledgeCatalog(scope, workspaceId, signal);
-      if (signal?.aborted) return;
+      const next = await loadKnowledgeCatalog(scope, workspaceId, controller.signal);
+      if (
+        controller.signal.aborted
+        || generation !== contextGeneration.current
+        || requestId !== requestGeneration.current
+        || currentContextKey.current !== contextKey
+      ) return;
+      loadedContextKey.current = contextKey;
       setItems(next);
       setSelectedId((current) => current && next.some((item) => item.id === current) ? current : next[0]?.id ?? null);
     } catch (error) {
-      if (!signal?.aborted) toast.error(error instanceof Error ? error.message : t('settings.knowledge.empty.none'));
+      if (
+        !controller.signal.aborted
+        && generation === contextGeneration.current
+        && requestId === requestGeneration.current
+        && currentContextKey.current === contextKey
+      ) {
+        toast.error(error instanceof Error ? error.message : t('settings.knowledge.empty.none'));
+      }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (
+        !controller.signal.aborted
+        && generation === contextGeneration.current
+        && requestId === requestGeneration.current
+        && currentContextKey.current === contextKey
+      ) setLoading(false);
     }
-  }, [scope, t, workspace.status, workspaceId]);
+  }, [contextKey, scope, t, workspace.status, workspaceId]);
 
   React.useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
+    resetContext();
+    void refresh();
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type !== 'harness-knowledge-changed') return;
       if (event.scope !== scope) return;
       if (scope === 'workspace' && event.workspaceId && workspaceId && event.workspaceId !== workspaceId) return;
-      void refresh(controller.signal);
+      void refresh();
     });
     return () => {
-      controller.abort();
+      contextGeneration.current += 1;
+      requestGeneration.current += 1;
+      refreshController.current?.abort();
+      actionController.current?.abort();
       unsubscribe();
     };
-  }, [refresh, scope, workspaceId]);
+  }, [refresh, resetContext, scope, workspaceId]);
 
   React.useEffect(() => {
     if (!selected) {
@@ -94,13 +154,19 @@ export const KnowledgeSettingsPage: React.FC = () => {
     return () => controller.abort();
   }, [selected, workspaceId]);
 
-  const run = React.useCallback(async (operation: () => Promise<void>) => {
+  const run = React.useCallback(async (operation: (signal: AbortSignal) => Promise<void>) => {
     if (busy) return;
+    const generation = contextGeneration.current;
+    const controller = new AbortController();
+    actionController.current?.abort();
+    actionController.current = controller;
     setBusy(true);
     try {
-      await operation();
+      await operation(controller.signal);
+      if (controller.signal.aborted || generation !== contextGeneration.current) return;
       await refresh();
     } catch (error) {
+      if (controller.signal.aborted || generation !== contextGeneration.current) return;
       if (error instanceof Error && 'code' in error && error.code === 'conflict') {
         toast.error(t('harness.knowledge.conflict'));
         await refresh();
@@ -108,9 +174,17 @@ export const KnowledgeSettingsPage: React.FC = () => {
         toast.error(error instanceof Error ? error.message : t('settings.knowledge.empty.none'));
       }
     } finally {
-      setBusy(false);
+      if (generation === contextGeneration.current) setBusy(false);
+      if (actionController.current === controller) actionController.current = null;
     }
   }, [busy, refresh, t]);
+
+  const changeScope = React.useCallback((next: KnowledgeCatalogScope) => {
+    if (next === scope) return;
+    currentContextKey.current = `${next}:${workspaceId ?? ''}`;
+    resetContext();
+    setScope(next);
+  }, [resetContext, scope, workspaceId]);
 
   return (
     <SettingsPageLayout
@@ -123,10 +197,10 @@ export const KnowledgeSettingsPage: React.FC = () => {
         settingsItem={scope === 'workspace' ? 'knowledge.workspace' : 'knowledge.user'}
         headerAction={(
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant={scope === 'workspace' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => setScope('workspace')}>
+            <Button type="button" variant={scope === 'workspace' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => changeScope('workspace')}>
               {t('harness.knowledge.scope.workspace')}
             </Button>
-            <Button type="button" variant={scope === 'user' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => setScope('user')}>
+            <Button type="button" variant={scope === 'user' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => changeScope('user')}>
               {t('harness.knowledge.scope.user')}
             </Button>
             <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setShowRetired((value) => !value)}>
@@ -204,9 +278,9 @@ export const KnowledgeSettingsPage: React.FC = () => {
                     variant="outline"
                     size="xs"
                     disabled={busy || !draft.content.trim()}
-                    onClick={() => void run(async () => {
+                    onClick={() => void run(async (signal) => {
                       if (!draft.content.trim()) throw new Error(t('harness.knowledge.contentRequired'));
-                      await saveKnowledgeCatalogItem(selected, draft, workspaceId);
+                      await saveKnowledgeCatalogItem(selected, draft, workspaceId, signal);
                     })}
                   >
                     {t('harness.knowledge.save')}
@@ -214,10 +288,10 @@ export const KnowledgeSettingsPage: React.FC = () => {
                 ) : null}
                 {selected.status === 'suggested' && selected.invalidAt === undefined ? (
                   <>
-                    <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void run(() => reviewKnowledgeCatalogItem(selected, 'dismiss', workspaceId))}>
+                    <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void run((signal) => reviewKnowledgeCatalogItem(selected, 'dismiss', workspaceId, [], signal))}>
                       {t('harness.knowledge.dismiss')}
                     </Button>
-                    <Button type="button" size="xs" disabled={busy} onClick={() => void run(() => reviewKnowledgeCatalogItem(selected, 'accept', workspaceId))}>
+                    <Button type="button" size="xs" disabled={busy} onClick={() => void run((signal) => reviewKnowledgeCatalogItem(selected, 'accept', workspaceId, [], signal))}>
                       {t('harness.knowledge.accept')}
                     </Button>
                   </>
@@ -230,7 +304,7 @@ export const KnowledgeSettingsPage: React.FC = () => {
                     disabled={busy}
                     onClick={() => {
                       if (!window.confirm(t('settings.knowledge.deleteConfirm'))) return;
-                      void run(() => retireKnowledgeCatalogItem(selected, workspaceId));
+                      void run((signal) => retireKnowledgeCatalogItem(selected, workspaceId, signal));
                     }}
                   >
                     {t('settings.knowledge.delete')}

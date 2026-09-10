@@ -32,7 +32,7 @@ describe("knowledge suggestion extension", () => {
     const requests: unknown[] = [];
     const handlers = new Map<string, (event: { prompt: string }) => unknown>();
     createKnowledgeSuggestionExtension({
-      bridge: { request: async (method, params) => { requests.push([method, params]); } } as never,
+      bridge: { request: async (method: string, params: unknown) => { requests.push([method, params]); } } as never,
     })({
       on: (event: string, handler: (event: { prompt: string }) => unknown) => { handlers.set(event, handler); },
     } as never);
@@ -45,15 +45,15 @@ describe("knowledge suggestion extension", () => {
     const requests: unknown[] = [];
     const prompts: string[] = [];
     const handlers = new Map<string, (event: { prompt: string }) => unknown>();
-    let draft: ((prompt: string) => Promise<string>) | undefined;
+    const draftState: { current?: (prompt: string) => Promise<string> } = {};
     createKnowledgeSuggestionExtension({
       bridge: {
-        request: async (method, params) => {
+        request: async (method: string, params: unknown) => {
           requests.push([method, params]);
           return { created: true };
         },
       } as never,
-      getDraftWithModel: () => draft,
+      getDraftWithModel: () => draftState.current,
     })({
       on: (event: string, handler: (event: { prompt: string }) => unknown) => { handlers.set(event, handler); },
     } as never);
@@ -62,7 +62,7 @@ describe("knowledge suggestion extension", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(requests, []);
 
-    draft = async (prompt) => {
+    draftState.current = async (prompt) => {
       prompts.push(prompt);
       return '{"content":"Use bun for package management","trigger":"package management"}';
     };
@@ -74,8 +74,6 @@ describe("knowledge suggestion extension", () => {
       {
         content: "Use bun for package management",
         trigger: "package management",
-        kind: "user-message",
-        scope: "workspace",
       },
     ]);
   });
@@ -84,7 +82,7 @@ describe("knowledge suggestion extension", () => {
     const requests: unknown[] = [];
     const handlers = new Map<string, (event: { prompt: string }) => unknown>();
     createKnowledgeSuggestionExtension({
-      bridge: { request: async (method, params) => { requests.push([method, params]); } } as never,
+      bridge: { request: async (method: string, params: unknown) => { requests.push([method, params]); } } as never,
       getDraftWithModel: () => async () => "null",
     })({
       on: (event: string, handler: (event: { prompt: string }) => unknown) => { handlers.set(event, handler); },

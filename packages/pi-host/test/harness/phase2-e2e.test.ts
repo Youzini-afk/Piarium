@@ -13,8 +13,7 @@ import { tmpdir } from "node:os";
 import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
-import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
-import { DEFAULT_TODO_SETTINGS } from "../../../web/application-host/lib/harness/todo-tool.js";
+import { openWorkspaceKnowledge } from "../../../web/application-host/lib/knowledge/store.js";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../../web/application-host/lib/harness/compaction.js";
 
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
@@ -66,7 +65,7 @@ async function setupP2E2E() {
   }
 
   // Compaction deps provider
-  async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
+  async function compactionDepsProvider(_sessionId: string): Promise<CompactionHandlerDeps> {
     return {
       store: knowledgeStore,
       settings: DEFAULT_COMPACTION_SETTINGS,
@@ -83,7 +82,6 @@ async function setupP2E2E() {
     return {
       store: knowledgeStore,
       sessionId,
-      settings: DEFAULT_TODO_SETTINGS,
     };
   }
 
@@ -111,16 +109,16 @@ async function setupP2E2E() {
   });
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
-  let bridge: HostServicesBridge;
+  const bridgeState: { current?: HostServicesBridge } = {};
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
-      bridge.respond(sessionId, requestId, outcome);
+      bridgeState.current?.respond(sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });
   registerHarnessServices(router, harnessServiceHost);
 
-  bridge = new HostServicesBridge({
+  const bridge = new HostServicesBridge({
     emit: (_event, data) => {
       void router.processEvent({
         actor: ACTOR,
@@ -131,6 +129,7 @@ async function setupP2E2E() {
     sessionId: SESSION_ID,
     defaultTimeoutMs: 10000,
   });
+  bridgeState.current = bridge;
 
   return { workspaceRoot, dataDir, knowledgeStore, harnessServiceHost, router, bridge };
 }
@@ -150,7 +149,7 @@ describe("Phase 2 e2e integration", () => {
     const { workspaceRoot, dataDir, knowledgeStore, bridge, harnessServiceHost } = await setupP2E2E();
     try {
       const todoTool = createTodoTool(bridge);
-      const { text, details } = await executeTool(todoTool, {
+      const { text } = await executeTool(todoTool, {
         items: [
           { text: "write tests", status: "open" },
           { text: "run tests", status: "done" },
@@ -175,7 +174,7 @@ describe("Phase 2 e2e integration", () => {
   });
 
   it("recall tool → bridge → router → service → store: search knowledge", async () => {
-    const { workspaceRoot, dataDir, knowledgeStore, bridge, harnessServiceHost } = await setupP2E2E();
+    const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
     try {
       const recallTool = createRecallTool(bridge, SESSION_ID);
       const { text, details } = await executeTool(recallTool, {

@@ -9,9 +9,9 @@
  * Content rendered as `- [ ] text` / `- [x] text` / `- [!] text`.
  * Returns: `plan updated: ${done}/${total} done${blocked ? `, ${blocked} blocked` : ''}`
  *
- * Confidence is informational. Confirmation waits only when an explicit
- * approval policy is enabled (requireConfirmation or the existing permission
- * gate). Version conflicts stay on the knowledge store.
+ * Confidence is informational. Plan updates are ordinary session state; any
+ * explicit approval belongs to the existing plan/permission flow before the
+ * tool call. Version conflicts stay on the knowledge store.
  */
 
 import type { KnowledgeStore } from "../knowledge/store.js";
@@ -30,18 +30,9 @@ export interface TodoToolInput {
   confidence?: number;
 }
 
-export interface TodoToolSettings {
-  requireConfirmation: boolean;
-}
-
-export const DEFAULT_TODO_SETTINGS: TodoToolSettings = {
-  requireConfirmation: false,
-};
-
 export interface TodoToolDeps {
   store: KnowledgeStore;
   sessionId: string;
-  settings: TodoToolSettings;
 }
 
 // ── Rendering ──────────────────────────────────────────────────────
@@ -70,28 +61,16 @@ export function parsePlanContent(content: string): TodoItem[] {
 
 export interface TodoToolResult {
   text: string;
-  confirmed?: boolean | undefined;
-  askedConfirmation: boolean;
 }
 
 export async function executeTodoTool(
   input: TodoToolInput,
   deps: TodoToolDeps,
-  sessionConfirmed: boolean,
   branchEntryIds?: readonly string[],
 ): Promise<TodoToolResult> {
-  const { store, sessionId, settings } = deps;
+  const { store, sessionId } = deps;
   const items = input.items;
   const content = renderPlanContent(items);
-
-  const askedConfirmation = settings.requireConfirmation;
-  if (askedConfirmation && !sessionConfirmed) {
-    return {
-      text: "plan update requires user confirmation",
-      confirmed: false,
-      askedConfirmation: true,
-    };
-  }
 
   await store.upsertBlock({
     sessionId,
@@ -110,11 +89,7 @@ export async function executeTodoTool(
   let text = `plan updated: ${done}/${total} done`;
   if (blocked > 0) text += `, ${blocked} blocked`;
 
-  return {
-    text,
-    ...(askedConfirmation && sessionConfirmed ? { confirmed: true } : {}),
-    askedConfirmation,
-  };
+  return { text };
 }
 
 // ── Prompt guidelines ──────────────────────────────────────────────

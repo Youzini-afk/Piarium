@@ -561,11 +561,48 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
+  it('delivers an exited handle callback once without retaining it on the session', async () => {
+    const harness = createHarness();
+    try {
+      const handle = await harness.runtime.createTerminalSession({ sessionId: 'term-reuse', cwd: '/repo' });
+      requiredProcess(harness.processes, 0).emitExit(7, 0);
+      const calls: Array<{ exitCode: number; signal: number }> = [];
+      const subscription = handle.onExit((event) => { calls.push(event); });
+
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+      expect(calls).toEqual([{ exitCode: 7, signal: 0 }]);
+      const duplicate = handle.onExit((event) => { calls.push(event); });
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(calls).toEqual([{ exitCode: 7, signal: 0 }, { exitCode: 7, signal: 0 }]);
+      expect(harness.processes).toHaveLength(1);
+      duplicate.dispose();
+      subscription.dispose();
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('does not retain an exited callback after it is disposed before delivery', async () => {
+    const harness = createHarness();
+    try {
+      const handle = await harness.runtime.createTerminalSession({ sessionId: 'term-dispose-exit', cwd: '/repo' });
+      requiredProcess(harness.processes, 0).emitExit(0, 0);
+      let calls = 0;
+      const subscription = handle.onExit(() => { calls += 1; });
+      subscription.dispose();
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(calls).toBe(0);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('escalates close to SIGKILL when a running process ignores SIGTERM', async () => {
     const harness = createHarness();
     try {
       await requiredRoute(harness.routes.post, '/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo' } }, createResponse());
-      await requiredRoute(harness.routes.delete, '/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, createResponse());
+      const response = createResponse();
+      await requiredRoute(harness.routes.delete, '/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, response);
+      expect(response.statusCode).toBe(500);
+      expect(response.body.error).toContain('did not exit');
+      expect(harness.runtime.inspectSession('term-1')?.status).toBe('running');
       expect(requiredProcess(harness.processes, 0).kills).toEqual(['SIGTERM', 'SIGKILL']);
     } finally { await harness.runtime.shutdown(); }
   });
@@ -590,7 +627,10 @@ describe('terminal runtime', () => {
           pid: 99123,
           killed: false,
           writes: [] as string[],
-          write(value: string) { this.writes.push(value); }, resize() {}, kill() { this.killed = true; },
+          write(value: string) { this.writes.push(value); }, resize() {}, kill() {
+            this.killed = true;
+            for (const handler of exits) handler({ exitCode: 137, signal: 9 });
+          },
           onData(handler: (value: string) => void) { data.add(handler); return { dispose: () => data.delete(handler) }; },
           onExit(handler: (event: { exitCode: number; signal: number }) => void) { exits.add(handler); return { dispose: () => exits.delete(handler) }; },
           emitData(value: string) { for (const handler of data) handler(value); },
@@ -765,6 +805,109 @@ describe('terminal runtime', () => {
       expect(closed.body).toEqual({ success: true, retained: true });
       expect(requiredProcess(harness.processes, 0).killed).toBe(false);
       expect(harness.runtime.inspectSession('sh_1')?.status).toBe('running');
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('keeps HTTP and programmatic harness creation identities separate, including after exit', async () => {
+    const harness = createHarness();
+    try {
+      await harness.runtime.createTerminalSession({
+        sessionId: 'sh-owned',
+        cwd: '/repo',
+        owner: 'harness',
+        retainWhenDetached: true,
+        registerProcessWriter: false,
+        spawn: { executable: '/usr/bin/harness-bash', args: ['-l'] },
+      });
+      const create = requiredRoute(harness.routes.post, '/api/terminal/create');
+      const runningConflict = createResponse();
+      await create({
+        body: {
+          sessionId: 'sh-owned',
+          cwd: '/repo',
+          owner: 'harness',
+          spawn: { executable: '/tmp/other', args: [] },
+        },
+      }, runningConflict);
+      expect(runningConflict.statusCode).toBe(409);
+      expect(harness.processes).toHaveLength(1);
+
+      requiredProcess(harness.processes, 0).emitExit(0, 0);
+      const exitedConflict = createResponse();
+      await create({ body: { sessionId: 'sh-owned', cwd: '/repo' } }, exitedConflict);
+      expect(exitedConflict.statusCode).toBe(409);
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('allocates a new global harness id when HTTP already owns sh_1', async () => {
+    const harness = createHarness();
+    try {
+      const user = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/create')({
+        body: { sessionId: 'sh_1', cwd: '/repo' },
+      }, user);
+      expect(user.statusCode).toBe(200);
+
+      const shell = await harness.runtime.createTerminalSession({
+        cwd: '/repo',
+        owner: 'harness',
+        spawn: { executable: '/usr/bin/harness-bash', args: [] },
+      });
+      expect(shell.id).toBe('sh_2');
+      expect(harness.runtime.inspectSession('sh_1')).toMatchObject({ owner: 'user' });
+      expect(harness.runtime.inspectSession('sh_2')).toMatchObject({ owner: 'harness' });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('waits for force-kill to observe PTY exit and writer release', async () => {
+    let writerClosed = 0;
+    let releaseWriter: () => void = () => undefined;
+    const harness = createHarness({
+      terminalTerminationGraceMs: 100,
+      documents: { registerWriterForScope: async () => ({
+        markMutated: async () => {},
+        close: async () => {
+          writerClosed += 1;
+          await new Promise<void>((resolve) => { releaseWriter = resolve; });
+        },
+      }) },
+    });
+    try {
+      await harness.runtime.createTerminalSession({
+        sessionId: 'term-force-wait', cwd: '/repo', registerProcessWriter: true,
+      });
+      const forceKill = requiredRoute(harness.routes.post, '/api/terminal/force-kill');
+      const response = createResponse();
+      let finished = false;
+      const request = (async () => {
+        await forceKill({ body: { sessionId: 'term-force-wait' } }, response);
+        finished = true;
+      })();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(finished).toBe(false);
+      requiredProcess(harness.processes, 0).emitExit(137, 9);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(finished).toBe(false);
+      releaseWriter();
+      await request;
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ success: true, killedCount: 1, killedSessionIds: ['term-force-wait'] });
+      expect(writerClosed).toBe(1);
+      expect(harness.runtime.inspectSession('term-force-wait')).toBeNull();
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('returns an observable force-kill failure and keeps the session mapped', async () => {
+    const harness = createHarness({ terminalTerminationGraceMs: 5 });
+    try {
+      await harness.runtime.createTerminalSession({ sessionId: 'term-force-fails', cwd: '/repo' });
+      const response = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/force-kill')({ body: { sessionId: 'term-force-fails' } }, response);
+      expect(response.statusCode).toBe(500);
+      expect(response.body).toMatchObject({ success: false, killedCount: 0, killedSessionIds: [] });
+      expect(response.body.errors).toEqual([{ sessionId: 'term-force-fails', error: 'Terminal process did not exit after termination' }]);
+      expect(harness.runtime.inspectSession('term-force-fails')).toMatchObject({ status: 'running' });
     } finally { await harness.runtime.shutdown(); }
   });
 

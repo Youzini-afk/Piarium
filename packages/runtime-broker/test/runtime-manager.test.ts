@@ -82,7 +82,6 @@ test("probes a discovered system install and records the real handshake source",
     await rm(dataDir, { force: true, recursive: true });
   }
 });
-
 test("does not probe or recommend a downgrade when the installed Pi is newer", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
   try {
@@ -550,4 +549,3 @@ test("keeps an explicit system runtime ahead of a ready bundled Pi", async () =>
     await rm(dataDir, { force: true, recursive: true });
   }
 });
-

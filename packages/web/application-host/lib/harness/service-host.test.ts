@@ -172,4 +172,37 @@ describe("harness service host authorization", () => {
       await host.dispose();
     }
   });
+
+  it("preserves the ThreadRun binding while a worker generation is re-registered", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace/thread",
+      discoveredShells: {},
+    });
+    try {
+      host.registerSession({
+        actor: { ...ACTOR, runId: "run-1" }, grantedCapabilities: ["process.shell"],
+        workspaceId: "workspace-1", workspaceRoot: "D:/workspace/thread",
+      });
+      host.verification.attachThreadSession(ACTOR.sessionId, {
+        workspaceId: "workspace-1", threadId: "thread-1", runId: "run-1",
+        worktreePath: "D:/workspace/thread", branchId: "thread-1",
+        captureIdentity: async () => ({ treeHash: "tree" }),
+      });
+      host.dropSession(ACTOR.sessionId);
+      expect(host.verification.sessionBinding(ACTOR.sessionId)).toMatchObject({
+        scope: "child", threadId: "thread-1", runId: "run-1",
+      });
+      host.registerSession({
+        actor: { ...ACTOR, workerGeneration: 2, runId: "run-1" }, grantedCapabilities: ["process.shell"],
+        workspaceId: "workspace-1", workspaceRoot: "D:/workspace/thread",
+      });
+      expect(host.verification.sessionBinding(ACTOR.sessionId)).toMatchObject({
+        scope: "child", threadId: "thread-1", runId: "run-1",
+        actor: { workerGeneration: 2, runId: "run-1" },
+      });
+    } finally {
+      await host.dispose();
+    }
+  });
 });

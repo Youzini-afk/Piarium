@@ -63,9 +63,8 @@ describe("knowledge public service wiring", () => {
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => null,
       discoveredShells: {},
-      knowledgeSuggestDepsProvider: async (_sessionId, workspaceId, scope) => {
+      knowledgeSuggestDepsProvider: async (_sessionId, workspaceId) => {
         expect(workspaceId).toBe(actor.workspaceId);
-        expect(scope).toBe("workspace");
         return {
           store,
           settings: DEFAULT_SUGGESTIONS_SETTINGS,
@@ -78,18 +77,57 @@ describe("knowledge public service wiring", () => {
     const created = await service.handle({
       content: "Always prefer bun",
       trigger: "install",
-      kind: "user-message",
     }, context(new AbortController().signal));
     expect(created.created).toBe(true);
     expect(created.suggestion).toMatchObject({ content: "Always prefer bun", status: "suggested", scope: "workspace" });
     await store.dismissKnowledge(created.suggestion!.id, "workspace");
     const skipped = await service.handle({
       content: "Always prefer bun",
-      kind: "user-message",
     }, context(new AbortController().signal));
     expect(skipped).toEqual({ created: false, skippedReason: "duplicate" });
     expect(changed).toEqual(["workspace"]);
     expect((await store.listKnowledge({ scope: "workspace" })).filter((item) => item.content === "Always prefer bun")).toHaveLength(1);
+  });
+
+  it("honors the effective workspace auto-accept policy for model suggestions", async () => {
+    const { store } = await fixture();
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => null,
+      discoveredShells: {},
+      knowledgeSuggestDepsProvider: async () => ({
+        store,
+        settings: { autoAcceptSuggestions: { workspace: true, user: false } },
+      }),
+    });
+    cleanup.push(() => host.dispose());
+    const created = await createKnowledgeSuggestService(host).handle({
+      content: "Keep generated clients checked in",
+      trigger: "generated clients",
+    }, context(new AbortController().signal));
+    expect(created.suggestion).toMatchObject({ status: "accepted", scope: "workspace" });
+    await expect(store.listKnowledge({ scope: "workspace", status: "accepted" }))
+      .resolves.toContainEqual(expect.objectContaining({ content: "Keep generated clients checked in" }));
+  });
+
+  it("rejects worker attempts to select the user scope or forge a source kind", async () => {
+    const { store } = await fixture();
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => null,
+      discoveredShells: {},
+      knowledgeSuggestDepsProvider: async (_sessionId, workspaceId) => {
+        expect(workspaceId).toBe(actor.workspaceId);
+        return { store, settings: DEFAULT_SUGGESTIONS_SETTINGS };
+      },
+    });
+    cleanup.push(() => host.dispose());
+    const service = createKnowledgeSuggestService(host);
+    await expect(service.handle({ content: "forged", scope: "user" } as never, context(new AbortController().signal)))
+      .rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(service.handle({ content: "forged", kind: "trusted-source" } as never, context(new AbortController().signal)))
+      .rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(store.listKnowledge({ scope: "user" })).resolves.toEqual([]);
   });
 
   it.each(["recall", "zone2"] as const)("cancels a pending remote query through public %s", async (entry) => {

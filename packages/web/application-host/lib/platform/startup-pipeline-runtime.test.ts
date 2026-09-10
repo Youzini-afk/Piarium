@@ -7,7 +7,12 @@ describe('startup pipeline runtime', () => {
   it('publishes the listening port before attaching process handlers', async () => {
     const order: string[] = [];
     const runtime = createStartupPipelineRuntime({
-      createTerminalRuntime: () => ({ shutdown: async () => {} }),
+      createTerminalRuntime: () => ({
+        attachTerminalSession: () => null,
+        createTerminalSession: async () => { throw new Error('not used'); },
+        inspectSession: () => null,
+        shutdown: async () => {},
+      }),
       createDictationRuntime: () => ({ stop: () => {} }),
       createServerStartupRuntime: () => ({
         resolveBindHost: () => '127.0.0.1',

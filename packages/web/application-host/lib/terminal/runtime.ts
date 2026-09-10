@@ -42,6 +42,7 @@ type ProcessWriter = Awaited<ReturnType<DocumentAuthority['registerWriterForScop
 interface WriterState {
   released: boolean;
   writer: ProcessWriter;
+  releasePromise?: Promise<void>;
 }
 
 interface PtyProcess {
@@ -64,6 +65,7 @@ type TerminalEvent =
 
 interface TerminalSession {
   backend?: string;
+  closing: boolean;
   cols: number;
   cwd: string;
   dataListeners: Set<(data: string) => void>;
@@ -76,6 +78,7 @@ interface TerminalSession {
   lastActivity: number;
   loginShell: boolean;
   owner: TerminalSessionOwner;
+  creationSource: 'http' | 'programmatic';
   pendingHistoryControlSequence: string;
   pendingThemeControlSequence: string;
   process: PtyProcess | null;
@@ -93,6 +96,7 @@ interface TerminalSession {
   themeModeEnabled: boolean;
   writerGeneration: number;
   writerState: WriterState | null;
+  writerReleasePromise?: Promise<void>;
 }
 
 interface TerminalAttachment {
@@ -127,6 +131,18 @@ interface TerminalRuntimeDependencies {
   } | null;
 }
 
+type SessionCreationSource = 'http' | 'programmatic';
+
+type SessionCreationIdentity = {
+  owner: TerminalSessionOwner;
+  creationSource: SessionCreationSource;
+  loginShell: boolean;
+  registerProcessWriter: boolean;
+  retainWhenDetached: boolean;
+  shell: TerminalShellPreference;
+  spawn?: TerminalSpawnSpec;
+};
+
 interface StartSessionInput {
   cols: number;
   cwd: string;
@@ -157,6 +173,41 @@ const isTerminalSpawnSpec = (value: unknown): value is TerminalSpawnSpec => {
   return true;
 };
 
+const sameSpawnSpec = (left: TerminalSpawnSpec | undefined, right: TerminalSpawnSpec | undefined): boolean => {
+  if (left === right) return true;
+  if (!left || !right || left.executable !== right.executable || left.args.length !== right.args.length) return false;
+  if (left.args.some((arg, index) => arg !== right.args[index])) return false;
+  const leftEnv = left.env ?? {};
+  const rightEnv = right.env ?? {};
+  const leftKeys = Object.keys(leftEnv);
+  const rightKeys = Object.keys(rightEnv);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => leftEnv[key] === rightEnv[key]);
+};
+
+const sameCreationIdentity = (
+  left: SessionCreationIdentity,
+  right: SessionCreationIdentity,
+): boolean => left.owner === right.owner
+  && left.creationSource === right.creationSource
+  && left.loginShell === right.loginShell
+  && left.registerProcessWriter === right.registerProcessWriter
+  && left.retainWhenDetached === right.retainWhenDetached
+  && left.shell === right.shell
+  && sameSpawnSpec(left.spawn, right.spawn);
+
+const sessionIdentityConflict = (id: string): Error & { statusCode: number } => {
+  const error = new Error(`Terminal session ${id} already exists with a different owner or creation identity`) as Error & { statusCode: number };
+  error.statusCode = 409;
+  return error;
+};
+
+const exitedSessionConflict = (id: string): Error & { statusCode: number } => {
+  const error = new Error(`Terminal session ${id} has exited; close it before reusing the id`) as Error & { statusCode: number };
+  error.statusCode = 409;
+  return error;
+};
+
 const releaseProcessWriter = async (writer: ProcessWriter, mutated = true): Promise<void> => {
   if (!writer) return;
   if (mutated) {
@@ -182,18 +233,16 @@ export function createTerminalRuntime({
   documents,
 }: TerminalRuntimeDependencies) {
   const sessions = new Map<string, TerminalSession>();
-  const pendingSessionCreates = new Map<string, {
+  const pendingSessionCreates = new Map<string, SessionCreationIdentity & {
     cwd: string;
-    loginShell: boolean;
-    owner: TerminalSessionOwner;
     promise: Promise<TerminalSession>;
-    shell: TerminalShellPreference;
   }>();
   const pendingSessionRestarts = new Map<string, Promise<void>>();
   const connections = new Set<TerminalConnection>();
   const pendingTerminations = new Set<Promise<void>>();
   const runtime = 'Bun' in globalThis ? 'bun' : 'node';
   let ptyProviderPromise: Promise<PtyProvider> | null = null;
+  let nextHarnessSessionId = 0;
   let wsServer: WebSocketServer | null = new WebSocketServer({ noServer: true, maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES });
   const shellResolver = createTerminalShellResolver({ fs, path, searchPathFor, isExecutable, buildAugmentedPath });
 
@@ -208,12 +257,14 @@ export function createTerminalRuntime({
     return null;
   };
 
-  const releaseWriterState = async (state: WriterState | null, mutated = true): Promise<void> => {
-    if (!state || state.released) return;
+  const releaseWriterState = (state: WriterState | null, mutated = true): Promise<void> => {
+    if (!state || state.released) return state?.releasePromise ?? Promise.resolve();
+    if (state.releasePromise) return state.releasePromise;
     state.released = true;
     const writer = state.writer;
     state.writer = null;
-    await releaseProcessWriter(writer, mutated);
+    state.releasePromise = releaseProcessWriter(writer, mutated);
+    return state.releasePromise;
   };
 
   const getPtyProvider = async (): Promise<PtyProvider> => {
@@ -280,23 +331,37 @@ export function createTerminalRuntime({
     try { ptyProcess.kill(force ? 'SIGKILL' : undefined); } catch { /* already gone */ }
   };
 
-  const terminateProcess = (ptyProcess: PtyProcess | null, force = false): Promise<void> => {
+  const terminateProcess = (ptyProcess: PtyProcess | null, force = false, waitForExit = false): Promise<void> => {
     if (!ptyProcess) return Promise.resolve();
-    if (force) { killProcess(ptyProcess, true); return Promise.resolve(); }
-    const completion = new Promise<void>((resolve) => {
+    if (force && !waitForExit) { killProcess(ptyProcess, true); return Promise.resolve(); }
+    const completion = new Promise<void>((resolve, reject) => {
       let settled = false;
       let disposable: { dispose?(): void } | null = null;
-      const finish = () => {
+      const finish = (error?: unknown) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         disposable?.dispose?.();
-        resolve();
+        if (error) reject(error);
+        else resolve();
       };
-      const timeout = setTimeout(() => { killProcess(ptyProcess, true); finish(); }, terminalTerminationGraceMs);
-      try { disposable = ptyProcess.onExit(() => finish()); } catch { /* backend is already gone */ }
-      killProcess(ptyProcess, false);
+      const timeout = setTimeout(() => {
+        killProcess(ptyProcess, true);
+        if (waitForExit) finish(new Error('Terminal process did not exit after termination'));
+        else finish();
+      }, terminalTerminationGraceMs);
+      try { disposable = ptyProcess.onExit(() => finish()); }
+      catch (error) {
+        if (waitForExit) finish(error);
+      }
+      killProcess(ptyProcess, force);
     });
+    if (waitForExit) {
+      const waited = completion.then(() => undefined);
+      const termination = waited.finally(() => pendingTerminations.delete(termination));
+      pendingTerminations.add(termination);
+      return termination;
+    }
     const termination = completion.finally(() => pendingTerminations.delete(termination));
     pendingTerminations.add(termination);
     return termination;
@@ -361,10 +426,13 @@ export function createTerminalRuntime({
           session.signal = Number.isInteger(event.signal) ? event.signal : null;
           session.process = null;
           if (session.writerState === event.writerState) session.writerState = null;
-          void releaseWriterState(event.writerState);
+          session.writerReleasePromise = releaseWriterState(event.writerState);
+          void session.writerReleasePromise;
           publish(session, { t: 'exit', exitCode: session.exitCode, signal: session.signal });
           const exitEvent = { exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 };
-          for (const listener of session.exitListeners) listener(exitEvent);
+          const listeners = [...session.exitListeners];
+          session.exitListeners.clear();
+          for (const listener of listeners) listener(exitEvent);
         }
       }
     } finally { session.draining = false; }
@@ -461,6 +529,7 @@ export function createTerminalRuntime({
     if (clear) { session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; }
     session.cwd = cwd; session.cols = cols; session.rows = rows; session.process = spawned.process;
     session.writerState = spawned.writerState; session.writerGeneration = spawned.generation;
+    delete session.writerReleasePromise;
     session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.exitCode = null; session.signal = null;
     session.themeMode = themeMode === 'light' ? 'light' : 'dark';
     session.terminalBackground = typeof terminalBackground === 'string' ? terminalBackground : session.terminalBackground;
@@ -480,23 +549,49 @@ export function createTerminalRuntime({
     return count;
   };
 
-  const createSession = async (value: unknown, options: { allowSpawn?: boolean } = {}): Promise<TerminalSession> => {
+  const allocateHarnessSessionId = (): string => {
+    let id = '';
+    do {
+      id = `sh_${++nextHarnessSessionId}`;
+    } while (sessions.has(id) || pendingSessionCreates.has(id));
+    return id;
+  };
+
+  const createSession = async (
+    value: unknown,
+    options: { allowSpawn?: boolean; creationSource?: SessionCreationSource } = {},
+  ): Promise<TerminalSession> => {
     const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const { sessionId, cwd, workspacePath, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false } = input;
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
     const owner: TerminalSessionOwner = options.allowSpawn && input.owner === 'harness' ? 'harness' : 'user';
-    const retainWhenDetached = options.allowSpawn && (input.retainWhenDetached === true || owner === 'harness');
     const registerProcessWriter = owner === 'user'
       ? input.registerProcessWriter !== false
       : input.registerProcessWriter === true;
     const spawn = options.allowSpawn && isTerminalSpawnSpec(input.spawn) ? input.spawn : undefined;
     const normalizedShell = spawn ? 'auto' : normalizeTerminalShell(shell);
     if (!normalizedShell) throw new Error('Invalid terminal shell');
-    const id = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : randomUUID();
+    const creationSource = options.creationSource ?? 'programmatic';
+    const retainWhenDetached = options.allowSpawn === true && (input.retainWhenDetached === true || owner === 'harness');
+    const creationIdentity: SessionCreationIdentity = {
+      owner,
+      creationSource,
+      loginShell,
+      registerProcessWriter,
+      retainWhenDetached,
+      shell: normalizedShell,
+      ...(spawn ? { spawn } : {}),
+    };
+    const id = typeof sessionId === 'string' && sessionId.trim()
+      ? sessionId.trim()
+      : owner === 'harness' ? allocateHarnessSessionId() : randomUUID();
     if (id.length > 128) throw new Error('Invalid terminal session id');
     const existing = sessions.get(id);
     const resolvedCwd = await resolveTerminalWorkingDirectory({ cwd, workspacePath });
+    if (existing?.closing) throw sessionIdentityConflict(id);
+    if (existing && !sameCreationIdentity(existing, creationIdentity)) throw sessionIdentityConflict(id);
+    if (existing?.status === 'exited') throw exitedSessionConflict(id);
     if (existing?.status === 'running') {
       if (path.resolve(existing.cwd) !== resolvedCwd) throw new Error('Terminal session belongs to a different working directory');
       applyAppearance(existing, { themeMode, terminalBackground, terminalForeground });
@@ -507,13 +602,14 @@ export function createTerminalRuntime({
       if (pending.cwd !== resolvedCwd) throw new Error('Terminal session belongs to a different working directory');
       if (pending.shell !== normalizedShell) throw new Error('Terminal session is already being created with a different shell');
       if (pending.loginShell !== loginShell) throw new Error('Terminal session is already being created with a different login mode');
+      if (!sameCreationIdentity(pending, creationIdentity)) throw sessionIdentityConflict(id);
       const session = await pending.promise;
       applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
       return session;
     }
     if (owner === 'user' && !existing && userSessionCount() >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const creation = (async () => {
-      const session: TerminalSession = existing ?? {
+      const session: TerminalSession = {
         id,
         cols,
         cwd: resolvedCwd,
@@ -526,9 +622,11 @@ export function createTerminalRuntime({
         draining: false,
         exitCode: null,
         exitListeners: new Set(),
+        closing: false,
         lastActivity: Date.now(),
         loginShell,
         owner,
+        creationSource,
         process: null,
         registerProcessWriter,
         retainWhenDetached,
@@ -544,19 +642,11 @@ export function createTerminalRuntime({
         writerState: null,
         writerGeneration: 0,
       };
-      if (existing) {
-        session.owner = owner;
-        session.retainWhenDetached = retainWhenDetached;
-        session.registerProcessWriter = registerProcessWriter;
-        if (spawn) session.spawn = spawn;
-        session.dataListeners ??= new Set();
-        session.exitListeners ??= new Set();
-      }
       await startSession(session, { cwd: resolvedCwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell, ...(spawn ? { spawn } : {}) });
       sessions.set(id, session);
       return session;
     })();
-    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, owner, promise: creation };
+    const pendingEntry = { ...creationIdentity, cwd: resolvedCwd, promise: creation };
     pendingSessionCreates.set(id, pendingEntry);
     try { return await creation; }
     finally { if (pendingSessionCreates.get(id) === pendingEntry) pendingSessionCreates.delete(id); }
@@ -636,7 +726,10 @@ export function createTerminalRuntime({
     },
     onExit(handler) {
       if (session.status === 'exited') {
-        queueMicrotask(() => handler({ exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 }));
+        let active = true;
+        const event = { exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 };
+        queueMicrotask(() => { if (active) handler(event); });
+        return { dispose: () => { active = false; } };
       }
       session.exitListeners.add(handler);
       return { dispose: () => { session.exitListeners.delete(handler); } };
@@ -654,8 +747,7 @@ export function createTerminalRuntime({
     },
     async terminate(force = false) {
       const processToTerminate = session.process;
-      if (!processToTerminate) return;
-      await terminateProcess(processToTerminate, force);
+      await terminateProcess(processToTerminate, force, force);
     },
     async destroy() {
       await removeSession(session, { force: false, retain: false });
@@ -667,14 +759,40 @@ export function createTerminalRuntime({
       closeAttachments(session.id, 'DETACHED', 'Terminal view closed');
       return;
     }
-    sessions.delete(session.id);
-    closeAttachments(session.id, force ? 'KILLED' : 'CLOSED', force ? 'Terminal was killed' : 'Terminal closed');
+    if (session.closing) throw sessionIdentityConflict(session.id);
+    session.closing = true;
     const processToTerminate = session.process;
     const writerState = session.writerState;
-    session.process = null;
-    session.writerState = null;
-    await terminateProcess(processToTerminate, force);
-    await releaseWriterState(writerState);
+    try {
+      await terminateProcess(processToTerminate, force, true);
+      await releaseWriterState(writerState);
+      if (session.writerReleasePromise) await session.writerReleasePromise;
+      closeAttachments(session.id, force ? 'KILLED' : 'CLOSED', force ? 'Terminal was killed' : 'Terminal closed');
+      if (sessions.get(session.id) === session) sessions.delete(session.id);
+    } catch (error) {
+      session.closing = false;
+      throw error;
+    }
+  };
+
+  const forceTerminateSession = async (session: TerminalSession): Promise<void> => {
+    if (session.closing) throw sessionIdentityConflict(session.id);
+    session.closing = true;
+    const processToTerminate = session.process;
+    const writerState = session.writerState;
+    try {
+      // Keep the session wired and mapped until the PTY has emitted its exit.
+      // This lets the normal FIFO event path observe the exit and prevents a
+      // later session from inheriting an id while the old process is alive.
+      await terminateProcess(processToTerminate, true, true);
+      await releaseWriterState(writerState);
+      if (session.writerReleasePromise) await session.writerReleasePromise;
+      closeAttachments(session.id, 'KILLED', 'Terminal was killed');
+      if (sessions.get(session.id) === session) sessions.delete(session.id);
+    } catch (error) {
+      session.closing = false;
+      throw error;
+    }
   };
 
   const createTerminalSession = async (input: CreateTerminalSessionInput): Promise<TerminalHandle> => {
@@ -722,7 +840,7 @@ export function createTerminalRuntime({
     }
   });
   app.post('/api/terminal/create', async (req, res) => {
-    try { const session = await createSession(req.body ?? {}); res.json({ sessionId: session.id, cols: session.cols, rows: session.rows, status: session.status }); }
+    try { const session = await createSession(req.body ?? {}, { creationSource: 'http' }); res.json({ sessionId: session.id, cols: session.cols, rows: session.rows, status: session.status }); }
     catch (error) {
       const record = errorRecord(error);
       const statusCode = typeof record.statusCode === 'number'
@@ -798,22 +916,49 @@ export function createTerminalRuntime({
       res.json({ success: true, retained: true });
       return;
     }
-    await removeSession(session, { force: false, retain: false });
-    res.json({ success: true, retained: false });
+    try {
+      await removeSession(session, { force: false, retain: false });
+      res.json({ success: true, retained: false });
+    } catch (error) {
+      res.status(500).json({ error: errorMessage(error, 'Terminal process did not exit during close') });
+    }
   });
-  app.post('/api/terminal/force-kill', (req, res) => {
+  app.post('/api/terminal/force-kill', async (req, res) => {
     const { sessionId, cwd } = req.body ?? {}; let killedCount = 0;
     const resolvedCwd = cwd ? path.resolve(String(cwd)) : null;
     const killedSessionIds: string[] = [];
+    const selected: TerminalSession[] = [];
     for (const [id, session] of sessions) {
       if ((sessionId && id !== sessionId) || (!sessionId && resolvedCwd && path.resolve(session.cwd) !== resolvedCwd)) continue;
-      sessions.delete(id); closeAttachments(id, 'KILLED', 'Terminal was killed');
-      const processToTerminate = session.process;
-      const writerState = session.writerState;
-      session.process = null;
-      session.writerState = null;
-      void terminateProcess(processToTerminate, true).then(() => releaseWriterState(writerState));
-      killedSessionIds.push(id); killedCount += 1;
+      selected.push(session);
+    }
+    const results = await Promise.allSettled(selected.map(async (session) => {
+      await forceTerminateSession(session);
+      return session.id;
+    }));
+    const errors: Array<{ sessionId: string; error: string }> = [];
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') {
+        killedSessionIds.push(result.value);
+        killedCount += 1;
+      } else {
+        const error = result.reason;
+        const failedSession = selected[index];
+        errors.push({
+          sessionId: failedSession?.id ?? '',
+          error: errorMessage(error, 'Terminal process did not exit after termination'),
+        });
+      }
+    }
+    if (errors.length > 0) {
+      res.status(500).json({
+        success: false,
+        killedCount,
+        killedSessionIds,
+        errors,
+        error: errors.map((entry) => `${entry.sessionId}: ${entry.error}`).join('; '),
+      });
+      return;
     }
     res.json({ success: true, killedCount, killedSessionIds });
   });

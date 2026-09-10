@@ -1,13 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessActorIdentity } from "@piarium/protocol";
 import { createShellExecService, createShellReadService, createShellWriteService } from "./harness-services.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
 import { discoverShells } from "./shell-discovery.js";
 import { createHarnessServiceHost } from "./service-host.js";
+import { createVerificationCoordinator } from "./verification-coordinator.js";
+import type { ResultVerificationBundle } from "./working-state/types.js";
+import type { WorkingStateStore } from "./working-state/working-state-store.js";
 
 const actor = (sessionId: string): HarnessActorIdentity => ({
   authorityInstanceId: "authority-1",
@@ -242,5 +245,57 @@ describe("production shell assembly", () => {
     expect(observed).toContain("got:piarium-term-in");
     expect(view.join("")).toContain("got:piarium-term-in");
     expect(terminal.inspectSession(started.id)?.status).toBe("running");
+  }, 30_000);
+
+  it("completes background verification from the real command lifecycle without shell.read", async () => {
+    const discovered = discoverShells();
+    if (process.platform === "win32") {
+      expect(discovered.gitBashPath, "Git Bash should be discovered on this Windows machine").toBeTruthy();
+    } else if (!discovered.hasBash) {
+      return;
+    }
+    const workspace = mkdtempSync(join(tmpdir(), "shell-verification-"));
+    dirs.push(workspace);
+    const verification = createVerificationCoordinator();
+    const completed = vi.spyOn(verification, "completeCommand");
+    const host = createHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => workspace,
+      verification,
+    });
+    host.registerSession({
+      actor: actor("session-verification"), grantedCapabilities: ["process.shell"],
+      workspaceId: "ws-verification", workspaceRoot: workspace, shellSetting: "auto",
+    });
+    host.verification.attachThreadSession("session-verification", {
+      workspaceId: "ws-verification", threadId: "thread-1", runId: "run-1",
+      worktreePath: workspace, branchId: "thread-1",
+      captureIdentity: async () => ({ treeHash: "tree-1" }),
+    });
+    const result = await createShellExecService(host).handle(
+      { command: "sleep 0.2; printf 'done\\n'", cwd: workspace, waitMs: 20 },
+      serviceContext("session-verification", "ws-verification"),
+    );
+    expect(result.kind).toBe("background");
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+
+    let child: ResultVerificationBundle | null = null;
+    const store = {
+      getResult: () => ({ branchId: "thread-1", resultRevision: 1, createdAt: new Date().toISOString() }),
+      resultTreeIdentity: () => "tree-1",
+      putChildVerification: async (_threadId: string, bundle: ResultVerificationBundle) => { child = bundle; },
+      getChildVerification: () => child,
+      listChildVerifications: () => child ? [child] : [],
+      getParentVerification: () => null,
+      getReviewRecord: () => null,
+      listReviewRecords: () => [],
+    } as unknown as WorkingStateStore;
+    const projection = await host.verification.bindPublishedResult(store, {
+      workspaceId: "ws-verification", threadId: "thread-1", runId: "run-1", branchId: "thread-1",
+      resultRevision: 1, worktreePath: workspace,
+    });
+    expect(projection.childChecks?.commands).toEqual([
+      expect.objectContaining({ command: "sleep 0.2; printf 'done\\n'", exitCode: 0, relation: "same-run-matching-result" }),
+    ]);
   }, 30_000);
 });

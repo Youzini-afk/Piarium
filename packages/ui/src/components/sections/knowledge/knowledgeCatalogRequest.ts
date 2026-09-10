@@ -144,6 +144,7 @@ export async function saveKnowledgeCatalogItem(
   item: KnowledgeCatalogItem,
   draft: { content: string; trigger: string },
   workspaceId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await runtimeFetch(`/api/harness/knowledge/${item.scope}/${item.id}`, {
     method: 'PUT',
@@ -154,7 +155,10 @@ export async function saveKnowledgeCatalogItem(
       trigger: draft.trigger,
       expectedContent: item.content,
       expectedTrigger: item.trigger,
+      expectedStatus: item.status,
+      expectedInvalidAt: item.invalidAt ?? null,
     }),
+    ...(signal ? { signal } : {}),
   });
   if (response.status === 409) throw Object.assign(new Error('conflict'), { code: 'conflict' });
   if (!response.ok) throw new Error(await readError(response));
@@ -163,6 +167,7 @@ export async function saveKnowledgeCatalogItem(
 export async function retireKnowledgeCatalogItem(
   item: KnowledgeCatalogItem,
   workspaceId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await runtimeFetch(`/api/harness/knowledge/${item.scope}/${item.id}`, {
     method: 'DELETE',
@@ -172,8 +177,9 @@ export async function retireKnowledgeCatalogItem(
       expectedContent: item.content,
       expectedTrigger: item.trigger,
       expectedStatus: item.status,
-      ...(item.invalidAt === undefined ? {} : { expectedInvalidAt: item.invalidAt }),
+      expectedInvalidAt: item.invalidAt ?? null,
     }),
+    ...(signal ? { signal } : {}),
   });
   if (response.status === 409) throw Object.assign(new Error('conflict'), { code: 'conflict' });
   if (!response.ok) throw new Error(await readError(response));
@@ -184,6 +190,7 @@ export async function reviewKnowledgeCatalogItem(
   action: 'accept' | 'dismiss',
   workspaceId?: string,
   supersedes: number[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await runtimeFetch(`/api/harness/knowledge/${item.scope}/${item.id}/${action}`, {
     method: 'POST',
@@ -191,7 +198,12 @@ export async function reviewKnowledgeCatalogItem(
     body: JSON.stringify({
       ...workspaceBody(item.scope, workspaceId),
       supersedes,
+      expectedContent: item.content,
+      expectedTrigger: item.trigger,
+      expectedStatus: item.status,
+      expectedInvalidAt: item.invalidAt ?? null,
     }),
+    ...(signal ? { signal } : {}),
   });
   if (response.status === 409) throw Object.assign(new Error('conflict'), { code: 'conflict' });
   if (!response.ok) throw new Error(await readError(response));

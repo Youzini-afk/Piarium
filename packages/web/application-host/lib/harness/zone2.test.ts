@@ -253,7 +253,7 @@ describe("assembleZone2Content", () => {
             childChecks: {
               resultRevision: 2,
               binding: "bound",
-              commands: [{ command: "bun test", cwd: "/ws", exitCode: 0, cancelled: false, relation: "same-run-before-publish", inputChanged: false }],
+              commands: [{ command: "bun test", cwd: "/ws", exitCode: 0, cancelled: false, relation: "same-run-matching-result", inputChanged: false }],
               allExitedZero: true,
             },
             parentChecks: {

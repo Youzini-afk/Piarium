@@ -118,6 +118,16 @@ export class KnowledgeBlockConflictError extends Error {
 export type KnowledgeScope = "workspace" | "user";
 export type KnowledgeStatus = "suggested" | "accepted" | "dismissed";
 
+/** Values that identify the revision a caller opened before a mutation. */
+export interface KnowledgeExpectedRevision {
+  content: string;
+  trigger: string;
+  /** Optional for legacy review-tray callers; Settings always supplies it. */
+  status?: KnowledgeStatus;
+  /** `null` identifies an active row with no invalidAt field. */
+  invalidAt?: number | null;
+}
+
 export interface KnowledgeInput {
   scope: KnowledgeScope;
   status: KnowledgeStatus;
@@ -144,6 +154,12 @@ export interface KnowledgeSupersedeChain {
   predecessors: Knowledge[];
   successors: Knowledge[];
   chain: Knowledge[];
+}
+
+export interface KnowledgeCreateIfAbsentResult {
+  created: boolean;
+  duplicate: boolean;
+  knowledge: Knowledge;
 }
 
 export class KnowledgeMutationError extends Error {
@@ -298,17 +314,22 @@ export interface KnowledgeStore {
     },
   ): Promise<void>;
   putKnowledge(k: KnowledgeInput): Promise<NodeId>;
+  /**
+   * Atomically create one knowledge row unless the same normalized content
+   * already exists in this scope, including dismissed and retired history.
+   */
+  createKnowledgeIfAbsent(k: KnowledgeInput): Promise<KnowledgeCreateIfAbsentResult>;
   updateSuggestedKnowledge(
     id: NodeId,
     patch: { content: string; trigger: string },
     expectedScope?: KnowledgeScope,
-    expected?: { content: string; trigger: string },
+    expected?: KnowledgeExpectedRevision,
   ): Promise<void>;
   updateAcceptedKnowledge(
     id: NodeId,
     patch: { content: string; trigger: string },
     expectedScope?: KnowledgeScope,
-    expected?: { content: string; trigger: string },
+    expected?: KnowledgeExpectedRevision,
   ): Promise<void>;
   /**
    * Hide one knowledge row from current-effective queries by setting `invalidAt`.
@@ -317,7 +338,7 @@ export interface KnowledgeStore {
   retireKnowledge(
     id: NodeId,
     expectedScope?: KnowledgeScope,
-    expected?: { content: string; trigger: string; status: KnowledgeStatus; invalidAt?: number | null },
+    expected?: KnowledgeExpectedRevision,
   ): Promise<void>;
   getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;
@@ -325,9 +346,10 @@ export interface KnowledgeStore {
   acceptKnowledge(id: NodeId, opts: {
     supersedes?: NodeId[] | undefined;
     expectedScope?: KnowledgeScope;
-    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+    expected?: KnowledgeExpectedRevision;
+    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string; expectedStatus?: KnowledgeStatus; expectedInvalidAt?: number | null };
   }): Promise<void>;
-  dismissKnowledge(id: NodeId, expectedScope?: KnowledgeScope): Promise<void>;
+  dismissKnowledge(id: NodeId, expectedScope?: KnowledgeScope, expected?: KnowledgeExpectedRevision): Promise<void>;
   recordRecall(ids: NodeId[]): Promise<void>;
   recall(query: string, k: number): Promise<RecallResult[]>;
   touchFile(path: string, language: string): Promise<NodeId>;
@@ -506,6 +528,19 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   const notifyKnowledge = (ids: readonly NodeId[]): void => {
     if (ids.length === 0 || !deps.onKnowledgeChanged) return;
     queueMicrotask(() => deps.onKnowledgeChanged?.(ids));
+  };
+  const normalizeKnowledgeContent = (value: string): string => value.replace(/\s+/g, " ").trim().toLowerCase();
+  const matchesExpectedRevision = (
+    payload: Record<string, unknown>,
+    expected: KnowledgeExpectedRevision,
+  ): boolean => {
+    if (payload["content"] !== expected.content || payload["trigger"] !== expected.trigger) return false;
+    if (expected.status !== undefined && payload["status"] !== expected.status) return false;
+    if (expected.invalidAt !== undefined) {
+      const currentInvalid = typeof payload["invalidAt"] === "number" ? payload["invalidAt"] : null;
+      if (currentInvalid !== expected.invalidAt) return false;
+    }
+    return true;
   };
 
   type StoredBlockNode = { id: number; payload: Record<string, unknown> };
@@ -967,6 +1002,49 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
+    async createKnowledgeIfAbsent(k: KnowledgeInput): Promise<KnowledgeCreateIfAbsentResult> {
+      return enqueueWrite(() => {
+        if (recallScope === "user" && k.scope !== "user") {
+          throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
+        }
+        const identity = normalizeKnowledgeContent(k.content);
+        if (!identity) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+        // This lookup intentionally stays inside the single writer queue. It
+        // covers every status and retired row so concurrent model proposals
+        // cannot insert two identities or resurrect dismissed history.
+        const duplicate = scanNodes((payload) => (
+          payload["type"] === "knowledge"
+          && payload["scope"] === k.scope
+          && typeof payload["content"] === "string"
+          && normalizeKnowledgeContent(payload["content"] as string) === identity
+        ))[0];
+        if (duplicate) {
+          const knowledge = knowledgeFromPayload(duplicate.id, duplicate.payload);
+          if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${duplicate.id}`);
+          return { created: false, duplicate: true, knowledge };
+        }
+        const now = Date.now();
+        const payload = {
+          type: "knowledge",
+          scope: k.scope,
+          status: k.status,
+          content: k.content,
+          trigger: k.trigger,
+          ...(k.source ? { source: k.source } : {}),
+          createdAt: now,
+          recallCount: 0,
+        };
+        const id = db.insert(placeholderVec, payload);
+        db.indexText(id, k.content);
+        if (k.trigger) db.indexKeyword(id, k.trigger);
+        db.flush();
+        notifyKnowledge([id]);
+        const knowledge = knowledgeFromPayload(id, payload);
+        if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${id}`);
+        return { created: true, duplicate: false, knowledge };
+      });
+    },
+
     async getKnowledge(id: NodeId): Promise<Knowledge | null> {
       const payload = db.getPayload(id) as Record<string, unknown> | null;
       if (!payload) return null;
@@ -1001,7 +1079,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         if (payload["status"] !== "suggested") {
           throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer awaiting review`);
         }
-        if (expected && (payload["content"] !== expected.content || payload["trigger"] !== expected.trigger)) {
+        if (payload["invalidAt"] !== undefined) {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer current`);
+        }
+        if (expected && !matchesExpectedRevision(payload, expected)) {
           throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
         }
         if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
@@ -1028,7 +1109,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         if (payload["invalidAt"] !== undefined) {
           throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer current`);
         }
-        if (expected && (payload["content"] !== expected.content || payload["trigger"] !== expected.trigger)) {
+        if (expected && !matchesExpectedRevision(payload, expected)) {
           throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
         }
         if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
@@ -1051,18 +1132,9 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         if (expected) {
           if (
-            payload["content"] !== expected.content
-            || payload["trigger"] !== expected.trigger
-            || payload["status"] !== expected.status
+            !matchesExpectedRevision(payload, expected)
+            || (expected.invalidAt === undefined && payload["invalidAt"] !== undefined)
           ) {
-            throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
-          }
-          const currentInvalid = typeof payload["invalidAt"] === "number" ? payload["invalidAt"] : undefined;
-          if (expected.invalidAt === null || expected.invalidAt === undefined) {
-            if (currentInvalid !== undefined) {
-              throw new KnowledgeMutationError("conflict", `Knowledge ${id} was already retired`);
-            }
-          } else if (currentInvalid !== expected.invalidAt) {
             throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
           }
         }
@@ -1122,7 +1194,8 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     async acceptKnowledge(id: NodeId, opts: {
       supersedes?: NodeId[];
       expectedScope?: KnowledgeScope;
-      edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+      expected?: KnowledgeExpectedRevision;
+      edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string; expectedStatus?: KnowledgeStatus; expectedInvalidAt?: number | null };
     }): Promise<void> {
       return enqueueWrite(() => {
         const payload = db.getPayload(id) as Record<string, unknown> | null;
@@ -1132,14 +1205,23 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         if (opts.expectedScope && payload["scope"] !== opts.expectedScope) {
           throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found in ${opts.expectedScope} scope: ${id}`);
         }
+        const expected = opts.expected ?? (opts.edit ? {
+          content: opts.edit.expectedContent,
+          trigger: opts.edit.expectedTrigger,
+          ...(opts.edit.expectedStatus === undefined ? {} : { status: opts.edit.expectedStatus }),
+          ...(opts.edit.expectedInvalidAt === undefined ? {} : { invalidAt: opts.edit.expectedInvalidAt }),
+        } : undefined);
+        if (expected && !matchesExpectedRevision(payload, expected)) {
+          throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
+        }
+        if (payload["invalidAt"] !== undefined) {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer current`);
+        }
         if (payload["status"] === "accepted") return;
         if (payload["status"] !== "suggested") {
           throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer awaiting review`);
         }
         if (opts.edit) {
-          if (payload["content"] !== opts.edit.expectedContent || payload["trigger"] !== opts.edit.expectedTrigger) {
-            throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
-          }
           if (!opts.edit.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
         }
         const superseded = [...new Set(opts.supersedes ?? [])].filter((oldId) => oldId !== id);
@@ -1175,7 +1257,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async dismissKnowledge(id: NodeId, expectedScope): Promise<void> {
+    async dismissKnowledge(id: NodeId, expectedScope, expected): Promise<void> {
       return enqueueWrite(() => {
         const payload = db.getPayload(id) as Record<string, unknown> | null;
         if (!payload || payload["type"] !== "knowledge") {
@@ -1183,6 +1265,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         if (expectedScope && payload["scope"] !== expectedScope) {
           throw new KnowledgeMutationError("not-found", `Knowledge suggestion not found in ${expectedScope} scope: ${id}`);
+        }
+        if (expected && !matchesExpectedRevision(payload, expected)) {
+          throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
+        }
+        if (payload["invalidAt"] !== undefined) {
+          throw new KnowledgeMutationError("conflict", `Knowledge ${id} is no longer current`);
         }
         if (payload["status"] === "dismissed") return;
         if (payload["status"] !== "suggested") {

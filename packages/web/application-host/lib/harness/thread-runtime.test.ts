@@ -729,6 +729,83 @@ describe("thread runtime", () => {
     await coordinatorRuntime.dispose();
   });
 
+  it("does not treat an applied unsaved surface result as disk-verified parent state", async () => {
+    const recordParentMerge = vi.fn(async () => ({
+      currentResultRevision: 1,
+      childChecks: null,
+      parentChecks: {
+        mergedResultRevision: 1,
+        mergeOperationId: "surface-op",
+        draftUnsaved: true,
+        binding: "cannot-verify-unsaved-draft" as const,
+        commands: [],
+        allExitedZero: null,
+      },
+      review: null,
+    }));
+    const captureParentInput = vi.fn(async () => ({ treeHash: "disk-tree" }));
+    const surfaceRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+      workingStates: {
+        withStore: async (_workspaceId: string, _purpose: string, operation: (store: WorkingStateStore) => Promise<unknown>) => operation({} as WorkingStateStore),
+      } as never,
+      verification: { captureParentInput, recordParentMerge } as never,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      resolveIntegrationCoordinator: async () => ({
+        mergeResult: async () => ({
+          operationId: "surface-op",
+          status: "applied" as const,
+          appliedPaths: ["draft.ts"],
+          conflictPaths: [],
+          changedFiles: ["draft.ts"],
+          diffStats: { files: 1, insertions: 1, deletions: 0 },
+          text: "applied to buffer",
+          surfaceTargetPaths: ["draft.ts"],
+          preview: {
+            operationId: "surface-op",
+            threadId: "surface-thread",
+            resultRevision: 1,
+            bindingFingerprint: "surface-binding",
+            valid: true,
+            mergeReady: true,
+            binding: { "draft.ts": { target: "surface" as const, revision: "draft-r1" } },
+            paths: [{
+              path: "draft.ts", target: "surface" as const, decision: "apply-child" as const,
+              phase: "surface-applied" as const, isText: true,
+            }],
+            conflictPaths: [],
+            surfaceTargetPaths: ["draft.ts"],
+            unavailablePaths: [],
+            appliedPaths: ["draft.ts"],
+          },
+        }),
+        previewResult: vi.fn(),
+        undoIntegration: vi.fn(),
+        invalidateWorkspace: vi.fn(() => []),
+      }),
+    });
+    const thread = await registry.createThread(createInput());
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "surface-branch", resultRevision: 1 });
+
+    await surfaceRuntime.merge(WORKSPACE, PARENT, thread.id);
+
+    expect(captureParentInput).not.toHaveBeenCalled();
+    expect(recordParentMerge).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      integrated: true,
+      draftUnsaved: true,
+      parentIdentity: expect.objectContaining({ treeHash: null }),
+    }));
+    await surfaceRuntime.dispose();
+  });
+
   it("does not fall back to a disk worktree merge when a draft Thread has no native result", async () => {
     const legacyMerge = vi.fn(async () => ({
       merged: 1,
@@ -1905,9 +1982,18 @@ describe("thread runtime", () => {
     const { resolveRoles } = await import("./roles.js");
     const verification = createVerificationCoordinator();
     let created = 0;
+    let failNextReviewStart = false;
+    let hidePublishedResult = false;
     const sessions: ThreadSessionAdapter = {
       ...sessionAdapter,
-      create: vi.fn(async () => snapshot(`child-${++created}`)),
+      create: vi.fn(async () => {
+        const id = `child-${++created}`;
+        if (failNextReviewStart) {
+          failNextReviewStart = false;
+          throw new Error("review model failed to start");
+        }
+        return snapshot(id);
+      }),
     };
     const reviewRuntime = createThreadRuntime({
       registry,
@@ -1915,7 +2001,7 @@ describe("thread runtime", () => {
       verification,
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
-      resolveReviewSettings: () => ({ enabled: true, gate: false }),
+      resolveReviewSettings: () => ({ enabled: true, gate: true }),
       resolveReviewRole: () => resolveRoles({}, { providerId: "test-provider", modelId: "test-model" }).find((role) => role.id === "review") ?? null,
       worktrees: {
         prepare: prepareWorktree,
@@ -1939,9 +2025,11 @@ describe("thread runtime", () => {
           withStore: async (_workspaceId, _purpose, operation) => operation(
             {
               captureDirectory: async () => ({}),
+              captureBranchCandidateIdentity: async () => "tree-1",
               createBranch: async () => ({ branchId: "branch" }),
               publishDirectoryResult: async () => published,
-              getResult: () => published,
+              resultTreeIdentity: () => "tree-1",
+              getResult: () => hidePublishedResult ? null : published,
               getObject: async () => Buffer.from("new\n"),
               getChildVerification: (threadId: string, revision: number) => (
                 (child.get(threadId) ?? []).find((item) => (item as { resultRevision: number }).resultRevision === revision) ?? null
@@ -1969,12 +2057,32 @@ describe("thread runtime", () => {
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await reviewRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-    verification.recordCommand({
-      sessionId: "child-1",
+    const actor = {
+      authorityInstanceId: "host", sessionId: "child-1", workerId: "worker", workerGeneration: 1, runId: run.id,
+    };
+    verification.attachParentSession("child-1", {
+      workspaceId: WORKSPACE, parentRoot: "/workspace", parentSessionId: "child-1", actor,
+    });
+    await verification.beginCommand({
+      actor,
+      executionId: "command-1",
+      commandRunId: "shell-1",
       command: "bun test",
       cwd: "/workspace/thread",
+      startedAt: 1,
+    });
+    await verification.completeCommand({
+      actor,
+      executionId: "command-1",
+      commandRunId: "shell-1",
+      command: "bun test",
+      cwd: "/workspace/thread",
+      startedAt: 1,
+      endedAt: 2,
       exitCode: 0,
+      cancelled: false,
       outputHandle: "out_1",
+      outputPreview: "ok",
     });
     reviewRuntime.processEvent({
       kind: "host",
@@ -1991,12 +2099,24 @@ describe("thread runtime", () => {
     expect(settled?.verification?.childChecks?.commands[0]).toMatchObject({
       command: "bun test",
       exitCode: 0,
-      relation: "same-run-before-publish",
+      relation: "same-run-matching-result",
     });
     await vi.waitFor(async () => {
       const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
       expect(current?.verification?.review?.status).toBe("running");
       expect(current?.verification?.review?.resultRevision).toBe(1);
+      expect(current?.verification?.review?.gate).toBe(true);
+      expect(current).toMatchObject({
+        attention: "thread",
+        waitingFor: {
+          kind: "thread",
+          review: {
+            resultRevision: 1,
+            reviewThreadId: current?.verification?.review?.reviewThreadId,
+            reviewRunId: current?.verification?.review?.reviewRunId,
+          },
+        },
+      });
     });
     const hidden = await registry.listThreads(WORKSPACE, PARENT, true);
     const review = hidden.find((item) => item.reviewOf?.sourceThreadId === thread.id);
@@ -2027,8 +2147,63 @@ describe("thread runtime", () => {
       status: "completed",
       resultRevision: 1,
       conclusion: expect.stringContaining("Looks good"),
+      gate: false,
     });
+    expect(reviewed).toMatchObject({ attention: "none", waitingFor: null });
     expect(reviewed?.verification?.review?.findings?.some((finding) => finding.file === "a.ts" && finding.severity === "high")).toBe(true);
+
+    const secondThread = await registry.createThread(input);
+    const secondRun = await registry.startRun(WORKSPACE, secondThread.id);
+    await reviewRuntime.spawn({ ...input, threadId: secondThread.id, runId: secondRun.id });
+    failNextReviewStart = true;
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-3",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
+    });
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-3",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await reviewRuntime.drain();
+    await vi.waitFor(async () => {
+      const failed = await registry.getThread(WORKSPACE, PARENT, secondThread.id);
+      expect(failed?.verification?.review).toMatchObject({
+        resultRevision: 1,
+        status: "failed",
+        gate: false,
+        reviewThreadId: expect.any(String),
+        reviewRunId: expect.any(String),
+        error: expect.stringContaining("review model failed to start"),
+      });
+      expect(failed).toMatchObject({ attention: "none", waitingFor: null });
+    });
+
+    const thirdThread = await registry.createThread(input);
+    const thirdRun = await registry.startRun(WORKSPACE, thirdThread.id);
+    await reviewRuntime.spawn({ ...input, threadId: thirdThread.id, runId: thirdRun.id });
+    hidePublishedResult = true;
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-5",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
+    });
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-5",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await reviewRuntime.drain();
+    await vi.waitFor(async () => {
+      const failed = await registry.getThread(WORKSPACE, PARENT, thirdThread.id);
+      expect(failed?.verification?.review).toMatchObject({
+        resultRevision: 1,
+        status: "failed",
+        gate: false,
+        error: expect.stringContaining("Published result is missing"),
+      });
+    });
     await reviewRuntime.dispose();
   });
 });

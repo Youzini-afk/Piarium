@@ -125,4 +125,61 @@ describe("harness terminal runtime bridge", () => {
       outputStore.dispose();
     }
   });
+
+  it("allocates distinct runtime-owned shell ids for concurrent supervisors and skips a user id", async () => {
+    const workspaceA = mkdtempSync(join(tmpdir(), "harness-term-a-"));
+    const workspaceB = mkdtempSync(join(tmpdir(), "harness-term-b-"));
+    dirs.push(workspaceA, workspaceB);
+    const processes: FakeProcess[] = [];
+    const runtime = createIsolatedTerminalSessionApi({
+      loadPtyProvider: async () => ({
+        backend: "fake-pty",
+        spawn: () => {
+          const process = createFakeProcess();
+          processes.push(process);
+          return process;
+        },
+      }),
+      searchPathFor: () => "/bin/sh",
+      isExecutable: () => true,
+    });
+    runtimes.push(runtime);
+    const outputStore = createOutputStore();
+    const user = await runtime.createTerminalSession({
+      sessionId: "sh_1",
+      cwd: workspaceA,
+      owner: "user",
+      spawn: { executable: "/bin/user-shell", args: [] },
+    });
+    const first = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: ["-l"], env: {} },
+      outputStore,
+      sessionId: "agent-a",
+      cwd: workspaceA,
+      createTerminalSession: (input) => runtime.createTerminalSession(input),
+    });
+    const second = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: ["-l"], env: {} },
+      outputStore,
+      sessionId: "agent-b",
+      cwd: workspaceB,
+      createTerminalSession: (input) => runtime.createTerminalSession(input),
+    });
+    try {
+      const [a, b] = await Promise.all([
+        first.exec("first", { waitMs: 5 }),
+        second.exec("second", { waitMs: 5 }),
+      ]);
+      expect(user.id).toBe("sh_1");
+      expect(a).toMatchObject({ kind: "background", id: "sh_2", cwd: workspaceA });
+      expect(b).toMatchObject({ kind: "background", id: "sh_3", cwd: workspaceB });
+      expect(runtime.inspectSession("sh_1")).toMatchObject({ owner: "user", cwd: workspaceA });
+      expect(runtime.inspectSession("sh_2")).toMatchObject({ owner: "harness", cwd: workspaceA });
+      expect(runtime.inspectSession("sh_3")).toMatchObject({ owner: "harness", cwd: workspaceB });
+      expect(processes).toHaveLength(3);
+    } finally {
+      await Promise.all([first.dispose(), second.dispose()]);
+      outputStore.dispose();
+    }
+  });
 });

@@ -117,8 +117,9 @@ export function resolveHarnessMemoryMode(value: unknown): HarnessMemoryMode {
   return "takeover";
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "memory"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "memory" | "review"> & {
   memory?: HarnessMemorySettingsInput;
+  review?: Partial<HarnessReviewSettings>;
 };
 
 export interface HarnessSettings {

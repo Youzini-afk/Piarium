@@ -157,6 +157,8 @@ function formatThread(thread: Zone2Thread, now: number): string {
     ? "waiting for user"
     : thread.attention === "permission"
       ? "waiting for permission"
+      : thread.attention === "thread"
+        ? "waiting for review"
       : thread.attention === "stalled" || thread.attention === "looping"
         ? thread.attention
         : thread.lifecycle === "queued"

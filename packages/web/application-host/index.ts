@@ -71,7 +71,7 @@ import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-sugges
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
 import { DEFAULT_COMPACTION_SETTINGS, collectCompactionFacts, createKeeperCoverageStore, type CompactionHandlerDeps } from './lib/harness/compaction.js';
-import { DEFAULT_TODO_SETTINGS, type TodoToolDeps } from './lib/harness/todo-tool.js';
+import { type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
@@ -88,7 +88,7 @@ import { createVerificationCoordinator } from './lib/harness/verification-coordi
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
-import { DEFAULT_SUGGESTIONS_SETTINGS } from './lib/harness/knowledge-suggestions.js';
+import { DEFAULT_SUGGESTIONS_SETTINGS, suggestionSettingsFromSnapshot } from './lib/harness/knowledge-suggestions.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
@@ -1163,7 +1163,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
-  const verificationCoordinator = createVerificationCoordinator();
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
@@ -1249,7 +1248,48 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
     return branch.entries.map((entry) => entry.id);
   };
+  const knowledgeSuggestionSettingsForSession = async (sessionId: string) => {
+    try {
+      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
+      return suggestionSettingsFromSnapshot(snapshot);
+    } catch (error) {
+      console.error(`[HarnessKnowledge] Unable to read suggestion settings for ${sessionId}:`, errorMessage(error));
+      return DEFAULT_SUGGESTIONS_SETTINGS;
+    }
+  };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
+  const verificationCoordinator = createVerificationCoordinator({
+    workingStates: harnessWorkingStates,
+    captureParentIdentity: async (workspaceId, parentRoot) => {
+      const inspected = await threadWorktreeRuntime.inspectWorkspaceIdentity(parentRoot);
+      if (inspected.status !== 'ready') return { treeHash: null, reason: inspected.reason };
+      const treeHash = await harnessWorkingStates.withStore(
+        workspaceId,
+        'parent-command-input-identity',
+        (store) => store.captureSeededPathIdentity(parentRoot, inspected.changedFiles, inspected.baseRef),
+        'shared',
+      );
+      return { treeHash };
+    },
+    loadParentWindows: async (workspaceId, parentSessionId) => {
+      const owner = await threadRegistry.getThreadForSession(workspaceId, parentSessionId);
+      const parent = owner
+        ? { kind: 'thread' as const, id: owner.id }
+        : { kind: 'session' as const, id: parentSessionId };
+      const children = await threadRegistry.listThreads(workspaceId, parent, true);
+      return harnessWorkingStates.withStore(
+        workspaceId,
+        'parent-verification-window-restore',
+        (store) => children.flatMap((thread) => store.listParentVerifications(thread.id).map((bundle) => ({
+          parent,
+          threadId: thread.id,
+          bundle,
+        }))),
+        'shared',
+      );
+    },
+    onProjection: (workspaceId, threadId, projection) => threadRegistry.setVerification(workspaceId, threadId, projection).then(() => undefined),
+  });
   const threadIntegrationCoordinator = new IntegrationCoordinator({
     workingStates: harnessWorkingStates,
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
@@ -1422,6 +1462,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getStore: getKnowledgeStoreForSession,
     getBranchEntryIds: branchEntryIdsForSession,
     getUserStore: getUserKnowledgeStore,
+    getSuggestionSettings: knowledgeSuggestionSettingsForSession,
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-knowledge-changed',
@@ -1553,6 +1594,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const decisionSuggestionRuntime = createDecisionSuggestionRuntime({
     getStore: getKnowledgeStoreForWorkspace,
+    getSettings: knowledgeSuggestionSettingsForSession,
     onChanged: (sessionId) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-knowledge-changed',
@@ -1885,7 +1927,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return {
       store,
       sessionId,
-      settings: DEFAULT_TODO_SETTINGS,
     };
   }
 
@@ -2100,20 +2141,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     keeperCoverageStore,
     todoDepsProvider,
     recallDepsProvider,
-    knowledgeSuggestDepsProvider: async (sessionId, workspaceId, scope) => {
-      const store = scope === 'user'
-        ? await getUserKnowledgeStore()
-        : workspaceId
-          ? await getKnowledgeStoreForWorkspace(workspaceId)
-          : null;
+    knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
+      // Worker user-message suggestions always belong to the actor workspace;
+      // the user-global store is reachable only through explicit Settings/user
+      // promotion routes.
+      const store = workspaceId && workspaceId !== 'user'
+        ? await getKnowledgeStoreForWorkspace(workspaceId)
+        : null;
       if (!store) return null;
       return {
         store,
-        settings: DEFAULT_SUGGESTIONS_SETTINGS,
+        settings: await knowledgeSuggestionSettingsForSession(sessionId),
         onChanged: () => {
           broadcastGlobalUiEvent?.({
             type: 'piarium:harness-knowledge-changed',
-            properties: { sessionId, scope, ...(workspaceId ? { workspaceId } : {}) },
+            properties: { sessionId, scope: 'workspace', ...(workspaceId ? { workspaceId } : {}) },
           });
         },
       };

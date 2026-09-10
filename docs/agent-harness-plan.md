@@ -100,7 +100,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    草稿/线程语义覆盖、专用 HTTP rerank。已实现的旧 3.15①②④ 接口继续使用。
    explore 负责快速提供当前代码，较长开放追踪由 retrieval 承担；扩散模型与后训练留待后续。
    3.17 的命令输出整理已交付（D-197/D-199）。完成能力即按有效配置提供，缺某一路不丢弃其他材料。
-4. **其余产品面**：知识全量管理、自动 review、后台终端 tab、bundled Pi 按实际依赖交付；知识语义召回已沿远程 embedding 接线（D-196）。重叠提示与合并预览随线程服务实现，不设独立收益审批。
+4. **其余产品面**：知识全量管理、自动 review、后台终端 tab 与 bundled Pi 默认已交付，并经 D-209–D-211 补正身份、并发和退出契约；知识语义召回已沿远程 embedding 接线（D-196）。重叠提示与合并预览随线程服务实现，不设独立收益审批。
 
 TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台与外部 provider 的未验证范围如实报告，不把缺另一平台机器
 写成已验证平台的禁用条件。不自行发起付费记忆实验；完成一个切片后按本节顺序继续，不把文档同步解释为停工点。
@@ -137,8 +137,9 @@ Host 规范化、完整批次全序获取 owner-bound lease；只保证该 Host 
 
 身份、Unicode、跨会话、注册表故障测试已存在，修改相关契约时复用，不重新跑一轮完整 P0。
 
-阶段 1 待做：shell 接 terminal runtime/终端 tab；apply_patch 多文件恢复真会话证据；macOS/Linux 与 Electron 打包验证。
-Windows 生产发现与按工作区 `harness.shell` 接线已由 D-200 交付。
+阶段 1 待做：apply_patch 多文件恢复真会话证据；macOS/Linux 与 Electron 打包验证。
+Windows 生产发现与按工作区 `harness.shell` 接线已由 D-200 交付；后台 shell 与 terminal runtime 共用真实进程、全局身份及退出/写者
+生命周期已由 D-206/D-209 收口。
 websearch provider 当前变更需重启 Host，后续新会话使用新的能力世代，旧会话保持配置；不注册不存在的 provider。
 
 ## 阶段 2：上下文与知识
@@ -197,9 +198,9 @@ provider 原生上下文编辑按实际 API 使用，缺能力不阻塞本地压
 
 ### 2.7 知识建议与管理
 
-人工标记和 memory decisions 已接。继续 suggestions 槽位的用户消息提议、Settings 全量列表/取代链，完成启用；未配走已有
-无模型路径。编辑/接受同队列 CAS、同 scope 预检后提交，旧历史保留。自动接受仍按用户显式 scope 设置。
-验证实际 route/UI、跨 scope 身份、并发/取代；再生成失败不能丢旧建议。
+人工标记、memory decisions、suggestions 槽位的用户消息提议和 Settings 全量列表/取代链均已接（D-208/D-211）；未配走已有
+无模型路径。Settings 的编辑/接受/驳回/停用以打开时完整修订在同一写队列 CAS，同 scope 预检后提交，旧历史保留；模型提议的
+scope/source 由 Host actor 固定，相同正文的历史查重与插入原子完成。自动接受仍按用户显式 scope 设置。
 
 ### 2.8 embedding
 
@@ -328,9 +329,9 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 
 ### 3.7 自动 review
 
-接已有 review-sensor 到 agent_settled 和真实结果 diff/修订，使用 review 槽位（默认主模型），默认运行、不阻断，用户可关闭
-或显式设完成门。同结果去重，输入为 diff/任务/项目知识，不含父完整对话；结论和失败可见，带严重度/file:line 进 Zone 2。
-旧修订审阅不标成当前已审；链路测试通过直接启用，不等 T4。
+已有 review-sensor 已接到固定结果发布，使用 review 槽位（默认主模型），默认运行、不阻断，用户可关闭或显式设完成门
+（D-207/D-210）。一轮以结果修订、review 线程和 review Run 的组合身份落盘；输入为固定 diff/任务/项目知识，不含父完整对话；
+结论、失败和取消可见，带严重度/file:line 进 Zone 2。旧修订或迟到旧 Run 不标成当前已审；不等待 T4。
 
 ### 3.8 LSP 导航与语言服务视图（D-087）
 

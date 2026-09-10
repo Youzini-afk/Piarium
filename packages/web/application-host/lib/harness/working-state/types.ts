@@ -99,7 +99,19 @@ export interface ThreeWayMergePlan {
   diffStats: ThreadDiffStats;
 }
 
-export type CommandInputRelation = "same-run-before-publish" | "unbound" | "uncertain";
+export type CommandInputRelation =
+  | "same-run-matching-result"
+  | "post-merge-matching-tree"
+  | "unbound"
+  | "uncertain";
+
+export interface VerificationActorIdentity {
+  authorityInstanceId: string;
+  sessionId: string;
+  workerId: string;
+  workerGeneration: number;
+  runId?: string;
+}
 
 export interface CommandVerificationRecord {
   id: string;
@@ -114,13 +126,14 @@ export interface CommandVerificationRecord {
   cancelled: boolean;
   outputHandle?: string;
   outputPreview?: string;
+  actor: VerificationActorIdentity;
+  bindingGeneration: number;
   inputIdentity: {
-    kind: "published-revision" | "unbound";
+    kind: "tree" | "unbound";
     branchId?: string;
-    startPublishedRevision?: number;
-    endPublishedRevision?: number;
-    startHeadRevision?: number;
-    endHeadRevision?: number;
+    root?: string;
+    startTreeHash?: string;
+    endTreeHash?: string;
     reason?: string;
   };
   inputChangedDuringRun: boolean | null;
@@ -130,6 +143,7 @@ export interface CommandVerificationRecord {
 export interface ResultVerificationBundle {
   resultRevision: number;
   branchId: string;
+  resultTreeHash?: string;
   recordedAt: number;
   binding: "bound" | "uncertain";
   bindingReason?: string;
@@ -138,10 +152,13 @@ export interface ResultVerificationBundle {
 
 export interface ParentVerificationBundle {
   mergedResultRevision: number;
+  mergeOperationId?: string;
+  parentTreeHash?: string;
+  windowOpenedAt?: number;
   recordedAt: number;
   draftUnsaved: boolean;
   note?: string;
-  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded";
+  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded" | "not-integrated";
   checks: CommandVerificationRecord[];
 }
 
@@ -151,6 +168,7 @@ export interface ResultReviewRecord {
   recordedAt: number;
   reviewThreadId?: string;
   reviewRunId?: string;
+  gate?: boolean;
   conclusion?: string;
   findings?: Array<{ severity: string; file?: string; line?: number; message: string }>;
   error?: string;

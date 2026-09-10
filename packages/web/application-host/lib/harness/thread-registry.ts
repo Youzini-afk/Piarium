@@ -224,7 +224,7 @@ interface MutationResult<T> {
 }
 
 const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "archived"]);
-const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "stalled", "looping"]);
+const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "thread", "stalled", "looping"]);
 const INTEGRATIONS = new Set<ThreadIntegration>(["none", "dirty", "merge-ready", "conflict", "merged"]);
 const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparationStage"]>>([
   "materialize",
@@ -348,7 +348,10 @@ const isWaitingFor = (value: unknown): value is ThreadWaitingFor | null => (
   value === null
   || (isRecord(value)
     && (value.kind === "user" || value.kind === "permission" || value.kind === "thread")
-    && isString(value.text))
+    && isString(value.text)
+    && (value.review === undefined || (value.kind === "thread" && isRecord(value.review)
+      && Number.isSafeInteger(value.review.resultRevision) && Number(value.review.resultRevision) > 0
+      && isString(value.review.reviewThreadId) && isString(value.review.reviewRunId))))
 );
 
 const isDiffStats = (value: unknown): value is ThreadDiffStats | null => (
@@ -789,8 +792,8 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       throw new ThreadRegistryError("corrupt", `Thread registry thread points to a missing active run: ${path}`, path);
     }
     if (
-      ((thread.attention === "user" || thread.attention === "permission") && thread.waitingFor === null)
-      || (thread.waitingFor !== null && thread.attention !== "user" && thread.attention !== "permission")
+      ((thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread") && thread.waitingFor === null)
+      || (thread.waitingFor !== null && thread.attention !== thread.waitingFor.kind)
     ) {
       throw new ThreadRegistryError("corrupt", `Thread registry contains inconsistent attention state: ${path}`, path);
     }
@@ -839,6 +842,7 @@ const convertLegacy = (workspaceId: string, records: LegacyThreadRecord[]): { th
         : "exited";
     let attention: ThreadAttention = "none";
     if (legacy.waitingFor?.kind === "permission") attention = "permission";
+    else if (legacy.waitingFor?.kind === "thread") attention = "thread";
     else if (legacy.waitingFor) attention = "user";
     else if (legacy.flags?.looping) attention = "looping";
     else if (legacy.flags?.stalled) attention = "stalled";
@@ -1338,8 +1342,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
-    if ((attention === "user" || attention === "permission") && waitingFor === null) {
+    if ((attention === "user" || attention === "permission" || attention === "thread") && waitingFor === null) {
       throw new Error(`${attention} attention requires waitingFor details`);
+    }
+    if (waitingFor !== null && waitingFor.kind !== attention) {
+      throw new Error(`${attention} attention does not match ${waitingFor.kind} waiting details`);
     }
     thread.attention = attention;
     thread.waitingFor = waitingFor;

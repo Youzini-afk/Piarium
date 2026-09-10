@@ -169,7 +169,7 @@ export function createKillShellTool(bridge: HostServicesBridge, _sessionId: stri
       try {
         const result = await bridge.request("shell.kill", { id: params.shellId });
         return {
-          content: [{ type: "text", text: result.killed ? `killed ${params.shellId}` : `shell ${params.shellId} not found or already exited` }],
+          content: [{ type: "text", text: result.killed ? `killed ${params.shellId}` : `shell ${params.shellId} not found or termination failed` }],
           details: { shellId: params.shellId, killed: result.killed },
         };
       } catch (error) {

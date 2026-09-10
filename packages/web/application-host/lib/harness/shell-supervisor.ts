@@ -137,9 +137,11 @@ export interface PtyProvider {
 export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider): TerminalSessionApi {
   const handles = new Map<string, TerminalHandle>();
   let nextId = 0;
+  let nextHarnessId = 0;
   return {
     async createTerminalSession(input: CreateTerminalSessionInput): Promise<TerminalHandle> {
-      const id = input.sessionId?.trim() || `term_${++nextId}`;
+      const id = input.sessionId?.trim()
+        || (input.owner === "harness" ? `sh_${++nextHarnessId}` : `term_${++nextId}`);
       const existing = handles.get(id);
       if (existing?.status === "running") return existing;
       const spawn = input.spawn ?? { executable: "bash", args: [] };
@@ -173,7 +175,10 @@ export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider
         },
         onExit(handler) {
           if (status === "exited") {
-            queueMicrotask(() => handler({ exitCode: exitCode ?? 0, signal: signal ?? 0 }));
+            let active = true;
+            const event = { exitCode: exitCode ?? 0, signal: signal ?? 0 };
+            queueMicrotask(() => { if (active) handler(event); });
+            return { dispose: () => { active = false; } };
           }
           exitHandlers.add(handler);
           return { dispose: () => { exitHandlers.delete(handler); } };
@@ -227,20 +232,49 @@ export interface ShellSupervisorOptions {
   rows?: number;
   registerWriter?: () => Promise<{ close: () => Promise<void> } | null>;
   createTerminalSession?: TerminalSessionApi["createTerminalSession"];
+  commandLifecycle?: ShellCommandLifecycle;
   /** Deterministic test seam wrapping a fake PTY. Production uses terminal runtime. */
   ptyProvider?: PtyProvider;
+}
+
+export interface ShellCommandStartedEvent {
+  command: string;
+  commandRunId: string;
+  executionId: string;
+  cwd: string;
+  startedAt: number;
+}
+
+export interface ShellCommandCompletedEvent extends ShellCommandStartedEvent {
+  endedAt: number;
+  exitCode: number;
+  cancelled: boolean;
+  outputHandle?: string;
+  outputPreview?: string;
+}
+
+export interface ShellCommandLifecycle {
+  started?(event: ShellCommandStartedEvent): void | Promise<void>;
+  completed?(event: ShellCommandCompletedEvent): void | Promise<void>;
 }
 
 interface BackgroundShell {
   id: string;
   token: string;
+  executionId: string;
+  commandRunId: string;
+  startedAt: number;
   command: string;
   output: string;
   cwd: string;
   exited: boolean;
   exitCode: number | null;
+  cancelRequested: boolean;
+  lifecycleCompleted: boolean;
+  lifecyclePromise?: Promise<void>;
   lastOutputAt: number | null;
   writer: { close: () => Promise<void> } | null;
+  writerClosePromise?: Promise<void>;
   handle: TerminalHandle;
 }
 
@@ -264,7 +298,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const backgroundShells = new Map<string, BackgroundShell>();
   let activeBackground: BackgroundShell | null = null;
-  let shellCounter = 0;
   let disposed = false;
   let sessionHandle: TerminalHandle | null = null;
   const liveHandles = new Set<TerminalHandle>();
@@ -294,6 +327,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   type ShellWriter = { close: () => Promise<void> };
   interface PendingCommand {
     token: string;
+    executionId: string;
+    commandRunId: string;
+    command: string;
     resolve: (result: ShellExecResult) => void;
     timeout: ReturnType<typeof setTimeout>;
     cwd: string;
@@ -312,11 +348,77 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   let finalizingStop: Promise<boolean> | null = null;
   let commandStartPromise: Promise<void> | null = null;
   const startingWriters = new Set<ShellWriter>();
+  const lingeringWriters = new Map<ShellWriter, string>();
+  const commandLifecyclePromises = new Set<Promise<void>>();
+
+  const trackCommandLifecycle = (work: Promise<void>): Promise<void> => {
+    commandLifecyclePromises.add(work);
+    void work.then(
+      () => commandLifecyclePromises.delete(work),
+      () => commandLifecyclePromises.delete(work),
+    );
+    return work;
+  };
+
+  const closeCommandWriter = async (writer: ShellWriter | null, cwd: string): Promise<void> => {
+    if (!writer) return;
+    try {
+      await writer.close();
+      lingeringWriters.delete(writer);
+    } catch (error) {
+      lingeringWriters.set(writer, cwd);
+      throw error;
+    }
+  };
+
+  const notifyCommandStarted = async (event: ShellCommandStartedEvent): Promise<void> => {
+    try { await deps.commandLifecycle?.started?.(event); } catch { /* observers cannot change shell behavior */ }
+  };
+
+  const notifyCommandCompleted = (event: ShellCommandCompletedEvent): Promise<void> => trackCommandLifecycle(
+    Promise.resolve().then(async () => {
+      try { await deps.commandLifecycle?.completed?.(event); } catch { /* observers cannot change shell behavior */ }
+    }),
+  );
 
   const closeBackgroundWriter = (background: BackgroundShell): Promise<void> => {
+    if (background.writerClosePromise) return background.writerClosePromise;
     const writer = background.writer;
-    background.writer = null;
-    return writer?.close() ?? Promise.resolve();
+    if (!writer) return Promise.resolve();
+    const closing = writer.close().then(() => {
+      if (background.writer === writer) background.writer = null;
+    });
+    background.writerClosePromise = closing;
+    void closing.then(
+      () => { if (background.writerClosePromise === closing) delete background.writerClosePromise; },
+      () => { if (background.writerClosePromise === closing) delete background.writerClosePromise; },
+    );
+    return closing;
+  };
+
+  const completeBackgroundCommand = (background: BackgroundShell, exitCode: number): Promise<void> => {
+    if (background.lifecycleCompleted) return background.lifecyclePromise ?? closeBackgroundWriter(background);
+    background.lifecycleCompleted = true;
+    background.exited = true;
+    background.exitCode = exitCode;
+    const completed = notifyCommandCompleted({
+      command: background.command,
+      commandRunId: background.commandRunId,
+      executionId: background.executionId,
+      cwd: background.cwd,
+      startedAt: background.startedAt,
+      endedAt: Date.now(),
+      exitCode,
+      cancelled: background.cancelRequested,
+      outputPreview: stripControlSequences(background.output),
+    });
+    const lifecycle = trackCommandLifecycle(completed.then(() => closeBackgroundWriter(background)));
+    background.lifecyclePromise = lifecycle;
+    void lifecycle.then(
+      () => { if (background.lifecyclePromise === lifecycle) delete background.lifecyclePromise; },
+      () => { if (background.lifecyclePromise === lifecycle) delete background.lifecyclePromise; },
+    );
+    return lifecycle;
   };
 
   const unbindHandle = (handle: TerminalHandle): void => {
@@ -372,12 +474,15 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const backgrounds = [...backgroundShells.values()];
       const starting = [...startingWriters];
       try {
+        await Promise.all([...commandLifecyclePromises]);
+        const lingering = [...lingeringWriters.entries()];
         if (pending) await closePendingWriterAfterStop(pending);
         await Promise.all(backgrounds.map((background) => closeBackgroundWriterAfterStop(background)));
         await Promise.all(starting.map(async (writer) => {
           await writer.close();
           if (startingWriters.has(writer)) startingWriters.delete(writer);
         }));
+        await Promise.all(lingering.map(([writer, cwd]) => closeCommandWriter(writer, cwd)));
       } catch {
         return false;
       }
@@ -460,35 +565,25 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         return;
       }
       if (disposeRequested) {
-        if (pendingCommand && wasCurrent) clearTimeout(pendingCommand.timeout);
+        const ownsPending = pendingCommand?.commandRunId === handle.id;
+        if (ownsPending) {
+          clearTimeout(pendingCommand!.timeout);
+          completeCommand(event.exitCode, true, true);
+        }
         const background = backgroundShells.get(handle.id);
         if (background) {
-          background.exited = true;
-          background.exitCode = event.exitCode;
+          void completeBackgroundCommand(background, event.exitCode).catch(() => undefined);
         }
         if (liveHandles.size === 0) void finalizeStoppedResources();
         return;
       }
       if (pendingCommand && wasCurrent) {
         clearTimeout(pendingCommand.timeout);
-        void pendingCommand.writer?.close();
-        pendingCommand.resolve({
-          kind: "completed",
-          exitCode: event.exitCode,
-          durationMs: Date.now() - pendingCommand.startedAt,
-          cwd: pendingCommand.cwd,
-          stdout: stripControlSequences(outputBuffer),
-          stderr: "",
-          handle: null,
-          shown: null,
-        });
-        pendingCommand = null;
+        completeCommand(event.exitCode, false);
       }
       const background = backgroundShells.get(handle.id);
       if (background) {
-        background.exited = true;
-        background.exitCode = event.exitCode;
-        closeBackgroundWriter(background);
+        void completeBackgroundCommand(background, event.exitCode).catch(() => undefined);
         if (activeBackground === background) activeBackground = null;
       }
     }));
@@ -516,12 +611,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     try {
       const api = resolveTerminalApi();
       if (disposed) throw new Error("Shell supervisor has been disposed");
-      const id = `sh_${++shellCounter}`;
       const spawnArgs = interpreter.kind === "powershell"
         ? [...interpreter.args, "-Command", `Write-Output ${quotePowerShell(initMarker)}`]
         : interpreter.args;
       sessionHandle = await api.createTerminalSession({
-        sessionId: id,
         cwd: lastCwd,
         cols,
         rows,
@@ -571,8 +664,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         const exitCode = parseInt(sentinelLine.slice(2), 10);
         // Remove the sentinel from output
         outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
-        if (disposeRequested) return;
-        completeCommand(exitCode);
+        completeCommand(exitCode, disposeRequested);
         return;
       }
     }
@@ -595,17 +687,14 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       } else if (sentinelLine?.startsWith("E:")) {
         background.exitCode = parseInt(sentinelLine.slice(2), 10);
         background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
-        background.exited = true;
-        if (!disposeRequested) {
-          closeBackgroundWriter(background);
-          if (activeBackground === background) activeBackground = null;
-        }
+        void completeBackgroundCommand(background, background.exitCode).catch(() => undefined);
+        if (activeBackground === background) activeBackground = null;
         return;
       }
     }
   };
 
-  const completeCommand = (exitCode: number): void => {
+  const completeCommand = (exitCode: number, cancelled: boolean, disposedResult = false): void => {
     if (!pendingCommand) return;
     clearTimeout(pendingCommand.timeout);
     const cmd = pendingCommand;
@@ -614,9 +703,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const cleanedOutput = stripControlSequences(outputBuffer);
     outputBuffer = "";
     lastCwd = cmd.cwd;
-
-    // Release writer
-    void cmd.writer?.close();
 
     let handle: string | null = null;
     let shown: { head: number; tail: number; total: number } | null = null;
@@ -627,16 +713,72 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       shown = { head: 0, tail: 0, total: stored.total };
     }
 
-    cmd.resolve({
-      kind: "completed",
-      exitCode,
-      durationMs: Date.now() - cmd.startedAt,
+    const result: ShellExecResult = disposedResult
+      ? {
+        kind: "spawn-failed",
+        reason: "disposed",
+        interpreter: interpreter.command,
+        hint: "Shell supervisor has been disposed",
+      }
+      : {
+        kind: "completed",
+        exitCode,
+        durationMs: Date.now() - cmd.startedAt,
+        cwd: cmd.cwd,
+        stdout: cleanedOutput,
+        stderr: "",
+        handle,
+        shown,
+      };
+    const completion = notifyCommandCompleted({
+      command: cmd.command,
+      commandRunId: cmd.commandRunId,
+      executionId: cmd.executionId,
       cwd: cmd.cwd,
-      stdout: cleanedOutput,
-      stderr: "",
-      handle,
-      shown,
+      startedAt: cmd.startedAt,
+      endedAt: Date.now(),
+      exitCode,
+      cancelled,
+      ...(handle ? { outputHandle: handle } : {}),
+      outputPreview: cleanedOutput,
+    }).then(async () => {
+      try { await closeCommandWriter(cmd.writer, cmd.cwd); } catch { /* retained for disposal retry */ }
+      cmd.resolve(result);
     });
+    trackCommandLifecycle(completion);
+  };
+
+  const cancelUnwrittenCommand = ({
+    command,
+    commandRunId,
+    executionId,
+    cwd,
+    startedAt,
+    writer,
+    outputPreview = "",
+  }: {
+    command: string;
+    commandRunId: string;
+    executionId: string;
+    cwd: string;
+    startedAt: number;
+    writer: ShellWriter | null;
+    outputPreview?: string;
+  }): void => {
+    const completion = notifyCommandCompleted({
+      command,
+      commandRunId,
+      executionId,
+      cwd,
+      startedAt,
+      endedAt: Date.now(),
+      exitCode: -1,
+      cancelled: true,
+      outputPreview,
+    }).then(async () => {
+      try { await closeCommandWriter(writer, cwd); } catch { /* retained for disposal retry */ }
+    });
+    trackCommandLifecycle(completion);
   };
 
   const exec = async (command: string, options: { cwd?: string; waitMs: number }): Promise<ShellExecResult> => {
@@ -649,6 +791,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const startPromise = new Promise<void>((resolve) => { finishStart = resolve; });
     commandStartPromise = startPromise;
     try {
+      // Do not let a new wrapper cross the previous command's completion
+      // callback and writer-release boundary.
+      await Promise.all([...commandLifecyclePromises]);
       await ensureShell();
       if (!sessionHandle) {
         commandStarting = false;
@@ -658,6 +803,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const token = randomBytes(8).toString("hex");
       const wrapped = buildCommandWrapper(command, token, interpreter.kind);
       const cwd = options.cwd ?? lastCwd;
+      const startedAt = Date.now();
+      const commandRunId = sessionHandle.id;
 
       // Register writer for the duration of command execution
       const writer = deps.registerWriter ? await deps.registerWriter() : null;
@@ -674,6 +821,29 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             }
           }
         }
+        finishStart();
+        startFinished = true;
+        return {
+          kind: "spawn-failed",
+          reason: "disposed",
+          interpreter: interpreter.command,
+          hint: "Shell supervisor has been disposed",
+        };
+      }
+
+      await notifyCommandStarted({
+        command,
+        commandRunId,
+        executionId: token,
+        cwd,
+        startedAt,
+      });
+      if (disposed) {
+        commandStarting = false;
+        if (writer && stopped) {
+          try { await writer.close(); startingWriters.delete(writer); } catch { /* disposal retries the close */ }
+        }
+        cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer: writer && !stopped ? writer : null });
         finishStart();
         startFinished = true;
         return {
@@ -702,11 +872,16 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           const bgShell: BackgroundShell = {
             id,
             token,
+            executionId: token,
+            commandRunId: id,
+            startedAt,
             command,
             output: outputBuffer,
             cwd: pendingCommand?.cwd ?? cwd,
             exited: false,
             exitCode: null,
+            cancelRequested: false,
+            lifecycleCompleted: false,
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
             writer,
             handle,
@@ -733,11 +908,14 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
         pendingCommand = {
           token,
+          executionId: token,
+          commandRunId,
+          command,
           resolve: resolvePromise,
           timeout,
           cwd,
           writer,
-          startedAt: Date.now(),
+          startedAt,
         };
         if (writer) startingWriters.delete(writer);
         finishStart();
@@ -750,7 +928,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           clearTimeout(timeout);
           pendingCommand = null;
           commandStarting = false;
-          void writer?.close();
+          cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer });
           resolvePromise({ kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" });
           return;
         }
@@ -766,7 +944,15 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           clearTimeout(timeout);
           pendingCommand = null;
           commandStarting = false;
-          void writer?.close();
+          cancelUnwrittenCommand({
+            command,
+            commandRunId,
+            executionId: token,
+            cwd,
+            startedAt,
+            writer,
+            outputPreview: stripControlSequences(outputBuffer),
+          });
           resolvePromise({
             kind: "spawn-failed",
             reason: error instanceof Error ? error.message : String(error),
@@ -818,15 +1004,26 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const kill = async (id: string): Promise<boolean> => {
     const bg = backgroundShells.get(id);
     if (!bg) return false;
-    if (bg.exited) return true;
-    // Send Ctrl+C to the PTY. The command remains running until its sentinel
-    // or the PTY exit event confirms that the interrupt took effect.
-    try {
-      bg.handle.write("\x03");
+    if (bg.exited) {
+      try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
       return true;
+    }
+    if (bg.handle.status === "exited") {
+      try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
+      return bg.exited;
+    }
+    bg.cancelRequested = true;
+    // A background handle is no longer the foreground session. Terminate that
+    // exact PTY through the runtime, which owns process-tree escalation and
+    // the real exit event. A successful write or interrupt alone is not a kill.
+    try {
+      await bg.handle.terminate(true);
     } catch {
       return false;
     }
+    if (!bg.exited && bg.handle.status === "running") return false;
+    try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
+    return bg.exited;
   };
 
   const dispose = (): Promise<void> => {
@@ -936,8 +1133,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     if (stopping && stoppingDirectory && same(stoppingDirectory)) return true;
     if (pendingCommand && same(pendingCommand.cwd)) return true;
     for (const background of backgroundShells.values()) {
-      if (!background.exited && same(background.cwd)) return true;
+      if ((!background.exited || background.writer !== null || background.writerClosePromise !== undefined) && same(background.cwd)) return true;
     }
+    for (const cwd of lingeringWriters.values()) if (same(cwd)) return true;
     return false;
   };
 

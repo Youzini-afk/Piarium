@@ -382,6 +382,7 @@ const PiToolCard: React.FC<{
   execution?: PiToolExecutionState;
   result?: PiToolResultMessage;
 }> = ({ call, cwd, editor, execution, result }) => {
+  const { t } = useI18n();
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: PiToolCall;
     cwd: string;

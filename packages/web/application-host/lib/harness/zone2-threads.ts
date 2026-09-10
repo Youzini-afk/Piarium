@@ -17,7 +17,7 @@ export interface Zone2ThreadProjectionOptions {
 }
 
 const priority = (thread: Thread): number => {
-  if (thread.attention === "user" || thread.attention === "permission") return 0;
+  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread") return 0;
   if (thread.attention === "stalled" || thread.attention === "looping") return 1;
   if (thread.lifecycle === "active" || thread.lifecycle === "queued") return 2;
   if (thread.integration === "conflict") return 3;

@@ -254,6 +254,12 @@ are specified in [agent-harness.md](agent-harness.md); which of its capabilities
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
 
+Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
+process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
+owns command framing and output presentation but does not own a second process table. Background
+completion comes from the PTY exit event, and process-writer ownership remains live until exit and
+release actually complete. Reading output is observation, never the completion trigger (D-209).
+
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role. The
 application host owns search, current document reads, local embedding instances, derived indexes, and
 the short-lived explore query context (fixed input-source reference, actor/scope, candidate producers,
@@ -644,7 +650,7 @@ Git and copy directories remain materialization and migration backends as specif
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
-| Workspace and user knowledge | Per-host workspace/user `.tdb` under `PIARIUM_DATA_DIR` | Settings catalog and suggestion accept/edit/retire mutate this store; vectors are derived and must not become a second write authority |
+| Workspace and user knowledge | Per-host workspace/user `.tdb` under `PIARIUM_DATA_DIR` | Settings catalog and suggestion accept/edit/retire mutate this store with opened-revision CAS; proposals use the authenticated actor workspace, atomically deduplicate against all history, and consume the session's trusted auto-accept policy. Vectors are derived and must not become a second write authority |
 | Workspace text documents | Application-host document authority; the file on disk | One revisioned read/write/watch path with opaque revisions; never a second text shape in `FilesAPI`/`WorkspaceAPI` |
 | Workspace identity and document recovery journals | Per-host records below `PIARIUM_DATA_DIR` | Scoped to the owning application host; another host never inherits a same-path selection |
 | Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |
@@ -696,7 +702,14 @@ the Integration operation id. Unavailable or drifted buffers keep the child resu
 Published results can carry Host verification records: the actual commands, cwd, exits, and whether
 those observations can be bound to that revision. Child-result checks, merge applicability, and
 post-merge parent checks stay separate facts. A default, non-blocking review thread may run against
-the stored result diff after publish; it does not copy the parent conversation (D-207).
+the stored result diff after publish; it does not copy the parent conversation. Command observations
+bind authority/session/worker generation/Run plus start and end input identities. Git identity combines
+the immutable base or HEAD with states for staged, unstaged, tracked-mode, non-ignored untracked, fixed
+draft, and explicit capture-scope changes; this avoids a normal-path whole-directory scan. Non-Git input
+without an equivalent fixed identity is reported as uncertain. A parent verification window is keyed by
+the applied Integration operation, result revision, and parent session and survives Host restart.
+Review completion is keyed by its result, review thread, and review Run, so a late old run cannot satisfy
+a new gate (D-207/D-210).
 
 Git trees and resultCommit are valid migration inputs and backend references. Publication switches to
 the new authority only after its records and content are readable; failure preserves the previous source.

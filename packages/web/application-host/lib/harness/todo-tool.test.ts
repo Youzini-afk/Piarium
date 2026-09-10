@@ -7,7 +7,6 @@ import {
   renderPlanContent,
   parsePlanContent,
   executeTodoTool,
-  DEFAULT_TODO_SETTINGS,
   type TodoItem,
 } from "./todo-tool.js";
 
@@ -92,11 +91,9 @@ describe("executeTodoTool", () => {
         { text: "Task 2", status: "open" },
         { text: "Task 3", status: "blocked" },
       ]},
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
-      false,
+      { store, sessionId: "s1" },
     );
     expect(result.text).toBe("plan updated: 1/3 done, 1 blocked");
-    expect(result.askedConfirmation).toBe(false);
 
     const blocks = await store.getBlocks("s1");
     expect(blocks).toHaveLength(1);
@@ -106,45 +103,17 @@ describe("executeTodoTool", () => {
   });
 
   it("treats confidence as informational and writes without confirmation", async () => {
-    const result = await executeTodoTool(
+    await executeTodoTool(
       { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
-      false,
+      { store, sessionId: "s1" },
     );
-    expect(result.askedConfirmation).toBe(false);
-    expect(result.confirmed).toBeUndefined();
     expect(await store.getBlocks("s1")).toHaveLength(1);
   });
 
-  it("waits only when an explicit approval policy is enabled", async () => {
-    const result = await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.9 },
-      { store, sessionId: "s1", settings: { requireConfirmation: true } },
-      false,
-    );
-    expect(result.askedConfirmation).toBe(true);
-    expect(result.confirmed).toBe(false);
-    expect(result.text).toContain("requires user confirmation");
-    expect(await store.getBlocks("s1")).toHaveLength(0);
-  });
-
-  it("writes after an explicit approval policy is confirmed", async () => {
-    const result = await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      { store, sessionId: "s1", settings: { requireConfirmation: true } },
-      true,
-    );
-    expect(result.askedConfirmation).toBe(true);
-    expect(result.confirmed).toBe(true);
-    expect(await store.getBlocks("s1")).toHaveLength(1);
-  });
-
-  it("does not require confirmation when confidence is absent", async () => {
-    const result = await executeTodoTool(
+  it("does not add a second confirmation path when confidence is absent", async () => {
+    await executeTodoTool(
       { items: [{ text: "Task", status: "open" }] },
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
-      false,
+      { store, sessionId: "s1" },
     );
-    expect(result.askedConfirmation).toBe(false);
   });
 });

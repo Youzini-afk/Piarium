@@ -10,6 +10,11 @@
  * 3. User message explicit pattern (only when models.suggestions configured)
  */
 
+import {
+  mergeHarnessSettings,
+  type HarnessSettingsInput,
+  type PiSettingsSnapshot,
+} from "@piarium/protocol";
 import type { Knowledge, KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -46,6 +51,25 @@ export const DEFAULT_SUGGESTIONS_SETTINGS: KnowledgeSuggestionsSettings = {
   autoAcceptSuggestions: { workspace: false, user: false },
 };
 
+const record = (value: unknown): Record<string, unknown> => (
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+/** Resolve the same trusted global/project harness layers used by the session. */
+export const suggestionSettingsFromSnapshot = (snapshot: PiSettingsSnapshot): KnowledgeSuggestionsSettings => {
+  const globalHarness = record(record(snapshot.global).harness) as HarnessSettingsInput;
+  const projectHarness = snapshot.projectTrusted
+    ? record(record(snapshot.project).harness) as HarnessSettingsInput
+    : {};
+  const resolved = mergeHarnessSettings(globalHarness, projectHarness).knowledge.autoAcceptSuggestions;
+  return {
+    autoAcceptSuggestions: {
+      workspace: resolved.workspace === true,
+      user: resolved.user === true,
+    },
+  };
+};
+
 export const normalizeKnowledgeIdentity = (value: string): string => (
   value.replace(/\s+/g, " ").trim().toLowerCase()
 );
@@ -71,17 +95,29 @@ export async function proposeUserMessageSuggestion(
   const content = drafted.content.trim();
   if (!content) return { created: false, skippedReason: "empty" };
   const scope = input.scope ?? "workspace";
-  const duplicate = await findDuplicateKnowledge(deps.store, scope, content);
-  if (duplicate) return { created: false, skippedReason: "duplicate" };
-  const suggestion = await createSuggestion({
-    trigger: "user-message",
-    content,
-    recallTrigger: drafted.trigger,
-    sessionId: input.sessionId,
-    kind: input.kind,
+  // The identity check and insert must share KnowledgeStore's writer queue.
+  // A read followed by putKnowledge allows two simultaneous user messages to
+  // pass the check and create duplicate rows.
+  const created = await deps.store.createKnowledgeIfAbsent({
     scope,
-  }, deps);
-  return { created: true, suggestion };
+    status: "suggested",
+    content,
+    trigger: drafted.trigger,
+    source: { sessionId: input.sessionId, kind: input.kind },
+  });
+  if (!created.created) return { created: false, skippedReason: "duplicate" };
+  const autoAccepted = deps.settings.autoAcceptSuggestions[scope];
+  if (autoAccepted) await deps.store.acceptKnowledge(created.knowledge.id, {});
+  return {
+    created: true,
+    suggestion: {
+      id: created.knowledge.id,
+      content: created.knowledge.content,
+      trigger: created.knowledge.trigger,
+      scope: created.knowledge.scope,
+      status: autoAccepted ? "accepted" : "suggested",
+    },
+  };
 }
 
 // ── Suggestion creation ────────────────────────────────────────────
@@ -173,12 +209,14 @@ export async function acceptSuggestion(
   options: {
     supersedes?: NodeId[] | undefined;
     scope?: KnowledgeScope;
-    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string };
+    expected?: { content: string; trigger: string; status?: "suggested" | "accepted" | "dismissed"; invalidAt?: number | null };
+    edit?: { content: string; trigger: string; expectedContent: string; expectedTrigger: string; expectedStatus?: "suggested" | "accepted" | "dismissed"; expectedInvalidAt?: number | null };
   },
 ): Promise<void> {
   await deps.store.acceptKnowledge(id, {
     ...(options.supersedes === undefined ? {} : { supersedes: options.supersedes }),
     ...(options.scope === undefined ? {} : { expectedScope: options.scope }),
+    ...(options.expected === undefined ? {} : { expected: options.expected }),
     ...(options.edit === undefined ? {} : { edit: options.edit }),
   });
 }
@@ -187,6 +225,7 @@ export async function dismissSuggestion(
   id: NodeId,
   deps: SuggestionDeps,
   scope?: KnowledgeScope,
+  expected?: { content: string; trigger: string; status?: "suggested" | "accepted" | "dismissed"; invalidAt?: number | null },
 ): Promise<void> {
-  await deps.store.dismissKnowledge(id, scope);
+  await deps.store.dismissKnowledge(id, scope, expected);
 }

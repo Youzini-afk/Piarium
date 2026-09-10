@@ -57,15 +57,6 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         waitMs: params.waitMs ?? 60_000,
       });
       if (result.kind === "completed") {
-        host.verification?.recordCommand({
-          sessionId: ctx.sessionId,
-          command: params.command,
-          cwd: result.cwd,
-          exitCode: result.exitCode,
-          durationMs: result.durationMs,
-          ...(result.handle ? { outputHandle: result.handle } : {}),
-          outputPreview: result.stdout,
-        });
         const presented = presentOrganizedOutput({
           command: params.command,
           output: result.stdout,
@@ -86,15 +77,6 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         };
       }
       if (result.kind === "background") {
-        host.verification?.recordCommand({
-          sessionId: ctx.sessionId,
-          command: params.command,
-          cwd: result.cwd,
-          exitCode: null,
-          commandRunId: result.id,
-          pending: true,
-          outputPreview: result.outputSoFar,
-        });
         const presented = presentOrganizedOutput({
           command: params.command,
           output: result.outputSoFar,
@@ -130,9 +112,6 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
         command?: string;
       }>(ctx.sessionId, "shell", params.id, async (previous) => {
         const result = await supervisor.read(params.id, previous?.value.offset ?? 0, Number.MAX_SAFE_INTEGER);
-        if (result.running === false && result.exitCode !== undefined) {
-          host.verification?.completeBackgroundCommand(ctx.sessionId, params.id, result.exitCode);
-        }
         const now = host.observationCursors.now();
         const presented = presentOrganizedOutput({
           command: result.command ?? "",
@@ -557,14 +536,9 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
       const result = await executeTodoTool(
         { items: params.items, ...(params.confidence !== undefined ? { confidence: params.confidence } : {}) },
         deps,
-        params.confirmed === true,
         params.branchEntryIds,
       );
-      return {
-        text: result.text,
-        ...(result.confirmed !== undefined ? { confirmed: result.confirmed } : {}),
-        askedConfirmation: result.askedConfirmation,
-      };
+      return { text: result.text };
     },
   };
 }
@@ -575,18 +549,27 @@ export function createKnowledgeSuggestService(host: HarnessServiceHost): Harness
       if (!host.knowledgeSuggestDepsProvider) {
         throw new HarnessServiceError("unavailable", "Knowledge suggestion deps not configured");
       }
+      // `knowledge.suggest` is an internal worker entry point for user-message
+      // proposals. Its authority is always the actor's workspace; scope and
+      // source kind are deliberately not worker-controlled. Keep rejecting
+      // forged legacy fields at runtime even though the public protocol type
+      // no longer exposes them.
+      const rawParams = params as unknown as Record<string, unknown>;
+      if (rawParams.scope !== undefined || rawParams.kind !== undefined) {
+        throw new HarnessServiceError("invalid-params", "knowledge.suggest accepts no scope or source kind");
+      }
       const content = typeof params.content === "string" ? params.content : "";
       if (!content.trim()) return { created: false, skippedReason: "empty" };
-      const scope = params.scope === "user" ? "user" : "workspace";
-      const deps = await host.knowledgeSuggestDepsProvider(ctx.sessionId, ctx.workspaceId, scope);
+      if (!ctx.workspaceId || ctx.workspaceId === "user") return { created: false, skippedReason: "no-workspace" };
+      const deps = await host.knowledgeSuggestDepsProvider(ctx.sessionId, ctx.workspaceId);
       if (!deps) return { created: false, skippedReason: "no-workspace" };
       const result = await proposeUserMessageSuggestion({
         trigger: "user-message",
         content,
         recallTrigger: typeof params.trigger === "string" ? params.trigger : "",
         sessionId: ctx.sessionId,
-        kind: typeof params.kind === "string" && params.kind.trim() ? params.kind.trim() : "user-message",
-        scope,
+        kind: "user-message",
+        scope: "workspace",
       }, deps);
       if (result.created) deps.onChanged?.();
       return result;

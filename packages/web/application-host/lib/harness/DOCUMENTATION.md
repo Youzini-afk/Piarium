@@ -8,8 +8,8 @@ on the `HarnessRouter` and dispatched from the broker event stream.
 
 ```
 broker event stream ──→ HarnessRouter.processEvent()
-                           ├── shell.exec   → ShellSupervisor (per-session PTY) + verification.recordCommand
-                           ├── shell.read   → ShellSupervisor + background verification complete
+                           ├── shell.exec   → ShellSupervisor (per-session framing over terminal runtime) + verification start/end
+                           ├── shell.read   → ShellSupervisor observation (never a completion trigger)
                            ├── shell.write  → ShellSupervisor
                            ├── shell.kill   → ShellSupervisor
                            ├── output.store → OutputStore (global)
@@ -80,16 +80,23 @@ process manager.
 - Commands separated by sentinel markers (`__PIARIUM_SENTINEL_`)
 - cwd/env/venv maintained between commands
 - A command that exceeds `wait_ms` keeps its current terminal session as the
-  public `sh_N` identity; the next foreground command starts a new session shell
+  public `sh_N` identity allocated by the global terminal runtime; the next
+  foreground command starts a new session shell
 - User attach and agent `get_output` / `write_to_process` use that same session
+- Owner, creation source, cwd, shell/spawn, writer, and retain identity must all
+  match before an existing running handle can be reused. HTTP cannot claim a
+  programmatic Harness id, and exited ids require explicit close before reuse.
 - Closing a terminal tab detaches only; `kill_shell` / force-kill / dispose
-  still wait for real process exit before releasing writers (D-204 / D-205 / D-206)
+  still wait for real process exit before releasing writers (D-204 / D-205 / D-206 / D-209)
 - `registerWriter` callback for `mode: 'process'` writer registration
 - Interpreter command is the discovered executable path, including spaces
 - PowerShell starts interactively under ConPTY with its own readiness/command wrappers.
 - Interrupt delivery does not mark a command exited. Shutdown waits for PTY exit
   and writer release; a failed stop remains observable and retryable. ServiceHost
   retains retiring supervisors after a session drop, and thread close awaits them.
+- Background completion is emitted once by PTY exit even when no caller reads
+  output. A failed writer release keeps directory protection and is retried by
+  disposal instead of being treated as a completed cleanup.
 
 ### OutputStore (`output-store.ts`)
 
@@ -121,10 +128,10 @@ the Thread plus a `starting` Run and returns immediately. The runtime then
 creates a managed worktree when needed, opens a real persisted Pi child
 session with the role's active-tool allowlist, and projects broker events into
 progress, attention, report, durable transcript, integration, and verification
-state. After a successful publish, same-run shell commands are bound to that
-`resultRevision`. A hidden review thread is then created with `startRun` +
-`spawn` (not `autoRun` alone). Draft merge records that disk commands cannot
-verify unsaved buffers.
+state. After a successful publish, only same-Run observations whose start/end
+identity matches the fixed result are bound to that `resultRevision`. A hidden
+review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
+Draft merge records that disk commands cannot verify unsaved buffers.
 
 One unexpected worker exit is resumed in the same session/worktree as a new
 Run; a second consecutive crash becomes `stalled` instead of entering a crash
@@ -135,17 +142,22 @@ registry exposes it through the `piarium-harness` provider.
 
 ### VerificationCoordinator (`verification-coordinator.ts`)
 
-Session-scoped command observations, bound at publish to a fixed
-`resultRevision`. Production `shell.exec` / background `shell.read` record
-exits; `settle()` binds before `setWorkingState` so a new revision cannot
-inherit the previous review or child-check projection. Parent merge writes a
-separate bundle: draft-unsaved is `cannot-verify-unsaved-draft`.
+Session-scoped command observations bind the authority instance, worker
+generation, Run, and binding generation at start and recheck them at completion.
+Production `shell.exec` records both boundaries; PTY exit completes background
+commands independently of `shell.read`. Git inputs use a base/HEAD seed plus the
+states of changed and explicitly captured paths, avoiding a per-command full-tree
+scan; non-Git inputs remain `uncertain`. Publication consumes eligible observations
+once. A fully applied parent merge opens a persisted window keyed by operation,
+result revision, and exact parent session; draft-unsaved and incomplete merge
+states do not. Review records additionally bind review thread and review Run.
 
 ### Review sensor (`review-sensor.ts`)
 
 `onPublishedResult` opens a hidden review thread for one published revision.
-`createAndStart` must `startRun` and `spawn`. `onAgentSettled` remains only as
-a closed door for the old parent-theater trigger.
+`createAndStart` must `startRun` and `spawn`. There is no parent
+journaled-change review entry point; fixed result publication is the only
+automatic trigger.
 
 ### HarnessSearchService (`search-service.ts`)
 
@@ -307,8 +319,8 @@ The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.
 Blocks can be explicitly promoted into workspace or user knowledge suggestions.
-The authenticated review API keeps `(scope, id)` identities distinct, uses
-opened-value conflict checks for edits, validates same-scope supersedes before
+The authenticated review API keeps `(scope, id)` identities distinct, uses the
+complete opened content/trigger/status/invalidAt revision for every mutation, validates same-scope supersedes before
 mutation, and broadcasts only invalidation identities over SSE.
 Settings catalog routes list/edit/retire the same workspace and user `.tdb`
 rows after Documents workspace resolution. Delete sets `invalidAt` on one id;
@@ -319,9 +331,16 @@ suggestion runtime: only new structured list entries are proposed, and any
 content previously suggested, accepted, or dismissed for that session is not
 proposed again. This path never invokes a model or auto-accepts.
 When `models.suggestions` is configured, pi-host drafts from the current user
-message and Host `knowledge.suggest` stores the proposal. Unconfigured sessions
-do not borrow the main model. Suggested, dismissed, and superseded identities
-are not re-proposed and do not enter public recall.
+message and Host `knowledge.suggest` stores the proposal in the authenticated
+actor's workspace with source `user-message`; scope and source kind are not
+worker inputs. Normalized-content lookup and insert share the store write queue
+and cover dismissed/retired history. Catalog mutations send the complete opened
+content/trigger/status/invalidAt revision; workspace/scope changes retire the UI
+request generation so late responses cannot replace the active catalog.
+User-mark, memory-decision, and model proposal creation all resolve the session's
+effective auto-accept setting; an unreadable setting keeps the new row suggested.
+Unconfigured sessions do not borrow the main model. Suggested, dismissed, and
+superseded identities do not enter public recall.
 
 Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
 authority has already validated and frozen any dirty buffers behind its opaque

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   onPublishedResult,
-  onAgentSettled,
   formatReviewForZone2,
   parseReviewFindings,
   DEFAULT_REVIEW_SENSOR_SETTINGS,
@@ -149,7 +148,7 @@ describe("onPublishedResult", () => {
       changedPaths: ["a.ts"],
       reviewRole: reviewRoleFor(),
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
-      existingReview: { resultRevision: 1, status: "running", reviewThreadId: first.threadId },
+      existingReview: { resultRevision: 1, status: "running", reviewThreadId: first.threadId! },
       formatDiff: async () => "new",
       cancelReview: async (id) => { cancelled.push(id); },
       createAndStart: start,
@@ -163,25 +162,12 @@ describe("onPublishedResult", () => {
       changedPaths: ["a.ts"],
       reviewRole: reviewRoleFor(),
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
-      existingReview: { resultRevision: 2, status: "running", reviewThreadId: second.threadId },
+      existingReview: { resultRevision: 2, status: "running", reviewThreadId: second.threadId! },
       formatDiff: async () => "new",
       createAndStart: start,
     });
     expect(dup.reviewDispatched).toBe(false);
     expect(dup.skippedReason).toBe("dedup");
-  });
-
-  it("does not treat parent journaled changes as a published-result review", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
-      workspaceId,
-      reviewRole: reviewRoleFor(),
-      settings: { gate: false },
-      getJournaledChanges: async () => ["a.ts"],
-      getDiff: async () => "diff",
-    });
-    expect(result.reviewDispatched).toBe(false);
-    expect(result.skippedReason).toBe("not-a-published-result");
   });
 });
 

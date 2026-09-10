@@ -13,7 +13,7 @@
 
 import type { ModelSelection, ThreadReviewFinding, ThreadVerificationProjection } from "@piarium/protocol";
 import type { ResolvedRole } from "./roles.js";
-import type { CreateThreadInput, Thread, ThreadRegistry } from "./thread-registry.js";
+import type { CreateThreadInput, Thread } from "./thread-registry.js";
 
 export interface ReviewSensorSettings {
   enabled: boolean;
@@ -125,24 +125,6 @@ export async function onPublishedResult(input: ReviewDispatchInput): Promise<Rev
     threadId: thread.id,
     blocking: settings.gate,
   };
-}
-
-/**
- * Parent journaled-change theater is not a published-result review.
- * Kept so older imports fail closed instead of inventing a second trigger.
- */
-export async function onAgentSettled(
-  _sessionId: string,
-  _deps: {
-    registry: ThreadRegistry;
-    workspaceId: string;
-    reviewRole: ResolvedRole | null;
-    settings: { gate: boolean };
-    getJournaledChanges: (sessionId: string) => Promise<string[]>;
-    getDiff: (sessionId: string) => Promise<string>;
-  },
-): Promise<ReviewResult> {
-  return { reviewDispatched: false, blocking: false, skippedReason: "not-a-published-result" };
 }
 
 export function formatReviewForZone2(input: {

@@ -114,7 +114,14 @@ describe("harness knowledge catalog routes", () => {
     await request(app)
       .post(`/api/harness/knowledge/workspace/${suggestion}/accept`)
       .set("x-test-auth", "yes")
-      .send({ workspaceId: "workspace-1", supersedes: [oldId] })
+      .send({
+        workspaceId: "workspace-1",
+        supersedes: [oldId],
+        expectedContent: "Use bun",
+        expectedTrigger: "packages",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
+      })
       .expect(200);
 
     await request(app)
@@ -126,6 +133,8 @@ describe("harness knowledge catalog routes", () => {
         trigger: "packages",
         expectedContent: "Use bun",
         expectedTrigger: "packages",
+        expectedStatus: "accepted",
+        expectedInvalidAt: null,
       })
       .expect(200);
 
@@ -138,6 +147,8 @@ describe("harness knowledge catalog routes", () => {
         trigger: "packages",
         expectedContent: "Use bun",
         expectedTrigger: "packages",
+        expectedStatus: "accepted",
+        expectedInvalidAt: null,
       })
       .expect(409);
 
@@ -156,6 +167,7 @@ describe("harness knowledge catalog routes", () => {
         expectedContent: "Use npm",
         expectedTrigger: "packages",
         expectedStatus: "accepted",
+        expectedInvalidAt: null,
       })
       .expect(200);
 
@@ -166,5 +178,62 @@ describe("harness knowledge catalog routes", () => {
     expect(current?.invalidAt).toBeUndefined();
     expect(await userStore.recall("Use npm", 5)).toEqual([]);
     expect(changed.map((item) => item.scope)).toEqual(["workspace", "workspace", "user"]);
+  });
+
+  it("checks the complete opened revision for Settings review actions", async () => {
+    const suggestion = await store.putKnowledge({
+      scope: "workspace", status: "suggested", content: "v1", trigger: "rule",
+    });
+    const { app } = appFor();
+    const opened = {
+      workspaceId: "workspace-1",
+      expectedContent: "v1",
+      expectedTrigger: "rule",
+      expectedStatus: "suggested",
+      expectedInvalidAt: null,
+    };
+    await request(app)
+      .put(`/api/harness/knowledge/workspace/${suggestion}`)
+      .set("x-test-auth", "yes")
+      .send({ ...opened, content: "v2", trigger: "rule" })
+      .expect(200);
+    await request(app)
+      .post(`/api/harness/knowledge/workspace/${suggestion}/accept`)
+      .set("x-test-auth", "yes")
+      .send({ ...opened, supersedes: [] })
+      .expect(409);
+
+    const retired = await store.putKnowledge({
+      scope: "workspace", status: "suggested", content: "retire me", trigger: "rule",
+    });
+    await request(app)
+      .delete(`/api/harness/knowledge/workspace/${retired}`)
+      .set("x-test-auth", "yes")
+      .send({
+        workspaceId: "workspace-1",
+        expectedContent: "retire me",
+        expectedTrigger: "rule",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
+      })
+      .expect(200);
+    await request(app)
+      .put(`/api/harness/knowledge/workspace/${retired}`)
+      .set("x-test-auth", "yes")
+      .send({
+        workspaceId: "workspace-1",
+        content: "rewritten history",
+        trigger: "rule",
+        expectedContent: "retire me",
+        expectedTrigger: "rule",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
+      })
+      .expect(409);
+    await request(app)
+      .post(`/api/harness/knowledge/workspace/${retired}/dismiss`)
+      .set("x-test-auth", "yes")
+      .send({ ...opened, expectedContent: "retire me" })
+      .expect(409);
   });
 });

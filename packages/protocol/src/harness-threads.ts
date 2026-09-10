@@ -9,7 +9,7 @@
 export type ThreadKind = "discussion" | "implementation";
 export type ThreadCreatedBy = "user" | "agent";
 export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";
-export type ThreadAttention = "none" | "user" | "permission" | "stalled" | "looping";
+export type ThreadAttention = "none" | "user" | "permission" | "thread" | "stalled" | "looping";
 export type ThreadIntegration = "none" | "dirty" | "merge-ready" | "conflict" | "merged";
 export type ThreadRunWorkerState = "starting" | "running" | "lost" | "exited";
 export type ThreadRunOutcome = "success" | "failure" | "cancelled" | "lost";
@@ -44,6 +44,11 @@ export interface TranscriptRef {
 export interface ThreadWaitingFor {
   kind: "user" | "permission" | "thread";
   text: string;
+  review?: {
+    resultRevision: number;
+    reviewThreadId: string;
+    reviewRunId: string;
+  };
 }
 
 export interface ThreadWorktree {
@@ -180,7 +185,7 @@ export interface ThreadVerificationCommandFact {
   cwd: string;
   exitCode: number | null;
   cancelled: boolean;
-  relation: "same-run-before-publish" | "unbound" | "uncertain";
+  relation: "same-run-matching-result" | "post-merge-matching-tree" | "unbound" | "uncertain";
   inputChanged: boolean | null;
   outputHandle?: string;
 }
@@ -196,8 +201,9 @@ export interface ThreadChildCheckProjection {
 
 export interface ThreadParentCheckProjection {
   mergedResultRevision: number;
+  mergeOperationId?: string;
   draftUnsaved: boolean;
-  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded";
+  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded" | "not-integrated";
   note?: string;
   commands: ThreadVerificationCommandFact[];
   allExitedZero: boolean | null;
@@ -215,6 +221,8 @@ export interface ThreadReviewProjection {
   status: "none" | "running" | "completed" | "failed" | "cancelled";
   reviewThreadId?: string;
   reviewRunId?: string;
+  /** True only while this exact review identity is the configured completion gate. */
+  gate?: boolean;
   conclusion?: string;
   findings?: ThreadReviewFinding[];
   error?: string;

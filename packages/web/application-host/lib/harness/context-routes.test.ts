@@ -122,6 +122,26 @@ describe("harness context routes", () => {
       .expect(({ body }) => expect(body.code).toBe("branch-conflict"));
   });
 
+  it("uses the session's effective auto-accept policy for explicit suggestions", async () => {
+    const app = express();
+    app.use(express.json());
+    registerHarnessContextRoutes(app, {
+      getStore: async () => store,
+      getBranchEntryIds: async () => [],
+      getSuggestionSettings: async () => ({
+        autoAcceptSuggestions: { workspace: true, user: false },
+      }),
+    });
+
+    await request(app)
+      .post("/api/harness/sessions/session-1/knowledge/suggestions")
+      .send({ scope: "workspace", content: "Keep this policy" })
+      .expect(201)
+      .expect(({ body }) => expect(body.suggestion.status).toBe("accepted"));
+    await expect(store.listKnowledge({ scope: "workspace", status: "accepted" }))
+      .resolves.toEqual([expect.objectContaining({ content: "Keep this policy" })]);
+  });
+
   it("reviews workspace and user suggestions through authenticated scoped actions", async () => {
     const oldId = await store.putKnowledge({
       scope: "workspace",
@@ -181,6 +201,8 @@ describe("harness context routes", () => {
         trigger: "package management",
         expectedContent: "Use bun",
         expectedTrigger: "package management",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
       })
       .expect(200);
     await request(app)
@@ -191,6 +213,8 @@ describe("harness context routes", () => {
         trigger: "package management",
         expectedContent: "Use bun",
         expectedTrigger: "package management",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
       })
       .expect(409);
     await request(app)
@@ -202,12 +226,35 @@ describe("harness context routes", () => {
         trigger: "package management",
         expectedContent: "Use Bun for package management",
         expectedTrigger: "package management",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
       })
       .expect(200);
+    await userStore.updateSuggestedKnowledge(
+      userId,
+      { content: "Prefer very concise replies", trigger: "response style" },
+      "user",
+      { content: "Prefer concise replies", trigger: "response style", status: "suggested", invalidAt: null },
+    );
     await request(app)
       .post(`${base}/user/${userId}/dismiss`)
       .set("x-test-auth", "yes")
-      .send({})
+      .send({
+        expectedContent: "Prefer concise replies",
+        expectedTrigger: "response style",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
+      })
+      .expect(409);
+    await request(app)
+      .post(`${base}/user/${userId}/dismiss`)
+      .set("x-test-auth", "yes")
+      .send({
+        expectedContent: "Prefer very concise replies",
+        expectedTrigger: "response style",
+        expectedStatus: "suggested",
+        expectedInvalidAt: null,
+      })
       .expect(200);
 
     expect(await store.listKnowledge({ scope: "workspace", status: "accepted", activeOnly: true }))

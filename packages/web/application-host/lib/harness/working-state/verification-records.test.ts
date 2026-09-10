@@ -7,91 +7,60 @@ import {
   projectThreadVerification,
   relateCommandToPublish,
 } from "./verification-records.js";
-import type { WorkingResult } from "./types.js";
+import type { CommandVerificationRecord, WorkingResult } from "./types.js";
+
+const actor = { authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1, runId: "run-1" };
 
 describe("verification records", () => {
-  it("treats cwd under the worktree as bindable and outside as unbound", () => {
+  it("requires an exact observed boundary identity before binding a command", () => {
     expect(cwdUnderRoot("D:\\ws\\thread\\src", "D:\\ws\\thread")).toBe(true);
     expect(relateCommandToPublish(
       { cwd: "D:\\ws\\thread", runId: "run-1", endedAt: 10 },
-      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20 },
-    )).toBe("same-run-before-publish");
+      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20, startTreeHash: "tree", endTreeHash: "tree", resultTreeHash: "tree" },
+    )).toBe("same-run-matching-result");
     expect(relateCommandToPublish(
       { cwd: "D:\\other", runId: "run-1", endedAt: 10 },
-      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20 },
+      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20, startTreeHash: "tree", endTreeHash: "tree", resultTreeHash: "tree" },
     )).toBe("unbound");
     expect(relateCommandToPublish(
-      { cwd: "D:\\ws\\thread", runId: "run-2", endedAt: 10 },
-      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20 },
+      { cwd: "D:\\ws\\thread", runId: "run-1", endedAt: 10 },
+      { worktreePath: "D:\\ws\\thread", runId: "run-1", publishedAt: 20, startTreeHash: "old", endTreeHash: "new", resultTreeHash: "new" },
     )).toBe("uncertain");
   });
 
-  it("records input change only when identities actually differ", () => {
-    expect(inputChangedDuringCommand({
-      startPublishedRevision: 1,
-      endPublishedRevision: 1,
-      startHeadRevision: 1,
-      endHeadRevision: 1,
-    })).toBe(false);
-    expect(inputChangedDuringCommand({
-      startPublishedRevision: 1,
-      endPublishedRevision: 2,
-    })).toBe(true);
+  it("records input change only from actual observed tree identities", () => {
+    expect(inputChangedDuringCommand({ startTreeHash: "tree-1", endTreeHash: "tree-1" })).toBe(false);
+    expect(inputChangedDuringCommand({ startTreeHash: "tree-1", endTreeHash: "tree-2" })).toBe(true);
     expect(inputChangedDuringCommand({})).toBeNull();
   });
 
-  it("binds same-run commands without claiming the published objects were tested", () => {
+  it("binds only the command whose observed input is the fixed result", () => {
+    const command: Omit<CommandVerificationRecord, "relationToPublished" | "inputChangedDuringRun"> = {
+      id: "cmd-1", runId: "run-1", command: "bun test", cwd: "/ws/thread", startedAt: 10, endedAt: 20,
+      exitCode: 0, cancelled: false, actor, bindingGeneration: 1,
+      inputIdentity: { kind: "tree", root: "/ws/thread", branchId: "thread-1", startTreeHash: "tree", endTreeHash: "tree" },
+    };
     const bundle = bindCommandsToPublishedResult({
-      branchId: "thread-1",
-      resultRevision: 2,
-      runId: "run-1",
-      worktreePath: "/ws/thread",
-      publishedAt: 50,
-      commands: [{
-        id: "cmd-1",
-        runId: "run-1",
-        command: "bun test",
-        cwd: "/ws/thread",
-        startedAt: 10,
-        endedAt: 20,
-        exitCode: 0,
-        cancelled: false,
-        startPublishedRevision: 1,
-        endPublishedRevision: 1,
-        startHeadRevision: 1,
-        endHeadRevision: 1,
-        branchId: "thread-1",
-      }],
+      branchId: "thread-1", resultRevision: 2, runId: "run-1", worktreePath: "/ws/thread",
+      publishedAt: 50, resultTreeHash: "tree", commands: [command],
     });
     expect(bundle.binding).toBe("bound");
-    expect(bundle.checks[0]?.relationToPublished).toBe("same-run-before-publish");
-    expect(bundle.checks[0]?.exitCode).toBe(0);
-    expect(bundle.bindingReason).toMatch(/captured later/);
-    const projection = projectThreadVerification({
-      currentResultRevision: 2,
-      child: bundle,
-    });
+    expect(bundle.checks[0]?.relationToPublished).toBe("same-run-matching-result");
+    expect(bundle.bindingReason).toMatch(/observed command start\/end and publish boundaries/);
+    const projection = projectThreadVerification({ currentResultRevision: 2, child: bundle });
     expect(projection.childChecks?.allExitedZero).toBe(true);
     expect(projection.review?.status).toBe("none");
   });
 
   it("formats a published result from stored objects rather than a live scan", async () => {
-    const objects = new Map<string, Buffer>([
-      ["sha256-a", Buffer.from("old\n")],
-      ["sha256-b", Buffer.from("new\n")],
-    ]);
+    const objects = new Map<string, Buffer>([["sha256-a", Buffer.from("old\n")], ["sha256-b", Buffer.from("new\n")]]);
     const result: WorkingResult = {
-      resultRevision: 1,
-      branchId: "thread-1",
-      changedPaths: ["a.txt"],
+      resultRevision: 1, branchId: "thread-1", changedPaths: ["a.txt"],
       baseStates: { "a.txt": { kind: "regular-file", objectHash: "sha256-a", byteLength: 4, mode: 0o644 } },
       pathStates: { "a.txt": { kind: "regular-file", objectHash: "sha256-b", byteLength: 4, mode: 0o644 } },
-      diffStats: { files: 1, insertions: 1, deletions: 1 },
-      createdAt: new Date().toISOString(),
+      diffStats: { files: 1, insertions: 1, deletions: 1 }, createdAt: new Date().toISOString(),
     };
-    const diff = await formatPublishedResultDiff({
-      getObject: async (hash) => objects.get(hash) ?? null,
-    }, result);
+    const diff = await formatPublishedResultDiff({ getObject: async (hash) => objects.get(hash) ?? null }, result);
     expect(diff).toContain("--- a/a.txt");
     expect(diff).toContain("-old");
     expect(diff).toContain("+new");
