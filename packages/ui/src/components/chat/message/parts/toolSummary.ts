@@ -93,7 +93,7 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
       const durationMs = asNumber(details?.durationMs);
       const exitStr = exitCode !== undefined ? ` · exit ${exitCode}` : "";
       const durStr = durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1)}s` : "";
-      const shellId = asString(details?.shellId);
+      const shellId = asString(details?.shellId) ?? (details?.kind === "background" ? asString(details?.id) : undefined);
       const bgStr = shellId !== undefined ? ` · running · shell ${shellId}` : "";
       return {
         text: `${firstLine.slice(0, 80)}${exitStr}${durStr}${bgStr}`,

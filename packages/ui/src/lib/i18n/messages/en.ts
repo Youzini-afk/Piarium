@@ -13,6 +13,7 @@ export const dict = {
   'chat.chatInput.prCheckContextRemove': 'Remove PR checks context',
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',
+  'chat.timeline.tools.openTerminal': 'Open terminal',
   'harness.threads.title': 'Threads',
   'harness.context.title': 'Session state',
   'harness.context.open': 'Open session state',

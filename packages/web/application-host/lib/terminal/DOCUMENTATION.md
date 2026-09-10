@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, status, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.js` owns terminal identity, PTY processes, status, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. Programmatic `createTerminalSession` / `attachTerminalSession` / `inspectSession` are the same authority used by HTTP and WebSocket. Harness background shells create sessions with `owner: 'harness'` and `retainWhenDetached: true`; HTTP create ignores client `owner` / `spawn` / retain flags. Closing a retained session detaches viewers and leaves the process running. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 

@@ -300,9 +300,10 @@ export class PiRuntimeManager {
     if (selected && selected.state !== "missing") return selected;
     const usable = (entry: PiRuntimeInstallation) =>
       entry.state === "ready" || entry.state === "upgrade-required";
+    const bundled = byId.get("bundled");
+    if (bundled?.state === "ready") return bundled;
     return (
       this.#installations.find((entry) => (entry.id === "system" || entry.id === "standalone") && usable(entry))
-      ?? this.#installations.find((entry) => entry.id === "bundled" && entry.state === "ready")
       ?? this.#installations.find((entry) => usable(entry))
     );
   }

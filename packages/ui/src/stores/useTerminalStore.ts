@@ -29,11 +29,13 @@ export const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
 });
 
 export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
+export type TerminalTabClosePolicy = 'destroy' | 'detach';
 
 export type TerminalTab = {
   id: string;
   terminalSessionId: string | null;
   lifecycle: TerminalTabLifecycle;
+  closePolicy: TerminalTabClosePolicy;
   label: string;
   iconKey: string | null;
   isConnecting: boolean;
@@ -71,6 +73,7 @@ interface TerminalStore {
   getBuffer: (directory: string, tabId: string) => TerminalBuffer;
 
   createTab: (directory: string) => string;
+  attachExistingSession: (directory: string, sessionId: string, label?: string) => string;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
   setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
@@ -174,6 +177,7 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   id,
   terminalSessionId: null,
   lifecycle: 'idle',
+  closePolicy: 'destroy',
   label,
   iconKey: null,
   isConnecting: false,
@@ -323,6 +327,38 @@ export const useTerminalStore = create<TerminalStore>()(
             return { sessions: newSessions, nextTabId };
           });
 
+          return tabId;
+        },
+
+        attachExistingSession: (directory: string, sessionId: string, label) => {
+          const key = normalizeDirectory(directory);
+          if (!key || !sessionId.trim()) return 'tab-invalid';
+          const existingState = get().getDirectoryState(key);
+          const already = existingState?.tabs.find((tab) => tab.terminalSessionId === sessionId);
+          if (already) {
+            get().setActiveTab(key, already.id);
+            return already.id;
+          }
+          const tabId = get().createTab(key);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) return state;
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) return state;
+            const tab = existing.tabs[idx];
+            if (!tab) return state;
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...tab,
+              terminalSessionId: sessionId,
+              lifecycle: 'running',
+              closePolicy: 'detach',
+              ...(label?.trim() ? { label: label.trim() } : {}),
+            };
+            newSessions.set(key, { ...existing, tabs: nextTabs, activeTabId: tabId });
+            return { sessions: newSessions };
+          });
           return tabId;
         },
 
@@ -805,6 +841,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
                 terminalSessionId: null,
                 lifecycle: 'idle',
+                closePolicy: 'destroy',
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,
                 previewUrl: null,

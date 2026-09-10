@@ -3,6 +3,7 @@ import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
 import type { HarnessShellSetting } from "./harness-shell-settings.js";
 import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
+import type { TerminalSessionApi } from "../terminal/session-api.js";
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
@@ -243,6 +244,7 @@ export interface HarnessServiceHostOptions {
    * with a close() method, or null if registration is not available.
    */
   registerWriter?: (sessionId: string, workspaceRoot: string) => Promise<{ close: () => Promise<void> } | null>;
+  createTerminalSession?: TerminalSessionApi["createTerminalSession"];
   /** Web fetch service (null on cloud/web hosts without fetch capability) */
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
@@ -310,7 +312,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const compactionDepsProvider = options.compactionDepsProvider ?? null;
   const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
   const keeperCoverageStore = options.keeperCoverageStore ?? createKeeperCoverageStore();
-  const todoSettings = options.todoSettings ?? { confirmBelow: 0.6 };
+  const todoSettings = options.todoSettings ?? { requireConfirmation: false };
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
   // Phase 3
@@ -382,6 +384,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         cwd: ctx.workspaceRoot ?? undefined,
         ...(options.registerWriter ? {
           registerWriter: () => options.registerWriter!(sessionId, ctx.workspaceRoot),
+        } : {}),
+        ...(options.createTerminalSession ? {
+          createTerminalSession: options.createTerminalSession,
         } : {}),
       });
     }

@@ -9,12 +9,12 @@
  * Content rendered as `- [ ] text` / `- [x] text` / `- [!] text`.
  * Returns: `plan updated: ${done}/${total} done${blocked ? `, ${blocked} blocked` : ''}`
  *
- * Confidence check: confidence < settings.plan.confirmBelow (default 0.6) and
- * session not yet confirmed → ask for confirmation via permission channel.
+ * Confidence is informational. Confirmation waits only when an explicit
+ * approval policy is enabled (requireConfirmation or the existing permission
+ * gate). Version conflicts stay on the knowledge store.
  */
 
 import type { KnowledgeStore } from "../knowledge/store.js";
-import { DEFAULT_TODO_CONFIRM_BELOW } from "@piarium/protocol";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -31,11 +31,11 @@ export interface TodoToolInput {
 }
 
 export interface TodoToolSettings {
-  confirmBelow: number; // default 0.6
+  requireConfirmation: boolean;
 }
 
 export const DEFAULT_TODO_SETTINGS: TodoToolSettings = {
-  confirmBelow: DEFAULT_TODO_CONFIRM_BELOW,
+  requireConfirmation: false,
 };
 
 export interface TodoToolDeps {
@@ -84,9 +84,8 @@ export async function executeTodoTool(
   const items = input.items;
   const content = renderPlanContent(items);
 
-  // Confidence check
-  const askedConfirmation = input.confidence !== undefined && input.confidence < settings.confirmBelow;
-  if (!sessionConfirmed && askedConfirmation) {
+  const askedConfirmation = settings.requireConfirmation;
+  if (askedConfirmation && !sessionConfirmed) {
     return {
       text: "plan update requires user confirmation",
       confirmed: false,
@@ -94,7 +93,6 @@ export async function executeTodoTool(
     };
   }
 
-  // Replace plan block
   await store.upsertBlock({
     sessionId,
     label: "plan",
@@ -106,14 +104,17 @@ export async function executeTodoTool(
     }),
   });
 
-  // Build summary
   const done = items.filter((i) => i.status === "done").length;
   const blocked = items.filter((i) => i.status === "blocked").length;
   const total = items.length;
   let text = `plan updated: ${done}/${total} done`;
   if (blocked > 0) text += `, ${blocked} blocked`;
 
-  return { text, ...(sessionConfirmed && askedConfirmation ? { confirmed: true } : {}), askedConfirmation };
+  return {
+    text,
+    ...(askedConfirmation && sessionConfirmed ? { confirmed: true } : {}),
+    askedConfirmation,
+  };
 }
 
 // ── Prompt guidelines ──────────────────────────────────────────────

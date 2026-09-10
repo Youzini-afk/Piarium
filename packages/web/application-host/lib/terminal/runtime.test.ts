@@ -557,7 +557,7 @@ describe('terminal runtime', () => {
       expect(resize.statusCode).toBe(200);
       const closed = createResponse();
       await requiredRoute(harness.routes.delete, '/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, closed);
-      expect(closed.body).toEqual({ success: true });
+      expect(closed.body).toEqual({ success: true, retained: false });
     } finally { await harness.runtime.shutdown(); }
   });
 
@@ -703,4 +703,113 @@ describe('terminal runtime', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   }, 15_000);
+
+  it('creates and attaches a programmatic harness session without HTTP spawn', async () => {
+    const harness = createHarness();
+    try {
+      const handle = await harness.runtime.createTerminalSession({
+        sessionId: 'sh_1',
+        cwd: '/repo',
+        owner: 'harness',
+        retainWhenDetached: true,
+        registerProcessWriter: false,
+        spawn: { executable: '/usr/bin/harness-bash', args: ['-l'], env: { HARNESS: '1' } },
+      });
+      expect(handle.id).toBe('sh_1');
+      expect(harness.runtime.inspectSession('sh_1')).toMatchObject({
+        id: 'sh_1',
+        owner: 'harness',
+        retainWhenDetached: true,
+        status: 'running',
+      });
+      expect(requiredProcess(harness.processes, 0).shell).toBe('/usr/bin/harness-bash');
+      expect(requiredProcess(harness.processes, 0).args).toEqual(['-l']);
+
+      const attached = harness.runtime.attachTerminalSession('sh_1');
+      expect(attached?.id).toBe('sh_1');
+      const chunks: string[] = [];
+      attached?.onData((data) => { chunks.push(data); });
+      requiredProcess(harness.processes, 0).emitData('live-output');
+      expect(chunks).toEqual(['live-output']);
+      attached?.write('stdin');
+      expect(requiredProcess(harness.processes, 0).writes).toContain('stdin');
+
+      const ignored = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/create')({
+        body: {
+          sessionId: 'user-1',
+          cwd: '/repo',
+          owner: 'harness',
+          retainWhenDetached: true,
+          spawn: { executable: '/tmp/evil', args: ['-c', 'id'] },
+        },
+      }, ignored);
+      expect(ignored.statusCode).toBe(200);
+      expect(requiredProcess(harness.processes, 1).shell).not.toBe('/tmp/evil');
+      expect(harness.runtime.inspectSession('user-1')?.owner).toBe('user');
+
+      const inspect = createResponse();
+      requiredRoute(harness.routes.get, '/api/terminal/:sessionId')({ params: { sessionId: 'sh_1' } }, inspect);
+      expect(inspect.body).toMatchObject({ id: 'sh_1', owner: 'harness', retainWhenDetached: true });
+
+      const restart = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/restart')({
+        params: { sessionId: 'sh_1' },
+        body: { cwd: '/repo' },
+      }, restart);
+      expect(restart.statusCode).toBe(409);
+      expect(requiredProcess(harness.processes, 0).killed).toBe(false);
+
+      const closed = createResponse();
+      await requiredRoute(harness.routes.delete, '/api/terminal/:sessionId')({ params: { sessionId: 'sh_1' } }, closed);
+      expect(closed.body).toEqual({ success: true, retained: true });
+      expect(requiredProcess(harness.processes, 0).killed).toBe(false);
+      expect(harness.runtime.inspectSession('sh_1')?.status).toBe('running');
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('does not idle-expire harness sessions while user sessions still expire', async () => {
+    const harness = createHarness({ terminalIdleTimeoutMs: 20, terminalIdleSweepMs: 10 });
+    try {
+      await harness.runtime.createTerminalSession({
+        sessionId: 'sh_keep',
+        cwd: '/repo',
+        owner: 'harness',
+        retainWhenDetached: true,
+        spawn: { executable: '/bin/sh', args: [] },
+      });
+      await requiredRoute(harness.routes.post, '/api/terminal/create')({
+        body: { sessionId: 'user-idle', cwd: '/repo' },
+      }, createResponse());
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(harness.runtime.inspectSession('sh_keep')?.status).toBe('running');
+      expect(harness.runtime.inspectSession('user-idle')).toBeNull();
+      expect(requiredProcess(harness.processes, 0).killed).toBe(false);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('does not count harness sessions against the user session cap', async () => {
+    const harness = createHarness();
+    try {
+      for (let index = 0; index < 20; index += 1) {
+        const created = createResponse();
+        await requiredRoute(harness.routes.post, '/api/terminal/create')({
+          body: { sessionId: `user-${index}`, cwd: '/repo' },
+        }, created);
+        expect(created.statusCode).toBe(200);
+      }
+      await harness.runtime.createTerminalSession({
+        sessionId: 'sh_cap',
+        cwd: '/repo',
+        owner: 'harness',
+        spawn: { executable: '/bin/sh', args: [] },
+      });
+      expect(harness.runtime.inspectSession('sh_cap')?.owner).toBe('harness');
+      const overflow = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/create')({
+        body: { sessionId: 'user-overflow', cwd: '/repo' },
+      }, overflow);
+      expect(overflow.statusCode).toBe(429);
+    } finally { await harness.runtime.shutdown(); }
+  });
 });

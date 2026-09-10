@@ -40,6 +40,8 @@ worker 响应送达后推进 observation/thread cursors 已接生产路径。它
 
 **D-203–D-205 已完成本轮验收返工。** 旧预览覆盖新编辑、surface 提前 complete、预览请求自循环、退出前释放写者、准备失败无法重试及并发回收/预算问题均已按具体反例修复。真实 Documents/Registry 混合集成与撤销、Windows Git Bash/PowerShell、Git/native 归档恢复再发布及普通线程打开前恢复已有证据；证据范围与尚未验证的平台见下表。
 
+**D-206 已接通后台 shell 与 terminal runtime，并收掉默认路径的两个缺口。** 公开 `bash` 后台命令与用户终端 tab 共用同一会话身份和进程；关闭查看不杀进程；bundled Pi 在无显式选择时优先于 PATH/system；todo/plan 的 confidence 不再默认弹确认。证据与未测平台见 1.3 / 2.5。
+
 **D-080 简化辅助统计。** 已移除“模型槽位用量”区块及其专用聚合/传输，后续不新增同类辅助费用或 Token 看板。
 右上角原有普通会话费用、输入/输出/缓存 Token 和上下文容量展示保留；模型槽位的配置与功能不变。
 验证：`harnessCounterPresentation.test.ts`、`sessionStats.test.ts`、`usagePresentation.test.ts` 与 i18n 两组测试共 17 项；
@@ -70,7 +72,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **0.3** `HARNESS_TOOL_META` 与 unjournalled 判定 | protocol / host | ✓ | ✓ | `protocol/test/harness-tools.test.ts`；`turn-coordinator.test.ts` | ✓ | — | — |
 | **1.1** worker→host 请求通道（bridge / router） | protocol / pi-host / host | ✓ | ✓ | `pi-host/test/harness/host-services-bridge.test.ts`、`router-bridge-contract.test.ts`、`harness-e2e.test.ts`；`runtime-broker/test/worker-event-identity.test.ts`；`host/router.test.ts`、`service-host.test.ts` | ✓ | — | broker 在 create/open/fork 方法响应后 pin session；请求 payload 无 sessionId；Router 只使用 broker Actor，并由 Host 注册表补齐 workspace 与静态能力（D-035） |
 | **1.2** Zone 0 字节稳定 | pi-host | ✓ | ✓ | `pi-host/test/zone0-stability.test.ts`、`pi-hooks-contract.test.ts` | ✓ | — | — |
-| **1.3** `bash` / shell 监督器（D-200 / D-205） | host / pi-host | ✓ | ✓ | `shell-supervisor.test.ts`（初始化重试、真实退出、迟到写者、中断不伪造完成）；`shell-assembly.test.ts`（本机真实 Git Bash、PowerShell 连续调用与非零退出）；`session-registration.test.ts` / `service-host.test.ts` / `router.test.ts`（首请求等待同 actor 代际、关闭不复活、停止失败保留写者、按 actor 取消） | ✓ | Host 不提供能力时保留 Pi 内置；已配置解释器/设置失败明确 unavailable | 后台 shell 尚不是终端 tab（D-013）；macOS / Linux 真机 smoke 未做；bundled Pi 默认优先级另排 |
+| **1.3** `bash` / shell 监督器（D-200 / D-205 / D-206） | host / pi-host / ui | ✓ | ✓ | `terminal/runtime.test.ts`（程序化 create/attach、HTTP 忽略 spawn/owner、DELETE retain、harness 不可 restart、idle 跳过、上限不计 harness）；`terminal-harness-bridge.test.ts`（同一 handle 上用户附着与 agent 读写）；`shell-assembly.test.ts`（本机真实 Git Bash 后台附着与输入回显、PowerShell 连续调用与非零退出）；`shell-supervisor.test.ts`（转后台后继续采集、无显式 cwd 仍保护会话目录、真实退出/迟到写者）；`openHarnessTerminal.test.ts` / `useTerminalStore.test.ts`（detach tab、不重开）；`runtime-broker/test/runtime-manager.test.ts`（无选择时用 bundled，显式 system 保持优先） | ✓ | Host 不提供能力时保留 Pi 内置；已配置解释器/设置失败明确 unavailable | macOS / Linux 真机 smoke 未做；浏览器完整点击链未跑。bundled Pi 是 runtime 选择，不是 `harness.shell` |
 | **1.4** `OutputRef` 与 `tool_result` 截断 | host / pi-host / protocol | ✓ | ✓ | `host/output-store.test.ts`（epoch、HMAC、水位、Unicode）；`protocol/test/utf8.test.ts`；`tool-result-truncation.test.ts`；`harness-e2e.test.ts` #5；`session-e2e.test.ts`（真实 Pi agent loop：read 大文件只见预览/句柄，再用 get_output UTF-8 分页） | ✓ | Pi 默认（结果原样进上下文） | — |
 | **1.5** `grep` 覆盖 | host / pi-host | ✓ | ✓ | `host/search-service.test.ts`；`harness-e2e.test.ts` #4、#6 | ✓ | Pi 内置 grep | — |
 | **1.6a** `edit` / `write` 编辑后诊断、`diagnostics` 工具 | host / pi-host | ✓ | ✓ | `diagnostics-adapter.test.ts`（真实 fixture LSP 进程、版本化 error→clean、pending/unavailable）；`session-e2e.test.ts`（真实 Pi agent loop → Host bridge → fixture LSP）；`output-tools.test.ts` | ✓ | 无诊断附注 | — |
@@ -90,7 +92,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.2** Zone 2 组装 | host / pi-host | ✓ | ✓ | `host/zone2.test.ts`；`knowledge/context-runtime.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（Documents 用户写入在下一真实 Pi turn 出现、event cursor 不重复、system 不变） | ✓ | 无材料时不追加消息 | user terminal 尚缺 shell integration；Git 与 prompt-relevant accepted knowledge 已接 |
 | **2.3** host 观察者 | host knowledge | ✓ | ✓（Documents + user-change LSP + Git status） | `documents/authority.test.ts`（提交后通知且观察失败不反噬写入）；`knowledge/context-runtime.test.ts`（多会话 fan-out、agent 过滤、诊断因果、raw Git status → workspace → event → Zone 2 与去重）；`git-status.test.ts` / `git-status-runtime.test.ts`（最小投影与 Documents workspace 解析）；`git/routes.test.ts` / `workspace-routes.test.ts`（两个生产刷新边界且 observer 失败不反噬）；`session-e2e.test.ts`（Documents 纵切） | ✓（已接部分） | 观察失败只降级本轮上下文并记录 Host 错误；不新增 Git 轮询 | user terminal 需要 shell integration 才有可靠的逐命令/退出码；Git 外部变化在现有 status 下一次刷新时可见，不声称后台实时；Harness shell / agent 自身事件不重复进 Zone 2（D-054） |
 | **2.4** 记忆 keeper（off / assist / takeover） | protocol / pi-host / host / ui | ✓ | ✓ | `memory-agent-extension.test.ts`（动态 off、拒绝/成功）；`phase2-e2e.test.ts`（Host 顺序 apply、off 不注入）；`session-e2e.test.ts`（当前模型后台调用、默认/旧值/实时全局/session override、失败投影，memory_edit 不进主对话）；`context-routes.test.ts` / `harnessBlockPresentation.test.ts` / `harnessMemoryPresentation.test.ts` | ✓（缺省 takeover） | off：不维护、不注入、Pi 压缩；assist：维护/注入、Pi 压缩 | 事件加速尚未接；辅助费用/Token 明细按 D-080 不提供 |
-| **2.5** `todo` / `plan` 块 | host / pi-host / ui | ✓ | ✓ | `host/todo-tool.test.ts`；`pi-host/test/harness/todo-tool.test.ts`（当前低置信度真 UI、同会话只问一次、取消不写 Host）；`phase2-e2e.test.ts`；session state 侧栏可见可编辑（D-046） | ✓ | 不注册 | D-078 将默认低置信度确认改为用户显式审批策略，尚未改代码 |
+| **2.5** `todo` / `plan` 块 | host / pi-host / ui | ✓ | ✓ | `host/todo-tool.test.ts`（低 confidence 默认直写；仅 `requireConfirmation` 等待）；`pi-host/test/harness/todo-tool.test.ts`（Host 未要求时不弹 UI，明确审批策略才问一次，取消不重试 Host）；`phase2-e2e.test.ts`；session state 侧栏可见可编辑（D-046） | ✓ | 不注册 | confidence 只作信息。未配置审批策略时不弹确认（D-206） |
 | **2.6** 接管压缩 | host / pi-host | ✓ | ✓ | `host/compaction.test.ts`（覆盖/错分支/block 修订/重启）；`compaction-extension.test.ts`（Pi 移除边界）；`session-e2e.test.ts`（零额外模型调用接管、Pi fallback、连续两次压缩）；`pi-hooks-contract.test.ts`（D-022） | ✓（takeover 模式） | 任一证据不足或 off/assist 时由 Pi 完成本次摘要 | coverage 有意保留在 Host 内存，重启后等下一次 material keeper 更新重建；facts 当前只可靠提供 touched files，不伪造当前诊断/checkpoint；测试为本地 faux provider |
 | **2.7** 知识建议 / 审阅托盘 / 取代链 | host / ui | ✓ | ✓（全部 user-mark + memory decisions） | `knowledge-suggestions.test.ts`（同 scope 取代与状态）；`context-routes.test.ts`（UI auth、workspace/user 创建→编辑→原子接受/驳回、409、取代链）；`decision-suggestions.test.ts`（committed previous/current、结构化新增、历史/驳回去重、用户块忽略）；`recall-tool.test.ts`（user store scope）；`harnessKnowledgePresentation.test.ts` / `HarnessKnowledgeReviewSection.test.tsx`（双 scope id、malformed、编辑与候选渲染）；`RememberKnowledgeButton.test.ts` / `PiTimelineEntries.renderMode.test.tsx`（持久 user/assistant/tool 来源）；`piariumEvents.test.ts`（失效通知） | ✓（用户显式动作；keeper 更新 decisions 时） | off 且无用户标记时不发起 keeper 模型调用；建议未接受不参与 recall | 配置 suggestions model 后的用户消息提议、Settings 全量知识/取代链管理未接（D-058/D-060/D-061） |
 | **2.8** 知识库语义召回（D-196 / D-198） | host knowledge | ✓ | ✓ | `knowledge-recall.test.ts`（向量命中、范围/状态/修订、完整长条目分块、换空间）；`vectors/acceptance.test.ts`（自动维度、绑定异常保留文本、不自循环重试、并发 bootstrap 不串 query、resolver 取消/关闭）；`knowledge-services.test.ts`（actor 工作区传递、公开 recall / Zone 2 取消）；知识库 134 项及新增边界/公开接线 9 项通过 | ✓（未配远程保持文本；有效配置启用派生向量） | failed/unavailable/partial/empty 分列，绑定解析异常也保留文本 | 复用共享代际库、chunker、缓存与调度；受影响 id 即时失效，配置刷新与关闭已接。证据来自真实模块和 faux provider，不证明完整桌面 IPC 或真实外部质量；权威 `.tdb` 不变，不回退 MiniLM |
@@ -249,7 +251,7 @@ TriviumDB 的数据库问题按版本和通用语义向用户说明，不转嫁 
 | --- | --- |
 | D-023 | Zone 2 尚缺 user terminal；配置 suggestions model 后的自动提议与 Settings 全量知识管理未接；memory 事件加速触发未接 |
 | D-024 / D-026 | merge/归档后的 worktree 与分支回收已由 D-077/D-202 接线；归档/恢复 UI 见 D-202 |
-| D-013 | harness shell 未接进 terminal runtime |
+| D-013 | 已由 D-206 接通 terminal runtime；见矩阵 1.3 |
 
 ## 历史快照：阶段 1 小结（2026-09-03，自决策日志迁入）
 
@@ -283,4 +285,4 @@ TriviumDB 的数据库问题按版本和通用语义向用户说明，不转嫁 
 
 `buildHarnessRespondParams` → host-controller `harness.respond` → `respondHarness` → bridge：ok 结果 resolves；error 结果 rejection；timeout 为 retryable rejection。
 
-当时的已知缺口：`read` 的 `tool_result` 截断未在真会话验证；诊断 provider 已接线但未用真实 LSP 验证；D-013 的 terminal runtime 集成待完成。前两条已于 2026-09-05 由 D-065 补齐；terminal runtime 集成仍见矩阵。
+当时的已知缺口：`read` 的 `tool_result` 截断未在真会话验证；诊断 provider 已接线但未用真实 LSP 验证；D-013 的 terminal runtime 集成待完成。前两条已于 2026-09-05 由 D-065 补齐；terminal runtime 集成已由 D-206 收口，见矩阵 1.3。

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@piarium/protocol";
+import type { CreateTerminalSessionInput, TerminalHandle, TerminalSessionApi } from "../terminal/session-api.js";
 import type { OutputStore } from "./output-store.js";
 
 export type ShellInterpreterKind = "git-bash" | "bash" | "wsl" | "powershell" | "remote";
@@ -133,15 +134,85 @@ export interface PtyProvider {
   spawn(executable: string, args: string[], options: Record<string, unknown>): PtyProcess;
 }
 
-async function loadPtyProvider(): Promise<PtyProvider> {
-  if ("Bun" in globalThis) {
-    try {
-      const pty = await import("bun-pty");
-      return { spawn: pty.spawn as PtyProvider["spawn"], backend: "bun-pty" };
-    } catch { /* fall through */ }
-  }
-  const pty = await import("node-pty");
-  return { spawn: pty.spawn as PtyProvider["spawn"], backend: "node-pty" };
+export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider): TerminalSessionApi {
+  const handles = new Map<string, TerminalHandle>();
+  let nextId = 0;
+  return {
+    async createTerminalSession(input: CreateTerminalSessionInput): Promise<TerminalHandle> {
+      const id = input.sessionId?.trim() || `term_${++nextId}`;
+      const existing = handles.get(id);
+      if (existing?.status === "running") return existing;
+      const spawn = input.spawn ?? { executable: "bash", args: [] };
+      const ptyProcess = ptyProvider.spawn(spawn.executable, spawn.args, {
+        cols: input.cols ?? 120,
+        rows: input.rows ?? 40,
+        cwd: input.cwd,
+        env: { ...globalThis.process.env, ...spawn.env },
+      });
+      const dataHandlers = new Set<(data: string) => void>();
+      const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+      let status: TerminalHandle["status"] = "running";
+      let exitCode: number | null = null;
+      let signal: number | null = null;
+      ptyProcess.onData((data) => { for (const handler of dataHandlers) handler(data); });
+      ptyProcess.onExit((event) => {
+        status = "exited";
+        exitCode = event.exitCode;
+        signal = event.signal;
+        for (const handler of exitHandlers) handler(event);
+      });
+      const handle: TerminalHandle = {
+        get id() { return id; },
+        get cwd() { return input.cwd; },
+        get status() { return status; },
+        write(data: string) { ptyProcess.write(data); },
+        resize(cols: number, rows: number) { ptyProcess.resize(cols, rows); },
+        onData(handler) {
+          dataHandlers.add(handler);
+          return { dispose: () => { dataHandlers.delete(handler); } };
+        },
+        onExit(handler) {
+          if (status === "exited") {
+            queueMicrotask(() => handler({ exitCode: exitCode ?? 0, signal: signal ?? 0 }));
+          }
+          exitHandlers.add(handler);
+          return { dispose: () => { exitHandlers.delete(handler); } };
+        },
+        waitForExit() {
+          if (status === "exited") return Promise.resolve({ exitCode, signal });
+          return new Promise((resolve) => {
+            const disposable = handle.onExit((event) => {
+              disposable.dispose();
+              resolve({ exitCode: event.exitCode, signal: event.signal });
+            });
+          });
+        },
+        async terminate() {
+          ptyProcess.kill();
+        },
+        async destroy() {
+          try { ptyProcess.kill(); } catch { /* already gone */ }
+          handles.delete(id);
+        },
+      };
+      handles.set(id, handle);
+      return handle;
+    },
+    attachTerminalSession(id: string) {
+      return handles.get(id) ?? null;
+    },
+    inspectSession(id: string) {
+      const handle = handles.get(id);
+      if (!handle) return null;
+      return {
+        id: handle.id,
+        cwd: handle.cwd,
+        owner: "harness" as const,
+        retainWhenDetached: true,
+        status: handle.status,
+      };
+    },
+  };
 }
 
 // ── Shell Supervisor (PTY-based) ────────────────────────────────────
@@ -155,7 +226,8 @@ export interface ShellSupervisorOptions {
   cols?: number;
   rows?: number;
   registerWriter?: () => Promise<{ close: () => Promise<void> } | null>;
-  /** Deterministic test seam; production loads bun-pty or node-pty. */
+  createTerminalSession?: TerminalSessionApi["createTerminalSession"];
+  /** Deterministic test seam wrapping a fake PTY. Production uses terminal runtime. */
   ptyProvider?: PtyProvider;
 }
 
@@ -169,6 +241,7 @@ interface BackgroundShell {
   exitCode: number | null;
   lastOutputAt: number | null;
   writer: { close: () => Promise<void> } | null;
+  handle: TerminalHandle;
 }
 
 export type ShellSupervisor = ReturnType<typeof createShellSupervisor>;
@@ -193,17 +266,30 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   let activeBackground: BackgroundShell | null = null;
   let shellCounter = 0;
   let disposed = false;
-  let ptyProcess: PtyProcess | null = null;
-  let ptyProvider: PtyProvider | null = deps.ptyProvider ?? null;
+  let sessionHandle: TerminalHandle | null = null;
+  const liveHandles = new Set<TerminalHandle>();
+  const handleBindings = new Map<TerminalHandle, Set<{ dispose?(): void }>>();
+  const terminalApi: TerminalSessionApi | null = deps.createTerminalSession
+    ? {
+      createTerminalSession: deps.createTerminalSession,
+      attachTerminalSession: (id) => {
+        if (sessionHandle?.id === id) return sessionHandle;
+        for (const background of backgroundShells.values()) {
+          if (background.handle.id === id) return background.handle;
+        }
+        return null;
+      },
+      inspectSession: () => null,
+    }
+    : deps.ptyProvider
+      ? createTerminalSessionApiFromPtyProvider(deps.ptyProvider)
+      : null;
+  let lastCwd = deps.cwd ?? process.cwd();
   let outputBuffer = "";
   let shellReady = false;
   let shellReadyPromise: Promise<void> | null = null;
   let shellReadyResolve: (() => void) | null = null;
   let shellReadyReject: ((error: unknown) => void) | null = null;
-  // Track disposables from onData/onExit to clean up on dispose
-  let dataDisposable: { dispose?(): void } | null = null;
-  let exitDisposable: { dispose?(): void } | null = null;
-
   // Pending command state
   type ShellWriter = { close: () => Promise<void> };
   interface PendingCommand {
@@ -233,11 +319,28 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return writer?.close() ?? Promise.resolve();
   };
 
-  const clearPtyHandlers = (): void => {
-    try { dataDisposable?.dispose?.(); } catch { /* already disposed */ }
-    try { exitDisposable?.dispose?.(); } catch { /* already disposed */ }
-    dataDisposable = null;
-    exitDisposable = null;
+  const unbindHandle = (handle: TerminalHandle): void => {
+    const disposables = handleBindings.get(handle);
+    if (disposables) {
+      for (const disposable of disposables) {
+        try { disposable.dispose?.(); } catch { /* already disposed */ }
+      }
+      handleBindings.delete(handle);
+    }
+    liveHandles.delete(handle);
+  };
+
+  const clearAllBindings = (): void => {
+    for (const handle of [...handleBindings.keys()]) unbindHandle(handle);
+  };
+
+  const trackDisposable = (handle: TerminalHandle, disposable: { dispose?(): void }): void => {
+    let disposables = handleBindings.get(handle);
+    if (!disposables) {
+      disposables = new Set();
+      handleBindings.set(handle, disposables);
+    }
+    disposables.add(disposable);
   };
 
   const closePendingWriterAfterStop = async (pending: PendingCommand): Promise<void> => {
@@ -304,17 +407,98 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return work;
   };
 
+  const resolveTerminalApi = (): TerminalSessionApi => {
+    if (terminalApi) return terminalApi;
+    throw new Error("Terminal runtime is not available");
+  };
+
+  const bindSessionHandle = (handle: TerminalHandle, initMarker: string): void => {
+    let initBuffer = "";
+    liveHandles.add(handle);
+    const isCurrentSession = (): boolean => sessionHandle === handle;
+    trackDisposable(handle, handle.onData((data: string) => {
+      if (pendingCommand && isCurrentSession()) {
+        outputBuffer += data;
+        parsePendingOutput();
+        return;
+      }
+      const background = backgroundShells.get(handle.id);
+      if (background && !background.exited) {
+        background.output += data;
+        parseBackgroundOutput(background);
+        background.lastOutputAt = Date.now();
+        return;
+      }
+      if (isCurrentSession() && !shellReady) {
+        initBuffer += data;
+        const cleaned = stripControlSequences(initBuffer);
+        if (cleaned.includes(initMarker)) {
+          shellReady = true;
+          shellReadyResolve?.();
+          shellReadyResolve = null;
+          shellReadyReject = null;
+        }
+      }
+    }));
+
+    trackDisposable(handle, handle.onExit((event) => {
+      const wasCurrent = isCurrentSession();
+      const wasInitializing = wasCurrent && !shellReady;
+      liveHandles.delete(handle);
+      if (wasCurrent) {
+        sessionHandle = null;
+        shellReady = false;
+        shellReadyPromise = null;
+      }
+      if (wasInitializing) {
+        const rejectReadyNow = shellReadyReject;
+        shellReadyResolve = null;
+        shellReadyReject = null;
+        shellReadyPromise = null;
+        rejectReadyNow?.(new Error(`Shell exited before ready (code ${event.exitCode})`));
+        if (disposeRequested && liveHandles.size === 0) void finalizeStoppedResources();
+        return;
+      }
+      if (disposeRequested) {
+        if (pendingCommand && wasCurrent) clearTimeout(pendingCommand.timeout);
+        const background = backgroundShells.get(handle.id);
+        if (background) {
+          background.exited = true;
+          background.exitCode = event.exitCode;
+        }
+        if (liveHandles.size === 0) void finalizeStoppedResources();
+        return;
+      }
+      if (pendingCommand && wasCurrent) {
+        clearTimeout(pendingCommand.timeout);
+        void pendingCommand.writer?.close();
+        pendingCommand.resolve({
+          kind: "completed",
+          exitCode: event.exitCode,
+          durationMs: Date.now() - pendingCommand.startedAt,
+          cwd: pendingCommand.cwd,
+          stdout: stripControlSequences(outputBuffer),
+          stderr: "",
+          handle: null,
+          shown: null,
+        });
+        pendingCommand = null;
+      }
+      const background = backgroundShells.get(handle.id);
+      if (background) {
+        background.exited = true;
+        background.exitCode = event.exitCode;
+        closeBackgroundWriter(background);
+        if (activeBackground === background) activeBackground = null;
+      }
+    }));
+  };
+
   const ensureShell = async (): Promise<void> => {
     if (disposed) throw new Error("Shell supervisor has been disposed");
-    if (shellReady) return;
-    if (!ptyProvider) ptyProvider = await loadPtyProvider();
-    if (disposed) throw new Error("Shell supervisor has been disposed");
-    if (ptyProcess) return shellReadyPromise ?? Promise.resolve();
+    if (shellReady && sessionHandle?.status === "running") return;
+    if (sessionHandle?.status === "running") return shellReadyPromise ?? Promise.resolve();
 
-    // PowerShell must receive an initial command on its command line. Sending
-    // `-Command -` to a ConPTY is rejected as if stdin were not redirected;
-    // `-NoExit -Command <marker>` leaves the interactive process alive and
-    // gives us a deterministic readiness marker before any user command.
     const initToken = randomBytes(8).toString("hex");
     const initMarker = `__PIARIUM_READY_${initToken}__`;
 
@@ -327,121 +511,41 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     shellReadyPromise = ready;
     shellReadyResolve = resolveReady;
     shellReadyReject = rejectReady;
+    shellReady = false;
 
     try {
-      if (!ptyProvider) {
-        const error = new Error("PTY provider not loaded");
-        shellReadyPromise = null;
-        shellReadyResolve = null;
-        shellReadyReject = null;
-        rejectReady(error);
-        return ready;
-      }
-      ptyProcess = ptyProvider.spawn(
-        interpreter.command,
-        interpreter.kind === "powershell"
-          ? [...interpreter.args, "-Command", `Write-Output ${quotePowerShell(initMarker)}`]
-        : interpreter.args,
-        {
-          cols,
-          rows,
-          cwd: deps.cwd ?? process.cwd(),
+      const api = resolveTerminalApi();
+      if (disposed) throw new Error("Shell supervisor has been disposed");
+      const id = `sh_${++shellCounter}`;
+      const spawnArgs = interpreter.kind === "powershell"
+        ? [...interpreter.args, "-Command", `Write-Output ${quotePowerShell(initMarker)}`]
+        : interpreter.args;
+      sessionHandle = await api.createTerminalSession({
+        sessionId: id,
+        cwd: lastCwd,
+        cols,
+        rows,
+        owner: "harness",
+        retainWhenDetached: true,
+        registerProcessWriter: false,
+        spawn: {
+          executable: interpreter.command,
+          args: spawnArgs,
           env: { ...process.env, ...baseEnv } as Record<string, string>,
-          windowsHide: true,
         },
-      );
-
-      // Wait for initial prompt by sending a unique echo command for shells
-      // whose process starts without a command-line initialization script.
-      let initBuffer = "";
-
-      dataDisposable = ptyProcess.onData((data: string) => {
-        // Route to pending command or init
-        if (pendingCommand) {
-          outputBuffer += data;
-          parsePendingOutput();
-        } else if (activeBackground) {
-          const background = activeBackground;
-          background.output += data;
-          parseBackgroundOutput(background);
-          background.lastOutputAt = Date.now();
-        } else {
-          initBuffer += data;
-          // Strip control sequences for marker detection
-          const cleaned = stripControlSequences(initBuffer);
-          if (cleaned.includes(initMarker)) {
-            shellReady = true;
-            shellReadyResolve?.();
-            shellReadyResolve = null;
-            shellReadyReject = null;
-          }
-        }
       });
-
-      exitDisposable = ptyProcess.onExit((event) => {
-        if (!shellReady) {
-          const error = new Error(`Shell exited before ready (code ${event.exitCode})`);
-          const rejectReadyNow = shellReadyReject;
-          shellReadyResolve = null;
-          shellReadyReject = null;
-          shellReadyPromise = null;
-          ptyProcess = null;
-          clearPtyHandlers();
-          rejectReadyNow?.(error);
-          if (disposeRequested) void finalizeStoppedResources();
-          return;
-        }
-        // Shell exited unexpectedly
-        ptyProcess = null;
-        shellReady = false;
-        shellReadyPromise = null;
-        clearPtyHandlers();
-        if (disposeRequested) {
-          if (pendingCommand) clearTimeout(pendingCommand.timeout);
-          if (activeBackground) {
-            activeBackground.exited = true;
-            activeBackground.exitCode = event.exitCode;
-          }
-          void finalizeStoppedResources();
-          return;
-        }
-        if (pendingCommand) {
-          clearTimeout(pendingCommand.timeout);
-          void pendingCommand.writer?.close();
-          pendingCommand.resolve({
-            kind: "completed",
-            exitCode: event.exitCode,
-            durationMs: Date.now() - pendingCommand.startedAt,
-            cwd: pendingCommand.cwd,
-            stdout: stripControlSequences(outputBuffer),
-            stderr: "",
-            handle: null,
-            shown: null,
-          });
-          pendingCommand = null;
-        }
-        if (activeBackground) {
-          activeBackground.exited = true;
-          activeBackground.exitCode = event.exitCode;
-          closeBackgroundWriter(activeBackground);
-          activeBackground = null;
-        }
-      });
-
-      // Send init marker to detect shell readiness
-      if (interpreter.kind !== "powershell") ptyProcess.write(`echo ${initMarker}\n`);
+      bindSessionHandle(sessionHandle, initMarker);
+      if (interpreter.kind !== "powershell") sessionHandle.write(`echo ${initMarker}\n`);
       return ready;
     } catch (error) {
-      const proc = ptyProcess;
-      ptyProcess = null;
+      const handle = sessionHandle;
+      sessionHandle = null;
       shellReadyPromise = null;
       shellReadyResolve = null;
       shellReadyReject = null;
-      clearPtyHandlers();
-      try { proc?.kill(); } catch { /* already exited */ }
+      if (handle) unbindHandle(handle);
+      try { await handle?.destroy(); } catch { /* already exited */ }
       rejectReady(error);
-      // Return the rejected shared promise so callers observe one failure and
-      // the promise is never left as an unhandled orphan.
       return ready;
     }
   };
@@ -460,6 +564,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
         pendingCommand.cwd = sentinelLine.slice(2).trim();
+        lastCwd = pendingCommand.cwd;
         outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("E:")) {
@@ -484,6 +589,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
         background.cwd = sentinelLine.slice(2).trim();
+        lastCwd = background.cwd;
         background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("E:")) {
@@ -507,6 +613,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
     const cleanedOutput = stripControlSequences(outputBuffer);
     outputBuffer = "";
+    lastCwd = cmd.cwd;
 
     // Release writer
     void cmd.writer?.close();
@@ -535,7 +642,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const exec = async (command: string, options: { cwd?: string; waitMs: number }): Promise<ShellExecResult> => {
     if (disposed) return { kind: "spawn-failed", reason: "disposed", interpreter: interpreter.command, hint: "Shell supervisor has been disposed" };
     if (pendingCommand || commandStarting) throw new Error("Another command is already running");
-    if (activeBackground && !activeBackground.exited) throw new Error(`Background shell ${activeBackground.id} is still running`);
 
     commandStarting = true;
     let startFinished = false;
@@ -544,14 +650,14 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     commandStartPromise = startPromise;
     try {
       await ensureShell();
-      if (!ptyProcess) {
+      if (!sessionHandle) {
         commandStarting = false;
         return { kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" };
       }
 
       const token = randomBytes(8).toString("hex");
       const wrapped = buildCommandWrapper(command, token, interpreter.kind);
-      const cwd = options.cwd ?? process.cwd();
+      const cwd = options.cwd ?? lastCwd;
 
       // Register writer for the duration of command execution
       const writer = deps.registerWriter ? await deps.registerWriter() : null;
@@ -581,8 +687,18 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       return new Promise<ShellExecResult>((resolvePromise) => {
         outputBuffer = "";
         const timeout = setTimeout(() => {
-          // Background this command
-          const id = `sh_${++shellCounter}`;
+          const handle = sessionHandle;
+          if (!handle) {
+            pendingCommand = null;
+            resolvePromise({
+              kind: "spawn-failed",
+              reason: "no-shell",
+              interpreter: interpreter.command,
+              hint: "Shell not initialized",
+            });
+            return;
+          }
+          const id = handle.id;
           const bgShell: BackgroundShell = {
             id,
             token,
@@ -593,9 +709,14 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             exitCode: null,
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
             writer,
+            handle,
           };
           backgroundShells.set(id, bgShell);
           activeBackground = bgShell;
+          lastCwd = bgShell.cwd;
+          sessionHandle = null;
+          shellReady = false;
+          shellReadyPromise = null;
           pendingCommand = null;
           outputBuffer = "";
 
@@ -624,7 +745,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         commandStarting = false;
 
         // If cwd is different from current, cd first
-        const shell = ptyProcess;
+        const shell = sessionHandle;
         if (!shell) {
           clearTimeout(timeout);
           pendingCommand = null;
@@ -685,11 +806,13 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const write = async (id: string, text: string): Promise<boolean> => {
     const bg = backgroundShells.get(id);
-    if (bg && ptyProcess) {
-      ptyProcess.write(text);
+    if (!bg || bg.exited) return false;
+    try {
+      bg.handle.write(text);
       return true;
+    } catch {
+      return false;
     }
-    return false;
   };
 
   const kill = async (id: string): Promise<boolean> => {
@@ -698,9 +821,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     if (bg.exited) return true;
     // Send Ctrl+C to the PTY. The command remains running until its sentinel
     // or the PTY exit event confirms that the interrupt took effect.
-    if (!ptyProcess) return false;
     try {
-      ptyProcess.write("\x03");
+      bg.handle.write("\x03");
       return true;
     } catch {
       return false;
@@ -725,12 +847,16 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       rejectReady?.(new Error("Shell supervisor has been disposed"));
       if (pendingCommand) clearTimeout(pendingCommand.timeout);
 
-      const proc = ptyProcess;
+      const handles = [
+        ...(sessionHandle ? [sessionHandle] : []),
+        ...[...backgroundShells.values()].map((background) => background.handle),
+      ];
+      sessionHandle = null;
+      shellReady = false;
+      shellReadyPromise = null;
       let stopFailed = false;
       let stopError: unknown;
-      if (proc) {
-        // Register the waiter before kill: a synchronous fake or native PTY
-        // exit must still count as confirmed termination.
+      for (const handle of handles) {
         let waiterDispose: (() => void) | undefined;
         const exited = new Promise<void>((resolve, reject) => {
           let settled = false;
@@ -749,7 +875,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             try { subscription?.dispose?.(); } catch { /* already disposed */ }
           };
           try {
-            subscription = proc.onExit(() => {
+            subscription = handle.onExit(() => {
               if (timer) clearTimeout(timer);
               settle();
             });
@@ -759,28 +885,19 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           }
         });
         try {
-          proc.kill();
+          await handle.terminate();
           await exited;
+          await handle.destroy();
         } catch (error) {
           waiterDispose?.();
-          // The waiter promise is intentionally abandoned on a kill failure;
-          // consume its rejection after clearing its timer and listener.
           void exited.catch(() => undefined);
           stopFailed = true;
           stopError = error;
+          break;
         }
-        if (!stopFailed) {
-          waiterDispose?.();
-          // node-pty on Windows leaves anonymous pipe handles (Sockets) open
-          // even after the process exits and handlers are disposed. unref() them
-          // so the event loop can exit naturally.
-          try { (proc as unknown as { destroy?: () => void }).destroy?.(); } catch { /* ignore */ }
-          ptyProcess = null;
-          shellReady = false;
-          shellReadyPromise = null;
-          clearPtyHandlers();
-        }
+        waiterDispose?.();
       }
+      if (!stopFailed) clearAllBindings();
 
       // A command may still be awaiting writer registration. Let that setup
       // observe disposal and settle before finalizing the stopped resources;

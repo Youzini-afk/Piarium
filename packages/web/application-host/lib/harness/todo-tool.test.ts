@@ -11,7 +11,6 @@ import {
   type TodoItem,
 } from "./todo-tool.js";
 
-// Scratch stores live in the OS temp dir; see recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "piarium-test-todo");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
@@ -94,7 +93,7 @@ describe("executeTodoTool", () => {
         { text: "Task 3", status: "blocked" },
       ]},
       { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
-      true, // session already confirmed
+      false,
     );
     expect(result.text).toBe("plan updated: 1/3 done, 1 blocked");
     expect(result.askedConfirmation).toBe(false);
@@ -106,10 +105,21 @@ describe("executeTodoTool", () => {
     expect(blocks[0]?.content).toContain("- [x] Task 1");
   });
 
-  it("requires confirmation without writing when confidence is low", async () => {
+  it("treats confidence as informational and writes without confirmation", async () => {
     const result = await executeTodoTool(
       { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
       { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
+      false,
+    );
+    expect(result.askedConfirmation).toBe(false);
+    expect(result.confirmed).toBeUndefined();
+    expect(await store.getBlocks("s1")).toHaveLength(1);
+  });
+
+  it("waits only when an explicit approval policy is enabled", async () => {
+    const result = await executeTodoTool(
+      { items: [{ text: "Task", status: "open" }], confidence: 0.9 },
+      { store, sessionId: "s1", settings: { requireConfirmation: true } },
       false,
     );
     expect(result.askedConfirmation).toBe(true);
@@ -118,24 +128,15 @@ describe("executeTodoTool", () => {
     expect(await store.getBlocks("s1")).toHaveLength(0);
   });
 
-  it("writes a low-confidence plan after pi-host confirms it", async () => {
+  it("writes after an explicit approval policy is confirmed", async () => {
     const result = await executeTodoTool(
       { items: [{ text: "Task", status: "open" }], confidence: 0.3 },
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
+      { store, sessionId: "s1", settings: { requireConfirmation: true } },
       true,
     );
     expect(result.askedConfirmation).toBe(true);
     expect(result.confirmed).toBe(true);
     expect(await store.getBlocks("s1")).toHaveLength(1);
-  });
-
-  it("does not require confirmation when confidence is high", async () => {
-    const result = await executeTodoTool(
-      { items: [{ text: "Task", status: "open" }], confidence: 0.9 },
-      { store, sessionId: "s1", settings: DEFAULT_TODO_SETTINGS },
-      false,
-    );
-    expect(result.askedConfirmation).toBe(false);
   });
 
   it("does not require confirmation when confidence is absent", async () => {

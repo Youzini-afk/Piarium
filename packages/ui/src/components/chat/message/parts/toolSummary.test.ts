@@ -41,6 +41,15 @@ describe('getToolSummary', () => {
     expect(result.readOnly).toBe(false);
   });
 
+  it('bash: background result id is the same shell identity', () => {
+    const result = getToolSummary({
+      toolName: 'bash',
+      arguments: { command: 'sleep 90' },
+      details: { kind: 'background', id: 'sh_1' },
+    });
+    expect(result.text).toContain('running · shell sh_1');
+  });
+
   it('edit: path + diff stats', () => {
     const result = getToolSummary({
       toolName: 'edit',

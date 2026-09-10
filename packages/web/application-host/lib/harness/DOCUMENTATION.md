@@ -70,12 +70,19 @@ unavailable interpreter rather than silently selecting `auto`.
 
 ### ShellSupervisor (`shell-supervisor.ts`)
 
-PTY-based persistent shell per session:
+PTY-based persistent shell per session. Production creates those PTYs through
+the terminal runtime (`createTerminalSession`); tests may inject a `ptyProvider`
+seam that wraps the same handle contract. There is not a second production
+process manager.
+
 - One login shell (git-bash / bash / wsl / powershell) per session
 - Commands separated by sentinel markers (`__PIARIUM_SENTINEL_`)
 - cwd/env/venv maintained between commands
-- Background shells keep PTY alive, stdin open
-- Data and cwd/exit sentinels continue to be consumed after a command moves to the background
+- A command that exceeds `wait_ms` keeps its current terminal session as the
+  public `sh_N` identity; the next foreground command starts a new session shell
+- User attach and agent `get_output` / `write_to_process` use that same session
+- Closing a terminal tab detaches only; `kill_shell` / force-kill / dispose
+  still wait for real process exit before releasing writers (D-204 / D-205 / D-206)
 - `registerWriter` callback for `mode: 'process'` writer registration
 - Interpreter command is the discovered executable path, including spaces
 - PowerShell starts interactively under ConPTY with its own readiness/command wrappers.

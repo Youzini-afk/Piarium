@@ -15,6 +15,7 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
+import { harnessShellIdFromDetails, openHarnessTerminal } from '@/lib/openHarnessTerminal';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -408,11 +409,18 @@ const PiToolCard: React.FC<{
   const applyPatchFiles = call.name === 'apply_patch'
     ? getApplyPatchFileEntries(result?.details ?? transientOutput)
     : [];
+  const details = result?.details ?? transientOutput;
   const compactSummary = getToolSummary({
     toolName: call.name,
     arguments: call.arguments,
-    details: result?.details ?? transientOutput,
+    details,
   }).text;
+  const harnessShellId = (call.name === 'bash' || call.name === 'get_output' || call.name === 'write_to_process' || call.name === 'kill_shell')
+    ? harnessShellIdFromDetails(details)
+    : null;
+  const command = typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments)
+    ? String((call.arguments as Record<string, unknown>).command ?? '')
+    : '';
   return (
     <details
       className={cn(
@@ -436,6 +444,19 @@ const PiToolCard: React.FC<{
         {compactSummary && compactSummary !== call.name ? (
           <span className="min-w-0 flex-1 truncate text-muted-foreground/85">· {compactSummary}</span>
         ) : <span className="flex-1" />}
+        {harnessShellId ? (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 typography-micro text-foreground hover:bg-interactive-hover"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openHarnessTerminal(cwd, harnessShellId, command);
+            }}
+          >
+            {t('chat.timeline.tools.openTerminal')}
+          </button>
+        ) : null}
         <span className="typography-micro">{status}</span>
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>

@@ -332,8 +332,6 @@ export interface TodoUpsertResult {
   askedConfirmation: boolean;
 }
 
-export const DEFAULT_TODO_CONFIRM_BELOW = 0.6;
-
 export interface RecallSearchParams {
   query: string;
   k?: number;

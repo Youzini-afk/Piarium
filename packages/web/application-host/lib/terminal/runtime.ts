@@ -21,6 +21,14 @@ import { assertAbsolutePathInWorkspace, resolveWorkspacePath } from '../workspac
 import { resolveLinuxPtyLaunch, stripAppImageArgv0Leak } from '../platform/inherited-env.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { TerminalShellPreference } from './shells.js';
+import type {
+  CreateTerminalSessionInput,
+  TerminalHandle,
+  TerminalSessionApi,
+  TerminalSessionInfo,
+  TerminalSessionOwner,
+  TerminalSpawnSpec,
+} from './session-api.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -58,20 +66,26 @@ interface TerminalSession {
   backend?: string;
   cols: number;
   cwd: string;
+  dataListeners: Set<(data: string) => void>;
   draining: boolean;
   eventQueue: TerminalEvent[];
   exitCode: number | null;
+  exitListeners: Set<(event: { exitCode: number; signal: number }) => void>;
   history: string;
   id: string;
   lastActivity: number;
   loginShell: boolean;
+  owner: TerminalSessionOwner;
   pendingHistoryControlSequence: string;
   pendingThemeControlSequence: string;
   process: PtyProcess | null;
+  registerProcessWriter: boolean;
+  retainWhenDetached: boolean;
   rows: number;
   sequence: number;
   shell: TerminalShellPreference;
   signal: number | null;
+  spawn?: TerminalSpawnSpec;
   status: 'exited' | 'running';
   terminalBackground: string;
   terminalForeground: string;
@@ -104,6 +118,8 @@ interface TerminalRuntimeDependencies {
   searchPathFor(name: string, searchPath: string): string | null;
   server: Server;
   TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: number;
+  terminalIdleSweepMs?: number;
+  terminalIdleTimeoutMs?: number;
   terminalTerminationGraceMs?: number;
   uiAuthController?: {
     enabled: boolean;
@@ -117,6 +133,7 @@ interface StartSessionInput {
   loginShell: boolean;
   rows: number;
   shell: TerminalShellPreference;
+  spawn?: TerminalSpawnSpec;
   terminalBackground?: unknown;
   terminalForeground?: unknown;
   themeMode?: unknown;
@@ -127,6 +144,18 @@ const errorRecord = (error: unknown): Record<string, unknown> => (
 );
 
 const errorMessage = (error: unknown, fallback: string): string => error instanceof Error && error.message ? error.message : fallback;
+
+const isTerminalSpawnSpec = (value: unknown): value is TerminalSpawnSpec => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.executable !== 'string' || !record.executable.trim()) return false;
+  if (!Array.isArray(record.args) || record.args.some((entry) => typeof entry !== 'string')) return false;
+  if (record.env !== undefined) {
+    if (!record.env || typeof record.env !== 'object' || Array.isArray(record.env)) return false;
+    if (Object.values(record.env).some((entry) => typeof entry !== 'string')) return false;
+  }
+  return true;
+};
 
 const releaseProcessWriter = async (writer: ProcessWriter, mutated = true): Promise<void> => {
   if (!writer) return;
@@ -148,10 +177,18 @@ export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS,
+  terminalIdleTimeoutMs = IDLE_TIMEOUT_MS,
+  terminalIdleSweepMs = 5 * 60 * 1000,
   documents,
 }: TerminalRuntimeDependencies) {
   const sessions = new Map<string, TerminalSession>();
-  const pendingSessionCreates = new Map<string, { cwd: string; loginShell: boolean; promise: Promise<TerminalSession>; shell: TerminalShellPreference }>();
+  const pendingSessionCreates = new Map<string, {
+    cwd: string;
+    loginShell: boolean;
+    owner: TerminalSessionOwner;
+    promise: Promise<TerminalSession>;
+    shell: TerminalShellPreference;
+  }>();
   const pendingSessionRestarts = new Map<string, Promise<void>>();
   const connections = new Set<TerminalConnection>();
   const pendingTerminations = new Set<Promise<void>>();
@@ -192,7 +229,27 @@ export function createTerminalRuntime({
     return ptyProviderPromise;
   };
 
-  const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell }: StartSessionInput) => {
+  const spawnExplicit = async ({ cwd, cols, rows, themeMode, spawn }: StartSessionInput & { spawn: TerminalSpawnSpec }) => {
+    const provider = await getPtyProvider();
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...spawn.env,
+      PATH: spawn.env?.PATH ?? buildAugmentedPath(),
+      TERM: spawn.env?.TERM ?? 'xterm-256color',
+      COLORTERM: spawn.env?.COLORTERM ?? 'truecolor',
+      COLORFGBG: themeMode === 'light' ? '0;15' : '15;0',
+    };
+    env.NODE_CHANNEL_FD = '';
+    delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
+    stripAppImageArgv0Leak(env);
+    const launch = resolveLinuxPtyLaunch(spawn.executable, spawn.args);
+    const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
+    return { process: provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: 'auto' as TerminalShellPreference, loginShell: false };
+  };
+
+  const spawnPty = async (input: StartSessionInput) => {
+    if (input.spawn) return spawnExplicit(input as StartSessionInput & { spawn: TerminalSpawnSpec });
+    const { cwd, cols, rows, themeMode, shell, loginShell } = input;
     const provider = await getPtyProvider();
     const resolvedShell = await shellResolver.resolve(shell);
     let lastError: unknown = null;
@@ -297,6 +354,7 @@ export function createTerminalRuntime({
           session.history = trimHistory(session.history + sanitized.visible);
           session.lastActivity = Date.now();
           publish(session, { t: 'output', d: event.data, ...(sanitized.visible !== event.data ? { r: sanitized.visible } : {}) });
+          for (const listener of session.dataListeners) listener(event.data);
         } else {
           session.status = 'exited';
           session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
@@ -305,6 +363,8 @@ export function createTerminalRuntime({
           if (session.writerState === event.writerState) session.writerState = null;
           void releaseWriterState(event.writerState);
           publish(session, { t: 'exit', exitCode: session.exitCode, signal: session.signal });
+          const exitEvent = { exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 };
+          for (const listener of session.exitListeners) listener(exitEvent);
         }
       }
     } finally { session.draining = false; }
@@ -363,12 +423,14 @@ export function createTerminalRuntime({
     const writerState: WriterState = { writer: null, released: false };
     let spawned: Awaited<ReturnType<typeof spawnPty>> | null = null;
     try {
-      writerState.writer = await acquireWriter(cwd, {
-        kind: 'terminal',
-        id: session.id,
-        generation,
-      });
-      spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
+      if (session.registerProcessWriter) {
+        writerState.writer = await acquireWriter(cwd, {
+          kind: 'terminal',
+          id: session.id,
+          generation,
+        });
+      }
+      spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell, ...(session.spawn ? { spawn: session.spawn } : {}) });
       return { ...spawned, writerState, generation };
     } catch (error) {
       await releaseWriterState(writerState, Boolean(spawned));
@@ -407,12 +469,29 @@ export function createTerminalRuntime({
     wire(session, spawned.process, spawned.writerState);
   };
 
-  const createSession = async (value: unknown): Promise<TerminalSession> => {
+  const userSessionCount = (): number => {
+    let count = 0;
+    for (const session of sessions.values()) {
+      if (session.owner === 'user') count += 1;
+    }
+    for (const pending of pendingSessionCreates.values()) {
+      if (pending.owner === 'user') count += 1;
+    }
+    return count;
+  };
+
+  const createSession = async (value: unknown, options: { allowSpawn?: boolean } = {}): Promise<TerminalSession> => {
     const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const { sessionId, cwd, workspacePath, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false } = input;
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
-    const normalizedShell = normalizeTerminalShell(shell);
+    const owner: TerminalSessionOwner = options.allowSpawn && input.owner === 'harness' ? 'harness' : 'user';
+    const retainWhenDetached = options.allowSpawn && (input.retainWhenDetached === true || owner === 'harness');
+    const registerProcessWriter = owner === 'user'
+      ? input.registerProcessWriter !== false
+      : input.registerProcessWriter === true;
+    const spawn = options.allowSpawn && isTerminalSpawnSpec(input.spawn) ? input.spawn : undefined;
+    const normalizedShell = spawn ? 'auto' : normalizeTerminalShell(shell);
     if (!normalizedShell) throw new Error('Invalid terminal shell');
     const id = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : randomUUID();
     if (id.length > 128) throw new Error('Invalid terminal session id');
@@ -432,12 +511,13 @@ export function createTerminalRuntime({
       applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
       return session;
     }
-    if (!existing && sessions.size + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
+    if (owner === 'user' && !existing && userSessionCount() >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const creation = (async () => {
       const session: TerminalSession = existing ?? {
         id,
         cols,
         cwd: resolvedCwd,
+        dataListeners: new Set(),
         sequence: 0,
         history: '',
         pendingHistoryControlSequence: '',
@@ -445,12 +525,17 @@ export function createTerminalRuntime({
         eventQueue: [],
         draining: false,
         exitCode: null,
+        exitListeners: new Set(),
         lastActivity: Date.now(),
         loginShell,
+        owner,
         process: null,
+        registerProcessWriter,
+        retainWhenDetached,
         rows,
         shell: normalizedShell,
         signal: null,
+        ...(spawn ? { spawn } : {}),
         status: 'exited',
         terminalBackground: '',
         terminalForeground: '',
@@ -459,11 +544,19 @@ export function createTerminalRuntime({
         writerState: null,
         writerGeneration: 0,
       };
-      await startSession(session, { cwd: resolvedCwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell });
+      if (existing) {
+        session.owner = owner;
+        session.retainWhenDetached = retainWhenDetached;
+        session.registerProcessWriter = registerProcessWriter;
+        if (spawn) session.spawn = spawn;
+        session.dataListeners ??= new Set();
+        session.exitListeners ??= new Set();
+      }
+      await startSession(session, { cwd: resolvedCwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell, ...(spawn ? { spawn } : {}) });
       sessions.set(id, session);
       return session;
     })();
-    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, promise: creation };
+    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, owner, promise: creation };
     pendingSessionCreates.set(id, pendingEntry);
     try { return await creation; }
     finally { if (pendingSessionCreates.get(id) === pendingEntry) pendingSessionCreates.delete(id); }
@@ -522,6 +615,104 @@ export function createTerminalRuntime({
   };
   server.on('upgrade', upgradeHandler);
 
+  const makeHandle = (session: TerminalSession): TerminalHandle => ({
+    get id() { return session.id; },
+    get cwd() { return session.cwd; },
+    get status() { return session.status; },
+    write(data: string) {
+      if (session.status !== 'running' || !session.process) throw new Error('Terminal is not running');
+      session.process.write(data);
+      session.lastActivity = Date.now();
+    },
+    resize(nextCols: number, nextRows: number) {
+      if (!validateSize(nextCols, 1000) || !validateSize(nextRows, 500)) throw new Error('Invalid terminal dimensions');
+      if (session.status === 'running') session.process?.resize(nextCols, nextRows);
+      session.cols = nextCols;
+      session.rows = nextRows;
+    },
+    onData(handler) {
+      session.dataListeners.add(handler);
+      return { dispose: () => { session.dataListeners.delete(handler); } };
+    },
+    onExit(handler) {
+      if (session.status === 'exited') {
+        queueMicrotask(() => handler({ exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 }));
+      }
+      session.exitListeners.add(handler);
+      return { dispose: () => { session.exitListeners.delete(handler); } };
+    },
+    waitForExit() {
+      if (session.status === 'exited') {
+        return Promise.resolve({ exitCode: session.exitCode, signal: session.signal });
+      }
+      return new Promise((resolve) => {
+        const disposable = makeHandle(session).onExit((event) => {
+          disposable.dispose();
+          resolve({ exitCode: event.exitCode, signal: event.signal });
+        });
+      });
+    },
+    async terminate(force = false) {
+      const processToTerminate = session.process;
+      if (!processToTerminate) return;
+      await terminateProcess(processToTerminate, force);
+    },
+    async destroy() {
+      await removeSession(session, { force: false, retain: false });
+    },
+  });
+
+  const removeSession = async (session: TerminalSession, { force, retain }: { force: boolean; retain: boolean }): Promise<void> => {
+    if (retain) {
+      closeAttachments(session.id, 'DETACHED', 'Terminal view closed');
+      return;
+    }
+    sessions.delete(session.id);
+    closeAttachments(session.id, force ? 'KILLED' : 'CLOSED', force ? 'Terminal was killed' : 'Terminal closed');
+    const processToTerminate = session.process;
+    const writerState = session.writerState;
+    session.process = null;
+    session.writerState = null;
+    await terminateProcess(processToTerminate, force);
+    await releaseWriterState(writerState);
+  };
+
+  const createTerminalSession = async (input: CreateTerminalSessionInput): Promise<TerminalHandle> => {
+    const session = await createSession({
+      sessionId: input.sessionId,
+      cwd: input.cwd,
+      cols: input.cols ?? 120,
+      rows: input.rows ?? 40,
+      shell: input.shell ?? 'auto',
+      loginShell: input.loginShell ?? false,
+      themeMode: input.themeMode,
+      terminalBackground: input.terminalBackground,
+      terminalForeground: input.terminalForeground,
+      owner: input.owner ?? 'user',
+      retainWhenDetached: input.retainWhenDetached,
+      registerProcessWriter: input.registerProcessWriter,
+      ...(input.spawn ? { spawn: input.spawn } : {}),
+    }, { allowSpawn: true });
+    return makeHandle(session);
+  };
+
+  const attachTerminalSession = (id: string): TerminalHandle | null => {
+    const session = sessions.get(id);
+    return session ? makeHandle(session) : null;
+  };
+
+  const inspectSession = (id: string): TerminalSessionInfo | null => {
+    const session = sessions.get(id);
+    if (!session) return null;
+    return {
+      id: session.id,
+      cwd: session.cwd,
+      owner: session.owner,
+      retainWhenDetached: session.retainWhenDetached,
+      status: session.status,
+    };
+  };
+
   app.get('/api/terminal/shells', async (_req: Request, res: Response) => {
     try {
       const shells = await shellResolver.list();
@@ -554,9 +745,15 @@ export function createTerminalRuntime({
     applyAppearance(session, req.body ?? {});
     res.json({ success: true });
   });
+  app.get('/api/terminal/:sessionId', (req, res) => {
+    const info = inspectSession(req.params.sessionId);
+    if (!info) return res.status(404).json({ error: 'Terminal session not found' });
+    res.json(info);
+  });
   app.post('/api/terminal/:sessionId/restart', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Terminal session not found' });
+    if (session.owner === 'harness') return res.status(409).json({ error: 'Harness terminal sessions cannot be restarted' });
     const cwd = req.body?.cwd ?? session.cwd;
     const workspacePath = req.body?.workspacePath;
     const cols = req.body?.cols ?? session.cols;
@@ -596,15 +793,13 @@ export function createTerminalRuntime({
   app.delete('/api/terminal/:sessionId', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Terminal session not found' });
-    sessions.delete(session.id);
-    closeAttachments(session.id, 'CLOSED', 'Terminal closed');
-    const processToTerminate = session.process;
-    const writerState = session.writerState;
-    session.process = null;
-    session.writerState = null;
-    await terminateProcess(processToTerminate);
-    await releaseWriterState(writerState);
-    res.json({ success: true });
+    if (session.retainWhenDetached) {
+      await removeSession(session, { force: false, retain: true });
+      res.json({ success: true, retained: true });
+      return;
+    }
+    await removeSession(session, { force: false, retain: false });
+    res.json({ success: true, retained: false });
   });
   app.post('/api/terminal/force-kill', (req, res) => {
     const { sessionId, cwd } = req.body ?? {}; let killedCount = 0;
@@ -627,7 +822,8 @@ export function createTerminalRuntime({
     const now = Date.now();
     for (const [id, session] of sessions) {
       const attached = [...connections].some((connection) => connection.attachments.has(id));
-      if (!attached && now - session.lastActivity > IDLE_TIMEOUT_MS) {
+      if (session.retainWhenDetached || session.owner === 'harness') continue;
+      if (!attached && now - session.lastActivity > terminalIdleTimeoutMs) {
         sessions.delete(id); closeAttachments(id, 'IDLE_TIMEOUT', 'Terminal expired after being idle');
         const processToTerminate = session.process;
         const writerState = session.writerState;
@@ -636,7 +832,7 @@ export function createTerminalRuntime({
         void terminateProcess(processToTerminate, true).then(() => releaseWriterState(writerState));
       }
     }
-  }, 5 * 60 * 1000);
+  }, terminalIdleSweepMs);
 
   const shutdown = async (): Promise<void> => {
     server.off('upgrade', upgradeHandler); clearInterval(idleSweep);
@@ -660,5 +856,10 @@ export function createTerminalRuntime({
     ]);
     wsServer = null;
   };
-  return { shutdown };
+  const api: TerminalSessionApi = {
+    createTerminalSession,
+    attachTerminalSession,
+    inspectSession,
+  };
+  return { shutdown, ...api };
 }

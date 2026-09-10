@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import { DEFAULT_TODO_CONFIRM_BELOW, type TodoUpsertResult } from "@piarium/protocol";
+import type { TodoUpsertResult } from "@piarium/protocol";
 
 const TodoParams = Type.Object({
   items: Type.Array(
@@ -31,9 +31,16 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
     executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       try {
-        if (!sessionConfirmed && params.confidence !== undefined && params.confidence < DEFAULT_TODO_CONFIRM_BELOW) {
+        const result = await bridge.request<"todo.upsert">("todo.upsert", {
+          items: params.items,
+          branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
+          ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
+          ...(sessionConfirmed ? { confirmed: true } : {}),
+        });
+        const typed = result as TodoUpsertResult;
+        if (typed.askedConfirmation && typed.confirmed === false) {
           const choice = await ctx.ui.select(
-            `The proposed plan has low confidence (${params.confidence}). Use it?`,
+            "The session requires confirmation before updating the plan. Use it?",
             ["Use plan", "Cancel"],
           );
           if (choice !== "Use plan") {
@@ -43,14 +50,21 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
             };
           }
           sessionConfirmed = true;
+          const confirmed = await bridge.request<"todo.upsert">("todo.upsert", {
+            items: params.items,
+            branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
+            ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
+            confirmed: true,
+          });
+          const confirmedResult = confirmed as TodoUpsertResult;
+          return {
+            content: [{ type: "text", text: confirmedResult.text }],
+            details: {
+              askedConfirmation: true,
+              ...(confirmedResult.confirmed !== undefined ? { confirmed: confirmedResult.confirmed } : {}),
+            },
+          };
         }
-        const result = await bridge.request<"todo.upsert">("todo.upsert", {
-          items: params.items,
-          branchEntryIds: ctx.sessionManager.getBranch().map((entry) => entry.id),
-          ...(params.confidence !== undefined ? { confidence: params.confidence } : {}),
-          ...(sessionConfirmed ? { confirmed: true } : {}),
-        });
-        const typed = result as TodoUpsertResult;
         return {
           content: [{ type: "text", text: typed.text }],
           details: {

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { discoverShells } from "./shell-discovery.js";
+import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
 import { createShellSupervisor, selectInterpreter, stripControlSequences, type DiscoveredShells, type PtyProcess, type PtyProvider } from "./shell-supervisor.js";
 import { createOutputStore } from "./output-store.js";
 
@@ -239,6 +240,39 @@ describe("background shell output", () => {
       outputStore.dispose();
     }
   });
+
+  it("protects the session cwd when a command backgrounds without an explicit cwd", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "shell-protect-"));
+    const dataHandlers = new Set<(data: string) => void>();
+    const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const process: PtyProcess = {
+      kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
+      onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+      onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+      resize: () => undefined,
+      write: (data) => {
+        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        if (ready) {
+          queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
+        }
+      },
+    };
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore: createOutputStore(),
+      sessionId: "protect-cwd",
+      cwd: workspace,
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const started = await supervisor.exec("never completes", { waitMs: 5 });
+      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
+      expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
+    } finally {
+      await supervisor.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("shell-supervisor dispose kills process tree", () => {
@@ -255,27 +289,24 @@ describe("shell-supervisor dispose kills process tree", () => {
     });
     if (!("kind" in interp)) { rmSync(workspaceRoot, { recursive: true, force: true }); return; }
 
+    const terminal = createIsolatedTerminalSessionApi();
     const supervisor = createShellSupervisor({
       interpreter: interp,
       outputStore,
       sessionId: "dispose-test",
+      cwd: workspaceRoot,
+      createTerminalSession: (input) => terminal.createTerminalSession(input),
     });
-
-    // Run a command to ensure the shell is spawned
-    const result = await supervisor.exec("echo hello", { waitMs: 10000 });
-    expect(result.kind).toBe("completed");
-
-    // Dispose and verify the process tree is gone
-    await supervisor.dispose();
-
-    // Give the OS a moment to reap the process
-    await new Promise((r) => setTimeout(r, 500));
-
-    // We can't directly access the PID after dispose (ptyProcess is nulled),
-    // but we can verify dispose() resolved without hanging and the test
-    // process exits cleanly. The real verification is that the test runner
-    // doesn't hang after this test completes.
-    rmSync(workspaceRoot, { recursive: true, force: true });
+    try {
+      const result = await supervisor.exec("echo hello", { waitMs: 10000 });
+      expect(result.kind).toBe("completed");
+      await supervisor.dispose();
+      await new Promise((r) => setTimeout(r, 500));
+    } finally {
+      await supervisor.dispose().catch(() => undefined);
+      await terminal.shutdown();
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   }, 15000);
 });
 
@@ -445,7 +476,7 @@ describe("shell-supervisor disposal protection", () => {
   it("keeps the writer and active directory protected when exit confirmation fails", async () => {
     const state = await setup({ failSecondExitRegistration: true });
     try {
-      await expect(state.supervisor.dispose()).rejects.toThrow("exit wait registration failed");
+      await expect(state.supervisor.dispose()).rejects.toThrow("Shell process did not exit during disposal");
       expect(state.writerClosed).toBe(0);
       expect(state.supervisor.hasActiveCommandAt(state.workspace)).toBe(true);
       state.process.emitExit();

@@ -889,9 +889,10 @@ See [security.md](security.md) for the threat model and release gates.
 
 ## 10. Runtime selection
 
-Desktop and the local Web UI start without forcing a Pi warmup. The Runtime Manager discovers PATH
-`pi` first and then probes that install: Node starts, the three Pi SDK packages resolve, and the
-Host handshake must succeed. A newer Pi is used as-is. An older Pi is upgrade-required only. There
+Desktop and the local Web UI start without forcing a Pi warmup. The Runtime Manager probes the
+user's explicit selection first. When nothing is selected, a ready bundled Pi is preferred over a
+system, standalone, or PATH install. The chosen install is then probed: Node starts, the three Pi
+SDK packages resolve, and the Host handshake must succeed. A newer Pi is used as-is. An older Pi is upgrade-required only. There
 is no version ceiling, downgrade action, or silent upgrade. Cloud and headless Web still require a
 ready runtime before the server finishes starting.
 

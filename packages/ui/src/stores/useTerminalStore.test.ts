@@ -134,4 +134,17 @@ describe('terminal state reconciliation', () => {
     useTerminalStore.getState().replaceBuffer('/repo', 'ghost-tab', 'snapshot', 1);
     expect(useTerminalStore.getState().buffers.size).toBe(0);
   });
+
+  test('attaches an existing harness session without creating a second tab', () => {
+    setup();
+    const first = useTerminalStore.getState().attachExistingSession('/repo', 'sh_1', 'sleep 90');
+    const again = useTerminalStore.getState().attachExistingSession('/repo', 'sh_1', 'ignored');
+    const state = useTerminalStore.getState().getDirectoryState('/repo');
+    const tab = state?.tabs.find((entry) => entry.id === first);
+    expect(again).toBe(first);
+    expect(tab?.terminalSessionId).toBe('sh_1');
+    expect(tab?.closePolicy).toBe('detach');
+    expect(tab?.lifecycle).toBe('running');
+    expect(state?.activeTabId).toBe(first);
+  });
 });

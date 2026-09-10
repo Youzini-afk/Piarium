@@ -4169,6 +4169,22 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施，真实 Windows 与定向证据见 status 1.3。
 
+### D-206 · 2026-09-10 · 后台 shell 接入终端 runtime，bundled Pi 默认与 todo 确认
+
+背景：D-013 只复用了 PTY 模块，监督器与用户终端各自创建同类进程。无显式选择时 Runtime Manager 仍偏向 PATH/system。todo 曾因 confidence 低于阈值默认弹确认。
+
+决定：
+
+1. 生产监督器只通过 terminal runtime 的 `createTerminalSession` 取得 PTY。公开 `sh_N` 就是该会话 id。HTTP create 不能指定 `owner` / `spawn` / retain；程序化 API 才允许 harness spawn。用户附着走同一 runtime 的 attach/WebSocket，agent `get_output` / `write_to_process` / `kill_shell` 写同一 handle。关闭查看（DELETE retain 或 tab `closePolicy: detach`）不终止进程；force-kill、`kill_shell` 与 supervisor dispose 仍等真实退出再放写者，后台命令继续按会话 cwd 阻止回收。短命令不自动打开终端。
+2. 没有 `selectedId` 且 bundled 为 ready 时，Runtime Manager 优先 bundled Pi。用户明确选择的 system/standalone/custom/source 只要不是 missing 就保持优先。这是 Pi 运行时选择，不是 `harness.shell`。
+3. `todo` 的 confidence 只作信息。默认 `requireConfirmation: false`。只有已有、明确启用的审批策略才让 Host 返回等待，并由 pi-host 在该响应之后弹确认。不另造审批框架。
+
+考虑过的替代：(1) 打开终端时重跑命令——不是同一进程。(2) 监督器继续自管 PTY、终端只镜像输出——两套生命周期。(3) 把 bundled 与 `harness.shell` 合成一项——混淆解释器与 Pi 运行时。
+
+影响：terminal runtime / session API、shell supervisor / service-host / index 晚绑定、Runtime Manager 优先序、todo Host/pi-host、UI 时间线“打开终端”；设计 5.2 / 5.6、architecture 10、status 1.3 / 2.5。D-013 的未兑现前置在此收口。
+
+状态：已实施；Windows Git Bash / PowerShell 与定向证据见 status 1.3 / 2.5。macOS / Linux 与完整浏览器点击链未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4187,7 +4203,7 @@ ModelRuntime 纵切继续通过。
 | D-010 | reverted | D-013 | — |
 | D-011 | implementation | — | — |
 | D-012 | reverted | D-014 | — |
-| D-013 | active-design | — | agent-harness.md 5.2（现状注记）、`lib/harness/DOCUMENTATION.md`（哨兵/环境变量）；前置条件"接进 terminal runtime"未兑现 → status Blocker |
+| D-013 | superseded in part（哨兵/环境变量与 PTY 选择保留；进程所有权改由 terminal runtime 承担） | D-206 | 设计 5.2；host/terminal DOCUMENTATION |
 | D-014 | implementation | — | — |
 | D-015 | contradicted → superseded | D-031 | agent-harness.md 5.10 |
 | D-016 | implementation | — | — |
@@ -4379,3 +4395,4 @@ ModelRuntime 纵切继续通过。
 | D-203 | implementation（定向 surface、持久确认/撤销、来源更新与绑定提交） | — | 设计 9.2.5b；plan 3.4F / 3.5；status 3.5a |
 | D-204 | implementation（退出、结构化准备、并发预算与原会话恢复） | — | 设计 9.3.4；plan 3.4E / 3.10；status 3.4 / 3.10 |
 | D-205 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 |
+| D-206 | implementation（后台 shell 与终端同一进程、bundled Pi 默认、todo confidence 只作信息） | — | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 |

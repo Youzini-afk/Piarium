@@ -271,9 +271,9 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
 - **PTY，不是管道。** Codex 的 `unified_exec` 是 PTY；Claude Code 是持久管道 shell，因此"不能原生处理 vim、sudo 这类
   TTY 交互提示"。Piarium 选 PTY，复用 host 现有终端运行时：后台 shell 天然就是用户可附着、可输入的终端 tab（第 2 节
   已定的 UI 投影），程序的行为与在终端中一致。给模型的文本剥去 ANSI 与控制序列（host 已有 replay-safe 字节逻辑），
-  终端 tab 显示原始字节。**现状**（D-013）：监督器复用的是 PTY 模块（`node-pty` / `bun-pty`），尚未经 terminal runtime
-  创建，因此后台 shell 还不是终端 tab；"接进 `lib/terminal/runtime.ts` 的 `createTerminalSession` / `attachTerminalSession`"
-  是这条边界的未兑现部分，记在状态矩阵的 Blocker 列。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
+  终端 tab 显示原始字节。后台命令使用 terminal runtime 的同一会话身份（D-206）：监督器经
+  `createTerminalSession` / `attachTerminalSession` 创建与附着，HTTP 不能指定 owner/spawn。关闭查看界面只脱离附着，
+  显式终止仍走统一关闭链。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
 - **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`wait_ms` 到了它转后台，模型在输出里看到提示文本，
   用 `write_to_process` 回答或 `kill_shell` 放弃。Pi 内置 bash 的 stdin 是 ignore，与 `write_to_process` 不相容，
   因此这里不沿用。
@@ -386,7 +386,8 @@ Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，�
 confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模型训练过。写入知识库的 `plan` 块（主 agent 是该块唯一
 的结构所有者，记忆 agent 只能标条目状态），显示在计划面板，Zone 2 复述。`confidence` 可选：主 agent 声明对计划的信心，
 只作说明，不以自报分数自动增加确认步骤。只有用户显式选择 plan mode 或配置计划审批时才按该选择等待。系统提示只建议
-"非平凡任务先计划"，harness 不检查它是否被调用，也不因其陈旧而提醒。当前低于 0.6 自动确认的实现待按 D-078 修改。
+"非平凡任务先计划"，harness 不检查它是否被调用，也不因其陈旧而提醒。confidence 只作信息；只有已有、明确启用的审批
+策略才会等待确认（D-206）。
 
 ### 5.7 `explore`、`dispatch` / `wait`（新增）
 

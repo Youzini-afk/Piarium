@@ -671,9 +671,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             setConnectionError(null);
             setIsFatalError(false);
             setIsReconnectPending(false);
-            const sessionId = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId)?.terminalSessionId;
+            const tab = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((entry) => entry.id === tabId);
+            const sessionId = tab?.terminalSessionId;
             void (async () => {
-                if (sessionId) await terminal.close(sessionId);
+                if (sessionId && tab?.closePolicy !== 'detach') await terminal.close(sessionId);
                 closeTab(effectiveDirectory, tabId);
             })().catch((error) => setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sessionEnded')));
         },

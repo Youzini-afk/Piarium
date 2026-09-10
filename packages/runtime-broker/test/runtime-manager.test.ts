@@ -446,3 +446,108 @@ test("installs a missing Pi then probes the rediscovered runtime", async () => {
     await rm(dataDir, { force: true, recursive: true });
   }
 });
+
+const bundledReady: RuntimeCandidate = {
+  available: true,
+  compatible: true,
+  id: "bundled",
+  nodePath: "C:\\Piarium\\node.exe",
+  packageRoot: "C:\\Piarium\\bundled\\pi",
+  source: "bundled",
+  version: "0.84.1",
+};
+
+const handshake = (source: "bundled" | "system", packageRoot: string, dataDir: string) => ({
+  handshake: {
+    capabilities: {
+      agentProviders: true,
+      extensionUi: true,
+      fleet: true,
+      models: true,
+      packages: true,
+      providerConfiguration: true,
+      recovery: true,
+      resources: true,
+      sessionFeatures: true,
+      sessions: true,
+      settings: true,
+    },
+    hostVersion: "0.1.0",
+    protocolVersion: 1,
+    runtime: {
+      agentDir: dataDir,
+      nodePath: source === "bundled" ? bundledReady.nodePath : systemReady.nodePath,
+      nodeVersion: "22.19.0",
+      packageRoot,
+      piVersion: "0.84.1",
+      source,
+    },
+  },
+  sessionCreated: false,
+});
+
+test("uses ready bundled Pi when the user has not selected a runtime", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const probed: string[] = [];
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => [systemReady, bundledReady],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+      probe: async (options) => {
+        probed.push(options.runtimeSource ?? "");
+        return handshake("bundled", bundledReady.packageRoot ?? "", dataDir);
+      },
+    });
+    const snapshot = await manager.refresh();
+    assert.deepEqual(probed, ["bundled"]);
+    assert.equal(snapshot.status, "ready");
+    assert.equal(snapshot.active?.id, "bundled");
+    assert.equal(snapshot.active?.source, "bundled");
+    assert.equal(snapshot.selectedId, undefined);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("keeps an explicit system runtime ahead of a ready bundled Pi", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const probed: string[] = [];
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => [systemReady, bundledReady],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+      probe: async (options) => {
+        probed.push(options.runtimeSource ?? "");
+        return handshake(
+          options.runtimeSource === "bundled" ? "bundled" : "system",
+          options.packageRoot ?? "",
+          dataDir,
+        );
+      },
+    });
+    const discovered = await manager.refresh();
+    assert.equal(discovered.active?.id, "bundled");
+    const activated = await manager.activate("system");
+    assert.equal(activated.selectedId, "system");
+    assert.equal(activated.active?.id, "system");
+    const again = await manager.refresh();
+    assert.equal(again.selectedId, "system");
+    assert.equal(again.active?.id, "system");
+    assert.deepEqual(probed, ["bundled", "system", "system"]);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+

@@ -1877,6 +1877,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return null;
       }
     },
+    createTerminalSession: async (input) => {
+      const runtime = terminalRuntime;
+      if (!runtime?.createTerminalSession) {
+        throw new Error("Terminal runtime is not available");
+      }
+      return runtime.createTerminalSession(input);
+    },
     registerWriter: async (sessionId, workspaceRoot) => {
       const writer = await documentsAuthority.registerWriterForScope(
         workspaceRoot,
