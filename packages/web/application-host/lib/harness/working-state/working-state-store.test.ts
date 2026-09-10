@@ -268,4 +268,40 @@ describe("WorkingStateStore", () => {
       h.database.close();
     }
   });
+
+  it("persists verification records without a schema bump and reopens them", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "thread-1", base);
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "next\n");
+      const published = await h.store.publishDirectoryResult("thread-1", h.workspace);
+      await h.store.putChildVerification("thread-a", {
+        resultRevision: published.resultRevision,
+        branchId: "thread-1",
+        recordedAt: 1,
+        binding: "bound",
+        bindingReason: "same run",
+        checks: [{
+          id: "cmd-1",
+          runId: "run-1",
+          command: "bun test",
+          cwd: h.workspace,
+          startedAt: 1,
+          endedAt: 2,
+          exitCode: 0,
+          cancelled: false,
+          inputIdentity: { kind: "published-revision", branchId: "thread-1", startPublishedRevision: 0, endPublishedRevision: 0 },
+          inputChangedDuringRun: false,
+          relationToPublished: "same-run-before-publish",
+        }],
+      });
+      const reopened = await WorkingStateStore.open(h.context);
+      expect(reopened.getChildVerification("thread-a", published.resultRevision)?.checks[0]?.command).toBe("bun test");
+      expect(reopened.getResult("thread-1", published.resultRevision)).toEqual(published);
+    } finally {
+      h.database.close();
+    }
+  });
 });

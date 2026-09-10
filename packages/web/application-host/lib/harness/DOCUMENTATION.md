@@ -8,8 +8,8 @@ on the `HarnessRouter` and dispatched from the broker event stream.
 
 ```
 broker event stream ──→ HarnessRouter.processEvent()
-                           ├── shell.exec   → ShellSupervisor (per-session PTY)
-                           ├── shell.read   → ShellSupervisor
+                           ├── shell.exec   → ShellSupervisor (per-session PTY) + verification.recordCommand
+                           ├── shell.read   → ShellSupervisor + background verification complete
                            ├── shell.write  → ShellSupervisor
                            ├── shell.kill   → ShellSupervisor
                            ├── output.store → OutputStore (global)
@@ -24,8 +24,8 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
                            ├── memory.blocks.* → KnowledgeStore block validator
-                           ├── zone2.assemble → Knowledge material + ThreadRegistry projection
-                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state
+                           ├── zone2.assemble → Knowledge material + ThreadRegistry projection + source-thread <review>
+                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification bind / auto review
 ```
 
 ## Components
@@ -119,7 +119,11 @@ durable work; `ThreadRun` is one execution attempt, and
 the Thread plus a `starting` Run and returns immediately. The runtime then
 creates a managed worktree when needed, opens a real persisted Pi child
 session with the role's active-tool allowlist, and projects broker events into
-progress, attention, report, durable transcript, and integration state.
+progress, attention, report, durable transcript, integration, and verification
+state. After a successful publish, same-run shell commands are bound to that
+`resultRevision`. A hidden review thread is then created with `startRun` +
+`spawn` (not `autoRun` alone). Draft merge records that disk commands cannot
+verify unsaved buffers.
 
 One unexpected worker exit is resumed in the same session/worktree as a new
 Run; a second consecutive crash becomes `stalled` instead of entering a crash
@@ -127,6 +131,20 @@ loop. Interactive child prompts, event silence, and six identical tool
 signatures project to `permission`/`user`, `stalled`, and `looping`. The Web UI
 reads the same registry through `/api/harness/threads` and SSE; the Pi Fleet
 registry exposes it through the `piarium-harness` provider.
+
+### VerificationCoordinator (`verification-coordinator.ts`)
+
+Session-scoped command observations, bound at publish to a fixed
+`resultRevision`. Production `shell.exec` / background `shell.read` record
+exits; `settle()` binds before `setWorkingState` so a new revision cannot
+inherit the previous review or child-check projection. Parent merge writes a
+separate bundle: draft-unsaved is `cannot-verify-unsaved-draft`.
+
+### Review sensor (`review-sensor.ts`)
+
+`onPublishedResult` opens a hidden review thread for one published revision.
+`createAndStart` must `startRun` and `spawn`. `onAgentSettled` remains only as
+a closed door for the old parent-theater trigger.
 
 ### HarnessSearchService (`search-service.ts`)
 

@@ -4185,6 +4185,26 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Windows Git Bash / PowerShell 与定向证据见 status 1.3 / 2.5。macOS / Linux 与完整浏览器点击链未测。
 
+### D-207 · 2026-09-10 · 结果验证记录与自动 review
+
+背景：Plan 3.4A / 3.5 / 3.7 要求用户和父 agent 能看到“哪一版结果接受了什么检查、结果如何、哪一版被审阅过”。旧 review-sensor 只在测试里 `createThread({ autoRun: true })`，不 spawn，也不挂已发布结果。父 `agent_settled` 上的 journaled-change 扫描不是受检输入。
+
+决定：
+
+1. 验证记录写在 WorkingState 文档的可选 `verifications`（schema 仍为 3）。Thread catalog 只存投影 `Thread.verification`（schema 仍为 8）。缺失当作 `{}` / 无投影。不恢复每次消息全工作区扫描，不建第二套工作状态权威。
+2. 命令成功只看 `exitCode === 0 && !cancelled`。不从报告或 stdout 里的“passed”推断。`allExitedZero` 只描述已记录命令的退出，不是“该结果已通过”。
+3. `binding: "bound"` 表示同一 Run、publish 前、cwd 在 worktree 下的现场观察；`bindingReason` 写明发布对象是之后捕获的。cwd 在外为 `unbound`；无法证明则为 `uncertain` 并写原因。
+4. 三个事实分开：子结果检查（`childChecks`）、合并可应用性（现有 `integrationBinding`，不复制权威）、合并后父检查（`parentChecks`）。子检查通过不意味着合并后的父工作区通过。草稿合并 `draftUnsaved` 记 `cannot-verify-unsaved-draft`，磁盘命令不能声称验证了未保存缓冲。
+5. 自动 review 的生产触发是子线程 `settle()` 在成功发布且 `changedPaths` 非空之后。`onAgentSettled` 对父 journaled 变化失败关闭。调用链是 `createThread` + `startRun` + `spawn`（`autoRun: true` 单独不会跑）。输入是任务 brief、已存储 WorkingResult 的 diff、可选已接受项目知识；`carryBlocks: false`、`worktree: "none"`、`hidden: true`。不复制父完整对话。
+6. 同一 `resultRevision` 去重；新修订不继承旧修订的已审阅/检查通过。进行中的旧 review 走现有 `kill()`。完成记录后，不同 `reviewThreadId` 或更早时间戳不能覆盖。结论写回源线程投影和 Zone 2 `<review>`；隐藏 review 线程不进默认列表。
+7. 默认 `harness.review = { enabled: true, gate: false }`，用户所有，workspace 不能改。gate 只把源线程标成等待该修订的 review，不阻断 settle。不新增强制全量检查、固定轮数、费用看板或执行者返工循环。
+
+考虑过的替代：(1) 继续用父 `agent_settled` + 现场 diff——受检输入不是固定结果。(2) `createThread({ autoRun: true })` 不 spawn——线程不会跑。(3) 从测试报告文本推断成功——把叙述当成证据。(4) 把合并可应用性再存一份验证权威——与 Integration 双写。
+
+影响：WorkingState / verification-coordinator / review-sensor / thread-runtime settle 与 merge / harness-services Zone 2 / Settings `harness.review` / 线程面板三事实展示；设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7。
+
+状态：已实施；调用链与定向证据见 status 3.4 / 3.5 / 3.7。真实付费模型审阅质量与完整浏览器点击链未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4396,3 +4416,4 @@ ModelRuntime 纵切继续通过。
 | D-204 | implementation（退出、结构化准备、并发预算与原会话恢复） | — | 设计 9.3.4；plan 3.4E / 3.10；status 3.4 / 3.10 |
 | D-205 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 |
 | D-206 | implementation（后台 shell 与终端同一进程、bundled Pi 默认、todo confidence 只作信息） | — | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 |
+| D-207 | implementation（固定结果验证记录、三事实分离、发布后自动 review） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |

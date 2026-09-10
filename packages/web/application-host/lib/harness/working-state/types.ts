@@ -99,6 +99,69 @@ export interface ThreeWayMergePlan {
   diffStats: ThreadDiffStats;
 }
 
+export type CommandInputRelation = "same-run-before-publish" | "unbound" | "uncertain";
+
+export interface CommandVerificationRecord {
+  id: string;
+  runId: string;
+  command: string;
+  cwd: string;
+  envSummary?: { PATH?: boolean; VIRTUAL_ENV?: string };
+  commandRunId?: string;
+  startedAt: number;
+  endedAt: number;
+  exitCode: number | null;
+  cancelled: boolean;
+  outputHandle?: string;
+  outputPreview?: string;
+  inputIdentity: {
+    kind: "published-revision" | "unbound";
+    branchId?: string;
+    startPublishedRevision?: number;
+    endPublishedRevision?: number;
+    startHeadRevision?: number;
+    endHeadRevision?: number;
+    reason?: string;
+  };
+  inputChangedDuringRun: boolean | null;
+  relationToPublished: CommandInputRelation;
+}
+
+export interface ResultVerificationBundle {
+  resultRevision: number;
+  branchId: string;
+  recordedAt: number;
+  binding: "bound" | "uncertain";
+  bindingReason?: string;
+  checks: CommandVerificationRecord[];
+}
+
+export interface ParentVerificationBundle {
+  mergedResultRevision: number;
+  recordedAt: number;
+  draftUnsaved: boolean;
+  note?: string;
+  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded";
+  checks: CommandVerificationRecord[];
+}
+
+export interface ResultReviewRecord {
+  resultRevision: number;
+  status: "running" | "completed" | "failed" | "cancelled";
+  recordedAt: number;
+  reviewThreadId?: string;
+  reviewRunId?: string;
+  conclusion?: string;
+  findings?: Array<{ severity: string; file?: string; line?: number; message: string }>;
+  error?: string;
+}
+
+export interface WorkingStateVerifications {
+  child: Record<string, ResultVerificationBundle[]>;
+  parent: Record<string, ParentVerificationBundle[]>;
+  reviews: Record<string, ResultReviewRecord[]>;
+}
+
 export interface IntegrationApplyResult {
   operationId: string;
   status: "applied" | "conflict" | "compensated" | "needs-attention";

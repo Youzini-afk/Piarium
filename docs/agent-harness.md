@@ -1156,7 +1156,7 @@ Handoff（把当前会话提炼为一条草稿 prompt 开新分支，Amp 的做�
 | `models.quickImplement` | `quick-implement` 角色 | 未配置 | 角色不注册 |
 | `models.hardImplement` | `hard-implement` 角色 | **主模型** | — |
 | `models.frontend` | `frontend` 角色 | 未配置 | 角色不注册 |
-| `models.review` | `review` 角色与回合结束的 review 传感器 | **主模型** | — |
+| `models.review` | `review` 角色与已发布结果的 review 传感器 | **主模型** | — |
 | `models.check` | `check` 角色 | 未配置 | 角色不注册 |
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
 | `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
@@ -1364,11 +1364,11 @@ timeout_ms?)` 等待（第 9.2.6 节）。返回结构化结果：改动文件�
 #### 9.2.3 harness 自己的 agent 对主 agent 不可见
 
 记忆 agent（第 8.4.1 节）与阅读子 agent（第 5.8 节）由 harness 规则触发，主 agent 没有调用它们的工具。`review` 角色
-有两个入口：主 agent 可以 `dispatch('review', ...)`；harness 也在回合结束且 diff 非空时作为**传感器**自动运行一次
-（第 9.1 节）。两者输入相同——只有 diff、任务说明与项目 knowledge，**不带父的对话**，干净是它有效的原因（Devin
-Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；输出带严重度与 `file:line` 的发现，作为 post-tool
-反馈注入。自动 review 接通后默认运行且不阻断；以待审结果修订去重，避免同一结果重复审查。profile 可显式设为完成门，用户可关闭；
-用量归 review 槽位，不以 T4 配对为启用前提。
+有两个入口：主 agent 可以 `dispatch('review', ...)`；harness 也在子线程成功发布非空结果后作为**传感器**自动运行一次
+（第 9.1 节，D-207）。两者输入相同——已存储结果的 diff、任务说明与已接受的项目 knowledge，**不带父的对话**，干净是它有效的原因（Devin
+Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；输出带严重度与 `file:line` 的发现，写回源线程投影并进入 Zone 2。
+自动 review 默认运行且不阻断 settle；以 `resultRevision` 去重，新修订不继承旧审阅。用户可关闭，或把 `harness.review.gate` 设为完成门；
+用量归 review 槽位（未配置则回退主模型），不以 T4 配对为启用前提。父会话的 journaled 变化不是自动 review 触发。
 
 #### 9.2.4 委派的判断交给主 agent，harness 不设配额、不估成本
 
@@ -1556,8 +1556,8 @@ ThreadRun {
 }
 ```
 
-工作分支、结果修订与草稿基线身份已经进入当前协议；单独的输入/验证记录与更完整的物化记录仍是后续形状。旧 worktree 在迁移期间
-作为后端记录保留。
+工作分支、结果修订与草稿基线身份已经进入当前协议。验证记录写在 WorkingState 可选字段，Thread 只投影子检查、合并可应用性与父检查
+以及该修订的 review 状态（D-207）。更完整的物化记录仍是后续形状。旧 worktree 在迁移期间作为后端记录保留。
 状态是**正交维度**，不是一个枚举：`done + merge conflict`、`active + worker lost`、`archived + worktree retained`、
 `waiting-for-input + permission pending` 都是合法组合，一条状态机表达不了。worker 崩溃 = 当前 Run 以 `lost` 结束，
 恢复 = 新建 `attempt + 1` 的 Run 并更新 `activeRunId`；**不在同一条记录上把 worker-lost 清掉、改回 running**——那是把

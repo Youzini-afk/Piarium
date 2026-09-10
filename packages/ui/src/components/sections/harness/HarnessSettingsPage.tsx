@@ -70,6 +70,7 @@ export interface HarnessSettings {
     search?: { provider: HarnessWebSearchProvider; endpoint?: string; credentialRef?: string };
   };
   permissions?: { mode?: PermissionMode; rules?: PermissionRule[] };
+  review?: { enabled?: boolean; gate?: boolean };
 }
 
 function readHarnessSettings(snapshot: PiSettingsSnapshot | null): HarnessSettings {
@@ -256,6 +257,16 @@ export const HarnessSettingsPage: React.FC = () => {
   const handleMemoryModeChange = React.useCallback((mode: string) => {
     if (!(HARNESS_MEMORY_MODES as readonly string[]).includes(mode)) return;
     void saveHarness(withHarnessMemoryMode(harness, mode as HarnessMemoryMode));
+  }, [harness, saveHarness]);
+
+  const handleReviewChange = React.useCallback((patch: { enabled?: boolean; gate?: boolean }) => {
+    void saveHarness({
+      ...harness,
+      review: {
+        enabled: patch.enabled ?? harness.review?.enabled ?? true,
+        gate: patch.gate ?? harness.review?.gate ?? false,
+      },
+    });
   }, [harness, saveHarness]);
 
   const handleModelSlotChange = React.useCallback((slot: HarnessModelRole, providerId: string, modelId: string) => {
@@ -608,6 +619,26 @@ export const HarnessSettingsPage: React.FC = () => {
             </p>
           ) : null}
         </SettingsFieldRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.page.harness.section.review')}
+        description={t('settings.page.harness.section.review.description')}
+      >
+        <div className="space-y-2">
+          <SettingsCheckboxRow
+            checked={harness.review?.enabled !== false}
+            onChange={(checked) => handleReviewChange({ enabled: checked })}
+            label={t('settings.page.harness.review.enabled')}
+            description={t('settings.page.harness.review.enabled.description')}
+          />
+          <SettingsCheckboxRow
+            checked={harness.review?.gate === true}
+            onChange={(checked) => handleReviewChange({ gate: checked })}
+            label={t('settings.page.harness.review.gate')}
+            description={t('settings.page.harness.review.gate.description')}
+          />
+        </div>
       </SettingsSection>
 
       <SettingsSection

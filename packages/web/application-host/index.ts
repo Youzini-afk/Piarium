@@ -83,7 +83,8 @@ import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
-import { DEFAULT_HARNESS_SETTINGS } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
+import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
@@ -1160,6 +1161,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
+  const verificationCoordinator = createVerificationCoordinator();
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
@@ -1260,6 +1262,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
     hasActiveCommands: (directory) => harnessShellActivity.hasActiveCommandAtDirectory(directory),
+    verification: verificationCoordinator,
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
     resolveWorktreeSettings: async (workspaceId, parent) => {
       const sessionId = parent.kind === 'session'
@@ -1267,6 +1270,54 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
       if (!sessionId) throw new Error('Parent thread has no Pi session for worktree settings');
       return resolveThreadWorktreeSettings(await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}));
+    },
+    resolveReviewSettings: async (workspaceId, parent) => {
+      const sessionId = parent.kind === 'session'
+        ? parent.id
+        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
+      if (!sessionId) return { enabled: true, gate: false };
+      try {
+        const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
+        const global = recordOf(recordOf(snapshot).global).harness;
+        return mergeHarnessSettings(
+          global && typeof global === 'object' && !Array.isArray(global) ? global : {},
+          {},
+        ).review;
+      } catch {
+        return { enabled: true, gate: false };
+      }
+    },
+    resolveReviewRole: async (workspaceId, parent) => {
+      const sessionId = parent.kind === 'session'
+        ? parent.id
+        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
+      if (!sessionId) return null;
+      const [settingsSnapshot, sessionSnapshot] = await Promise.all([
+        piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}).catch(() => null),
+        piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }).catch(() => null),
+      ]);
+      const global = settingsSnapshot ? recordOf(recordOf(settingsSnapshot).global).harness : undefined;
+      const merged = mergeHarnessSettings(
+        global && typeof global === 'object' && !Array.isArray(global) ? global : {},
+        {},
+      );
+      const model = recordOf(sessionSnapshot).model;
+      const main = model && typeof recordOf(model).provider === 'string' && typeof recordOf(model).id === 'string'
+        ? { providerId: recordOf(model).provider as string, modelId: recordOf(model).id as string }
+        : null;
+      return resolveRoles(merged.models, main).find((role) => role.id === 'review') ?? null;
+    },
+    recallProjectKnowledge: async (workspaceId, query) => {
+      const store = await getKnowledgeStoreForWorkspace(workspaceId);
+      const hits = await store.recall(query, 5);
+      return hits.map((hit) => {
+        const payload = hit.node.payload;
+        const title = typeof payload.title === 'string' ? payload.title
+          : typeof payload.trigger === 'string' ? payload.trigger
+            : String(hit.node.id);
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        return `#${hit.node.id} ${title}${content ? `\n${content}` : ''}`;
+      }).join('\n\n');
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
@@ -1839,6 +1890,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
+    verification: verificationCoordinator,
     readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: (sessionId, context, resourceId) => documentsAuthority.readAgentInputSnapshot(

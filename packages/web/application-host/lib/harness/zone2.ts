@@ -28,7 +28,9 @@ import type {
   ThreadLifecycle,
   ThreadRunOutcome,
   ThreadRunWorkerState,
+  ThreadVerificationProjection,
 } from "@piarium/protocol";
+import { formatReviewForZone2 } from "./review-sensor.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -88,6 +90,8 @@ export interface Zone2Thread {
   conclusion: string | null;
   deviations: string[];
   overlapWarning?: string | null | undefined;
+  mergeReady?: boolean | null;
+  verification?: ThreadVerificationProjection | null;
 }
 
 export type Zone2Threads =
@@ -103,6 +107,14 @@ export interface Zone2Material {
   blocks: Zone2Block[];
   contextUsage: Zone2ContextUsage | null;
   threads?: Zone2Threads | null;
+  reviews?: Array<{
+    threadId: string;
+    resultRevision: number;
+    status: string;
+    conclusion?: string;
+    findings?: Array<{ severity: string; file?: string; line?: number; message: string }>;
+    error?: string;
+  }>;
 }
 
 export interface Zone2Params {
@@ -167,6 +179,21 @@ function formatThread(thread: Zone2Thread, now: number): string {
     parts.push(`${thread.diffStats.files} files (+${thread.diffStats.insertions} −${thread.diffStats.deletions})`);
   }
   if (thread.integration !== "none") parts.push(`integration ${thread.integration}`);
+  if (thread.mergeReady === true) parts.push("merge applicability: ready");
+  else if (thread.mergeReady === false) parts.push("merge applicability: not ready");
+  const child = thread.verification?.childChecks;
+  if (child) {
+    const exits = child.commands.map((command) => command.exitCode ?? "pending").join(",");
+    parts.push(`child checks r${child.resultRevision}: ${child.commands.length} commands exits ${exits || "none"} (${child.binding})`);
+  }
+  const parentChecks = thread.verification?.parentChecks;
+  if (parentChecks) {
+    parts.push(`parent checks r${parentChecks.mergedResultRevision}: ${parentChecks.binding}`);
+  }
+  const review = thread.verification?.review;
+  if (review && review.status !== "none") {
+    parts.push(`review r${review.resultRevision}: ${review.status}`);
+  }
   if (thread.deviations.length > 0) parts.push(`deviations: ${thread.deviations.map(oneLine).join("; ")}`);
   if (thread.overlapWarning) parts.push(`overlap: ${thread.overlapWarning}`);
   return parts.join(" · ");
@@ -190,6 +217,7 @@ export function assembleZone2Content(
   const blocks = material.blocks;
   const git = material.git;
   const threads = material.threads ?? null;
+  const reviews = material.reviews ?? [];
   const contextUsage = material.contextUsage;
 
   // Check if everything is empty
@@ -201,6 +229,7 @@ export function assembleZone2Content(
     knowledge.length === 0 &&
     blocks.length === 0 &&
     (!threads || (threads.status === "ready" && threads.items.length === 0 && !threads.overlapWarning)) &&
+    reviews.length === 0 &&
     (!contextUsage || contextUsage.used === 0);
 
   if (allEmpty) return null;
@@ -264,6 +293,10 @@ export function assembleZone2Content(
       threadLines.push(`overlap warning: ${threads.overlapWarning}`);
     }
     sections.push(`<threads>\n${threadLines.join("\n")}\n</threads>`);
+  }
+
+  for (const review of reviews) {
+    sections.push(formatReviewForZone2(review));
   }
 
   // Knowledge

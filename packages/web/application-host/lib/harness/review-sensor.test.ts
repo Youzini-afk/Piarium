@@ -3,11 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  onPublishedResult,
   onAgentSettled,
   formatReviewForZone2,
+  parseReviewFindings,
   DEFAULT_REVIEW_SENSOR_SETTINGS,
 } from "./review-sensor.js";
-import { createThreadRegistry } from "./thread-registry.js";
+import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { resolveRoles } from "./roles.js";
 import type { ModelSelection } from "@piarium/protocol";
 
@@ -20,7 +22,7 @@ function reviewRoleFor(main: ModelSelection = mainModel) {
   return roles.find((r) => r.id === "review")!;
 }
 
-describe("onAgentSettled", () => {
+describe("onPublishedResult", () => {
   let dataDir: string;
   let registry: ReturnType<typeof createThreadRegistry>;
 
@@ -33,88 +35,174 @@ describe("onAgentSettled", () => {
     try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
   });
 
-  it("does not open a thread when no journaled changes", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
-      workspaceId,
-      reviewRole: reviewRoleFor(),
-      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
-      getJournaledChanges: async () => [],
-      getDiff: async () => "",
-    });
-    expect(result.reviewDispatched).toBe(false);
-    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(0);
+  const sourceThread = async () => registry.createThread({
+    workspaceId,
+    parent,
+    brief: "Implement login",
+    role: "hardImplement",
+    kind: "implementation",
+    createdBy: "agent",
+    concurrency: 12,
+    autoRun: false,
+    worktree: "isolated",
+    tools: ["bash"],
+    permissions: {},
   });
 
-  it("does not open a thread when no review role configured", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
+  const start = async (input: CreateThreadInput & { promptText: string }) => {
+    const { promptText: _promptText, ...createInput } = input;
+    const thread = await registry.createThread(createInput);
+    await registry.startRun(workspaceId, thread.id);
+    return thread;
+  };
+
+  it("does not open a thread when the published diff is empty", async () => {
+    const source = await sourceThread();
+    const result = await onPublishedResult({
       workspaceId,
+      source,
+      resultRevision: 1,
+      changedPaths: [],
+      reviewRole: reviewRoleFor(),
+      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      formatDiff: async () => "",
+      createAndStart: start,
+    });
+    expect(result.reviewDispatched).toBe(false);
+    expect(result.skippedReason).toBe("empty-diff");
+    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(1);
+  });
+
+  it("does not open a thread when review is disabled", async () => {
+    const source = await sourceThread();
+    const result = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 1,
+      changedPaths: ["a.ts"],
+      reviewRole: reviewRoleFor(),
+      settings: { enabled: false, gate: false },
+      formatDiff: async () => "diff",
+      createAndStart: start,
+    });
+    expect(result.reviewDispatched).toBe(false);
+    expect(result.skippedReason).toBe("disabled");
+  });
+
+  it("does not open a thread when no review role is available", async () => {
+    const source = await sourceThread();
+    const result = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 1,
+      changedPaths: ["a.ts"],
       reviewRole: null,
       settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      formatDiff: async () => "diff",
+      createAndStart: start,
+    });
+    expect(result.reviewDispatched).toBe(false);
+    expect(result.skippedReason).toBe("no-review-role");
+  });
+
+  it("creates a hidden review bound to the published revision and starts a run", async () => {
+    const source = await sourceThread();
+    const result = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 3,
+      changedPaths: ["a.ts"],
+      reviewRole: reviewRoleFor(),
+      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      formatDiff: async () => "diff content",
+      recallKnowledge: async () => "#1 Use bun",
+      createAndStart: start,
+    });
+    expect(result.reviewDispatched).toBe(true);
+    expect(result.blocking).toBe(false);
+    const review = await registry.getThread(workspaceId, parent, result.threadId!);
+    expect(review?.hidden).toBe(true);
+    expect(review?.reviewOf).toEqual({ sourceThreadId: source.id, resultRevision: 3 });
+    expect(review?.brief).toContain(`${source.id}@3`);
+    expect(await registry.getActiveRun(workspaceId, review!.id)).toMatchObject({ workerState: "starting" });
+    expect(await registry.listThreads(workspaceId, parent)).toHaveLength(1);
+    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(2);
+  });
+
+  it("dedups the same result revision and cancels a running older review", async () => {
+    const source = await sourceThread();
+    const first = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 1,
+      changedPaths: ["a.ts"],
+      reviewRole: reviewRoleFor(),
+      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      formatDiff: async () => "old",
+      createAndStart: start,
+    });
+    const cancelled: string[] = [];
+    const second = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 2,
+      changedPaths: ["a.ts"],
+      reviewRole: reviewRoleFor(),
+      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      existingReview: { resultRevision: 1, status: "running", reviewThreadId: first.threadId },
+      formatDiff: async () => "new",
+      cancelReview: async (id) => { cancelled.push(id); },
+      createAndStart: start,
+    });
+    expect(cancelled).toEqual([first.threadId]);
+    expect(second.reviewDispatched).toBe(true);
+    const dup = await onPublishedResult({
+      workspaceId,
+      source,
+      resultRevision: 2,
+      changedPaths: ["a.ts"],
+      reviewRole: reviewRoleFor(),
+      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
+      existingReview: { resultRevision: 2, status: "running", reviewThreadId: second.threadId },
+      formatDiff: async () => "new",
+      createAndStart: start,
+    });
+    expect(dup.reviewDispatched).toBe(false);
+    expect(dup.skippedReason).toBe("dedup");
+  });
+
+  it("does not treat parent journaled changes as a published-result review", async () => {
+    const result = await onAgentSettled("p1", {
+      registry,
+      workspaceId,
+      reviewRole: reviewRoleFor(),
+      settings: { gate: false },
       getJournaledChanges: async () => ["a.ts"],
       getDiff: async () => "diff",
     });
     expect(result.reviewDispatched).toBe(false);
-    expect(await registry.listThreads(workspaceId, parent, true)).toHaveLength(0);
-  });
-
-  it("opens a review thread when changes exist and role configured", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
-      workspaceId,
-      reviewRole: reviewRoleFor(),
-      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
-      getJournaledChanges: async () => ["a.ts", "b.ts"],
-      getDiff: async () => "diff content",
-    });
-    expect(result.reviewDispatched).toBe(true);
-    expect(result.threadId).toBeDefined();
-    expect(result.blocking).toBe(false);
-
-    const thread = await registry.getThread(workspaceId, parent, result.threadId!);
-    expect(thread?.role).toBe("review");
-    expect(thread?.brief).toContain("diff content");
-    expect(thread?.worktree).toBeNull();
-  });
-
-  it("the review thread is hidden from the parent agent's list", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
-      workspaceId,
-      reviewRole: reviewRoleFor(),
-      settings: DEFAULT_REVIEW_SENSOR_SETTINGS,
-      getJournaledChanges: async () => ["a.ts"],
-      getDiff: async () => "diff",
-    });
-    expect(result.reviewDispatched).toBe(true);
-
-    // §9.2.3: the harness's own agents are invisible to the main agent.
-    expect(await registry.listThreads(workspaceId, parent)).toHaveLength(0);
-    // …but the host still tracks them.
-    const all = await registry.listThreads(workspaceId, parent, true);
-    expect(all).toHaveLength(1);
-    expect(all[0]!.hidden).toBe(true);
-  });
-
-  it("gate mode is blocking", async () => {
-    const result = await onAgentSettled("p1", {
-      registry,
-      workspaceId,
-      reviewRole: reviewRoleFor(),
-      settings: { gate: true },
-      getJournaledChanges: async () => ["a.ts"],
-      getDiff: async () => "diff",
-    });
-    expect(result.blocking).toBe(true);
+    expect(result.skippedReason).toBe("not-a-published-result");
   });
 });
 
-describe("formatReviewForZone2", () => {
+describe("review formatting", () => {
+  it("parses severity and file:line from findings", () => {
+    expect(parseReviewFindings("- [high] src/a.ts:12 missing null check\n- none")).toEqual([
+      { severity: "high", file: "src/a.ts", line: 12, message: "missing null check" },
+    ]);
+  });
+
   it("wraps review text in <review> tags", () => {
-    const formatted = formatReviewForZone2("Looks good, minor issues in a.ts");
+    const formatted = formatReviewForZone2({
+      threadId: "thread-1",
+      resultRevision: 2,
+      status: "completed",
+      conclusion: "Looks good",
+      findings: [{ severity: "medium", file: "a.ts", line: 4, message: "unused" }],
+    });
     expect(formatted).toContain("<review>");
-    expect(formatted).toContain("Looks good");
+    expect(formatted).toContain("thread-1@2 completed");
+    expect(formatted).toContain("[medium] a.ts:4 unused");
     expect(formatted).toContain("</review>");
   });
 });

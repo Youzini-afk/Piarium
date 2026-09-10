@@ -26,6 +26,8 @@ import type {
   ThreadRunOutcome,
   ThreadTokens,
   ThreadViewCursor,
+  ThreadReviewOf,
+  ThreadVerificationProjection,
   ThreadWaitingFor,
   ThreadWorktree,
 } from "@piarium/protocol";
@@ -148,6 +150,7 @@ export interface CreateThreadInput {
   systemPromptFragment?: string;
   autoRun: boolean;
   hidden?: boolean;
+  reviewOf?: ThreadReviewOf;
 }
 
 export interface ThreadRegistryOptions {
@@ -232,6 +235,77 @@ const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparat
 
 const isStringArray = (value: unknown): value is string[] => (
   Array.isArray(value) && value.every((entry) => typeof entry === "string")
+);
+
+const isReviewOf = (value: unknown): value is ThreadReviewOf => (
+  isRecord(value)
+  && isString(value.sourceThreadId)
+  && Number.isSafeInteger(value.resultRevision)
+  && Number(value.resultRevision) > 0
+);
+
+const isVerificationCommand = (value: unknown): boolean => (
+  isRecord(value)
+  && isString(value.command)
+  && isString(value.cwd)
+  && (value.exitCode === null || Number.isSafeInteger(value.exitCode))
+  && typeof value.cancelled === "boolean"
+  && (value.relation === "same-run-before-publish" || value.relation === "unbound" || value.relation === "uncertain")
+  && (value.inputChanged === null || typeof value.inputChanged === "boolean")
+  && (value.outputHandle === undefined || isString(value.outputHandle))
+);
+
+const isChildChecks = (value: unknown): boolean => (
+  value === null
+  || (isRecord(value)
+    && Number.isSafeInteger(value.resultRevision)
+    && Number(value.resultRevision) > 0
+    && (value.binding === "bound" || value.binding === "uncertain")
+    && (value.bindingReason === undefined || isString(value.bindingReason))
+    && Array.isArray(value.commands)
+    && value.commands.every(isVerificationCommand)
+    && (value.allExitedZero === null || typeof value.allExitedZero === "boolean"))
+);
+
+const isParentChecks = (value: unknown): boolean => (
+  value === null
+  || (isRecord(value)
+    && Number.isSafeInteger(value.mergedResultRevision)
+    && Number(value.mergedResultRevision) > 0
+    && typeof value.draftUnsaved === "boolean"
+    && (value.binding === "bound" || value.binding === "uncertain"
+      || value.binding === "cannot-verify-unsaved-draft" || value.binding === "not-recorded")
+    && (value.note === undefined || isString(value.note))
+    && Array.isArray(value.commands)
+    && value.commands.every(isVerificationCommand)
+    && (value.allExitedZero === null || typeof value.allExitedZero === "boolean"))
+);
+
+const isReviewProjection = (value: unknown): boolean => (
+  value === null
+  || (isRecord(value)
+    && Number.isSafeInteger(value.resultRevision)
+    && Number(value.resultRevision) > 0
+    && (value.status === "none" || value.status === "running" || value.status === "completed"
+      || value.status === "failed" || value.status === "cancelled")
+    && (value.reviewThreadId === undefined || isString(value.reviewThreadId))
+    && (value.reviewRunId === undefined || isString(value.reviewRunId))
+    && (value.conclusion === undefined || isString(value.conclusion))
+    && (value.error === undefined || isString(value.error))
+    && (value.findings === undefined || (Array.isArray(value.findings) && value.findings.every((finding) => (
+      isRecord(finding) && isString(finding.severity) && isString(finding.message)
+      && (finding.file === undefined || isString(finding.file))
+      && (finding.line === undefined || Number.isSafeInteger(finding.line))
+    )))))
+);
+
+const isVerificationProjection = (value: unknown): value is ThreadVerificationProjection => (
+  isRecord(value)
+  && (value.currentResultRevision === undefined
+    || (Number.isSafeInteger(value.currentResultRevision) && Number(value.currentResultRevision) > 0))
+  && isChildChecks(value.childChecks)
+  && isParentChecks(value.parentChecks)
+  && isReviewProjection(value.review)
 );
 
 const isIntegrationBinding = (value: unknown): value is ThreadIntegrationBinding => (
@@ -385,6 +459,8 @@ const isThread = (value: unknown): value is Thread => {
     && (value.mergedCommit === undefined || isString(value.mergedCommit))
     && (value.mergedResultRevision === undefined || (Number.isSafeInteger(value.mergedResultRevision) && Number(value.mergedResultRevision) > 0))
     && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
+    && (value.verification === undefined || isVerificationProjection(value.verification))
+    && (value.reviewOf === undefined || isReviewOf(value.reviewOf))
     && isNullableString(value.activeRunId)
     && isString(value.createdAt)
     && isString(value.updatedAt)
@@ -447,6 +523,7 @@ const isThreadRun = (value: unknown): value is ThreadRun => {
     && Number(value.attempt) > 0
     && isString(value.runtimeId)
     && isNullableString(value.sessionId)
+    && (value.inputRevision === undefined || (Number.isSafeInteger(value.inputRevision) && Number(value.inputRevision) > 0))
     && WORKER_STATES.has(value.workerState as ThreadRun["workerState"])
     && (value.outcome === null || OUTCOMES.has(value.outcome as ThreadRunOutcome))
     && isNullableString(value.exitReason)
@@ -1047,6 +1124,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         updatedAt: timestamp,
         eventSeq: nextEventSeq(catalog),
         hidden: input.hidden ?? false,
+        ...(input.reviewOf ? { reviewOf: structuredClone(input.reviewOf) } : {}),
       };
       catalog.threads.push(thread);
       return { value: thread, changed: [thread] };
@@ -1144,6 +1222,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         attempt,
         runtimeId,
         sessionId: null,
+        ...(thread.resultRevision ? { inputRevision: thread.resultRevision } : {}),
         workerState: "starting",
         outcome: null,
         exitReason: null,
@@ -1349,6 +1428,26 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: thread, changed: [thread] };
   });
 
+  const setVerification = async (
+    workspaceId: string,
+    threadId: string,
+    verification: ThreadVerificationProjection | null,
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    if (verification) {
+      if (JSON.stringify(thread.verification) === JSON.stringify(verification)) {
+        return { value: thread, changed: [], write: false };
+      }
+      thread.verification = structuredClone(verification);
+    } else {
+      if (!thread.verification) return { value: thread, changed: [], write: false };
+      delete thread.verification;
+    }
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
+
   const setWorktree = async (workspaceId: string, threadId: string, worktree: ThreadWorktree): Promise<Thread | null> => (
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
@@ -1372,7 +1471,19 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     thread.workBranchId = input.branchId;
-    if (input.resultRevision !== undefined) thread.resultRevision = input.resultRevision;
+    if (input.resultRevision !== undefined) {
+      const previous = thread.resultRevision;
+      thread.resultRevision = input.resultRevision;
+      if (previous !== input.resultRevision && thread.verification) {
+        if (thread.verification.childChecks?.resultRevision !== input.resultRevision) {
+          thread.verification.childChecks = null;
+        }
+        if (thread.verification.review?.resultRevision !== input.resultRevision) {
+          thread.verification.review = null;
+        }
+        thread.verification.currentResultRevision = input.resultRevision;
+      }
+    }
     if (input.worktree) thread.worktree = normalizeThreadWorktree(input.worktree);
     if (input.diffStats) {
       thread.diffStats = structuredClone(input.diffStats);
@@ -1789,6 +1900,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setIntegration,
     setIntegrationBinding,
     invalidateIntegrationBinding,
+    setVerification,
     setWorktree,
     setWorkingState,
     completeThread,

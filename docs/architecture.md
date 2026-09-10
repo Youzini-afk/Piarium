@@ -692,6 +692,10 @@ Surface targets are classified from Documents dirty publications for the workspa
 the same three-way rules as disk, and applied through Document Registry as one unsaved undo group keyed by
 the Integration operation id. Unavailable or drifted buffers keep the child result and do not write disk.
 `merge-ready` is a bound preview, not “files changed at settlement”.
+Published results can carry Host verification records: the actual commands, cwd, exits, and whether
+those observations can be bound to that revision. Child-result checks, merge applicability, and
+post-merge parent checks stay separate facts. A default, non-blocking review thread may run against
+the stored result diff after publish; it does not copy the parent conversation (D-207).
 
 Git trees and resultCommit are valid migration inputs and backend references. Publication switches to
 the new authority only after its records and content are readable; failure preserves the previous source.

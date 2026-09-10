@@ -71,6 +71,22 @@ const formatThreadLine = (snapshot: ThreadSnapshot, cursor: ThreadViewCursor | n
   if (thread.diffStats && (full || !cursor || JSON.stringify(thread.diffStats) !== JSON.stringify(cursor.diffStats))) {
     line += `\n  Δ ${thread.diffStats.files} files (+${thread.diffStats.insertions} −${thread.diffStats.deletions})`;
   }
+  if (thread.integrationBinding) {
+    line += `\n  merge applicability: ${thread.integrationBinding.valid === false ? "stale" : thread.integrationBinding.mergeReady ? "ready" : "not ready"}`;
+  }
+  const childChecks = thread.verification?.childChecks;
+  if (childChecks) {
+    const exits = childChecks.commands.map((command) => command.exitCode ?? "pending").join(",");
+    line += `\n  child checks r${childChecks.resultRevision}: ${childChecks.commands.length} commands exits ${exits || "none"} (${childChecks.binding})`;
+  }
+  const parentChecks = thread.verification?.parentChecks;
+  if (parentChecks) {
+    line += `\n  parent checks r${parentChecks.mergedResultRevision}: ${parentChecks.binding}`;
+  }
+  const review = thread.verification?.review;
+  if (review && review.status !== "none") {
+    line += `\n  review r${review.resultRevision}: ${review.status}${review.conclusion ? ` — ${review.conclusion}` : ""}`;
+  }
   return line;
 };
 

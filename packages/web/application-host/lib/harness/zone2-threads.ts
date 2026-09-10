@@ -40,6 +40,8 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
   diffStats: thread.diffStats,
   conclusion: thread.report?.conclusion ?? null,
   deviations: [...(thread.report?.deviations ?? [])],
+  mergeReady: thread.integrationBinding?.valid === false ? false : thread.integrationBinding?.mergeReady ?? null,
+  ...(thread.verification ? { verification: thread.verification } : {}),
 });
 
 const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: ThreadRun | null }>): string | null => {

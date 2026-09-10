@@ -56,6 +56,15 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         waitMs: params.waitMs ?? 60_000,
       });
       if (result.kind === "completed") {
+        host.verification?.recordCommand({
+          sessionId: ctx.sessionId,
+          command: params.command,
+          cwd: result.cwd,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          ...(result.handle ? { outputHandle: result.handle } : {}),
+          outputPreview: result.stdout,
+        });
         const presented = presentOrganizedOutput({
           command: params.command,
           output: result.stdout,
@@ -76,6 +85,15 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         };
       }
       if (result.kind === "background") {
+        host.verification?.recordCommand({
+          sessionId: ctx.sessionId,
+          command: params.command,
+          cwd: result.cwd,
+          exitCode: null,
+          commandRunId: result.id,
+          pending: true,
+          outputPreview: result.outputSoFar,
+        });
         const presented = presentOrganizedOutput({
           command: params.command,
           output: result.outputSoFar,
@@ -111,6 +129,9 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
         command?: string;
       }>(ctx.sessionId, "shell", params.id, async (previous) => {
         const result = await supervisor.read(params.id, previous?.value.offset ?? 0, Number.MAX_SAFE_INTEGER);
+        if (result.running === false && result.exitCode !== undefined) {
+          host.verification?.completeBackgroundCommand(ctx.sessionId, params.id, result.exitCode);
+        }
         const now = host.observationCursors.now();
         const presented = presentOrganizedOutput({
           command: result.command ?? "",
@@ -405,7 +426,21 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
       const material = params.memoryMode === "off"
         ? { ...result.material, blocks: [] }
         : result.material;
-      const content = assembleZone2Content({ ...material, threads }, { eventCursor: result.eventCursor });
+      const reviews = threads && threads.status === "ready"
+        ? threads.items.flatMap((thread) => {
+            const review = thread.verification?.review;
+            if (!review || review.status === "none") return [];
+            return [{
+              threadId: thread.id,
+              resultRevision: review.resultRevision,
+              status: review.status,
+              ...(review.conclusion ? { conclusion: review.conclusion } : {}),
+              ...(review.findings ? { findings: review.findings } : {}),
+              ...(review.error ? { error: review.error } : {}),
+            }];
+          })
+        : [];
+      const content = assembleZone2Content({ ...material, threads, reviews }, { eventCursor: result.eventCursor });
       return { content, eventCursor: result.eventCursor };
     },
   };

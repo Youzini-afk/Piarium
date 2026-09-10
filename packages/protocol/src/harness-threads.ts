@@ -124,6 +124,13 @@ export interface Thread {
   mergedResultRevision?: number;
   /** Compact Host preview binding shared by Thread, wait, Zone 2, and the thread UI. */
   integrationBinding?: ThreadIntegrationBinding;
+  /**
+   * Host projection of checks and review for the current result.
+   * Command exits are facts; they are not a "result verified" flag.
+   */
+  verification?: ThreadVerificationProjection;
+  /** Hidden auto-review thread bound to one published source revision. */
+  reviewOf?: ThreadReviewOf;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -168,12 +175,71 @@ export type ThreadRestoreStatus =
   | "enospc"
   | "budget-unavailable";
 
+export interface ThreadVerificationCommandFact {
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  cancelled: boolean;
+  relation: "same-run-before-publish" | "unbound" | "uncertain";
+  inputChanged: boolean | null;
+  outputHandle?: string;
+}
+
+export interface ThreadChildCheckProjection {
+  resultRevision: number;
+  binding: "bound" | "uncertain";
+  bindingReason?: string;
+  commands: ThreadVerificationCommandFact[];
+  /** Fact about recorded command exits. Not "this result passed". */
+  allExitedZero: boolean | null;
+}
+
+export interface ThreadParentCheckProjection {
+  mergedResultRevision: number;
+  draftUnsaved: boolean;
+  binding: "bound" | "uncertain" | "cannot-verify-unsaved-draft" | "not-recorded";
+  note?: string;
+  commands: ThreadVerificationCommandFact[];
+  allExitedZero: boolean | null;
+}
+
+export interface ThreadReviewFinding {
+  severity: string;
+  file?: string;
+  line?: number;
+  message: string;
+}
+
+export interface ThreadReviewProjection {
+  resultRevision: number;
+  status: "none" | "running" | "completed" | "failed" | "cancelled";
+  reviewThreadId?: string;
+  reviewRunId?: string;
+  conclusion?: string;
+  findings?: ThreadReviewFinding[];
+  error?: string;
+}
+
+export interface ThreadVerificationProjection {
+  currentResultRevision?: number;
+  childChecks: ThreadChildCheckProjection | null;
+  parentChecks: ThreadParentCheckProjection | null;
+  review: ThreadReviewProjection | null;
+}
+
+export interface ThreadReviewOf {
+  sourceThreadId: string;
+  resultRevision: number;
+}
+
 export interface ThreadRun {
   id: string;
   threadId: string;
   attempt: number;
   runtimeId: string;
   sessionId: string | null;
+  /** Last published resultRevision known when this Run started, if any. */
+  inputRevision?: number;
   workerState: ThreadRunWorkerState;
   outcome: ThreadRunOutcome | null;
   exitReason: string | null;

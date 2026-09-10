@@ -7,11 +7,16 @@ import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
 import type {
+  CommandVerificationRecord,
   DraftBaseline,
   DraftBaselinePathProvenance,
+  ParentVerificationBundle,
   RecoveryState,
+  ResultReviewRecord,
+  ResultVerificationBundle,
   WorkingBranch,
   WorkingResult,
+  WorkingStateVerifications,
 } from "./types.js";
 import { materializeWorkingState } from "./materializer.js";
 
@@ -24,6 +29,7 @@ interface WorkingStateDocument {
   branches: Record<string, WorkingBranch>;
   draftBaselines: Record<string, DraftBaseline>;
   results: Record<string, WorkingResult>;
+  verifications?: WorkingStateVerifications;
 }
 
 export interface CreateDraftBaselinePath {
@@ -188,6 +194,147 @@ const parseResult = (value: unknown, key: string): WorkingResult => {
   };
 };
 
+const isSafeInt = (value: unknown): value is number => Number.isSafeInteger(value);
+const isOptionalString = (value: unknown): value is string | undefined => value === undefined || typeof value === "string";
+
+const parseCommandRecord = (value: unknown, label: string): CommandVerificationRecord => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.runId !== "string" || typeof row.command !== "string"
+    || typeof row.cwd !== "string" || !isSafeInt(row.startedAt) || !isSafeInt(row.endedAt)
+    || (row.exitCode !== null && !isSafeInt(row.exitCode)) || typeof row.cancelled !== "boolean"
+    || (row.relationToPublished !== "same-run-before-publish" && row.relationToPublished !== "unbound"
+      && row.relationToPublished !== "uncertain")
+    || (row.inputChangedDuringRun !== null && typeof row.inputChangedDuringRun !== "boolean")
+    || !row.inputIdentity || typeof row.inputIdentity !== "object" || Array.isArray(row.inputIdentity)) {
+    throw new Error(`${label} is malformed`);
+  }
+  const identity = row.inputIdentity as Record<string, unknown>;
+  if (identity.kind !== "published-revision" && identity.kind !== "unbound") throw new Error(`${label} identity is malformed`);
+  return {
+    id: row.id,
+    runId: row.runId,
+    command: row.command,
+    cwd: row.cwd,
+    ...(row.envSummary && typeof row.envSummary === "object" && !Array.isArray(row.envSummary)
+      ? { envSummary: row.envSummary as { PATH?: boolean; VIRTUAL_ENV?: string } }
+      : {}),
+    ...(typeof row.commandRunId === "string" ? { commandRunId: row.commandRunId } : {}),
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    exitCode: row.exitCode as number | null,
+    cancelled: row.cancelled,
+    ...(typeof row.outputHandle === "string" ? { outputHandle: row.outputHandle } : {}),
+    ...(typeof row.outputPreview === "string" ? { outputPreview: row.outputPreview } : {}),
+    inputIdentity: {
+      kind: identity.kind,
+      ...(typeof identity.branchId === "string" ? { branchId: identity.branchId } : {}),
+      ...(isSafeInt(identity.startPublishedRevision) ? { startPublishedRevision: identity.startPublishedRevision } : {}),
+      ...(isSafeInt(identity.endPublishedRevision) ? { endPublishedRevision: identity.endPublishedRevision } : {}),
+      ...(isSafeInt(identity.startHeadRevision) ? { startHeadRevision: identity.startHeadRevision } : {}),
+      ...(isSafeInt(identity.endHeadRevision) ? { endHeadRevision: identity.endHeadRevision } : {}),
+      ...(typeof identity.reason === "string" ? { reason: identity.reason } : {}),
+    },
+    inputChangedDuringRun: row.inputChangedDuringRun as boolean | null,
+    relationToPublished: row.relationToPublished,
+  };
+};
+
+const parseChildBundle = (value: unknown, label: string): ResultVerificationBundle => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
+  const row = value as Record<string, unknown>;
+  if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || typeof row.branchId !== "string"
+    || !isSafeInt(row.recordedAt) || (row.binding !== "bound" && row.binding !== "uncertain")
+    || !Array.isArray(row.checks) || !isOptionalString(row.bindingReason)) {
+    throw new Error(`${label} is malformed`);
+  }
+  return {
+    resultRevision: row.resultRevision,
+    branchId: row.branchId,
+    recordedAt: row.recordedAt,
+    binding: row.binding,
+    ...(typeof row.bindingReason === "string" ? { bindingReason: row.bindingReason } : {}),
+    checks: row.checks.map((check, index) => parseCommandRecord(check, `${label} check ${index}`)),
+  };
+};
+
+const parseParentBundle = (value: unknown, label: string): ParentVerificationBundle => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
+  const row = value as Record<string, unknown>;
+  const bindings = new Set(["bound", "uncertain", "cannot-verify-unsaved-draft", "not-recorded"]);
+  if (!isSafeInt(row.mergedResultRevision) || Number(row.mergedResultRevision) <= 0 || !isSafeInt(row.recordedAt)
+    || typeof row.draftUnsaved !== "boolean" || !bindings.has(row.binding as string) || !Array.isArray(row.checks)
+    || !isOptionalString(row.note)) {
+    throw new Error(`${label} is malformed`);
+  }
+  return {
+    mergedResultRevision: row.mergedResultRevision,
+    recordedAt: row.recordedAt,
+    draftUnsaved: row.draftUnsaved,
+    binding: row.binding as ParentVerificationBundle["binding"],
+    ...(typeof row.note === "string" ? { note: row.note } : {}),
+    checks: row.checks.map((check, index) => parseCommandRecord(check, `${label} check ${index}`)),
+  };
+};
+
+const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
+  const row = value as Record<string, unknown>;
+  const statuses = new Set(["running", "completed", "failed", "cancelled"]);
+  if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || !statuses.has(row.status as string)
+    || !isSafeInt(row.recordedAt)) {
+    throw new Error(`${label} is malformed`);
+  }
+  return {
+    resultRevision: row.resultRevision,
+    status: row.status as ResultReviewRecord["status"],
+    recordedAt: row.recordedAt,
+    ...(typeof row.reviewThreadId === "string" ? { reviewThreadId: row.reviewThreadId } : {}),
+    ...(typeof row.reviewRunId === "string" ? { reviewRunId: row.reviewRunId } : {}),
+    ...(typeof row.conclusion === "string" ? { conclusion: row.conclusion } : {}),
+    ...(Array.isArray(row.findings)
+      ? {
+          findings: row.findings.map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${label} finding is malformed`);
+            const finding = item as Record<string, unknown>;
+            if (typeof finding.severity !== "string" || typeof finding.message !== "string") {
+              throw new Error(`${label} finding is malformed`);
+            }
+            return {
+              severity: finding.severity,
+              message: finding.message,
+              ...(typeof finding.file === "string" ? { file: finding.file } : {}),
+              ...(isSafeInt(finding.line) ? { line: finding.line } : {}),
+            };
+          }),
+        }
+      : {}),
+    ...(typeof row.error === "string" ? { error: row.error } : {}),
+  };
+};
+
+const parseMap = <T>(value: unknown, label: string, parse: (item: unknown, itemLabel: string) => T): Record<string, T[]> => {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, items]) => {
+    if (!Array.isArray(items)) throw new Error(`${label} ${key} must be an array`);
+    return [key, items.map((item, index) => parse(item, `${label} ${key} ${index}`))];
+  }));
+};
+
+const parseVerifications = (value: unknown): WorkingStateVerifications | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Working-state verifications are malformed");
+  const row = value as Record<string, unknown>;
+  return {
+    child: parseMap(row.child, "Working-state child verifications", parseChildBundle),
+    parent: parseMap(row.parent, "Working-state parent verifications", parseParentBundle),
+    reviews: parseMap(row.reviews, "Working-state reviews", parseReviewRecord),
+  };
+};
+
+const emptyVerifications = (): WorkingStateVerifications => ({ child: {}, parent: {}, reviews: {} });
+
 export class WorkingStateStore {
   private readonly context: WorkspaceRecoveryStorageContext;
   private readonly fsPromises: typeof fs.promises;
@@ -237,12 +384,14 @@ export class WorkingStateStore {
       .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId)]));
     const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
       .map(([key, value]) => [key, parseResult(value, key)]));
+    const verifications = parseVerifications(record.verifications);
     return new WorkingStateStore(options, {
       schemaVersion: SCHEMA_VERSION,
       workspaceId: options.identity.workspaceId,
       branches,
       draftBaselines,
       results,
+      ...(verifications ? { verifications } : {}),
     });
   }
 
@@ -354,6 +503,68 @@ export class WorkingStateStore {
   getResult(branchId: string, revision: number): WorkingResult | null {
     const result = this.document.results[`${branchId}@${revision}`];
     return result ? clone(result) : null;
+  }
+
+  getChildVerification(threadId: string, resultRevision: number): ResultVerificationBundle | null {
+    const match = this.document.verifications?.child[threadId]?.find((bundle) => bundle.resultRevision === resultRevision);
+    return match ? clone(match) : null;
+  }
+
+  listChildVerifications(threadId: string): ResultVerificationBundle[] {
+    return (this.document.verifications?.child[threadId] ?? []).map((bundle) => clone(bundle));
+  }
+
+  getParentVerification(threadId: string, mergedResultRevision?: number): ParentVerificationBundle | null {
+    const list = this.document.verifications?.parent[threadId] ?? [];
+    const match = mergedResultRevision === undefined
+      ? list.at(-1)
+      : list.find((bundle) => bundle.mergedResultRevision === mergedResultRevision);
+    return match ? clone(match) : null;
+  }
+
+  getReviewRecord(threadId: string, resultRevision: number): ResultReviewRecord | null {
+    const match = this.document.verifications?.reviews[threadId]?.find((record) => record.resultRevision === resultRevision);
+    return match ? clone(match) : null;
+  }
+
+  listReviewRecords(threadId: string): ResultReviewRecord[] {
+    return (this.document.verifications?.reviews[threadId] ?? []).map((record) => clone(record));
+  }
+
+  async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> {
+    const next = clone(this.document);
+    const verifications = next.verifications ?? emptyVerifications();
+    const current = verifications.child[threadId] ?? [];
+    verifications.child[threadId] = [
+      ...current.filter((item) => item.resultRevision !== bundle.resultRevision),
+      clone(bundle),
+    ].sort((left, right) => left.resultRevision - right.resultRevision);
+    next.verifications = verifications;
+    await this.persist(next, () => undefined);
+  }
+
+  async putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void> {
+    const next = clone(this.document);
+    const verifications = next.verifications ?? emptyVerifications();
+    const current = verifications.parent[threadId] ?? [];
+    verifications.parent[threadId] = [
+      ...current.filter((item) => item.mergedResultRevision !== bundle.mergedResultRevision),
+      clone(bundle),
+    ].sort((left, right) => left.mergedResultRevision - right.mergedResultRevision);
+    next.verifications = verifications;
+    await this.persist(next, () => undefined);
+  }
+
+  async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> {
+    const next = clone(this.document);
+    const verifications = next.verifications ?? emptyVerifications();
+    const current = verifications.reviews[threadId] ?? [];
+    verifications.reviews[threadId] = [
+      ...current.filter((item) => item.resultRevision !== record.resultRevision),
+      clone(record),
+    ].sort((left, right) => left.resultRevision - right.resultRevision);
+    next.verifications = verifications;
+    await this.persist(next, () => undefined);
   }
 
   resultState(branchId: string, revision: number): Record<string, RecoveryState> | null {

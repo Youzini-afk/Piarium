@@ -568,6 +568,56 @@ export const HarnessThreadsPanel: React.FC<{
                     ? {entry.thread.waitingFor.text}
                   </p>
                 ) : null}
+                {entry.thread.verification?.childChecks ? (
+                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
+                    {t('harness.threads.verification.child', { revision: String(entry.thread.verification.childChecks.resultRevision) })}
+                    {': '}
+                    {entry.thread.verification.childChecks.commands.length === 0
+                      ? t('harness.threads.verification.childEmpty')
+                      : entry.thread.verification.childChecks.commands
+                        .map((command) => t('harness.threads.verification.command', {
+                          code: command.exitCode === null ? '—' : String(command.exitCode),
+                          command: command.command,
+                        }))
+                        .join('; ')}
+                    {entry.thread.verification.childChecks.binding === 'uncertain' && entry.thread.verification.childChecks.bindingReason
+                      ? ` · ${t('harness.threads.verification.childUncertain', { reason: entry.thread.verification.childChecks.bindingReason })}`
+                      : ''}
+                  </p>
+                ) : null}
+                {entry.thread.integrationBinding ? (
+                  <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+                    {t('harness.threads.verification.merge')}
+                    {': '}
+                    {entry.thread.integrationBinding.valid === false
+                      ? t('harness.threads.previewStale')
+                      : entry.thread.integrationBinding.mergeReady
+                        ? t('harness.threads.state.merge-ready')
+                        : t('harness.threads.state.dirty')}
+                  </p>
+                ) : null}
+                {entry.thread.verification?.parentChecks ? (
+                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
+                    {t('harness.threads.verification.parent')}
+                    {': '}
+                    {entry.thread.verification.parentChecks.draftUnsaved
+                      ? t('harness.threads.verification.parentUnsaved')
+                      : entry.thread.verification.parentChecks.binding === 'not-recorded'
+                        ? t('harness.threads.verification.parentNone')
+                        : entry.thread.verification.parentChecks.note ?? entry.thread.verification.parentChecks.binding}
+                  </p>
+                ) : null}
+                {entry.thread.verification?.review && entry.thread.verification.review.status !== 'none' ? (
+                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
+                    {t('harness.threads.verification.review', { revision: String(entry.thread.verification.review.resultRevision) })}
+                    {': '}
+                    {entry.thread.verification.review.status === 'running'
+                      ? t('harness.threads.verification.reviewRunning')
+                      : entry.thread.verification.review.conclusion
+                        ?? entry.thread.verification.review.error
+                        ?? entry.thread.verification.review.status}
+                  </p>
+                ) : null}
                 <div className="mt-1.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground/80">
                   <span>↳ {entry.activeRun?.steps ?? 0}</span>
                   {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (

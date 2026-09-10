@@ -39,6 +39,10 @@ import type { IntegrationCoordinator } from "./working-state/integration-coordin
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import { encodeDocumentText } from "../documents/inspect.js";
+import type { VerificationCoordinator } from "./verification-coordinator.js";
+import { formatPublishedResultDiff } from "./working-state/verification-records.js";
+import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
+import type { ResolvedRole } from "./roles.js";
 
 export interface ThreadSessionAdapter {
   create(input: {
@@ -96,11 +100,16 @@ export interface ThreadRuntimeOptions {
   resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
+  verification?: VerificationCoordinator;
+  resolveReviewSettings?(workspaceId: string, parent: ThreadParent): Promise<ReviewSensorSettings> | ReviewSensorSettings;
+  resolveReviewRole?(workspaceId: string, parent: ThreadParent): Promise<ResolvedRole | null> | ResolvedRole | null;
+  recallProjectKnowledge?(workspaceId: string, query: string): Promise<string>;
 }
 
 export interface SpawnThreadRunInput extends CreateThreadInput {
   threadId: string;
   runId: string;
+  promptText?: string;
 }
 
 export interface CapturedThreadDraftBaseline {
@@ -309,7 +318,7 @@ const initialPrompt = (
   "If a memory decisions block is available, record each deviation as `Deviation: ...`.",
   "",
   "Task:",
-  input.brief,
+  input.promptText ?? input.brief,
 ].filter((line): line is string => line !== null).join("\n");
 
 const discussionPrompt = (
@@ -818,6 +827,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     bindingsBySession.set(binding.sessionId, binding);
     sessionByThread.set(binding.threadId, binding.sessionId);
     recentToolSignatures.delete(`${binding.workspaceId}\0${binding.threadId}`);
+    options.verification?.attachThreadSession(binding.sessionId, {
+      workspaceId: binding.workspaceId,
+      threadId: binding.threadId,
+      runId: binding.runId,
+      worktreePath: binding.cwd,
+    });
+    void options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId).then((thread) => {
+      options.verification?.updateChildHead(binding.sessionId, {
+        worktreePath: thread?.worktree?.path ?? binding.cwd,
+        ...(thread?.workBranchId ? { branchId: thread.workBranchId } : {}),
+        ...(thread?.resultRevision ? { lastPublishedRevision: thread.resultRevision, lastHeadRevision: thread.resultRevision } : {}),
+      });
+    }).catch(reportError);
   };
 
   const clearStallTimer = (sessionId: string): void => {
@@ -892,6 +914,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
     if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
+    options.verification?.detachSession(binding.sessionId);
     lastAgentEnd.delete(binding.sessionId);
     clearStallTimer(binding.sessionId);
     stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
@@ -1425,6 +1448,126 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  const projectVerification = async (
+    workspaceId: string,
+    threadId: string,
+    currentResultRevision: number | undefined,
+    write: (store: import("./working-state/working-state-store.js").WorkingStateStore) => Promise<import("@piarium/protocol").ThreadVerificationProjection>,
+  ): Promise<void> => {
+    if (!options.workingStates) return;
+    const projection = await options.workingStates.withStore(workspaceId, "thread-verification", write);
+    await options.registry.setVerification(workspaceId, threadId, projection);
+  };
+
+  const completeAutoReview = async (
+    reviewThread: Thread,
+    outcome: ThreadRunOutcome,
+    report: ThreadReport | null,
+  ): Promise<void> => {
+    const reviewed = reviewThread.reviewOf;
+    if (!reviewed || !options.verification || !options.workingStates) return;
+    const source = await options.registry.getThread(reviewThread.workspaceId, reviewThread.parent, reviewed.sourceThreadId);
+    if (!source) return;
+    const status = outcome === "cancelled" ? "cancelled" as const
+      : outcome === "success" ? "completed" as const
+        : "failed" as const;
+    const findings = report ? parseReviewFindings(report.conclusion, report.unresolved) : [];
+    await projectVerification(source.workspaceId, source.id, source.resultRevision, (store) => (
+      options.verification!.putReview(store, source.id, {
+        resultRevision: reviewed.resultRevision,
+        status,
+        recordedAt: Date.now(),
+        reviewThreadId: reviewThread.id,
+        ...(report ? { conclusion: report.conclusion } : {}),
+        ...(findings.length > 0 ? { findings } : {}),
+        ...(outcome !== "success" && !report ? { error: outcome } : {}),
+        ...(report && outcome === "failure" ? { error: report.conclusion } : {}),
+      }, source.resultRevision)
+    ));
+    if (source.waitingFor?.kind === "thread" && source.waitingFor.text.includes(`r${reviewed.resultRevision}`)) {
+      await options.registry.setAttention(source.workspaceId, source.id, "none");
+    }
+  };
+
+  const dispatchAutoReview = async (
+    source: Thread,
+    resultRevision: number,
+    changedPaths: readonly string[],
+    branchId: string,
+  ): Promise<void> => {
+    if (!options.verification || !options.workingStates || source.reviewOf) return;
+    const settings = options.resolveReviewSettings
+      ? await options.resolveReviewSettings(source.workspaceId, source.parent)
+      : { enabled: true, gate: false };
+    const reviewRole = options.resolveReviewRole
+      ? await options.resolveReviewRole(source.workspaceId, source.parent)
+      : null;
+    const existing = source.verification?.review;
+    const result = await onPublishedResult({
+      workspaceId: source.workspaceId,
+      source,
+      resultRevision,
+      changedPaths,
+      reviewRole,
+      settings,
+      existingReview: existing,
+      formatDiff: async () => options.workingStates!.withStore(source.workspaceId, "thread-review-diff", async (store) => {
+        const published = store.getResult(branchId, resultRevision);
+        if (!published) return "";
+        return formatPublishedResultDiff(store, published);
+      }),
+      ...(options.recallProjectKnowledge
+        ? {
+            recallKnowledge: () => options.recallProjectKnowledge!(
+              source.workspaceId,
+              `${source.brief}\n${changedPaths.join("\n")}`,
+            ),
+          }
+        : {}),
+      cancelReview: async (reviewThreadId) => {
+        await kill(reviewThreadId, true).catch(reportError);
+      },
+      createAndStart: async (input) => {
+        const { promptText, ...createInput } = input;
+        const thread = await options.registry.createThread(createInput);
+        const run = await options.registry.startRun(source.workspaceId, thread.id);
+        try {
+          await spawn({ ...createInput, threadId: thread.id, runId: run.id, ...(promptText ? { promptText } : {}) });
+        } catch (error) {
+          await options.registry.endRun(
+            source.workspaceId,
+            thread.id,
+            run.id,
+            "failure",
+            `review start failed: ${error instanceof Error ? error.message : String(error)}`,
+          ).catch(reportError);
+          throw error;
+        }
+        return thread;
+      },
+    });
+    if (!result.reviewDispatched || !result.threadId) return;
+    const reviewThread = await options.registry.getThread(source.workspaceId, source.parent, result.threadId);
+    const reviewRun = reviewThread ? await options.registry.getActiveRun(source.workspaceId, reviewThread.id) : null;
+    await projectVerification(source.workspaceId, source.id, resultRevision, (store) => (
+      options.verification!.putReview(store, source.id, {
+        resultRevision,
+        status: "running",
+        recordedAt: Date.now(),
+        reviewThreadId: result.threadId,
+        ...(reviewRun ? { reviewRunId: reviewRun.id } : {}),
+      }, resultRevision)
+    ));
+    if (result.blocking) {
+      await options.registry.setAttention(
+        source.workspaceId,
+        source.id,
+        "none",
+        { kind: "thread", text: `Waiting for review of result r${resultRevision}` },
+      );
+    }
+  };
+
   const settle = async (binding: RuntimeBinding): Promise<void> => {
     const currentRun = await options.registry.getActiveRun(binding.workspaceId, binding.threadId);
     if (!currentRun || currentRun.id !== binding.runId || currentRun.outcome !== null) return;
@@ -1487,6 +1630,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;
           diffStats = published.diffStats;
+          if (options.verification) {
+            try {
+              const projection = await options.workingStates.withStore(
+                binding.workspaceId,
+                "thread-result-verify",
+                (store) => options.verification!.bindPublishedResult(store, {
+                  workspaceId: binding.workspaceId,
+                  threadId: binding.threadId,
+                  runId: binding.runId,
+                  branchId: thread.workBranchId!,
+                  resultRevision: published.resultRevision,
+                  worktreePath: currentWorktree!.path,
+                }),
+              );
+              await options.registry.setVerification(binding.workspaceId, binding.threadId, projection);
+            } catch (error) {
+              unresolved.push(`Unable to bind result verification: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
           await options.registry.setWorkingState(binding.workspaceId, binding.threadId, {
             branchId: thread.workBranchId,
             resultRevision: published.resultRevision,
@@ -1606,6 +1768,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       conclusion.error,
       report,
     );
+    const settledThread = await options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId);
+    if (settledThread?.reviewOf) {
+      await completeAutoReview(settledThread, outcome, report).catch(reportError);
+    } else if (settledThread && publishedResultRevision && changedFiles.length > 0 && outcome === "success" && settledThread.workBranchId) {
+      void dispatchAutoReview(settledThread, publishedResultRevision, changedFiles, settledThread.workBranchId).catch(reportError);
+    }
     autoResumedThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
     await closeBinding(binding, false);
     const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId, binding.parent);
@@ -2004,6 +2172,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const run = await options.registry.getActiveRun(binding.workspaceId, threadId);
         if (run?.id === binding.runId && run.outcome === null) {
           await options.registry.endRun(binding.workspaceId, threadId, binding.runId, "cancelled", "killed by parent");
+          const killed = await options.registry.getThread(binding.workspaceId, binding.parent, threadId);
+          if (killed?.reviewOf) await completeAutoReview(killed, "cancelled", killed.report).catch(reportError);
         }
         if (!keepWorktree) {
           await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, threadId).catch(reportError);
@@ -2089,6 +2259,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             threadId,
             threadIntegrationBindingFromPreview(result.preview),
           );
+          if (options.verification && options.workingStates && resultRevision) {
+            await projectVerification(workspaceId, threadId, resultRevision, (store) => (
+              options.verification!.recordParentMerge(store, {
+                threadId,
+                mergedResultRevision: resultRevision,
+                draftUnsaved: pendingSurface,
+              })
+            )).catch(reportError);
+          }
         }
         return {
           merged: result.appliedPaths.length,

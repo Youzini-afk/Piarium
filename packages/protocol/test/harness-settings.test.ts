@@ -4,6 +4,7 @@ import {
   DEFAULT_HARNESS_SETTINGS,
   mergeHarnessSettings,
   resolveHarnessMemoryMode,
+  resolveHarnessReviewSettings,
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
@@ -142,6 +143,23 @@ describe("harness settings", () => {
     assert.equal(resolveHarnessMemoryMode({ shadowMode: false }), "off");
     assert.equal(resolveHarnessMemoryMode({ shadowMode: true }), "assist");
     assert.equal(resolveHarnessMemoryMode({ mode: "takeover", shadowMode: false }), "takeover");
+  });
+
+  it("keeps automatic review user-owned and defaults to enabled non-blocking", () => {
+    assert.deepEqual(mergeHarnessSettings({}, {}).review, { enabled: true, gate: false });
+    assert.deepEqual(mergeHarnessSettings(
+      { review: { enabled: false, gate: true } },
+      { review: { enabled: true, gate: false } },
+    ).review, { enabled: false, gate: true });
+    assert.deepEqual(mergeHarnessSettings(
+      { review: { enabled: false } },
+      {},
+    ).review, { enabled: false, gate: false });
+  });
+
+  it("rejects malformed review settings", () => {
+    assert.throws(() => resolveHarnessReviewSettings({ enabled: "yes" }), HarnessSettingsValidationError);
+    assert.throws(() => resolveHarnessReviewSettings(false), /must be an object/);
   });
 
   it("does not let a workspace change the user-owned memory mode", () => {

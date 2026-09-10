@@ -1899,4 +1899,136 @@ describe("thread runtime", () => {
     expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "partial-session", cwd: childPath }));
     await partialRuntime.dispose();
   });
+
+  it("binds recorded commands to a published result and reviews that revision once", async () => {
+    const { createVerificationCoordinator } = await import("./verification-coordinator.js");
+    const { resolveRoles } = await import("./roles.js");
+    const verification = createVerificationCoordinator();
+    let created = 0;
+    const sessions: ThreadSessionAdapter = {
+      ...sessionAdapter,
+      create: vi.fn(async () => snapshot(`child-${++created}`)),
+    };
+    const reviewRuntime = createThreadRuntime({
+      registry,
+      sessions,
+      verification,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      resolveReviewSettings: () => ({ enabled: true, gate: false }),
+      resolveReviewRole: () => resolveRoles({}, { providerId: "test-provider", modelId: "test-model" }).find((role) => role.id === "review") ?? null,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+      workingStates: (() => {
+        const published = {
+          resultRevision: 1,
+          branchId: "branch",
+          changedPaths: ["a.ts"],
+          baseStates: { "a.ts": { kind: "missing" as const } },
+          pathStates: { "a.ts": { kind: "regular-file" as const, objectHash: "sha256-a", byteLength: 4 } },
+          diffStats: { files: 1, insertions: 1, deletions: 0 },
+          createdAt: new Date().toISOString(),
+        };
+        const child = new Map<string, unknown[]>();
+        const reviews = new Map<string, unknown[]>();
+        return {
+          withStore: async (_workspaceId, _purpose, operation) => operation(
+            {
+              captureDirectory: async () => ({}),
+              createBranch: async () => ({ branchId: "branch" }),
+              publishDirectoryResult: async () => published,
+              getResult: () => published,
+              getObject: async () => Buffer.from("new\n"),
+              getChildVerification: (threadId: string, revision: number) => (
+                (child.get(threadId) ?? []).find((item) => (item as { resultRevision: number }).resultRevision === revision) ?? null
+              ),
+              listChildVerifications: (threadId: string) => child.get(threadId) ?? [],
+              getParentVerification: () => null,
+              getReviewRecord: (threadId: string, revision: number) => (
+                (reviews.get(threadId) ?? []).find((item) => (item as { resultRevision: number }).resultRevision === revision) ?? null
+              ),
+              listReviewRecords: (threadId: string) => reviews.get(threadId) ?? [],
+              putChildVerification: async (threadId: string, bundle: unknown) => {
+                child.set(threadId, [bundle]);
+              },
+              putParentVerification: async () => undefined,
+              putReviewRecord: async (threadId: string, record: unknown) => {
+                reviews.set(threadId, [record]);
+              },
+            } as unknown as WorkingStateStore,
+            {} as WorkspaceRecoveryStorageContext,
+          ),
+        };
+      })(),
+    });
+    const input = { ...createInput(), tools: ["read", "edit", "bash"] };
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await reviewRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    verification.recordCommand({
+      sessionId: "child-1",
+      command: "bun test",
+      cwd: "/workspace/thread",
+      exitCode: 0,
+      outputHandle: "out_1",
+    });
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
+    });
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await reviewRuntime.drain();
+    const settled = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(settled?.verification?.childChecks?.commands[0]).toMatchObject({
+      command: "bun test",
+      exitCode: 0,
+      relation: "same-run-before-publish",
+    });
+    await vi.waitFor(async () => {
+      const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
+      expect(current?.verification?.review?.status).toBe("running");
+      expect(current?.verification?.review?.resultRevision).toBe(1);
+    });
+    const hidden = await registry.listThreads(WORKSPACE, PARENT, true);
+    const review = hidden.find((item) => item.reviewOf?.sourceThreadId === thread.id);
+    expect(review?.hidden).toBe(true);
+    expect(review?.reviewOf).toEqual({ sourceThreadId: thread.id, resultRevision: 1 });
+    expect(await registry.listThreads(WORKSPACE, PARENT, false)).toHaveLength(1);
+    expect(sent.some((text) => text.includes("Published diff") && text.includes("Implement the feature"))).toBe(true);
+    expect(sent.some((text) => text.includes("not seen the parent conversation"))).toBe(true);
+    expect(sent.some((text) => text.includes("Could this use the existing seam?"))).toBe(false);
+    expect(sent.filter((text) => text.includes("Published diff")).some((text) => text.includes("<parent-blocks"))).toBe(false);
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-2",
+      envelope: {
+        kind: "event",
+        event: "agent.event",
+        data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\nLooks good\nUnresolved issues\n- [high] a.ts:1 add a test")], willRetry: false } },
+      },
+    });
+    reviewRuntime.processEvent({
+      kind: "host",
+      sessionId: "child-2",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await reviewRuntime.drain();
+    const reviewed = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(reviewed?.verification?.review).toMatchObject({
+      status: "completed",
+      resultRevision: 1,
+      conclusion: expect.stringContaining("Looks good"),
+    });
+    expect(reviewed?.verification?.review?.findings?.some((finding) => finding.file === "a.ts" && finding.severity === "high")).toBe(true);
+    await reviewRuntime.dispose();
+  });
 });

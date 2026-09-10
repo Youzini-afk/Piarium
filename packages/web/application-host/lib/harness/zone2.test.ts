@@ -16,6 +16,15 @@ describe("assembleZone2Content", () => {
     expect(assembleZone2Content(emptyMaterial)).toBeNull();
   });
 
+  it("keeps a review section when other Zone 2 material is empty", () => {
+    const content = assembleZone2Content({
+      ...emptyMaterial,
+      reviews: [{ threadId: "thread-1", resultRevision: 2, status: "completed", conclusion: "Looks good" }],
+    });
+    expect(content).toContain("<review>");
+    expect(content).toContain("thread-1@2 completed");
+  });
+
   it("returns null when git is empty object", () => {
     expect(assembleZone2Content({ ...emptyMaterial, git: {} })).toBeNull();
   });
@@ -214,6 +223,64 @@ describe("assembleZone2Content", () => {
       userEdits: [{ path: "src/a.ts", kind: "modified" }],
     }, { eventCursor: 42 });
     expect(content).toContain('event-cursor="42"');
+  });
+
+  it("separates child checks, merge applicability, parent checks, and review", () => {
+    const now = Date.now();
+    const content = assembleZone2Content({
+      ...emptyMaterial,
+      threads: {
+        status: "ready",
+        items: [{
+          id: "thread-1",
+          brief: "implement",
+          role: "hardImplement",
+          lifecycle: "settled",
+          attention: "none",
+          integration: "merge-ready",
+          waitingFor: null,
+          steps: 3,
+          workerState: "exited",
+          outcome: "success",
+          lastActivityAt: new Date(now).toISOString(),
+          lastToolCall: null,
+          diffStats: { files: 1, insertions: 1, deletions: 0 },
+          conclusion: "done",
+          deviations: [],
+          mergeReady: true,
+          verification: {
+            currentResultRevision: 2,
+            childChecks: {
+              resultRevision: 2,
+              binding: "bound",
+              commands: [{ command: "bun test", cwd: "/ws", exitCode: 0, cancelled: false, relation: "same-run-before-publish", inputChanged: false }],
+              allExitedZero: true,
+            },
+            parentChecks: {
+              mergedResultRevision: 2,
+              draftUnsaved: true,
+              binding: "cannot-verify-unsaved-draft",
+              commands: [],
+              allExitedZero: null,
+            },
+            review: { resultRevision: 2, status: "completed", conclusion: "Looks good" },
+          },
+        }],
+      },
+      reviews: [{
+        threadId: "thread-1",
+        resultRevision: 2,
+        status: "completed",
+        conclusion: "Looks good",
+      }],
+    }, { now });
+    expect(content).toContain("child checks r2");
+    expect(content).toContain("merge applicability: ready");
+    expect(content).toContain("parent checks r2: cannot-verify-unsaved-draft");
+    expect(content).toContain("review r2: completed");
+    expect(content).toContain("<review>");
+    expect(content).toContain("thread-1@2 completed");
+    expect(content).not.toContain("verified");
   });
 
   it("budget folding reduces knowledge when over budget", () => {

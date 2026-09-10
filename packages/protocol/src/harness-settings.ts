@@ -48,6 +48,13 @@ export interface HarnessMemorySettings {
   mode: HarnessMemoryMode;
 }
 
+export interface HarnessReviewSettings {
+  /** Default true: review a published non-empty child result once. */
+  enabled: boolean;
+  /** Default false: do not block ordinary settlement on the review finding. */
+  gate: boolean;
+}
+
 /**
  * Raw persisted shape accepted while reading Pi settings. `shadowMode` is the
  * pre-takeover setting and is intentionally not part of HarnessSettings.
@@ -67,6 +74,26 @@ export class HarnessSettingsValidationError extends Error {
 const HARNESS_MEMORY_MODES = ["off", "assist", "takeover"] as const;
 
 /** Resolve the user-owned memory setting, including the legacy boolean. */
+const DEFAULT_HARNESS_REVIEW_SETTINGS: HarnessReviewSettings = { enabled: true, gate: false };
+
+export function resolveHarnessReviewSettings(value: unknown): HarnessReviewSettings {
+  if (value === undefined) return { ...DEFAULT_HARNESS_REVIEW_SETTINGS };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.review must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    throw new HarnessSettingsValidationError("harness.review.enabled must be a boolean");
+  }
+  if (input.gate !== undefined && typeof input.gate !== "boolean") {
+    throw new HarnessSettingsValidationError("harness.review.gate must be a boolean");
+  }
+  return {
+    enabled: input.enabled ?? DEFAULT_HARNESS_REVIEW_SETTINGS.enabled,
+    gate: input.gate ?? DEFAULT_HARNESS_REVIEW_SETTINGS.gate,
+  };
+}
+
 export function resolveHarnessMemoryMode(value: unknown): HarnessMemoryMode {
   if (value === undefined) return "takeover";
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -106,6 +133,8 @@ export interface HarnessSettings {
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
   memory: HarnessMemorySettings;
+  /** User-owned automatic review of published child results. */
+  review: HarnessReviewSettings;
   /** Dedicated embedding backend. Not a chat model slot. */
   embedding?: HarnessEmbeddingSettings;
   /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
@@ -146,6 +175,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     autoAcceptSuggestions: { workspace: false, user: false },
   },
   memory: { mode: "takeover" },
+  review: { enabled: true, gate: false },
   worktree: {
     copyIgnored: [],
     shareDependencies: false,
@@ -210,6 +240,8 @@ export function mergeHarnessSettings(
     // Memory execution is user-owned. A repository cannot disable the keeper,
     // enable background model calls, or change compaction ownership.
     memory: { mode: resolveHarnessMemoryMode(user.memory) },
+    // Automatic review enablement and the completion gate are user-owned.
+    review: resolveHarnessReviewSettings(user.review),
     // Embedding and rerank bindings are user-owned. A repository cannot
     // redirect remote inference or select another provider credential.
     ...((() => {

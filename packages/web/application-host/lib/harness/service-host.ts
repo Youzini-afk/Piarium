@@ -19,6 +19,7 @@ import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { StructureSource } from "../structure/types.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { ThreadTranscriptReader } from "./thread-transcript.js";
+import { createVerificationCoordinator, type VerificationCoordinator } from "./verification-coordinator.js";
 import type { CapturedThreadDraftBaseline } from "./thread-runtime.js";
 import { createObservationCursorStore, type ObservationCursorStore } from "./observation-cursors.js";
 import type {
@@ -207,6 +208,7 @@ export interface HarnessServiceHost {
   agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
   commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
   releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
+  verification: VerificationCoordinator;
   dispose(): Promise<void>;
 }
 
@@ -277,6 +279,7 @@ export interface HarnessServiceHostOptions {
   requireThreadMergeJournal?: boolean;
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
+  verification?: VerificationCoordinator;
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -323,6 +326,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
   const threadTranscriptReader = options.threadTranscriptReader ?? null;
+  const verification = options.verification ?? createVerificationCoordinator();
   const commitAgentInputContext = options.commitAgentInputContext ?? ((_sessionId, context) => ({
     // A Host without a snapshot authority may acknowledge disk/unavailable
     // sources, but it must not claim an opaque ready snapshot was committed.
@@ -397,6 +401,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       workerId: ctx.actor.workerId,
       workerGeneration: ctx.actor.workerGeneration,
     };
+    if (ctx.workspaceId) {
+      verification.attachParentSession(sessionId, {
+        workspaceId: ctx.workspaceId,
+        parentRoot: ctx.workspaceRoot,
+        parentSessionId: sessionId,
+      });
+    }
     sessions.set(sessionId, {
       actor,
       grantedCapabilities: Promise.resolve(ctx.grantedCapabilities).then((capabilities) => (
@@ -424,6 +435,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     pathLockService.dropSession(sessionId);
     keeperCoverageStore.clear(sessionId);
     options.dropAgentInputContexts?.(sessionId);
+    verification.detachSession(sessionId);
   };
 
   const hasActiveCommandAtDirectory = (directory: string): boolean => {
@@ -527,6 +539,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,
     threadSendToSession,
     threadTranscriptReader,
+    verification,
     commitAgentInputContext,
     releaseAgentInputContext,
     registerSession,
