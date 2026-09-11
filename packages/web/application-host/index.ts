@@ -1287,13 +1287,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { treeHash };
     },
     loadParentWindows: async (workspaceId, parentSessionId) => {
-      const owner = await threadRegistry.getThreadForSession(workspaceId, parentSessionId);
-      const parent = owner
-        ? { kind: 'thread' as const, id: owner.id }
+      const binding = await threadRegistry.getSessionBinding(parentSessionId);
+      const owningWorkspaceId = binding?.owningWorkspaceId ?? workspaceId;
+      const parent = binding
+        ? { kind: 'thread' as const, id: binding.threadId }
         : { kind: 'session' as const, id: parentSessionId };
-      const children = await threadRegistry.listThreads(workspaceId, parent, true);
+      const children = await threadRegistry.listThreads(owningWorkspaceId, parent, true);
       return harnessWorkingStates.withStore(
-        workspaceId,
+        owningWorkspaceId,
         'parent-verification-window-restore',
         (store) => children.flatMap((thread) => store.listParentVerifications(thread.id).map((bundle) => ({
           parent,
@@ -2448,10 +2449,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           });
         }
         void (async () => {
-          const owner = await threadRegistry.getThreadForSession(harnessWorkspaceId, sessionId);
+          const binding = await threadRegistry.getSessionBinding(sessionId);
           await threadRuntime.resumeLostForParent(
-            harnessWorkspaceId,
-            owner ? { kind: 'thread', id: owner.id } : { kind: 'session', id: sessionId },
+            binding?.owningWorkspaceId ?? harnessWorkspaceId,
+            binding
+              ? { kind: 'thread', id: binding.threadId }
+              : { kind: 'session', id: sessionId },
           );
         })().catch((error) => {
           console.error('[HarnessThreads] Failed to resume child runs:', errorMessage(error));

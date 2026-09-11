@@ -74,7 +74,7 @@ export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
-    Partial<Pick<ThreadWorktreeRuntime, "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
+    Partial<Pick<ThreadWorktreeRuntime, "attachIsolatedGitContext" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -872,15 +872,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         snapshot,
       };
     }
+    const persisted = await options.registry.getSessionBinding(sessionId);
+    if (persisted) {
+      return {
+        workspaceId: persisted.owningWorkspaceId,
+        parent: { kind: "thread", id: persisted.threadId },
+        snapshot,
+      };
+    }
     const workspace = snapshot?.workspace ?? summary?.workspace;
     if (workspace?.kind !== "workspace") {
       throw new ThreadRuntimeError("unavailable", "Discussion threads require a project workspace");
     }
     const workspaceId = workspace.authorityId ?? workspace.id;
-    const ownerThread = await options.registry.getThreadForSession(workspaceId, sessionId);
     return {
       workspaceId,
-      parent: ownerThread ? { kind: "thread", id: ownerThread.id } : { kind: "session", id: sessionId },
+      parent: { kind: "session", id: sessionId },
       snapshot,
     };
   };
@@ -997,6 +1004,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
     if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
+    await options.registry.unbindRunSession(binding.sessionId).catch(reportError);
     options.verification?.detachSession(binding.sessionId);
     options.executionViews?.unbind(binding.sessionId);
     lastAgentEnd.delete(binding.sessionId);
@@ -3567,6 +3575,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         throw error;
       }
       await fs.promises.rm(backup, { recursive: true, force: true });
+      if (options.worktrees.attachIsolatedGitContext) {
+        await options.worktrees.attachIsolatedGitContext(
+          sourceRoot,
+          worktree.path,
+          worktree.base,
+          abortController.signal,
+        );
+      }
       const nextWorktree = {
         ...worktree,
         viewMode: "materialized" as const,
@@ -3608,6 +3624,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const binding = bindingsBySession.get(sessionId);
     return binding
       ? { workspaceId: binding.workspaceId, parent: binding.parent, threadId: binding.threadId }
+      : null;
+  };
+
+  const resolveSessionBinding = async (sessionId: string): Promise<{
+    workspaceId: string;
+    parent: ThreadParent;
+    threadId: string;
+  } | null> => {
+    const live = getSessionBinding(sessionId);
+    if (live) return live;
+    const persisted = await options.registry.getSessionBinding(sessionId);
+    return persisted
+      ? { workspaceId: persisted.owningWorkspaceId, parent: persisted.parent, threadId: persisted.threadId }
       : null;
   };
 
@@ -3656,6 +3685,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     drain,
     isThreadSession,
     getSessionBinding,
+    resolveSessionBinding,
     materializeExecutionView,
     dispose,
   };

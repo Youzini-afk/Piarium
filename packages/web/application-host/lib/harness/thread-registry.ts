@@ -27,10 +27,13 @@ import type {
   ThreadTokens,
   ThreadViewCursor,
   ThreadReviewOf,
+  ThreadSessionBinding,
   ThreadVerificationProjection,
   ThreadWaitingFor,
   ThreadWorktree,
 } from "@piarium/protocol";
+
+export type { ThreadSessionBinding };
 
 export type {
   Thread,
@@ -590,6 +593,23 @@ export const threadCatalogPath = (dataDir: string, hostId: string, workspaceId: 
   join(dataDir, "threads", hostId, workspaceFileName(workspaceId))
 );
 
+export const threadSessionBindingsPath = (dataDir: string, hostId: string): string => (
+  join(dataDir, "threads", hostId, "session-bindings.json")
+);
+
+const SESSION_BINDINGS_FILE_NAME = "session-bindings.json";
+
+const isThreadCatalogFileName = (name: string): boolean => (
+  name.endsWith(".json") && name !== SESSION_BINDINGS_FILE_NAME
+);
+
+const SESSION_BINDINGS_SCHEMA_VERSION = 1;
+
+interface ThreadSessionBindingsDocument {
+  schemaVersion: typeof SESSION_BINDINGS_SCHEMA_VERSION;
+  bindings: ThreadSessionBinding[];
+}
+
 const legacyThreadPath = (dataDir: string, hostId: string, parentSessionId: string): string | null => {
   const fileName = `${parentSessionId}.json`;
   return basename(fileName) === fileName ? join(dataDir, "threads", hostId, fileName) : null;
@@ -918,6 +938,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const retiredParents = new Set<string>();
   const dequeueing = new Set<string>();
   let persistCounter = 0;
+  const sessionBindings = new Map<string, ThreadSessionBinding>();
+  let sessionBindingsLoaded = false;
+  let sessionBindingsLoad: Promise<void> | null = null;
+  let sessionBindingTail = Promise.resolve();
 
   const nowISO = (): string => now().toISOString();
 
@@ -948,6 +972,110 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     } finally {
       loads.delete(workspaceId);
     }
+  };
+
+  const parseSessionBindings = (raw: string, path: string): ThreadSessionBinding[] => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new ThreadRegistryError("corrupt", `Thread session bindings are not valid JSON: ${path}`, path, { cause: error });
+    }
+    if (!isRecord(parsed) || parsed.schemaVersion !== SESSION_BINDINGS_SCHEMA_VERSION || !Array.isArray(parsed.bindings)) {
+      throw new ThreadRegistryError("corrupt", `Thread session bindings are not a recognized document: ${path}`, path);
+    }
+    const bindings: ThreadSessionBinding[] = [];
+    for (const entry of parsed.bindings) {
+      if (
+        !isRecord(entry)
+        || !isString(entry.sessionId) || entry.sessionId.length === 0
+        || !isString(entry.owningWorkspaceId) || entry.owningWorkspaceId.length === 0
+        || !isString(entry.threadId) || entry.threadId.length === 0
+        || !isString(entry.runId) || entry.runId.length === 0
+        || !isParent(entry.parent)
+      ) {
+        throw new ThreadRegistryError("corrupt", `Thread session binding is invalid: ${path}`, path);
+      }
+      bindings.push({
+        sessionId: entry.sessionId,
+        owningWorkspaceId: entry.owningWorkspaceId,
+        threadId: entry.threadId,
+        runId: entry.runId,
+        parent: entry.parent,
+      });
+    }
+    return bindings;
+  };
+
+  const ensureSessionBindings = async (): Promise<void> => {
+    if (sessionBindingsLoaded) return;
+    if (!sessionBindingsLoad) {
+      const path = threadSessionBindingsPath(dataDir, hostId);
+      sessionBindingsLoad = (async () => {
+        const raw = await readText(path);
+        if (raw !== null) {
+          for (const binding of parseSessionBindings(raw, path)) {
+            sessionBindings.set(binding.sessionId, binding);
+          }
+        }
+        sessionBindingsLoaded = true;
+      })();
+    }
+    await sessionBindingsLoad;
+  };
+
+  const persistSessionBindings = async (): Promise<void> => {
+    const path = threadSessionBindingsPath(dataDir, hostId);
+    const directory = join(dataDir, "threads", hostId);
+    persistCounter += 1;
+    const temporary = `${path}.${process.pid}.${persistCounter}.tmp`;
+    const document: ThreadSessionBindingsDocument = {
+      schemaVersion: SESSION_BINDINGS_SCHEMA_VERSION,
+      bindings: [...sessionBindings.values()],
+    };
+    try {
+      await fsPromises.mkdir(directory, { recursive: true });
+      await fsPromises.writeFile(temporary, JSON.stringify(document, null, 2), "utf8");
+      await fsPromises.rename(temporary, path);
+    } catch (error) {
+      await fsPromises.rm(temporary, { force: true }).catch(() => undefined);
+      throw new ThreadRegistryError("write-failed", `Unable to persist thread session bindings: ${path}`, path, { cause: error });
+    }
+  };
+
+  const mutateSessionBindings = async (mutate: () => void): Promise<void> => {
+    const previous = sessionBindingTail;
+    const operation = previous.then(async () => {
+      await ensureSessionBindings();
+      mutate();
+      await persistSessionBindings();
+    });
+    sessionBindingTail = operation.then(() => undefined, () => undefined);
+    await operation;
+  };
+
+  const bindRunSession = async (binding: ThreadSessionBinding): Promise<ThreadSessionBinding> => {
+    await mutateSessionBindings(() => {
+      for (const [sessionId, existing] of sessionBindings) {
+        if (existing.threadId === binding.threadId || sessionId === binding.sessionId) {
+          sessionBindings.delete(sessionId);
+        }
+      }
+      sessionBindings.set(binding.sessionId, structuredClone(binding));
+    });
+    return structuredClone(binding);
+  };
+
+  const unbindRunSession = async (sessionId: string): Promise<void> => {
+    await mutateSessionBindings(() => {
+      sessionBindings.delete(sessionId);
+    });
+  };
+
+  const getSessionBinding = async (sessionId: string): Promise<ThreadSessionBinding | null> => {
+    await ensureSessionBindings();
+    const binding = sessionBindings.get(sessionId);
+    return binding ? structuredClone(binding) : null;
   };
 
   const writeCatalog = async (catalog: ThreadCatalogDocument): Promise<void> => {
@@ -1260,19 +1388,29 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     threadId: string,
     runId: string,
     sessionId: string,
-  ): Promise<ThreadRun> => mutateWorkspace(workspaceId, (catalog) => {
-    const thread = findThread(catalog, threadId);
-    const run = catalog.runs.find((candidate) => candidate.id === runId && candidate.threadId === threadId);
-    if (!thread || !run || thread.activeRunId !== runId) throw new Error(`Unknown active run: ${runId}`);
-    if (run.workerState !== "starting" && run.workerState !== "running") {
-      throw new Error(`Cannot mark ${run.workerState} run as running: ${runId}`);
-    }
-    run.workerState = "running";
-    run.sessionId = sessionId;
-    run.lastActivityAt = nowISO();
-    touchThread(catalog, thread);
-    return { value: run, changed: [thread] };
-  });
+  ): Promise<ThreadRun> => {
+    const run = await mutateWorkspace(workspaceId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      const candidate = catalog.runs.find((entry) => entry.id === runId && entry.threadId === threadId);
+      if (!thread || !candidate || thread.activeRunId !== runId) throw new Error(`Unknown active run: ${runId}`);
+      if (candidate.workerState !== "starting" && candidate.workerState !== "running") {
+        throw new Error(`Cannot mark ${candidate.workerState} run as running: ${runId}`);
+      }
+      candidate.workerState = "running";
+      candidate.sessionId = sessionId;
+      candidate.lastActivityAt = nowISO();
+      touchThread(catalog, thread);
+      return { value: { run: candidate, parent: thread.parent }, changed: [thread] };
+    });
+    await bindRunSession({
+      sessionId,
+      owningWorkspaceId: workspaceId,
+      threadId,
+      runId,
+      parent: run.parent,
+    });
+    return structuredClone(run.run);
+  };
 
   const maybeDequeue = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
     const key = scopeKey(workspaceId, parent);
@@ -1629,7 +1767,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       else throw new ThreadRegistryError("read-failed", `Unable to enumerate thread registries: ${directory}`, directory, { cause: error });
     }
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
       const path = join(directory, entry.name);
       const raw = await readText(path);
       if (raw === null) continue;
@@ -1861,7 +1999,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     let reconciledRuns = 0;
     let workspaces = 0;
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
       const path = join(directory, entry.name);
       try {
         const raw = await readText(path);
@@ -1890,12 +2028,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const dispose = async (): Promise<void> => {
-    await Promise.allSettled(mutationTails.values());
+    await Promise.allSettled([...mutationTails.values(), sessionBindingTail]);
     waiters.clear();
     cursors.clear();
     cursorEpochs.clear();
     cache.clear();
     retiredParents.clear();
+    sessionBindings.clear();
+    sessionBindingsLoaded = false;
+    sessionBindingsLoad = null;
   };
 
   return {
@@ -1908,6 +2049,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     getActiveRun,
     listRuns,
     getThreadForSession,
+    getSessionBinding,
+    bindRunSession,
+    unbindRunSession,
     countActive,
     startRun,
     markRunRunning,

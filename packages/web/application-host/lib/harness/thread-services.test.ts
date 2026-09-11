@@ -258,7 +258,12 @@ describe("thread services", () => {
       });
       const run = await registry.startRun("workspace-1", parent.id);
       await registry.markRunRunning("workspace-1", parent.id, run.id, "child-session");
-      const nestedCtx = { ...serviceContext(), sessionId: "child-session", actor: { ...serviceContext().actor, sessionId: "child-session" } };
+      const nestedCtx = {
+        ...serviceContext(),
+        sessionId: "child-session",
+        workspaceId: "execution-ws",
+        actor: { ...serviceContext().actor, sessionId: "child-session", workspaceId: "execution-ws" },
+      };
       const first = await service.handle({ concurrency: 1, role: "check", task: "Run the suite" }, nestedCtx);
       const queued = await service.handle({ concurrency: 1, role: "check", task: "Second check" }, nestedCtx);
       expect(first.queued).toBe(false);

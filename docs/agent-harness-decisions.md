@@ -4344,6 +4344,22 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Host 嵌套 dispatch/基线/集成与角色装配有定向证据。真实付费嵌套 Pi 会话与完整桌面 Host 重启未测。
 
+### D-216 · 2026-09-11 · 3.4 / 3.4a / 3.6（owning/execution workspace 拆分与物化 Git 边界）
+
+类型：问题与解法
+
+背景：D-212–D-215 把隔离 Run 的 Documents/LSP/路径权威放到 scratch/materialized cwd 上，但 Thread catalog、Zone 2、thread.* 和 lost resume 仍用同一个 `ctx.workspaceId` / snapshot workspace 去查 `getThreadForSession`。Documents 给执行目录分配另一个 workspaceId 后，子会话在错误 catalog 里找不到父 Thread，孙线程写错工作区，`parent.kind` 退化成 session。虚拟物化只是把 WorkingState 目录 rename 进 `.piarium/worktrees/<id>`，该路径仍在用户仓库内，子进程 `git rev-parse --show-toplevel` 会发现父仓库，status/reset/add/commit 会改父 index。
+
+决定：
+
+1. 维持两个身份。owning workspace 是 Thread catalog、WorkingState、知识、review、父子和生命周期所属的原工作区。execution workspace/root 是当前 scratch/materialized 目录的 Documents、LSP、路径与 shell 权威。`session.create/open` 继续把 Documents 解析出的 execution id 交给 Pi；Router `ctx.workspaceId` 继续表示 actor 的 execution workspace。
+2. Host 在 `dataDir/threads/<hostId>/session-bindings.json` 持久化 `sessionId → { owningWorkspaceId, threadId, runId, parent }`。`markRunRunning` 写入，session close 删除。thread services、Zone 2、lost resume 和 verification 父窗口只从该 binding 取 owning workspace，不扫全部 catalog，也不用执行路径猜父线程。根会话没有 binding 时，`ctx.workspaceId` 本身就是 owning。
+3. Git 工作区物化后必须有独立 Git 上下文。有 HEAD 时使用 `git worktree add --detach <live> <baseRef>`，再把 WorkingState staging 叠到该 worktree 上并保留 `.git` 文件。这会写入用户仓库的 `.git/worktrees`，但不创建 `piarium/<threadId>` 分支，也不把用户当前分支/HEAD/index 当作子仓库。unborn 或执行目录位于其他 Git worktree 内时，在 live 目录 `git init` 成独立仓库。非 Git 且探测不到外层 Git 时保持 Host 管理目录。WorkingState 仍是结果真相；Git 只是执行物化后端。
+
+影响：protocol `ThreadSessionBinding`；Host thread-registry/services/runtime/worktree、Application Host snapshot resume；设计 9.2.5b / 9.3.5、plan 3.4/3.6、status 3.4 / 3.4a / 3.6、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；Documents 分配不同 workspaceId 的公开 nested dispatch、Zone 2 / wait / lost resume 与子 Git 不改父状态有定向生产证据。虚拟写入/修订、dispatch 基线诚实和嵌套集成/权限仍待本轮后续阶段。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4560,7 +4576,8 @@ ModelRuntime 纵切继续通过。
 | D-209 | implementation（全局终端身份、真实退出与 writer 释放、后台自然完成、todo 单一审批边界） | — | 设计 5.2 / 5.6；architecture 4.4 / 6；status 1.3 / 2.5 |
 | D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
-| D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化） | D-213 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定） | D-214 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-214 | implementation（dispatch 创建分支时固定 Git/非 Git 磁盘基线） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-215 | implementation（角色目录 + Host 强制嵌套 dispatch/基线/集成） | — | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化；owning/execution 身份由 D-216 拆开） | D-213 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init） | D-214 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-214 | superseded in part（dispatch 创建分支时固定 Git/非 Git 磁盘基线保留；catalog 查找不得再用 execution workspaceId） | D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution） | D-216 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-216 | implementation（Host session binding 区分 owning/execution；物化 Git 用 --detach 或独立 init，并记录会写 `.git/worktrees`） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |

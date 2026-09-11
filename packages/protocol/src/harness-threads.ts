@@ -18,6 +18,19 @@ export type ThreadParent =
   | { kind: "session"; id: string }
   | { kind: "thread"; id: string };
 
+/**
+ * Host-owned mapping from a live Pi session to the Thread catalog it belongs to.
+ * `owningWorkspaceId` is the original project workspace; it is not the scratch
+ * or materialized execution workspace Documents assigns to the Run cwd.
+ */
+export interface ThreadSessionBinding {
+  sessionId: string;
+  owningWorkspaceId: string;
+  threadId: string;
+  runId: string;
+  parent: ThreadParent;
+}
+
 export interface ThreadReport {
   conclusion: string;
   changedFiles: string[];

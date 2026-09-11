@@ -119,7 +119,11 @@ The Application Host advertises `harnessThreads` in the private Host
 handshake. Thread tools are absent when that capability is missing. A real
 child launch supplies its resolved role model and tool allowlist to
 `session.create/open` before Pi constructs the AgentSession; read-only roles do
-not merely rely on a prompt asking them not to write. The role fragment and
+not merely rely on a prompt asking them not to write. `session.create/open`
+receives the Documents workspace id for the current scratch or materialized
+cwd (execution identity). Thread catalog, WorkingState, and parent/child
+lifecycle stay on the original owning workspace; Host session bindings carry
+that identity across register, dispatch, Zone 2, and lost resume. The role fragment and
 scope stay in the first task message, keeping the base system prefix stable;
 scope also travels in the broker-owned Actor envelope. Host path services,
 including fixed-source read, enforce it. This is not an OS sandbox over shell

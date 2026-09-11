@@ -280,7 +280,8 @@ are omitted.
 Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
-durable Run record before listing children.
+Host session binding (`sessionId → owning workspace / thread / run`), not from
+the execution workspace Documents assigns to scratch or materialized cwd.
 Run launch includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
@@ -296,7 +297,10 @@ and never writes the parent directory. Directory, binary, symlink, and unsupport
 states are rejected. The first `bash` or LSP navigation tool asks
 `workingBranch.ensureMaterialized`: the Host freezes the current revision, waits for
 in-flight virtual writes, materializes into a staging directory, then atomically
-replaces the scratch. Failure deletes staging and keeps the virtual branch readable.
+replaces the scratch. A Git parent then receives an isolated context via
+`git worktree add --detach` (this writes `.git/worktrees` and does not create a
+user-visible branch) or `git init` when HEAD is unborn or the directory would
+otherwise inherit another worktree. Failure deletes staging and keeps the virtual branch readable.
 Settlement publishes `publishHeadResult` while virtual, or inspects the directory and
 publishes that fold after the switch. Git commits and immutable copy snapshots remain
 migration/reconstruction sources. Merge reads the selected native revision, never the
@@ -306,8 +310,8 @@ of a materialized result rebuilds that directory at the same path; a still-virtu
 branch reopens on scratch and reads the branch view.
 Nested children reuse the same registry, Run, review, archive, and lost-resume
 path. Host restart resumes lost Runs for the snapshot session's owning Thread
-parent, so a parent session snapshot resumes its grandchildren without rewriting
-the first attempt.
+parent from the persisted session binding, so an execution-workspace snapshot
+cannot look up the wrong catalog.
 When dispatch carries dirty editor input, the runtime first clones the complete
 fixed surface snapshot into a persistent WorkingState draft baseline. Its id is
 frozen in the Thread launch manifest; queued or restarted Runs overlay the exact

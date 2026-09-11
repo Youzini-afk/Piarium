@@ -86,7 +86,7 @@ describe("Zone 2 thread projection", () => {
       autoRun: false,
       worktree: "none",
     }));
-    const result = await projectZone2Threads({ registry, cursors }, { sessionId: "child-session", workspaceId: WORKSPACE });
+    const result = await projectZone2Threads({ registry, cursors }, { sessionId: "child-session", workspaceId: "execution-ws" });
     expect(result.status === "ready" ? result.items.map((item) => item.id) : []).toEqual([nested.id]);
     const root = await projectZone2Threads({ registry, cursors }, { sessionId: PARENT.id, workspaceId: WORKSPACE });
     expect(root.status === "ready" ? root.items.map((item) => item.id) : []).toEqual([outer.id]);
@@ -96,7 +96,8 @@ describe("Zone 2 thread projection", () => {
     const host = {
       observationCursors: cursors,
       threadRegistry: {
-        getThreadForSession: async () => { throw new ThreadRegistryError("corrupt", "bad catalog", "catalog.json"); },
+        getSessionBinding: async () => null,
+        listThreadSnapshots: async () => { throw new ThreadRegistryError("corrupt", "bad catalog", "catalog.json"); },
       },
       zone2Provider: async () => ({
         eventCursor: 0,

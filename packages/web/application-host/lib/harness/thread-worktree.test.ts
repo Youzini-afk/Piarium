@@ -704,4 +704,63 @@ describe("thread worktree runtime", () => {
       try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows may retain the injected-failure staging path briefly. */ }
     }
   });
+
+  it("inits an independent Git repo when the live path sits inside the parent worktree", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    const live = join(fixture.repo, ".piarium", "worktrees", "isolated-child");
+    const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
+    const parentBranches = git(fixture.repo, ["branch"]);
+    try {
+      mkdirSync(live, { recursive: true });
+      writeFileSync(join(live, "child-only.txt"), "from working state\n");
+      const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
+      expect(attached.kind).toBe("init");
+      const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
+      expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
+      expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());
+      const parentStatus = git(fixture.repo, ["status", "--porcelain"]);
+      git(live, ["status", "--porcelain"]);
+      git(live, ["reset", "--hard"]);
+      writeFileSync(join(live, "child-only.txt"), "child commit\n");
+      git(live, ["add", "child-only.txt"]);
+      git(live, ["-c", "user.name=Child", "-c", "user.email=child@example.com", "commit", "--no-verify", "--no-gpg-sign", "-m", "child only"]);
+      expect(git(fixture.repo, ["rev-parse", "HEAD"])).toBe(parentHead);
+      expect(git(fixture.repo, ["status", "--porcelain"])).toBe(parentStatus);
+      expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
+      expect(git(fixture.repo, ["branch"])).toBe(parentBranches);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses a detached Git worktree when the live path is outside the parent worktree", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    const live = join(fixture.root, "external-live");
+    const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
+    const parentStatus = git(fixture.repo, ["status", "--porcelain"]);
+    const parentBranches = git(fixture.repo, ["branch"]);
+    try {
+      mkdirSync(live, { recursive: true });
+      writeFileSync(join(live, "child-only.txt"), "from working state\n");
+      const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
+      expect(attached.kind).toBe("worktree");
+      const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
+      expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
+      expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());
+      git(live, ["status", "--porcelain"]);
+      git(live, ["reset", "--hard"]);
+      writeFileSync(join(live, "child-only.txt"), "child commit\n");
+      git(live, ["add", "child-only.txt"]);
+      git(live, ["-c", "user.name=Child", "-c", "user.email=child@example.com", "commit", "--no-verify", "--no-gpg-sign", "-m", "child only"]);
+      expect(git(fixture.repo, ["rev-parse", "HEAD"])).toBe(parentHead);
+      expect(git(fixture.repo, ["status", "--porcelain"])).toBe(parentStatus);
+      expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
+      expect(git(fixture.repo, ["branch"])).toBe(parentBranches);
+      expect(existsSync(join(fixture.repo, ".git", "worktrees"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
 });

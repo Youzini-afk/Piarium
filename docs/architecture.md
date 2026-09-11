@@ -685,6 +685,11 @@ captures the parent materialized directory otherwise (D-215). Nested merge appli
 result onto the parent branch or parent worktree; the parent later folds its published result into
 the workspace. Child workspace, scope, and the frozen permission overlay inherit or narrow; Host
 rejects expansion. Role tools come from the child's own launch manifest.
+Owning workspace (Thread catalog, WorkingState, parent/child lifecycle) is distinct from the
+execution workspace Documents assigns to a scratch or materialized cwd (D-216). Thread services,
+Zone 2, and lost resume read the Host session binding; they do not treat `ctx.workspaceId` as the
+catalog key. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
+independent `git init`; child Git commands must not discover or mutate the user repository.
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

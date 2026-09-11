@@ -72,6 +72,29 @@ describe("thread registry", () => {
     expect(running.sessionId).toBe("child-session-1");
     expect(running.workerState).toBe("running");
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
+    expect(await registry.getSessionBinding("child-session-1")).toEqual({
+      sessionId: "child-session-1",
+      owningWorkspaceId: WORKSPACE,
+      threadId: thread.id,
+      runId: starting.id,
+      parent: PARENT,
+    });
+  });
+
+  it("reloads the session-to-owning-workspace binding after restart without scanning catalogs", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect(await registry.getSessionBinding("child-session-1")).toEqual({
+      sessionId: "child-session-1",
+      owningWorkspaceId: WORKSPACE,
+      threadId: thread.id,
+      runId: run.id,
+      parent: PARENT,
+    });
+    expect(await registry.getThreadForSession("execution-ws", "child-session-1")).toBeNull();
   });
 
   it("persists the retained branch and result commit", async () => {

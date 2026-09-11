@@ -94,7 +94,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
    同名 read/grep/find/ls/explore 的 WorkingState 只读视图已接入真实 Thread Run（D-212）。同名 edit/write/apply_patch 已在虚拟
    Run 上提交 WorkingState delta，首次 bash/LSP 原子切换物化目录（D-213）。隔离 dispatch 已在创建分支时固定 Git/非 Git
-   磁盘基线（D-214）。嵌套线程已沿 `parent.kind: "thread"` 接到真实工具能力与 Host 强制（D-215）。
+   磁盘基线（D-214）。嵌套线程已沿 `parent.kind: "thread"` 接到真实工具能力与 Host 强制（D-215）。D-216 已拆开
+   owning/execution workspace，并用 detached Git worktree 或独立 `git init` 隔离物化目录；虚拟写入、基线诚实和嵌套
+   集成/权限仍待本轮后续阶段，相关 status 行保持 Partial。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。

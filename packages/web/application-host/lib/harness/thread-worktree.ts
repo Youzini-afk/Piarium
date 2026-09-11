@@ -1054,6 +1054,100 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
   };
 
+  const normalizeComparePath = (value: string): string => {
+    const resolved = pathModule.resolve(value);
+    return process.platform === "win32" ? resolved.replace(/\\/g, "/").toLowerCase() : resolved;
+  };
+
+  const sameResolvedPath = async (left: string, right: string): Promise<boolean> => {
+    try {
+      const [a, b] = await Promise.all([fsPromises.realpath(left), fsPromises.realpath(right)]);
+      return normalizeComparePath(a) === normalizeComparePath(b);
+    } catch {
+      return normalizeComparePath(left) === normalizeComparePath(right);
+    }
+  };
+
+  const isInsideDirectory = async (root: string, candidate: string): Promise<boolean> => {
+    let rootPath = root;
+    let candidatePath = candidate;
+    try { rootPath = await fsPromises.realpath(root); } catch { /* compare the unresolved path */ }
+    try { candidatePath = await fsPromises.realpath(candidate); } catch { /* compare the unresolved path */ }
+    const rootNorm = normalizeComparePath(rootPath);
+    const candidateNorm = normalizeComparePath(candidatePath);
+    if (candidateNorm === rootNorm) return false;
+    const relative = pathModule.relative(rootNorm, candidateNorm);
+    return relative !== "" && !relative.startsWith("..") && !pathModule.isAbsolute(relative);
+  };
+
+  const inspectSourceGit = async (sourceRoot: string): Promise<{
+    isGit: boolean;
+    head: string | null;
+    toplevel: string | null;
+  }> => {
+    try {
+      const inside = (await runGit(sourceRoot, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
+      if (inside !== "true") return { isGit: false, head: null, toplevel: null };
+      const toplevel = (await runGit(sourceRoot, ["rev-parse", "--show-toplevel"])).stdout.trim();
+      try {
+        const head = (await runGit(sourceRoot, ["rev-parse", "--verify", "HEAD"])).stdout.trim();
+        return { isGit: true, head, toplevel };
+      } catch {
+        return { isGit: true, head: null, toplevel };
+      }
+    } catch {
+      return { isGit: false, head: null, toplevel: null };
+    }
+  };
+
+  const inheritsOtherGit = async (directory: string): Promise<boolean> => {
+    try {
+      const discovered = (await runGit(directory, ["rev-parse", "--show-toplevel"])).stdout.trim();
+      return Boolean(discovered && !await sameResolvedPath(discovered, directory));
+    } catch {
+      return false;
+    }
+  };
+
+  const exportGitTree = async (sourceRoot: string, ref: string, destination: string): Promise<void> => {
+    await fsPromises.mkdir(destination, { recursive: true });
+    const listed = await runGit(sourceRoot, ["ls-tree", "-r", "-z", ref]);
+    for (const entry of parseLsTree(listed.stdout)) {
+      const relative = normalizeRelative(entry.path, pathModule);
+      const dest = pathModule.join(destination, ...relative.split("/"));
+      await assertAbsolutePathInWorkspace(dest, { root: destination, fsPromises, pathModule, allowMissing: true });
+      if (entry.type === "commit") {
+        await fsPromises.mkdir(dest, { recursive: true });
+        continue;
+      }
+      if (entry.type !== "blob") continue;
+      const blob = await runGit(sourceRoot, ["cat-file", "blob", entry.objectHash]);
+      const bytes = blob.stdoutBuffer;
+      if (!bytes) throw new Error(`git cat-file did not return raw bytes for ${entry.objectHash}`);
+      await fsPromises.mkdir(pathModule.dirname(dest), { recursive: true });
+      if (entry.mode === "120000") {
+        await fsPromises.symlink(bytes.toString("utf8").replace(/\n$/, ""), dest);
+        continue;
+      }
+      await fsPromises.writeFile(dest, bytes);
+      if (entry.mode === "100755") {
+        await fsPromises.chmod(dest, 0o755).catch(() => undefined);
+      }
+    }
+  };
+
+  const initIsolatedGit = async (livePath: string, signal?: AbortSignal): Promise<void> => {
+    if (signal?.aborted) throw abortError();
+    await runGit(livePath, ["init"]);
+    await runGit(livePath, ["add", "-A"]);
+    await runGit(livePath, [
+      "-c", "user.name=Piarium Thread",
+      "-c", "user.email=thread@piarium.local",
+      "commit", "--no-verify", "--no-gpg-sign", "--allow-empty",
+      "-m", "Piarium isolated execution baseline",
+    ]);
+  };
+
   const materialize = async (
     sourceRoot: string,
     worktree: ThreadWorktree,
@@ -1080,24 +1174,17 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
     worktree.preparationStage = "materializing";
     if (worktree.base !== "zero-commit") {
-      const ref = worktree.branch || worktree.resultCommit || worktree.base;
-      await runGit(sourceRoot, ["worktree", "prune"]).catch(() => {});
-      try {
-        await runGit(sourceRoot, ["worktree", "add", "--force", worktree.path, ref]);
-      } catch {
-        await options.createWorktree(sourceRoot, {
-          mode: "existing",
-          worktreeName: pathModule.basename(worktree.path),
-          branchName: worktree.branch,
-          startRef: ref,
-        });
-      }
-      try {
-        await waitUntilReady(worktree.path, signal);
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
-        await waitUntilReady(worktree.path);
-        worktree.materialized = true;
+      const ref = worktree.resultCommit || worktree.base;
+      const source = await inspectSourceGit(sourceRoot);
+      const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, worktree.path) : false;
+      if (source.isGit && source.head && !liveInsideSource) {
+        await runGit(sourceRoot, ["worktree", "prune"]).catch(() => {});
+        if (signal?.aborted) throw abortError();
+        await runGit(sourceRoot, ["worktree", "add", "--detach", "--force", worktree.path, ref]);
+      } else {
+        if (signal?.aborted) throw abortError();
+        await exportGitTree(sourceRoot, ref, worktree.path);
+        await initIsolatedGit(worktree.path, signal);
       }
     } else {
       const snapshotDir = fixedCopyResultPath(worktree);
@@ -1116,6 +1203,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         }
       }
       await copyDirRecursive(src, worktree.path);
+      if (await inheritsOtherGit(worktree.path)) {
+        await initIsolatedGit(worktree.path, signal);
+      }
     }
     worktree.materialized = true;
     worktree.preparationStage = "ready";
@@ -1239,7 +1329,56 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return totalBytes;
   };
 
-  return { prepare, estimatePrepare, inspect, inspectGitBaselineInventory, inspectWorkspaceIdentity, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
+  const attachIsolatedGitContext = async (
+    sourceRoot: string,
+    livePath: string,
+    baseRef: string,
+    signal?: AbortSignal,
+  ): Promise<{ kind: "worktree" | "init" | "none" }> => {
+    if (signal?.aborted) throw abortError();
+    const source = await inspectSourceGit(sourceRoot);
+    const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, livePath) : false;
+    const liveInheritsOther = await inheritsOtherGit(livePath);
+    const canDetach = Boolean(source.isGit && source.head && !liveInsideSource && !liveInheritsOther);
+    if (canDetach) {
+      const ref = baseRef && baseRef !== "zero-commit" ? baseRef : source.head!;
+      const overlay = `${livePath}.git-overlay-${randomUUID()}`;
+      await fsPromises.rename(livePath, overlay);
+      try {
+        if (signal?.aborted) throw abortError();
+        await runGit(sourceRoot, ["worktree", "add", "--detach", livePath, ref]);
+        await copyDirRecursive(overlay, livePath);
+        await fsPromises.rm(overlay, { recursive: true, force: true });
+        return { kind: "worktree" };
+      } catch (error) {
+        await fsPromises.rm(livePath, { recursive: true, force: true }).catch(() => undefined);
+        await fsPromises.rename(overlay, livePath).catch(() => undefined);
+        throw error;
+      }
+    }
+    if (source.isGit || liveInsideSource || liveInheritsOther) {
+      await initIsolatedGit(livePath, signal);
+      return { kind: "init" };
+    }
+    return { kind: "none" };
+  };
+
+  return {
+    prepare,
+    estimatePrepare,
+    inspect,
+    inspectGitBaselineInventory,
+    inspectWorkspaceIdentity,
+    snapshot,
+    importFixedResult,
+    merge,
+    reclaim,
+    materialize,
+    prepareInputs,
+    runSetup,
+    measureDiskUsage,
+    attachIsolatedGitContext,
+  };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

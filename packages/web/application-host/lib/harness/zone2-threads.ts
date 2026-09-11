@@ -92,10 +92,10 @@ const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: Thr
  */
 const zone2ThreadTask = (
   options: Zone2ThreadProjectionOptions,
-  input: { workspaceId: string },
+  workspaceId: string,
   parent: ThreadParent,
 ) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
-  const snapshots = await options.registry.listThreadSnapshots(input.workspaceId, parent);
+  const snapshots = await options.registry.listThreadSnapshots(workspaceId, parent);
   const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
   const selected = snapshots
     .filter(({ thread }) => (
@@ -122,12 +122,20 @@ const zone2ThreadTask = (
 const zone2Scope = async (
   options: Zone2ThreadProjectionOptions,
   input: { sessionId: string; workspaceId: string },
-): Promise<{ objectId: string; parent: ThreadParent }> => {
-  const owner = await options.registry.getThreadForSession(input.workspaceId, input.sessionId);
-  const parent: ThreadParent = owner
-    ? { kind: "thread", id: owner.id }
-    : { kind: "session", id: input.sessionId };
-  return { objectId: `${input.workspaceId}\0${parent.kind}\0${parent.id}`, parent };
+): Promise<{ objectId: string; parent: ThreadParent; workspaceId: string }> => {
+  const binding = typeof options.registry.getSessionBinding === "function"
+    ? await options.registry.getSessionBinding(input.sessionId)
+    : null;
+  if (binding) {
+    const parent: ThreadParent = { kind: "thread", id: binding.threadId };
+    return {
+      objectId: `${binding.owningWorkspaceId}\0${parent.kind}\0${parent.id}`,
+      parent,
+      workspaceId: binding.owningWorkspaceId,
+    };
+  }
+  const parent: ThreadParent = { kind: "session", id: input.sessionId };
+  return { objectId: `${input.workspaceId}\0${parent.kind}\0${parent.id}`, parent, workspaceId: input.workspaceId };
 };
 
 export async function projectZone2Threads(
@@ -139,7 +147,7 @@ export async function projectZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, input, scope.parent),
+    zone2ThreadTask(options, scope.workspaceId, scope.parent),
   );
 }
 
@@ -152,6 +160,6 @@ export async function prepareZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, input, scope.parent),
+    zone2ThreadTask(options, scope.workspaceId, scope.parent),
   );
 }

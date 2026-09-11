@@ -1444,7 +1444,10 @@ LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真
 切换失败保持原虚拟分支。Git blob 与工作目录转换后的字节不能无条件视为相同；当前基线读取实际输入字节。
 具备角色目录嵌套工具的子线程经真实 tool registry 与 `control.thread` 能力调用 `dispatch` / `threads` / `wait` /
 `send` / `read_thread` / `merge` / `kill`；Host 把 caller 解析为 `parent.kind: "thread"`，scope 与权限只能继承或收窄
-（D-215）。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
+（D-215）。owning workspace 保存 catalog / WorkingState / 父子关系；execution workspace 只覆盖 scratch 或物化目录的
+Documents、LSP、路径与 shell（D-216）。子会话注册、thread services、Zone 2 和 lost resume 从 Host session binding
+读取 owning workspace，不扫描全部 catalog。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
+Git 物化使用 `git worktree add --detach`（会写 `.git/worktrees`，不创建用户可见分支）或独立 `git init`，子 Git 命令不得发现或修改父仓库。
 兄弟线程不直接通信；根上下文不复制孙对话正文。不加固定深度上限，复用既有并发与排队。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
