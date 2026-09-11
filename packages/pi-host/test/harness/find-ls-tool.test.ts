@@ -37,6 +37,33 @@ describe("surface-aware native find and ls", () => {
     }
   });
 
+  it("lists only the working-branch overlay when the Host marks exclusive authority", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-branch-"));
+    await writeFile(path.join(root, "parent-live.ts"), "live\n", "utf8");
+    const bridge = {
+      request: async () => ({
+        status: "ready" as const,
+        authority: "working-branch" as const,
+        entries: [
+          { path: ".", kind: "directory" as const },
+          { path: "fixed.ts", kind: "file" as const, revision: "working-branch:thread-1@0:base" },
+        ],
+      }),
+    } as unknown as HostServicesBridge;
+    try {
+      const listed = await createSurfaceAwareLsTool(bridge, root).execute("ls", {}, undefined, undefined, context);
+      const lsText = (listed.content[0] as { text: string }).text;
+      assert.match(lsText, /fixed\.ts/);
+      assert.doesNotMatch(lsText, /parent-live\.ts/);
+      const found = await createSurfaceAwareFindTool(bridge, root).execute("find", { pattern: "*" }, undefined, undefined, context);
+      const findText = (found.content[0] as { text: string }).text;
+      assert.match(findText, /fixed\.ts/);
+      assert.doesNotMatch(findText, /parent-live\.ts/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("delegates an unrelated disk directory to native ls", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-disk-"));
     await writeFile(path.join(root, "disk.txt"), "disk\n", "utf8");

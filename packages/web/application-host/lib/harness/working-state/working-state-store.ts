@@ -629,6 +629,27 @@ export class WorkingStateStore {
     return { ...clone(branch.baseState), ...clone(result.pathStates) };
   }
 
+  /**
+   * Current Host branch view: fixed base plus published/in-flight deltas.
+   * Revision 0 (no published result) is a valid empty-delta view.
+   */
+  effectiveState(branchId: string, revision?: number): Record<string, RecoveryState> | null {
+    const branch = this.document.branches[branchId];
+    if (!branch) return null;
+    if (revision !== undefined && revision > 0) return this.resultState(branchId, revision);
+    return { ...clone(branch.baseState), ...clone(branch.deltas) };
+  }
+
+  pathOrigin(branchId: string, file: string): "base" | "delta" | "draft-base" | null {
+    const branch = this.document.branches[branchId];
+    if (!branch) return null;
+    const normalized = normalizeRelative(file);
+    if (Object.hasOwn(branch.deltas, normalized)) return "delta";
+    if (branch.draftBasePaths.includes(normalized)) return "draft-base";
+    if (Object.hasOwn(branch.baseState, normalized)) return "base";
+    return null;
+  }
+
   resultTreeIdentity(branchId: string, revision: number): string | null {
     const states = this.resultState(branchId, revision);
     return states ? treeIdentityFromStates(states) : null;
@@ -785,6 +806,12 @@ export class WorkingStateStore {
       this.protectResult(result);
     });
     return clone(result);
+  }
+
+  async publishHeadResult(branchId: string): Promise<WorkingResult> {
+    const states = this.effectiveState(branchId);
+    if (!states) throw new Error(`Working branch not found: ${branchId}`);
+    return this.publishStates(branchId, states);
   }
 
   async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[]): Promise<WorkingResult> {

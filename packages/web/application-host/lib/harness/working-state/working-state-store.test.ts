@@ -35,6 +35,37 @@ afterEach(async () => {
 });
 
 describe("WorkingStateStore", () => {
+  it("exposes an effective view of base plus delta and names each path origin", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "base.txt"), "base\n");
+      await fs.promises.writeFile(path.join(h.workspace, "draft.txt"), "disk\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      const draft = await h.store.putObject(Buffer.from("draft\n"));
+      await h.store.createBranch("ws", "thread-1", {
+        ...base,
+        "draft.txt": { kind: "regular-file", objectHash: draft.hash, byteLength: draft.byteLength },
+      }, "git-base", ["draft.txt"]);
+      expect(h.store.pathOrigin("thread-1", "base.txt")).toBe("base");
+      expect(h.store.pathOrigin("thread-1", "draft.txt")).toBe("draft-base");
+      const added = await h.store.putObject(Buffer.from("delta\n"));
+      await h.store.publishStates("thread-1", {
+        ...h.store.effectiveState("thread-1")!,
+        "added.txt": { kind: "regular-file", objectHash: added.hash, byteLength: added.byteLength },
+        "base.txt": { kind: "missing" },
+      });
+      expect(h.store.pathOrigin("thread-1", "added.txt")).toBe("delta");
+      expect(h.store.pathOrigin("thread-1", "base.txt")).toBe("delta");
+      expect(h.store.effectiveState("thread-1")!["added.txt"]).toMatchObject({ kind: "regular-file" });
+      expect(h.store.effectiveState("thread-1")!["base.txt"]).toEqual({ kind: "missing" });
+      const published = await h.store.publishHeadResult("thread-1");
+      expect(published.resultRevision).toBe(1);
+      expect(published.changedPaths).toEqual(["added.txt", "base.txt"]);
+    } finally {
+      h.database.close();
+    }
+  });
+
   it("publishes immutable revisions with fixed baselines and keeps old objects referenced", async () => {
     const h = await harness();
     try {

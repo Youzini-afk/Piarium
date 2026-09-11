@@ -21,6 +21,11 @@ export interface HarnessSearchDeps {
   readFile?: ExploreFileReader;
   /** Dirty paths this turn's fixed source still owns (D-088). */
   draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[];
+  /**
+   * Isolated Thread Run corpus. A non-null result is exclusive: never merge
+   * parent or worktree disk hits into the same answer.
+   */
+  branchCorpus?: (sessionId: string) => Promise<Array<{ path: string; text: string }> | null>;
 }
 
 export interface HarnessSearchContext {
@@ -325,6 +330,39 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             if (!within(prefix, minimal)) minimal.push(prefix);
           }
           searchPrefixes = minimal;
+        }
+
+        if (deps.branchCorpus && ctx.actor) {
+          const corpus = await deps.branchCorpus(ctx.actor.sessionId);
+          if (corpus) {
+            const matcher = compileDraftPattern(params.pattern.trim(), params.fixedStrings, params.ignoreCase);
+            if (!matcher) return unavailableResult();
+            const hits: WorkspaceSearchHit[] = [];
+            for (const file of corpus) {
+              controller.signal.throwIfAborted();
+              if (searchPrefixes && !within(file.path, searchPrefixes)) continue;
+              if (!globFilter.matches(file.path)) continue;
+              hits.push(...draftHitsFor(file.path, ctx.workspaceId, file.text, matcher, contextWindow));
+            }
+            if (hits.length === 0) return emptyResult();
+            const grouped = groupAndSort(hits, root, limit, groupOptions);
+            return {
+              status: "ready",
+              files: grouped.files,
+              totalHits: grouped.totalHits,
+              totalFiles: grouped.totalFiles,
+              searchedFiles: grouped.totalFiles,
+              partial: grouped.totalHits > limit || grouped.perFileCapped || grouped.filesDropped > 0,
+              ...(candidateMode ? {
+                filesDropped: grouped.filesDropped,
+                fileCoverage: uniqueFileCoverage({
+                  filesDropped: grouped.filesDropped,
+                  backendIncomplete: false,
+                  backendCapped: false,
+                }),
+              } : {}),
+            };
+          }
         }
 
         // A path written during this turn is no longer draft-owned: its disk

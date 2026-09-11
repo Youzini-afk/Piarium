@@ -38,6 +38,29 @@ const runtimeFor = (worktrees: string) => createThreadWorktreeRuntime({
 });
 
 describe("thread worktree runtime", () => {
+  it("prepares a virtual isolated scratch without copying parent bytes", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    try {
+      writeFileSync(join(fixture.repo, "tracked.txt"), "parent live\n");
+      const prepared = await runtime.prepare({
+        mode: "isolated",
+        viewMode: "virtual",
+        sourceRoot: fixture.repo,
+        threadId: "virtual-one",
+      });
+      expect(prepared.worktree).toMatchObject({
+        viewMode: "virtual",
+        materialized: false,
+        preparationStage: "ready",
+      });
+      expect(existsSync(join(prepared.cwd, "tracked.txt"))).toBe(false);
+      expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("parent live\n");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("captures the parent working state as an internal baseline and merges only child deltas", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);

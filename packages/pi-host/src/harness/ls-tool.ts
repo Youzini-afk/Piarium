@@ -26,6 +26,7 @@ const makeOperations = (
   overlay: Extract<DocumentPathOverlayResult, { status: "ready" }>,
   signal: AbortSignal | undefined,
 ): LsOperations => {
+  const exclusive = overlay.authority === "working-branch";
   const nodes = new Map<string, OverlayNode>();
   const addNode = (absolutePath: string, kind: OverlayNode["kind"]): void => {
     const normalized = path.resolve(absolutePath);
@@ -60,17 +61,23 @@ const makeOperations = (
     throwIfAborted();
     const normalized = path.resolve(absolutePath);
     const node = findNode(normalized);
-    if (!node) return fs.stat(normalized);
+    if (node) return { isDirectory: () => node.kind === "directory" };
+    if (exclusive) {
+      const error = new Error(`ENOENT: ${normalized}`) as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    }
     // The fixed snapshot is authoritative for a covered path. A disk type
     // drift is therefore resolved in favor of the overlay rather than being
     // silently dropped by Pi's native per-entry stat loop.
-    return { isDirectory: () => node.kind === "directory" };
+    return fs.stat(normalized);
   };
 
   return {
     exists: async (absolutePath) => {
       throwIfAborted();
       if (findNode(absolutePath)) return true;
+      if (exclusive) return false;
       try {
         await fs.stat(path.resolve(absolutePath));
         return true;
@@ -83,13 +90,15 @@ const makeOperations = (
       throwIfAborted();
       const normalized = path.resolve(absolutePath);
       const names = new Map<string, string>();
-      try {
-        for (const name of await fs.readdir(normalized)) {
-          names.set(pathKey(name), name);
+      if (!exclusive) {
+        try {
+          for (const name of await fs.readdir(normalized)) {
+            names.set(pathKey(name), name);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== "ENOENT"
+            && (error as NodeJS.ErrnoException)?.code !== "ENOTDIR") throw error;
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT"
-          && (error as NodeJS.ErrnoException)?.code !== "ENOTDIR") throw error;
       }
       const parentKey = pathKey(normalized);
       for (const node of nodes.values()) {

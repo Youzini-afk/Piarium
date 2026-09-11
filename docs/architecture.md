@@ -679,12 +679,14 @@ so ignored modifications, additions, and deletions survive result publication an
 workspace-wide rescan. Schema 1/2 catalogs migrate with an empty capture scope.
 
 Parent-session `explore`, `grep`, and the same-name Pi `read`, `find`, and `ls` overrides consume the immutable surface input.
-Search removes dirty disk hits before its bounded backend counter and merges fixed-draft hits before ranking.
-Read asks the Host only to choose disk versus fixed draft bytes, then delegates pagination, truncation, and
+An isolated Thread Run with a WorkingBranch binding instead consumes `fixed base + branch delta/tombstone` through the same
+Host services; exclusive overlays do not merge parent or worktree disk. Search removes dirty disk hits before its bounded
+backend counter and merges fixed-draft hits before ranking.
+Read asks the Host only to choose disk, fixed draft, or working-branch bytes, then delegates pagination, truncation, and
 disk images to Pi's native read definition. Path overlays ask the Host only for
 relative fixed file and virtual directory identities plus revisions, then merge
 them with native fd/filesystem results through Pi's definitions before limit and
-byte truncation. An unavailable dirty source never falls back to disk. LSP and
+byte truncation unless the overlay authority is the working branch. An unavailable dirty or branch source never falls back to disk. LSP and
 fixed-revision sessions remain the next read-view consumers. Surface snapshots
 currently describe dirty text file existence only; deletion and rename
 tombstones are not represented.

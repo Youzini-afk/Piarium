@@ -1431,9 +1431,11 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 读取同一 baseState 加分支 delta；父后来新增、删除或修改的文件不自动进入子分支，更新基线是一次显式记录的新修订。
 
 当前 `thread.dispatch` 纵切在创建 Thread 前同步把固定草稿正文、编码/BOM、原换行和 surface/disk 修订来源复制进 WorkingState；
-`ThreadLaunchManifest.draftBaselineId` 只持久化 Host 对象身份，不进入模型参数。带草稿的角色统一使用 isolated worktree。Run 启动时先按
-现有后端准备磁盘目录，再以持久草稿覆盖对应路径；这个有效状态直接成为工作分支的 revision 0，delta 为空，因此未被子线程修改的
-草稿不会出现在结果里。非草稿路径目前仍取 Run 启动时的物化内容，并非整个工作区在 dispatch 时的瞬时快照。
+`ThreadLaunchManifest.draftBaselineId` 只持久化 Host 对象身份，不进入模型参数。带草稿的角色统一使用 isolated worktree。
+隔离 Run 在启动时捕获 `fixed base + draft` 为 WorkingBranch revision 0。同名 `read` / `grep` / `find` / `ls` / `explore`
+经 Host 分支视图读取该 base 加 delta/tombstone，provenance 标明 branch/base/delta；父 live 目录与 scratch/worktree
+磁盘不能补读未改路径。没有 shell、文本写入或 LSP 路径绑定工具的隔离 Run 只准备 scratch cwd，不复制父目录（D-212）。
+需要真实路径的工具仍先物化；非草稿路径目前仍取 Run 启动时捕获，并非整个工作区在 dispatch 时的瞬时快照。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
 显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和

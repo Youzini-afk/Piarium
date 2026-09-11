@@ -115,10 +115,11 @@ export function createSurfaceAwareFindTool(
       }
       const limit = params.limit ?? DEFAULT_FIND_LIMIT;
       const fixedPaths = overlayResultPaths(overlay);
-      const rootOnDisk = await diskPathExists(rootPath);
+      const exclusive = overlay.authority === "working-branch";
+      const rootOnDisk = exclusive ? false : await diskPathExists(rootPath);
       let diskPaths: FindPath[] = [];
       let diskResult: Awaited<ReturnType<typeof native.execute>> | undefined;
-      if (rootOnDisk || !hasVirtualRoot(overlay)) {
+      if (!exclusive && (rootOnDisk || !hasVirtualRoot(overlay))) {
         try {
           // Over-fetch by the complete fixed entry count so disk results do not
           // occupy the user's final limit before the merge.

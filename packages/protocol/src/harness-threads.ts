@@ -63,6 +63,11 @@ export interface ThreadWorktree {
   /** Whether the physical directory is currently materialized on disk. */
   materialized?: boolean;
   /**
+   * Isolated Runs without path-binding tools keep a scratch cwd and read the
+   * WorkingState view. Resume must not treat this as an incomplete copy.
+   */
+  viewMode?: "virtual" | "materialized";
+  /**
    * Durable progress through directory reconstruction and environment setup.
    * `materializing` may have a partial managed directory on disk; it is never
    * safe to open until the state advances to `setup` or `ready`.

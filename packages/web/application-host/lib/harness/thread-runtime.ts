@@ -38,6 +38,8 @@ import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
+import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
+import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
@@ -80,6 +82,7 @@ export interface ThreadRuntimeOptions {
   worktreeSettings?: HarnessWorktreeSettings | undefined;
   resolveWorktreeSettings?(workspaceId: string, parent: ThreadParent): Promise<HarnessWorktreeSettings | undefined> | HarnessWorktreeSettings | undefined;
   workingStates?: WorkspaceWorkingStateAccess | undefined;
+  executionViews?: ThreadExecutionViewRegistry | undefined;
   cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext):
     | { status: "disk" }
     | { status: "unavailable"; message: string }
@@ -506,8 +509,40 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const preparationStageOf = (
     worktree: NonNullable<Thread["worktree"]>,
   ): NonNullable<NonNullable<Thread["worktree"]>["preparationStage"]> => (
-    worktree.preparationStage ?? (worktree.materialized === false ? "materialize" : "ready")
+    worktree.preparationStage ?? (worktree.materialized === false && worktree.viewMode !== "virtual" ? "materialize" : "ready")
   );
+
+  const isVirtualWorktree = (worktree: Thread["worktree"] | undefined): boolean => (
+    worktree?.viewMode === "virtual"
+  );
+
+  const bindExecutionView = async (input: {
+    sessionId: string;
+    workspaceId: string;
+    parent: ThreadParent;
+    threadId: string;
+    runId: string;
+  }): Promise<void> => {
+    if (!options.executionViews || !options.workingStates) return;
+    const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+    if (!thread?.workBranchId) return;
+    const draftBasePaths = await options.workingStates.withStore(
+      input.workspaceId,
+      "working-branch-view-bind",
+      (store) => store.getBranch(thread.workBranchId!)?.draftBasePaths ?? [],
+      "shared",
+    );
+    options.executionViews.bind({
+      sessionId: input.sessionId,
+      workspaceId: input.workspaceId,
+      threadId: input.threadId,
+      runId: input.runId,
+      branchId: thread.workBranchId,
+      revision: thread.resultRevision ?? 0,
+      mode: isVirtualWorktree(thread.worktree) ? "virtual" : "materialized",
+      draftBasePaths,
+    });
+  };
 
   const unknownMeasurement = (): ReturnType<typeof measurementFromStates> => ({
     logicalBytes: null,
@@ -936,6 +971,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (bindingsBySession.get(binding.sessionId) === binding) bindingsBySession.delete(binding.sessionId);
     if (sessionByThread.get(binding.threadId) === binding.sessionId) sessionByThread.delete(binding.threadId);
     options.verification?.detachSession(binding.sessionId);
+    options.executionViews?.unbind(binding.sessionId);
     lastAgentEnd.delete(binding.sessionId);
     clearStallTimer(binding.sessionId);
     stalledThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
@@ -946,12 +982,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const publishPartialResult = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
-    const inspected = await options.worktrees.inspect(thread.worktree, "live");
-    const result = await options.workingStates.withStore(
-      workspaceId,
-      "thread-partial-result-publish",
-      (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles),
-    );
+    const result = isVirtualWorktree(thread.worktree)
+      ? await options.workingStates.withStore(
+        workspaceId,
+        "thread-partial-result-publish",
+        (store) => store.publishHeadResult(thread.workBranchId!),
+      )
+      : await (async () => {
+        const inspected = await options.worktrees.inspect(thread.worktree!, "live");
+        return options.workingStates!.withStore(
+          workspaceId,
+          "thread-partial-result-publish",
+          (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles),
+        );
+      })();
     let worktree = thread.worktree;
     try {
       worktree = await options.worktrees.snapshot(worktree);
@@ -1081,8 +1125,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let preparedCwd: string;
     let worktree = existing?.worktree;
     let needsBranchCapture = false;
+    const virtualIsolated = input.worktree === "isolated" && !runNeedsMaterializedDirectory(input.tools);
     if (!worktree) {
-      if (input.worktree === "isolated" && effectiveSettings?.budget) {
+      if (input.worktree === "isolated" && !virtualIsolated && effectiveSettings?.budget) {
         const reservation = await reserveMaterialization(
           input.workspaceId,
           input.parent,
@@ -1099,6 +1144,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       try {
         prep = await options.worktrees.prepare({
           mode: input.worktree,
+          ...(virtualIsolated ? { viewMode: "virtual" as const } : {}),
           sourceRoot,
           threadId: input.threadId,
           signal: preparationSignal,
@@ -1127,10 +1173,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       preparedCwd = prep.cwd;
       worktree = prep.worktree;
       if (worktree) {
-        worktree.materialized = true;
-        worktree.preparationStage = input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup
-          ? "setup"
-          : "ready";
+        if (virtualIsolated) {
+          worktree.viewMode = "virtual";
+          worktree.materialized = false;
+          worktree.preparationStage = "ready";
+        } else {
+          worktree.viewMode = worktree.viewMode ?? "materialized";
+          worktree.materialized = true;
+          worktree.preparationStage = input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup
+            ? "setup"
+            : "ready";
+        }
         delete worktree.materializationFingerprint;
         await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
         needsBranchCapture = true;
@@ -1139,9 +1192,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // uninterruptible copy may have completed a directory by this point.
       checkPreparation();
     } else {
-      const needsExistingMaterialization = worktree.materialized === false
+      const needsExistingMaterialization = !isVirtualWorktree(worktree) && (
+        worktree.materialized === false
         || preparationStageOf(worktree) === "materialize"
-        || preparationStageOf(worktree) === "materializing";
+        || preparationStageOf(worktree) === "materializing"
+      );
       if (needsExistingMaterialization
         && !options.worktrees.materialize
         && !(options.workingStates && existing?.workBranchId && existing.resultRevision)) {
@@ -1204,7 +1259,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // recopy live parent inputs or replace that scope from current settings.
     const launchBranchCapture = Boolean(worktree && needsBranchCapture && !existing?.workBranchId);
     const captureScopes = launchBranchCapture ? resolveCaptureScopes(sourceRoot, effectiveSettings) : [];
-    if (launchBranchCapture && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
+    if (launchBranchCapture && !virtualIsolated && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
       setPreparationStage("preparing-inputs");
       await options.worktrees.prepareInputs(sourceRoot, worktree!, effectiveSettings, preparationSignal);
       checkPreparation();
@@ -1213,7 +1268,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const branchId = `thread-${input.threadId}`;
       setPreparationStage("capturing-baseline");
       await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
-        const baseline = await store.captureDirectory(preparedCwd);
+        const baseline = await store.captureDirectory(virtualIsolated ? sourceRoot : preparedCwd);
         if (!draftBaselineId) {
           await store.createBranch(input.workspaceId, branchId, baseline, worktree!.base, [], captureScopes);
           return;
@@ -1235,10 +1290,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           worktree!.base,
           captureScopes,
         );
-        await store.materializeStates(
-          Object.fromEntries(branch.draftBasePaths.map((file) => [file, branch.baseState[file]!])),
-          preparedCwd,
-        );
+        if (!virtualIsolated) {
+          await store.materializeStates(
+            Object.fromEntries(branch.draftBasePaths.map((file) => [file, branch.baseState[file]!])),
+            preparedCwd,
+          );
+        }
       });
       checkPreparation();
       await options.registry.setWorkingState(input.workspaceId, input.threadId, { branchId, worktree });
@@ -1328,6 +1385,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         baseline: { cost: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0 } },
       };
       bind(binding);
+      await bindExecutionView({
+        sessionId,
+        workspaceId: input.workspaceId,
+        parent: input.parent,
+        threadId: input.threadId,
+        runId: input.runId,
+      });
       checkPreparation();
       scheduleStallTimer(binding);
       await options.registry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
@@ -1668,19 +1732,23 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let publishedResultRevision: number | undefined;
     if (currentWorktree) {
       let inspected: Awaited<ReturnType<ThreadWorktreeRuntime["inspect"]>> | null = null;
-      try {
-        inspected = await options.worktrees.inspect(currentWorktree, "live");
-        changedFiles = inspected.changedFiles;
-        diffStats = inspected.diffStats;
-      } catch (error) {
-        unresolved.push(`Unable to inspect worktree: ${error instanceof Error ? error.message : String(error)}`);
+      if (!isVirtualWorktree(currentWorktree)) {
+        try {
+          inspected = await options.worktrees.inspect(currentWorktree, "live");
+          changedFiles = inspected.changedFiles;
+          diffStats = inspected.diffStats;
+        } catch (error) {
+          unresolved.push(`Unable to inspect worktree: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-      if (options.workingStates && thread.workBranchId && inspected) {
+      if (options.workingStates && thread.workBranchId && (isVirtualWorktree(currentWorktree) || inspected)) {
         try {
           const published = await options.workingStates.withStore(
             binding.workspaceId,
             "thread-result-publish",
-            (store) => store.publishDirectoryResult(thread.workBranchId!, currentWorktree!.path, inspected!.changedFiles),
+            (store) => isVirtualWorktree(currentWorktree)
+              ? store.publishHeadResult(thread.workBranchId!)
+              : store.publishDirectoryResult(thread.workBranchId!, currentWorktree!.path, inspected!.changedFiles),
           );
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;
@@ -2026,6 +2094,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             },
           };
           bind(binding);
+          await bindExecutionView({
+            sessionId: snapshot.sessionId,
+            workspaceId,
+            parent,
+            threadId: thread.id,
+            runId: run.id,
+          });
           if (thread.attention === "user" || thread.attention === "permission") {
             waitingSessions.add(snapshot.sessionId);
           }
@@ -2185,6 +2260,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       },
     };
     bind(implementationBinding);
+    await bindExecutionView({
+      sessionId: opened.sessionId,
+      workspaceId: scope.workspaceId,
+      parent: scope.parent,
+      threadId: thread.id,
+      runId: converted.run.id,
+    });
     await options.registry.markRunRunning(scope.workspaceId, thread.id, converted.run.id, opened.sessionId);
     try {
       scheduleStallTimer(implementationBinding);
@@ -2886,6 +2968,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         },
       };
       bind(binding);
+      await bindExecutionView({
+        sessionId: opened.sessionId,
+        workspaceId,
+        parent,
+        threadId: thread.id,
+        runId: run.id,
+      });
       await options.registry.markRunRunning(workspaceId, thread.id, run.id, opened.sessionId);
       checkRestore();
       if (thread.kind === "implementation") scheduleStallTimer(binding);
@@ -2932,6 +3021,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const existingSessionId = sessionByThread.get(threadId);
       const existingBinding = existingSessionId ? bindingsBySession.get(existingSessionId) : undefined;
       const directoryReady = !existing.worktree
+        || isVirtualWorktree(existing.worktree)
         || (existing.worktree.materialized !== false && preparationStageOf(existing.worktree) === "ready");
       if (existingRun?.outcome === null
         && existingRun.workerState === "running"
@@ -2961,6 +3051,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const worktreeStage = worktree ? preparationStageOf(worktree) : "ready";
       const needsMaterialize = Boolean(
         worktree
+        && !isVirtualWorktree(worktree)
         && (worktree.materialized === false || worktreeStage === "materialize" || worktreeStage === "materializing"),
       );
       const needsSetupRetry = Boolean(

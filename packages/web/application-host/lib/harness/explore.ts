@@ -299,7 +299,7 @@ interface PreparedWindow {
   offTopic: boolean;
   windowWeight: number;
   revision: string;
-  source: "disk" | "surface-draft";
+  source: "disk" | "surface-draft" | "working-branch";
   why: string;
   unit?: ExploreSnippet["unit"];
   structure?: ExploreSnippet["structure"];

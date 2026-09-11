@@ -82,11 +82,22 @@ export function deriveHarnessCapabilities(
 }
 
 /** Read-source lookup used by the native Pi read wrapper. */
+export type HarnessDocumentReadLookup =
+  | SurfaceSnapshotReadResult
+  | {
+    status: "working-branch";
+    revision: string;
+    provenance: import("@piarium/protocol").WorkingBranchReadProvenance;
+    base64?: string;
+    missing?: true;
+    message?: string;
+  };
+
 export type HarnessDocumentReadSource = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
-) => SurfaceSnapshotReadResult;
+) => HarnessDocumentReadLookup | Promise<HarnessDocumentReadLookup>;
 
 /** Write admission for native Pi write/edit/apply_patch wrappers (D-089). */
 export type HarnessDocumentWriteGuard = (
@@ -95,12 +106,20 @@ export type HarnessDocumentWriteGuard = (
   resourceId: string,
 ) => Promise<import("@piarium/protocol").DocumentWriteGuardResult>;
 
+export type HarnessDocumentPathOverlayLookup =
+  | SurfaceSnapshotOverlayResult
+  | {
+    status: "ready";
+    authority: "working-branch";
+    entries: import("../documents/surface-snapshot-store.js").SurfaceSnapshotOverlayEntry[];
+  };
+
 /** Content-free fixed path lookup used by native Pi find/ls wrappers. */
 export type HarnessDocumentPathOverlay = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
-) => SurfaceSnapshotOverlayResult;
+) => HarnessDocumentPathOverlayLookup | Promise<HarnessDocumentPathOverlayLookup>;
 
 export interface HarnessServiceHost {
   outputStore: OutputStore;
@@ -220,6 +239,7 @@ export interface HarnessServiceHostOptions {
   search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  branchCorpus?: HarnessSearchDeps["branchCorpus"];
   agentInputDraftPaths?: HarnessServiceHost["agentInputDraftPaths"];
   agentInputSurfaceOwner?: HarnessServiceHost["agentInputSurfaceOwner"];
   commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
@@ -295,6 +315,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     ...(options.readExploreFile ? { readFile: options.readExploreFile } : {}),
+    ...(options.branchCorpus ? { branchCorpus: options.branchCorpus } : {}),
     ...(options.agentInputDraftPaths ? { draftPaths: options.agentInputDraftPaths } : {}),
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;

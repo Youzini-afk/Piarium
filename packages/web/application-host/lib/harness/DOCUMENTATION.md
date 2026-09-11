@@ -14,9 +14,9 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── shell.kill   → ShellSupervisor
                            ├── output.store → OutputStore (global)
                            ├── output.read  → OutputStore
-                           ├── search.content → HarnessSearchService
-                           ├── document.readSource → fixed surface bytes or disk sentinel
-                           ├── document.pathOverlay → fixed relative paths or disk sentinel
+                           ├── search.content → HarnessSearchService (surface overlay or exclusive WorkingState corpus)
+                           ├── document.readSource → fixed surface bytes, working-branch bytes, or disk sentinel
+                           ├── document.pathOverlay → surface merge paths or exclusive working-branch overlay
                            ├── explore.search → same query engine, algorithm-only facade
                            ├── explore.query.* → Host-owned short-lived query (start/plan/views/select/followup/finish/cancel/release)
                            ├── related.query → already-open KnowledgeStore (file-level topology; not lsp.references)
@@ -179,6 +179,10 @@ text with encoding, BOM, and revision. The Host serializes only fixed draft byte
 pi-host delegates both branches to Pi's `createReadToolDefinition`, preserving
 native offset/limit truncation and disk image attachments. The wrapper is
 registered only when the Host handshake advertises `harnessDocumentRead`.
+An isolated Thread Run bound to a WorkingBranch never returns the disk sentinel
+for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
+`effectiveState = base ∪ delta` with tombstones hidden, and provenance names
+the branch, revision, and origin. Missing branch content stays unavailable.
 
 The fixed draft is one turn's input, not a standing authority. Once Piarium
 observes a write to a path — a Documents write or the Pi mutation journal's
@@ -205,7 +209,8 @@ native definition. A covered disk path keeps the fixed snapshot's file or
 directory type. Unrelated roots return the disk sentinel; an expired related
 snapshot returns unavailable and never substitutes disk output. The snapshot
 currently represents dirty text file existence only, so it has no deletion or
-rename tombstones.
+rename tombstones. A working-branch overlay is exclusive: find/ls do not merge
+native disk, and tombstones hide files plus virtual ancestors.
 
 ### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
 

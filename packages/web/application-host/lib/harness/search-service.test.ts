@@ -636,4 +636,23 @@ describe("harness search service", () => {
     expect(result.status).toBe("empty");
     expect(called).toBe(false);
   });
+
+  it("searches a bound working-branch corpus without calling the disk backend", async () => {
+    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => {
+      throw new Error("disk search must not run");
+    });
+    const service = createHarnessSearchService({
+      search,
+      resolveWorkspaceRoot: async () => "/workspace",
+      branchCorpus: async () => [
+        { path: "kept.txt", text: "fixed kept\nparent must not match" },
+        { path: "src/nested.ts", text: "nested baseline\n" },
+      ],
+    });
+    const hit = await service.search({ pattern: "fixed kept" }, searchContext({ source: "disk" }));
+    expect(hit).toMatchObject({ status: "ready", totalHits: 1, files: [{ path: "kept.txt" }] });
+    const missed = await service.search({ pattern: "parent live" }, searchContext({ source: "disk" }));
+    expect(missed.status).toBe("empty");
+    expect(search).not.toHaveBeenCalled();
+  });
 });

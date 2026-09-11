@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -45,6 +45,8 @@ worker 响应送达后推进 observation/thread cursors 已接生产路径。它
 **D-207/D-210 已接通固定结果的验证记录与默认自动 review，并去掉时间邻近式绑定。** 子检查要求 actor/worker generation/Run/binding generation 和命令 start/end/publish 输入身份一致；父检查绑定完整 Integration 的 result/operation/parent session 持久窗口。非 Git 无便宜身份时如实标 uncertain，不做每命令全仓扫描。review 绑定结果、review 线程和 Run，失败/取消与迟到旧结果均有明确归属。证据与未测范围见 3.4 / 3.5 / 3.7。
 
 **D-208/D-211 已接通 Settings 知识目录与 suggestions 槽位的用户消息提议，并补正并发和写入身份。** Settings 对 workspace/user `.tdb` 做列表/查看/编辑/停用与取代链，所有变更核对打开时完整修订；作用域切换淘汰旧请求。`knowledge.suggest` 固定写 actor workspace/user-message 来源，相同正文的历史查重与插入原子完成。公开 recall 与 Zone 2 仍只看当前有效 accepted；未配置不借用主模型。证据与未测范围见 2.7 / 2.10。
+
+**D-212 已接通隔离 Thread Run 的 WorkingState 只读视图。** 同名 `read` / `grep` / `find` / `ls` / `explore` 走 Host `document.readSource` / `document.pathOverlay` / `search.content` / explore reader，读取固定 base 加 delta/tombstone；父目录与物化/scratch 磁盘不能补读。没有路径绑定工具的隔离 Run 只建 scratch cwd。虚拟写入、dispatch 瞬时基线与嵌套线程仍待后续纵切。证据见 3.4 / 3.4a。
 
 **D-080 简化辅助统计。** 已移除“模型槽位用量”区块及其专用聚合/传输，后续不新增同类辅助费用或 Token 看板。
 右上角原有普通会话费用、输入/输出/缓存 Token 和上下文容量展示保留；模型槽位的配置与功能不变。
@@ -122,7 +124,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.2** Smart fallback | pi-host | ✓ | ✓ | `session-e2e.test.ts`（配置槽位后真实模型调用）；`permission-gate-extension.test.ts`（普通 ask 可放行、高风险不调用 judge） | 用户选择后 | 无槽位时不可选、判断失败时 ask | 插件活跃时应使用其显式 `authorizerChain`，原生 Smart 不参与裁决 |
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 可选配对回放记录器 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor、记录、配对与失败分类） | — | 不运行不产生模型请求/设置变化 | 自动执行尚缺单会话配置；只有实际安排配对时才需要，不再阻塞其他功能或默认启用（D-078） |
-| **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol | ✓ | ✓（物化分支） | `working-state/working-state-store.test.ts`（schema 1/2→3、draft objects/ref、固定多修订、窄路径与 captureScopes）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope）；`thread-worktree.test.ts`（fixed/live） | ✓（隔离线程） | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路 | Merkle/无目录工具、整仓 dispatch 基线、跨平台 CoW 与历史引用释放 UI 待交付；物化预算与占用治理见 D-204；非草稿路径当前取 Run 启动时状态；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除 |
+| **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol / pi-host | ✓ | ✓（隔离只读视图 + 物化分支） | `working-state/working-state-store.test.ts`（schema 1/2→3、draft objects/ref、固定多修订、窄路径与 captureScopes、effectiveState/origin）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`working-state/branch-view.test.ts`；`working-state/working-branch-view.test.ts`（Host router 上的 read/grep/find/ls，父/worktree drift 隔离与 scope 拒绝）；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope、虚拟 spawn 绑定）；`thread-worktree.test.ts`（fixed/live、virtual scratch）；pi-host `read-tool.test.ts` / `find-ls-tool.test.ts`（working-branch provenance 与 exclusive overlay） | ✓（隔离线程） | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路；shared/none 仍读 live 父目录 | Merkle 优化、虚拟 edit/write/apply_patch、整仓 dispatch 基线、跨平台 CoW 与历史引用释放 UI 待交付；物化预算与占用治理见 D-204；非草稿路径当前取 Run 启动时状态；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除 |
 | **3.5a** 固定修订 Integration、草稿写回与绑定预览（D-203） | host / protocol / ui | ✓ | ✓ | `integration-coordinator.test.ts`（旧预览拒绝、持久 intent/回执、故障与条件补偿）；`integration-surface-vertical.test.js`（真实 Documents barrier + Registry + Coordinator，磁盘/草稿同一操作合并及撤销，草稿变 clean）；`documents/authority.test.ts`（定向注册、取消与固定来源更新）；UI `documents/registry.test.ts`（实例替换、观察者异常、重试/撤销）；`HarnessThreadIntegrationPanel.behavior.test.tsx`（真实 React 挂载、无请求循环、迟到丢弃、提交审阅绑定）；`thread-routes.test.ts`、Pi `phase3-e2e.test.ts` | ✓（UI 与 agent 共用 Host 定向执行；缓冲不保存） | 不明执行状态保留 needs-attention；不可用缓冲不写盘；失败不等于未写入；旧输入来源不冒充新正文 | 草稿目标支持文本；缓冲无法表达的类型/权限位变化明确 unavailable。完整浏览器点击链未跑；可应用性不代表测试或行为兼容 |
 
 ## 当前缺口与后续顺序

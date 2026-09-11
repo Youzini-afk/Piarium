@@ -84,6 +84,31 @@ describe("surface-aware native read", () => {
     assert.equal(observedSignal, controller.signal);
   });
 
+  it("reads working-branch bytes and reports provenance without touching disk", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-read-branch-"));
+    await writeFile(join(root, "kept.txt"), "parent live\n", "utf8");
+    const bridge = {
+      request: async () => ({
+        source: "working-branch" as const,
+        revision: "working-branch:thread-1@0:base",
+        provenance: { branchId: "thread-1", revision: 0, origin: "base" as const },
+        base64: Buffer.from("fixed base\n", "utf8").toString("base64"),
+      }),
+    } as unknown as HostServicesBridge;
+    const tool = createSurfaceAwareReadTool(bridge, root);
+    try {
+      const result = await tool.execute("call-branch", { path: "kept.txt" }, undefined, undefined, context);
+      assert.equal((result.content[0] as { text: string }).text, "fixed base\n");
+      assert.deepEqual(result.details, {
+        revision: "working-branch:thread-1@0:base",
+        source: "working-branch",
+        provenance: { branchId: "thread-1", revision: 0, origin: "base" },
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("delegates disk reads to the native definition", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-read-disk-"));
     const file = join(root, "disk.txt");

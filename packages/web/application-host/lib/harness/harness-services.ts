@@ -221,13 +221,23 @@ export function createDocumentReadSourceService(
         throw new HarnessServiceError("unavailable", "Document read source is unavailable.");
       }
       ctx.signal.throwIfAborted();
-      const snapshot = host.documentReadSource(
+      const snapshot = await host.documentReadSource(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
       );
       ctx.signal.throwIfAborted();
       if (snapshot.status === "disk") return { source: "disk" };
+      if (snapshot.status === "working-branch") {
+        if (snapshot.message) throw new HarnessServiceError("unavailable", snapshot.message);
+        return {
+          source: "working-branch",
+          revision: snapshot.revision,
+          provenance: snapshot.provenance,
+          ...(snapshot.missing ? { missing: true as const } : {}),
+          ...(snapshot.base64 === undefined ? {} : { base64: snapshot.base64 }),
+        };
+      }
       if (snapshot.status === "unavailable") {
         throw new HarnessServiceError("unavailable", snapshot.message);
       }
@@ -274,7 +284,7 @@ export function createDocumentPathOverlayService(
         throw new HarnessServiceError("unavailable", "Document path overlay is unavailable.");
       }
       ctx.signal.throwIfAborted();
-      const snapshot = host.documentPathOverlay(
+      const snapshot = await host.documentPathOverlay(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
@@ -300,7 +310,11 @@ export function createDocumentPathOverlayService(
           kind: entry.kind,
           ...(entry.revision === undefined ? {} : { revision: entry.revision }),
         }));
-      return { status: "ready", entries };
+      return {
+        status: "ready",
+        entries,
+        ...("authority" in snapshot && snapshot.authority ? { authority: snapshot.authority } : {}),
+      };
     },
   };
 }

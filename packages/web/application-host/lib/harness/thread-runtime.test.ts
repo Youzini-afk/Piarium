@@ -12,6 +12,7 @@ import type { WorkspaceRecoveryStorageContext } from "../recovery/journal-engine
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/journal-files.js";
 import { createDocumentAuthority } from "../documents/authority.js";
+import { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
@@ -320,6 +321,101 @@ describe("thread runtime", () => {
       });
     } finally {
       await draftRuntime.dispose();
+      await documents.dispose();
+      database.close();
+    }
+  });
+
+  it("captures a virtual isolated baseline from the parent root and binds the Host branch view", async () => {
+    const workspace = join(dataDir, "virtual-workspace");
+    const recoveryRoot = join(dataDir, "virtual-recovery");
+    const scratch = join(dataDir, "virtual-scratch");
+    await fs.promises.mkdir(workspace, { recursive: true });
+    await fs.promises.mkdir(scratch, { recursive: true });
+    await fs.promises.writeFile(join(workspace, "kept.txt"), "fixed parent\n");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("working-state database missing");
+    const storageContext: WorkspaceRecoveryStorageContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: WORKSPACE },
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      root: recoveryRoot,
+    };
+    const workingStates = {
+      withStore: async <T>(_workspaceId: string, _purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => (
+        operation(await DurableWorkingStateStore.open(storageContext), storageContext)
+      ),
+    };
+    const documents = createDocumentAuthority({
+      hostId: "host-1",
+      dataDir: join(dataDir, "virtual-documents"),
+      isAllowedRoot: async () => true,
+      isTrusted: async () => true,
+    });
+    const identity = await documents.resolveWorkspace({ path: workspace });
+    storageContext.identity.workspaceId = identity.workspaceId;
+    const views = new ThreadExecutionViewRegistry();
+    let prepared: { cwd: string; viewMode?: "virtual" | "materialized" } | undefined;
+    const virtualRuntime = createThreadRuntime({
+      registry,
+      workingStates,
+      executionViews: views,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => "runtime-virtual-workspace",
+      sessions: {
+        ...sessionAdapter,
+        create: vi.fn(async (input) => snapshot("virtual-child-session", input.cwd)),
+      },
+      worktrees: {
+        prepare: async (input) => {
+          prepared = input.viewMode === undefined
+            ? { cwd: scratch }
+            : { cwd: scratch, viewMode: input.viewMode };
+          return {
+            cwd: scratch,
+            worktree: { path: scratch, base: "fixed-disk-base", viewMode: input.viewMode ?? "materialized" },
+          };
+        },
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    try {
+      const input: CreateThreadInput = {
+        ...createInput(),
+        workspaceId: identity.workspaceId,
+        tools: ["read", "grep", "find", "ls", "explore"],
+      };
+      const thread = await registry.createThread(input);
+      const run = await registry.startRun(identity.workspaceId, thread.id);
+      await virtualRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+      expect(prepared).toEqual({ cwd: scratch, viewMode: "virtual" });
+      expect(await fs.promises.readdir(scratch)).toEqual([]);
+      await fs.promises.writeFile(join(workspace, "kept.txt"), "parent live\n");
+      await fs.promises.writeFile(join(scratch, "kept.txt"), "scratch live\n");
+      await workingStates.withStore(identity.workspaceId, "assert-virtual-branch", async (store) => {
+        const branch = store.getBranch(`thread-${thread.id}`)!;
+        expect(branch.headRevision).toBe(0);
+        expect(branch.deltas).toEqual({});
+        const kept = branch.baseState["kept.txt"];
+        if (kept?.kind !== "regular-file") throw new Error("expected captured file");
+        expect(await store.getObject(kept.objectHash)).toEqual(Buffer.from("fixed parent\n"));
+      });
+      expect(views.get("virtual-child-session")).toMatchObject({
+        workspaceId: identity.workspaceId,
+        threadId: thread.id,
+        runId: run.id,
+        branchId: `thread-${thread.id}`,
+        revision: 0,
+        mode: "virtual",
+      });
+      expect(await registry.getThread(identity.workspaceId, PARENT, thread.id)).toMatchObject({
+        worktree: { path: scratch, viewMode: "virtual", materialized: false, preparationStage: "ready" },
+      });
+    } finally {
+      await virtualRuntime.dispose();
       await documents.dispose();
       database.close();
     }

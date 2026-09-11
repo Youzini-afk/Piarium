@@ -226,9 +226,24 @@ export interface SearchResultItem {
  * Pi runtime; surface drafts are returned as save-compatible bytes by the
  * authenticated Application Host.
  */
+export type WorkingBranchPathOrigin = "base" | "delta" | "draft-base";
+
+export interface WorkingBranchReadProvenance {
+  branchId: string;
+  revision: number;
+  origin: WorkingBranchPathOrigin;
+}
+
 export type DocumentReadSourceResult =
   | { source: "disk" }
-  | { base64: string; revision: string; source: "surface-draft" };
+  | { base64: string; revision: string; source: "surface-draft" }
+  | {
+    source: "working-branch";
+    revision: string;
+    provenance: WorkingBranchReadProvenance;
+    base64?: string;
+    missing?: true;
+  };
 
 /**
  * Content-free view of fixed editor paths used by the native Pi find/ls
@@ -250,7 +265,7 @@ export interface DocumentPathOverlayParams {
 
 export type DocumentPathOverlayResult =
   | { status: "disk" }
-  | { status: "ready"; entries: DocumentPathOverlayEntry[] };
+  | { status: "ready"; entries: DocumentPathOverlayEntry[]; authority?: "surface" | "working-branch" };
 
 /**
  * Whether a native `write` / `edit` / `apply_patch` may proceed on one path.
@@ -460,7 +475,7 @@ export interface ExploreSearchSnippet {
   text: string;
   why: string;
   revision: string;
-  source: "disk" | "surface-draft";
+  source: "disk" | "surface-draft" | "working-branch";
   unit?: ExploreStructureUnit;
   structure?: ExploreStructureSource;
   /** Formatter must keep this range intact or omit the whole excerpt. */
@@ -476,7 +491,7 @@ export interface ExploreSearchIssue {
 export interface ExploreSearchProvenance {
   path: string;
   revision: string;
-  source: "disk" | "surface-draft" | null;
+  source: "disk" | "surface-draft" | "working-branch" | null;
   status: ExploreSourceStatus;
   matchedGroups: string[];
 }
@@ -760,7 +775,7 @@ export interface ExploreQueryView {
   endLine: number;
   text: string;
   revision: string;
-  source: "disk" | "surface-draft";
+  source: "disk" | "surface-draft" | "working-branch";
   ranges: ExploreQueryRange[];
   arrivals: ExploreArrival[];
   assessment: ExploreAssessment;

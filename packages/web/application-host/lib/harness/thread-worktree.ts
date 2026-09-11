@@ -30,6 +30,8 @@ export interface ThreadWorktreeRuntimeOptions {
 
 export interface PrepareThreadWorktreeInput {
   mode: "none" | "shared" | "isolated";
+  /** Isolated scratch cwd without copying parent bytes (D-212). */
+  viewMode?: "virtual" | "materialized";
   sourceRoot: string;
   threadId: string;
   signal?: AbortSignal;
@@ -384,8 +386,37 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
   };
 
-  const prepare = async ({ mode, sourceRoot, threadId, signal, onWorktreeState }: PrepareThreadWorktreeInput): Promise<PreparedThreadWorktree> => {
+  const prepareVirtual = async (
+    sourceRoot: string,
+    threadId: string,
+    signal: AbortSignal | undefined,
+    onWorktreeState: PrepareThreadWorktreeInput["onWorktreeState"],
+  ): Promise<PreparedThreadWorktree> => {
+    const targetDir = pathModule.resolve(sourceRoot, ".piarium", "worktrees", threadId);
+    await fsPromises.mkdir(targetDir, { recursive: true });
+    let base = "zero-commit";
+    try {
+      const head = (await runGit(sourceRoot, ["rev-parse", "HEAD"])).stdout.trim();
+      if (head) base = head;
+    } catch {
+      base = "zero-commit";
+    }
+    const worktree: ThreadWorktree = {
+      path: targetDir,
+      base,
+      branch: `piarium/${threadId}`,
+      materialized: false,
+      preparationStage: "ready",
+      viewMode: "virtual",
+    };
+    await onWorktreeState?.(worktree);
+    if (signal?.aborted) throw abortError();
+    return { cwd: targetDir, worktree };
+  };
+
+  const prepare = async ({ mode, sourceRoot, threadId, signal, onWorktreeState, viewMode }: PrepareThreadWorktreeInput): Promise<PreparedThreadWorktree> => {
     if (mode === "none" || mode === "shared") return { cwd: sourceRoot, worktree: null };
+    if (viewMode === "virtual") return prepareVirtual(sourceRoot, threadId, signal, onWorktreeState);
 
     let isGit = true;
     let parentHead = "";
@@ -426,6 +457,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         branch: `piarium/${threadId}`,
         materialized: await pathExists(targetDir),
         preparationStage: "materializing",
+        viewMode: "materialized",
       };
       await onWorktreeState?.(worktree);
       await copyDirRecursive(sourceRoot, targetDir);
@@ -452,6 +484,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       branch: `piarium/${threadId}`,
       materialized: await pathExists(created.path),
       preparationStage: "materializing",
+      viewMode: "materialized",
     };
     await onWorktreeState?.(worktree);
     try {

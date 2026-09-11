@@ -82,6 +82,8 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
+import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
+import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
@@ -1258,6 +1260,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
+  const threadExecutionViews = new ThreadExecutionViewRegistry();
+  const workingBranchLookups = createWorkingBranchLookups({
+    views: threadExecutionViews,
+    workingStates: harnessWorkingStates,
+  });
   const verificationCoordinator = createVerificationCoordinator({
     workingStates: harnessWorkingStates,
     captureParentIdentity: async (workspaceId, parentRoot) => {
@@ -1300,6 +1307,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     registry: threadRegistry,
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,
+    executionViews: threadExecutionViews,
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
@@ -1946,18 +1954,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
     verification: verificationCoordinator,
-    readExploreFile: createExploreFileReader(documentsAuthority, harnessPathAuthority),
+    readExploreFile: createExploreFileReader(
+      documentsAuthority,
+      harnessPathAuthority,
+      (sessionId, resourceId) => workingBranchLookups.exploreFile(sessionId, resourceId),
+    ),
+    branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
-    documentReadSource: (sessionId, context, resourceId) => documentsAuthority.readAgentInputSnapshot(
-      sessionId,
-      context,
-      resourceId,
-    ),
-    documentPathOverlay: (sessionId, context, resourceId) => documentsAuthority.overlayAgentInputSnapshot(
-      sessionId,
-      context,
-      resourceId,
-    ),
+    documentReadSource: async (sessionId, context, resourceId) => {
+      const branch = await workingBranchLookups.readSource(sessionId, resourceId);
+      if (branch) return branch;
+      return documentsAuthority.readAgentInputSnapshot(sessionId, context, resourceId);
+    },
+    documentPathOverlay: async (sessionId, context, resourceId) => {
+      const branch = await workingBranchLookups.pathOverlay(sessionId, resourceId);
+      if (branch) return branch;
+      return documentsAuthority.overlayAgentInputSnapshot(sessionId, context, resourceId);
+    },
     documentWriteGuard: (sessionId, context, resourceId) => documentsAuthority.inspectAgentWriteTarget(
       sessionId,
       context,

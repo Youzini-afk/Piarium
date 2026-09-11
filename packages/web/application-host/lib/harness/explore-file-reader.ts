@@ -3,7 +3,7 @@ import type { DocumentAuthority } from "../documents/authority.js";
 import type { HarnessPathAuthority } from "./path-authority.js";
 
 export type ExploreFileSnapshot =
-  | { status: "ready"; content: string; revision: string; source: "disk" | "surface-draft" }
+  | { status: "ready"; content: string; revision: string; source: "disk" | "surface-draft" | "working-branch" }
   | { status: "unavailable" | "failed" | "stale" | "forbidden"; message: string };
 
 export type ExploreFileReader = (
@@ -17,12 +17,24 @@ export type ExploreFileReader = (
 export function createExploreFileReader(
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">,
   paths: Pick<HarnessPathAuthority, "resolve">,
+  branchExplore?: (sessionId: string, resourceId: string) => Promise<ExploreFileSnapshot | null>,
 ): ExploreFileReader {
   return async (actor, path, signal, inputContext = { source: "disk" }) => {
     signal.throwIfAborted();
     try {
       const before = await paths.resolve(actor, path, { allowMissing: true });
       if (!before) return { status: "forbidden", message: "Path is outside the permitted workspace scope." };
+      if (branchExplore) {
+        const branch = await branchExplore(actor.sessionId, before.resourceId);
+        signal.throwIfAborted();
+        if (branch) {
+          const after = await paths.resolve(actor, path, { allowMissing: true });
+          if (!after || before.canonicalResourceId !== after.canonicalResourceId) {
+            return { status: "stale", message: "Path identity changed while reading. Search again." };
+          }
+          return branch;
+        }
+      }
       const surface = documents.readAgentInputSnapshot(actor.sessionId, inputContext, before.resourceId);
       if (surface.status === "unavailable") return surface;
       if (surface.status === "ready") {

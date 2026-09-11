@@ -4276,6 +4276,22 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；CAS、并发去重、跨 scope 伪造与 UI 迟到响应有定向证据。真实 suggestions 模型质量与完整浏览器点击链仍未测。
 
+### D-212 · 2026-09-11 · 3.4 / 3.4a（WorkingState 虚拟只读视图接入真实 Thread Run）
+
+类型：问题与解法
+
+背景：WorkingState 已能保存固定 base、draftBasePaths 与 delta/tombstone，但隔离线程的同名只读工具仍读父 live 或物化副本。父在 dispatch/spawn 之后修改未被子线程碰过的路径会泄漏进 child read/grep/find/ls/explore。没有路径绑定工具的隔离 Run 仍复制整仓，把物化目录当成视图权威。
+
+决定：
+
+1. Host 为隔离 Thread Run 绑定 `ThreadExecutionView`（session → workspace/thread/run/branch/revision/mode）。`document.readSource`、`document.pathOverlay`、`search.content` 与 explore reader 在绑定存在时只读 `effectiveState = base ∪ delta`，tombstone 隐藏文件及其后代，并合成仍有子项的虚拟祖先目录。provenance 标明 branch/revision/origin；缺失正文保持 unavailable，不降级到父磁盘或 scratch。
+2. 物化资格按实际工具名判断：`bash`、`edit`、`write`、`apply_patch`、`symbols`、`definition`、`references`、`hover` 需要目录。隔离 Run 若不含这些工具，只创建 `.piarium/worktrees/<threadId>` scratch，从父 `sourceRoot` 捕获基线，不复制、不把草稿物化到磁盘。`ThreadWorktree.viewMode: "virtual"` 使恢复不会把 ready scratch 当成未完成复制。结算与归档发布 `publishHeadResult`，不把空 scratch 当成整仓删除。
+3. 父会话与 `worktree: none|shared` 仍读 live/surface。路径、scope、actor 与 Run 继续由 Router/Host 强制。本阶段不实现 Merkle、虚拟写入或 dispatch 瞬时整仓基线。
+
+影响：protocol `DocumentReadSourceResult` / path overlay authority / `ThreadWorktree.viewMode`；Host working-branch lookups、search corpus、thread spawn/restore/settle；pi-host read/find/ls；设计 9.2.5b、plan 3.4 C、status 3.4a、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；Host router 与 pi-host 同名工具有定向证据。虚拟 edit/write、真实 Git filter/LFS 一致性与完整桌面会话未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4492,3 +4508,4 @@ ModelRuntime 纵切继续通过。
 | D-209 | implementation（全局终端身份、真实退出与 writer 释放、后台自然完成、todo 单一审批边界） | — | 设计 5.2 / 5.6；architecture 4.4 / 6；status 1.3 / 2.5 |
 | D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
+| D-212 | implementation（隔离 Thread Run 的 WorkingState 只读视图、exclusive overlay、虚拟 scratch spawn） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

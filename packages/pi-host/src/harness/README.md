@@ -13,9 +13,9 @@ The pi-host harness tools are custom tools registered in the Pi session's
 > are merged into a single stream. The `stderr` field in `ShellExecResult`
 > will be empty; all output appears in `stdout`. PowerShell is the only
 > interpreter that separates the streams (but it is not yet wired).
-| `read` | Pi-native paging/truncation/images with fixed editor-draft source selection | `document.readSource` |
-| `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only paths and virtual ancestors | `document.pathOverlay` |
-| `grep` | Bounded rg plus fixed editor-draft overlay and context lines | `search.content` |
+| `read` | Pi-native paging/truncation/images with fixed editor-draft or working-branch source selection | `document.readSource` |
+| `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only or exclusive working-branch paths | `document.pathOverlay` |
+| `grep` | Bounded rg plus fixed editor-draft overlay, or exclusive working-branch corpus | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only) | `fs.lock` + `lsp.diagnostics` |
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
