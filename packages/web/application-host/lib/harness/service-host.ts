@@ -106,6 +106,19 @@ export type HarnessDocumentWriteGuard = (
   resourceId: string,
 ) => Promise<import("@piarium/protocol").DocumentWriteGuardResult>;
 
+/** Shared surface-aware mutation plan for root-session write/edit/apply_patch (D-225). */
+export type HarnessDocumentSurfaceWrite = (
+  sessionId: string,
+  context: AgentInputContext,
+  changes: ReadonlyArray<{
+    resourceId: string;
+    action: import("@piarium/protocol").DocumentSurfaceWriteAction;
+    content?: string;
+    edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  }>,
+  signal?: AbortSignal,
+) => Promise<import("@piarium/protocol").DocumentSurfaceWriteResult>;
+
 export type HarnessDocumentBranchWrite = (
   sessionId: string,
   changes: ReadonlyArray<{
@@ -189,6 +202,7 @@ export interface HarnessServiceHost {
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
   documentWriteGuard: HarnessDocumentWriteGuard | null;
+  documentSurfaceWrite: HarnessDocumentSurfaceWrite | null;
   documentBranchWrite: HarnessDocumentBranchWrite | null;
   workingBranchEnsureMaterialized: HarnessWorkingBranchEnsureMaterialized | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
@@ -305,8 +319,10 @@ export interface HarnessServiceHostOptions {
   documentReadSource?: HarnessDocumentReadSource;
   /** Surface-aware native Pi find/ls path overlay (null when unavailable). */
   documentPathOverlay?: HarnessDocumentPathOverlay;
-  /** Write admission against this turn's fixed draft (null when unavailable). */
+  /** Classify a path against this turn's fixed draft (kept for inspect; writes use surfaceWrite). */
   documentWriteGuard?: HarnessDocumentWriteGuard;
+  /** Shared surface-aware mutation plan for native write / edit / apply_patch. */
+  documentSurfaceWrite?: HarnessDocumentSurfaceWrite;
   documentBranchWrite?: HarnessDocumentBranchWrite;
   workingBranchEnsureMaterialized?: HarnessWorkingBranchEnsureMaterialized;
   // Phase 2 options
@@ -361,6 +377,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const documentReadSource = options.documentReadSource ?? null;
   const documentPathOverlay = options.documentPathOverlay ?? null;
   const documentWriteGuard = options.documentWriteGuard ?? null;
+  const documentSurfaceWrite = options.documentSurfaceWrite ?? null;
   const documentBranchWrite = options.documentBranchWrite ?? null;
   const workingBranchEnsureMaterialized = options.workingBranchEnsureMaterialized ?? null;
   // Phase 2
@@ -584,6 +601,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     documentReadSource,
     documentPathOverlay,
     documentWriteGuard,
+    documentSurfaceWrite,
     documentBranchWrite,
     workingBranchEnsureMaterialized,
     knowledgeStore,

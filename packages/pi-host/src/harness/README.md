@@ -133,10 +133,13 @@ unavailable or disabled.
 ## Mutation Journal Integration
 
 `createWorkspaceMutationJournalTools` accepts an optional
-`HostServicesBridge`. After each edit/write, it fetches `lsp.diagnostics`,
-which binds the file's new disk revision and waits for the publication computed
-from it, and appends a summary to the tool result (three states: unavailable,
-pending, clean).
+`HostServicesBridge`. Isolated Runs try `document.branchWrite` first. Root
+sessions then call `document.surfaceWrite`: a snapshot-owned path edits the
+Document Registry buffer and never journals a disk checkpoint; `{ status: "disk" }`
+falls through to the existing `workspace.mutation.request` before/after loop.
+After a disk edit/write, the wrapper fetches `lsp.diagnostics` and appends a
+summary (unavailable, pending, or clean).
 
-`apply_patch` also goes through `workspace.mutation.request` before/after
-each file operation, ensuring all changes are journaled.
+`apply_patch` uses the same shared plan. Mixed surface/disk batches return
+per-path applied/conflict/compensated/needs-attention instead of a generic
+failure after a partial write.

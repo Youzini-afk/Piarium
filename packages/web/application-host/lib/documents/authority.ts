@@ -4,8 +4,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   parseAgentInputContext,
   type AgentInputContext,
+  type DocumentSurfaceWriteResult,
   type DocumentWriteGuardResult,
 } from '@piarium/protocol';
+import {
+  applyAgentSurfaceMutation,
+  type AgentMutationRecord,
+  type AgentSurfaceWriteChange,
+} from './surface-mutation.js';
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
@@ -420,6 +426,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
   const dirtyBarriers = new Map<string, DirtyBarrier>();
   const pendingSurfaceOperations = new Map<string, PendingDocumentSurfaceOperation>();
+  const agentMutations = new Map<string, AgentMutationRecord>();
   const surfaceSnapshots = createSurfaceSnapshotStore({ caseSensitive: platform !== 'win32' });
   let dirtyPublicationRevision = 0;
   let disposed = false;
@@ -1580,6 +1587,26 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         encoding: target.encoding,
         bom: target.bom,
       });
+      const publication = dirtyBuffersByOwner.get(dirtyBufferKey(pending.ownerId, pending.workspaceId));
+      if (publication) {
+        dirtyBuffersByOwner.set(dirtyBufferKey(pending.ownerId, pending.workspaceId), {
+          ...publication,
+          publicationRevision: ++dirtyPublicationRevision,
+          updatedAt: new Date().toISOString(),
+          resources: publication.resources.map((resource) => (
+            resource.resource.resourceId === result.resource.resourceId
+              ? {
+                  ...resource,
+                  localEditRevision: result.afterLocalEditRevision!,
+                  ...(result.afterHash === undefined ? {} : { bufferHash: result.afterHash }),
+                  ...(result.documentInstanceId === undefined
+                    ? {}
+                    : { documentInstanceId: result.documentInstanceId }),
+                }
+              : resource
+          )),
+        });
+      }
     }
     for (const result of results) {
       if (result.status !== 'failed') continue;
@@ -1707,22 +1734,64 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     resourceId: string,
   ) => surfaceSnapshots.overlay(sessionId, context, resourceId);
 
+  const applyAgentSurfaceWrite = async (
+    sessionId: string,
+    context: AgentInputContext,
+    changes: readonly AgentSurfaceWriteChange[],
+    signal?: AbortSignal,
+  ): Promise<DocumentSurfaceWriteResult> => {
+    const { result, record } = await applyAgentSurfaceMutation({
+      inspectSnapshot: surfaceSnapshots.inspect,
+      surfaceOwner: surfaceSnapshots.owner,
+      inspectDirtyBuffers,
+      requestSurfaceOperation,
+      inspectWorkspace: async (workspaceId) => mutations.inspect(workspaceId),
+      readDisk: async (workspaceId, resourceId) => {
+        const current = await read({ workspaceId, resourceId });
+        return {
+          status: current.status,
+          ...(current.status === 'ready' ? { content: current.content, revision: current.revision } : {}),
+          ...(current.status === 'binary' || current.status === 'unsupported-encoding'
+            ? { revision: current.revision }
+            : {}),
+        };
+      },
+      writeDisk: async (request) => {
+        const written = await write({
+          resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
+          token: request.token,
+          content: request.content,
+          encoding: request.encoding,
+          bom: request.bom,
+          expectedRevision: request.expectedRevision,
+          operationId: request.operationId,
+        });
+        if (written.status === 'written') return { status: 'written', revision: written.revision };
+        return {
+          status: written.status === 'conflict' ? 'conflict' : 'conflict',
+          message: `${request.resourceId} could not be written on disk.`,
+        };
+      },
+      deleteDisk: async (request) => {
+        const deleted = await remove({
+          resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
+          token: request.token,
+          expectedRevision: request.expectedRevision,
+          operationId: request.operationId,
+        });
+        if (deleted.status === 'deleted') return { status: 'deleted' };
+        if (deleted.status === 'missing') return { status: 'missing' };
+        return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
+      },
+    }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
+    if (record) agentMutations.set(record.operationId, record);
+    return result;
+  };
+
   /**
-   * Decide whether a native write may proceed on one path (D-089).
-   *
-   * An agent reads this turn's fixed draft but `write` / `edit` apply to disk.
-   * When the two differ, writing text derived from the draft persists the user's
-   * unsaved changes without their decision — the same outcome D-083 refuses on
-   * the child integration path. The write is therefore refused with a reason
-   * the agent can act on, and the matching semantics of the native tools stay
-   * untouched.
-   *
-   * Saving is the only remedy inside the turn: the save is a Documents write, so
-   * it supersedes the draft (D-088) and the next attempt is an ordinary write.
-   * Discarding cannot clear the refusal, because this turn keeps reading the
-   * captured draft and writing it back would restore changes the user rejected.
-   * The messages therefore name saving alone, so a refused agent escalates
-   * instead of retrying the same call.
+   * Classify whether a path still has a divergent fixed draft (D-089). Production
+   * root-session writes no longer use this as a refuse-to-save gate; they call
+   * `applyAgentSurfaceWrite` and edit the live buffer (D-225).
    */
   const inspectAgentWriteTarget = async (
     sessionId: string,
@@ -1847,9 +1916,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     commitAgentInputSnapshot,
     overlayAgentInputSnapshot,
     readAgentInputSnapshot: surfaceSnapshots.read,
+    inspectAgentInputSnapshot: surfaceSnapshots.inspect,
     cloneAgentInputSnapshot: surfaceSnapshots.clone,
     agentInputDraftPaths: surfaceSnapshots.draftPaths,
     agentInputSurfaceOwner: surfaceSnapshots.owner,
+    applyAgentSurfaceWrite,
+    inspectAgentMutation: (operationId: string) => agentMutations.get(operationId) ?? null,
     inspectAgentWriteTarget,
     observeAgentWrite,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,

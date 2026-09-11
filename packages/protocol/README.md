@@ -26,6 +26,7 @@ Piarium protocol types, schemas, and event/method definitions.
 | `output.read` | `{ handle, offset?, length? }` | `OutputSlice` | Read stored output |
 | `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` (`filesDropped?` / `fileCoverage?` only in explore candidate mode) | Content search |
 | `document.readSource` | `{ path }` | disk sentinel or fixed draft bytes | Select the authenticated source for native `read` without changing its schema |
+| `document.surfaceWrite` | `{ path, action, content?, edits? }` or `{ changes[] }` | disk sentinel, or per-path applied/conflict/unavailable/compensated/needs-attention | Shared surface-aware plan for native `write` / `edit` / `apply_patch` |
 | `document.pathOverlay` | `{ path, pattern? }` | disk sentinel or fixed relative path entries | Content-free fixed dirty paths and virtual directory ancestors for native `find` / `ls` |
 | `document.branchWrite` | `{ path, action, content?, edits?, expectedRevision? }` or `{ changes[], expectedRevision? }` | disk sentinel, committed revision, conflict, or rejection | Commit text mutations to an unpublished WorkingState delta |
 | `workingBranch.ensureMaterialized` | `{}` | virtual / materialized path / failed | Freeze the current branch revision and switch the Run to a real directory |

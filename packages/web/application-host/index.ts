@@ -2048,6 +2048,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
+    documentSurfaceWrite: (sessionId, context, changes, signal) => documentsAuthority.applyAgentSurfaceWrite(
+      sessionId,
+      context,
+      changes,
+      signal,
+    ),
     documentBranchWrite: (sessionId, changes, expectedRevision, signal) => workingBranchWrites.branchWrite(
       sessionId,
       changes,

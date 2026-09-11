@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApplyPatchTool } from "../../src/harness/apply-patch-tool.js";
@@ -17,6 +17,7 @@ function createFakeBridge(lockBatches?: string[][]): Pick<HostServicesBridge, "r
       if (method === "fs.lock" && params.action === "release") return { held: false, released: true };
       if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
       if (method === "document.branchWrite") return { status: "disk" };
+      if (method === "document.surfaceWrite") return { status: "disk" };
       if (method === "document.readSource") return { source: "disk" };
       throw new Error(`unexpected method: ${method}`);
     },
@@ -133,5 +134,103 @@ ccc
 *** End Patch`;
     const text = await executePatch(tool, patch);
     assert.match(text, /Context not found/);
+  });
+
+  it("matches a surface draft and writes the buffer instead of disk", async () => {
+    writeFileSync(join(tmpDir, "draft.txt"), "A\n");
+    const calls: string[] = [];
+    const bridge = {
+      request: async (method: string, params: Record<string, unknown>) => {
+        calls.push(method);
+        if (method === "fs.lock") {
+          return params.action === "acquire"
+            ? { held: true, leaseIds: ["lease-1"] }
+            : { held: false, released: true };
+        }
+        if (method === "document.branchWrite") return { status: "disk" };
+        if (method === "document.readSource") {
+          return {
+            source: "surface-draft",
+            revision: "surface-draft:fixed:1",
+            base64: Buffer.from("B unique-on-draft\n").toString("base64"),
+          };
+        }
+        if (method === "document.surfaceWrite") {
+          const changes = params.changes as Array<{ path: string; content?: string }>;
+          assert.equal(changes[0]?.path, "draft.txt");
+          assert.match(changes[0]?.content ?? "", /C unique-on-draft/);
+          return {
+            status: "applied",
+            operationId: "op-1",
+            results: [{ path: "draft.txt", target: "surface", status: "applied" }],
+          };
+        }
+        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createApplyPatchTool(bridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const text = await executePatch(tool, `*** Begin Patch
+*** Update File: draft.txt
+@@
+-B unique-on-draft
++C unique-on-draft
+*** End Patch`);
+    assert.match(text, /applied successfully/);
+    assert.equal(readFileSync(join(tmpDir, "draft.txt"), "utf8"), "A\n");
+    assert.ok(calls.includes("document.surfaceWrite"));
+  });
+
+  it("returns honest per-path status for a mixed surface/disk failure", async () => {
+    writeFileSync(join(tmpDir, "disk.txt"), "disk\n");
+    const bridge = {
+      request: async (method: string, params: Record<string, unknown>) => {
+        if (method === "fs.lock") {
+          return params.action === "acquire"
+            ? { held: true, leaseIds: ["lease-a", "lease-b"] }
+            : { held: false, released: true };
+        }
+        if (method === "document.branchWrite") return { status: "disk" };
+        if (method === "document.readSource") {
+          const path = String(params.path);
+          if (path.endsWith("draft.txt") || path === "draft.txt") {
+            return {
+              source: "surface-draft",
+              revision: "surface-draft:fixed:1",
+              base64: Buffer.from("B\n").toString("base64"),
+            };
+          }
+          return { source: "disk" };
+        }
+        if (method === "document.surfaceWrite") {
+          return {
+            status: "partial",
+            message: "compensated draft.txt (surface)\nunavailable disk.txt (disk)",
+            results: [
+              { path: "draft.txt", target: "surface", status: "compensated" },
+              { path: "disk.txt", target: "disk", status: "unavailable", message: "later path failed" },
+            ],
+          };
+        }
+        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createApplyPatchTool(bridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const text = await executePatch(tool, `*** Begin Patch
+*** Update File: draft.txt
+@@
+-B
++C
+*** Update File: disk.txt
+@@
+-disk
++DISK
+*** End Patch`);
+    assert.match(text, /compensated/);
+    assert.match(text, /unavailable/);
+    assert.match(text, /draft\.txt/);
+    assert.match(text, /disk\.txt/);
+    assert.equal(readFileSync(join(tmpDir, "disk.txt"), "utf8"), "disk\n");
   });
 });

@@ -362,9 +362,14 @@ diagnostics (typescript): 1 new error
 diagnostics("foo.ts")`、`clean`。永不沉默。实现路径优先用 `tool_result` 钩子替换 `content`，这样恢复日志的
 覆盖与诊断附加互不耦合。
 
-当前 edit/write 仍是 Pi 工具直接写盘并由编辑器 reconcile。目标统一到带版本的执行视图：实体目录保留 mutation journal，虚拟分支
-写本分支 delta，草稿目标经 surface 的 Document Registry 修改。参数保持同名先验，路径、版本与来源在内部传递；冲突按文件处理，
-不因存在任意脏缓冲就禁用整个工具。对应工作随 9.2.5b 的分支与窗口读取适配实施，不等待记忆效果实验。
+根会话 `edit` / `write` / `apply_patch` 与本轮固定输入共用同一正文权威（D-225）。虚拟线程仍先走 `document.branchWrite`。
+其余路径进入共享 Host 计划 `document.surfaceWrite`：本轮 snapshot 拥有的路径按固定正文匹配，写回同一 Document Registry
+缓冲，并核对 owner / generation / registration / document instance / `localEditRevision` / `baseRevision` / 正文 hash；
+用户在计划后继续编辑则明确 stale/conflict，不覆盖缓冲，也不回退写磁盘，且不隐式保存。普通磁盘路径保持既有 journaled
+disk 写入。多文件 `apply_patch` 同时含 surface 与 disk 时复用 durable 回执、条件补偿和 grouped undo，按路径返回
+applied / conflict / compensated / needs-attention，不允许“前面已写、后面失败”却只报普通失败。删除、二进制、symlink、
+mode 等 surface 无法表达的操作明确 unavailable/conflict。成功写入后同一回合后续 read/edit 看到新缓冲正文，不退回旧
+snapshot 或旧磁盘。参数保持同名先验。
 
 **编辑格式跟模型家族走。** Codex 系模型按 `apply_patch` 语法训练（`*** Begin Patch` / `*** Update File:` /
 `@@` hunk / `*** End Patch`，一次可改多文件，仅相对路径）；Claude 系按 str_replace 训练。Devin CLI 两者并存，
@@ -592,8 +597,9 @@ pi-host 执行模型请求，将搜索计划和选择交回同一次查询。公
 
 **来源与当前正文。** 用户发送消息时的窗口草稿，经 Document Registry → 鉴权 Documents 通道捕获到 Host 固定 snapshot；runtime
 只传不透明引用或 capture unavailable 与已知脏路径。每次读取记来源、revision、hash 与 span。这是请求内已读文件的版本集合，
-不是整个工作区的强一致快照。捕获失败的脏路径不取磁盘冒充；无 surface 的 headless 请求使用磁盘。观察到写入后，按 D-088/D-089
-终结该路径的旧草稿读取权威；其余路径仍沿本轮输入来源。检索、read/grep/find/ls、语言导航与线程基线沿同一规则。
+不是整个工作区的强一致快照。捕获失败的脏路径不取磁盘冒充；无 surface 的 headless 请求使用磁盘。磁盘写入按 D-088 终结该路径的
+旧草稿读取权威；根会话对仍由本轮 snapshot 拥有的路径经 `document.surfaceWrite` 改同一缓冲（D-225），后续 read/edit 看到新正文。
+其余路径仍沿本轮输入来源。检索、read/grep/find/ls、语言导航与线程基线沿同一规则。
 
 语义块与图节点首先是带身份的定位线索。范围仍匹配当前正文时可采用；只发生平移时按块正文与父单元重新定位；对应内容实质改变
 时读取当前代码并重新取得相关性依据，旧相似度不能替新正文背书。重新评价尚未完成时保留为导航线索并说明状态。派生路径也须经

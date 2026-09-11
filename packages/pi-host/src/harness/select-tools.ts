@@ -136,8 +136,8 @@ export function selectHarnessTools(
     result.push(
       createApplyPatchTool(bridge, sessionId, cwd, workspaceMutationJournal, {
         // Reads follow the fixed draft only when the Host advertises that
-        // source, so the write guard applies under the same condition (D-089).
-        writeGuard: documentReadAvailable === true,
+        // source, so surface writes apply under the same condition (D-225).
+        surfaceWrite: documentReadAvailable === true,
       }),
     );
   }

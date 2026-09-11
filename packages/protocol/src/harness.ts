@@ -281,6 +281,53 @@ export type DocumentWriteGuardResult =
   | { status: "conflict"; message: string; revision: string }
   | { status: "unavailable"; message: string };
 
+export type DocumentSurfaceWriteAction = "write" | "edit" | "delete";
+
+export interface DocumentSurfaceWriteChange {
+  path: string;
+  action: DocumentSurfaceWriteAction;
+  content?: string;
+  edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+}
+
+/**
+ * Apply one or more text mutations against this turn's fixed surface snapshot
+ * and the live Document Registry buffer (D-225). `{ status: "disk" }` means no
+ * path is owned by that snapshot, so the caller uses the journaled disk path.
+ */
+export interface DocumentSurfaceWriteParams {
+  path?: string;
+  action?: DocumentSurfaceWriteAction;
+  content?: string;
+  edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  changes?: DocumentSurfaceWriteChange[];
+}
+
+export type DocumentSurfaceWritePathStatus =
+  | "applied"
+  | "conflict"
+  | "unavailable"
+  | "compensated"
+  | "needs-attention"
+  | "disk";
+
+export interface DocumentSurfaceWritePathResult {
+  path: string;
+  target: "surface" | "disk";
+  status: DocumentSurfaceWritePathStatus;
+  revision?: string;
+  message?: string;
+}
+
+export type DocumentSurfaceWriteResult =
+  | { status: "disk" }
+  | {
+      status: "applied" | "conflict" | "unavailable" | "partial";
+      results: DocumentSurfaceWritePathResult[];
+      operationId?: string;
+      message?: string;
+    };
+
 export type DocumentBranchWriteAction = "write" | "edit" | "delete";
 
 export interface DocumentBranchWriteChange {
@@ -1031,6 +1078,7 @@ export interface HarnessServiceMap {
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
   "document.writeGuard": { params: { path: string }; result: DocumentWriteGuardResult };
+  "document.surfaceWrite": { params: DocumentSurfaceWriteParams; result: DocumentSurfaceWriteResult };
   "document.branchWrite": { params: DocumentBranchWriteParams; result: DocumentBranchWriteResult };
   "workingBranch.ensureMaterialized": { params: Record<string, never>; result: WorkingBranchEnsureMaterializedResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
@@ -1100,6 +1148,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "document.readSource": "read.document",
   "document.pathOverlay": "read.document",
   "document.writeGuard": "write.document",
+  "document.surfaceWrite": "write.document",
   "document.branchWrite": "write.document",
   "workingBranch.ensureMaterialized": "write.document",
   "surface.snapshot.commit": "context.session",
@@ -1169,6 +1218,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "document.readSource",
   "document.pathOverlay",
   "document.writeGuard",
+  "document.surfaceWrite",
   "document.branchWrite",
   "workingBranch.ensureMaterialized",
   "surface.snapshot.commit",

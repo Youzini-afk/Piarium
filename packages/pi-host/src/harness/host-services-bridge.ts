@@ -50,9 +50,9 @@ export class HostServicesBridge {
   }
 
   /**
-   * The input source accepted for the current turn. Tools read it to skip Host
-   * round-trips that cannot apply, such as the write guard when this turn has
-   * no unsaved editor documents at all.
+   * The input source accepted for the current turn. Surface-aware mutations
+   * still ask Host `document.surfaceWrite`; a disk-sourced context returns the
+   * journaled-disk sentinel without touching an editor buffer.
    */
   inputContext(): AgentInputContext | undefined {
     return this.#getInputContext?.();

@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
-import { createDocumentReadSourceService, createDocumentWriteGuardService } from "./harness-services.js";
+import { createDocumentReadSourceService, createDocumentSurfaceWriteService } from "./harness-services.js";
+import { attachLiveSurfaceCompleter, hashSurfaceText, type LiveSurfaceBuffer } from "../documents/contract-fixtures.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
 import { createHarnessRouter } from "./router.js";
 import { createHarnessServiceHost } from "./service-host.js";
@@ -40,8 +41,8 @@ async function fixture() {
     documentReadSource: (sessionId, context, resourceId) => (
       documents.readAgentInputSnapshot(sessionId, context, resourceId)
     ),
-    documentWriteGuard: (sessionId, context, resourceId) => (
-      documents.inspectAgentWriteTarget(sessionId, context, resourceId)
+    documentSurfaceWrite: (sessionId, context, changes, signal) => (
+      documents.applyAgentSurfaceWrite(sessionId, context, changes, signal)
     ),
   });
   let response: unknown;
@@ -51,7 +52,7 @@ async function fixture() {
     respond: async (_sessionId, _requestId, result) => { response = result; },
   });
   router.register("document.readSource", createDocumentReadSourceService(host));
-  router.register("document.writeGuard", createDocumentWriteGuardService(host));
+  router.register("document.surfaceWrite", createDocumentSurfaceWriteService(host));
   disposes.push(async () => {
     router.dispose();
     await host.dispose();
@@ -78,7 +79,10 @@ async function fixture() {
       | { ok: true; result: HarnessServiceMap["document.readSource"]["result"] }
       | { ok: false; error: { code: string; message: string } };
   };
-  const guard = async (resourcePath: string, inputContext?: AgentInputContext) => {
+  const write = async (
+    params: HarnessServiceMap["document.surfaceWrite"]["params"],
+    inputContext?: AgentInputContext,
+  ) => {
     await router.processEvent({
       kind: "host",
       actor,
@@ -87,14 +91,14 @@ async function fixture() {
         event: "harness.request",
         data: {
           requestId: crypto.randomUUID(),
-          method: "document.writeGuard",
-          params: { path: resourcePath },
+          method: "document.surfaceWrite",
+          params,
           ...(inputContext ? { inputContext } : {}),
         },
       },
     });
     return response as
-      | { ok: true; result: HarnessServiceMap["document.writeGuard"]["result"] }
+      | { ok: true; result: HarnessServiceMap["document.surfaceWrite"]["result"] }
       | { ok: false; error: { code: string; message: string } };
   };
   const capture = async (resourceId: string, content: string, localEditRevision: number, bom = false) => {
@@ -115,7 +119,7 @@ async function fixture() {
       workspaceId,
     });
   };
-  return { actor, capture, documents, guard, request, workspace };
+  return { actor, capture, documents, request, workspace, write };
 }
 
 describe("native read source through Host router and Documents", () => {
@@ -195,21 +199,68 @@ describe("native read source through Host router and Documents", () => {
     expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context)).toEqual([]);
   });
 
-  it("refuses a write through the router while the draft diverges, and allows it after the user saves", async () => {
+  it("writes the fixed draft through the router and keeps disk unchanged", async () => {
     const f = await fixture();
-    await fs.writeFile(path.join(f.workspace, "draft.ts"), "disk value\n", "utf8");
-    const context = await f.capture("draft.ts", "unsaved editor value\n", 2);
+    await fs.writeFile(path.join(f.workspace, "draft.ts"), "A\n", "utf8");
+    const disk = await f.documents.read({ workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" });
+    if (disk.status !== "ready") throw new Error("Expected draft fixture");
+    const live = new Map<string, LiveSurfaceBuffer>();
+    const binding = {
+      baseRevision: disk.revision,
+      localEditRevision: 2,
+      documentInstanceId: "document-instance",
+      bufferHash: hashSurfaceText("B\n"),
+      encoding: "utf-8" as const,
+      bom: false,
+      lineEnding: "lf" as const,
+      resource: { workspaceId: f.actor.workspaceId!, resourceId: "draft.ts" },
+    };
+    live.set("draft.ts", { ...binding, content: "B\n" });
+    const surface = attachLiveSurfaceCompleter(f.documents, {
+      generation: 1,
+      live,
+      ownerId: "surface",
+      workspaceId: f.actor.workspaceId!,
+    });
+    await f.documents.publishDirtyBuffers({
+      generation: 1,
+      ownerId: "surface",
+      resources: [binding],
+      workspaceId: f.actor.workspaceId!,
+    });
+    const context = await f.documents.captureAgentInputSnapshot({
+      generation: 1,
+      ownerId: "surface",
+      resources: [{ ...binding, content: "B\n" }],
+      sessionId: f.actor.sessionId,
+      workspaceId: f.actor.workspaceId!,
+    });
+    f.documents.commitAgentInputSnapshot(f.actor.sessionId, context);
+    try {
+      const written = await f.write({
+        path: "draft.ts",
+        action: "edit",
+        edits: [{ oldText: "B\n", newText: "C\n" }],
+      }, context);
+      expect(written).toMatchObject({ ok: true, result: { status: "applied" } });
+      if (!written.ok || written.result.status === "disk") throw new Error("Expected a surface write");
+      expect(written.result.results[0]).toMatchObject({ target: "surface", status: "applied" });
+      expect(live.get("draft.ts")?.content).toBe("C\n");
+      expect(await fs.readFile(path.join(f.workspace, "draft.ts"), "utf8")).toBe("A\n");
+      const reread = await f.request("draft.ts", context);
+      expect(reread.ok).toBe(true);
+      if (!reread.ok || reread.result.source !== "surface-draft") throw new Error("Expected updated draft");
+      expect(Buffer.from(reread.result.base64, "base64").toString("utf8")).toBe("C\n");
 
-    const refused = await f.guard("draft.ts", context);
-    expect(refused).toMatchObject({ ok: true, result: { status: "conflict" } });
-    if (!refused.ok || refused.result.status !== "conflict") throw new Error("Expected a conflict");
-    expect(refused.result.message).toContain("unsaved editor changes");
-    expect(refused.result.message).not.toContain("unsaved editor value");
-
-    // The user saves: disk now equals the draft, so nothing is hidden.
-    await fs.writeFile(path.join(f.workspace, "draft.ts"), "unsaved editor value\n", "utf8");
-    expect(await f.guard("draft.ts", context)).toEqual({ ok: true, result: { status: "allow" } });
-    expect(await f.guard("untouched.ts", context)).toEqual({ ok: true, result: { status: "allow" } });
+      const diskPath = await f.write({
+        path: "other.ts",
+        action: "write",
+        content: "plain\n",
+      }, context);
+      expect(diskPath).toEqual({ ok: true, result: { status: "disk" } });
+    } finally {
+      surface.close();
+    }
   });
 
   it("returns a disk sentinel when the current input has no draft for the path", async () => {

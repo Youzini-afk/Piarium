@@ -4575,7 +4575,7 @@ ModelRuntime 纵切继续通过。
 | D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |
 | D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
-| D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
+| D-089 | superseded in part（拦住写盘、不隐式保存的原则保留；根会话对 snapshot 拥有的路径改为写回同一缓冲） | D-225 | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片已由 3.11 第 1、3 步接上） | D-091（tree-sitter 第 5 步仍待决）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
 | D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-108（第 1–4 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–4 步已接，第 5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
@@ -4727,6 +4727,20 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；新增 integration materialized undo、drift、crash-reconcile、native result 失效、active Run owner、cascade fence、回收父分支基线与 scoped pin 定向测试。完整桌面重启、真实付费嵌套 Pi 与外部 provider 未测，3.4 / 3.4a / 3.6 继续 Partial；实际验证记录见 status。
 
+### D-225 · 2026-09-11 · 3.2（根会话 edit 消费未保存缓冲）
+
+类型：实现修正（D-089 写入侧对偶：同一正文权威，而不是拦住后要求用户先保存）
+
+决定：公开 Pi `edit` / `write` / `apply_patch` 在 `document.branchWrite` 返回 disk 之后走共享 Host 方法 `document.surfaceWrite`。本轮固定 surface snapshot 拥有的路径按该固定正文匹配，写回同一 Document Registry 缓冲；核对 owner、generation、registration、document instance、`localEditRevision`、`baseRevision` 和正文 hash。用户在计划后继续编辑返回明确 stale/conflict，保留其正文，不写磁盘，不隐式保存。`write` 覆盖已打开的对应 surface 路径同样写缓冲。普通磁盘路径或不属于该 snapshot 的路径返回 `{ status: "disk" }`，沿用既有 journaled disk 写入。成功后 `applyOwnerEdit` 更新同一 snapshot，本轮后续 read/edit 看到新缓冲，不得 `observeAgentWrite` 把它 supersede 到磁盘。删除、NUL 二进制、symlink/mode 等 surface 无法表达的操作 unavailable/conflict。多文件 `apply_patch` 同时含 surface 与 disk 时复用 durable 回执、条件补偿和 grouped undo，按路径返回 applied/conflict/compensated/needs-attention 及实际 target；补偿 CAS 失败则为 needs-attention，不得覆盖用户后续编辑。disk 与 surface 的恢复记录用 `targetKinds` 区分真实写入位置。与固定草稿 read 共用 `harnessDocumentRead` 握手。
+
+原因：D-085 让 read 看屏幕上的未保存正文，D-089 只拦住写盘。用户未保存时首次 `edit` 仍按磁盘匹配 `old_string`，会错误失败或后续实现选择错误写盘。正确对偶是写入与读取使用同一正文权威，而不是把未保存改动先保存。
+
+考虑过的替代：(1) 继续 D-089 拒绝并要求保存——用户未决定保存，agent 无法完成与屏幕一致的编辑。(2) 为三个工具分别打补丁——匹配、写回、混合补偿和恢复记录会分叉。(3) 把混合 apply_patch 做成 Integration `applyDurableFileOperation`——会占用 integration 操作并阻塞其他集成，不是根会话权威。
+
+影响：protocol `document.surfaceWrite`；Documents `surface-mutation.ts` / `applyAgentSurfaceWrite`；Harness router+services+`index.ts`；pi-host journal tools 与 `apply_patch`；设计 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2、architecture 4/5.1。
+
+状态：已实施；验证见 status 窗口读取/3.2 与本轮 D-225 证据。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -4735,3 +4749,4 @@ ModelRuntime 纵切继续通过。
 | D-221 | superseded in part（branch/materialized/pure-disk undo 统一 WAL 与启动三态对账由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a |
 | D-223 | superseded in part（registry 级 cascade admission、dispatch cleanup 与 binding current-owner 由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a/3.6 |
 | D-224 | implementation | — | agent-harness 9.2.5b/9.3；plan/status 3.4/3.4a/3.6；architecture 6.1 |
+| D-225 | implementation（根会话 edit/write/apply_patch 写回固定 surface 缓冲） | — | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；protocol document.surfaceWrite / Documents / Harness / pi-host |

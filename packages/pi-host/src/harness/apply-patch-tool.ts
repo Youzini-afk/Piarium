@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import { assertWritablePath, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
+import { trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withPathLock } from "./path-lock.js";
 
 const ApplyPatchParams = Type.Object({
@@ -196,7 +196,7 @@ export function createApplyPatchTool(
   _sessionId: string,
   cwd: string,
   mutationJournal?: WorkspaceMutationJournalBridge,
-  options: { writeGuard?: boolean } = {},
+  options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition {
   return defineTool({
     name: "apply_patch",
@@ -224,15 +224,35 @@ export function createApplyPatchTool(
       const filePaths = parsed.operations.map((operation) => resolve(cwd, operation.path));
       const diagnosticPaths: string[] = [];
 
-      const patchResult = await withPathLock(bridge, filePaths, async () => {
-        // A multi-file patch is admitted as a whole: one path answered from an
-        // unsaved editor draft refuses the patch before any file is touched, so
-        // the refusal never leaves a half-applied tree (D-089).
-        if (options.writeGuard === true) {
-          for (const filePath of filePaths) {
-            await assertWritablePath(bridge, filePath);
+      const decodeDraft = (source: { source: string; base64?: string }): string | null => {
+        if ((source.source !== "working-branch" && source.source !== "surface-draft") || !source.base64) {
+          return null;
+        }
+        const bytes = Buffer.from(source.base64, "base64");
+        return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+          ? bytes.subarray(3).toString("utf8")
+          : bytes.toString("utf8");
+      };
+      const readPatchBase = async (opPath: string, filePath: string): Promise<string | null> => {
+        if (options.surfaceWrite === true) {
+          try {
+            const source = await bridge.request("document.readSource", { path: opPath });
+            const draft = decodeDraft(source);
+            if (draft !== null) return draft;
+          } catch {
+            /* Fall through to disk once the Host says this path is not a draft. */
           }
         }
+        if (existsSync(filePath)) return readFileSync(filePath, "utf8");
+        if (options.surfaceWrite === true) return null;
+        try {
+          const source = await bridge.request("document.readSource", { path: opPath });
+          return decodeDraft(source);
+        } catch {
+          return null;
+        }
+      };
+      const patchResult = await withPathLock(bridge, filePaths, async () => {
         const prepared: Array<{
           op: (typeof parsed.operations)[number];
           filePath: string;
@@ -251,19 +271,7 @@ export function createApplyPatchTool(
             prepared.push({ op, filePath, action: "delete" });
             continue;
           }
-          let oldContent: string | null = existsSync(filePath) ? readFileSync(filePath, "utf8") : null;
-          if (oldContent === null) {
-            try {
-              const source = await bridge.request("document.readSource", { path: op.path });
-              if (source.source === "working-branch" && source.base64) {
-                oldContent = Buffer.from(source.base64, "base64").toString("utf8");
-              } else if (source.source === "surface-draft" && "base64" in source && source.base64) {
-                oldContent = Buffer.from(source.base64, "base64").toString("utf8");
-              }
-            } catch {
-              oldContent = null;
-            }
-          }
+          const oldContent = await readPatchBase(op.path, filePath);
           if (oldContent === null) {
             prepared.push({ op, filePath, action: "write", error: `file not found: ${op.path}` });
             continue;
@@ -275,25 +283,45 @@ export function createApplyPatchTool(
           }
           prepared.push({ op, filePath, action: "write", content: applyResult.result, hunks: applyResult.applied });
         }
-        if (prepared.every((row) => !row.error)) {
-          const virtual = await bridge.request("document.branchWrite", {
+        const prepareError = prepared.find((row) => row.error);
+        if (prepareError?.error) {
+          return {
+            content: [{ type: "text" as const, text: prepareError.error }],
+            details: { applied: false, error: prepareError.error },
+          };
+        }
+        const virtual = await bridge.request("document.branchWrite", {
+          changes: prepared.map((row) => ({
+            path: row.op.path,
+            action: row.action,
+            ...(row.content === undefined ? {} : { content: row.content }),
+          })),
+        });
+        if (virtual.status === "committed") {
+          const hunks = prepared.reduce((sum, row) => sum + (row.hunks ?? 0), 0);
+          return {
+            content: [{ type: "text" as const, text: `patch applied successfully (${parsed.operations.length} file(s), ${hunks} hunk(s))` }],
+            details: { applied: true, operations: parsed.operations.length, hunks },
+          };
+        }
+        if (virtual.status !== "disk") {
+          return {
+            content: [{ type: "text" as const, text: virtual.message }],
+            details: { applied: false, error: virtual.message },
+          };
+        }
+        if (options.surfaceWrite === true) {
+          const planned = await trySurfaceWrite(bridge, {
             changes: prepared.map((row) => ({
               path: row.op.path,
               action: row.action,
               ...(row.content === undefined ? {} : { content: row.content }),
             })),
-          });
-          if (virtual.status === "committed") {
-            const hunks = prepared.reduce((sum, row) => sum + (row.hunks ?? 0), 0);
+          }, undefined, "apply_patch");
+          if (planned !== "disk") {
             return {
-              content: [{ type: "text" as const, text: `patch applied successfully (${parsed.operations.length} file(s), ${hunks} hunk(s))` }],
-              details: { applied: true, operations: parsed.operations.length, hunks },
-            };
-          }
-          if (virtual.status !== "disk") {
-            return {
-              content: [{ type: "text" as const, text: virtual.message }],
-              details: { applied: false, error: virtual.message },
+              content: [{ type: "text" as const, text: planned.text }],
+              details: { applied: planned.status === "applied", operations: parsed.operations.length },
             };
           }
         }

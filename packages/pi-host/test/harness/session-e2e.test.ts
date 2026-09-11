@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -31,7 +31,12 @@ import { registerHarnessServices } from "../../../web/application-host/lib/harne
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../../../web/application-host/lib/knowledge/context-runtime.js";
 import { createDocumentAuthority, type DocumentMutationObservation } from "../../../web/application-host/lib/documents/authority.js";
-import { createDocumentAuthorityHarness } from "../../../web/application-host/lib/documents/contract-fixtures.js";
+import {
+  attachLiveSurfaceCompleter,
+  createDocumentAuthorityHarness,
+  hashSurfaceText,
+  type LiveSurfaceBuffer,
+} from "../../../web/application-host/lib/documents/contract-fixtures.js";
 import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
@@ -91,6 +96,11 @@ async function setupSession(options: {
       hasPowerShell: process.platform === "win32",
     },
     ...options.serviceHostOptions,
+    // Root sessions have no virtual working branch. Production still registers
+    // document.branchWrite and returns disk; journal calls it before surfaceWrite.
+    ...(options.harnessDocumentRead && !options.serviceHostOptions?.documentBranchWrite
+      ? { documentBranchWrite: async () => ({ status: "disk" as const }) }
+      : {}),
   });
 
   const uiRequests: UiRequest[] = [];
@@ -119,6 +129,11 @@ async function setupSession(options: {
         kind: "host",
         envelope: { kind: "event", event: "harness.cancel", data: payload },
       });
+      return;
+    }
+    if (event === "workspace.mutation.request") {
+      const payload = data as HostEventData<"workspace.mutation.request">;
+      host.respondWorkspaceMutation(payload.sessionId, payload.requestId, true);
       return;
     }
     if (event === "harness.request") {
@@ -198,7 +213,10 @@ async function setupSession(options: {
     projectTrustOverride: true,
     ...(options.inferenceFetch ? { inferenceFetch: options.inferenceFetch } : {}),
   });
-  if (options.harnessDocumentRead) host.setHarnessDocumentReadEnabled(true);
+  if (options.harnessDocumentRead) {
+    host.setHarnessDocumentReadEnabled(true);
+    host.setWorkspaceMutationJournalEnabled(true);
+  }
   if (options.harnessDocumentPathOverlay) host.setHarnessDocumentPathOverlayEnabled(true);
   if (options.harnessWebRead || options.harnessWebSearch) {
     host.setHarnessWebCapabilities({
@@ -729,6 +747,120 @@ describe("session e2e — fixed surface read", () => {
         faux.unregister();
       }
     });
+  });
+});
+
+describe("session e2e — fixed surface edit", () => {
+  it("edits the Host Document Registry buffer from a public Pi edit tool", async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const live = new Map<string, LiveSurfaceBuffer>();
+    const surface = attachLiveSurfaceCompleter(harness.authority, {
+      generation: 1,
+      live,
+      ownerId: "surface",
+      workspaceId: harness.identity.workspaceId,
+    });
+    const paths = createHarnessPathAuthority({
+      authorityId: "session-e2e-authority",
+      documents: harness.authority,
+    });
+    try {
+      await writeFile(join(harness.workspaceRoot, "draft.ts"), "A disk-only\n", "utf8");
+      const disk = await harness.authority.read(harness.resource("draft.ts"));
+      if (disk.status !== "ready") throw new Error("Expected draft fixture");
+      const binding = {
+        baseRevision: disk.revision,
+        localEditRevision: 2,
+        documentInstanceId: "document-instance",
+        bufferHash: hashSurfaceText("B unique-buffer\n"),
+        encoding: "utf-8" as const,
+        bom: false,
+        lineEnding: "lf" as const,
+        resource: harness.resource("draft.ts"),
+      };
+      live.set("draft.ts", { ...binding, content: "B unique-buffer\n" });
+      await harness.authority.publishDirtyBuffers({
+        generation: 1,
+        ownerId: "surface",
+        resources: [binding],
+        workspaceId: harness.identity.workspaceId,
+      });
+      const faux = registerFauxProvider();
+      let editResult = "";
+      let readResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("edit", {
+          path: "draft.ts",
+          edits: [{ oldText: "B unique-buffer\n", newText: "C unique-buffer\n" }],
+        })]),
+        (context) => {
+          editResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage([fauxToolCall("read", { path: "draft.ts" })]);
+        },
+        (context) => {
+          readResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage([fauxToolCall("edit", {
+            path: "draft.ts",
+            edits: [{ oldText: "C unique-buffer\n", newText: "E unique-buffer\n" }],
+          })]);
+        },
+        (context) => {
+          editResult = `${editResult}\n${JSON.stringify(context.messages.at(-1))}`;
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      const session = await setupSession({
+        root: harness.workspaceRoot,
+        faux,
+        workspaceId: harness.identity.workspaceId,
+        harnessDocumentRead: true,
+        answerDialog: () => "Allow for this session",
+        serviceHostOptions: {
+          commitAgentInputContext: (sessionId, context) => (
+            harness.authority.commitAgentInputSnapshot(sessionId, context)
+          ),
+          documentReadSource: (sessionId, context, resourceId) => (
+            harness.authority.readAgentInputSnapshot(sessionId, context, resourceId)
+          ),
+          documentSurfaceWrite: (sessionId, context, changes, signal) => (
+            harness.authority.applyAgentSurfaceWrite(sessionId, context, changes, signal)
+          ),
+        },
+        authorizeWorkspacePath: (actor, inputPath, options) => paths.resolve(actor, inputPath, options),
+      });
+      try {
+        const snapshot = await session.host.create(harness.workspaceRoot);
+        const rebound = await harness.authority.captureAgentInputSnapshot({
+          generation: 1,
+          ownerId: "surface",
+          resources: [{ ...binding, content: "B unique-buffer\n" }],
+          sessionId: snapshot.sessionId,
+          workspaceId: harness.identity.workspaceId,
+        });
+        harness.authority.commitAgentInputSnapshot(snapshot.sessionId, rebound);
+        await session.host.prompt(
+          snapshot.sessionId,
+          "edit the unsaved buffer",
+          undefined,
+          undefined,
+          rebound,
+        );
+        await session.host.session.waitForIdle();
+
+        assert.match(editResult, /Successfully edited|applied/i);
+        assert.match(readResult, /C unique-buffer/);
+        assert.doesNotMatch(readResult, /A disk-only/);
+        assert.doesNotMatch(readResult, /B unique-buffer/);
+        assert.equal(live.get("draft.ts")?.content, "E unique-buffer\n");
+        assert.equal(await readFile(join(harness.workspaceRoot, "draft.ts"), "utf8"), "A disk-only\n");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    } finally {
+      surface.close();
+      await harness.cleanup();
+    }
   });
 });
 

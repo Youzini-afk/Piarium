@@ -16,6 +16,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── output.read  → OutputStore
                            ├── search.content → HarnessSearchService (surface overlay or exclusive WorkingState corpus)
                            ├── document.readSource → fixed surface bytes, working-branch bytes, or disk sentinel
+                           ├── document.surfaceWrite → shared plan: write the fixed Registry buffer or return the disk sentinel
                            ├── document.pathOverlay → surface merge paths or exclusive working-branch overlay
                            ├── explore.search → same query engine, algorithm-only facade
                            ├── explore.query.* → Host-owned short-lived query (start/plan/views/select/followup/finish/cancel/release)
@@ -200,16 +201,29 @@ for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
 `effectiveState = base ∪ delta` with tombstones hidden, and provenance names
 the branch, revision, and origin. Missing branch content stays unavailable.
 
-The fixed draft is one turn's input, not a standing authority. Once Piarium
-observes a write to a path — a Documents write or the Pi mutation journal's
-successful `after` phase, which is awaited before the tool is acknowledged —
-every snapshot captured before that write stops answering for it, so read,
-search, enumeration, navigation, and the dispatch baseline all return to disk and
-an agent reads back its own write (D-088). A snapshot captured after the write
-keeps its draft. `agentInputDraftPaths` reports the dirty paths the fixed source
+The fixed draft is one turn's input, not a standing authority. A disk write —
+a Documents write or the Pi mutation journal's successful `after` phase, awaited
+before the tool is acknowledged — supersedes that path so later read/search/
+enumeration/navigation/dispatch return to disk (D-088). A root-session write
+whose path is still owned by this turn's snapshot goes through `document.surfaceWrite`
+instead: matching uses the fixed text, the live Registry buffer is updated in
+place, and later read/edit in the same turn see the new buffer (D-225). A later
+user edit is a conflict; compensation is conditional and must not overwrite that
+newer buffer. `agentInputDraftPaths` reports the dirty paths the fixed source
 still owns; an expired capture keeps every dirty path there and never degrades
 into a silent disk read. Shell and external writes stay unobserved, the same
 boundary the recovery journal reports.
+
+### Native surface write (`document.surfaceWrite`)
+
+`write` / `edit` / `apply_patch` share one Host plan after `document.branchWrite`
+returns the disk sentinel. Snapshot-owned paths write the Document Registry
+buffer through `requestSurfaceOperation` and never create a disk checkpoint.
+Unowned paths return `{ status: "disk" }` so the existing mutation journal
+writes the file. Mixed `apply_patch` batches classify each path, persist
+`targetKinds`, apply surface first, then disk, and compensate with CAS receipts
+(`applied` / `conflict` / `compensated` / `needs-attention`). Delete, NUL
+bytes, and other states a text buffer cannot express are `unavailable`.
 
 ### Native find/ls path overlay (`document.pathOverlay`)
 

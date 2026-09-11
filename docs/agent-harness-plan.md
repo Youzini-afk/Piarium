@@ -100,7 +100,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    拆开，钉住 explore 查询级 snapshot，并用内容身份拒绝混合基线。D-221 已规定 branch Integration 先 gate 后 store，
    并补写前日志与启动对账。D-222 已补 directory reconcile 的 execution Documents gate、dequeue 冻结 overlay、
    session-bindings 对账与知识 owning 解析。D-223 已补级联生命周期 serialization 与 scope 只拒绝完整 `..` 段。
-   3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
+   D-224 已补剩余状态契约：materialized 父条件撤销、cascade admission、binding 当前 owner、默认 native result 失效与
+   scoped explore pin。3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
+   D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -246,7 +248,7 @@ RunManifest 不成为这组能力共同前置。
 
 | 已有能力 | 下一步实际改动 |
 | --- | --- |
-| 自动 surface snapshot、Documents 当前正文、固定草稿的 read/grep/find/ls 与线程基线 | 语义覆盖沿同一来源（3.16D）；不另建读取权威 |
+| 自动 surface snapshot、Documents 当前正文、固定草稿的 read/grep/find/ls 与线程基线；根会话 edit/write/apply_patch 经 `document.surfaceWrite` 写回同一缓冲（D-225） | 语义覆盖沿同一来源（3.16D）；不另建读取权威 |
 | question/anchors/paths、对象与词组提取、候选按文件轮转、真实 rg | 保留明确范围和线索，收窄隐式意图判断；路径/符号明确时直接导航 |
 | models.explore 经公开 explore 接入查询理解/搜索表达和候选判断 | 沿用 Pi 会话 ModelRuntime；真实槽位质量仍未观察 |
 | 结构切片、图定义/连线另一端/反向 import、带版本的 focusRanges | 图只给可核验导航或关联；语义焦点不依赖查询词命中 |

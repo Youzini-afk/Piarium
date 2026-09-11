@@ -397,7 +397,8 @@ async function requireMaterializedDirectory(
  * Decide whether a native write may proceed on one path. Reads follow this
  * turn's fixed draft while writes apply to disk, so a divergent draft is
  * reported as an actionable conflict instead of being silently persisted
- * (D-089). The Router authorized the path with `allowMissing`, since a dirty
+ * (D-089 inspect). Production writes use `document.surfaceWrite` (D-225).
+ * The Router authorized the path with `allowMissing`, since a dirty
  * document may not exist on disk yet.
  */
 export function createDocumentWriteGuardService(
@@ -414,6 +415,47 @@ export function createDocumentWriteGuardService(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
+      );
+    },
+  };
+}
+
+const normalizeSurfaceWriteChanges = (
+  params: import("@piarium/protocol").DocumentSurfaceWriteParams,
+): import("@piarium/protocol").DocumentSurfaceWriteChange[] | null => {
+  if (params.changes && params.changes.length > 0) return [...params.changes];
+  if (params.path && params.action) {
+    return [{
+      path: params.path,
+      action: params.action,
+      ...(params.content === undefined ? {} : { content: params.content }),
+      ...(params.edits === undefined ? {} : { edits: params.edits }),
+    }];
+  }
+  return null;
+};
+
+export function createDocumentSurfaceWriteService(
+  host: Pick<HarnessServiceHost, "documentSurfaceWrite">,
+): HarnessService<"document.surfaceWrite"> {
+  return {
+    handle: async (params, ctx) => {
+      const changes = normalizeSurfaceWriteChanges(params);
+      if (!host.documentSurfaceWrite || !changes || changes.length === 0 || ctx.authorizedPaths.length !== changes.length) {
+        throw new HarnessServiceError("unavailable", "Document surface write is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      const mapped = changes.map((change, index) => ({
+        resourceId: ctx.authorizedPaths[index]!.resourceId,
+        action: change.action,
+        ...(change.content === undefined ? {} : { content: change.content }),
+        ...(change.edits === undefined ? {} : { edits: change.edits }),
+      }));
+      return host.documentSurfaceWrite(
+        ctx.sessionId,
+        ctx.inputContext ?? { source: "disk" },
+        mapped,
+        ctx.signal,
       );
     },
   };
@@ -710,6 +752,9 @@ export function registerHarnessServices(
   }
   if (host.documentWriteGuard) {
     router.register("document.writeGuard", createDocumentWriteGuardService(host));
+  }
+  if (host.documentSurfaceWrite) {
+    router.register("document.surfaceWrite", createDocumentSurfaceWriteService(host));
   }
   if (host.documentBranchWrite) {
     router.register("document.branchWrite", createDocumentBranchWriteService(host));

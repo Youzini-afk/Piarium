@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -125,6 +126,145 @@ export const createDocumentAuthorityHarness = async (
     },
   };
 };
+
+export const hashSurfaceText = (text: string): string => (
+  `sha256-${createHash('sha256').update(text, 'utf8').digest('hex')}`
+);
+
+export interface LiveSurfaceBuffer {
+  baseRevision: string | null;
+  bom: boolean;
+  bufferHash: string;
+  content: string;
+  documentInstanceId: string;
+  encoding: string;
+  lineEnding: 'lf' | 'crlf' | 'cr';
+  localEditRevision: number;
+  previousContent?: string;
+}
+
+/**
+ * Completes Host-directed surface operations the way Document Registry does:
+ * CAS against the live buffer identity, then apply/undo. Failed CAS leaves the
+ * live text untouched so later user edits cannot be rolled back.
+ */
+export const attachLiveSurfaceCompleter = (
+  authority: DocumentAuthority,
+  input: {
+    generation: number;
+    live: Map<string, LiveSurfaceBuffer>;
+    ownerId: string;
+    workspaceId: string;
+  },
+): { close: () => void } => authority.registerDirtySurface({
+  generation: input.generation,
+  ownerId: input.ownerId,
+  workspaceId: input.workspaceId,
+}, (event) => {
+  const requestId = event && typeof event === 'object' && 'requestId' in event
+    ? String((event as { requestId?: unknown }).requestId ?? '')
+    : '';
+  if (!requestId) return;
+  void (async () => {
+    const pending = await authority.readSurfaceOperation({
+      generation: input.generation,
+      ownerId: input.ownerId,
+      requestId,
+      workspaceId: input.workspaceId,
+    });
+    const resources = pending.targets.map((target) => {
+      const current = input.live.get(target.resource.resourceId);
+      if (pending.action === 'apply') {
+        if (!current
+          || current.documentInstanceId !== target.documentInstanceId
+          || current.localEditRevision !== target.localEditRevision
+          || current.bufferHash !== target.bufferHash
+          || current.baseRevision !== target.baseRevision) {
+          return {
+            resource: target.resource,
+            status: 'failed' as const,
+            message: 'Document surface binding changed',
+            ...(current ? {
+              documentInstanceId: current.documentInstanceId,
+              afterLocalEditRevision: current.localEditRevision,
+              afterHash: current.bufferHash,
+            } : {}),
+          };
+        }
+        const nextContent = target.newText ?? current.content;
+        const next: LiveSurfaceBuffer = {
+          ...current,
+          content: nextContent,
+          previousContent: current.content,
+          localEditRevision: current.localEditRevision + 1,
+          bufferHash: hashSurfaceText(nextContent),
+        };
+        input.live.set(target.resource.resourceId, next);
+        return {
+          resource: target.resource,
+          status: 'applied' as const,
+          documentInstanceId: current.documentInstanceId,
+          beforeLocalEditRevision: current.localEditRevision,
+          beforeHash: current.bufferHash,
+          afterLocalEditRevision: next.localEditRevision,
+          afterHash: next.bufferHash,
+        };
+      }
+      if (pending.action === 'undo') {
+        if (!current
+          || current.localEditRevision !== target.expectedAppliedRevision
+          || current.bufferHash !== target.expectedAppliedHash) {
+          return {
+            resource: target.resource,
+            status: 'failed' as const,
+            message: 'Document surface binding changed after apply',
+            ...(current ? {
+              documentInstanceId: current.documentInstanceId,
+              afterLocalEditRevision: current.localEditRevision,
+              afterHash: current.bufferHash,
+            } : {}),
+          };
+        }
+        const restored = current.previousContent ?? current.content;
+        const { previousContent: _cleared, ...rest } = current;
+        const next: LiveSurfaceBuffer = {
+          ...rest,
+          content: restored,
+          localEditRevision: current.localEditRevision + 1,
+          bufferHash: hashSurfaceText(restored),
+        };
+        input.live.set(target.resource.resourceId, next);
+        return {
+          resource: target.resource,
+          status: 'undone' as const,
+          documentInstanceId: current.documentInstanceId,
+          content: restored,
+          afterLocalEditRevision: next.localEditRevision,
+          afterHash: next.bufferHash,
+        };
+      }
+      if (!current) {
+        return { resource: target.resource, status: 'failed' as const, message: 'No live buffer' };
+      }
+      return {
+        resource: target.resource,
+        status: 'captured' as const,
+        content: current.content,
+        documentInstanceId: current.documentInstanceId,
+        beforeLocalEditRevision: current.localEditRevision,
+        beforeHash: current.bufferHash,
+      };
+    });
+    await authority.completeSurfaceOperation({
+      generation: input.generation,
+      operationId: pending.operationId,
+      ownerId: input.ownerId,
+      requestId,
+      resources,
+      workspaceId: input.workspaceId,
+    });
+  })().catch(() => undefined);
+});
 
 interface ContractNegatedMatchers {
   toBe(expected: unknown): void;

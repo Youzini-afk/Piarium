@@ -88,29 +88,64 @@ interface JournaledExecutionOptions<TResult> {
   toolCallId: string;
   toolName: WorkspaceMutationToolName;
   hostServicesBridge?: HostServicesBridge;
-  writeGuard?: boolean;
 }
 
-/**
- * Refuse a write whose path is answered from this turn's fixed editor draft
- * while the write itself would apply to disk (D-089). The check runs under the
- * same path lease as the write, and only when the turn actually carries unsaved
- * editor documents, so an ordinary write pays nothing.
- */
-export async function assertWritablePath(
+export function formatSurfaceWriteResult(
+  result: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>,
+  fallbackPath: string,
+  action: "write" | "edit" | "delete" | "apply_patch",
+): string {
+  const results = result.results;
+  if (result.status === "applied" && results.length === 1 && results[0]?.status === "applied") {
+    const path = results[0].path || fallbackPath;
+    if (action === "write") return `Successfully wrote ${path}`;
+    if (action === "delete") return `Successfully deleted ${path}`;
+    if (action === "edit") return `Successfully edited ${path}`;
+    return `patch applied successfully (1 file(s) on ${results[0].target})`;
+  }
+  const lines = results.map((entry) => (
+    `${entry.status} ${entry.path} (${entry.target})${entry.message ? `: ${entry.message}` : ""}`
+  ));
+  if (result.status === "applied") {
+    return action === "apply_patch"
+      ? `patch applied successfully (${results.length} file(s))\n${lines.join("\n")}`
+      : lines.join("\n");
+  }
+  return `${result.message ?? `surface mutation ${result.status}`}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}`;
+}
+
+export async function trySurfaceWrite(
   bridge: HostServicesBridge,
-  path: string,
+  params: {
+    path?: string;
+    action?: "write" | "edit" | "delete";
+    content?: string;
+    edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+    changes?: Array<{
+      path: string;
+      action: "write" | "edit" | "delete";
+      content?: string;
+      edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+    }>;
+  },
   signal?: AbortSignal,
-): Promise<void> {
-  const context = bridge.inputContext();
-  if (!context || context.source !== "surface" || context.dirtyPaths.length === 0) return;
-  const guard = await bridge.request(
-    "document.writeGuard",
-    { path },
+  label?: "write" | "edit" | "delete" | "apply_patch",
+): Promise<"disk" | { text: string; status: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["status"] }> {
+  const result = await bridge.request(
+    "document.surfaceWrite",
+    {
+      ...(params.path === undefined ? {} : { path: params.path }),
+      ...(params.action === undefined ? {} : { action: params.action }),
+      ...(params.content === undefined ? {} : { content: params.content }),
+      ...(params.edits === undefined ? {} : { edits: params.edits }),
+      ...(params.changes === undefined ? {} : { changes: params.changes }),
+    },
     signal === undefined ? {} : { signal },
   );
-  if (guard.status === "allow") return;
-  throw new Error(guard.message);
+  if (result.status === "disk") return "disk";
+  const action = label ?? params.action ?? params.changes?.[0]?.action ?? "edit";
+  const fallback = params.path ?? params.changes?.[0]?.path ?? "";
+  return { text: formatSurfaceWriteResult(result, fallback, action), status: result.status };
 }
 
 async function fetchDiagnostics(
@@ -174,11 +209,6 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
 ): Promise<TResult> {
   const path = resolve(options.cwd, options.inputPath);
   const executeMutation = async (): Promise<TResult> => {
-    // Admission first: a refused write leaves no journal records because
-    // nothing was attempted.
-    if (options.writeGuard && options.hostServicesBridge) {
-      await assertWritablePath(options.hostServicesBridge, path);
-    }
     await options.bridge.request({
       path,
       phase: "before",
@@ -227,11 +257,11 @@ export function createWorkspaceMutationJournalTools(
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
   _sessionId?: string,
-  options: { writeGuard?: boolean } = {},
+  options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
-  const guard = options.writeGuard === true;
+  const surface = options.surfaceWrite === true;
   const journaledWrite = defineTool({
     ...write,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
@@ -244,6 +274,16 @@ export function createWorkspaceMutationJournalTools(
         if (virtual !== "disk") {
           return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
         }
+        if (surface) {
+          const planned = await trySurfaceWrite(hostServicesBridge, {
+            path: params.path,
+            action: "write",
+            content: params.content,
+          }, signal);
+          if (planned !== "disk") {
+            return { content: [{ type: "text" as const, text: planned.text }], details: undefined };
+          }
+        }
       }
       return executeWithMutationJournal({
         bridge,
@@ -252,7 +292,6 @@ export function createWorkspaceMutationJournalTools(
         inputPath: params.path,
         toolCallId,
         toolName: "write",
-        writeGuard: guard,
         ...(hostServicesBridge ? { hostServicesBridge } : {}),
       });
     },
@@ -269,6 +308,16 @@ export function createWorkspaceMutationJournalTools(
         if (virtual !== "disk") {
           return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
         }
+        if (surface) {
+          const planned = await trySurfaceWrite(hostServicesBridge, {
+            path: params.path,
+            action: "edit",
+            edits: params.edits,
+          }, signal);
+          if (planned !== "disk") {
+            return { content: [{ type: "text" as const, text: planned.text }], details: undefined };
+          }
+        }
       }
       return executeWithMutationJournal({
         bridge,
@@ -277,7 +326,6 @@ export function createWorkspaceMutationJournalTools(
         inputPath: params.path,
         toolCallId,
         toolName: "edit",
-        writeGuard: guard,
         ...(hostServicesBridge ? { hostServicesBridge } : {}),
       });
     },

@@ -408,7 +408,10 @@ prompt, steer, or follow-up, the Document Registry copies that surface's dirty b
 immutable Application Host snapshot. Document text travels only over the authenticated Documents
 channel; the runtime request carries an opaque reference or an unavailable dirty-path set. Harness
 `explore`, `grep`, and the same-name `read` / `find` / `ls` adapters use that fixed snapshot for dirty paths;
-other paths keep each tool's established disk source. Explicit
+other paths keep each tool's established disk source. Root-session `edit` / `write` / `apply_patch` call Host
+`document.surfaceWrite` for snapshot-owned paths and write the same Document Registry buffer after owner,
+generation, registration, document instance, revision, and hash checks; a later user edit is a conflict and
+does not save or write disk. Ordinary disk paths keep the journaled Documents write. Explicit
 selection/diff attachments may still quote text in the prompt, and patch accept/reject uses
 expected-revision writes so an agent edit cannot silently overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
 confers process, debug, or test-runner capability.
@@ -493,7 +496,7 @@ The `HarnessServiceMap` defines the following method groups:
 
 - **Shell**: `shell.exec`, `shell.read`, `shell.write`, `shell.kill`
 - **Output**: `output.store`, `output.read`
-- **Search / fixed document source**: `search.content`, `document.readSource`, `document.pathOverlay`
+- **Search / fixed document source**: `search.content`, `document.readSource`, `document.pathOverlay`, `document.surfaceWrite`, `document.branchWrite`
 - **Filesystem**: `fs.lock`
 - **LSP**: `lsp.diagnostics`, `lsp.diagnosticsSnapshot`, `lsp.symbols`, `lsp.definition`, `lsp.references`, `lsp.hover`
 - **Web**: `web.fetch`, `web.search` (registered when available). A configured

@@ -42,6 +42,21 @@ export type SurfaceSnapshotReadResult =
   | { status: 'ready'; bom: boolean; content: string; encoding: string; revision: string; source: 'surface-draft' }
   | { status: 'unavailable'; message: string };
 
+export type SurfaceSnapshotInspectResult =
+  | { status: 'disk'; superseded?: true }
+  | { status: 'unavailable'; message: string }
+  | {
+      status: 'ready';
+      bom: boolean;
+      content: string;
+      encoding: string;
+      localEditRevision: number;
+      baseRevision: string | null;
+      revision: string;
+      resource: { workspaceId: string; resourceId: string };
+      source: 'surface-draft';
+    };
+
 export interface SurfaceSnapshotOverlayEntry {
   path: string;
   kind: 'file' | 'directory';
@@ -309,6 +324,31 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     };
   };
 
+  const inspect = (
+    sessionId: string,
+    context: AgentInputContext,
+    resourceId: string,
+  ): SurfaceSnapshotInspectResult => {
+    const draft = read(sessionId, context, resourceId);
+    if (draft.status !== 'ready') return draft;
+    const snapshot = resolveReady(sessionId, context);
+    const resource = snapshot?.resources.get(pathKey(resourceId));
+    if (!snapshot || !resource) {
+      return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
+    }
+    return {
+      status: 'ready',
+      bom: resource.bom,
+      content: draft.content,
+      encoding: resource.encoding,
+      localEditRevision: resource.localEditRevision,
+      baseRevision: resource.baseRevision,
+      revision: draft.revision,
+      resource: { ...resource.resource },
+      source: 'surface-draft',
+    };
+  };
+
   const clone = (sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult => {
     if (context.source === 'disk') return { status: 'disk' };
     if (context.snapshot.status === 'unavailable') {
@@ -474,6 +514,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     draftPaths,
     dropPendingOwner,
     dropSession,
+    inspect,
     invalidateOwnerEdit,
     observeWrite,
     overlay,

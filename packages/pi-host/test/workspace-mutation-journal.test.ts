@@ -76,7 +76,7 @@ function serveHarnessRequest(host: SessionHost, event: HostEvent, data: HostEven
       : { held: false, released: true }
     : request.method === "lsp.diagnostics"
       ? { status: "ready", diagnostics: [] }
-      : request.method === "document.branchWrite"
+      : request.method === "document.branchWrite" || request.method === "document.surfaceWrite"
         ? { status: "disk" }
         : null;
   if (result !== null) host.respondHarness(sessionId, request.requestId, { ok: true, result });
@@ -88,12 +88,11 @@ describe("workspace mutation journal", () => {
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
     const events = new MutationEventCollector();
-    let host!: SessionHost;
-    host = new SessionHost({
+    const host = new SessionHost({
       agentDir: join(root, "agent"),
       emit: (event, data) => {
         events.emit(event, data);
-        if (host) serveHarnessRequest(host, event, data);
+        serveHarnessRequest(host, event, data);
       },
       projectTrustOverride: true,
     });
@@ -231,14 +230,14 @@ describe("workspace mutation journal", () => {
     }
   });
 
-  it("refuses a write whose path is answered from an unsaved editor draft", async () => {
+  it("writes a fixed surface draft through document.surfaceWrite and journals ordinary disk paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-write-guard-"));
     const events = new MutationEventCollector();
     const journal = new WorkspaceMutationJournalBridge({
       emit: (event, data) => events.emit(event, data),
       sessionId: "session-guard",
     });
-    const guardCalls: string[] = [];
+    const surfaceWrites: string[] = [];
     let inputContext: AgentInputContext = {
       source: "surface",
       workspaceId: "workspace-1",
@@ -261,18 +260,18 @@ describe("workspace mutation journal", () => {
           hostServices.respond("session-guard", data.requestId, { ok: true, result: { status: "disk" } });
           return;
         }
-        if (data.method === "document.writeGuard") {
-          const path = (data.params as { path: string }).path;
-          guardCalls.push(path);
+        if (data.method === "document.surfaceWrite") {
+          const path = (data.params as { path?: string }).path ?? "";
+          surfaceWrites.push(path);
           hostServices.respond("session-guard", data.requestId, {
             ok: true,
             result: path.endsWith("draft.txt")
               ? {
-                  status: "conflict",
-                  revision: "surface-draft:ref-1:2",
-                  message: "draft.txt has unsaved editor changes that differ from the file on disk.",
+                  status: "applied",
+                  operationId: "op-surface",
+                  results: [{ path, target: "surface", status: "applied" }],
                 }
-              : { status: "allow" },
+              : { status: "disk" },
           });
           return;
         }
@@ -284,17 +283,20 @@ describe("workspace mutation journal", () => {
       getInputContext: () => inputContext,
     });
     const write = createWorkspaceMutationJournalTools(root, journal, hostServices, "session-guard", {
-      writeGuard: true,
+      surfaceWrite: true,
     }).find((tool) => tool.name === "write") as ReturnType<typeof createWriteToolDefinition>;
 
-    await assert.rejects(
-      write.execute("guarded", { content: "agent text", path: "draft.txt" }, undefined, undefined, undefined as never),
-      /unsaved editor changes/,
+    const surfaceResult = await write.execute(
+      "surface",
+      { content: "C", path: "draft.txt" },
+      undefined,
+      undefined,
+      undefined as never,
     );
-    // A refused write leaves neither a file nor a journal record.
+    assert.match((surfaceResult.content[0] as { text: string }).text, /Successfully wrote/);
     await assert.rejects(readFile(join(root, "draft.txt")), { code: "ENOENT" });
     assert.equal(events.seen.length, 0);
-    assert.deepEqual(guardCalls, [resolve(root, "draft.txt")]);
+    assert.deepEqual(surfaceWrites, ["draft.txt"]);
 
     // Another path in the same turn is an ordinary write.
     const otherRun = write.execute("allowed", { content: "plain", path: "other.txt" }, undefined, undefined, undefined as never);
@@ -305,8 +307,6 @@ describe("workspace mutation journal", () => {
     await otherRun;
     assert.equal(await readFile(join(root, "other.txt"), "utf8"), "plain");
 
-    // A disk-sourced turn never pays for the guard at all.
-    guardCalls.length = 0;
     inputContext = { source: "disk" };
     const diskRun = write.execute("disk", { content: "disk turn", path: "disk.txt" }, undefined, undefined, undefined as never);
     const diskBefore = await events.next();
@@ -314,7 +314,7 @@ describe("workspace mutation journal", () => {
     const diskAfter = await events.next();
     assert.equal(journal.respond("session-guard", diskAfter.requestId, true), true);
     await diskRun;
-    assert.deepEqual(guardCalls, []);
+    assert.equal(await readFile(join(root, "disk.txt"), "utf8"), "disk turn");
 
     journal.dispose();
     hostServices.dispose();
@@ -393,12 +393,11 @@ describe("workspace mutation journal", () => {
     await mkdir(firstCwd, { recursive: true });
     await mkdir(secondCwd, { recursive: true });
     const events = new MutationEventCollector();
-    let host!: SessionHost;
-    host = new SessionHost({
+    const host = new SessionHost({
       agentDir: join(root, "agent"),
       emit: (event, data) => {
         events.emit(event, data);
-        if (host) serveHarnessRequest(host, event, data);
+        serveHarnessRequest(host, event, data);
       },
       projectTrustOverride: true,
     });

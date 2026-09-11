@@ -8,7 +8,8 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 
 ## Entrypoints
 
-- `authority.js`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals, and immutable agent-input snapshots. `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` for trusted host collaborators (search and language). It is not a renderer DocumentsAPI method.
+- `authority.js`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals, immutable agent-input snapshots, and `applyAgentSurfaceWrite` (the shared root-session plan that edits a live Registry buffer or returns the disk sentinel). `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` for trusted host collaborators (search and language). It is not a renderer DocumentsAPI method.
+- `surface-mutation.js` — classifies snapshot-owned vs disk paths, applies text edits against the fixed snapshot, writes the live buffer through `requestSurfaceOperation`, and compensates mixed batches with CAS receipts.
 - `surface-snapshot-store.js` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including encoding/BOM metadata and content serialized with its original line endings so consumers can reproduce save bytes. Pending snapshots become active only after Pi accepts the input; replacement, rollback, session drop, and Host disposal release content references. The internal clone operation lets Thread dispatch copy a validated snapshot into persistent WorkingState; it is not a renderer route.
 - `routes.js`: `registerDocumentRoutes(app, { documents, uiAuthController })` — authenticated `/api/documents/*` routes.
 - `capability.js`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
