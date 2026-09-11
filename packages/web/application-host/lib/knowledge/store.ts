@@ -283,9 +283,14 @@ export interface SymbolGraphLinkSearchResult {
 
 // ── Store interface ────────────────────────────────────────────────
 
+export interface PutEventResult {
+  id: NodeId;
+  inserted: boolean;
+}
+
 export interface KnowledgeStore {
   readonly dim: number;
-  putEvent(e: EventInput): Promise<NodeId>;
+  putEvent(e: EventInput): Promise<PutEventResult>;
   listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
   putSession(s: SessionInput): Promise<NodeId>;
   /**
@@ -768,8 +773,19 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   const store: KnowledgeStore = {
     dim,
 
-    async putEvent(e: EventInput): Promise<NodeId> {
+    async putEvent(e: EventInput): Promise<PutEventResult> {
       return enqueueWrite(() => {
+        const commandId = e.kind === "command" && e.data && typeof e.data === "object"
+          ? e.data["commandId"]
+          : undefined;
+        if (typeof commandId === "string" && commandId.length > 0) {
+          const existing = scanNodes((payload) => {
+            if (payload["type"] !== "event" || payload["kind"] !== "command") return false;
+            const data = payload["data"];
+            return Boolean(data && typeof data === "object" && (data as Record<string, unknown>)["commandId"] === commandId);
+          });
+          if (existing[0]) return { id: existing[0].id, inserted: false };
+        }
         const payload = {
           type: "event",
           kind: e.kind,
@@ -784,7 +800,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const id = db.insert(placeholderVec, payload);
         db.indexText(id, e.text);
         db.flush();
-        return id;
+        return { id, inserted: true };
       });
     },
 

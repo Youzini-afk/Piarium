@@ -40,7 +40,7 @@ describe("KnowledgeStore", () => {
 
   describe("putEvent", () => {
     it("stores an event and assigns an id", async () => {
-      const id = await store.putEvent({
+      const { id, inserted } = await store.putEvent({
         kind: "edit",
         at: Date.now(),
         sessionId: "s1",
@@ -49,10 +49,11 @@ describe("KnowledgeStore", () => {
       });
       expect(typeof id).toBe("number");
       expect(id).toBeGreaterThan(0);
+      expect(inserted).toBe(true);
     });
 
     it("stores events with refs", async () => {
-      const id = await store.putEvent({
+      const { id } = await store.putEvent({
         kind: "command",
         at: Date.now(),
         sessionId: "s1",
@@ -91,11 +92,33 @@ describe("KnowledgeStore", () => {
       });
 
       await expect(store.listEvents({ sessionId: "s1", minTurnIndex: 4 })).resolves.toMatchObject([
-        { id: second, text: "bun test" },
+        { id: second.id, text: "bun test" },
       ]);
-      await expect(store.listEvents({ sessionId: "s1", afterId: first })).resolves.toMatchObject([
-        { id: second, text: "bun test" },
+      await expect(store.listEvents({ sessionId: "s1", afterId: first.id })).resolves.toMatchObject([
+        { id: second.id, text: "bun test" },
       ]);
+    });
+
+    it("deduplicates command events by workspace commandId", async () => {
+      const first = await store.putEvent({
+        kind: "command",
+        at: 1,
+        sessionId: "s1",
+        text: "exit 0 · echo hi",
+        data: { command: "echo hi", commandId: "term-1:1:1", exitCode: 0 },
+        source: "user",
+      });
+      const second = await store.putEvent({
+        kind: "command",
+        at: 2,
+        sessionId: "s1",
+        text: "exit 0 · echo hi again",
+        data: { command: "echo hi again", commandId: "term-1:1:1", exitCode: 0 },
+        source: "user",
+      });
+      expect(first.inserted).toBe(true);
+      expect(second).toEqual({ id: first.id, inserted: false });
+      await expect(store.listEvents({ sessionId: "s1" })).resolves.toHaveLength(1);
     });
   });
 

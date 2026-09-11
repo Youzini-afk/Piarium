@@ -3,6 +3,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_MEMORY_AGENT_SETTINGS,
   createInitialMemoryAgentState,
+  encodeHarnessObservationText,
   evaluateMemoryAgentGate,
   evaluateMemoryEventGate,
   type HarnessMemoryMode,
@@ -83,8 +84,8 @@ const keeperInstruction = (
 );
 
 const formatCommands = (commands: MemoryNudgeCommand[]): string => commands.map((item) => {
-  const cwd = item.cwd ? ` (${item.cwd})` : "";
-  return `user-terminal exit ${item.exitCode} · ${item.command}${cwd}`;
+  const cwd = item.cwd ? ` (${encodeHarnessObservationText(item.cwd)})` : "";
+  return `user-terminal exit ${item.exitCode} · ${encodeHarnessObservationText(item.command)}${cwd}`;
 }).join("\n");
 
 export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions): MemoryAgentExtension {
@@ -105,6 +106,13 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
   const track = (task: Promise<void>): void => {
     active.add(task);
     void task.catch((error) => options.onError?.(error)).finally(() => active.delete(task));
+  };
+
+  const enqueuePendingCommands = (commands: readonly MemoryNudgeCommand[]): void => {
+    for (const command of commands) {
+      if (pendingCommands.some((item) => item.commandId === command.commandId)) continue;
+      pendingCommands.push(command);
+    }
   };
 
   const takePendingCommands = (): MemoryNudgeCommand[] => pendingCommands.splice(0);
@@ -207,7 +215,7 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
     if (!lastTurn || disposed || options.getMode() === "off") return;
     const decision = evaluateMemoryEventGate(state, settings, now());
     if (!decision.shouldRun) {
-      if (commands.length > 0) pendingCommands.push(...commands);
+      if (commands.length > 0) enqueuePendingCommands(commands);
       if (decision.reason === "in-flight" || decision.reason === "cooldown") {
         pendingMaterial = true;
         if (decision.reason === "cooldown") scheduleCooldown();
@@ -297,7 +305,7 @@ export function createMemoryAgentExtension(options: MemoryAgentExtensionOptions)
     if (disposed) return { accepted: false, reason: "disposed" };
     if (options.getMode() === "off") return { accepted: false, reason: "off" };
     if (!lastTurn) return { accepted: false, reason: "no-session-context" };
-    if (input.commands && input.commands.length > 0) pendingCommands.push(...input.commands);
+    if (input.commands && input.commands.length > 0) enqueuePendingCommands(input.commands);
     if (state.inFlight) {
       pendingMaterial = true;
       return { accepted: true, reason: "in-flight" };

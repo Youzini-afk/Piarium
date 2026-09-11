@@ -12,6 +12,7 @@ export * from "./harness-roles.js";
 export * from "./harness-tools.js";
 export * from "./harness-threads.js";
 export * from "./utf8.js";
+export * from "./harness-observation.js";
 export * from "./permission-gate.js";
 export * from "./memory-agent.js";
 export * from "./methods.js";

@@ -289,10 +289,14 @@ Successful Git status reads from both workbench APIs pass through Documents
 workspace resolution and a per-session deduplicating observer; this reuses the
 existing SCM refresh boundary and does not add a second Git poller.
 User-terminal command finish events come from Terminal Runtime OSC 633
-through `subscribeCommands` and `observeTerminalCommand`. They are stored
-only for bound sessions, keyed by `commandId` so reconnect and Host
-restart cannot replay the same observation. Harness/agent shells stay
-`source: agent` and never enter `<user-terminal>`. After the event is
+through `subscribeCommands` and `observeTerminalCommand`. Frames must
+carry this session's integration generation tag; untagged OSC is ignored.
+`putEvent` treats `workspaceId + commandId` as an idempotent write: a
+duplicate delivery does not insert a second event or nudge again. The
+live PTY path does not replay finished commands after Host restart, so
+this is duplicate-delivery protection, not a restart replay log.
+Harness/agent shells stay `source: agent` and never enter
+`<user-terminal>`. `/bin/sh` is not treated as Bash. After a new event is
 stored, Host `memory.nudge` wakes the existing keeper; worker-unavailable
 and keeper failure do not fail the terminal.
 The same Documents post-commit boundary drives an event-based symbol graph:

@@ -451,6 +451,66 @@ describe('terminal runtime', () => {
       expect(restarted.body.error).toBe('Terminal shell "fish" is not available');
       expect(harness.processes).toHaveLength(1);
       expect(requiredProcess(harness.processes, 0).killed).toBe(false);
+      expect(requiredProcess(harness.processes, 0).args).not.toContain('--init-file');
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('does not pass --init-file to /bin/sh user sessions', async () => {
+    const harness = createHarness({
+      searchPathFor: (name: string) => name === 'sh' ? '/bin/sh' : null,
+      isExecutable: (candidate: string) => candidate === '/bin/sh',
+    });
+    try {
+      await harness.runtime.createTerminalSession({
+        sessionId: 'user-sh',
+        cwd: '/repo',
+        owner: 'user',
+        shell: 'sh',
+      });
+      expect(requiredProcess(harness.processes, 0).shell).toBe('/bin/sh');
+      expect(requiredProcess(harness.processes, 0).args).not.toContain('--init-file');
+      expect(requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID).toBeUndefined();
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('resets integration generation on restart so a new zsh D cannot settle the old command', async () => {
+    const harness = createHarness({
+      searchPathFor: (name: string) => String(name).includes('zsh') ? '/bin/zsh' : '/bin/sh',
+      isExecutable: () => true,
+    });
+    try {
+      const commands: Array<{ command: string; commandId: string }> = [];
+      const subscription = harness.runtime.subscribeCommands((event) => { commands.push(event); });
+      await harness.runtime.createTerminalSession({
+        sessionId: 'user-zsh',
+        cwd: '/repo',
+        owner: 'user',
+        shell: 'zsh',
+      });
+      const firstId = requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID;
+      expect(firstId).toBe('user-zsh:1');
+      requiredProcess(harness.processes, 0).emitData(
+        `\u001b]633;pi;${firstId};E;old-cmd\u0007\u001b]633;pi;${firstId};C\u0007`,
+      );
+      expect(commands).toEqual([]);
+
+      const restarted = createResponse();
+      await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/restart')({
+        params: { sessionId: 'user-zsh' },
+        body: { shell: 'zsh' },
+      }, restarted);
+      expect(restarted.statusCode).toBe(200);
+      const second = requiredProcess(harness.processes, 1);
+      expect(second.options.env.PIARIUM_SHELL_INTEGRATION_ID).toBe('user-zsh:2');
+      second.emitData(`\u001b]633;pi;user-zsh:2;D;0\u0007`);
+      expect(commands).toEqual([]);
+      second.emitData(`\u001b]633;pi;user-zsh:1;E;stale\u0007\u001b]633;pi;user-zsh:1;D;0\u0007`);
+      expect(commands).toEqual([]);
+      second.emitData(`\u001b]633;pi;user-zsh:2;E;new-cmd\u0007\u001b]633;pi;user-zsh:2;D;0\u0007`);
+      expect(commands).toEqual([
+        expect.objectContaining({ command: 'new-cmd', commandId: 'user-zsh:2:1' }),
+      ]);
+      subscription.dispose();
     } finally { await harness.runtime.shutdown(); }
   });
 
@@ -972,6 +1032,7 @@ describe('terminal runtime', () => {
         shell: 'bash',
       });
       expect(requiredProcess(harness.processes, 0).args).toContain('--init-file');
+      expect(requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID).toBe('user-bash:1');
       expect(harness.runtime.inspectSession('user-bash')).toMatchObject({
         integration: 'not-observed',
         owner: 'user',
@@ -980,9 +1041,21 @@ describe('terminal runtime', () => {
       const commands: Array<{ command: string; commandId: string; owner: string }> = [];
       const subscription = harness.runtime.subscribeCommands((event) => { commands.push(event); });
       user.onCommand((event) => { commands.push(event); });
-      requiredProcess(harness.processes, 0).emitData('\u001b]633;E;echo hi\u0007\u001b]633;D;0\u0007');
+      requiredProcess(harness.processes, 0).emitData('\u001b]633;E;echo alien\u0007\u001b]633;D;0\u0007');
+      expect(commands).toHaveLength(0);
+      expect(harness.runtime.inspectSession('user-bash')?.integration).toBe('not-observed');
+      const userId = requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID;
+      requiredProcess(harness.processes, 0).emitData(
+        `\u001b]633;pi;${userId};E;echo hi\u0007\u001b]633;pi;${userId};D;0\u0007`,
+      );
       expect(commands).toHaveLength(2);
-      expect(commands[0]).toMatchObject({ command: 'echo hi', exitCode: 0, owner: 'user', terminalId: 'user-bash' });
+      expect(commands[0]).toMatchObject({
+        command: 'echo hi',
+        commandId: 'user-bash:1:1',
+        exitCode: 0,
+        owner: 'user',
+        terminalId: 'user-bash',
+      });
       expect(harness.runtime.inspectSession('user-bash')?.integration).toBe('ready');
 
       requiredProcess(harness.processes, 0).emitExit(0, 0);

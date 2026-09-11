@@ -119,22 +119,29 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     }));
   };
 
-  const observeTerminalExit = (event: TerminalExitEvent): void => {
-    if (disposed) return;
+  const persistTerminalObservation = async (event: TerminalExitEvent): Promise<boolean> => {
+    if (disposed) return false;
     if (event.commandId) {
       const seenKey = `${event.workspaceId}:${event.commandId}`;
-      if (seenCommandIds.has(seenKey)) return;
+      if (seenCommandIds.has(seenKey)) return false;
       seenCommandIds.add(seenKey);
     }
-    track(forWorkspace(event.workspaceId, (observers, binding) => observers.onTerminalExit({
-      ...event,
-      turnIndex: binding.turnIndex,
-    })));
+    let inserted = false;
+    const task = forWorkspace(event.workspaceId, async (observers, binding) => {
+      const wrote = await observers.onTerminalExit({
+        ...event,
+        turnIndex: binding.turnIndex,
+      });
+      if (wrote) inserted = true;
+    });
+    track(task);
+    await task;
+    return inserted;
   };
 
-  const observeTerminalCommand = (event: TerminalCommandEvent): void => {
-    observeTerminalExit(event);
-  };
+  const observeTerminalExit = (event: TerminalExitEvent): Promise<boolean> => persistTerminalObservation(event);
+
+  const observeTerminalCommand = (event: TerminalCommandEvent): Promise<boolean> => persistTerminalObservation(event);
 
   const observeDiagnostics = (event: DiagnosticEvent): void => {
     if (disposed) return;

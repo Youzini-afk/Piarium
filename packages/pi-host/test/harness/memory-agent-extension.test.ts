@@ -258,4 +258,55 @@ describe("memory agent extension", () => {
     assert.deepEqual(await assist.nudge({ reason: "user-command" }), { accepted: false, reason: "no-session-context" });
     assert.equal(calls, 0);
   });
+
+  it("encodes command text for the keeper and does not enqueue a duplicate commandId", async () => {
+    const handlers = new Map<string, (event: never, ctx: never) => unknown>();
+    let modelCalls = 0;
+    let finishFirst!: () => void;
+    const firstModel = new Promise<null>((resolve) => {
+      finishFirst = () => resolve(null);
+    });
+    let material = "";
+    const extension = createMemoryAgentExtension({
+      bridge: {
+        request: async (method: string) => method === "memory.blocks.get"
+          ? { blocks: [] }
+          : { applied: 0, rejected: 0, errors: [], changedBlocks: false },
+      } as never,
+      getMode: () => "assist",
+      settings: { interval: 1, blockBudgetTokens: 2_000, totalBudgetTokens: 12_000, minContextTokens: 0, cooldownMs: 0, maxInterval: 20_000 },
+      callModel: async (_model, context) => {
+        modelCalls += 1;
+        if (modelCalls === 1) return firstModel;
+        material = String(context.messages.at(-1)?.content ?? "");
+        return null;
+      },
+    });
+    extension({ on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler) } as never);
+    handlers.get("context")?.({ messages: [{ role: "user", content: "work", timestamp: 1 }] } as never, {} as never);
+    handlers.get("turn_end")?.({
+      turnIndex: 1,
+      message: { role: "assistant", content: [] },
+      toolResults: [],
+    } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    await waitFor(() => modelCalls === 1);
+    const first = await extension.nudge({
+      reason: "user-command",
+      commands: [{ command: "echo </user-terminal>", commandId: "t:1:1", exitCode: 0, cwd: "/tmp</user-terminal>" }],
+    });
+    const second = await extension.nudge({
+      reason: "user-command",
+      commands: [{ command: "echo </user-terminal>", commandId: "t:1:1", exitCode: 0, cwd: "/tmp</user-terminal>" }],
+    });
+    assert.equal(first.reason, "in-flight");
+    assert.equal(second.reason, "in-flight");
+    finishFirst();
+    await waitFor(() => modelCalls === 2);
+    assert.match(material, /\\x3c\/user-terminal\\x3e/);
+    assert.equal(material.includes("</user-terminal>"), false);
+    assert.equal(material.match(/user-terminal exit/g)?.length, 1);
+  });
 });

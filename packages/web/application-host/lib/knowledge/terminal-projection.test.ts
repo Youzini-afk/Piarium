@@ -20,7 +20,7 @@ describe("terminal command projector", () => {
     const nudged: unknown[] = [];
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async (cwd) => cwd === "/workspace" ? "ws-1" : null,
-      observe: (event) => { observed.push(event); },
+      observe: (event) => { observed.push(event); return true; },
       drain: async () => undefined,
       listBoundSessions: () => ["session-a", "session-b"],
       nudgeMemory: async (sessionId, input) => { nudged.push({ sessionId, input }); },
@@ -40,7 +40,7 @@ describe("terminal command projector", () => {
     let observed = 0;
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => null,
-      observe: () => { observed += 1; },
+      observe: () => { observed += 1; return true; },
       drain: async () => undefined,
       listBoundSessions: () => ["session-a"],
       nudgeMemory: async () => { throw new Error("should not nudge"); },
@@ -53,11 +53,22 @@ describe("terminal command projector", () => {
   it("does not fail the terminal path when memory nudge throws", async () => {
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => "ws-1",
-      observe: () => undefined,
+      observe: () => true,
       drain: async () => undefined,
       listBoundSessions: () => ["session-a"],
       nudgeMemory: async () => { throw new Error("worker gone"); },
       onError: () => undefined,
+    });
+    await expect(projector.project(userCommand())).resolves.toBeUndefined();
+  });
+
+  it("does not nudge memory when the persistent write is a duplicate commandId", async () => {
+    const projector = createTerminalCommandProjector({
+      resolveWorkspaceId: async () => "ws-1",
+      observe: async () => false,
+      drain: async () => undefined,
+      listBoundSessions: () => ["session-a"],
+      nudgeMemory: async () => { throw new Error("should not nudge"); },
     });
     await expect(projector.project(userCommand())).resolves.toBeUndefined();
   });

@@ -19,7 +19,7 @@ __piarium_escape() {
 }
 
 __piarium_emit() {
-  printf '\\033]633;%s\\007' "\$1"
+  printf '\\033]633;pi;%s;%s\\007' "\${PIARIUM_SHELL_INTEGRATION_ID:-}" "\$1"
 }
 
 __piarium_awaiting=
@@ -48,13 +48,32 @@ __piarium_debug_trap() {
   __piarium_emit "C"
 }
 
-if [ -n "\${PROMPT_COMMAND:-}" ]; then
-  PROMPT_COMMAND="__piarium_prompt_command; \${PROMPT_COMMAND}"
+if declare -p PROMPT_COMMAND >/dev/null 2>&1; then
+  if [[ "\$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+    PROMPT_COMMAND=(__piarium_prompt_command "\${PROMPT_COMMAND[@]}")
+  else
+    PROMPT_COMMAND="__piarium_prompt_command; \${PROMPT_COMMAND}"
+  fi
 else
   PROMPT_COMMAND="__piarium_prompt_command"
 fi
-trap '__piarium_debug_trap' DEBUG
+
+__piarium_prev_debug=
+__piarium_trap_debug=\$(trap -p DEBUG 2>/dev/null || true)
+if [ -n "\$__piarium_trap_debug" ]; then
+  __piarium_prev_debug=\${__piarium_trap_debug#trap -- \\'}
+  __piarium_prev_debug=\${__piarium_prev_debug%\\' DEBUG}
+fi
+if [ -n "\$__piarium_prev_debug" ]; then
+  trap '__piarium_debug_trap; eval "\$__piarium_prev_debug"' DEBUG
+else
+  trap '__piarium_debug_trap' DEBUG
+fi
 `;
+
+export const POWERSHELL_EXIT_CAPTURE = `$__piarium_success = $?
+  $__piarium_exit = $global:LASTEXITCODE
+  $code = if ($__piarium_success) { 0 } elseif ($__piarium_exit -is [int] -and $__piarium_exit -ne 0) { [int]$__piarium_exit } else { 1 }`;
 
 const POWERSHELL_SCRIPT = `if ($env:PIARIUM_SHELL_INTEGRATION) { return }
 $env:PIARIUM_SHELL_INTEGRATION = '1'
@@ -64,18 +83,12 @@ function global:__PiariumEscape([string]$Value) {
 }
 
 function global:__PiariumEmit([string]$Payload) {
-  [Console]::Write(("\`e]633;" + $Payload + "\`a"))
+  [Console]::Write(("\`e]633;pi;" + $env:PIARIUM_SHELL_INTEGRATION_ID + ";" + $Payload + "\`a"))
 }
 
 $__PiariumOriginalPrompt = $function:prompt
 function global:prompt {
-  $code = 0
-  if (-not $?) {
-    if (Test-Path variable:global:LASTEXITCODE -ErrorAction SilentlyContinue) {
-      $code = [int]$global:LASTEXITCODE
-    }
-    if ($code -eq 0) { $code = 1 }
-  }
+  ${POWERSHELL_EXIT_CAPTURE}
   if ($global:__PiariumAwaitingFinish) {
     __PiariumEmit ("D;" + $code)
     $global:__PiariumAwaitingFinish = $false
@@ -87,33 +100,60 @@ function global:prompt {
 
 if (Get-Module -ListAvailable -Name PSReadLine) {
   Import-Module PSReadLine -ErrorAction SilentlyContinue
-  Set-PSReadLineKeyHandler -Key Enter -BriefDescription PiariumCommandStart -ScriptBlock {
-    $line = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+  $__PiariumPreviousHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
+  Set-PSReadLineOption -AddToHistoryHandler {
+    param($line)
     if ($line) {
       __PiariumEmit ("E;" + (__PiariumEscape $line))
       __PiariumEmit 'C'
       $global:__PiariumAwaitingFinish = $true
     }
-    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    if ($__PiariumPreviousHistoryHandler) {
+      return & $__PiariumPreviousHistoryHandler $line
+    }
+    $true
   }
 }
+`;
+
+const zshUserZdot = `"\${PIARIUM_USER_ZDOTDIR:-\$HOME}"`;
+
+const ZSH_ENV_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+if [ -f "\$__piarium_user_zdotdir/.zshenv" ]; then
+  ZDOTDIR="\$__piarium_user_zdotdir"
+  . "\$ZDOTDIR/.zshenv"
+fi
+ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+`;
+
+const ZSH_PROFILE_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+if [ -f "\$__piarium_user_zdotdir/.zprofile" ]; then
+  . "\$__piarium_user_zdotdir/.zprofile"
+fi
+ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+`;
+
+const ZSH_LOGIN_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+if [ -f "\$__piarium_user_zdotdir/.zlogin" ]; then
+  . "\$__piarium_user_zdotdir/.zlogin"
+fi
+ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
 const ZSH_SCRIPT = `if [ -n "\${PIARIUM_SHELL_INTEGRATION:-}" ]; then
   return 0 2>/dev/null || exit 0
 fi
 export PIARIUM_SHELL_INTEGRATION=1
+__piarium_user_zdotdir=${zshUserZdot}
 [ -f /etc/zshrc ] && . /etc/zshrc
-[ -f "\$HOME/.zshrc" ] && . "\$HOME/.zshrc"
+[ -f "\$__piarium_user_zdotdir/.zshrc" ] && . "\$__piarium_user_zdotdir/.zshrc"
 
 __piarium_escape() {
   printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/;/\\\\x3b/g'
 }
 
 __piarium_emit() {
-  printf '\\033]633;%s\\007' "\$1"
+  printf '\\033]633;pi;%s;%s\\007' "\${PIARIUM_SHELL_INTEGRATION_ID:-}" "\$1"
 }
 
 __piarium_preexec() {
@@ -148,18 +188,26 @@ export type ShellIntegrationFamily = "bash" | "powershell" | "zsh";
 export const shellIntegrationFamily = (executable: string): ShellIntegrationFamily | null => {
   const name = executable.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
   const id = name.endsWith(".exe") ? name.slice(0, -4) : name;
-  if (id === "bash" || id === "sh") return "bash";
+  if (id === "bash") return "bash";
   if (id === "zsh") return "zsh";
   if (id === "pwsh" || id === "powershell") return "powershell";
   return null;
 };
 
 const materializeZshDotDir = (): string => {
-  const hash = createHash("sha256").update(ZSH_SCRIPT).digest("hex").slice(0, 16);
+  const hash = createHash("sha256")
+    .update(ZSH_ENV_SCRIPT)
+    .update(ZSH_PROFILE_SCRIPT)
+    .update(ZSH_SCRIPT)
+    .update(ZSH_LOGIN_SCRIPT)
+    .digest("hex")
+    .slice(0, 16);
   const directory = join(tmpdir(), "piarium-shell-integration", `zsh-${hash}`);
   mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, ".zshenv"), ZSH_ENV_SCRIPT);
+  writeFileSync(join(directory, ".zprofile"), ZSH_PROFILE_SCRIPT);
   writeFileSync(join(directory, ".zshrc"), ZSH_SCRIPT);
-  writeFileSync(join(directory, ".zprofile"), 'source "${ZDOTDIR:-$HOME}/.zshrc"\n');
+  writeFileSync(join(directory, ".zlogin"), ZSH_LOGIN_SCRIPT);
   return directory;
 };
 
@@ -173,11 +221,14 @@ export const shellIntegrationLaunch = (
   executable: string,
   baseArgs: readonly string[],
   loginShell: boolean,
+  integrationId: string,
 ): { args: string[]; env: Record<string, string> } | null => {
   const family = shellIntegrationFamily(executable);
   if (!family) return null;
-  const env = {
+  const userZdotDir = process.env.ZDOTDIR;
+  const env: Record<string, string> = {
     PIARIUM_SHELL_INTEGRATION_KIND: family,
+    PIARIUM_SHELL_INTEGRATION_ID: integrationId,
     ...(loginShell ? { PIARIUM_LOGIN_SHELL: "1" } : {}),
   };
   if (family === "powershell") {
@@ -187,9 +238,15 @@ export const shellIntegrationLaunch = (
     };
   }
   if (family === "zsh") {
+    const zdotdir = materializeZshDotDir();
     return {
       args: [...baseArgs],
-      env: { ...env, ZDOTDIR: materializeZshDotDir() },
+      env: {
+        ...env,
+        ZDOTDIR: zdotdir,
+        PIARIUM_ZDOTDIR: zdotdir,
+        ...(userZdotDir ? { PIARIUM_USER_ZDOTDIR: userZdotDir } : {}),
+      },
     };
   }
   return {

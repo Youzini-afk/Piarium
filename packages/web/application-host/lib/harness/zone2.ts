@@ -21,14 +21,15 @@
  * 5. Still over → truncate plan section
  */
 
-import type {
-  ThreadAttention,
-  ThreadDiffStats,
-  ThreadIntegration,
-  ThreadLifecycle,
-  ThreadRunOutcome,
-  ThreadRunWorkerState,
-  ThreadVerificationProjection,
+import {
+  encodeHarnessObservationText,
+  type ThreadAttention,
+  type ThreadDiffStats,
+  type ThreadIntegration,
+  type ThreadLifecycle,
+  type ThreadRunOutcome,
+  type ThreadRunWorkerState,
+  type ThreadVerificationProjection,
 } from "@piarium/protocol";
 import { formatReviewForZone2 } from "./review-sensor.js";
 
@@ -266,8 +267,8 @@ export function assembleZone2Content(
       userCommands = userCommands.slice(-MAX_USER_COMMANDS);
     }
     const lines = userCommands.map((c) => {
-      const cwd = c.cwd ? `  (${c.cwd})` : "";
-      return `exit ${c.exitCode} · ${c.command}${cwd}  (${formatTimeAgo(c.at, now)})`;
+      const cwd = c.cwd ? `  (${encodeHarnessObservationText(c.cwd)})` : "";
+      return `exit ${c.exitCode} · ${encodeHarnessObservationText(c.command)}${cwd}  (${formatTimeAgo(c.at, now)})`;
     });
     sections.push(`<user-terminal>\n${lines.join("\n")}\n</user-terminal>`);
   }

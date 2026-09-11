@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createKnowledgeContextRuntime } from "./context-runtime.js";
 import { createGitStatusObserver } from "./git-status-runtime.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
+import { createTerminalCommandProjector } from "./terminal-projection.js";
+import type { TerminalCommandRecord } from "../terminal/session-api.js";
 
 const TEST_DIR = join(tmpdir(), "piarium-knowledge-context-runtime");
 
@@ -261,5 +263,70 @@ describe("knowledge context runtime", () => {
     expect(second.eventCursor).toBe(first.eventCursor);
     expect(runtime.listBoundSessions("workspace-1")).toEqual(["session-a"]);
     await runtime.dispose();
+  });
+
+  it("keeps one command event after context-runtime rebuild and does not insert the duplicate", async () => {
+    const first = createKnowledgeContextRuntime({ getStore: async () => store });
+    first.bindSession("session-a", "workspace-1");
+    const event = {
+      workspaceId: "workspace-1",
+      sessionId: "term-1",
+      command: "echo hi",
+      commandId: "term-1:1:1",
+      cwd: "/workspace",
+      exitCode: 0,
+      source: "user" as const,
+      integration: "osc-633" as const,
+      endedAt: Date.now(),
+    };
+    await expect(first.observeTerminalCommand(event)).resolves.toBe(true);
+    await first.dispose();
+
+    const second = createKnowledgeContextRuntime({ getStore: async () => store });
+    second.bindSession("session-a", "workspace-1");
+    await expect(second.observeTerminalCommand(event)).resolves.toBe(false);
+    await second.drain();
+    const events = await store.listEvents({ sessionId: "session-a" });
+    expect(events.filter((item) => item.kind === "command")).toHaveLength(1);
+    await second.dispose();
+  });
+
+  it("rebuilds the projector path without a second event or memory nudge", async () => {
+    const nudges: string[] = [];
+    const record: TerminalCommandRecord = {
+      command: "echo hi",
+      commandId: "term-1:1:1",
+      cwd: "/workspace",
+      endedAt: 10,
+      exitCode: 0,
+      integration: "osc-633",
+      owner: "user",
+      terminalId: "term-1",
+    };
+    const first = createKnowledgeContextRuntime({ getStore: async () => store });
+    first.bindSession("session-a", "workspace-1");
+    const firstProjector = createTerminalCommandProjector({
+      resolveWorkspaceId: async () => "workspace-1",
+      observe: (event) => first.observeTerminalCommand(event),
+      drain: () => first.drain(),
+      listBoundSessions: (workspaceId) => first.listBoundSessions(workspaceId),
+      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
+    });
+    await firstProjector.project(record);
+    await first.dispose();
+
+    const second = createKnowledgeContextRuntime({ getStore: async () => store });
+    second.bindSession("session-a", "workspace-1");
+    const secondProjector = createTerminalCommandProjector({
+      resolveWorkspaceId: async () => "workspace-1",
+      observe: (event) => second.observeTerminalCommand(event),
+      drain: () => second.drain(),
+      listBoundSessions: (workspaceId) => second.listBoundSessions(workspaceId),
+      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
+    });
+    await secondProjector.project(record);
+    expect(nudges).toEqual(["session-a"]);
+    expect((await store.listEvents({ sessionId: "session-a" })).filter((item) => item.kind === "command")).toHaveLength(1);
+    await second.dispose();
   });
 });

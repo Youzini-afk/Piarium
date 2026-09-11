@@ -2,6 +2,11 @@
  * Parse FinalTerm/VS Code OSC 133/633 command lifecycle sequences.
  * Command text and exit codes come only from those sequences — never from
  * prompt painting or raw PTY text.
+ *
+ * Piarium only accepts frames tagged with this session integration id
+ * (`pi;<terminalId>:<generation>;<body>`). Other OSC 133/633 or ordinary
+ * program output is ignored. The tag is source-bound observation, not an
+ * unforgeable security identity.
  */
 
 export type ShellIntegrationSequence =
@@ -28,6 +33,14 @@ export type ShellIntegrationStatus = "not-observed" | "ready";
 /* eslint-disable no-control-regex -- OSC 133/633 frames use ESC and BEL */
 const OSC_START = /\u001b\](?:133|633);/u;
 const ST_OR_BEL = /\u0007|\u001b\\|\u009c/u;
+
+export const piariumShellIntegrationId = (terminalId: string, generation: number): string => (
+  `${terminalId}:${generation}`
+);
+
+export const formatPiariumOscFrame = (integrationId: string, body: string): string => (
+  `\u001b]633;pi;${integrationId};${body}\u0007`
+);
 
 export const decodeShellIntegrationPayload = (value: string): string => {
   let decoded = "";
@@ -76,9 +89,19 @@ export const parseShellIntegrationBody = (body: string): ShellIntegrationSequenc
   return null;
 };
 
+export const parsePiariumShellIntegrationBody = (
+  raw: string,
+  expectedId: string,
+): ShellIntegrationSequence | null => {
+  const prefix = `pi;${expectedId};`;
+  if (!raw.startsWith(prefix)) return null;
+  return parseShellIntegrationBody(raw.slice(prefix.length));
+};
+
 const consumeOscChunk = (
   pending: string,
   data: string,
+  expectedId: string,
 ): { pending: string; sequences: ShellIntegrationSequence[] } => {
   const input = `${pending}${data}`;
   const sequences: ShellIntegrationSequence[] = [];
@@ -95,7 +118,7 @@ const consumeOscChunk = (
     const end = rest.search(ST_OR_BEL);
     if (end < 0) return { pending: input.slice(absolute), sequences };
     const terminator = rest[end] === "\u001b" ? 2 : 1;
-    const parsed = parseShellIntegrationBody(rest.slice(0, end));
+    const parsed = parsePiariumShellIntegrationBody(rest.slice(0, end), expectedId);
     if (parsed) sequences.push(parsed);
     cursor = bodyStart + end + terminator;
   }
@@ -119,6 +142,8 @@ export function createShellIntegrationParser(options: {
   let command: string | undefined;
   let startedAt: number | undefined;
   let awaitingFinish = false;
+
+  const expectedId = (): string => piariumShellIntegrationId(options.terminalId, generation);
 
   const finish = (exitCode: number, endedAt: number): TerminalCommandObservation | null => {
     if (!awaitingFinish || typeof command !== "string" || command.length === 0) {
@@ -146,7 +171,7 @@ export function createShellIntegrationParser(options: {
 
   return {
     consume(data: string) {
-      const parsed = consumeOscChunk(pending, data);
+      const parsed = consumeOscChunk(pending, data, expectedId());
       pending = parsed.pending;
       const finished: TerminalCommandObservation[] = [];
       for (const item of parsed.sequences) {

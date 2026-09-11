@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
@@ -106,6 +106,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    D-228 纠正了 CRLF/CR 身份、整组 undo、耐久 `agent-mutation` 补偿、磁盘 encoding/BOM 恢复，以及
    `apply_patch` 在 `readSource` 非 disk 时不得回退磁盘。完整桌面 Registry 与 Host 进程重启仅未实测。
    D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
+   D-229 纠正了 PowerShell 退出码捕获、`/restart` 代际重置、`sh` 不当作 Bash、用户 shell
+   保留、带代际标识的 OSC 观察、Zone 2/keeper 结构编码，以及 `commandId` 持久幂等写入。
+   zsh/macOS/Linux 真机用户终端与完整桌面重启仅未实测。
    D-227 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
    Host 校验 `submit_facts`，报告经 wait / read_thread / Zone 2 可见。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/

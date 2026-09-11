@@ -16,7 +16,7 @@ export interface TerminalCommandProjectorDeps {
     commands: TerminalMemoryNudgeCommand[];
     reason: "user-command";
   }): Promise<unknown>;
-  observe(event: TerminalCommandEvent): void;
+  observe(event: TerminalCommandEvent): boolean | Promise<boolean>;
   onError?(error: unknown): void;
   resolveWorkspaceId(scope: string): Promise<string | null>;
 }
@@ -41,7 +41,7 @@ export function createTerminalCommandProjector(deps: TerminalCommandProjectorDep
       return;
     }
     if (!workspaceId) return;
-    deps.observe({
+    const inserted = await deps.observe({
       workspaceId,
       sessionId: record.terminalId,
       command: record.command,
@@ -59,6 +59,7 @@ export function createTerminalCommandProjector(deps: TerminalCommandProjectorDep
       deps.onError?.(error);
       return;
     }
+    if (!inserted) return;
     const commands = [commandFrom(record, cwd)];
     await Promise.all(deps.listBoundSessions(workspaceId).map(async (sessionId) => {
       try {

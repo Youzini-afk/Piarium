@@ -153,6 +153,7 @@ interface StartSessionInput {
   cols: number;
   cwd: string;
   injectIntegration?: boolean;
+  integrationId?: string;
   loginShell: boolean;
   rows: number;
   shell: TerminalShellPreference;
@@ -322,7 +323,9 @@ export function createTerminalRuntime({
         env.NODE_CHANNEL_FD = '';
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         stripAppImageArgv0Leak(env);
-        const integration = input.injectIntegration ? shellIntegrationLaunch(executable, args, loginShell) : null;
+        const integration = input.injectIntegration && input.integrationId
+          ? shellIntegrationLaunch(executable, args, loginShell, input.integrationId)
+          : null;
         if (integration) Object.assign(env, integration.env);
         const launch = resolveLinuxPtyLaunch(executable, integration?.args ?? args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
@@ -506,6 +509,8 @@ export function createTerminalRuntime({
   }: StartSessionInput) => {
     const generation = (session.writerGeneration ?? 0) + 1;
     const writerState: WriterState = { writer: null, released: false };
+    const injectIntegration = session.owner === 'user' && !session.spawn;
+    const nextIntegrationGeneration = injectIntegration ? session.integrationGeneration + 1 : undefined;
     let spawned: Awaited<ReturnType<typeof spawnPty>> | null = null;
     try {
       if (session.registerProcessWriter) {
@@ -517,14 +522,26 @@ export function createTerminalRuntime({
       }
       spawned = await spawnPty({
         cwd, cols, rows, themeMode, shell, loginShell,
-        injectIntegration: session.owner === 'user' && !session.spawn,
+        injectIntegration,
+        ...(injectIntegration && nextIntegrationGeneration !== undefined
+          ? { integrationId: `${session.id}:${nextIntegrationGeneration}` }
+          : {}),
         ...(session.spawn ? { spawn: session.spawn } : {}),
       });
-      return { ...spawned, writerState, generation };
+      return { ...spawned, writerState, generation, nextIntegrationGeneration };
     } catch (error) {
       await releaseWriterState(writerState, Boolean(spawned));
       throw error;
     }
+  };
+
+  const commitIntegrationGeneration = (
+    session: TerminalSession,
+    nextIntegrationGeneration: number | undefined,
+  ): void => {
+    if (nextIntegrationGeneration === undefined) return;
+    session.integrationGeneration = nextIntegrationGeneration;
+    session.integrationParser.reset(session.integrationGeneration);
   };
 
   const applyAppearance = (session: TerminalSession, { themeMode, terminalBackground, terminalForeground }: {
@@ -556,8 +573,7 @@ export function createTerminalRuntime({
     session.terminalBackground = typeof terminalBackground === 'string' ? terminalBackground : session.terminalBackground;
     session.terminalForeground = typeof terminalForeground === 'string' ? terminalForeground : session.terminalForeground;
     session.lastActivity = Date.now(); session.eventQueue.length = 0;
-    session.integrationGeneration += 1;
-    session.integrationParser.reset(session.integrationGeneration);
+    commitIntegrationGeneration(session, spawned.nextIntegrationGeneration);
     wire(session, spawned.process, spawned.writerState);
   };
 
@@ -924,6 +940,7 @@ export function createTerminalRuntime({
       session.writerState = spawned.writerState; session.writerGeneration = spawned.generation;
       session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
+      commitIntegrationGeneration(session, spawned.nextIntegrationGeneration);
       wire(session, spawned.process, spawned.writerState);
       void terminateProcess(oldProcess).then(() => releaseWriterState(oldWriterState));
       publish(session, { t: 'restarted', history: '' });

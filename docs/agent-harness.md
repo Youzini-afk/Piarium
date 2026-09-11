@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -908,8 +908,13 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
 - Document Registry 在成功提交 `write/move/delete` 后发布带已校验 writer owner 的结构化事件；观察失败不反噬文件提交。
   同 workspace 的活动会话各保留自己的 event，agent writer 的事件留作轨迹但不进入 Zone 2。LSP 诊断只有紧跟用户编辑的
   error/warning 才作为“新诊断”投影，避免复述 agent 已在工具结果中见过的诊断。Git status 已复用现有刷新边界接入。User
-  terminal 的命令正文、cwd 和退出码只来自 OSC 133/633（或同等已接线的命令生命周期事件）；没有 shell integration 时不编造
-  命令，来源为 `not-observed`，终端仍可正常使用。Harness `bash` 不注入该脚本，也不进入 Zone 2 `<user-terminal>`。
+  terminal 的命令正文、cwd 和退出码只来自本次 session integration 发出的带代际标识的 OSC 133/633 帧；没有
+  shell integration 时不编造命令，来源为 `not-observed`，终端仍可正常使用。未带本代际标识的 OSC 或普通程序输出
+  不生成命令。代际标识是来源绑定的 shell 观察，不是无法伪造的安全身份。`/bin/sh` 不按 Bash 注入 `--init-file`。
+  默认注入不得破坏用户已有 PROMPT_COMMAND / DEBUG trap、zsh login/profile hooks 或 PowerShell Enter/prompt。
+  命令与 cwd 进入 Zone 2 和 keeper 前要编码，使 `</user-terminal>` 与控制字符不能关闭标签或变成新指令块。
+  `workspaceId + commandId` 的幂等写入落在 knowledge `putEvent`：重复投递不二次入库、不二次 nudge。
+  产品链没有 PTY 重播，因此不声称 Host 重启去重。Harness `bash` 不注入该脚本，也不进入 Zone 2 `<user-terminal>`。
   有意义的用户命令完成后，Host `memory.nudge` 唤醒现有 memory keeper，不另建轮询或第二个后台循环。
   `kind: edit` 的 event 最终引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
 - 记忆 agent 维护的 `block`（第 8.4.1 节），每次改动记录来源与游标；主 agent 的 `plan` / `todo` 亦为 `block`。回合

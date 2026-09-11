@@ -96,7 +96,7 @@ export function createObservers(deps: ObserverDeps) {
     await store.putEvent(input);
   }
 
-  async function onTerminalExit(event: TerminalExitEvent): Promise<void> {
+  async function onTerminalExit(event: TerminalExitEvent): Promise<boolean> {
     const source = determineTerminalSource(event.source);
     const at = event.endedAt ?? Date.now();
     const cwdSuffix = event.cwd ? `  (${event.cwd})` : "";
@@ -119,7 +119,8 @@ export function createObservers(deps: ObserverDeps) {
       },
       source,
     };
-    await store.putEvent(input);
+    const result = await store.putEvent(input);
+    return result.inserted;
   }
 
   async function onDiagnostics(event: DiagnosticEvent): Promise<void> {

@@ -4833,3 +4833,34 @@ ModelRuntime 纵切继续通过。
 | --- | --- | --- | --- |
 | D-225 | superseded in part（正文身份、grouped undo、耐久 agent-mutation 补偿与 apply_patch 读源由 D-228 纠正；写回同一缓冲的产品方向保留） | D-228 | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；Documents / recovery / pi-host apply_patch |
 | D-228 | implementation（纠正 surface 身份、整组 undo、耐久补偿与 apply_patch 读源） | — | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；architecture 4；Documents DOCUMENTATION |
+
+### D-229 · 2026-09-12 · 2.2 / 2.3 / 2.4（纠正 D-226 命令事实）
+
+类型：问题与解法
+
+背景：D-226 把用户终端命令接入 Zone 2 与 `memory.nudge`，但验收发现生产契约不成立：PowerShell 在 prompt 里先做别的工作再读 `$?`；`/restart` 不递增 integration generation、不 reset parser，新进程会结算旧 command/startedAt；`sh` 被当成支持 `--init-file` 的 Bash；默认注入覆盖用户 PROMPT_COMMAND 数组、DEBUG trap、zsh login/profile 与 PowerShell Enter handler；parser 接受任意 OSC 133/633；command/cwd 原文可关闭 Zone 2 标签；`commandId` 去重只在进程内 RAM，重复投递会二次入库并二次 nudge。文档还把 RAM 去重写成 Host 重启去重。
+
+决定：
+
+1. PowerShell `prompt` 在任何赋值、函数或管道之前保存 `$?` 与 `$LASTEXITCODE`。成功为 0；native 非零退出用该码；cmdlet 失败且没有非零 native 码则为 1。
+2. `/restart` 与普通 start 共用 `spawnSessionProcess` 的 generation/reset：spawn 成功后才提交新 generation 并 `parser.reset`。新进程初始 D 不得结算旧命令；下一 commandId 属于新 generation。spawn 失败时旧 parser 保持可用。
+3. 只有真实 `bash` 才注入 `--init-file`。`sh` / `dash` 等不注入。
+4. 默认注入保留用户 shell：Bash 检测 `PROMPT_COMMAND` 数组并前置，且链式已有 DEBUG trap；zsh 物化 `.zshenv` / `.zprofile` / `.zshrc` / `.zlogin` 并在 sourcing 用户文件后恢复 Piarium `ZDOTDIR`；PowerShell 用 `AddToHistoryHandler` 链式已有 handler，不替换 Enter。
+5. 脚本发出 `\033]633;pi;<PIARIUM_SHELL_INTEGRATION_ID>;<body>\007`。parser 只接受本 session `terminalId:generation` 的帧。这是来源绑定的 shell 观察，不是无法伪造的安全身份。
+6. command/cwd 进入 Zone 2 与 keeper 前经 `encodeHarnessObservationText` 编码，使 `</user-terminal>` 与 C0 控制字符不能关闭标签或变成新指令块。原始文本仍可读。
+7. `workspaceId + commandId` 幂等写入落在 knowledge `putEvent`（workspace store 内按 `data.commandId`）。重复事件不入库；projector 只在 `inserted` 时 nudge；keeper 也不重复入队同一 `commandId`。产品链没有 PTY 重播，文档不得声称 Host 重启去重。
+
+原因：D-226 的产品方向成立，但退出码、代际、注入破坏、未绑定 OSC 和 RAM 去重会把别人的输出或旧进程状态写成这次命令事实，或在重复投递时污染 Zone 2 与 keeper。
+
+考虑过的替代：(1) 继续把 `sh` 当 Bash——dash 没有 `--init-file`。(2) 用无法伪造的加密身份——超出 shell observation 范围。(3) 把 Host 重启去重写进文档——产品链不重播 PTY。
+
+影响：Host terminal integration / runtime、knowledge `putEvent` / observers / context-runtime / terminal-projection、Zone 2、pi-host memory keeper、protocol `encodeHarnessObservationText`；设计 7.3、plan 2.2–2.4、status 2.2/2.3/2.4、architecture 4.4。D-226 相应部分在本条索引标 superseded in part。不改写 D-226 正文。
+
+状态：已实施定向反例；zsh/macOS/Linux 真机用户终端与完整桌面 Host 重启仅未实测。验证见 status 2.2/2.3/2.4。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-226 | superseded in part（PowerShell 退出码、restart 代际、sh 非 Bash、用户 shell 保留、代际 OSC、Zone 2/keeper 编码与持久 commandId 幂等由 D-229 纠正；用户命令进 Zone 2 与 nudge 的产品方向保留） | D-229 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
+| D-229 | implementation（纠正终端命令事实的代际绑定、编码与持久幂等） | — | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
