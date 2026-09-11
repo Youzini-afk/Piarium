@@ -106,6 +106,21 @@ export type HarnessDocumentWriteGuard = (
   resourceId: string,
 ) => Promise<import("@piarium/protocol").DocumentWriteGuardResult>;
 
+export type HarnessDocumentBranchWrite = (
+  sessionId: string,
+  changes: ReadonlyArray<{
+    resourceId: string;
+    action: import("@piarium/protocol").DocumentBranchWriteAction;
+    content?: string;
+    edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  }>,
+  expectedRevision?: number,
+) => Promise<import("@piarium/protocol").DocumentBranchWriteResult>;
+
+export type HarnessWorkingBranchEnsureMaterialized = (
+  sessionId: string,
+) => Promise<import("@piarium/protocol").WorkingBranchEnsureMaterializedResult>;
+
 export type HarnessDocumentPathOverlayLookup =
   | SurfaceSnapshotOverlayResult
   | {
@@ -167,6 +182,8 @@ export interface HarnessServiceHost {
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
   documentWriteGuard: HarnessDocumentWriteGuard | null;
+  documentBranchWrite: HarnessDocumentBranchWrite | null;
+  workingBranchEnsureMaterialized: HarnessWorkingBranchEnsureMaterialized | null;
   // Phase 2: knowledge, memory, zone2, compaction, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
@@ -281,6 +298,8 @@ export interface HarnessServiceHostOptions {
   documentPathOverlay?: HarnessDocumentPathOverlay;
   /** Write admission against this turn's fixed draft (null when unavailable). */
   documentWriteGuard?: HarnessDocumentWriteGuard;
+  documentBranchWrite?: HarnessDocumentBranchWrite;
+  workingBranchEnsureMaterialized?: HarnessWorkingBranchEnsureMaterialized;
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
@@ -331,6 +350,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const documentReadSource = options.documentReadSource ?? null;
   const documentPathOverlay = options.documentPathOverlay ?? null;
   const documentWriteGuard = options.documentWriteGuard ?? null;
+  const documentBranchWrite = options.documentBranchWrite ?? null;
+  const workingBranchEnsureMaterialized = options.workingBranchEnsureMaterialized ?? null;
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
@@ -550,6 +571,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     documentReadSource,
     documentPathOverlay,
     documentWriteGuard,
+    documentBranchWrite,
+    workingBranchEnsureMaterialized,
     knowledgeStore,
     userKnowledgeStore,
     memoryDepsProvider,

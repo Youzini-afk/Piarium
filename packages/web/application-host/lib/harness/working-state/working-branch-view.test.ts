@@ -78,6 +78,7 @@ async function fixture() {
     runId: "run-1",
     branchId: "thread-child",
     revision: 0,
+    writeRevision: 0,
     mode: "virtual",
     draftBasePaths: ["draft.ts"],
   });
@@ -88,6 +89,7 @@ async function fixture() {
     runId: "run-1",
     branchId: "thread-child",
     revision: 0,
+    writeRevision: 0,
     mode: "virtual",
     draftBasePaths: ["draft.ts"],
   });

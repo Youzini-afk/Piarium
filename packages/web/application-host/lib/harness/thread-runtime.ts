@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -18,6 +18,7 @@ import type {
   ThreadRunOutcome,
   ThreadOccupancy,
   ThreadRestoreStatus,
+  WorkingBranchEnsureMaterializedResult,
   WorkspaceThreadSpace,
 } from "@piarium/protocol";
 import { HARNESS_TOOL_META, threadIntegrationBindingFromPreview } from "@piarium/protocol";
@@ -39,12 +40,13 @@ import type { IntegrationCoordinator } from "./working-state/integration-coordin
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
-import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
+import type { VirtualWriteGate } from "./working-state/virtual-write-gate.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
 import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
 import type { ResolvedRole } from "./roles.js";
+import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
 
 export interface ThreadSessionAdapter {
   create(input: {
@@ -83,6 +85,7 @@ export interface ThreadRuntimeOptions {
   resolveWorktreeSettings?(workspaceId: string, parent: ThreadParent): Promise<HarnessWorktreeSettings | undefined> | HarnessWorktreeSettings | undefined;
   workingStates?: WorkspaceWorkingStateAccess | undefined;
   executionViews?: ThreadExecutionViewRegistry | undefined;
+  virtualWriteGate?: VirtualWriteGate | undefined;
   cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext):
     | { status: "disk" }
     | { status: "unavailable"; message: string }
@@ -358,7 +361,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const preparations = new Map<string, PreparationTask>();
   const spaceMutationTails = new Map<string, Promise<void>>();
   const spaceReservations = new Map<string, Map<string, ReturnType<typeof measurementFromStates>>>();
+  const pendingMaterializeReservations = new Map<string, () => Promise<void>>();
   const threadLifecycleTails = new Map<string, Promise<void>>();
+
+  const releasePendingMaterializeReservation = async (threadId: string): Promise<void> => {
+    const release = pendingMaterializeReservations.get(threadId);
+    if (!release) return;
+    pendingMaterializeReservations.delete(threadId);
+    await release();
+  };
 
   const reportError = (error: unknown): void => {
     try { options.onError?.(error); } catch { /* Diagnostics cannot break runtime state. */ }
@@ -526,10 +537,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.executionViews || !options.workingStates) return;
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread?.workBranchId) return;
-    const draftBasePaths = await options.workingStates.withStore(
+    const bound = await options.workingStates.withStore(
       input.workspaceId,
       "working-branch-view-bind",
-      (store) => store.getBranch(thread.workBranchId!)?.draftBasePaths ?? [],
+      (store) => {
+        const branch = store.getBranch(thread.workBranchId!);
+        return {
+          draftBasePaths: branch?.draftBasePaths ?? [],
+          writeRevision: branch?.writeRevision ?? 0,
+        };
+      },
       "shared",
     );
     options.executionViews.bind({
@@ -539,8 +556,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       runId: input.runId,
       branchId: thread.workBranchId,
       revision: thread.resultRevision ?? 0,
+      writeRevision: bound.writeRevision,
       mode: isVirtualWorktree(thread.worktree) ? "virtual" : "materialized",
-      draftBasePaths,
+      draftBasePaths: bound.draftBasePaths,
     });
   };
 
@@ -1125,9 +1143,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let preparedCwd: string;
     let worktree = existing?.worktree;
     let needsBranchCapture = false;
-    const virtualIsolated = input.worktree === "isolated" && !runNeedsMaterializedDirectory(input.tools);
+    const virtualIsolated = input.worktree === "isolated" && (!worktree || isVirtualWorktree(worktree));
+    const mayMaterialize = runNeedsMaterializedDirectory(input.tools);
     if (!worktree) {
-      if (input.worktree === "isolated" && !virtualIsolated && effectiveSettings?.budget) {
+      if (input.worktree === "isolated" && mayMaterialize && effectiveSettings?.budget) {
         const reservation = await reserveMaterialization(
           input.workspaceId,
           input.parent,
@@ -1176,7 +1195,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (virtualIsolated) {
           worktree.viewMode = "virtual";
           worktree.materialized = false;
-          worktree.preparationStage = "ready";
+          worktree.preparationStage = input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup
+            ? "setup"
+            : "ready";
         } else {
           worktree.viewMode = worktree.viewMode ?? "materialized";
           worktree.materialized = true;
@@ -1300,7 +1321,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       checkPreparation();
       await options.registry.setWorkingState(input.workspaceId, input.threadId, { branchId, worktree });
     }
-    if (worktree && input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup) {
+    if (worktree && !virtualIsolated && input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup) {
       setPreparationStage("running-setup");
       worktree.preparationStage = "setup";
       await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
@@ -1401,6 +1422,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks),
       );
       checkPreparation();
+      if (virtualIsolated && mayMaterialize && effectiveSettings?.budget) {
+        pendingMaterializeReservations.set(input.threadId, releaseSpaceReservation);
+        releaseSpaceReservation = async () => undefined;
+      }
       return { sessionId };
     } catch (error) {
       if (sessionId) {
@@ -1732,7 +1757,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let publishedResultRevision: number | undefined;
     if (currentWorktree) {
       let inspected: Awaited<ReturnType<ThreadWorktreeRuntime["inspect"]>> | null = null;
-      if (!isVirtualWorktree(currentWorktree)) {
+      const inspectVirtualWithoutBranch = isVirtualWorktree(currentWorktree)
+        && (!options.workingStates || !thread.workBranchId);
+      if (!isVirtualWorktree(currentWorktree) || inspectVirtualWithoutBranch) {
         try {
           inspected = await options.worktrees.inspect(currentWorktree, "live");
           changedFiles = inspected.changedFiles;
@@ -1899,6 +1926,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     autoResumedThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
     await closeBinding(binding, false);
+    await releasePendingMaterializeReservation(binding.threadId);
     const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId, binding.parent);
     if (effectiveSettings?.reclaimIdle) {
       await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
@@ -2316,6 +2344,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (!keepWorktree) {
           await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, threadId).catch(reportError);
         }
+        await releasePendingMaterializeReservation(threadId);
       }
     } finally {
       if (!binding) {
@@ -2649,7 +2678,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!current.worktree) {
       return { thread: current, reclaimed: true, occupancy };
     }
-    if (current.worktree.materialized === false) {
+    if (current.worktree.materialized === false && !isVirtualWorktree(current.worktree)) {
       try {
         await fs.promises.lstat(current.worktree.path);
         current.worktree.retentionReason = "Original thread path contains uncollected content";
@@ -2728,7 +2757,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const latestRun = await options.registry.getActiveRun(workspaceId, current.id);
       const latestReasons = await keepReasonsFor(workspaceId, latest);
       if (latestRun?.outcome === null || latestReasons.length > 0
-        || !latest.worktree || latest.worktree.materialized === false
+        || !latest.worktree
+        || (latest.worktree.materialized === false && !isVirtualWorktree(latest.worktree))
         || latest.worktree.path !== current.worktree.path) {
         current.worktree.retentionReason = latestReasons[0] ?? "Thread changed while worktree reclamation was starting";
         await persistWorktree(workspaceId, current.id, current.worktree);
@@ -2739,7 +2769,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           message: current.worktree.retentionReason,
         };
       }
-      if (latest.workBranchId && latest.resultRevision && options.workingStates) {
+      if (latest.workBranchId && latest.resultRevision && options.workingStates && !isVirtualWorktree(latest.worktree)) {
         const matches = await options.workingStates.withStore(
           workspaceId,
           "thread-result-reclaim-check",
@@ -2870,6 +2900,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       terminatingSessions.delete(sessionId);
     }
     stalledThreads.delete(`${workspaceId}\0${threadId}`);
+    await releasePendingMaterializeReservation(threadId);
   };
 
   const archiveUserImpl = async (
@@ -3274,6 +3305,145 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  const materializeExecutionView = async (sessionId: string): Promise<WorkingBranchEnsureMaterializedResult> => {
+    const view = options.executionViews?.get(sessionId);
+    if (!view) return { status: "materialized", path: "" };
+    if (view.mode === "materialized") {
+      const current = await options.registry.getThreadForSession(view.workspaceId, sessionId);
+      return { status: "materialized", path: current?.worktree?.path ?? "" };
+    }
+    if (!options.workingStates) {
+      return { status: "failed", message: "Persistent working state is unavailable for materialization" };
+    }
+    const gate = options.virtualWriteGate;
+    const switchRole = gate ? await gate.beginSwitch(sessionId) : "owner";
+    if (switchRole === "already") {
+      const latest = options.executionViews?.get(sessionId);
+      if (latest?.mode === "materialized") {
+        const current = await options.registry.getThreadForSession(latest.workspaceId, sessionId);
+        return { status: "materialized", path: current?.worktree?.path ?? "" };
+      }
+      return { status: "failed", message: "Working-branch materialization did not complete" };
+    }
+    let releaseReservation = async (): Promise<void> => undefined;
+    let keepSpawnReservation = false;
+    try {
+      const latest = options.executionViews?.get(sessionId);
+      if (!latest || latest.mode === "materialized") {
+        const current = latest
+          ? await options.registry.getThreadForSession(latest.workspaceId, sessionId)
+          : null;
+        return { status: "materialized", path: current?.worktree?.path ?? "" };
+      }
+      const thread = await options.registry.getThreadForSession(latest.workspaceId, sessionId);
+      const worktree = thread?.worktree;
+      if (!thread || !worktree?.path || !thread.workBranchId) {
+        return { status: "failed", message: "Virtual run has no scratch directory to materialize" };
+      }
+      const sourceRoot = await options.resolveWorkspaceRoot(latest.workspaceId);
+      const settings = await resolveEffectiveWorktreeSettings(latest.workspaceId, thread.parent);
+      const footprint = await options.workingStates.withStore(
+        latest.workspaceId,
+        "working-branch-materialize-estimate",
+        (store) => {
+          const states = store.effectiveState(latest.branchId);
+          return states ? measurementFromStates(states) : unknownMeasurement();
+        },
+        "shared",
+      );
+      const pendingRelease = pendingMaterializeReservations.get(latest.threadId);
+      if (pendingRelease) {
+        const failure = await withSpaceMutation(latest.workspaceId, () => budgetFailureFor(
+          latest.workspaceId,
+          thread.parent,
+          settings,
+          footprint,
+          latest.threadId,
+        ));
+        if (failure) {
+          return { status: "failed", message: `Worktree budget unavailable: ${failure}` };
+        }
+        keepSpawnReservation = true;
+        releaseReservation = async () => {
+          pendingMaterializeReservations.delete(latest.threadId);
+          await pendingRelease();
+        };
+      } else {
+        const reservation = await reserveMaterialization(
+          latest.workspaceId,
+          thread.parent,
+          latest.threadId,
+          settings,
+          footprint,
+        );
+        releaseReservation = reservation.release;
+        if (reservation.failure) {
+          return { status: "failed", message: `Worktree budget unavailable: ${reservation.failure}` };
+        }
+      }
+      const token = randomUUID();
+      const staging = `${worktree.path}.materializing-${token}`;
+      const backup = `${worktree.path}.virtual-backup-${token}`;
+      await options.workingStates.withStore(latest.workspaceId, "working-branch-materialize", async (store) => {
+        const states = store.effectiveState(latest.branchId);
+        if (!states) throw new Error(`Working branch ${latest.branchId} is unavailable`);
+        await fs.promises.rm(staging, { recursive: true, force: true });
+        await store.materializeStates(states, staging);
+      });
+      await fs.promises.rm(backup, { recursive: true, force: true });
+      let movedLive = false;
+      try {
+        await fs.promises.rename(worktree.path, backup);
+        movedLive = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          await fs.promises.rm(staging, { recursive: true, force: true });
+          throw error;
+        }
+      }
+      try {
+        await fs.promises.rename(staging, worktree.path);
+      } catch (error) {
+        if (movedLive) await fs.promises.rename(backup, worktree.path).catch(() => undefined);
+        await fs.promises.rm(staging, { recursive: true, force: true });
+        throw error;
+      }
+      await fs.promises.rm(backup, { recursive: true, force: true });
+      const nextWorktree = {
+        ...worktree,
+        viewMode: "materialized" as const,
+        materialized: true,
+        preparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+      };
+      delete nextWorktree.materializationFingerprint;
+      await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+      options.executionViews?.bind({ ...latest, mode: "materialized" });
+      keepSpawnReservation = false;
+      if (nextWorktree.preparationStage === "setup" && options.worktrees.runSetup && settings?.setup) {
+        try {
+          await options.worktrees.runSetup(sourceRoot, nextWorktree, settings, abortController.signal);
+          nextWorktree.preparationStage = "ready";
+          delete nextWorktree.retentionReason;
+          await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+        } catch (setupErr) {
+          const message = setupErr instanceof Error ? setupErr.message : String(setupErr);
+          nextWorktree.retentionReason = message;
+          await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree).catch(reportError);
+          return { status: "failed", message };
+        }
+      }
+      return { status: "materialized", path: worktree.path };
+    } catch (error) {
+      return {
+        status: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      gate?.endSwitch(sessionId);
+      if (!keepSpawnReservation) await releaseReservation();
+    }
+  };
+
   const isThreadSession = (sessionId: string): boolean => bindingsBySession.has(sessionId);
 
   const getSessionBinding = (sessionId: string): { workspaceId: string; parent: ThreadParent; threadId: string } | null => {
@@ -3299,6 +3469,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     waitingSessions.clear();
     preparations.clear();
     spaceMutationTails.clear();
+    for (const threadId of [...pendingMaterializeReservations.keys()]) {
+      await releasePendingMaterializeReservation(threadId);
+    }
     spaceReservations.clear();
     threadLifecycleTails.clear();
   };
@@ -3324,6 +3497,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     drain,
     isThreadSession,
     getSessionBinding,
+    materializeExecutionView,
     dispose,
   };
 }

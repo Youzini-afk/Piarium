@@ -136,6 +136,39 @@ async function fetchDiagnostics(
   }
 }
 
+async function tryVirtualBranchWrite(
+  bridge: HostServicesBridge,
+  params: {
+    path: string;
+    action: "write" | "edit" | "delete";
+    content?: string;
+    edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  },
+  signal?: AbortSignal,
+): Promise<"disk" | { text: string }> {
+  const result = await bridge.request(
+    "document.branchWrite",
+    {
+      path: params.path,
+      action: params.action,
+      ...(params.content === undefined ? {} : { content: params.content }),
+      ...(params.edits === undefined ? {} : { edits: params.edits }),
+    },
+    signal === undefined ? {} : { signal },
+  );
+  if (result.status === "disk") return "disk";
+  if (result.status === "committed") {
+    return {
+      text: params.action === "edit"
+        ? `Successfully edited ${params.path}`
+        : params.action === "delete"
+          ? `Successfully deleted ${params.path}`
+          : `Successfully wrote ${params.path}`,
+    };
+  }
+  throw new Error(result.message);
+}
+
 async function executeWithMutationJournal<TResult extends { content: Array<{ type: string; text?: string }> }>(
   options: JournaledExecutionOptions<TResult>,
 ): Promise<TResult> {
@@ -201,29 +234,53 @@ export function createWorkspaceMutationJournalTools(
   const guard = options.writeGuard === true;
   const journaledWrite = defineTool({
     ...write,
-    execute: (toolCallId, params, signal, onUpdate, ctx) => executeWithMutationJournal({
-      bridge,
-      cwd,
-      execute: () => write.execute(toolCallId, params, signal, onUpdate, ctx),
-      inputPath: params.path,
-      toolCallId,
-      toolName: "write",
-      writeGuard: guard,
-      ...(hostServicesBridge ? { hostServicesBridge } : {}),
-    }),
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      if (hostServicesBridge) {
+        const virtual = await tryVirtualBranchWrite(hostServicesBridge, {
+          path: params.path,
+          action: "write",
+          content: params.content,
+        }, signal);
+        if (virtual !== "disk") {
+          return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
+        }
+      }
+      return executeWithMutationJournal({
+        bridge,
+        cwd,
+        execute: () => write.execute(toolCallId, params, signal, onUpdate, ctx),
+        inputPath: params.path,
+        toolCallId,
+        toolName: "write",
+        writeGuard: guard,
+        ...(hostServicesBridge ? { hostServicesBridge } : {}),
+      });
+    },
   });
   const journaledEdit = defineTool({
     ...edit,
-    execute: (toolCallId, params, signal, onUpdate, ctx) => executeWithMutationJournal({
-      bridge,
-      cwd,
-      execute: () => edit.execute(toolCallId, params, signal, onUpdate, ctx),
-      inputPath: params.path,
-      toolCallId,
-      toolName: "edit",
-      writeGuard: guard,
-      ...(hostServicesBridge ? { hostServicesBridge } : {}),
-    }),
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      if (hostServicesBridge) {
+        const virtual = await tryVirtualBranchWrite(hostServicesBridge, {
+          path: params.path,
+          action: "edit",
+          edits: params.edits,
+        }, signal);
+        if (virtual !== "disk") {
+          return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
+        }
+      }
+      return executeWithMutationJournal({
+        bridge,
+        cwd,
+        execute: () => edit.execute(toolCallId, params, signal, onUpdate, ctx),
+        inputPath: params.path,
+        toolCallId,
+        toolName: "edit",
+        writeGuard: guard,
+        ...(hostServicesBridge ? { hostServicesBridge } : {}),
+      });
+    },
   });
   return [journaledWrite, journaledEdit];
 }

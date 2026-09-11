@@ -281,6 +281,40 @@ export type DocumentWriteGuardResult =
   | { status: "conflict"; message: string; revision: string }
   | { status: "unavailable"; message: string };
 
+export type DocumentBranchWriteAction = "write" | "edit" | "delete";
+
+export interface DocumentBranchWriteChange {
+  path: string;
+  action: DocumentBranchWriteAction;
+  content?: string;
+  edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+}
+
+/**
+ * Commit one or more text mutations to the unpublished WorkingState delta.
+ * `expectedRevision` is the CAS token captured when the tool started.
+ * `{ status: "disk" }` means this Run is not on a virtual branch view.
+ */
+export interface DocumentBranchWriteParams {
+  expectedRevision?: number;
+  path?: string;
+  action?: DocumentBranchWriteAction;
+  content?: string;
+  edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  changes?: DocumentBranchWriteChange[];
+}
+
+export type DocumentBranchWriteResult =
+  | { status: "disk" }
+  | { status: "committed"; revision: number; provenance: WorkingBranchReadProvenance }
+  | { status: "conflict"; revision: number; message: string }
+  | { status: "rejected"; message: string };
+
+export type WorkingBranchEnsureMaterializedResult =
+  | { status: "virtual" }
+  | { status: "materialized"; path: string }
+  | { status: "failed"; message: string };
+
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
@@ -997,6 +1031,8 @@ export interface HarnessServiceMap {
   "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
   "document.writeGuard": { params: { path: string }; result: DocumentWriteGuardResult };
+  "document.branchWrite": { params: DocumentBranchWriteParams; result: DocumentBranchWriteResult };
+  "workingBranch.ensureMaterialized": { params: Record<string, never>; result: WorkingBranchEnsureMaterializedResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
 }
@@ -1064,6 +1100,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "document.readSource": "read.document",
   "document.pathOverlay": "read.document",
   "document.writeGuard": "write.document",
+  "document.branchWrite": "write.document",
+  "workingBranch.ensureMaterialized": "write.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
@@ -1131,6 +1169,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "document.readSource",
   "document.pathOverlay",
   "document.writeGuard",
+  "document.branchWrite",
+  "workingBranch.ensureMaterialized",
   "surface.snapshot.commit",
   "surface.snapshot.release",
 ]);

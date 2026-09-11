@@ -45,6 +45,15 @@ export { createExploreSearchService } from "./explore-service.js";
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
+      const materializeError = await requireMaterializedDirectory(host, ctx.sessionId);
+      if (materializeError) {
+        return {
+          kind: "spawn-failed",
+          reason: "working-branch-materialize",
+          interpreter: "",
+          hint: materializeError,
+        } as ShellExecResultSpawnFailed;
+      }
       const supervisor = host.getShellSupervisor(ctx.sessionId);
       if (!supervisor) {
         const interpreter = host.getInterpreter(ctx.sessionId);
@@ -317,6 +326,69 @@ export function createDocumentPathOverlayService(
       };
     },
   };
+}
+
+const normalizeBranchWriteChanges = (
+  params: import("@piarium/protocol").DocumentBranchWriteParams,
+): import("@piarium/protocol").DocumentBranchWriteChange[] | null => {
+  if (params.changes && params.changes.length > 0) return [...params.changes];
+  if (params.path && params.action) {
+    return [{
+      path: params.path,
+      action: params.action,
+      ...(params.content === undefined ? {} : { content: params.content }),
+      ...(params.edits === undefined ? {} : { edits: params.edits }),
+    }];
+  }
+  return null;
+};
+
+export function createDocumentBranchWriteService(
+  host: Pick<HarnessServiceHost, "documentBranchWrite">,
+): HarnessService<"document.branchWrite"> {
+  return {
+    handle: async (params, ctx) => {
+      const changes = normalizeBranchWriteChanges(params);
+      if (!host.documentBranchWrite || !changes || changes.length === 0 || ctx.authorizedPaths.length !== changes.length) {
+        throw new HarnessServiceError("unavailable", "Working-branch write is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      const mapped = changes.map((change, index) => ({
+        resourceId: ctx.authorizedPaths[index]!.resourceId,
+        action: change.action,
+        ...(change.content === undefined ? {} : { content: change.content }),
+        ...(change.edits === undefined ? {} : { edits: change.edits }),
+      }));
+      return host.documentBranchWrite(
+        ctx.sessionId,
+        mapped,
+        params.expectedRevision,
+      );
+    },
+  };
+}
+
+export function createWorkingBranchEnsureMaterializedService(
+  host: Pick<HarnessServiceHost, "workingBranchEnsureMaterialized">,
+): HarnessService<"workingBranch.ensureMaterialized"> {
+  return {
+    handle: async (_params, ctx) => {
+      if (!host.workingBranchEnsureMaterialized) {
+        throw new HarnessServiceError("unavailable", "Working-branch materialization is unavailable.");
+      }
+      ctx.signal.throwIfAborted();
+      return host.workingBranchEnsureMaterialized(ctx.sessionId);
+    },
+  };
+}
+
+async function requireMaterializedDirectory(
+  host: Pick<HarnessServiceHost, "workingBranchEnsureMaterialized">,
+  sessionId: string,
+): Promise<string | null> {
+  if (!host.workingBranchEnsureMaterialized) return null;
+  const result = await host.workingBranchEnsureMaterialized(sessionId);
+  return result.status === "failed" ? result.message : null;
 }
 
 /**
@@ -637,16 +709,31 @@ export function registerHarnessServices(
   if (host.documentWriteGuard) {
     router.register("document.writeGuard", createDocumentWriteGuardService(host));
   }
+  if (host.documentBranchWrite) {
+    router.register("document.branchWrite", createDocumentBranchWriteService(host));
+  }
+  if (host.workingBranchEnsureMaterialized) {
+    router.register("workingBranch.ensureMaterialized", createWorkingBranchEnsureMaterializedService(host));
+  }
   router.register("fs.lock", createFsLockService(host.pathLockService));
   if (host.diagnosticsProvider) {
     router.register("lsp.diagnostics", createLspDiagnosticsService(host.diagnosticsProvider));
     router.register("lsp.diagnosticsSnapshot", createLspDiagnosticsSnapshotService(host.diagnosticsProvider, host.observationCursors));
   }
   if (host.lspNavigationServices) {
-    router.register("lsp.symbols", host.lspNavigationServices.symbols);
-    router.register("lsp.definition", host.lspNavigationServices.definition);
-    router.register("lsp.references", host.lspNavigationServices.references);
-    router.register("lsp.hover", host.lspNavigationServices.hover);
+    const wrapNavigation = <M extends "lsp.symbols" | "lsp.definition" | "lsp.references" | "lsp.hover">(
+      service: import("./router.js").HarnessService<M>,
+    ): import("./router.js").HarnessService<M> => ({
+      handle: async (params, ctx) => {
+        const materializeError = await requireMaterializedDirectory(host, ctx.sessionId);
+        if (materializeError) throw new HarnessServiceError("unavailable", materializeError);
+        return service.handle(params, ctx);
+      },
+    });
+    router.register("lsp.symbols", wrapNavigation(host.lspNavigationServices.symbols));
+    router.register("lsp.definition", wrapNavigation(host.lspNavigationServices.definition));
+    router.register("lsp.references", wrapNavigation(host.lspNavigationServices.references));
+    router.register("lsp.hover", wrapNavigation(host.lspNavigationServices.hover));
   }
   // Web services — registered only when available
   if (host.webFetchService) {

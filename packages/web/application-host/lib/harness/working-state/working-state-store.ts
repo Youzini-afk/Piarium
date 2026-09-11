@@ -137,6 +137,9 @@ const parseBranch = (
     captureScopes,
     deltas: parseStates(row.deltas, `Working branch ${key} deltas`),
     headRevision: row.headRevision as number,
+    writeRevision: Number.isSafeInteger(row.writeRevision) && Number(row.writeRevision) >= 0
+      ? Number(row.writeRevision)
+      : 0,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -715,6 +718,7 @@ export class WorkingStateStore {
       captureScopes: [...new Set(captureScopes.map(normalizeRelative))].sort(),
       deltas: {},
       headRevision: 0,
+      writeRevision: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -812,6 +816,60 @@ export class WorkingStateStore {
     const states = this.effectiveState(branchId);
     if (!states) throw new Error(`Working branch not found: ${branchId}`);
     return this.publishStates(branchId, states);
+  }
+
+  async commitVirtualWrites(
+    branchId: string,
+    expectedWriteRevision: number,
+    files: Record<string, RecoveryState>,
+  ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
+    const branch = this.document.branches[branchId];
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const current = branch.writeRevision ?? 0;
+    if (current !== expectedWriteRevision) {
+      return { status: "conflict", writeRevision: current };
+    }
+    const deltas = clone(branch.deltas);
+    for (const [file, next] of Object.entries(files)) {
+      const normalized = normalizeRelative(file);
+      if (next.kind === "missing" && !Object.hasOwn(branch.baseState, normalized)) {
+        delete deltas[normalized];
+      } else {
+        deltas[normalized] = clone(next);
+      }
+      if (next.kind === "missing") continue;
+      let parent = this.pathModule.posix.dirname(normalized);
+      while (parent && parent !== "." && parent !== "/") {
+        const ancestor = deltas[parent] ?? branch.baseState[parent];
+        if (ancestor?.kind === "missing") {
+          if (Object.hasOwn(branch.baseState, parent) && branch.baseState[parent]!.kind !== "missing") {
+            delete deltas[parent];
+          } else {
+            deltas[parent] = { kind: "directory" };
+          }
+        }
+        parent = this.pathModule.posix.dirname(parent);
+      }
+    }
+    const writeRevision = current + 1;
+    const nextDocument = clone(this.document);
+    nextDocument.branches[branchId] = {
+      ...clone(branch),
+      deltas,
+      writeRevision,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.persist(nextDocument, () => this.protectBranch(nextDocument.branches[branchId]!));
+    return { status: "committed", writeRevision };
+  }
+
+  async commitVirtualWrite(
+    branchId: string,
+    expectedWriteRevision: number,
+    file: string,
+    next: RecoveryState,
+  ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
+    return this.commitVirtualWrites(branchId, expectedWriteRevision, { [file]: next });
   }
 
   async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[]): Promise<WorkingResult> {

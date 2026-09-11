@@ -27,6 +27,8 @@ Piarium protocol types, schemas, and event/method definitions.
 | `search.content` | `{ pattern, limit?, contextLines? }` | `SearchContentResult` (`filesDropped?` / `fileCoverage?` only in explore candidate mode) | Content search |
 | `document.readSource` | `{ path }` | disk sentinel or fixed draft bytes | Select the authenticated source for native `read` without changing its schema |
 | `document.pathOverlay` | `{ path, pattern? }` | disk sentinel or fixed relative path entries | Content-free fixed dirty paths and virtual directory ancestors for native `find` / `ls` |
+| `document.branchWrite` | `{ path, action, content?, edits?, expectedRevision? }` or `{ changes[], expectedRevision? }` | disk sentinel, committed revision, conflict, or rejection | Commit text mutations to an unpublished WorkingState delta |
+| `workingBranch.ensureMaterialized` | `{}` | virtual / materialized path / failed | Freeze the current branch revision and switch the Run to a real directory |
 | `fs.lock` | acquire `{ paths[], timeoutMs? }`; release `{ leaseId }` | `{ held, leaseIds[] }` / `{ held: false, released }` | Acquire an ordered canonical path batch or release one owner-bound lease |
 | `lsp.diagnostics` | `{ path, waitMs? }` | `DiagnosticsResult` | Bind the path's current disk revision and wait for the publication computed from it |
 | `lsp.diagnosticsSnapshot` | `{ path }` | `DiagnosticsResult` | Get diagnostics snapshot |

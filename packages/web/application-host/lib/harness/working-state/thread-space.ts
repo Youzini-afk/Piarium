@@ -188,7 +188,9 @@ export const projectThreadOccupancy = (input: {
 }): ThreadOccupancy => {
   const exclusiveObjects = measurementFromHashes(input.exclusive);
   const sharedObjects = measurementFromHashes(input.shared);
-  const reclaimable = input.keepReasons.length === 0 && input.thread.worktree?.materialized !== false;
+  const virtualScratch = input.thread.worktree?.viewMode === "virtual";
+  const reclaimable = input.keepReasons.length === 0
+    && (input.thread.worktree?.materialized !== false || virtualScratch);
   return {
     threadId: input.thread.id,
     materialized: input.materialized,

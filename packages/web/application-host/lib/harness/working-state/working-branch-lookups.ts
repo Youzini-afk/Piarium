@@ -14,11 +14,11 @@ export interface WorkingBranchLookups {
 }
 
 const provenanceFor = (
-  view: { branchId: string; revision: number },
+  view: { branchId: string; writeRevision: number },
   origin: WorkingBranchReadProvenance["origin"],
 ): WorkingBranchReadProvenance => ({
   branchId: view.branchId,
-  revision: view.revision,
+  revision: view.writeRevision,
   origin,
 });
 
@@ -31,7 +31,7 @@ export function createWorkingBranchLookups(options: {
     read: (view: NonNullable<ReturnType<ThreadExecutionViewRegistry["get"]>>, store: Parameters<Parameters<WorkspaceWorkingStateAccess["withStore"]>[2]>[0]) => Promise<T> | T,
   ): Promise<T | null> => {
     const view = options.views.get(sessionId);
-    if (!view) return null;
+    if (!view || view.mode === "materialized") return null;
     return options.workingStates.withStore(
       view.workspaceId,
       "working-branch-view",
@@ -43,11 +43,11 @@ export function createWorkingBranchLookups(options: {
   return {
     async readSource(sessionId, resourceId) {
       return withView(sessionId, async (view, store) => {
-        const result = await readBranchFile(store, view.branchId, resourceId, view.revision);
+        const result = await readBranchFile(store, view.branchId, resourceId);
         if ("unavailable" in result) {
           return {
             status: "working-branch" as const,
-            revision: `working-branch:${view.branchId}@${view.revision}:base`,
+            revision: `working-branch:${view.branchId}@${view.writeRevision}:base`,
             provenance: provenanceFor(view, "base"),
             message: result.unavailable,
           };
@@ -71,7 +71,7 @@ export function createWorkingBranchLookups(options: {
 
     async pathOverlay(sessionId, resourceId) {
       return withView(sessionId, (view, store) => {
-        const states = store.effectiveState(view.branchId, view.revision);
+        const states = store.effectiveState(view.branchId);
         if (!states) {
           return {
             status: "unavailable" as const,
@@ -80,7 +80,7 @@ export function createWorkingBranchLookups(options: {
         }
         const entries: SurfaceSnapshotOverlayEntry[] = listBranchView(states, resourceId, {
           branchId: view.branchId,
-          revision: view.revision,
+          revision: view.writeRevision,
         }).map((entry) => ({
           path: entry.path,
           kind: entry.kind,
@@ -92,14 +92,14 @@ export function createWorkingBranchLookups(options: {
 
     async searchCorpus(sessionId) {
       return withView(sessionId, async (view, store) => {
-        const files = await listBranchTextFiles(store, view.branchId, [""], view.revision);
+        const files = await listBranchTextFiles(store, view.branchId, [""]);
         return files.map((file) => ({ path: file.path, text: file.text }));
       });
     },
 
     async exploreFile(sessionId, resourceId) {
       return withView(sessionId, async (view, store) => {
-        const result = await readBranchFile(store, view.branchId, resourceId, view.revision);
+        const result = await readBranchFile(store, view.branchId, resourceId);
         if ("unavailable" in result) {
           return { status: "unavailable" as const, message: result.unavailable };
         }

@@ -130,6 +130,20 @@ describe("thread space accounting", () => {
     ]);
   });
 
+  it("treats a virtual scratch as reclaimable when keep reasons are empty", () => {
+    const occupancy = projectThreadOccupancy({
+      thread: thread({
+        worktree: { path: "/tmp/scratch", base: "zero-commit", materialized: false, viewMode: "virtual" },
+      }),
+      materialized: { logicalBytes: 0, allocatedBytes: 0, unknown: false },
+      exclusive: new Map(),
+      shared: new Map(),
+      keepReasons: [],
+    });
+    expect(occupancy.reclaimable).toBe(true);
+    expect(occupancy.reclaimableLogicalBytes).toBe(0);
+  });
+
   it("marks low-free from the configured ratio without inventing a default cap", () => {
     const occupancy = projectThreadOccupancy({
       thread: thread(),

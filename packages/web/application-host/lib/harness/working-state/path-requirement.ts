@@ -1,12 +1,10 @@
 /**
- * Tools that need a real directory: shell, text mutation, or LSP file binding.
- * Isolated Runs without these stay on the WorkingState view (D-212).
+ * Tools that need a real directory: shell or LSP file binding.
+ * Text edit/write/apply_patch stay on the WorkingState view until one of
+ * these first runs (D-212 / D-213).
  */
 const MATERIALIZED_DIRECTORY_TOOLS = new Set([
   "bash",
-  "edit",
-  "write",
-  "apply_patch",
   "symbols",
   "definition",
   "references",

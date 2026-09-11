@@ -76,7 +76,9 @@ function serveHarnessRequest(host: SessionHost, event: HostEvent, data: HostEven
       : { held: false, released: true }
     : request.method === "lsp.diagnostics"
       ? { status: "ready", diagnostics: [] }
-      : null;
+      : request.method === "document.branchWrite"
+        ? { status: "disk" }
+        : null;
   if (result !== null) host.respondHarness(sessionId, request.requestId, { ok: true, result });
 }
 
@@ -255,6 +257,10 @@ describe("workspace mutation journal", () => {
           });
           return;
         }
+        if (data.method === "document.branchWrite") {
+          hostServices.respond("session-guard", data.requestId, { ok: true, result: { status: "disk" } });
+          return;
+        }
         if (data.method === "document.writeGuard") {
           const path = (data.params as { path: string }).path;
           guardCalls.push(path);
@@ -426,6 +432,48 @@ describe("workspace mutation journal", () => {
     await events.next();
     await Promise.all([disposalRun, host.dispose()]);
     assert.equal(await readFile(join(secondCwd, "disposal.txt"), "utf8"), "disposal");
+  });
+
+  it("commits a virtual write through document.branchWrite without touching disk", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-virtual-write-"));
+    const journal = new WorkspaceMutationJournalBridge({
+      emit: () => {
+        throw new Error("virtual writes must not journal disk mutations");
+      },
+      sessionId: "session-virtual",
+    });
+    const writes: Array<{ path: string; content?: string }> = [];
+    const hostServices = new HostServicesBridge({
+      emit: (_event, data) => {
+        if (data.method === "document.branchWrite") {
+          const params = data.params as { path: string; content?: string };
+          writes.push(params.content === undefined ? { path: params.path } : { path: params.path, content: params.content });
+          hostServices.respond("session-virtual", data.requestId, {
+            ok: true,
+            result: {
+              status: "committed",
+              revision: 1,
+              provenance: { branchId: "thread-child", revision: 1, origin: "delta" },
+            },
+          });
+          return;
+        }
+        throw new Error(`unexpected method: ${data.method}`);
+      },
+      sessionId: "session-virtual",
+    });
+    const write = createWorkspaceMutationJournalTools(root, journal, hostServices, "session-virtual")
+      .find((tool) => tool.name === "write") as ReturnType<typeof createWriteToolDefinition>;
+    const result = await write.execute(
+      "virtual-write",
+      { content: "virtual only", path: "kept.txt" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+    assert.match((result.content[0] as { text: string }).text, /Successfully wrote kept.txt/);
+    assert.deepEqual(writes, [{ path: "kept.txt", content: "virtual only" }]);
+    await assert.rejects(readFile(join(root, "kept.txt")), { code: "ENOENT" });
   });
 
   it("negotiates the capability and accepts worker-only responses in HostController", async () => {

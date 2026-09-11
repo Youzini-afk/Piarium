@@ -4292,6 +4292,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Host router 与 pi-host 同名工具有定向证据。虚拟 edit/write、真实 Git filter/LFS 一致性与完整桌面会话未测。
 
+### D-213 · 2026-09-11 · 3.4 / 3.4a（虚拟 edit/write/apply_patch 与原子物化切换）
+
+类型：问题与解法
+
+背景：D-212 已让隔离 Thread Run 从固定 base+delta 只读。同名 edit/write/apply_patch 仍走父磁盘或 spawn 时复制的目录，父 live 会被子写入污染，兄弟分支也会共享同一可写树。物化资格把文本工具算作需要目录，使纯编辑 Run 在启动时复制整仓。同一 Run 若一边写 delta、一边写目录，就没有单一可写视图。
+
+决定：
+
+1. 隔离 Run 一律从 `viewMode: "virtual"` scratch 启动。同名 `edit` / `write` / `apply_patch` 经 Host `document.branchWrite` 把文本变更提交到 WorkingState delta：内容进入现有对象库，路径状态复用 RecoveryState，每次写入绑定 `writeRevision` 并在分支单写序列内 CAS。迟到的旧修订不能覆盖新头。目录、二进制、符号链接与 unsupported 明确拒绝，不暗改另一种对象。父磁盘保持不变。
+2. 物化资格只看实际路径绑定能力：`bash`、`symbols`、`definition`、`references`、`hover`。首次这类工具由 Host 强制：固定当前 branch revision，等待在飞虚拟写入，物化到 staging，再原子换到该 Run 的唯一目录；之后本 Run 的文件工具都走该目录。切换失败删除 staging，保持原虚拟分支可读，不进入半目录半 delta。`lsp.diagnostics` 不触发切换。eligibility 不按角色名猜测。
+3. 虚拟结算发布 `publishHeadResult`；物化后的结算把目录变化收回新结果修订。Integration、review 与 verification 只消费该不可变结果。含 bash/LSP 的隔离 Run 在 spawn 时按用户配置预算预占最终物化占用，直到物化成功或 Run 结束；纯文本 Run 不预占复制预算。虚拟 scratch 在 keepReasons 为空时可回收，不按未完成物化残留处理。
+4. 本阶段不实现 Merkle、dispatch 瞬时整仓基线、嵌套线程工具装配或跨平台 CoW。
+
+影响：protocol `document.branchWrite` / `workingBranch.ensureMaterialized`、WorkingBranch `writeRevision`；Host writes/gate/runtime/reclaim；pi-host mutation journal 与 apply_patch；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；Host router 生产链与 pi-host journal 有定向证据。真实 Git filter/LFS 一致性、完整桌面 bash 物化后的跨平台 CoW，以及非 Git 大目录物化墙钟未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4508,4 +4525,5 @@ ModelRuntime 纵切继续通过。
 | D-209 | implementation（全局终端身份、真实退出与 writer 释放、后台自然完成、todo 单一审批边界） | — | 设计 5.2 / 5.6；architecture 4.4 / 6；status 1.3 / 2.5 |
 | D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
-| D-212 | implementation（隔离 Thread Run 的 WorkingState 只读视图、exclusive overlay、虚拟 scratch spawn） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化） | D-213 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-213 | implementation（虚拟文本写入、writeRevision CAS、首次 bash/LSP 原子物化切换） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

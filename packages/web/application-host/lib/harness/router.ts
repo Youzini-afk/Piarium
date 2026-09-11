@@ -118,6 +118,25 @@ const requestPaths = (
       ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
+  if (method === "document.branchWrite") {
+    const validAction = (action: unknown): action is "write" | "edit" | "delete" => (
+      action === "write" || action === "edit" || action === "delete"
+    );
+    if (Array.isArray(record.changes)) {
+      if (record.changes.length === 0) return "invalid";
+      const paths: Array<{ allowMissing: boolean; path: string }> = [];
+      for (const change of record.changes) {
+        if (!change || typeof change !== "object" || Array.isArray(change)) return "invalid";
+        const row = change as Record<string, unknown>;
+        if (typeof row.path !== "string" || !row.path.trim() || !validAction(row.action)) return "invalid";
+        paths.push({ allowMissing: true, path: row.path });
+      }
+      return paths;
+    }
+    return typeof record.path === "string" && record.path.trim() && validAction(record.action)
+      ? [{ allowMissing: true, path: record.path }]
+      : "invalid";
+  }
   if (method === "shell.exec") {
     if (record.cwd === undefined) return [];
     return typeof record.cwd === "string" && record.cwd.trim()

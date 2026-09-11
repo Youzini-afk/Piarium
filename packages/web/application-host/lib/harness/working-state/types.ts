@@ -34,6 +34,8 @@ export interface WorkingBranch {
   captureScopes: string[];
   deltas: Record<string, RecoveryState>;
   headRevision: number;
+  /** Monotonic CAS token for unpublished virtual writes (D-213). */
+  writeRevision: number;
   createdAt: string;
   updatedAt: string;
 }

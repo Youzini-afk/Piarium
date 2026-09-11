@@ -84,6 +84,8 @@ import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-set
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
+import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
+import { VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
@@ -1261,9 +1263,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
   const threadExecutionViews = new ThreadExecutionViewRegistry();
+  const virtualWriteGate = new VirtualWriteGate();
   const workingBranchLookups = createWorkingBranchLookups({
     views: threadExecutionViews,
     workingStates: harnessWorkingStates,
+  });
+  const workingBranchWrites = createWorkingBranchWriteServices({
+    views: threadExecutionViews,
+    workingStates: harnessWorkingStates,
+    writeGate: virtualWriteGate,
   });
   const verificationCoordinator = createVerificationCoordinator({
     workingStates: harnessWorkingStates,
@@ -1308,6 +1316,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,
     executionViews: threadExecutionViews,
+    virtualWriteGate,
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
@@ -1976,6 +1985,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
+    documentBranchWrite: (sessionId, changes, expectedRevision) => workingBranchWrites.branchWrite(
+      sessionId,
+      changes,
+      expectedRevision,
+    ),
+    workingBranchEnsureMaterialized: (sessionId) => {
+      if (!threadRuntime) {
+        return Promise.resolve({ status: "failed" as const, message: "Thread runtime is unavailable for materialization" });
+      }
+      return threadRuntime.materializeExecutionView(sessionId);
+    },
     commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
     releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
     dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),

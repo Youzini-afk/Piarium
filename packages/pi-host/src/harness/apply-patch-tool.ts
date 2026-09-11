@@ -233,6 +233,70 @@ export function createApplyPatchTool(
             await assertWritablePath(bridge, filePath);
           }
         }
+        const prepared: Array<{
+          op: (typeof parsed.operations)[number];
+          filePath: string;
+          action: "write" | "delete";
+          content?: string;
+          hunks?: number;
+          error?: string;
+        }> = [];
+        for (const [index, op] of parsed.operations.entries()) {
+          const filePath = filePaths[index]!;
+          if (op.kind === "add") {
+            prepared.push({ op, filePath, action: "write", content: op.content });
+            continue;
+          }
+          if (op.kind === "delete") {
+            prepared.push({ op, filePath, action: "delete" });
+            continue;
+          }
+          let oldContent: string | null = existsSync(filePath) ? readFileSync(filePath, "utf8") : null;
+          if (oldContent === null) {
+            try {
+              const source = await bridge.request("document.readSource", { path: op.path });
+              if (source.source === "working-branch" && source.base64) {
+                oldContent = Buffer.from(source.base64, "base64").toString("utf8");
+              } else if (source.source === "surface-draft" && "base64" in source && source.base64) {
+                oldContent = Buffer.from(source.base64, "base64").toString("utf8");
+              }
+            } catch {
+              oldContent = null;
+            }
+          }
+          if (oldContent === null) {
+            prepared.push({ op, filePath, action: "write", error: `file not found: ${op.path}` });
+            continue;
+          }
+          const applyResult = applyCodexHunks(oldContent, op.hunks);
+          if ("error" in applyResult) {
+            prepared.push({ op, filePath, action: "write", error: `patch error in ${op.path}: ${applyResult.error}` });
+            continue;
+          }
+          prepared.push({ op, filePath, action: "write", content: applyResult.result, hunks: applyResult.applied });
+        }
+        if (prepared.every((row) => !row.error)) {
+          const virtual = await bridge.request("document.branchWrite", {
+            changes: prepared.map((row) => ({
+              path: row.op.path,
+              action: row.action,
+              ...(row.content === undefined ? {} : { content: row.content }),
+            })),
+          });
+          if (virtual.status === "committed") {
+            const hunks = prepared.reduce((sum, row) => sum + (row.hunks ?? 0), 0);
+            return {
+              content: [{ type: "text" as const, text: `patch applied successfully (${parsed.operations.length} file(s), ${hunks} hunk(s))` }],
+              details: { applied: true, operations: parsed.operations.length, hunks },
+            };
+          }
+          if (virtual.status !== "disk") {
+            return {
+              content: [{ type: "text" as const, text: virtual.message }],
+              details: { applied: false, error: virtual.message },
+            };
+          }
+        }
         for (const [index, op] of parsed.operations.entries()) {
           const filePath = filePaths[index]!;
           const opResult = await (async () => {

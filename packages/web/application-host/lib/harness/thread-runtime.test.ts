@@ -248,8 +248,8 @@ describe("thread runtime", () => {
         { ...publication.resources[1]!, content: "new fixed draft\n" },
       ],
     });
-    const observedAtCreate: Record<string, Buffer> = {};
-    const draftRuntime = createThreadRuntime({
+      const observedAtCreate: string[] = [];
+      const draftRuntime = createThreadRuntime({
       registry,
       workingStates,
       cloneAgentInputSnapshot: (sessionId, inputContext) => documents.cloneAgentInputSnapshot(sessionId, inputContext),
@@ -258,15 +258,17 @@ describe("thread runtime", () => {
       sessions: {
         ...sessionAdapter,
         create: vi.fn(async (input) => {
-          observedAtCreate.draft = await fs.promises.readFile(join(input.cwd, "draft.ts"));
-          observedAtCreate.added = await fs.promises.readFile(join(input.cwd, "new.ts"));
+          observedAtCreate.push(...await fs.promises.readdir(input.cwd));
           return snapshot("draft-child-session", input.cwd);
         }),
       },
       worktrees: {
-        prepare: async ({ sourceRoot }) => {
-          await fs.promises.cp(sourceRoot, childRoot, { recursive: true });
-          return { cwd: childRoot, worktree: { path: childRoot, base: "fixed-disk-base" } };
+        prepare: async (input) => {
+          await fs.promises.mkdir(childRoot, { recursive: true });
+          if (input.viewMode !== "virtual") {
+            await fs.promises.cp(input.sourceRoot, childRoot, { recursive: true });
+          }
+          return { cwd: childRoot, worktree: { path: childRoot, base: "fixed-disk-base", viewMode: input.viewMode ?? "materialized" } };
         },
         snapshot: async (worktree) => worktree,
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
@@ -297,21 +299,33 @@ describe("thread runtime", () => {
       expect(documents.cloneAgentInputSnapshot("parent-1", context)).toMatchObject({ status: "unavailable" });
       const run = await registry.startRun(identity.workspaceId, thread.id);
       await draftRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-      expect(observedAtCreate).toEqual({
-        draft: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("fixed parent draft\r\n")]),
-        added: Buffer.from("new fixed draft\n"),
-      });
+      expect(observedAtCreate).toEqual([]);
+      expect(await fs.promises.readdir(childRoot)).toEqual([]);
 
       await workingStates.withStore(identity.workspaceId, "assert-draft-branch", async (store) => {
         const branchId = `thread-${thread.id}`;
         const branch = store.getBranch(branchId)!;
         expect(branch.headRevision).toBe(0);
+        expect(branch.writeRevision).toBe(0);
         expect(branch.deltas).toEqual({});
         expect(branch.draftBasePaths).toEqual(["draft.ts", "new.ts"]);
-        const unchanged = await store.publishDirectoryResult(branchId, childRoot);
+        const draft = branch.baseState["draft.ts"];
+        if (draft?.kind !== "regular-file") throw new Error("draft baseline is not a file");
+        expect(await store.getObject(draft.objectHash)).toEqual(
+          Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("fixed parent draft\r\n")]),
+        );
+        const added = branch.baseState["new.ts"];
+        if (added?.kind !== "regular-file") throw new Error("added draft is not a file");
+        expect(await store.getObject(added.objectHash)).toEqual(Buffer.from("new fixed draft\n"));
+        const unchanged = await store.publishHeadResult(branchId);
         expect(unchanged.changedPaths).toEqual([]);
-        await fs.promises.writeFile(join(childRoot, "draft.ts"), "child result\n");
-        const changed = await store.publishDirectoryResult(branchId, childRoot);
+        const next = await store.putObject(Buffer.from("child result\n"));
+        expect(await store.commitVirtualWrite(branchId, 0, "draft.ts", {
+          kind: "regular-file",
+          objectHash: next.hash,
+          byteLength: next.byteLength,
+        })).toMatchObject({ status: "committed", writeRevision: 1 });
+        const changed = await store.publishHeadResult(branchId);
         expect(changed.changedPaths).toEqual(["draft.ts"]);
         const base = changed.baseStates["draft.ts"]!;
         if (base.kind !== "regular-file") throw new Error("draft baseline is not a file");
@@ -409,6 +423,7 @@ describe("thread runtime", () => {
         runId: run.id,
         branchId: `thread-${thread.id}`,
         revision: 0,
+        writeRevision: 0,
         mode: "virtual",
       });
       expect(await registry.getThread(identity.workspaceId, PARENT, thread.id)).toMatchObject({
@@ -966,7 +981,9 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "thread-partial" }),
+          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
           publishDirectoryResult,
+          publishHeadResult: publishDirectoryResult,
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
       },
       resolveWorkspaceRoot: async () => WORKSPACE,
@@ -978,7 +995,7 @@ describe("thread runtime", () => {
     await partialRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
     partialRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true });
     await partialRuntime.drain();
-    expect(inspect).toHaveBeenCalledWith(expect.objectContaining({ path: "/workspace/thread" }), "live");
+    expect(inspect).not.toHaveBeenCalled();
     expect(publishDirectoryResult).toHaveBeenCalled();
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       resultRevision: 1,
@@ -988,7 +1005,7 @@ describe("thread runtime", () => {
     await partialRuntime.dispose();
   });
 
-  it("copies configured inputs before baseline capture and runs setup afterward", async () => {
+  it("defers ignored-input copy and setup until a virtual isolated Run materializes", async () => {
     const order: string[] = [];
     const createBranch = vi.fn(async () => ({ branchId: "branch" }));
     const orderedRuntime = createThreadRuntime({
@@ -1007,6 +1024,7 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => { order.push("baseline"); return {}; },
           createBranch,
+          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
       },
       resolveWorkspaceRoot: async () => WORKSPACE,
@@ -1016,7 +1034,10 @@ describe("thread runtime", () => {
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await orderedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-    expect(order).toEqual(["inputs", "baseline", "setup"]);
+    expect(order).toEqual(["baseline"]);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      worktree: { viewMode: "virtual", materialized: false, preparationStage: "setup" },
+    });
     expect(createBranch).toHaveBeenCalledWith(
       WORKSPACE,
       expect.stringMatching(/^thread-/),
@@ -1045,7 +1066,8 @@ describe("thread runtime", () => {
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "branch" }),
           publishDirectoryResult: async () => ({ resultRevision: 1, branchId: "branch", changedPaths: ["a.txt"], baseStates: { "a.txt": { kind: "missing" } }, pathStates: { "a.txt": { kind: "missing" } }, diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() }),
-          getBranch: () => ({ baseState: {}, deltas: {} }),
+          publishHeadResult: async () => ({ resultRevision: 1, branchId: "branch", changedPaths: ["a.txt"], baseStates: { "a.txt": { kind: "missing" } }, pathStates: { "a.txt": { kind: "missing" } }, diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() }),
+          getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], writeRevision: 0 }),
           listResults: () => [],
           getDraftBaselineRecord: () => null,
           directoryMatchesResult: async () => purpose === "thread-result-reclaim-check",
@@ -1273,7 +1295,7 @@ describe("thread runtime", () => {
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
     });
-    const input = createInput();
+    const input = { ...createInput(), tools: ["read", "bash"] };
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await expect(budgetRuntime.spawn({ ...input, threadId: thread.id, runId: run.id })).rejects.toMatchObject({ code: "unavailable" });
@@ -1312,13 +1334,13 @@ describe("thread runtime", () => {
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
     });
-    const firstInput = createInput();
+    const firstInput = { ...createInput(), tools: ["bash"] };
     const first = await registry.createThread(firstInput);
     const firstRun = await registry.startRun(WORKSPACE, first.id);
     const firstSpawn = budgetRuntime.spawn({ ...firstInput, threadId: first.id, runId: firstRun.id });
     await firstReady;
 
-    const secondInput = { ...createInput(), brief: "second concurrent thread" };
+    const secondInput = { ...createInput(), brief: "second concurrent thread", tools: ["bash"] };
     const second = await registry.createThread(secondInput);
     const secondRun = await registry.startRun(WORKSPACE, second.id);
     await expect(budgetRuntime.spawn({ ...secondInput, threadId: second.id, runId: secondRun.id })).rejects.toMatchObject({ code: "unavailable" });
@@ -1478,33 +1500,38 @@ describe("thread runtime", () => {
   });
 
   it("waits for a slow preparation to finish before archiving", async () => {
-    let releaseSetup!: () => void;
-    let setupStarted!: () => void;
-    const setupReady = new Promise<void>((resolve) => { setupStarted = resolve; });
-    const setupDone = new Promise<void>((resolve) => { releaseSetup = resolve; });
+    let releasePrepare!: () => void;
+    let prepareStarted!: () => void;
+    const prepareReady = new Promise<void>((resolve) => { prepareStarted = resolve; });
+    const prepareDone = new Promise<void>((resolve) => { releasePrepare = resolve; });
     const slowRuntime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
-      worktreeSettings: { setup: "install" },
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
       worktrees: {
-        prepare: async () => ({ cwd: "/workspace/slow", worktree: { path: "/workspace/slow", base: "base", materialized: true } }),
-        runSetup: async () => { setupStarted(); await setupDone; return { output: "" }; },
+        prepare: async () => {
+          prepareStarted();
+          await prepareDone;
+          return {
+            cwd: "/workspace/slow",
+            worktree: { path: "/workspace/slow", base: "base", materialized: false, viewMode: "virtual" as const },
+          };
+        },
         snapshot: async (worktree) => worktree,
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
     });
-    const input = { ...createInput(), tools: ["bash"] };
+    const input = createInput();
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     const spawning = slowRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-    await setupReady;
+    await prepareReady;
     const archiving = slowRuntime.archiveUser(WORKSPACE, PARENT, thread.id);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
-    releaseSetup();
+    releasePrepare();
     await expect(spawning).rejects.toMatchObject({ name: "AbortError" });
     await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ outcome: "cancelled" });
@@ -1638,7 +1665,16 @@ describe("thread runtime", () => {
         diffStats: { files: 0, insertions: 0, deletions: 0 },
         createdAt: new Date().toISOString(),
       }),
-      getBranch: () => ({ baseState: {}, deltas: {} }),
+      publishHeadResult: async () => ({
+        resultRevision: 1,
+        branchId: "serialized-branch",
+        changedPaths: [],
+        baseStates: {},
+        pathStates: {},
+        diffStats: { files: 0, insertions: 0, deletions: 0 },
+        createdAt: new Date().toISOString(),
+      }),
+      getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], writeRevision: 0 }),
       listResults: () => [],
       getDraftBaselineRecord: () => null,
       resultState: () => ({}),
@@ -1745,7 +1781,9 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "capture-branch" }),
+          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
           publishDirectoryResult: async () => { throw new Error("capture failed"); },
+          publishHeadResult: async () => { throw new Error("capture failed"); },
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
       },
       resolveWorkspaceRoot: async () => WORKSPACE,
@@ -1775,10 +1813,19 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "snapshot-branch" }),
-          getBranch: () => ({ baseState: {}, deltas: {} }),
+          getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], writeRevision: 0 }),
           listResults: () => [],
           getDraftBaselineRecord: () => null,
           publishDirectoryResult: async () => ({
+            resultRevision: 1,
+            branchId: "snapshot-branch",
+            changedPaths: [],
+            baseStates: {},
+            pathStates: {},
+            diffStats: { files: 0, insertions: 0, deletions: 0 },
+            createdAt: new Date().toISOString(),
+          }),
+          publishHeadResult: async () => ({
             resultRevision: 1,
             branchId: "snapshot-branch",
             changedPaths: [],
@@ -2123,7 +2170,9 @@ describe("thread runtime", () => {
               captureDirectory: async () => ({}),
               captureBranchCandidateIdentity: async () => "tree-1",
               createBranch: async () => ({ branchId: "branch" }),
+              getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
               publishDirectoryResult: async () => published,
+              publishHeadResult: async () => published,
               resultTreeIdentity: () => "tree-1",
               getResult: () => hidePublishedResult ? null : published,
               getObject: async () => Buffer.from("new\n"),

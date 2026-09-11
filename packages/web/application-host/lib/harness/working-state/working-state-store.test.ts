@@ -345,6 +345,39 @@ describe("WorkingStateStore", () => {
     }
   });
 
+  it("commits unpublished virtual writes with a single-writer CAS token", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "kept.txt"), "base\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "thread-1", base);
+      const first = await h.store.putObject(Buffer.from("child write\n"));
+      expect(await h.store.commitVirtualWrite("thread-1", 0, "kept.txt", {
+        kind: "regular-file",
+        objectHash: first.hash,
+        byteLength: first.byteLength,
+      })).toEqual({ status: "committed", writeRevision: 1 });
+      const stale = await h.store.putObject(Buffer.from("stale write\n"));
+      expect(await h.store.commitVirtualWrite("thread-1", 0, "kept.txt", {
+        kind: "regular-file",
+        objectHash: stale.hash,
+        byteLength: stale.byteLength,
+      })).toEqual({ status: "conflict", writeRevision: 1 });
+      const added = await h.store.putObject(Buffer.from("new file\n"));
+      expect(await h.store.commitVirtualWrites("thread-1", 1, {
+        "src/new.ts": { kind: "regular-file", objectHash: added.hash, byteLength: added.byteLength },
+        "kept.txt": { kind: "missing" },
+      })).toEqual({ status: "committed", writeRevision: 2 });
+      expect(h.store.pathOrigin("thread-1", "src/new.ts")).toBe("delta");
+      expect(h.store.effectiveState("thread-1")!["kept.txt"]).toEqual({ kind: "missing" });
+      expect(await fs.promises.readFile(path.join(h.workspace, "kept.txt"), "utf8")).toBe("base\n");
+      const published = await h.store.publishHeadResult("thread-1");
+      expect(published.changedPaths).toEqual(["kept.txt", "src/new.ts"]);
+    } finally {
+      h.database.close();
+    }
+  });
+
   it("projects the most recently merged parent operation instead of the highest result revision", async () => {
     const h = await harness();
     try {

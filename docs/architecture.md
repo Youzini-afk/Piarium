@@ -663,8 +663,13 @@ Thread and ThreadRun remain the coordination and execution objects. The Applicat
 content-addressed working-state store: immutable file objects and path trees, a fixed branch baseline
 plus its delta, and versioned result publication. Materialization supplies an actual directory whenever
 Pi tools, a language server, an extension, or a command needs filesystem access. Controlled virtual
-tools use the same fixed branch view; live shared mode remains explicit. Commands write the materialized
-directory and their changes are captured into a new result before that directory may be reclaimed.
+read and text-mutation tools use the same fixed branch view; live shared mode remains explicit.
+Same-name `edit` / `write` / `apply_patch` on an isolated Run commit WorkingState deltas with
+`writeRevision` CAS and do not write the parent directory. The first bash or LSP navigation tool
+freezes that revision, waits for in-flight virtual writes, materializes into staging, and atomically
+switches the Run; a failed switch keeps the virtual branch. After the switch, commands write the
+materialized directory and settlement folds those changes into a new result before that directory
+may be reclaimed (D-213).
 
 The baseline includes captured disk inputs and revisioned drafts from the window that submitted the
 user message. The surface retains mutable-buffer ownership. `thread.dispatch` now clones fixed draft

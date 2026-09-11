@@ -16,6 +16,8 @@ function createFakeBridge(lockBatches?: string[][]): Pick<HostServicesBridge, "r
       }
       if (method === "fs.lock" && params.action === "release") return { held: false, released: true };
       if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
+      if (method === "document.branchWrite") return { status: "disk" };
+      if (method === "document.readSource") return { source: "disk" };
       throw new Error(`unexpected method: ${method}`);
     },
   } as unknown as Pick<HostServicesBridge, "request">;

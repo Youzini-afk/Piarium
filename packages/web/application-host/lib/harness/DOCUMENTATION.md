@@ -279,18 +279,28 @@ settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
 An isolated child captures its execution baseline into the Host working-state
-store before the Pi session starts. Settlement publishes an immutable native
-result revision before the Thread catalog points at it; Git commits and immutable
-copy snapshots remain migration/reconstruction sources. Merge reads the selected
-native revision, never the live child directory, and applies only baseline-to-result
-paths through the recovery store's selected location, SQLite journal, object store,
-and workspace lease. Reopen materializes the recorded result at the same path.
+store before the Pi session starts and stays on a virtual scratch until a path-binding
+tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
+which commits text into the unpublished WorkingState delta with `writeRevision` CAS
+and never writes the parent directory. Directory, binary, symlink, and unsupported
+states are rejected. The first `bash` or LSP navigation tool asks
+`workingBranch.ensureMaterialized`: the Host freezes the current revision, waits for
+in-flight virtual writes, materializes into a staging directory, then atomically
+replaces the scratch. Failure deletes staging and keeps the virtual branch readable.
+Settlement publishes `publishHeadResult` while virtual, or inspects the directory and
+publishes that fold after the switch. Git commits and immutable copy snapshots remain
+migration/reconstruction sources. Merge reads the selected native revision, never the
+live child directory, and applies only baseline-to-result paths through the recovery
+store's selected location, SQLite journal, object store, and workspace lease. Reopen
+of a materialized result rebuilds that directory at the same path; a still-virtual
+branch reopens on scratch and reads the branch view.
 When dispatch carries dirty editor input, the runtime first clones the complete
 fixed surface snapshot into a persistent WorkingState draft baseline. Its id is
 frozen in the Thread launch manifest; queued or restarted Runs overlay the exact
-draft bytes into the execution directory and use that effective state as branch
-revision zero. Result publication reads the live materialization even when an
-older fixed result exists, while merge and migration continue to read the selected
+draft bytes into the branch base (and into a materialized directory only after a
+path-binding tool switches the Run) and use that effective state as branch
+revision zero. Virtual publication reads the live branch head; materialized
+publication reads the directory. Merge and migration continue to read the selected
 fixed result. Draft-derived paths are checked even when Git ignores them.
 Configured `copyIgnored` roots are stored as branch `captureScopes`; narrowed
 publication scans only those roots plus known changed paths, so ignored additions,
